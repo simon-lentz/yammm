@@ -409,7 +409,7 @@ Every diagnostic a batch call returns carries exactly one `instance_index` detai
 
 **Composed nesting is bounded.** A root is depth 0 and its composed children depth 1; a child deeper than `instance.MaxComposedDepth` (32) draws `E_COMPOSITION_DEPTH_EXCEEDED`. The `.ys` wire enforces the same number on write and read, so every validated instance is one a snapshot can carry.
 
-> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state.
+> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state — for `Validate`, whatever the batch, a nil or empty one included.
 
 Type names passed to the validator (`Validate`, `ValidateOne`, and `ValidateForComposition`'s parent tag) are entry-schema-relative: bare names for entry-schema types, alias-qualified names (`common.Region`) for directly imported ones. Relation *targets*, by contrast, are resolved internally by the absolute identity completion records (`Relation.TargetID`), never by re-reading the declared target name against the entry schema — so associations and compositions declared on imported types, or inherited from cross-schema parents, validate against the true target type even when the entry schema does not know the declaring schema's aliases or shadows the target's bare name with a type of its own.
 

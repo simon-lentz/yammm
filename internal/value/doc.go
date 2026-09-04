@@ -49,15 +49,17 @@
 //
 // # Kind Detection
 //
-// [Classify] normalizes a runtime value to a semantic [Kind] constant, with the
-// value transformed where the kind requires it:
+// [Classify] normalizes a runtime scalar to a semantic [Kind] constant, with
+// the value transformed where the kind requires it:
 //
 //   - [IntKind]: Integer values (returns normalized int64 for json.Number)
 //   - [FloatKind]: Float values (returns normalized float64 for json.Number)
-//   - [VectorKind]: Float slices (coerces integer elements to float64)
 //   - [BoolKind]: Boolean values
 //   - [StringKind]: String values
-//   - [UnspecifiedKind]: Unsupported or nil values
+//   - [UnspecifiedKind]: Slices, unsupported or nil values
+//
+// A slice is never a scalar kind: a list or vector's shape is its constraint's
+// to judge, elementwise, in the instance layer.
 //
 // # json.Number Handling
 //
@@ -99,33 +101,6 @@
 //   - Order(uint64(2^53+1), float64(2^53)) returns 1 (greater), not 0
 //   - Order(int64(2^53+1), float64(2^53)) returns 1 (greater), not 0
 //
-// # Vector Coercion
-//
-// For []any input (the JSON pathway), all elements are coerced to float64:
-//   - []any{1, 2, 3} → VectorKind, []float64{1, 2, 3}
-//   - []any{1.5, 2.5} → VectorKind, []float64{1.5, 2.5}
-//   - []any{1, 2.5, 3} → VectorKind, []float64{1, 2.5, 3}
-//   - []any{float32(1.5), float32(2.5)} → VectorKind, []float64{1.5, 2.5}
-//   - []any{1, "x", 3} → UnspecifiedKind (non-numeric element)
-//
-// Typed float slices are preserved as-is:
-//   - []float64{1, 2, 3} → VectorKind, []float64{1, 2, 3}
-//   - []float32{1, 2, 3} → VectorKind, []float32{1, 2, 3}
-//
-// # Empty Slice Handling
-//
-// Empty slices are classified based on their static type, not their contents:
-//   - []float64{} → VectorKind (typed, element type known)
-//   - []float32{} → VectorKind (typed, element type known)
-//   - []any{} → UnspecifiedKind (untyped, no elements to inspect)
-//
-// This follows the "determine what it IS, not what it should be" principle.
-// An empty []any{} is genuinely ambiguous—it could represent an empty vector,
-// an empty string list, or an empty object list. The instance validator has
-// schema context and can properly interpret empty arrays based on the expected
-// type. Note that Vector[N] constraints always require N > 0, so empty vectors
-// would fail validation regardless of classification.
-//
 // # Thread Safety
 //
 // All functions in this package are stateless and safe for concurrent use.
@@ -135,10 +110,11 @@
 //
 // [Canonical] returns a value in the single stored representation its schema
 // constraint defines. Timestamp, UUID and Date each accept more than one Go
-// representation and store one; every other kind passes through. It is the one
-// implementation behind every call site that stores or writes a value, so a
-// value reaches one spelling whether it arrived through validation, a wire
-// write, a CSV or JSON export, or a snapshot rebuild.
+// representation and store one; every other kind passes through. It is the
+// temporal and UUID half of the stored-form rule: the instance layer's
+// CoerceValue — the rule itself — calls it for those kinds, and the graph
+// writer and the snapshot wire call it directly for a value that reached them
+// without validation.
 //
 // # Dependencies
 //

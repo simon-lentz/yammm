@@ -1384,7 +1384,7 @@ These operators support two modes:
 ! "email must be valid" email =~ /.+@.+\..+/
 ```
 
-**Type checking:** When the right operand is a datatype keyword, checks whether the value matches that type at runtime:
+**Type checking:** When the right operand is one of the datatype keywords listed below, checks whether the value matches that type at runtime:
 
 ```yammm-snippet
 ! "value must be integer" value =~ Integer
@@ -1401,6 +1401,8 @@ Supported datatype keywords for type checking:
 - `UUID` - checks for valid UUID strings
 - `Timestamp` - checks for valid timestamp values
 - `Date` - checks for valid date values
+
+Each check applies the rule a property of that kind applies: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts a `time.Time` or an RFC 3339 string. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
 
 Numeric type checks are cross-form: `5 =~ Float` and `5.0 =~ Integer` both hold — a whole number matches both numeric types.
 
@@ -1770,7 +1772,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the same bound the snapshot writer and reader enforce; a validated instance is always one a snapshot can carry
 - `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately
 - `E_INVALID_TYPE_TAG` — `$type` tag errors
-- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
+- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field or edge property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
 

@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -342,10 +343,14 @@ func GetBool(val any) (bool, bool) {
 
 // GetString extracts a string, accepting a pointer or a named type over string.
 // It rejects *regexp.Regexp, which toStringComparable accepts for ordering but
-// which is not a value any string-kinded constraint holds.
+// which is not a value any string-kinded constraint holds, and json.Number,
+// which is a named type over string but a number to every other getter here.
 func GetString(val any) (string, bool) {
 	if s, ok := val.(string); ok {
 		return s, true
+	}
+	if _, isNumber := val.(json.Number); isNumber {
+		return "", false
 	}
 	if rv, ok := underlying(val); ok && rv.Kind() == reflect.String {
 		return rv.String(), true
@@ -378,9 +383,9 @@ func fitsInt64(f float64) bool {
 	return f >= minInt64AsFloat && f < maxInt64AsFloat
 }
 
-// GetUint64 extracts a uint64 from any unsigned integer type.
-// Returns (value, true) if the input is any unsigned integer type.
-// Returns (0, false) for non-unsigned types.
+// GetUint64 extracts a uint64 from any unsigned integer type, or from a
+// json.Number whose text is a non-negative integer within uint64.
+// Returns (0, false) for every other value.
 //
 // Unlike GetInt64, this function does not reject any valid unsigned values.
 // All uint64 values (including those > math.MaxInt64) are supported.
@@ -398,6 +403,9 @@ func GetUint64(val any) (uint64, bool) {
 		return x, true
 	case uintptr:
 		return uint64(x), true
+	case json.Number:
+		n, err := strconv.ParseUint(string(x), 10, 64)
+		return n, err == nil
 	}
 	rv, ok := underlying(val)
 	if !ok {

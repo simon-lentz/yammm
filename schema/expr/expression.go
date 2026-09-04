@@ -3,6 +3,7 @@ package expr
 import (
 	"regexp"
 	"slices"
+	"strings"
 )
 
 // Expression represents a node in the expression AST.
@@ -143,10 +144,27 @@ func (o Op) Literal() any {
 // expression implements Expression.
 func (Op) expression() {}
 
-// DatatypeLiteral represents a data type name in an expression.
-//
-// Used for type-checking expressions like `x is Integer` or `items.All(is(String))`.
+// DatatypeLiteral is a datatype keyword in an expression: the right operand
+// of `=~` and `!~` (docs/SPEC.md "Type checking"). The parser emits one for
+// every datatype keyword; [IsDatatypeCheck] says which of them name a check.
 type DatatypeLiteral string
+
+// datatypeChecks are the datatype keywords `=~` checks a value against, by
+// the runtime rule of the same kind. Vector, List, Enum and Pattern are
+// datatype keywords too, but they name a shape or a constraint rather than a
+// kind a value can have, so no check exists for them.
+var datatypeChecks = map[string]bool{
+	"string": true, "integer": true, "float": true, "boolean": true,
+	"uuid": true, "timestamp": true, "date": true,
+}
+
+// IsDatatypeCheck reports whether name — matched case-insensitively, as the
+// evaluator resolves it — is a datatype `=~` can check. The static checker
+// refuses any other DatatypeLiteral at load, so the evaluator never meets one
+// from a parsed schema.
+func IsDatatypeCheck(name string) bool {
+	return datatypeChecks[strings.ToLower(name)]
+}
 
 // Op implements Expression.
 func (DatatypeLiteral) Op() string {

@@ -1,7 +1,6 @@
 package instance
 
 import (
-	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -28,7 +27,7 @@ func CanonicalValue(val any, c schema.Constraint) (any, error) {
 	if val == nil || c == nil {
 		return val, nil
 	}
-	out, err := coerceValueRecovering(eval.DefaultChecker(), val, c)
+	out, err := coerceValueRecovering(val, c)
 	if err != nil {
 		return val, err
 	}

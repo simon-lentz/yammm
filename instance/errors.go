@@ -77,24 +77,14 @@ var (
 	// ErrInternalFailure is the parent sentinel for all internal failures.
 	// Use errors.Is(err, ErrInternalFailure) to detect any internal error.
 	ErrInternalFailure = errors.New("internal validation failure")
-
-	// ErrNilValidator is returned when a Validate method is called on a nil receiver.
-	ErrNilValidator = fmt.Errorf("%w: nil validator receiver", ErrInternalFailure)
-
-	// ErrCorruptedSchema is returned when the schema is in an invalid state.
-	ErrCorruptedSchema = fmt.Errorf("%w: corrupted schema state", ErrInternalFailure)
 )
 
 // InternalErrorKind classifies internal errors for programmatic handling.
 type InternalErrorKind int
 
 const (
-	// KindNilValidator indicates a nil validator receiver.
-	KindNilValidator InternalErrorKind = iota
-	// KindCorruptedSchema indicates schema invariants were violated.
-	KindCorruptedSchema
 	// KindInvariantPanic indicates a panic during invariant evaluation.
-	KindInvariantPanic
+	KindInvariantPanic InternalErrorKind = iota
 	// KindConstraintPanic indicates a panic during constraint checking.
 	KindConstraintPanic
 )
@@ -102,10 +92,6 @@ const (
 // String returns a human-readable name for the error kind.
 func (k InternalErrorKind) String() string {
 	switch k {
-	case KindNilValidator:
-		return "nil validator"
-	case KindCorruptedSchema:
-		return "corrupted schema"
 	case KindInvariantPanic:
 		return "invariant evaluation panic"
 	case KindConstraintPanic:
@@ -146,9 +132,6 @@ func (e *InternalError) Is(target error) bool {
 // wrapPanicValue wraps a recovered panic value into an InternalError with stack trace.
 // This should be called with the result of recover() in a deferred function.
 func wrapPanicValue(r any, kind InternalErrorKind) *InternalError {
-	if r == nil {
-		return nil
-	}
 	var cause error
 	switch v := r.(type) {
 	case error:

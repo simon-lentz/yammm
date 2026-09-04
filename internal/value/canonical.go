@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -105,19 +106,21 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 
 // canonicalUUID renders val through [uuid.UUID.String]. Parsing the string form
 // first is what collapses the brace, urn, uppercase and bare-hex spellings
-// [uuid.Parse] accepts onto one key.
+// [uuid.Parse] accepts onto one key. The string form is whatever [GetString]
+// reads, so a carrier the check side accepts is one this side renders.
 func canonicalUUID(val any) (any, error) {
-	switch v := val.(type) {
-	case uuid.UUID:
-		return v.String(), nil
-	case string:
-		u, err := uuid.Parse(v)
-		if err != nil {
-			return val, fmt.Errorf("value: %q is not a UUID", v)
-		}
+	if u, ok := val.(uuid.UUID); ok {
 		return u.String(), nil
 	}
-	return val, fmt.Errorf("value: cannot canonicalize %T as a UUID (want a string or uuid.UUID)", val)
+	s, ok := GetString(val)
+	if !ok {
+		return val, fmt.Errorf("value: cannot canonicalize %T as a UUID (want a string or uuid.UUID)", val)
+	}
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return val, fmt.Errorf("value: %q is not a UUID", s)
+	}
+	return u.String(), nil
 }
 
 // canonicalDate renders val through [time.DateOnly] in the value's own
@@ -144,14 +147,15 @@ func canonicalDate(val any) (any, error) {
 
 // canonicalList canonicalizes each element under the list's element
 // constraint. A list whose element kind has no canonical form is returned as
-// it arrived, so a caller's concrete slice type survives untouched.
+// it arrived, so a caller's concrete slice type survives untouched. A value
+// that is not a list is an error, as it is to the check side's coerceList.
 func canonicalList(val any, elem schema.Constraint) (any, error) {
 	if !Canonicalizes(elem) {
 		return val, nil
 	}
 	elems, ok := listElems(val)
 	if !ok {
-		return val, nil
+		return val, fmt.Errorf("value: cannot canonicalize %T as a list (want a slice)", val)
 	}
 	out := make([]any, len(elems))
 	for i, e := range elems {
@@ -183,11 +187,19 @@ func Canonicalizes(c schema.Constraint) bool {
 	}
 }
 
-// listElems returns val's elements as []any for any slice. An array is not a
-// list position — a uuid.UUID is [16]byte, and reaching it through here would
-// canonicalize a scalar elementwise.
+// listElems returns val's elements as []any for any slice, an
+// [immutable.Slice] included. An array is not a list position — a uuid.UUID is
+// [16]byte, and reaching it through here would canonicalize a scalar
+// elementwise.
 func listElems(val any) ([]any, bool) {
-	if elems, ok := val.([]any); ok {
+	switch v := val.(type) {
+	case []any:
+		return v, true
+	case immutable.Slice:
+		elems := make([]any, 0, v.Len())
+		for e := range v.Iter() {
+			elems = append(elems, e.Unwrap())
+		}
 		return elems, true
 	}
 	rv := reflect.ValueOf(val)

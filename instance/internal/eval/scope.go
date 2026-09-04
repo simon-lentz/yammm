@@ -52,15 +52,6 @@ func EmptyScope() Scope {
 	}
 }
 
-// PropertyScope returns a Scope backed by the given immutable.Properties.
-// Property lookups use the Properties' Get method.
-func PropertyScope(props immutable.Properties) Scope {
-	return &propertyScope{
-		props: props,
-		vars:  make(map[string]immutable.Value),
-	}
-}
-
 // PropertyScopeFromMap returns a Scope backed by a raw property map, with
 // $self bound to it. The map is wrapped ONCE, with WithClone so the caller's
 // map is isolated: the property lookup reads the wrap as a Properties and

@@ -13,8 +13,6 @@ func TestInternalErrorKind_String(t *testing.T) {
 		kind InternalErrorKind
 		want string
 	}{
-		{KindNilValidator, "nil validator"},
-		{KindCorruptedSchema, "corrupted schema"},
 		{KindInvariantPanic, "invariant evaluation panic"},
 		{KindConstraintPanic, "constraint checking panic"},
 		{InternalErrorKind(999), "unknown"},
@@ -37,9 +35,9 @@ func TestInternalError_Error(t *testing.T) {
 
 	t.Run("without cause", func(t *testing.T) {
 		err := &InternalError{
-			Kind: KindNilValidator,
+			Kind: KindConstraintPanic,
 		}
-		assert.Equal(t, "nil validator", err.Error())
+		assert.Equal(t, "constraint checking panic", err.Error())
 	})
 
 	t.Run("unknown kind without cause", func(t *testing.T) {
@@ -96,47 +94,15 @@ func TestWrapPanicValue_WithOtherType(t *testing.T) {
 
 	func() {
 		defer func() {
-			result = wrapPanicValue(recover(), KindCorruptedSchema)
+			result = wrapPanicValue(recover(), KindConstraintPanic)
 		}()
 		panic(42)
 	}()
 
 	require.NotNil(t, result)
-	assert.Equal(t, KindCorruptedSchema, result.Kind)
+	assert.Equal(t, KindConstraintPanic, result.Kind)
 	assert.Equal(t, "panic: 42", result.Cause.Error())
 	assert.NotEmpty(t, result.Stack)
-}
-
-func TestWrapPanicValue_NoPanic(t *testing.T) {
-	var result *InternalError
-
-	func() {
-		defer func() {
-			result = wrapPanicValue(recover(), KindNilValidator)
-		}()
-		// No panic
-	}()
-
-	assert.Nil(t, result)
-}
-
-func TestWrapPanicValue_NilInput(t *testing.T) {
-	result := wrapPanicValue(nil, KindInvariantPanic)
-	assert.Nil(t, result)
-}
-
-func TestErrCorruptedSchema_Is(t *testing.T) {
-	t.Run("is ErrInternalFailure", func(t *testing.T) {
-		assert.ErrorIs(t, ErrCorruptedSchema, ErrInternalFailure)
-	})
-
-	t.Run("is not ErrNilValidator", func(t *testing.T) {
-		assert.NotErrorIs(t, ErrCorruptedSchema, ErrNilValidator)
-	})
-}
-
-func TestErrNilValidator_Is(t *testing.T) {
-	assert.ErrorIs(t, ErrNilValidator, ErrInternalFailure)
 }
 
 func TestInternalError_Is(t *testing.T) {
@@ -178,8 +144,8 @@ func TestInternalError_Is(t *testing.T) {
 
 	t.Run("constructed InternalError is ErrInternalFailure", func(t *testing.T) {
 		err := &InternalError{
-			Kind:  KindCorruptedSchema,
-			Cause: errors.New("schema corrupted"),
+			Kind:  KindInvariantPanic,
+			Cause: errors.New("invariant blew up"),
 		}
 		assert.ErrorIs(t, err, ErrInternalFailure,
 			"all InternalError should match ErrInternalFailure")

@@ -222,60 +222,6 @@ func TestIsDate(t *testing.T) {
 	}
 }
 
-func TestMatchesPattern(t *testing.T) {
-	pattern := regexp.MustCompile(`^[a-z]+$`)
-	checker := eval.MatchesPattern(pattern)
-
-	tests := []struct {
-		name     string
-		val      any
-		expected bool
-	}{
-		{"matches", "hello", true},
-		{"no_match", "Hello", false},
-		{"with_numbers", "hello123", false},
-		{"not_string", 123, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ok, msg := checker(tt.val)
-			assert.Equal(t, tt.expected, ok)
-			if !tt.expected {
-				assert.NotEmpty(t, msg)
-			}
-		})
-	}
-}
-
-func TestInEnum(t *testing.T) {
-	allowed := []string{"red", "green", "blue"}
-	checker := eval.InEnum(allowed)
-
-	tests := []struct {
-		name     string
-		val      any
-		expected bool
-	}{
-		{"valid_red", "red", true},
-		{"valid_green", "green", true},
-		{"valid_blue", "blue", true},
-		{"invalid_yellow", "yellow", false},
-		{"case_sensitive", "RED", false},
-		{"not_string", 1, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ok, msg := checker(tt.val)
-			assert.Equal(t, tt.expected, ok)
-			if !tt.expected {
-				assert.NotEmpty(t, msg)
-			}
-		})
-	}
-}
-
 func TestCheckValue_Nil(t *testing.T) {
 	// nil is always valid (required check is done separately)
 	err := eval.CheckValue(nil, schema.NewStringConstraint())
@@ -461,8 +407,8 @@ func TestCheckValue_Boolean(t *testing.T) {
 }
 
 // TestCheckCoerce_Timestamp covers string and time.Time forms plus the
-// custom-format constraint. Timestamp is a canonical kind, so CoerceValue
-// passes every value through unchanged — even ones CheckValue rejects.
+// custom-format constraint. CoerceValue renders both forms to the one stored
+// spelling through value.Canonical, and rejects what CheckValue rejects.
 func TestCheckCoerce_Timestamp(t *testing.T) {
 	defaultC := schema.NewTimestampConstraint()
 	customC := schema.NewTimestampConstraintFormatted("2006-01-02 15:04:05")
@@ -546,8 +492,9 @@ func TestCheckValue_Date(t *testing.T) {
 	}
 }
 
-// TestCheckCoerce_UUID covers string and uuid.UUID forms. UUID is a
-// canonical kind, so CoerceValue passes every value through unchanged.
+// TestCheckCoerce_UUID covers string and uuid.UUID forms. CoerceValue renders
+// both to the one lowercase spelling through value.Canonical, and rejects
+// what CheckValue rejects.
 func TestCheckCoerce_UUID(t *testing.T) {
 	constraint := schema.NewUUIDConstraint()
 
@@ -753,65 +700,18 @@ func TestCheckValue_UnresolvedAlias(t *testing.T) {
 	assert.Contains(t, err.Error(), "unresolved")
 }
 
-func TestCheckerFor(t *testing.T) {
-	constraint := schema.IntegerBetween(0, 100)
-	checker := eval.CheckerFor(constraint)
-
-	ok, msg := checker(int64(50))
-	assert.True(t, ok)
-	assert.Empty(t, msg)
-
-	ok, msg = checker(int64(150))
-	assert.False(t, ok)
-	assert.NotEmpty(t, msg)
-}
-
-// NOTE: named scalar types work without a Registry at all — internal/value
-// falls back to the underlying kind for both classification and extraction.
-// The Registry remains for a carrier whose base kind reflect cannot name.
-//
-// These tests verify the registry wiring is correct AND that named scalars work.
-
-func TestChecker_Method_vs_PackageLevel(t *testing.T) {
-	// Verify method and package-level function produce same results
-	checker := eval.DefaultChecker()
-
-	testCases := []struct {
-		val        any
-		constraint schema.Constraint
-	}{
-		{int64(42), schema.NewIntegerConstraint()},
-		{3.14, schema.NewFloatConstraint()},
-		{"test", schema.NewStringConstraint()},
-		{true, schema.NewBooleanConstraint()},
-	}
-
-	for _, tc := range testCases {
-		methodErr := checker.CheckValue(tc.val, tc.constraint)
-		pkgErr := eval.CheckValue(tc.val, tc.constraint)
-
-		if methodErr == nil {
-			require.NoError(t, pkgErr, "package-level should match method result")
-		} else {
-			require.Error(t, pkgErr, "package-level should match method error")
-		}
-	}
-}
-
 func TestCoerceValue_AliasConstraint(t *testing.T) {
-	checker := eval.DefaultChecker()
-
 	// Test alias that resolves to integer
 	intAlias := schema.NewAliasConstraint("MyInt", schema.NewIntegerConstraint())
 
 	t.Run("alias_to_integer_coerce_int32", func(t *testing.T) {
-		result, err := checker.CoerceValue(int32(42), intAlias)
+		result, err := eval.CoerceValue(int32(42), intAlias)
 		require.NoError(t, err)
 		assert.Equal(t, int64(42), result)
 	})
 
 	t.Run("alias_to_integer_coerce_uint", func(t *testing.T) {
-		result, err := checker.CoerceValue(uint(100), intAlias)
+		result, err := eval.CoerceValue(uint(100), intAlias)
 		require.NoError(t, err)
 		assert.Equal(t, int64(100), result)
 	})
@@ -820,13 +720,13 @@ func TestCoerceValue_AliasConstraint(t *testing.T) {
 	floatAlias := schema.NewAliasConstraint("MyFloat", schema.NewFloatConstraint())
 
 	t.Run("alias_to_float_coerce_int", func(t *testing.T) {
-		result, err := checker.CoerceValue(int64(42), floatAlias)
+		result, err := eval.CoerceValue(int64(42), floatAlias)
 		require.NoError(t, err)
 		assert.Equal(t, float64(42), result)
 	})
 
 	t.Run("alias_to_float_coerce_float32", func(t *testing.T) {
-		result, err := checker.CoerceValue(float32(3.14), floatAlias)
+		result, err := eval.CoerceValue(float32(3.14), floatAlias)
 		require.NoError(t, err)
 		// float32 to float64 conversion
 		assert.InDelta(t, 3.14, result.(float64), 0.001)
@@ -836,14 +736,14 @@ func TestCoerceValue_AliasConstraint(t *testing.T) {
 	stringAlias := schema.NewAliasConstraint("MyString", schema.NewStringConstraint())
 
 	t.Run("alias_to_string_passthrough", func(t *testing.T) {
-		result, err := checker.CoerceValue("hello", stringAlias)
+		result, err := eval.CoerceValue("hello", stringAlias)
 		require.NoError(t, err)
 		assert.Equal(t, "hello", result)
 	})
 
 	// Test nil value
 	t.Run("nil_value_returns_nil", func(t *testing.T) {
-		result, err := checker.CoerceValue(nil, intAlias)
+		result, err := eval.CoerceValue(nil, intAlias)
 		require.NoError(t, err)
 		assert.Nil(t, result)
 	})
@@ -938,13 +838,11 @@ func TestCheckValue_List_Nested(t *testing.T) {
 
 func TestCoerceValue_List(t *testing.T) {
 	t.Parallel()
-	checker := eval.DefaultChecker()
-
 	t.Run("coerce integer elements", func(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
 		// float64 values (as from JSON) should coerce to int64
-		result, err := checker.CoerceValue([]any{float64(1), float64(2), float64(3)}, constraint)
+		result, err := eval.CoerceValue([]any{float64(1), float64(2), float64(3)}, constraint)
 		require.NoError(t, err)
 		slice, ok := result.([]any)
 		require.True(t, ok)
@@ -963,7 +861,7 @@ func TestCoerceValue_List(t *testing.T) {
 	t.Run("nil element is refused", func(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewStringConstraint())
-		result, err := checker.CoerceValue([]any{"a", nil}, constraint)
+		result, err := eval.CoerceValue([]any{"a", nil}, constraint)
 		require.Error(t, err)
 		assert.Nil(t, result)
 		assert.Contains(t, err.Error(), "element [1]")
@@ -972,7 +870,7 @@ func TestCoerceValue_List(t *testing.T) {
 	t.Run("coerce float elements", func(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewFloatConstraint())
-		result, err := checker.CoerceValue([]any{float32(1.5), int(2)}, constraint)
+		result, err := eval.CoerceValue([]any{float32(1.5), int(2)}, constraint)
 		require.NoError(t, err)
 		slice, ok := result.([]any)
 		require.True(t, ok)
@@ -984,7 +882,7 @@ func TestCoerceValue_List(t *testing.T) {
 	t.Run("coerce string elements passthrough", func(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewStringConstraint())
-		result, err := checker.CoerceValue([]any{"hello", "world"}, constraint)
+		result, err := eval.CoerceValue([]any{"hello", "world"}, constraint)
 		require.NoError(t, err)
 		slice, ok := result.([]any)
 		require.True(t, ok)
@@ -994,7 +892,7 @@ func TestCoerceValue_List(t *testing.T) {
 	t.Run("coerce empty list", func(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewStringConstraint())
-		result, err := checker.CoerceValue([]any{}, constraint)
+		result, err := eval.CoerceValue([]any{}, constraint)
 		require.NoError(t, err)
 		slice, ok := result.([]any)
 		require.True(t, ok)
@@ -1004,14 +902,14 @@ func TestCoerceValue_List(t *testing.T) {
 	t.Run("not a slice", func(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewStringConstraint())
-		_, err := checker.CoerceValue("not_a_slice", constraint)
+		_, err := eval.CoerceValue("not_a_slice", constraint)
 		assert.Error(t, err)
 	})
 
 	t.Run("element coercion fails", func(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
-		_, err := checker.CoerceValue([]any{"not_an_int"}, constraint)
+		_, err := eval.CoerceValue([]any{"not_an_int"}, constraint)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "element [0]")
 	})
@@ -1028,8 +926,6 @@ func TestCoerceValue_List(t *testing.T) {
 // identical, or coercion would not be idempotent.
 func TestCoerceValue_CanonicalFormsAreStable(t *testing.T) {
 	t.Parallel()
-	checker := eval.DefaultChecker()
-
 	cases := []struct {
 		name string
 		c    schema.Constraint
@@ -1046,7 +942,7 @@ func TestCoerceValue_CanonicalFormsAreStable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := checker.CoerceValue(tc.val, tc.c)
+			got, err := eval.CoerceValue(tc.val, tc.c)
 			require.NoError(t, err)
 			assert.Equal(t, tc.val, got, "a canonical value must coerce to itself")
 		})

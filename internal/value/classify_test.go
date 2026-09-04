@@ -3,7 +3,6 @@ package value_test
 import (
 	"encoding/json"
 	"reflect"
-	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/value"
@@ -102,121 +101,15 @@ func TestClassify_JSONNumber(t *testing.T) {
 	}
 }
 
-func TestClassify_Vector(t *testing.T) {
-	t.Run("typed float slices", func(t *testing.T) {
-		var nilFloat64 []float64
-		var nilFloat32 []float32
-
-		tests := []struct {
-			name      string
-			input     any
-			wantSlice any
-		}{
-			{"float64 slice", []float64{1.0, 2.5}, []float64{1.0, 2.5}},
-			{"float32 slice", []float32{1.0, 2.5}, []float32{1.0, 2.5}},
-			{"nil float64 slice", nilFloat64, nilFloat64},
-			{"nil float32 slice", nilFloat32, nilFloat32},
-			{"empty float64 slice", []float64{}, []float64{}},
-			{"empty float32 slice", []float32{}, []float32{}},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				kind, norm := value.Classify(tt.input)
-				if kind != value.VectorKind {
-					t.Errorf("expected VectorKind, got %v", kind)
-				}
-				if !reflect.DeepEqual(norm, tt.wantSlice) {
-					t.Errorf("expected %v, got %v", tt.wantSlice, norm)
-				}
-			})
-		}
-	})
-
-	// []any always produces []float64 (JSON pathway normalization).
-	// This matches the architecture spec: "each element is coerced to float64".
-	t.Run("[]any float elements", func(t *testing.T) {
-		tests := []struct {
-			name      string
-			input     []any
-			wantSlice []float64 // Always []float64 for []any input
-		}{
-			{"float64 elements", []any{float64(1), float64(2.5)}, []float64{1, 2.5}},
-			{"float32 elements", []any{float32(1.25), float32(2.5)}, []float64{1.25, 2.5}}, // float32 → float64
-			{"mixed float widths", []any{float32(1.5), float64(2.25)}, []float64{1.5, 2.25}},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				kind, norm := value.Classify(tt.input)
-				if kind != value.VectorKind {
-					t.Errorf("expected VectorKind, got %v", kind)
-				}
-				if !reflect.DeepEqual(norm, tt.wantSlice) {
-					t.Errorf("expected %v, got %v", tt.wantSlice, norm)
-				}
-			})
-		}
-	})
-
-	// Integer elements are accepted in vectors (coerced to float64).
-	t.Run("[]any integer elements", func(t *testing.T) {
-		tests := []struct {
-			name      string
-			input     []any
-			wantSlice []float64
-		}{
-			{"int elements", []any{1, 2, 3}, []float64{1, 2, 3}},
-			{"int64 elements", []any{int64(10), int64(20)}, []float64{10, 20}},
-			{"uint elements", []any{uint(1), uint(2)}, []float64{1, 2}},
-			{"mixed int/float", []any{1, 2.5, 3}, []float64{1, 2.5, 3}},
-			{"mixed int types", []any{int(1), int64(2), uint(3)}, []float64{1, 2, 3}},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				kind, norm := value.Classify(tt.input)
-				if kind != value.VectorKind {
-					t.Errorf("expected VectorKind, got %v", kind)
-				}
-				if !reflect.DeepEqual(norm, tt.wantSlice) {
-					t.Errorf("expected %v, got %v", tt.wantSlice, norm)
-				}
-			})
-		}
-	})
-
-	t.Run("json.Number elements in vectors", func(t *testing.T) {
-		tests := []struct {
-			name      string
-			input     []json.Number
-			wantSlice []float64
-		}{
-			{"float json.Numbers", []json.Number{json.Number("1.1"), json.Number("2.2")}, []float64{1.1, 2.2}},
-			{"int json.Numbers", []json.Number{json.Number("1"), json.Number("2")}, []float64{1, 2}},
-			{"mixed json.Numbers", []json.Number{json.Number("1"), json.Number("2.5")}, []float64{1, 2.5}},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				kind, norm := value.Classify(tt.input)
-				if kind != value.VectorKind {
-					t.Errorf("expected VectorKind, got %v", kind)
-				}
-				if !reflect.DeepEqual(norm, tt.wantSlice) {
-					t.Errorf("expected %v, got %v", tt.wantSlice, norm)
-				}
-			})
-		}
-	})
-}
-
 func TestClassify_Unspecified(t *testing.T) {
 	tests := []struct {
 		name  string
 		input any
 	}{
 		{"nil", nil},
+		{"float64 slice", []float64{1}},
+		{"numeric interface slice", []any{1.5, 2}},
+		{"json.Number slice", []json.Number{json.Number("1")}},
 		{"string slice", []any{"x", "y"}},
 		{"int slice (typed)", []int{1, 2}}, // typed int slice, not []any
 		{"uint slice (typed)", []uint{1, 2, 3}},
@@ -253,7 +146,6 @@ func TestKind_String(t *testing.T) {
 		{value.IntKind, "IntKind"},
 		{value.FloatKind, "FloatKind"},
 		{value.BoolKind, "BoolKind"},
-		{value.VectorKind, "VectorKind"},
 		{value.Kind(99), "UnknownKind"}, // Unknown kind
 	}
 
@@ -296,82 +188,6 @@ func TestClassify_FloatPrecision(t *testing.T) {
 		// This test documents that precision loss occurs
 		t.Logf("large int %d as float64 becomes %f (precision lost)", largeInt, asFloat)
 	})
-
-	t.Run("float64 in vector preserves value", func(t *testing.T) {
-		input := []any{float64(3.14159265358979)}
-		kind, norm := value.Classify(input)
-		if kind != value.VectorKind {
-			t.Errorf("expected VectorKind, got %v", kind)
-		}
-		slice := norm.([]float64)
-		if slice[0] != 3.14159265358979 {
-			t.Errorf("expected exact float64, got %v", slice[0])
-		}
-	})
-}
-
-// Custom numeric types for testing reflect fallback in toFloat64
-type (
-	customInt     int
-	customInt64   int64
-	customUint    uint
-	customUint64  uint64
-	customFloat32 float32
-	customFloat64 float64
-)
-
-// TestClassify_VectorElementTypes covers element coercion to []float64 in an
-// []any vector across every accepted element representation: each direct
-// integer width, uintptr, custom (named) numeric types via the reflect
-// fallback, and the rejection rows (nil element, non-numeric custom type).
-// A nil want means the vector is rejected as UnspecifiedKind.
-func TestClassify_VectorElementTypes(t *testing.T) {
-	type customString string
-	tests := []struct {
-		name  string
-		input []any
-		want  []float64
-	}{
-		{"int8", []any{int8(1), int8(2), int8(3)}, []float64{1, 2, 3}},
-		{"int16", []any{int16(10), int16(20)}, []float64{10, 20}},
-		{"int32", []any{int32(100), int32(200)}, []float64{100, 200}},
-		{"uint8", []any{uint8(5), uint8(10)}, []float64{5, 10}},
-		{"uint16", []any{uint16(100), uint16(200)}, []float64{100, 200}},
-		{"uint32", []any{uint32(1000), uint32(2000)}, []float64{1000, 2000}},
-		{"uint64", []any{uint64(10000), uint64(20000)}, []float64{10000, 20000}},
-		{"uintptr", []any{uintptr(1), uintptr(2)}, []float64{1, 2}},
-		{"customInt", []any{customInt(1), customInt(2), customInt(3)}, []float64{1, 2, 3}},
-		{"customInt64", []any{customInt64(10), customInt64(20)}, []float64{10, 20}},
-		{"customUint", []any{customUint(5), customUint(10)}, []float64{5, 10}},
-		{"customUint64", []any{customUint64(100), customUint64(200)}, []float64{100, 200}},
-		{"customFloat32", []any{customFloat32(1.5), customFloat32(2.5)}, []float64{1.5, 2.5}},
-		{"customFloat64", []any{customFloat64(3.14), customFloat64(2.71)}, []float64{3.14, 2.71}},
-		{"mixed custom types", []any{customInt(1), customFloat64(2.5), customUint(3)}, []float64{1, 2.5, 3}},
-		{"nil element rejected", []any{1.0, nil, 3.0}, nil},
-		{"non-numeric custom type rejected", []any{customString("hello")}, nil},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			kind, norm := value.Classify(tt.input)
-			if tt.want == nil {
-				if kind != value.UnspecifiedKind {
-					t.Errorf("Classify(%v) kind = %v, want UnspecifiedKind", tt.input, kind)
-				}
-				return
-			}
-			if kind != value.VectorKind {
-				t.Fatalf("Classify(%v) kind = %v, want VectorKind", tt.input, kind)
-			}
-			got, ok := norm.([]float64)
-			if !ok {
-				t.Fatalf("normalized = %T, want []float64", norm)
-			}
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("normalized = %v, want %v", got, tt.want)
-			}
-		})
-	}
 }
 
 // Helper functions for pointer tests
@@ -472,18 +288,11 @@ func TestClassify_PointerDereferencing(t *testing.T) {
 		}
 	})
 
-	t.Run("*[]float64 returns VectorKind", func(t *testing.T) {
+	t.Run("*[]float64 follows its target to the slice rule", func(t *testing.T) {
 		slice := []float64{1.0, 2.0, 3.0}
-		input := &slice
-		kind, norm := value.Classify(input)
-		if kind != value.VectorKind {
-			t.Errorf("expected VectorKind for *[]float64, got %v", kind)
-		}
-		if !reflect.DeepEqual(norm, slice) {
-			t.Errorf("expected %v, got %v", slice, norm)
+		kind, _ := value.Classify(&slice)
+		if kind != value.UnspecifiedKind {
+			t.Errorf("expected UnspecifiedKind for *[]float64, got %v", kind)
 		}
 	})
 }
-
-// Vec is a named slice type for testing registry hook
-type Vec []float64

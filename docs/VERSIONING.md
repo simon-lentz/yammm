@@ -851,11 +851,11 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 ## Unreleased
 
-*Two blocks: unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass in the working tree, the unit NOT closed; the clause-5 round will add to it — and unit 4's, merged as `fabed40`. Each says which.*
+*Two blocks: unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass in the working tree, the unit NOT closed; the clause-5 round will add to it — and unit 4's, merged as `fabed40`. Each says which.*
 
-### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass in the working tree; the unit is not closed
+### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass in the working tree; the unit is not closed
 
-*Written in the fix pass that landed the behaviour, not at the tag (A-227). Pass A's declaration delta was enumerated from the diff and confirmed by `gorelease -base=v0.20.0` at `e8547b6`: across both units' cargo, **three incompatible changes and thirty-seven additions** (recounted from the persisted run; an earlier sentence here said thirty-eight), suggested `v0.21.0` — this unit's share one removal and ten additions, matching the list below symbol for symbol. **Pass B's block follows pass A's, measured by `gorelease -base=v0.20.0` at its commit `2b28aab`: across both units' cargo, four incompatible changes — `E_RELATION_NORMALIZATION_COLLISION` and `Type.CanonicalPropertyMap` removed, `StructuralHashVersion` 3 → 4, and `expr.IsNilLiteral` removed — and forty-four additions, suggested `v0.21.0`; pass B's share is the one removal and seven additions named below. The tag-time run re-confirms it.***
+*Written in the fix pass that landed the behaviour, not at the tag (A-227). Pass A's declaration delta was enumerated from the diff and confirmed by `gorelease -base=v0.20.0` at `e8547b6`: across both units' cargo, **three incompatible changes and thirty-seven additions** (recounted from the persisted run; an earlier sentence here said thirty-eight), suggested `v0.21.0` — this unit's share one removal and ten additions, matching the list below symbol for symbol. **Pass B's block follows pass A's, measured by `gorelease -base=v0.20.0` at its commit `2b28aab`: across both units' cargo, four incompatible changes — `E_RELATION_NORMALIZATION_COLLISION` and `Type.CanonicalPropertyMap` removed, `StructuralHashVersion` 3 → 4, and `expr.IsNilLiteral` removed — and forty-four additions, suggested `v0.21.0`; pass B's share is the one removal and seven additions named below. **The clause-3/4 block follows pass B's, measured by `gorelease -base=v0.20.0` on a `git ls-files` export of the working tree: ten incompatible and forty-six additive across units 4 and 5, suggested `v0.21.0` — this pass's share the four `instance` removals, the two `Kind` value shifts and the two `schema/expr` additions named below; re-measured at its commit.** The tag-time run re-confirms it.***
 
 #### Pass B — the evaluator, the value rule and the static checker (A-253…A-261)
 
@@ -898,6 +898,59 @@ Nine repairs from the unit's second reading pass, every one a model change, rati
 ##### Prose
 
 - `docs/SPEC.md`: the equality rule (structural, never errors, shared by `in`/`Contains`/`Unique`); integer overflow and `nil` under the arithmetic operators; `+`'s operand rule; `Round` *"keeps the operand's kind, as `Floor` and `Ceil` do"* where it said *"to nearest integer"* (the code preserved the kind all along, measured). `instance/internal/eval/doc.go` listed all 43 builtins in a spelling the language does not resolve for seven of them (`all_or_none`, `type_of`, …); it lists the catalogue's names. `internal/value/doc.go` named a package path that does not exist and a function that had no caller.
+
+#### The clause-3/4 pass — the acknowledge and corpus lanes of both passes, dispositioned and fixed
+
+Sixty-six fixes from the 130 acknowledge- and corpus-lane findings of both reading passes (93 fixed counting those an earlier pass retired; 17 deferred with a trigger; 10 wontfix with a reason — the ledger's §21), delivered under TDD in four batches. Two of them change a language rule and are recorded as derived decisions awaiting confirmation (A-262, A-263).
+
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0` — twice, before and after the pass's last follow-ups: its unit-lane suite against this working tree fails **exactly the four hash re-key tests unit 4's re-key fails**, byte-identical to pass A's and pass B's sets, and the suite at the pin is green; **the clause-3/4 delta is empty.**
+
+##### Breaking — behaviour, `instance`
+
+- **A typed nil pointer is the absent value** at every null-rule site — a property (required or optional), a foreign-key component, an edge value, an edge property, a composition — exactly as an interface nil is: an optional `(*string)(nil)` is dropped where it drew `E_TYPE_MISMATCH`, a required one is `E_MISSING_REQUIRED`. A typed nil slice or map stays an empty container, as `RawInstance` documents.
+- **`Validate` resolves the type before it answers a nil or empty batch**, as `ValidateForComposition` already did, so an unknown type name is `E_INSTANCE_TYPE_NOT_FOUND` whatever the batch; `docs/API.md`'s Note now holds for every call.
+- **A cancelled batch returns a nil slice, not a partial one**, on both `Validate` and `ValidateForComposition`: the "one entry per input instance" contract is the completed batch's.
+- **A recovered panic in an edge check is Fatal `E_INTERNAL` with its stack**, as it was at the node site; the two edge sites reported it as `E_TYPE_MISMATCH`. Every check error is classified by one function.
+- **A batch-wide failure — an unknown type, a relation that is not a composition — is anchored on the batch's source at its root with no span**, where it borrowed the first row's provenance and pointed at a row that was fine.
+- **A nested composed child's diagnostic carries the innermost relation detail only**, where each nesting level stacked another `relation`/`json_field` pair under the same keys.
+- **A JSON number at a String, Enum or Pattern property is `E_TYPE_MISMATCH`**: `value.GetString` no longer reads a `json.Number` — a named type over string — through its reflect fallback, so a document decoded with `UseNumber` (what `adapter/json` does) no longer stores a number's digits in a String property. Measured at zero consumer cost.
+- **`CanonicalValue` refuses a value of the wrong kind at a String, Enum, Pattern or Boolean constraint**, and a typed nil pointer, where it returned the input with a nil error; the exporters pass the input through on error, as before.
+- **`ValidInstance`'s accessors are nil-receiver safe**, as `Validate` documents nil entries; `NewValidInstance` clones the caller's maps.
+
+##### Breaking — the DSL and its evaluation
+
+- **A datatype check applies the property rule of its kind**: `=~ Float` is false for NaN and the infinities; `=~ Integer` is false for an unsigned value above the int64 range; `=~ String` is false for a `json.Number`; `=~ Boolean` and `=~ String` read a named carrier as the property check does. `=~ Timestamp` accepts a `time.Time` or an RFC 3339 string.
+- **`Min` and `Max` with an argument refuse a list receiver** (`E_EVAL_ERROR`), where `[a, b] -> Max("z")` returned the list because a slice orders above every scalar; the static checker refuses it at load.
+- **`Substring` clamps in int64** before narrowing, so an index no `int` can hold is clamped, not wrapped, on a 32-bit build.
+- **`TypeOf` reads a carrier**: a `json.Number` is `"integer"` or `"float"` and a named scalar is its base kind, where both were `"unknown"`.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **`=~` against `Vector`, `List`, `Enum` or `Pattern` is refused at load** (`E_INVALID_INVARIANT`): they are datatype keywords but not type checks, and the invariant failed every instance. The seven checkable kinds are one set, `expr.IsDatatypeCheck`, read by both layers (A-262, derived).
+- **`Default`'s fallback must be of the receiver's kind** — a list for a list, a string for a string or an association key — and the result is typed as their merge, so the stage after `Default` is typed by a value the checker predicted; `(tags -> Default("none") -> First)` loaded clean and failed every instance (A-263, derived).
+- **`Min`/`Max` with an argument refuse a list receiver at load** (A-263, derived).
+- A `List<List<T>>` element is typed as a list, pinned by rows (the descent shipped with A-254).
+
+##### Breaking — Go API
+
+- **`instance.ErrNilValidator`, `ErrCorruptedSchema`, `KindNilValidator` and `KindCorruptedSchema` are removed**: no production code returned or produced them, and their godoc stated a contract the code contradicted. `KindInvariantPanic` and `KindConstraintPanic` shift to 0 and 1.
+
+##### Additive — Go API
+
+- `schema/expr`: `IsDatatypeCheck(name string) bool` — the datatype-check set, matched case-insensitively; `ResultReceiverOrArg` — the receiver's type when it holds a value, the argument's when nil.
+
+##### Behaviour, non-breaking
+
+- The validator's configured logger reaches the evaluator (`WithLogger` was restored by pass A and never wired through); `Evaluate`'s trace op ends with the evaluation's error, where it always ended clean.
+- `value.GetUint64` reads a `json.Number`, so `Order` compares a lexical integer above the int64 range exactly instead of through float64; `canonicalUUID` reads the carriers `checkUUID` accepts; `value.Canonical` under a List constraint errors on a non-slice and reads an `immutable.Slice`.
+- `accessMember` folds a member name by `immutable.Properties`' rule (ASCII only, the alphabetically first key on a collision), where it folded with `strings.ToLower`; a raw Go map is no longer a receiver (none reached it).
+- `checkFloat` accepts a `uint64` or `uintptr` above the int64 range, as its coercion already did.
+- Dead code deleted, each proven unreachable: `value.VectorKind` and the vector half of `Classify` (a slice is `UnspecifiedKind`); `eval.Checker`/`DefaultChecker` (every rule a package function); `CheckerFor`, `MatchesPattern`, `InEnum`, `PropertyScope`; the `expr.Op` arm of `evaluate`; both RFC3339Nano fallbacks; thirteen arity re-checks and `Count`'s body guard; `div`'s duplicated integer pre-check; two dead invariant-loop branches; `wrapPanicValue`'s nil branch; `composedChildren`'s `[]*ValidInstance` arm; two single-caller wrappers.
+- The invariant scope's edge and composition maps are allocated only when non-empty; `Validate` and the composition batch preallocate their result slice.
+
+##### Prose
+
+- `docs/SPEC.md`: the type-checking paragraph (the seven keywords, each applying its kind's rule, the four refused at load); `E_CASE_FOLD_COLLISION` covers relation fields and edge properties. `docs/API.md`: the `Validate` Note holds for every batch. `internal/value/doc.go`: a slice is never a scalar kind; `Canonical` is the temporal/UUID half of the stored-form rule `CoerceValue` applies. `instance/schema_builder.go`'s `# Performance` section and `buildPropertyMapping`'s godoc reduced to their contracts; six paraphrase comments and three registry-era comments deleted; two test docstrings that stated the opposite of their bodies rewritten.
 
 Minor tier, under the pre-1.0 subtractive rules. Fourteen repairs from the unit's round (A-237…A-250), every one a model change: one member index and one fold rule for every input key, one path rule, one type-identity rendering, one meaning per diagnostic code, one stored-form rule, and one composed-nesting bound shared with the wire.
 

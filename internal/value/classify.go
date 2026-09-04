@@ -19,8 +19,6 @@ const (
 	FloatKind
 	// BoolKind indicates a boolean value.
 	BoolKind
-	// VectorKind indicates a slice of float32 or float64 values.
-	VectorKind
 )
 
 // String returns the string representation of a Kind.
@@ -36,29 +34,27 @@ func (k Kind) String() string {
 		return "FloatKind"
 	case BoolKind:
 		return "BoolKind"
-	case VectorKind:
-		return "VectorKind"
 	default:
 		return "UnknownKind"
 	}
 }
 
-// Classify normalizes a runtime value into a Kind and possibly transformed value.
-// It is used by runtime validation to stay aligned with type checker expectations.
+// Classify normalizes a runtime scalar into a Kind and possibly transformed
+// value. It is used by runtime validation to stay aligned with type checker
+// expectations.
 //
 // For json.Number: attempts Int64() first, then Float64() to determine kind.
-// For slices: detects and coerces to []float64 or []float32 for VectorKind.
+// A slice of any element type is UnspecifiedKind: a list's shape is the
+// constraint's to judge, elementwise.
 //
 // Pointers are dereferenced before classification, so *int and int return the
 // same Kind; a nil pointer returns UnspecifiedKind. A named type over a basic
 // kind classifies as its base kind.
 func Classify(val any) (Kind, any) {
-	// Handle nil
 	if val == nil {
 		return UnspecifiedKind, val
 	}
 
-	// Dereference pointers first
 	rv := reflect.ValueOf(val)
 	for rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
@@ -68,14 +64,11 @@ func Classify(val any) (Kind, any) {
 		val = rv.Interface()
 	}
 
-	// Type switch for primitives
 	switch v := val.(type) {
 	case json.Number:
-		// Try integer first (no decimal point)
 		if n, err := v.Int64(); err == nil {
 			return IntKind, n
 		}
-		// Then try float
 		if n, err := v.Float64(); err == nil {
 			return FloatKind, n
 		}
@@ -90,15 +83,6 @@ func Classify(val any) (Kind, any) {
 		return IntKind, val
 	case float32, float64:
 		return FloatKind, val
-	}
-
-	valType := reflect.TypeOf(val)
-	if valType == nil {
-		return UnspecifiedKind, val
-	}
-
-	if valType.Kind() == reflect.Slice {
-		return classifySlice(val)
 	}
 
 	if kind, base, ok := classifyNamedBase(rv); ok {
@@ -126,140 +110,5 @@ func classifyNamedBase(rv reflect.Value) (Kind, any, bool) {
 		return FloatKind, rv.Float(), true
 	default:
 		return UnspecifiedKind, nil, false
-	}
-}
-
-// jsonNumberType is used to detect []json.Number slices
-var jsonNumberType = reflect.TypeFor[json.Number]()
-
-func classifySlice(val any) (Kind, any) {
-	// Fast path for typed float slices
-	switch v := val.(type) {
-	case []float64:
-		return VectorKind, v
-	case []float32:
-		return VectorKind, v
-	}
-
-	rv := reflect.ValueOf(val)
-	elemType := rv.Type().Elem()
-	elemKind := elemType.Kind()
-
-	// Handle nil slices - only float slices become VectorKind
-	if rv.IsNil() {
-		switch elemKind {
-		case reflect.Float64:
-			return VectorKind, []float64(nil)
-		case reflect.Float32:
-			return VectorKind, []float32(nil)
-		default:
-			return UnspecifiedKind, val
-		}
-	}
-
-	// Handle empty slices - only typed float slices become VectorKind.
-	// Empty []any{} returns UnspecifiedKind because it's genuinely ambiguous:
-	// we cannot distinguish an empty vector from an empty string list or empty
-	// object list without schema context. The instance validator has schema
-	// information and can properly interpret empty arrays. This follows the
-	// "determine what it IS, not what it should be" principle.
-	if rv.Len() == 0 {
-		switch elemKind {
-		case reflect.Float64:
-			return VectorKind, []float64{}
-		case reflect.Float32:
-			return VectorKind, []float32{}
-		default:
-			return UnspecifiedKind, val
-		}
-	}
-
-	// Only coerce certain slice types to VectorKind:
-	// - []any slices with numeric elements
-	// - []json.Number slices
-	// Typed slices like []int, []string should return UnspecifiedKind.
-	// Per spec: "Vector[N] | []float64, []float32, []any with numeric elements"
-	isInterfaceSlice := elemKind == reflect.Interface
-	isJSONNumberSlice := elemType == jsonNumberType
-	if !isInterfaceSlice && !isJSONNumberSlice {
-		return UnspecifiedKind, val
-	}
-
-	// Build vector from elements - always produce []float64 for []any input.
-	// This ensures JSON input (which comes as []any) always produces []float64,
-	// matching the architecture spec's "each element is coerced to float64".
-	// Typed []float32 inputs are preserved by the fast path above.
-	result := make([]float64, 0, rv.Len())
-	for i := range rv.Len() {
-		elem := rv.Index(i).Interface()
-		fval, ok := toFloat64(elem)
-		if !ok {
-			return UnspecifiedKind, val
-		}
-		result = append(result, fval)
-	}
-	return VectorKind, result
-}
-
-// toFloat64 converts any numeric type to float64 for vector element coercion.
-// Returns (value, true) if the element is numeric, (0, false) otherwise.
-//
-// All numeric types (int*, uint*, float32, float64, json.Number) are accepted.
-// This is used for []any and []json.Number vector coercion where we always
-// produce []float64 output.
-func toFloat64(elem any) (float64, bool) {
-	switch n := elem.(type) {
-	// Float types
-	case float64:
-		return n, true
-	case float32:
-		return float64(n), true
-
-	// Integer types (v2: coerced to float64 for vectors)
-	case int:
-		return float64(n), true
-	case int8:
-		return float64(n), true
-	case int16:
-		return float64(n), true
-	case int32:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	case uint:
-		return float64(n), true
-	case uint8:
-		return float64(n), true
-	case uint16:
-		return float64(n), true
-	case uint32:
-		return float64(n), true
-	case uint64:
-		return float64(n), true
-	case uintptr:
-		return float64(n), true
-
-	// json.Number in vectors: coerce to float64
-	case json.Number:
-		if fv, err := n.Float64(); err == nil {
-			return fv, true
-		}
-		return 0, false
-	}
-
-	// Reflect fallback for custom numeric types
-	rv := reflect.ValueOf(elem)
-	if !rv.IsValid() {
-		return 0, false
-	}
-	switch rv.Kind() {
-	case reflect.Float32, reflect.Float64:
-		return rv.Float(), true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return float64(rv.Int()), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return float64(rv.Uint()), true
-	default:
-		return 0, false
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -312,5 +313,60 @@ func TestCanonical_NilInputsPassThrough(t *testing.T) {
 	}
 	if got := canon(t, "x", nil); got != "x" {
 		t.Errorf("Canonical with a nil constraint = %#v, want the input", got)
+	}
+}
+
+// canonicalUUID reads the same carriers checkUUID accepts: a named string
+// type (adapter/gogen's shape for a DataType over UUID) and a *string. A
+// value the check passes must not fail the coercion that follows it.
+func TestCanonical_UUIDReadsAStringCarrier(t *testing.T) {
+	t.Parallel()
+	type userID string
+	const spelled = "{123E4567-E89B-12D3-A456-426614174000}"
+	const want = "123e4567-e89b-12d3-a456-426614174000"
+	str := spelled
+	for name, in := range map[string]any{"named string": userID(spelled), "pointer": &str} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := canon(t, in, schema.NewUUIDConstraint()); got != want {
+				t.Errorf("Canonical(%T) = %#v, want %q", in, got, want)
+			}
+		})
+	}
+}
+
+// A non-slice under a List constraint is an error, not a value already in
+// canonical form: the check side's coerceList refuses it, and both halves of
+// the stored-form rule must agree.
+func TestCanonical_ListRefusesANonSlice(t *testing.T) {
+	t.Parallel()
+	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
+	for name, in := range map[string]any{"string": "2026-08-19T12:00:00Z", "array": [1]string{"2026-08-19T12:00:00Z"}, "int": 7} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := value.Canonical(in, lc)
+			if err == nil {
+				t.Fatalf("Canonical(%T) under List<Timestamp> returned nil error", in)
+			}
+			if !reflect.DeepEqual(got, in) {
+				t.Errorf("on failure Canonical returned %#v, want the input unchanged", got)
+			}
+		})
+	}
+}
+
+// An immutable.Slice is a slice for every purpose in this package, the list
+// arm included: it is what a stored List property unwraps to.
+func TestCanonical_ListReadsAnImmutableSlice(t *testing.T) {
+	t.Parallel()
+	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
+	in := immutable.Wrap([]any{time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC), "2026-08-19T13:00:00+00:00"}).Unwrap()
+	if _, ok := in.(immutable.Slice); !ok {
+		t.Fatalf("fixture: Wrap([]any).Unwrap() is %T, want immutable.Slice", in)
+	}
+	got := canon(t, in, lc)
+	want := []any{"2026-08-19T12:00:00Z", "2026-08-19T13:00:00Z"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Canonical(immutable.Slice) = %#v, want %#v", got, want)
 	}
 }

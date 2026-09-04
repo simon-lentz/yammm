@@ -30,6 +30,11 @@ const (
 	// ResultElementOrArg is one element of a list receiver when the call has
 	// no argument, and a scalar when it has one (Min, Max).
 	ResultElementOrArg
+	// ResultReceiverOrArg is the receiver's type when the receiver holds a
+	// value and the argument's when it is nil (Default). The static checker
+	// requires the two to be of one kind, so the stage after the call is typed
+	// by a value it predicted, and types the result as their merge.
+	ResultReceiverOrArg
 	// ResultUnknown makes no claim (Reduce, Then, Lest, Coalesce).
 	ResultUnknown
 )
@@ -78,9 +83,10 @@ const (
 	// yields zero. A number or a boolean is refused.
 	RecvSized
 	// RecvListOrArg: a list when the call has no argument, when the builtin
-	// ranks the list's elements; any rankable value when it has one, when the
-	// builtin ranks receiver against argument. An instance is refused either
-	// way. The receiver's mirror of [ResultElementOrArg].
+	// ranks the list's elements; a scalar when it has one, when the builtin
+	// ranks receiver against argument and promises a scalar. An instance is
+	// refused either way, a list with an argument. The receiver's mirror of
+	// [ResultElementOrArg].
 	RecvListOrArg
 	// RecvStringList: a list of strings. A list of numbers or instances is
 	// refused.
@@ -166,7 +172,7 @@ func init() {
 	// Utility
 	spec("TypeOf", 0, 0, 0, false, RecvAny, ResultScalar, BindNone)
 	spec("IsNil", 0, 0, 0, false, RecvAny, ResultScalar, BindNone)
-	spec("Default", 1, 1, 0, false, RecvAny, ResultReceiver, BindNone)
+	spec("Default", 1, 1, 0, false, RecvAny, ResultReceiverOrArg, BindNone)
 	spec("Coalesce", 1, -1, 0, false, RecvAny, ResultUnknown, BindNone)
 }
 

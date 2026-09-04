@@ -2,6 +2,7 @@ package instance
 
 import (
 	"iter"
+	"maps"
 	"slices"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -40,19 +41,21 @@ func NewValidInstance(
 	composed map[string]immutable.Value,
 	provenance *location.Provenance,
 ) *ValidInstance {
+	// The caller keeps its maps; the instance must not see a later mutation.
 	return &ValidInstance{
 		typeName:   typeName,
 		typeID:     typeID,
 		primaryKey: pk,
 		properties: props,
-		edges:      edges,
-		composed:   composed,
+		edges:      maps.Clone(edges),
+		composed:   maps.Clone(composed),
 		provenance: provenance,
 	}
 }
 
-// newValidatedInstance is the validator's constructor: identical to
-// [NewValidInstance], plus the validated bit only this package can set.
+// newValidatedInstance is the validator's constructor: the shape of
+// [NewValidInstance] over maps the validator owns (so no clone), plus the
+// validated bit only this package can set.
 func newValidatedInstance(
 	typeName string,
 	typeID schema.TypeID,
@@ -62,47 +65,69 @@ func newValidatedInstance(
 	composed map[string]immutable.Value,
 	provenance *location.Provenance,
 ) *ValidInstance {
-	v := NewValidInstance(typeName, typeID, pk, props, edges, composed, provenance)
-	v.validated = true
-	return v
+	return &ValidInstance{
+		typeName:   typeName,
+		typeID:     typeID,
+		primaryKey: pk,
+		properties: props,
+		edges:      edges,
+		composed:   composed,
+		provenance: provenance,
+		validated:  true,
+	}
 }
 
 // Validated reports whether this instance was produced by [Validator].
 // No exported constructor can set it: false means asserted, not proven.
 func (v *ValidInstance) Validated() bool {
-	return v.validated
+	return v != nil && v.validated
 }
 
 // TypeName returns the name of the validated type.
 func (v *ValidInstance) TypeName() string {
+	if v == nil {
+		return ""
+	}
 	return v.typeName
 }
 
 // TypeID returns the schema type ID.
 func (v *ValidInstance) TypeID() schema.TypeID {
+	if v == nil {
+		return schema.TypeID{}
+	}
 	return v.typeID
 }
 
 // PrimaryKey returns the extracted primary key.
 func (v *ValidInstance) PrimaryKey() immutable.Key {
+	if v == nil {
+		return immutable.Key{}
+	}
 	return v.primaryKey
 }
 
 // Property returns the value of a property by name.
 // Returns (zero, false) if the property is not set.
 func (v *ValidInstance) Property(name string) (immutable.Value, bool) {
+	if v == nil {
+		return immutable.Value{}, false
+	}
 	return v.properties.Get(name)
 }
 
 // Properties returns all validated properties.
 func (v *ValidInstance) Properties() immutable.Properties {
+	if v == nil {
+		return immutable.Properties{}
+	}
 	return v.properties
 }
 
 // Edge returns the validated edge data for a relation.
 // Returns (nil, false) if the relation has no edges.
 func (v *ValidInstance) Edge(relationName string) (*ValidEdgeData, bool) {
-	if v.edges == nil {
+	if v == nil {
 		return nil, false
 	}
 	edge, ok := v.edges[relationName]
@@ -112,31 +137,28 @@ func (v *ValidInstance) Edge(relationName string) (*ValidEdgeData, bool) {
 // Provenance returns the source location metadata.
 // Returns nil if no provenance was provided.
 func (v *ValidInstance) Provenance() *location.Provenance {
+	if v == nil {
+		return nil
+	}
 	return v.provenance
 }
 
 // Edges returns an iterator over all edges.
 // The iteration order is not guaranteed to be deterministic.
 func (v *ValidInstance) Edges() iter.Seq2[string, *ValidEdgeData] {
-	return func(yield func(string, *ValidEdgeData) bool) {
-		for name, edge := range v.edges {
-			if !yield(name, edge) {
-				return
-			}
-		}
+	if v == nil {
+		return maps.All(map[string]*ValidEdgeData(nil))
 	}
+	return maps.All(v.edges)
 }
 
 // Compositions returns an iterator over all compositions.
 // The iteration order is not guaranteed to be deterministic.
 func (v *ValidInstance) Compositions() iter.Seq2[string, immutable.Value] {
-	return func(yield func(string, immutable.Value) bool) {
-		for name, comp := range v.composed {
-			if !yield(name, comp) {
-				return
-			}
-		}
+	if v == nil {
+		return maps.All(map[string]immutable.Value(nil))
 	}
+	return maps.All(v.composed)
 }
 
 // ValidEdgeData represents validated association edge data.

@@ -171,6 +171,9 @@ func TestOrder_JSONNumberIsNumeric(t *testing.T) {
 		{"less than int64", json.Number("4"), int64(5), -1},
 		{"fractional against float64", json.Number("2.5"), 2.5, 0},
 		{"int64 on the left", int64(9), json.Number("5"), 1},
+		{"max uint64 lexical against uint64", json.Number("18446744073709551615"), uint64(math.MaxUint64), 0},
+		{"uint64 above int64 against its lexical", uint64(1 << 63), json.Number("9223372036854775808"), 0},
+		{"lexical one below max against max", json.Number("18446744073709551614"), uint64(math.MaxUint64), -1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := value.Order(tt.left, tt.right)
@@ -329,8 +332,12 @@ func TestGetUint64(t *testing.T) {
 		{"uint64 large", uint64(1<<63 + 1000), 1<<63 + 1000, true},
 		{"uint64 max", uint64(1<<64 - 1), 1<<64 - 1, true},
 		{"uintptr", uintptr(12345), 12345, true},
+		{"json.Number max uint64", json.Number("18446744073709551615"), 1<<64 - 1, true},
+		{"json.Number small", json.Number("42"), 42, true},
 
 		// Non-unsigned types return false
+		{"json.Number negative", json.Number("-1"), 0, false},
+		{"json.Number fractional", json.Number("1.5"), 0, false},
 		{"int", int(42), 0, false},
 		{"int64", int64(42), 0, false},
 		{"float64", float64(42.5), 0, false},
@@ -1791,5 +1798,18 @@ func TestOrder_TimeErrorsWhileItsStringFormDoesNot(t *testing.T) {
 	}
 	if got != -1 {
 		t.Errorf("Order(earlier, later) = %d, want -1", got)
+	}
+}
+
+// GetString refuses a json.Number: it is a named type over string, so the
+// reflect fallback would read a number's digits as a string, and every
+// string-kinded check would accept a value Classify calls numeric.
+func TestGetString_RefusesAJSONNumber(t *testing.T) {
+	if s, ok := value.GetString(json.Number("4200")); ok {
+		t.Errorf("GetString(json.Number) = %q, true; want refused", s)
+	}
+	type carrier string
+	if s, ok := value.GetString(carrier("x")); !ok || s != "x" {
+		t.Errorf("a named string carrier must still read: got %q, %v", s, ok)
 	}
 }

@@ -48,19 +48,12 @@ import (
 //
 // # Performance
 //
-// Each builder method (Property, EdgeTo) captures the
-// caller's program counter via runtime.Callers so Build-time shape errors can
-// name the offending call site. Only the stack walk is eager; resolving the PC
-// to file:line happens when an error is rendered, so a successful call
-// allocates nothing for a locator it will never print. Measured per-method
-// overhead is ~200–400 ns per call on M2-class hardware at zero allocations;
-// at the typical I/O-bound pipeline scale (low-thousands records per batch,
-// 3–4 builder-method calls per record) the aggregate per-batch overhead is
-// under ~5 ms — genuinely noise against pipeline wall-clock. At a 100k+
-// records-per-batch ceiling aggregate overhead reaches ~100–200 ms, still well
-// below validation cost. See [BenchmarkSchemaBuilder_CallerCapture] for the
-// in-tree pin and TestSchemaBuilder_SuccessPath_IsAllocationFree for the
-// zero-allocation ratchet.
+// Each builder method captures the caller's program counter with
+// runtime.Callers so a Build-time shape error can name the call site; the PC
+// resolves to file:line only when an error is rendered, so a successful call
+// allocates nothing for it. [BenchmarkSchemaBuilder_CallerCapture] pins the
+// per-call cost and TestSchemaBuilder_SuccessPath_IsAllocationFree the
+// zero-allocation success path.
 type SchemaBuilder struct {
 	schema     *schema.Schema
 	typeName   string // user-provided (may be qualified)

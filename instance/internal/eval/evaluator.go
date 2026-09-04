@@ -32,14 +32,15 @@ func NewEvaluator(opts ...Option) *Evaluator {
 
 // Evaluate evaluates an expression with the given scope.
 // Returns the result value, or an error if evaluation fails.
-func (e *Evaluator) Evaluate(expression expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) Evaluate(expression expr.Expression, scope Scope) (result any, err error) {
 	if expression == nil {
 		return nil, nil //nolint:nilnil // nil expression evaluates to nil
 	}
 
-	// Operation boundary logging (evaluator doesn't take context)
+	// The evaluator takes no context; the op ends with the evaluation's own
+	// error, which is not known until the return, hence the closure.
 	op := trace.Begin(context.Background(), e.cfg.logger, "yammm.eval.expr")
-	defer func() { op.End(nil) }()
+	defer func() { op.End(err) }()
 
 	return e.evaluate(expression, scope)
 }
@@ -63,16 +64,14 @@ func (e *Evaluator) EvaluateBool(expression expr.Expression, scope Scope) (bool,
 
 // evaluate is the internal evaluation dispatcher. A nil expression — an
 // absent lambda body, or an absent operand — evaluates to nil, as the public
-// [Evaluator.Evaluate] promises.
+// [Evaluator.Evaluate] promises. An Op is not an expression: the parser
+// places one only at an S-expression's head, read through [expr.SExpr.Op].
 func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, error) {
 	switch ex := expression.(type) {
 	case nil:
 		return nil, nil //nolint:nilnil // nil expression evaluates to nil
 	case *expr.Literal:
 		return ex.Val, nil
-	case expr.Op:
-		// Op by itself is just its string value
-		return string(ex), nil
 	case expr.DatatypeLiteral:
 		// Return a type checker for the datatype
 		return e.datatypeChecker(string(ex))
@@ -309,62 +308,25 @@ func (e *Evaluator) evalMember(children []expr.Expression, scope Scope) (any, er
 	return e.accessMember(obj, memberName)
 }
 
+// accessMember reads name from obj. Every object that reaches here is an
+// immutable.Map[string] — a stored value unwraps to one and every scope wraps
+// its map — so that is the only receiver. A name with no exact match folds
+// by immutable.Properties' rule, the one property lookup uses.
 func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	if obj == nil {
 		return nil, nil //nolint:nilnil // member access on nil returns nil
 	}
-
-	// Try as map[string]any
-	if m, ok := obj.(map[string]any); ok {
-		val, exists := m[name]
-		if !exists {
-			// Case-insensitive fallback: pick alphabetically first key on collision
-			// for deterministic behavior (matches immutable.Properties.GetFold behavior)
-			lower := strings.ToLower(name)
-			var matchKey string
-			var matchVal any
-			for k, v := range m {
-				if strings.ToLower(k) == lower {
-					if matchKey == "" || k < matchKey {
-						matchKey = k
-						matchVal = v
-					}
-				}
-			}
-			if matchKey != "" {
-				return matchVal, nil
-			}
-			return nil, nil //nolint:nilnil // missing key returns nil
-		}
-		return val, nil
+	m, ok := obj.(immutable.Map[string])
+	if !ok {
+		return nil, fmt.Errorf("cannot access member on %T", obj)
 	}
-
-	// Try as immutable.Map[string] (e.g. $self, which PropertyScopeFromMap binds)
-	if m, ok := obj.(immutable.Map[string]); ok {
-		val, exists := m.Get(name)
-		if !exists {
-			// Case-insensitive fallback: pick alphabetically first key on collision
-			// for deterministic behavior (matches immutable.Properties.GetFold behavior)
-			lower := strings.ToLower(name)
-			var matchKey string
-			var matchVal immutable.Value
-			for k, v := range m.Range() {
-				if strings.ToLower(k) == lower {
-					if matchKey == "" || k < matchKey {
-						matchKey = k
-						matchVal = v
-					}
-				}
-			}
-			if matchKey != "" {
-				return matchVal.Unwrap(), nil
-			}
-			return nil, nil //nolint:nilnil // missing key returns nil
-		}
+	if val, exists := m.Get(name); exists {
 		return val.Unwrap(), nil
 	}
-
-	return nil, fmt.Errorf("cannot access member on %T", obj)
+	if val, exists := immutable.PropertiesOf(m).GetFold(name); exists {
+		return val.Unwrap(), nil
+	}
+	return nil, nil //nolint:nilnil // missing key returns nil
 }
 
 func (e *Evaluator) evalSlice(children []expr.Expression, scope Scope) (any, error) {
@@ -600,26 +562,15 @@ func (e *Evaluator) mul(args []any) (any, error) {
 	return result, nil
 }
 
+// div divides: the integer domain through checkedDiv, which refuses a zero
+// divisor and the one overflowing quotient; the float domain by IEEE 754,
+// where a zero divisor yields ±Inf.
 func (e *Evaluator) div(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("/ requires 2 operands")
 	}
 
-	// Check for integer division by zero first (panics without this check)
-	li, liok := value.GetInt64(args[0])
-	ri, riok := value.GetInt64(args[1])
-	if liok && riok {
-		q, err := checkedDiv(li, ri)
-		if err != nil {
-			return nil, err
-		}
-		return q, nil
-	}
-
-	// Float division (returns ±Inf for /0, which is valid IEEE 754)
-	result, err := e.numericOp(args[0], args[1],
-		checkedDiv, // unreachable: the integer case returned above
-		func(a, b float64) any { return a / b })
+	result, err := e.numericOp(args[0], args[1], checkedDiv, func(a, b float64) any { return a / b })
 	if err != nil {
 		return nil, err
 	}
@@ -894,24 +845,27 @@ func isNumericVar(name string) bool {
 	return true
 }
 
-// datatypeChecker returns a TypeChecker for the given datatype name.
+// datatypeChecker returns the TypeChecker for a datatype name, by the set
+// [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
+// any other name at load.
 func (e *Evaluator) datatypeChecker(name string) (TypeChecker, error) {
+	if !expr.IsDatatypeCheck(name) {
+		return nil, fmt.Errorf("unknown datatype: %s", name)
+	}
 	switch strings.ToLower(name) {
 	case "string":
 		return IsString(), nil
-	case "integer", "int":
+	case "integer":
 		return IsInteger(), nil
-	case "float", "number":
+	case "float":
 		return IsFloat(), nil
-	case "boolean", "bool":
+	case "boolean":
 		return IsBoolean(), nil
 	case "uuid":
 		return IsUUID(), nil
 	case "timestamp":
 		return IsTimestamp(), nil
-	case "date":
-		return IsDate(), nil
 	default:
-		return nil, fmt.Errorf("unknown datatype: %s", name)
+		return IsDate(), nil
 	}
 }

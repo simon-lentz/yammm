@@ -60,7 +60,7 @@ func (v *Validator) validateCompositions(
 	base path.Builder,
 	depth int,
 ) map[string]immutable.Value {
-	composed := make(map[string]immutable.Value)
+	var composed map[string]immutable.Value
 
 	for rel := range typ.AllCompositions() {
 		if err := ctx.Err(); err != nil {
@@ -87,12 +87,11 @@ func (v *Validator) validateCompositions(
 
 		composedValue := v.validateComposition(ctx, rel, rawValue, collector, prov, base.Key(inputKey), depth)
 		if !composedValue.IsNil() {
+			if composed == nil {
+				composed = make(map[string]immutable.Value)
+			}
 			composed[rel.Name()] = composedValue
 		}
-	}
-
-	if len(composed) == 0 {
-		return nil
 	}
 	return composed
 }
@@ -109,7 +108,7 @@ func (v *Validator) validateComposition(
 	depth int,
 ) immutable.Value {
 	// An explicit null is a shape error whatever the optionality.
-	if rawValue == nil {
+	if isAbsent(rawValue) {
 		collector.Collect(shapeMismatch(rel, fmt.Sprintf("composition %q: null is not a valid composition value", rel.Name()),
 			"array", "null", prov, relPath))
 		return immutable.Value{}
@@ -198,9 +197,15 @@ func (v *Validator) validateComposition(
 	// Recursively validate children against the relation already in hand;
 	// rel.Owner() is a declaring-schema-local name the entry schema may not
 	// know, so no name round-trips through public tag resolution.
+	// The relation detail is the innermost one — the relation that reached
+	// the faulty child; an outer level must not stack a second entry under
+	// the same keys.
 	relationDetails := diag.PathRelation(rel.Name(), rel.FieldName())
-	validChildren := v.validateComposedBatch(ctx, rel, childRaws, childBases, childDepth, func(_ int, res diag.Result) {
+	validChildren, childType := v.validateComposedBatch(ctx, rel, childRaws, childBases, childDepth, func(_ int, res diag.Result) {
 		collector.MergeFunc(res, func(issue diag.Issue) diag.Issue {
+			if hasDetailKey(issue, diag.DetailKeyRelationName) {
+				return issue
+			}
 			return diag.FromIssue(issue).WithDetails(relationDetails...).Build()
 		})
 	})
@@ -209,8 +214,7 @@ func (v *Validator) validateComposition(
 	// PK-less composed children use structural position (array index) for identity,
 	// so no duplicate check is needed for them.
 	if len(validChildren) > 0 {
-		childType, found := resolveRelationTarget(v.schema, rel)
-		if found && childType.HasPrimaryKey() {
+		if childType != nil && childType.HasPrimaryKey() {
 			seenPKs := make(map[string]int) // pk string -> first occurrence's input index
 			for i, child := range validChildren {
 				if child == nil {
@@ -239,4 +243,14 @@ func (v *Validator) validateComposition(
 	}
 
 	return immutable.Wrap(validChildren)
+}
+
+// hasDetailKey reports whether issue already carries a detail under key.
+func hasDetailKey(issue diag.Issue, key string) bool {
+	for _, d := range issue.Details() {
+		if d.Key == key {
+			return true
+		}
+	}
+	return false
 }

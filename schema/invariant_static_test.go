@@ -37,6 +37,7 @@ type Order {
     id String primary
     name String
     tags List<String>
+    matrix List<List<Integer>>
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
     --> PLACED_BY (one) Customer
@@ -112,6 +113,19 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`[LINES[0], LINES[0]] -> Unique -> Len == 1`,
 		`LINES -> Contains(LINES[0])`,
 		`LINES[0] in LINES`,
+		// a nested list's element is a list, and its element a number
+		`matrix -> All |$r| { $r -> Sum > 0 }`,
+		`matrix[0][0] > 0`,
+		// Default's fallback is of the receiver's kind, so the stage after it is typed
+		`(tags -> Default(["x"]) -> First) == "x"`,
+		`(tags -> Default([]) -> Len) == 0`,
+		`(name -> Default("n")) -> Upper == "N"`,
+		`MAIN_LINE.qty -> Default(0) > -1`,
+		`(PLACED_BY -> Default("c1")) == "c1"`,
+		// a datatype check names a kind a value can have
+		`name =~ String`,
+		`MAIN_LINE.qty =~ Integer`,
+		`name !~ Timestamp`,
 	}
 	for _, inv := range accept {
 		t.Run("accepts "+inv, func(t *testing.T) {
@@ -186,6 +200,18 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`(name != "" ? { name : name }) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		// a boolean result cannot be indexed
 		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
+		// Default's fallback of another kind reaches the next stage unpredicted
+		{`(tags -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default"},
+		{`(name -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default"},
+		{`(tags -> Default([1]) -> First) == 1`, diag.E_INVALID_INVARIANT, "Default"},
+		// Min and Max with an argument rank a scalar against it, never a list
+		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument"},
+		{`tags -> Min("z") != ""`, diag.E_INVALID_INVARIANT, "argument"},
+		// a shape or a constraint keyword is not a datatype check
+		{`name =~ Vector`, diag.E_INVALID_INVARIANT, "Vector"},
+		{`name =~ List`, diag.E_INVALID_INVARIANT, "List"},
+		{`name =~ Enum`, diag.E_INVALID_INVARIANT, "Enum"},
+		{`name !~ Pattern`, diag.E_INVALID_INVARIANT, "Pattern"},
 	}
 	for _, tc := range refuse {
 		t.Run("refuses "+tc.inv, func(t *testing.T) {

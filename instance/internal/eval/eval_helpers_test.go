@@ -27,12 +27,6 @@ func list(vals ...any) expr.SExpr {
 	return s
 }
 
-// callArgs wraps argument expressions in the args-literal shape the compiler
-// emits for builtin call arguments.
-func callArgs(args ...expr.Expression) expr.Expression {
-	return expr.NewLiteral(args)
-}
-
 // evalEq evaluates e in an empty scope and reports any difference from want.
 // The evaluator is stateless, so a fresh one per call is equivalent to a
 // shared instance.

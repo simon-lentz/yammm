@@ -293,6 +293,10 @@ func (c *completer) typeExpr(e expr.Expression, sc *staticScope, owner *Type, in
 		}
 		return scalarType
 	case expr.DatatypeLiteral:
+		if !expr.IsDatatypeCheck(string(ex)) {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s is not a datatype =~ can check (String, Integer, Float, Boolean, UUID, Timestamp or Date) in invariant %q on type %q", string(ex), inv.Name(), owner.Name())
+		}
 		return otherScalarType
 	case expr.Op:
 		return unknownType
@@ -598,8 +602,9 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 			}
 		}
 	}
-	for _, a := range args {
-		c.typeExpr(a, sc, owner, inv)
+	argTypes := make([]staticType, len(args))
+	for i, a := range args {
+		argTypes[i] = c.typeExpr(a, sc, owner, inv)
 	}
 
 	c.checkReceiver(spec, recv, len(args), owner, inv)
@@ -667,9 +672,70 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 			return recv.element()
 		}
 		return scalarType
+	case expr.ResultReceiverOrArg:
+		if len(argTypes) == 0 {
+			return unknownType
+		}
+		return c.typeReceiverOrArg(spec, recv, argTypes[0], owner, inv)
 	case expr.ResultUnknown:
 	}
 	return unknownType
+}
+
+// typeReceiverOrArg types a call that yields its receiver or its argument —
+// Default — as their merge, and refuses the two when they are of different
+// kinds: the stage after the call would then meet a value the checker did
+// not predict. A kind the checker does not know is admitted. An association
+// key is a string at evaluation time, so a string fallback matches it.
+func (c *completer) typeReceiverOrArg(spec expr.BuiltinSpec, recv, arg staticType, owner *Type, inv *Invariant) staticType {
+	refuse := func() staticType {
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"%s takes a fallback of its receiver's kind in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
+		return unknownType
+	}
+	if recv.kind == kindUnknown || arg.kind == kindUnknown {
+		return unknownType
+	}
+	if recv.kind == kindKey || arg.kind == kindKey {
+		other := arg
+		if arg.kind == kindKey {
+			other = recv
+		}
+		if other.kind == kindKey || (other.kind == kindScalar && other.scalar != scalarOther) {
+			return staticType{kind: kindKey}
+		}
+		return refuse()
+	}
+	if recv.kind != arg.kind {
+		return refuse()
+	}
+	switch recv.kind {
+	case kindScalar:
+		if recv.scalar != scalarAny && arg.scalar != scalarAny && recv.scalar != arg.scalar {
+			return refuse()
+		}
+		return mergeScalar(recv, arg)
+	case kindList:
+		re, ae := recv.element(), arg.element()
+		switch {
+		case re.kind == kindUnknown || ae.kind == kindUnknown:
+			return listOf(unknownType)
+		case re.kind != ae.kind, re.kind == kindInstance && re.typ != ae.typ:
+			return refuse()
+		case re.kind == kindScalar:
+			if re.scalar != scalarAny && ae.scalar != scalarAny && re.scalar != ae.scalar {
+				return refuse()
+			}
+			return listOf(mergeScalar(re, ae))
+		}
+		return recv
+	case kindInstance:
+		if recv.typ != arg.typ {
+			return refuse()
+		}
+	case kindKey, kindUnknown:
+	}
+	return recv
 }
 
 // paramOr returns the i-th declared parameter name, or the implicit numeric
@@ -739,6 +805,9 @@ func (c *completer) checkReceiver(spec expr.BuiltinSpec, recv staticType, nargs 
 		case nargs > 0 && recv.kind == kindInstance:
 			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 				"%s ranks its receiver against its argument, and an instance cannot be ordered in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
+		case nargs > 0 && recv.kind == kindList:
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s takes a scalar when it has an argument, and its receiver is a list in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
 		}
 	case expr.RecvAny:
 	}

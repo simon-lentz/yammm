@@ -52,3 +52,19 @@ func TestBuiltins_FieldsAgree(t *testing.T) {
 		t.Errorf("Lest evaluates its body in the caller's scope: AcceptBody, BindNone, MaxParams 0; got %+v", lest)
 	}
 }
+
+// The datatype checks are the seven kinds a value can be checked against at
+// runtime, matched case-insensitively; a shape or constraint keyword is not
+// one, although the parser emits a DatatypeLiteral for it.
+func TestIsDatatypeCheck(t *testing.T) {
+	for _, name := range []string{"String", "Integer", "Float", "Boolean", "UUID", "Timestamp", "Date", "integer", "uuid"} {
+		if !expr.IsDatatypeCheck(name) {
+			t.Errorf("IsDatatypeCheck(%q) = false", name)
+		}
+	}
+	for _, name := range []string{"Vector", "List", "Enum", "Pattern", "int", "number", "bool", ""} {
+		if expr.IsDatatypeCheck(name) {
+			t.Errorf("IsDatatypeCheck(%q) = true", name)
+		}
+	}
+}
