@@ -366,7 +366,9 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 	if name == "self" {
 		return instanceOf(owner)
 	}
-	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found {
+	// A $ variable names a member by its exact spelling, as the evaluator's
+	// scope resolves it; only a bare name folds.
+	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found && memberSpelled(owner, name) {
 		return t
 	}
 	if isNumericVar(name) {
@@ -375,6 +377,16 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 	c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 		"undefined variable $%s in invariant %q on type %q", name, inv.Name(), owner.Name())
 	return unknownType
+}
+
+// memberSpelled reports whether name is the exact spelling of one of t's
+// members: a property's declared name or a relation's field name.
+func memberSpelled(t *Type, name string) bool {
+	if _, ok := t.Property(name); ok {
+		return true
+	}
+	_, ok := t.RelationByField(name)
+	return ok
 }
 
 func isNumericVar(name string) bool {

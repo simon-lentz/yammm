@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
@@ -599,29 +598,6 @@ func TestType_IsSubTypeOf(t *testing.T) {
 	assert.False(t, employeeType.IsSubTypeOf(schema.NewTypeID(sourceID, "Unknown")))
 }
 
-func TestType_CanonicalPropertyMap(t *testing.T) {
-	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p1 := schema.TestNewProperty("FirstName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
-	p2 := schema.TestNewProperty("LastName", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
-	schema.TestSetTypeAllProperties(typ, []*schema.Property{p1, p2})
-
-	result := typ.CanonicalPropertyMap()
-
-	assert.Equal(t, "FirstName", result["firstname"])
-	assert.Equal(t, "LastName", result["lastname"])
-}
-
-func TestType_CanonicalPropertyMap_AfterSeal(t *testing.T) {
-	typ := schema.TestNewType("Person", location.SourceID{}, location.Span{}, "", false, false)
-	p := schema.TestNewProperty("Name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
-	schema.TestSetTypeAllProperties(typ, []*schema.Property{p})
-	schema.TestSealType(typ)
-
-	result := typ.CanonicalPropertyMap()
-
-	assert.Equal(t, "Name", result["name"])
-}
-
 func TestType_IsSealed(t *testing.T) {
 	typ := schema.TestNewType("Test", location.SourceID{}, location.Span{}, "", false, false)
 
@@ -631,47 +607,4 @@ func TestType_IsSealed(t *testing.T) {
 	// After sealing, IsSealed should return true
 	schema.TestSealType(typ)
 	assert.True(t, schema.TestIsSealedType(typ), "sealed type should report IsSealed() == true")
-}
-
-// TestType_CanonicalPropertyMap_Immutability verifies that CanonicalPropertyMap
-// returns a defensive copy, not the internal map. Mutations to the returned map
-// should not affect the internal state.
-func TestType_CanonicalPropertyMap_Immutability(t *testing.T) {
-	// Build a schema with properties to test immutability
-	s, result := schema.NewBuilder().
-		WithName("test").
-		AddType("Person").
-		WithPrimaryKey("id", schema.NewStringConstraint()).
-		WithProperty("firstName", schema.NewStringConstraint()).
-		WithProperty("lastName", schema.NewStringConstraint()).
-		Done().
-		Build()
-
-	require.False(t, result.HasErrors(), "unexpected build errors: %v", result)
-	require.NotNil(t, s)
-
-	person, ok := s.Type("Person")
-	require.True(t, ok)
-
-	// Get the canonical map
-	canonMap := person.CanonicalPropertyMap()
-	require.NotNil(t, canonMap)
-	assert.Equal(t, "firstName", canonMap["firstname"])
-	assert.Equal(t, "lastName", canonMap["lastname"])
-
-	// Mutate the returned map
-	originalFirst := canonMap["firstname"]
-	canonMap["firstname"] = "CORRUPTED"
-	delete(canonMap, "lastname")
-	canonMap["injected"] = "INJECTED"
-
-	// Get a fresh copy - should be unchanged
-	freshMap := person.CanonicalPropertyMap()
-	assert.Equal(t, originalFirst, freshMap["firstname"],
-		"mutation of returned map should not affect internal state")
-	assert.Equal(t, "lastName", freshMap["lastname"],
-		"deletion from returned map should not affect internal state")
-	_, hasInjected := freshMap["injected"]
-	assert.False(t, hasInjected,
-		"insertion to returned map should not affect internal state")
 }

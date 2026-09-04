@@ -43,37 +43,16 @@ func (k Kind) String() string {
 	}
 }
 
-// Registry allows custom type recognition via reflect.Type hooks.
-//
-// When instance validation is implemented, the evaluator will populate
-// BaseKindOfReflectType with schema-aware type recognition. Until then,
-// a zero-value Registry provides complete functionality via built-in detection.
-type Registry struct {
-	// BaseKindOfReflectType returns the Kind for a custom reflect.Type.
-	// Returns UnspecifiedKind if the type is not recognized.
-	// If nil, ClassifyWithRegistry falls back to built-in detection.
-	BaseKindOfReflectType func(reflect.Type) Kind
-}
-
 // Classify normalizes a runtime value into a Kind and possibly transformed value.
 // It is used by runtime validation to stay aligned with type checker expectations.
 //
 // For json.Number: attempts Int64() first, then Float64() to determine kind.
 // For slices: detects and coerces to []float64 or []float32 for VectorKind.
+//
+// Pointers are dereferenced before classification, so *int and int return the
+// same Kind; a nil pointer returns UnspecifiedKind. A named type over a basic
+// kind classifies as its base kind.
 func Classify(val any) (Kind, any) {
-	return ClassifyWithRegistry(Registry{}, val)
-}
-
-// ClassifyWithRegistry normalizes a value using the provided type registry so custom
-// RecognizeReflectType hooks participate in base-kind detection. A zero Registry
-// falls back to built-in type detection.
-//
-// Pointers are automatically dereferenced before classification, so *int and int
-// return the same Kind. Nil pointers return UnspecifiedKind.
-//
-// Registry hooks are checked BEFORE built-in slice handling, allowing custom slice
-// types (e.g., type Vec []float64) to be recognized by hooks.
-func ClassifyWithRegistry(registry Registry, val any) (Kind, any) {
 	// Handle nil
 	if val == nil {
 		return UnspecifiedKind, val
@@ -118,16 +97,6 @@ func ClassifyWithRegistry(registry Registry, val any) (Kind, any) {
 		return UnspecifiedKind, val
 	}
 
-	// Check registry FIRST - allows custom types to override built-in behavior.
-	// This enables custom slice types (e.g., type Vec []float64) to be recognized.
-	if registry.BaseKindOfReflectType != nil {
-		kind := registry.BaseKindOfReflectType(valType)
-		if kind != UnspecifiedKind {
-			return kind, val
-		}
-	}
-
-	// Then built-in slice handling
 	if valType.Kind() == reflect.Slice {
 		return classifySlice(val)
 	}

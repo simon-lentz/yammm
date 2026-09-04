@@ -852,9 +852,9 @@ type Record {
 	}
 }
 
-func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
-	// Property paths should use schema property names, not input field names.
-	// When input uses different case (e.g., "firstname"), path should still use "firstName".
+func TestValidator_PropertyPath_UsesInputName(t *testing.T) {
+	// A diagnostic's path names the token in the input document, so a folded
+	// match anchors on the key the caller wrote; the schema spelling is a detail.
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
@@ -877,7 +877,6 @@ func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 	assert.Nil(t, valid)
 	require.False(t, result.OK())
 
-	// Check that the path uses schema property name "firstName", not input name "firstname"
 	var foundPath string
 	for issue := range result.Issues() {
 		if issue.Path() != "" {
@@ -886,8 +885,7 @@ func TestValidator_PropertyPath_UsesSchemaName(t *testing.T) {
 		}
 	}
 
-	assert.Contains(t, foundPath, "firstName", "path should use schema property name")
-	assert.NotContains(t, foundPath, "firstname", "path should not use input field name")
+	assert.Equal(t, "$.firstname", foundPath, "path names the input key")
 }
 
 func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {

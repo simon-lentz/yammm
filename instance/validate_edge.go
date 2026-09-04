@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -25,9 +27,10 @@ const fkPrefix = "_target_"
 func (v *Validator) validateEdges(
 	ctx context.Context,
 	typ *schema.Type,
-	props map[string]any,
+	in inputKeys,
 	collector *diag.Collector,
 	prov *location.Provenance,
+	base path.Builder,
 ) map[string]*ValidEdgeData {
 	edges := make(map[string]*ValidEdgeData)
 
@@ -36,43 +39,14 @@ func (v *Validator) validateEdges(
 			return edges
 		}
 
-		// Get the raw edge value from properties.
-		// Per architecture spec, use FieldName() (JSON field name) only,
-		// not the schema relation Name() (DSL name).
-		fieldName := rel.FieldName()
-		rawValue, hasValue := props[fieldName]
-
-		// Also check case-insensitive match on FieldName only, with collision detection
-		if !hasValue && !v.cfg.strictPropertyNames {
-			lower := strings.ToLower(fieldName)
-			var candidates []string
-			for k, val := range props {
-				if strings.ToLower(k) == lower {
-					candidates = append(candidates, k)
-					rawValue = val
-					hasValue = true
-				}
-			}
-			if len(candidates) > 1 {
-				// Collision: multiple input names fold to same relation field
-				slices.Sort(candidates) // Deterministic error message
-				issue := diag.NewIssue(
-					diag.Error,
-					ErrCaseFoldCollision,
-					fmt.Sprintf("multiple input fields %v fold to relation field %q", candidates, fieldName),
-				).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-					WithDetail(diag.DetailKeyJSONField, fieldName)
-				withProvenance(issue, prov, provenancePathBuilder(prov).String())
-				collector.Collect(issue.Build())
-				hasValue = false // Don't proceed with ambiguous match
-			}
+		// Absent is valid for an association: presence and requiredness are
+		// graph.Check's question, reported there as E_UNRESOLVED_REQUIRED.
+		inputKey, rawValue, hasValue := v.lookupRelationInput(rel, in, collector, prov, base)
+		if !hasValue {
+			continue
 		}
 
-		// Use schema relation name for path, not JSON field name
-		basePath := provenancePathBuilder(prov).Key(rel.Name())
-
-		// Validate the edge data
-		edgeData := v.validateEdgeData(ctx, rel, rawValue, hasValue, collector, prov, basePath)
+		edgeData := v.validateEdgeData(ctx, rel, rawValue, collector, prov, base.Key(inputKey))
 		if edgeData != nil {
 			edges[rel.Name()] = edgeData
 		}
@@ -84,102 +58,72 @@ func (v *Validator) validateEdges(
 	return edges
 }
 
-// validateEdgeData validates a single edge relation.
+// validateEdgeData validates a present association value at relPath, the
+// input key's location.
 func (v *Validator) validateEdgeData(
 	ctx context.Context,
 	rel *schema.Relation,
 	rawValue any,
-	hasValue bool,
 	collector *diag.Collector,
 	prov *location.Provenance,
-	basePath path.Builder,
+	relPath path.Builder,
 ) *ValidEdgeData {
-	// Handle absent field - valid for associations (graph-layer concern).
-	// Association presence/requiredness is validated at graph.Check() via E_UNRESOLVED_REQUIRED.
-	if !hasValue {
-		return nil
-	}
-
-	// Handle explicit null - always a shape error per spec.
-	// Null is never valid for edge object fields regardless of optionality.
+	// An explicit null is a shape error whatever the multiplicity.
 	if rawValue == nil {
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrEdgeShapeMismatch,
-			"edge "+rel.Name()+": null is not a valid edge value",
-		).WithExpectedGot(expectedShapeForRelation(rel), "null")
-		withProvenance(issue, prov, basePath.String()).
-			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-		collector.Collect(issue.Build())
+		collector.Collect(shapeMismatch(rel, "edge "+rel.Name()+": null is not a valid edge value",
+			expectedShapeForRelation(rel), "null", prov, relPath))
 		return nil
 	}
 
-	// Validate shape based on multiplicity
 	if rel.IsMany() {
-		// Expect array (accept typed slices via reflection)
 		arr, ok := toSliceOfAny(rawValue)
 		if !ok {
-			issue := diag.NewIssue(
-				diag.Error,
-				ErrEdgeShapeMismatch,
-				"edge "+rel.Name()+": expected array, got "+kindOf(rawValue),
-			)
-			withProvenance(issue, prov, basePath.String()).
-				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			collector.Collect(issue.Build())
+			collector.Collect(shapeMismatch(rel, "edge "+rel.Name()+": expected array, got "+kindOf(rawValue),
+				"array", kindOf(rawValue), prov, relPath))
 			return nil
 		}
 
-		// Empty array is valid at instance layer for all associations.
-		// Required association empty-array validation is deferred to graph.Check()
-		// via E_UNRESOLVED_REQUIRED with reason="empty".
-
-		// Validate each target
+		// An empty array is valid at the instance layer for every association;
+		// a required association's empty array is graph.Check's E_UNRESOLVED_REQUIRED.
 		targets := make([]ValidEdgeTarget, 0, len(arr))
 		for i, elem := range arr {
 			if err := ctx.Err(); err != nil {
 				return nil
 			}
-
-			targetPath := basePath.Index(i)
-			target := v.validateEdgeTarget(ctx, rel, elem, collector, prov, targetPath)
-			if target != nil {
+			if target := v.validateEdgeTarget(rel, elem, collector, prov, relPath.Index(i)); target != nil {
 				targets = append(targets, *target)
 			}
-		}
-
-		if len(targets) == 0 && collector.HasErrors() {
-			return nil
 		}
 		return NewValidEdgeData(targets)
 	}
 
-	// Expect single object (accept typed maps via reflection)
 	obj, ok := toMapOfAny(rawValue)
 	if !ok {
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrEdgeShapeMismatch,
-			"edge "+rel.Name()+": expected object, got "+kindOf(rawValue),
-		)
-		withProvenance(issue, prov, basePath.String()).
-			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-		collector.Collect(issue.Build())
+		collector.Collect(shapeMismatch(rel, "edge "+rel.Name()+": expected object, got "+kindOf(rawValue),
+			"object", kindOf(rawValue), prov, relPath))
 		return nil
 	}
-
-	target := v.validateEdgeTarget(ctx, rel, obj, collector, prov, basePath)
+	target := v.validateEdgeTarget(rel, obj, collector, prov, relPath)
 	if target == nil {
 		return nil
 	}
 	return NewValidEdgeData([]ValidEdgeTarget{*target})
 }
 
+// shapeMismatch builds an E_EDGE_SHAPE_MISMATCH carrying the expected and got
+// shapes as details on every arm, so a structured consumer reads them the
+// same way whichever arm fired.
+func shapeMismatch(rel *schema.Relation, message, expected, got string, prov *location.Provenance, at path.Builder) diag.Issue {
+	issue := diag.NewIssue(diag.Error, ErrEdgeShapeMismatch, message).
+		WithExpectedGot(expected, got)
+	withProvenance(issue, prov, at.String()).
+		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
+	return issue.Build()
+}
+
 // coercionIssue builds the diagnostic a failed coercion owes, classifying it the
 // way the node-property path does: a recovered panic is Fatal E_INTERNAL
-// carrying its stack, anything else an ordinary E_TYPE_MISMATCH. Both edge slots
-// share it because both previously assigned the raw value and reported nothing,
-// so a recovered panic reached the validated instance as data.
+// carrying its stack, anything else an ordinary E_TYPE_MISMATCH.
 func coercionIssue(err error, message string) *diag.IssueBuilder {
 	if internalErr, ok := errors.AsType[*InternalError](err); ok {
 		return diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).
@@ -188,10 +132,129 @@ func coercionIssue(err error, message string) *diag.IssueBuilder {
 	return diag.NewIssue(diag.Error, ErrTypeMismatch, message+": coercion error: "+err.Error())
 }
 
-// validateEdgeTarget validates a single edge target object.
+// edgeObject is one edge target's input object with each key resolved to the
+// member it names: a foreign-key field of the target type, an edge property
+// of the relation, or neither. Resolution applies the one fold rule the node
+// path applies: exact first, then under the default mode the ASCII fold, with
+// an exact match never a collision and two folds to one member a collision
+// reported at the object.
+type edgeObject struct {
+	obj      map[string]any
+	fk       map[string]string           // expected FK field → input key
+	props    map[*schema.Property]string // edge property → input key
+	unknown  []string                    // input keys naming no member, sorted
+	shadowed map[string]string           // unknown key → the member an exact match already claimed
+}
+
+func (v *Validator) resolveEdgeObject(rel *schema.Relation, targetType *schema.Type, obj map[string]any, collector *diag.Collector, prov *location.Provenance, targetPath path.Builder) edgeObject {
+	eo := edgeObject{
+		obj:      obj,
+		fk:       make(map[string]string),
+		props:    make(map[*schema.Property]string),
+		shadowed: make(map[string]string),
+	}
+	names := slices.Sorted(maps.Keys(obj))
+
+	fkByLower := make(map[string]string)
+	for pk := range targetType.PrimaryKeys() {
+		field := fkPrefix + pk.Name()
+		fkByLower[strings.ToLower(field)] = field
+	}
+
+	// Exact pass.
+	var unclaimed []string
+	for _, name := range names {
+		if _, isFK := fkByLower[strings.ToLower(name)]; isFK && fkByLower[strings.ToLower(name)] == name {
+			eo.fk[name] = name
+			continue
+		}
+		if p, ok := rel.Property(name); ok {
+			eo.props[p] = name
+			continue
+		}
+		unclaimed = append(unclaimed, name)
+	}
+	if v.cfg.strictPropertyNames {
+		eo.unknown = unclaimed
+		return eo
+	}
+
+	// Fold pass over the unclaimed keys: member → the keys folding to it.
+	type member struct {
+		fk   string
+		prop *schema.Property
+	}
+	folded := make(map[member][]string)
+	var order []member
+	for _, name := range unclaimed {
+		lower, ok := foldKey(name)
+		if !ok {
+			eo.unknown = append(eo.unknown, name)
+			continue
+		}
+		var m member
+		if field, isFK := fkByLower[lower]; isFK {
+			if _, claimed := eo.fk[field]; claimed {
+				eo.unknown = append(eo.unknown, name)
+				eo.shadowed[name] = field
+				continue
+			}
+			m = member{fk: field}
+		} else if p, isProp := rel.PropertyFold(lower); isProp {
+			if _, claimed := eo.props[p]; claimed {
+				eo.unknown = append(eo.unknown, name)
+				eo.shadowed[name] = p.Name()
+				continue
+			}
+			m = member{prop: p}
+		} else {
+			eo.unknown = append(eo.unknown, name)
+			continue
+		}
+		if _, seen := folded[m]; !seen {
+			order = append(order, m)
+		}
+		folded[m] = append(folded[m], name)
+	}
+	for _, m := range order {
+		keys := folded[m]
+		if len(keys) > 1 {
+			what := "edge property " + strconv.Quote(memberName(m.fk, m.prop))
+			if m.fk != "" {
+				what = "foreign-key field " + strconv.Quote(m.fk)
+			}
+			issue := diag.NewIssue(
+				diag.Error,
+				ErrCaseFoldCollision,
+				fmt.Sprintf("multiple input fields %v fold to %s", keys, what),
+			).WithDetail(diag.DetailKeyRelationName, rel.Name())
+			if m.prop != nil {
+				issue.WithDetail(diag.DetailKeyPropertyName, m.prop.Name())
+			}
+			withProvenance(issue, prov, targetPath.String())
+			collector.Collect(issue.Build())
+			continue
+		}
+		if m.fk != "" {
+			eo.fk[m.fk] = keys[0]
+		} else {
+			eo.props[m.prop] = keys[0]
+		}
+	}
+	slices.Sort(eo.unknown)
+	return eo
+}
+
+func memberName(fk string, p *schema.Property) string {
+	if p != nil {
+		return p.Name()
+	}
+	return fk
+}
+
+// validateEdgeTarget validates a single edge target object at targetPath.
 // Uses per-target collector isolation to ensure each target is evaluated independently.
 func (v *Validator) validateEdgeTarget(
-	_ context.Context,
 	rel *schema.Relation,
 	elem any,
 	collector *diag.Collector,
@@ -202,22 +265,16 @@ func (v *Validator) validateEdgeTarget(
 	// Use unlimited collector since issues will be merged into the parent
 	// collector which handles the actual limit.
 	targetCollector := diag.NewCollectorUnlimited()
-
-	// Accept typed maps via reflection for programmatic callers
-	obj, ok := toMapOfAny(elem)
-	if !ok {
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrEdgeShapeMismatch,
-			"expected object for edge target, got "+kindOf(elem),
-		)
-		withProvenance(issue, prov, targetPath.String()).
-			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-		targetCollector.Collect(issue.Build())
-		// Merge issues into parent collector
+	defer func() {
 		for issue := range targetCollector.Result().Issues() {
 			collector.Collect(issue)
 		}
+	}()
+
+	obj, ok := toMapOfAny(elem)
+	if !ok {
+		targetCollector.Collect(shapeMismatch(rel, "expected object for edge target, got "+kindOf(elem),
+			"object", kindOf(elem), prov, targetPath))
 		return nil
 	}
 
@@ -236,15 +293,12 @@ func (v *Validator) validateEdgeTarget(
 			WithDetail(diag.DetailKeyTargetType, rel.Target().String())
 		withProvenance(issue, prov, targetPath.String())
 		targetCollector.Collect(issue.Build())
-		// Merge issues into parent collector
-		for issue := range targetCollector.Result().Issues() {
-			collector.Collect(issue)
-		}
 		return nil
 	}
 
+	eo := v.resolveEdgeObject(rel, targetType, obj, targetCollector, prov, targetPath)
+
 	// Extract FK fields and build target key.
-	// Build expected FK fields list upfront for diagnostic details.
 	pkFields := targetType.PrimaryKeysSlice()
 	allExpectedFKFields := make([]string, len(pkFields))
 	for i, pk := range pkFields {
@@ -257,10 +311,7 @@ func (v *Validator) validateEdgeTarget(
 
 	for _, pk := range pkFields {
 		fkFieldName := fkPrefix + pk.Name()
-		val, hasFKField := obj[fkFieldName]
-
-		// Note: FK field matching is always case-sensitive per architecture spec.
-		// StrictPropertyNames only affects property name matching, not FK fields.
+		inputKey, hasFKField := eo.fk[fkFieldName]
 
 		// Check key existence (not value)
 		if !hasFKField {
@@ -270,24 +321,19 @@ func (v *Validator) validateEdgeTarget(
 
 		// Key exists - track as present regardless of value
 		presentFKFields = append(presentFKFields, fkFieldName)
+		val := obj[inputKey]
+		fkPath := targetPath.Key(inputKey).String()
 
 		// Handle null value — present but invalid per spec.
 		if val == nil {
-			// Resolve alias to underlying type for user-friendly error messages
-			constraint := pk.Constraint()
-			if alias, ok := constraint.(schema.AliasConstraint); ok {
-				if resolved := alias.Resolved(); resolved != nil {
-					constraint = resolved
-				}
-			}
-			expectedType := strings.ToLower(constraint.Kind().String())
+			expectedType := strings.ToLower(schema.ResolveAlias(pk.Constraint()).Kind().String())
 			issue := diag.NewIssue(
 				diag.Error,
 				ErrTypeMismatch,
 				fmt.Sprintf("FK field %q: expected %s, got null", fkFieldName, expectedType),
 			).WithDetails(diag.RelationField(rel.Name(), fkFieldName)...).
 				WithExpectedGot(expectedType, "null")
-			withProvenance(issue, prov, targetPath.Key(fkFieldName).String())
+			withProvenance(issue, prov, fkPath)
 			targetCollector.Collect(issue.Build())
 			continue
 		}
@@ -303,7 +349,7 @@ func (v *Validator) validateEdgeTarget(
 				code,
 				fmt.Sprintf("FK field %q: %s", fkFieldName, err.Error()),
 			).WithDetails(diag.RelationField(rel.Name(), fkFieldName)...)
-			withProvenance(issue, prov, targetPath.Key(fkFieldName).String())
+			withProvenance(issue, prov, fkPath)
 			targetCollector.Collect(issue.Build())
 			continue
 		}
@@ -313,7 +359,7 @@ func (v *Validator) validateEdgeTarget(
 		if err != nil {
 			issue := coercionIssue(err, fmt.Sprintf("FK field %q", fkFieldName)).
 				WithDetails(diag.RelationField(rel.Name(), fkFieldName)...)
-			withProvenance(issue, prov, targetPath.Key(fkFieldName).String())
+			withProvenance(issue, prov, fkPath)
 			targetCollector.Collect(issue.Build())
 			continue
 		}
@@ -335,15 +381,9 @@ func (v *Validator) validateEdgeTarget(
 			WithDetail(diag.DetailKeyExpected, expectedStr)
 		withProvenance(issue, prov, targetPath.String())
 		targetCollector.Collect(issue.Build())
-
-		for issue := range targetCollector.Result().Issues() {
-			collector.Collect(issue)
-		}
 		return nil
 	} else if presentCount < expectedCount && expectedCount > 1 {
 		// Partial composite FK - some present, some missing
-		// presentFKFields already contains all present keys (including invalid ones)
-		// and is in PK order for deterministic output
 		expectedStr := strings.Join(allExpectedFKFields, ", ")
 		presentStr := strings.Join(presentFKFields, ", ")
 		issue := diag.NewIssue(
@@ -355,106 +395,49 @@ func (v *Validator) validateEdgeTarget(
 			WithDetail(diag.DetailKeyGot, presentStr)
 		withProvenance(issue, prov, targetPath.String())
 		targetCollector.Collect(issue.Build())
-
-		for issue := range targetCollector.Result().Issues() {
-			collector.Collect(issue)
-		}
 		return nil
 	}
 
 	// present == expected: all FK fields present
-	// Type errors were emitted above; check if we have all valid components
 	if len(pkComponents) < expectedCount {
 		// Some fields had validation errors - already emitted
-		for issue := range targetCollector.Result().Issues() {
-			collector.Collect(issue)
-		}
 		return nil
 	}
 
-	// Check for unknown fields in edge object
-	// Track which schema properties have been matched to detect collisions
-	matchedProps := make(map[string]string) // schema property name -> first input field name
+	// Unknown keys in the edge object.
+	if !v.cfg.allowUnknownFields {
+		for _, fieldName := range eo.unknown {
+			issue := diag.NewIssue(
+				diag.Error,
+				ErrUnknownEdgeField,
+				fmt.Sprintf("unknown field in edge object: %q", fieldName),
+			).WithDetails(diag.RelationField(rel.Name(), fieldName)...)
+			if member, ok := eo.shadowed[fieldName]; ok {
+				issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").
+					WithDetail(diag.DetailKeyPropertyName, member)
+			}
+			withProvenance(issue, prov, targetPath.Key(fieldName).String())
+			targetCollector.Collect(issue.Build())
+		}
+	}
+
+	// Edge properties. An explicit null is the absent case, exactly as it is
+	// for a node property: the required check below reports it, and an
+	// optional one is dropped.
 	edgeProps := make(map[string]any)
-	for fieldName, fieldVal := range obj {
-		// Skip FK fields (case-sensitive matching per architecture spec)
-		if strings.HasPrefix(fieldName, fkPrefix) {
+	present := make(map[string]bool)
+	for prop := range rel.Properties() {
+		fieldName, has := eo.props[prop]
+		if !has {
 			continue
 		}
-
-		// Check if it's a known edge property
-		prop, isProp := rel.Property(fieldName)
-		if !isProp && !v.cfg.strictPropertyNames {
-			// Try case-insensitive match with collision detection
-			lower := strings.ToLower(fieldName)
-			var candidates []*schema.Property
-			for p := range rel.Properties() {
-				if strings.ToLower(p.Name()) == lower {
-					candidates = append(candidates, p)
-				}
-			}
-			if len(candidates) == 1 {
-				prop = candidates[0]
-				isProp = true
-			} else if len(candidates) > 1 {
-				// Multiple schema properties fold to same input - emit collision
-				var names []string
-				for _, c := range candidates {
-					names = append(names, c.Name())
-				}
-				slices.Sort(names)
-				issue := diag.NewIssue(
-					diag.Error,
-					ErrCaseFoldCollision,
-					fmt.Sprintf("input field %q matches multiple edge properties %v", fieldName, names),
-				).WithDetail(diag.DetailKeyRelationName, rel.Name())
-				withProvenance(issue, prov, targetPath.Key(fieldName).String())
-				targetCollector.Collect(issue.Build())
-				continue
-			}
-		}
-
-		// Check if this schema property was already matched by another input field
-		if isProp {
-			if firstField, exists := matchedProps[prop.Name()]; exists {
-				// Collision: multiple input fields match same schema property
-				colliders := []string{firstField, fieldName}
-				slices.Sort(colliders)
-				issue := diag.NewIssue(
-					diag.Error,
-					ErrCaseFoldCollision,
-					fmt.Sprintf("multiple input fields %v fold to edge property %q", colliders, prop.Name()),
-				).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-					WithDetail(diag.DetailKeyPropertyName, prop.Name())
-				withProvenance(issue, prov, targetPath.Key(fieldName).String())
-				targetCollector.Collect(issue.Build())
-				continue
-			}
-			matchedProps[prop.Name()] = fieldName
-		}
-
-		if !isProp {
-			if !v.cfg.allowUnknownFields {
-				issue := diag.NewIssue(
-					diag.Error,
-					ErrUnknownEdgeField,
-					fmt.Sprintf("unknown field in edge object: %q", fieldName),
-				).WithDetails(diag.RelationField(rel.Name(), fieldName)...)
-				withProvenance(issue, prov, targetPath.Key(fieldName).String())
-				targetCollector.Collect(issue.Build())
-			}
-			continue
-		}
-
-		// An explicit null is the absent case, exactly as it is for a node
-		// property: leaving the key out here lets the required check below
-		// report it, and drops an optional one. Storing nil instead would
-		// satisfy the required check by key presence alone.
+		fieldVal := obj[fieldName]
 		if fieldVal == nil {
 			continue
 		}
+		present[prop.Name()] = true
+		propPath := targetPath.Key(fieldName).String()
 
-		// Validate edge property type
 		if err := v.checkValueWithRecovery(fieldVal, prop.Constraint()); err != nil {
 			code := ErrTypeMismatch
 			if checkErr, ok := errors.AsType[*eval.CheckError](err); ok && checkErr.Kind == eval.KindConstraintFail {
@@ -466,43 +449,37 @@ func (v *Validator) validateEdgeTarget(
 				fmt.Sprintf("edge property %q: %s", prop.Name(), err.Error()),
 			).WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyPropertyName, prop.Name())
-			withProvenance(issue, prov, targetPath.Key(fieldName).String())
+			withProvenance(issue, prov, propPath)
 			targetCollector.Collect(issue.Build())
 			continue
 		}
 
-		// Coerce edge property to canonical form (e.g., int -> int64).
 		coercedVal, err := v.coerceValueWithRecovery(fieldVal, prop.Constraint())
 		if err != nil {
 			issue := coercionIssue(err, fmt.Sprintf("edge property %q", prop.Name())).
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyPropertyName, prop.Name())
-			withProvenance(issue, prov, targetPath.Key(fieldName).String())
+			withProvenance(issue, prov, propPath)
 			targetCollector.Collect(issue.Build())
 			continue
 		}
 		edgeProps[prop.Name()] = coercedVal
 	}
 
-	// Check for required edge properties
+	// A required edge property is missing when no key supplied a value for
+	// it; a supplied value that failed its check was reported above and is
+	// not also missing.
 	for prop := range rel.Properties() {
-		if prop.IsRequired() {
-			if _, has := edgeProps[prop.Name()]; !has {
-				issue := diag.NewIssue(
-					diag.Error,
-					ErrMissingRequired,
-					fmt.Sprintf("missing required edge property %q", prop.Name()),
-				).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-					WithDetail(diag.DetailKeyPropertyName, prop.Name())
-				withProvenance(issue, prov, targetPath.String())
-				targetCollector.Collect(issue.Build())
-			}
+		if prop.IsRequired() && !present[prop.Name()] {
+			issue := diag.NewIssue(
+				diag.Error,
+				ErrMissingRequired,
+				fmt.Sprintf("missing required edge property %q", prop.Name()),
+			).WithDetail(diag.DetailKeyRelationName, rel.Name()).
+				WithDetail(diag.DetailKeyPropertyName, prop.Name())
+			withProvenance(issue, prov, targetPath.String())
+			targetCollector.Collect(issue.Build())
 		}
-	}
-
-	// Merge issues into parent collector
-	for issue := range targetCollector.Result().Issues() {
-		collector.Collect(issue)
 	}
 
 	// Check per-target collector (not shared collector) to decide success.
@@ -510,7 +487,6 @@ func (v *Validator) validateEdgeTarget(
 		return nil
 	}
 
-	// Build ValidEdgeTarget
 	targetKey := immutable.WrapKey(pkComponents, immutable.WithClone(true))
 	var edgeProperties immutable.Properties
 	if len(edgeProps) > 0 {
@@ -521,15 +497,9 @@ func (v *Validator) validateEdgeTarget(
 	return &target
 }
 
-// provenancePathBuilder returns a path builder from provenance, or Root() if nil.
-func provenancePathBuilder(prov *location.Provenance) path.Builder {
-	if prov == nil {
-		return path.Root()
-	}
-	return prov.Path()
-}
-
-// kindOf returns a human-readable type description for error messages.
+// kindOf returns a human-readable shape name for a value: the JSON shape for
+// the shapes JSON produces, and the reflect kind's shape for a typed
+// container a Go caller sent.
 func kindOf(v any) string {
 	if v == nil {
 		return "null"
@@ -545,8 +515,22 @@ func kindOf(v any) string {
 		return "boolean"
 	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return "number"
+	}
+	switch reflect.TypeOf(v).Kind() {
+	case reflect.Map, reflect.Struct:
+		return "object"
+	case reflect.Slice, reflect.Array:
+		return "array"
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return "number"
 	default:
-		return "unknown"
+		return reflect.TypeOf(v).String()
 	}
 }
 

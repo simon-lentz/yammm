@@ -68,13 +68,18 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 	if typeColumn != "" {
 		adapter := csv.New(csv.WithTypeColumn(typeColumn))
 		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) *schema.Type {
-			t, _ := s.Type(name)
+			t, _ := s.ResolveTypeName(name)
 			return t
 		})
 		return parsed, result, nil
 	}
 
-	schemaType, _ := s.Type(typeName)
+	// An unknown type is the caller's mistake, refused here rather than parsed
+	// uncoerced and refused row by row downstream.
+	schemaType, ok := s.ResolveTypeName(typeName)
+	if !ok {
+		return nil, diag.Result{}, fmt.Errorf("type %q not found in schema", typeName)
+	}
 	raws, result := csv.New().ParseTyped(ctx, sourceID, typeName, f, schemaType)
 	return map[string][]instance.RawInstance{typeName: raws}, result, nil
 }

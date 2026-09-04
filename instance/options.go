@@ -1,10 +1,6 @@
 package instance
 
-import (
-	"log/slog"
-
-	"github.com/simon-lentz/yammm/internal/value"
-)
+import "log/slog"
 
 // Option configures the Validator.
 type Option func(*validatorConfig)
@@ -15,7 +11,6 @@ type validatorConfig struct {
 	strictPropertyNames  bool
 	allowUnknownFields   bool
 	maxIssuesPerInstance int
-	valueRegistry        value.Registry
 }
 
 // defaultConfig returns the default validator configuration.
@@ -47,12 +42,34 @@ func WithAllowUnknownFields(allow bool) Option {
 	}
 }
 
+// WithIssueLimit sets the maximum number of diagnostic issues one instance
+// stores. Validation always completes: past the limit the collector keeps the
+// most severe issues seen, and [github.com/simon-lentz/yammm/diag.Result.DroppedCount]
+// and [github.com/simon-lentz/yammm/diag.Result.LimitReached] report the rest
+// exactly, on the batch result too. Set to 0 for unlimited. Default is 100,
+// matching [github.com/simon-lentz/yammm/schema.WithIssueLimit].
+func WithIssueLimit(limit int) Option {
+	return func(c *validatorConfig) {
+		c.maxIssuesPerInstance = max(limit, 0)
+	}
+}
+
+// WithLogger provides a structured logger for validation diagnostics: a
+// debug record when a property name is normalized. If not provided, logging
+// is disabled. Symmetric with [github.com/simon-lentz/yammm/schema.WithLogger].
+func WithLogger(logger *slog.Logger) Option {
+	return func(c *validatorConfig) {
+		c.logger = logger
+	}
+}
+
 // RecommendedOptions returns the recommended default options
 // for new projects. These options prioritize correctness and early error
 // detection over permissiveness.
 //
 // Includes:
-//   - WithStrictPropertyNames(true): Require exact case matching for property names
+//   - WithStrictPropertyNames(true): require exact case matching for property names
+//   - WithAllowUnknownFields(false): report unknown fields
 //
 // Use this as a starting point and relax specific options as needed for your use case.
 func RecommendedOptions() []Option {

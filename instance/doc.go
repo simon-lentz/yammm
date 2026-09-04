@@ -65,8 +65,10 @@
 //
 // [NewValidator] accepts [Option] values to configure behavior:
 //
-//   - [WithStrictPropertyNames]: reject properties not defined in the schema
+//   - [WithStrictPropertyNames]: require exact-case property names
 //   - [WithAllowUnknownFields]: allow extra properties without diagnostics
+//   - [WithIssueLimit]: cap the issues one instance stores
+//   - [WithLogger]: receive a debug record when a property name is normalized
 //
 // # Value Functions
 //
@@ -74,8 +76,7 @@
 // does this value conform, and what is its stored form — exported for a
 // boundary this library does not own: a hand-built export, a direct-Cypher
 // parameter map, a pre-filter in front of a write the validator never sees.
-// Both accept nil and use built-in type detection only; a Validator's custom
-// value registry is not consulted.
+// Both accept nil.
 //
 // # Thread Safety
 //
@@ -85,5 +86,6 @@
 //
 // # Dependencies
 //
-//	instance  ──imports──▶  schema, diag, location, location/path, immutable
+//	instance  ──imports──▶  schema, diag, location, location/path, immutable,
+//	                        instance/internal/eval, internal/value
 package instance

@@ -1765,13 +1765,15 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_EDGE_SHAPE_MISMATCH` — edge has wrong shape (object vs array)
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_NOT_FOUND` — referenced composition not found
+- `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the same bound the snapshot writer and reader enforce; a validated instance is always one a snapshot can carry
+- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately
 - `E_INVALID_TYPE_TAG` — `$type` tag errors
 - `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
 
 - `E_DUPLICATE_PK` — duplicate primary key
-- `E_DUPLICATE_COMPOSED_PK` — duplicate composed child primary key
+- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child (also raised by the validator; see Instance)
 - `E_UNRESOLVED_REQUIRED` — required association unresolved
 - `E_GRAPH_TYPE_NOT_FOUND` — type not found in graph operations
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found

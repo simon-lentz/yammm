@@ -164,6 +164,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_EDGE_SHAPE_MISMATCH` | Edge has wrong shape |
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_NOT_FOUND` | Referenced composition not found |
+| `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
 | `E_INVALID_TYPE_TAG` | `$type` tag has invalid format |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 

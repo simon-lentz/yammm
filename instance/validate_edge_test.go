@@ -515,33 +515,29 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 	assert.Contains(t, result.String(), "incomplete composite FK")
 }
 
-// TestValidateEdges_FKCaseSensitive verifies that FK field matching is always case-sensitive,
-// regardless of the StrictPropertyNames setting.
-// Per architecture spec: "_target_ID" does NOT match expected "_target_id".
-func TestValidateEdges_FKCaseSensitive(t *testing.T) {
+// TestValidateEdges_FKFieldCase verifies that FK field matching follows the
+// one fold rule every input key follows: a case variant matches under the
+// default mode and does not under WithStrictPropertyNames.
+func TestValidateEdges_FKFieldCase(t *testing.T) {
 	s := fkSchema(t, true, false)
 
-	t.Run("wrong_case_fails_even_without_strict_mode", func(t *testing.T) {
-		// Default: StrictPropertyNames = false, but FK fields are ALWAYS case-sensitive
+	t.Run("case_variant_matches_without_strict_mode", func(t *testing.T) {
 		validator := instance.NewValidator(s)
 
 		raw := instance.RawInstance{
 			Properties: map[string]any{
-				"id": "1",
-				// Wrong case: _target_ID instead of _target_id
+				"id":       "1",
 				"employer": map[string]any{"_target_ID": "42"},
 			},
 		}
 
 		valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-		assert.Nil(t, valid, "Should fail: _target_ID != _target_id (case-sensitive)")
-		require.False(t, result.OK())
-		assert.Contains(t, result.String(), "missing FK field")
+		require.True(t, result.OK(), result.String())
+		require.NotNil(t, valid, "_target_ID folds to _target_id under the default mode")
 	})
 
 	t.Run("wrong_case_fails_with_strict_mode", func(t *testing.T) {
-		// StrictPropertyNames = true, FK fields still case-sensitive
 		validator := instance.NewValidator(s, instance.WithStrictPropertyNames(true))
 
 		raw := instance.RawInstance{

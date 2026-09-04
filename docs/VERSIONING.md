@@ -376,7 +376,7 @@ The pre-1.0 sweep release: the expression-contract decisions ratified after the 
   - `diag.E_INVALID_RELATION` and `diag.E_UNKNOWN_BUILTIN` — registered and documented, emitted by nothing. An unknown built-in call surfaces as `E_EVAL_ERROR` ("unknown method"), which SPEC's diagnostics list and the plugin references now state; both false doc rows are corrected in the same change. The same emission-less class as the removed snapshot codes above.
   - `diag.DetailKeyImportedVia` — attached by no diagnostic.
   - `graph.WithValidatorOptions` and `graph.WithGraphOptions` — `BatchAssembler` option forwarders with zero callers. The assembler constructs its validator and graph with defaults, and the README / API-reference examples are corrected. (`WithValidatorPool` falls in the unexercised-surface cut below.)
-  - `instance.SchemaBuilder.WithProvenance` — zero callers. `RawInstance.Provenance` stays, populated by the parsing adapters.
+  - `instance.SchemaBuilder.WithProvenance` — zero callers. `RawInstance.Provenance` stays, a caller-supplied input. *(This entry said "populated by the parsing adapters" until 2026-09-03; no adapter has since this release removed `adapter/json`'s location tracking — A-232.)*
   - `lsp.WithLogger` — zero callers; `NewServer`'s logger parameter is the sole logging input. `lsp.Option` stays as the extension point.
   - `schema.Property.Annotations` and `schema.Type.Annotations` — the iterator twins of the `AnnotationsSlice` accessors, with zero callers. The slice forms and `Type.AllAnnotations` remain; the enumeration-order contract moved onto `Property.AnnotationsSlice`'s doc.
   - `schema.Registry.LookupSchema` — zero callers; `Registry.LookupBySourceID` covers the lookup.
@@ -849,7 +849,59 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 - **`Marshal` returns Fatal `E_INTERNAL` and no bytes for a target key `graph.ParseKey` cannot read** (A-191), where v0.19.0 wrote the document with the address dropped and a `W_SNAPSHOT_VALUE_DROPPED` Warning. `UnresolvedEdge.TargetKey` is written from `immutable.Key.String()` on every library path, `graph.ParseKey` is its pinned inverse, and no consumer path supplies the string — so the branch guarded an event the module's own invariant excludes, and a broken invariant is an internal failure rather than a sampled warning. The one reachable input is caller-assembled `RebuildSnapshot` parts whose key holds a non-scalar component, which `Marshal`'s contract already assigns to Fatal `E_INTERNAL`. The two `W_SNAPSHOT_VALUE_DROPPED` arms for a target key or edge properties under an `absent`/`empty` reason are unchanged, and the code's own description is narrowed to them. Consumer cost is zero by absence: every key the consumer writes is a `String` primary key rendered by the library.
 
-## Unreleased — merged to `main`
+## Unreleased
+
+*Two blocks: unit 5's fix pass, which is NOT yet merged, and unit 4's, which is merged to `main`. Each says which.*
+
+### Condition-1 unit 5 — `instance/` and `internal/value/`, not yet merged
+
+*Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration delta below is enumerated from the diff; `gorelease -base=v0.20.0` at the tag re-measures it, and the number it reports replaces this sentence.*
+
+Minor tier, under the pre-1.0 subtractive rules. Fourteen repairs from the unit's round (A-237…A-250), every one a model change: one member index and one fold rule for every input key, one path rule, one type-identity rendering, one meaning per diagnostic code, one stored-form rule, and one composed-nesting bound shared with the wire.
+
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, which pins `v0.20.0` — by running its unit-lane suite three ways: at the pin (green), against `main` at `6264040` with unit 4 merged and this unit absent, and against this tree. **The last two fail identically** — five generated `SchemaHash` constants, five embedded-identity pins and seven `.ys` wire goldens, all moved by unit 4's hash re-key above — **so this unit adds no failure the consumer's suite can see.** rdata builds every production validator with `RecommendedOptions()` (strict names, so the fold path below is never entered), validates by bare type names, and declares no composition; what does reach it is the FK-field rule, and its suite is green under it.
+
+### Breaking — behaviour, `instance`
+
+- **A `_target_`-prefixed key that is not one of the target's foreign-key fields is `E_UNKNOWN_EDGE_FIELD`** where it was skipped silently (the scan skipped the prefix rather than the expected names) — the one change that can surface in a consumer's data, as a typo it never saw.
+- **Foreign-key fields and edge properties fold like every other input key**: exact match first, then under the default mode an ASCII case-fold; an exact match never collides; two keys folding to one member is one `E_CASE_FOLD_COLLISION` at the object, and the colliding keys are not also reported unknown. `_target_ID` now matches `_target_id` under the default mode, where it drew `E_MISSING_FK_TARGET`; the strict mode is unchanged. A key carrying a non-ASCII letter matches nothing.
+- **A present-but-invalid required edge property is `E_TYPE_MISMATCH` alone**, not also `E_MISSING_REQUIRED`.
+- **A composition-field collision is one diagnostic**; the slot is not also reported absent.
+- **Paths name the input document.** A diagnostic's path is the input key as written (`$.Age`, `$.lines[0].qty`), or the parent object for an absent member or a collision; the schema spelling rides in the details. A composed child's provenance path follows the same rule, and is nil under a parent with no provenance where it was synthesized from `""`. **On the `.ys` wire a child's provenance path is spelled by the input key (`lines[0]`) where it carried the DSL name (`LINES[0]`)** — data, not identity; the wire version is unchanged.
+- **Every rendering of a type identity is the entry-relative form `schema.TagForm` renders**, as graph and snapshot already did: a composed child's `TypeName()` (`Cell`, not the declaring schema's `parts.Cell`), and `DetailKeyTypeName` on every diagnostic (`common.Region`, not the bare `Region`). Identical for a bare-named root.
+- **`E_DUPLICATE_COMPOSED_PK` for a `(one)` composition given several children**, where the validator drew `E_EDGE_SHAPE_MISMATCH` for the fact graph assembly reports under the former.
+- **`instance_index` is stamped once**, by the public entry that received the batch; a composed child's issue through `Validate` carried the child's index and the root's under one key. **The batch result carries each instance's truncation facts** (`LimitReached`, `DroppedCount`, the seen severity counts): a 150-issue instance under the 100 cap reported `dropped=0` on the batch path.
+- **Duplicate-key indices in a composition name positions in the caller's array**, not in the slice surviving the shape filter.
+- **Every Fatal on the validator's own path carries the provenance in hand**; every `E_EDGE_SHAPE_MISMATCH` carries `expected` and `got`; a typed Go container is named by its kind (`array`), not `unknown`.
+- **Composed nesting deeper than `instance.MaxComposedDepth` (32) is `E_COMPOSITION_DEPTH_EXCEEDED`** at validation, where depth 33 and 500 validated and then could not be written to a `.ys` document; `snapshot`'s bound is now derived from the same constant.
+- **`ValidateForComposition` refuses an association's name with `E_COMPOSITION_NOT_FOUND`** where it validated the raws as children of the association's target; **accepts the field-name spelling** (`lines`) beside the DSL name; and **resolves parent and relation before the nil-raws return**, so `nil` raws with an unknown type report it as an empty slice does.
+- **`CanonicalValue` returns what the validator stores for every kind** — `int64` for an Integer, `float64` for a Float, `[]float64` for a Vector, the base value under a named carrier type — where it returned the input unchanged for six of nine kinds and its godoc claimed otherwise.
+- **`SchemaBuilder.Build`'s cardinality error names the relation whose `EdgeTo` call first violated it**, every run; it named one of them by map order.
+- **`yammm data`'s `--type` resolves by the validator's rule** (A-233): an alias-qualified type name now drives CSV coercion, where `LoadAndParseCSV` resolved local-only, discarded the miss, and handed the adapter a nil type that kept every value a string for the validator to refuse; **an unknown `--type` is an error naming the type** rather than a parse that fails row by row downstream. A type-column value resolves the same way.
+
+### Breaking — the static invariant checker, `schema`
+
+- **A `$name` variable is matched against a type's members by its exact spelling**, as `docs/SPEC.md` "Expressions and Invariants" states and the evaluator already did. A schema whose `$startdate` named a `startDate` property loaded clean and failed every instance with `E_EVAL_ERROR`; it is refused at load with `E_INVALID_INVARIANT`. rdata's 30 invariants use no `$` member reference. `instance/invariant_contract_test.go` judges the rows.
+
+### Breaking — Go API
+
+- **`schema.Type.CanonicalPropertyMap` is removed.** Its one caller cloned the whole map once per validated instance; `CanonicalPropertyName` answers the lookup with no allocation.
+
+### Additive — Go API
+
+- `instance.WithIssueLimit(int)` — the per-instance cap, restored to match `schema.WithIssueLimit` and `snapshot.WithIssueLimit` (default 100, 0 unlimited); `instance.WithLogger(*slog.Logger)` — restored beside `schema.WithLogger` and `graph.WithLogger`; `instance.MaxComposedDepth`; `instance.ErrCompositionDepthExceeded` and `diag.E_COMPOSITION_DEPTH_EXCEEDED` (`CategoryInstance`).
+- `schema.Type.RelationByField` — the exact lookup on a relation's field name, beside `Relation` on the DSL name; `schema.Relation.PropertyFold` — the case-folded lookup on an edge-property block.
+- `schema.Schema.ResolveTypeName` — the one entry-relative by-name resolve (a bare name for a declared type, `alias.Name` for a directly imported one), which the validator, `instance.BuilderFor` and the CLI now share (A-233).
+- `diag.Collector.MergeFunc` — `Merge` with a transform on each stored issue, carrying the source's severity counts and truncation facts.
+
+### Removed — dead machinery
+
+- `validatorConfig.valueRegistry`, `eval.NewChecker`, `eval.Checker.registry`, `value.Registry` and `value.ClassifyWithRegistry` (A-243): one func field with no setter since v0.12.0, no consumer, and a reflection fallback that already classifies named basic types. `eval.DefaultChecker` is the one checker; the "a Validator's custom value registry is not consulted" sentences are deleted as true by construction.
+- `edgeState.excessCallerPC` and `SchemaBuilder.relByFieldName`: retired by the call-time cardinality check and `Type.RelationByField`.
+
+### Prose
+
+- `docs/API.md` "Instance Validation": the options table gains `WithIssueLimit` and `WithLogger`; "Validation" states the relation-argument rule, the `instance_index` and truncation contract, the path rule and the depth bound; "Input Format" states the one fold rule; "Value Functions" describes `CanonicalValue` as the stored-form rule and drops the registry sentences. `docs/SPEC.md` lists `E_COMPOSITION_DEPTH_EXCEEDED` under Instance and `E_DUPLICATE_COMPOSED_PK` under Instance and Graph with the note `E_DUPLICATE_PK` carries. `instance/doc.go`'s `WithStrictPropertyNames` sentence described `WithAllowUnknownFields`; its Dependencies line omitted two of seven imports; `ValidEdgeData.TargetsIter`'s example called a method that does not exist. **§v0.12.0 below said `RawInstance.Provenance` is "populated by the parsing adapters"; no adapter has since `adapter/json`'s location tracking was removed in the same release** (A-232) — the field is a caller-supplied input.
 
 *Condition-1 unit 4's fixes (`schema/`), merged to `main` as `fabed40` (PR #102) on 2026-09-03 and not yet released. Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration count below is measured at `9007281`, whose Go tree is `main`'s; the tag-time run re-confirms it.*
 

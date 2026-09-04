@@ -550,11 +550,12 @@ func TestValidateCompositions_OneCardinality(t *testing.T) {
 	require.True(t, result.OK(), result.String())
 	require.NotNil(t, valid)
 
-	// Two is refused here, not deferred to the graph.
+	// Two is refused here, not deferred to the graph, under the code graph
+	// assembly reports the same fact with.
 	_, result = validator.ValidateOne(t.Context(), "Person", person(addr("100"), addr("200")))
 	require.False(t, result.OK())
-	assert.True(t, result.HasCode(instance.ErrEdgeShapeMismatch),
-		"want E_EDGE_SHAPE_MISMATCH, got %s", result.String())
+	assert.True(t, result.HasCode(instance.ErrDuplicateComposedPK),
+		"want E_DUPLICATE_COMPOSED_PK, got %s", result.String())
 
 	// An empty array on an optional (one) slot stays legal — the cardinality
 	// check must not swallow the empty case the arm above it handles.

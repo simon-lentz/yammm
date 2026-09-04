@@ -45,8 +45,8 @@ func TestValidateOne_InlineComposition_OneCardinalityRefused(t *testing.T) {
 	if vres.OK() {
 		t.Fatal("two children under a (one) composition passed validation")
 	}
-	if !vres.HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
-		t.Fatalf("want E_EDGE_SHAPE_MISMATCH, got %s", vres.String())
+	if !vres.HasCode(diag.E_DUPLICATE_COMPOSED_PK) {
+		t.Fatalf("want E_DUPLICATE_COMPOSED_PK, got %s", vres.String())
 	}
 }
 

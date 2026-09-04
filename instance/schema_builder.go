@@ -26,7 +26,10 @@ import (
 // It does NOT catch value-level errors (wrong type, out-of-range, invalid PK);
 // those remain in [Validator.ValidateOne]'s domain. A SchemaBuilder that
 // returns a clean (RawInstance, nil) from Build is guaranteed to pass the
-// shape portion of ValidateOne.
+// shape portion of ValidateOne — property and relation names, and
+// association cardinality. Compositions are not covered: the builder cannot
+// produce one, so a type with a required composition builds clean here and
+// fails ValidateOne with E_UNRESOLVED_REQUIRED_COMPOSITION.
 //
 // # Thread safety
 //
@@ -65,24 +68,11 @@ type SchemaBuilder struct {
 	properties map[string]any
 	edges      map[string]*edgeState
 	errors     []*buildError
-
-	// relByFieldName is a lazy-built secondary index that maps FieldName()
-	// (the lower-case form, e.g. "in_district") to its relation. Built on first
-	// miss against typ.Relation (which indexes by DSL name, e.g. "IN_DISTRICT")
-	// so callers using either form resolve without needing to know which
-	// the schema author used.
-	relByFieldName map[string]*schema.Relation
 }
 
 type edgeState struct {
 	rel     *schema.Relation
 	targets []map[string]any
-
-	// excessCallerPC is the PC of the call that gave this relation a second
-	// target. A cardinality mismatch is detected in Build, after every call has
-	// returned, so there is no "current" call site to attribute it to; the
-	// first excess call is the one the caller has to delete.
-	excessCallerPC uintptr
 }
 
 // BuilderFor constructs a schema-aware builder for instances of the given
@@ -96,8 +86,7 @@ func BuilderFor(s *schema.Schema, typeName string) (*SchemaBuilder, error) {
 	if s == nil {
 		return nil, errors.New("instance.BuilderFor: nil schema")
 	}
-	ref := parseTypeRef(typeName)
-	typ, found := s.ResolveType(ref)
+	typ, found := s.ResolveTypeName(typeName)
 	if !found {
 		return nil, fmt.Errorf("instance.BuilderFor: type %q not found", typeName)
 	}
@@ -216,16 +205,25 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, callerPC uintptr) 
 	}
 
 	st := b.edgeStateFor(rel)
-	if len(st.targets) == 1 {
-		st.excessCallerPC = callerPC
-	}
 	st.targets = append(st.targets, target)
+	// A (one) relation's second target is the call the caller has to delete,
+	// so the error is recorded here, at that call, and Build reports errors
+	// in call order.
+	if !rel.IsMany() && len(st.targets) == 2 {
+		b.recordErr(&buildError{
+			kind:     kindCardinality,
+			typ:      b.typeName,
+			target:   rel.Name(),
+			detail:   fmt.Sprintf("%q is single-valued, got %d targets", rel.Name(), len(st.targets)),
+			callerPC: callerPC,
+		})
+	}
 }
 
-// buildEdgeTarget assembles one edge-target map: {_target_<pk>: value, ...}
-// with edge properties (if any) merged at the top level alongside the PK
-// fields. Returns a shaped buildError on PK arity mismatch, missing target
-// type, or unknown edge-property keys; otherwise nil.
+// buildEdgeTarget assembles one edge-target map, {_target_<pk>: value, ...},
+// for a relation addEdge has already established declares no edge
+// properties. Returns a shaped buildError on a missing target type, a keyless
+// target, or a target-key arity mismatch; otherwise nil.
 func (b *SchemaBuilder) buildEdgeTarget(
 	rel *schema.Relation,
 	targetKey []any,
@@ -288,10 +286,13 @@ func (b *SchemaBuilder) edgeStateFor(rel *schema.Relation) *edgeState {
 //
 // On success the returned RawInstance is guaranteed to pass the shape
 // portion of [Validator.ValidateOne]: property names and relation names are
-// schema-valid and cardinality invariants hold. Value-level validation
-// (constraint checks, PK type coercion, foreign-key shape and key-component
-// checks) still happens at ValidateOne time; whether an association's target
-// exists is [graph.Graph.Check]'s question, never the validator's.
+// schema-valid and association cardinality holds. Compositions are not
+// covered — the builder cannot produce one — so a type with a required
+// composition builds clean and fails ValidateOne with
+// E_UNRESOLVED_REQUIRED_COMPOSITION. Value-level validation (constraint
+// checks, PK type coercion, foreign-key shape and key-component checks) still
+// happens at ValidateOne time; whether an association's target exists is
+// [graph.Graph.Check]'s question, never the validator's.
 //
 // Error messages include:
 //   - the offending call's target (property or relation name)
@@ -308,18 +309,8 @@ func (b *SchemaBuilder) Build() (RawInstance, error) {
 
 	// Edges — iteration order on maps is nondeterministic; outputs go into
 	// the RawInstance map under rel.FieldName() so no ordering-dependent
-	// contract is exposed here.
+	// contract is exposed here, and every error was recorded at its call.
 	for _, st := range b.edges {
-		if !st.rel.IsMany() && len(st.targets) > 1 {
-			b.recordErr(&buildError{
-				kind:     kindCardinality,
-				typ:      b.typeName,
-				target:   st.rel.Name(),
-				detail:   fmt.Sprintf("%q is single-valued, got %d targets", st.rel.Name(), len(st.targets)),
-				callerPC: st.excessCallerPC,
-			})
-			continue
-		}
 		if st.rel.IsMany() {
 			arr := make([]any, len(st.targets))
 			for i, t := range st.targets {
@@ -331,9 +322,6 @@ func (b *SchemaBuilder) Build() (RawInstance, error) {
 		}
 	}
 
-	if err := b.firstErrorWithCount(); err != nil {
-		return RawInstance{}, err
-	}
 	return RawInstance{Properties: out}, nil
 }
 
@@ -359,22 +347,8 @@ func (b *SchemaBuilder) firstErrorWithCount() error {
 }
 
 // resolveRelation looks up a relation by name, accepting either the DSL form
-// (e.g. "IN_DISTRICT") or the FieldName form (e.g. "in_district"). Returns the
-// resolved *schema.Relation and true on success; zero value and false on
-// miss.
+// (e.g. "IN_DISTRICT") or the FieldName form (e.g. "in_district"), the two
+// spellings every name-taking surface of this package accepts.
 func (b *SchemaBuilder) resolveRelation(name string) (*schema.Relation, bool) {
-	if r, ok := b.typ.Relation(name); ok {
-		return r, true
-	}
-	if b.relByFieldName == nil {
-		b.relByFieldName = make(map[string]*schema.Relation)
-		for r := range b.typ.AllAssociations() {
-			b.relByFieldName[r.FieldName()] = r
-		}
-		for r := range b.typ.AllCompositions() {
-			b.relByFieldName[r.FieldName()] = r
-		}
-	}
-	r, ok := b.relByFieldName[name]
-	return r, ok
+	return relationByEitherName(b.typ, name)
 }

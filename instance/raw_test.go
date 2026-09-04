@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 )
@@ -89,33 +88,5 @@ func TestProvenance_AtKey(t *testing.T) {
 		extended := prov.AtKey("my field")
 
 		assert.Equal(t, `$["my field"]`, extended.Path().String())
-	})
-}
-
-func TestRawInstance(t *testing.T) {
-	t.Run("with_provenance", func(t *testing.T) {
-		prov := location.NewProvenance("data.json", path.Root().Key("person"), location.Span{})
-		raw := instance.RawInstance{
-			Properties: map[string]any{
-				"id":   int64(1),
-				"name": "Alice",
-			},
-			Provenance: prov,
-		}
-
-		assert.Equal(t, int64(1), raw.Properties["id"])
-		assert.Equal(t, "Alice", raw.Properties["name"])
-		assert.Equal(t, "data.json", raw.Provenance.SourceName())
-	})
-
-	t.Run("without_provenance", func(t *testing.T) {
-		raw := instance.RawInstance{
-			Properties: map[string]any{
-				"value": "test",
-			},
-		}
-
-		assert.Equal(t, "test", raw.Properties["value"])
-		assert.Nil(t, raw.Provenance)
 	})
 }

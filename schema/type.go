@@ -2,7 +2,6 @@ package schema
 
 import (
 	"iter"
-	"maps"
 	"slices"
 	"strings"
 
@@ -43,7 +42,8 @@ type Type struct {
 
 	// O(1) lookup indices
 	propByName map[string]*Property
-	relByName  map[string]*Relation
+	relByName  map[string]*Relation // DSL name, "WORKS_AT"
+	relByField map[string]*Relation // field name, "works_at"
 
 	// suppressedAnns records, per property name, the annotation names this
 	// type's inheritance DROPPED — a re-declaration that did not re-state what
@@ -78,6 +78,7 @@ func newType(
 		isPart:     isPart,
 		propByName: make(map[string]*Property),
 		relByName:  make(map[string]*Relation),
+		relByField: make(map[string]*Relation),
 	}
 }
 
@@ -227,10 +228,20 @@ func (t *Type) HasPrimaryKey() bool {
 	return len(t.primaryKeys) > 0
 }
 
-// Relation returns the relation with the given name (own or inherited), if it exists.
-// Uses O(1) lookup.
+// Relation returns the relation with the given DSL name (own or inherited), if
+// it exists. Uses O(1) lookup. [Type.RelationByField] is the same lookup on
+// the field name instance data and expressions use.
 func (t *Type) Relation(name string) (*Relation, bool) {
 	r, ok := t.relByName[name]
+	return r, ok
+}
+
+// RelationByField returns the relation (own or inherited) whose
+// [Relation.FieldName] is fieldName, if one exists. The lookup is exact: a
+// field name is the DSL name in lower case, so a caller that folds an input
+// key lowercases it first.
+func (t *Type) RelationByField(fieldName string) (*Relation, bool) {
+	r, ok := t.relByField[fieldName]
 	return r, ok
 }
 
@@ -424,29 +435,9 @@ func (t *Type) IsSubTypeOf(id TypeID) bool {
 	return false
 }
 
-// CanonicalPropertyMap returns a map from lowercase property names to their
-// canonical schema names. Used for case-insensitive property matching.
-//
-// The returned map is a defensive copy; callers may modify it freely.
-// This method is O(n) on first call (builds map) and O(n) on subsequent calls
-// (defensive copy). For single lookups, consider iterating AllProperties() directly.
-func (t *Type) CanonicalPropertyMap() map[string]string {
-	if t.canonicalMap != nil {
-		return maps.Clone(t.canonicalMap) // Defensive copy to preserve immutability
-	}
-	// Compute on demand for unsealed types (during completion).
-	// Intentionally not cached: allProperties may change until Seal() is called.
-	result := make(map[string]string, len(t.allProperties))
-	for _, p := range t.allProperties {
-		lower := strings.ToLower(p.name)
-		result[lower] = p.name
-	}
-	return result
-}
-
 // CanonicalPropertyName maps a lowercased property name to the type's declared
-// spelling. It answers the one question every [Type.CanonicalPropertyMap]
-// caller asks without handing out a copy of the whole map.
+// spelling, the case-folded half of [Type.Property]. The caller lowercases the
+// input key; the answer comes from an index built at seal.
 func (t *Type) CanonicalPropertyName(lower string) (string, bool) {
 	if t.canonicalMap != nil {
 		name, ok := t.canonicalMap[lower]
@@ -511,6 +502,7 @@ func (t *Type) setAssociations(associations []*Relation) {
 	t.associations = associations
 	for _, r := range associations {
 		t.relByName[r.name] = r
+		t.relByField[r.fieldName] = r
 	}
 }
 
@@ -522,6 +514,7 @@ func (t *Type) setCompositions(compositions []*Relation) {
 	t.compositions = compositions
 	for _, r := range compositions {
 		t.relByName[r.name] = r
+		t.relByField[r.fieldName] = r
 	}
 }
 
@@ -612,6 +605,7 @@ func (t *Type) setAllAssociations(all []*Relation) {
 	t.allAssociations = all
 	for _, r := range all {
 		t.relByName[r.name] = r
+		t.relByField[r.fieldName] = r
 	}
 }
 
@@ -623,6 +617,7 @@ func (t *Type) setAllCompositions(all []*Relation) {
 	t.allCompositions = all
 	for _, r := range all {
 		t.relByName[r.name] = r
+		t.relByField[r.fieldName] = r
 	}
 }
 

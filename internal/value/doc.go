@@ -47,8 +47,8 @@
 //
 // # Kind Detection
 //
-// The [Classify] and [ClassifyWithRegistry] functions normalize runtime values
-// to semantic [Kind] constants with optional value transformation:
+// [Classify] normalizes a runtime value to a semantic [Kind] constant, with the
+// value transformed where the kind requires it:
 //
 //   - [IntKind]: Integer values (returns normalized int64 for json.Number)
 //   - [FloatKind]: Float values (returns normalized float64 for json.Number)
@@ -123,13 +123,6 @@
 // schema context and can properly interpret empty arrays based on the expected
 // type. Note that Vector[N] constraints always require N > 0, so empty vectors
 // would fail validation regardless of classification.
-//
-// # Registry Integration
-//
-// [ClassifyWithRegistry] accepts a [Registry] for custom type recognition hooks.
-// The Registry hook is designed for instance/eval integration;
-// see the [Registry] type documentation for details.
-// A zero-value Registry falls back to built-in type detection.
 //
 // # Thread Safety
 //

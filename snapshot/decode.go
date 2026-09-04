@@ -22,7 +22,9 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-const maxComposedDepth = 32
+// maxComposedDepth is the validator's bound: what the validator accepts, the
+// wire carries, and nothing deeper is ever written or read.
+const maxComposedDepth = instance.MaxComposedDepth
 
 // streamDecoder is the shared infrastructure for Verify, Load, Info, and
 // HeaderOnlyRead. Byte-based callers set data; reader-based callers set
