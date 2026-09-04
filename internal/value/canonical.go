@@ -60,17 +60,20 @@ func Canonical(val any, c schema.Constraint) (any, error) {
 // timestamp is stored in text that satisfies its own format.
 func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 	layout := timestampLayout(c)
-	switch v := val.(type) {
-	case time.Time:
-		return v.Format(layout), nil
-	case string:
-		t, err := parseTimestamp(v, c)
-		if err != nil {
-			return val, err
-		}
+	if t, ok := val.(time.Time); ok {
 		return t.Format(layout), nil
 	}
-	return val, fmt.Errorf("value: cannot canonicalize %T as a Timestamp (want a string or time.Time)", val)
+	// The string form is whatever GetString reads, as the check side accepts
+	// it: a carrier the check passes is one this side renders.
+	s, ok := GetString(val)
+	if !ok {
+		return val, fmt.Errorf("value: cannot canonicalize %T as a Timestamp (want a string or time.Time)", val)
+	}
+	t, err := parseTimestamp(s, c)
+	if err != nil {
+		return val, err
+	}
+	return t.Format(layout), nil
 }
 
 // timestampLayout returns the declared Go layout, or RFC 3339 with fractional
@@ -132,17 +135,18 @@ func canonicalUUID(val any) (any, error) {
 // an identity today — the layout admits exactly one spelling. It exists so the
 // three kinds read alike, not because a second spelling is waiting for it.
 func canonicalDate(val any) (any, error) {
-	switch v := val.(type) {
-	case time.Time:
-		return v.Format(time.DateOnly), nil
-	case string:
-		t, err := time.Parse(time.DateOnly, v)
-		if err != nil {
-			return val, fmt.Errorf("value: %q is not a YYYY-MM-DD date", v)
-		}
+	if t, ok := val.(time.Time); ok {
 		return t.Format(time.DateOnly), nil
 	}
-	return val, fmt.Errorf("value: cannot canonicalize %T as a Date (want a string or time.Time)", val)
+	s, ok := GetString(val)
+	if !ok {
+		return val, fmt.Errorf("value: cannot canonicalize %T as a Date (want a string or time.Time)", val)
+	}
+	t, err := time.Parse(time.DateOnly, s)
+	if err != nil {
+		return val, fmt.Errorf("value: %q is not a YYYY-MM-DD date", s)
+	}
+	return t.Format(time.DateOnly), nil
 }
 
 // canonicalList canonicalizes each element under the list's element
@@ -153,7 +157,7 @@ func canonicalList(val any, elem schema.Constraint) (any, error) {
 	if !Canonicalizes(elem) {
 		return val, nil
 	}
-	elems, ok := listElems(val)
+	elems, ok := ListElems(val)
 	if !ok {
 		return val, fmt.Errorf("value: cannot canonicalize %T as a list (want a slice)", val)
 	}
@@ -187,23 +191,24 @@ func Canonicalizes(c schema.Constraint) bool {
 	}
 }
 
-// listElems returns val's elements as []any for any slice, an
-// [immutable.Slice] included. An array is not a list position — a uuid.UUID is
-// [16]byte, and reaching it through here would canonicalize a scalar
-// elementwise.
-func listElems(val any) ([]any, bool) {
+// ListElems reads val as a list: a []any as it is, an [immutable.Slice] as
+// its unwrapped elements, and any other slice or array elementwise. Anything
+// else — nil included — is not a list. This is the one reader every list
+// position in the module goes through, so the check, coerce, canonical and
+// builtin paths agree on what a list is.
+func ListElems(val any) ([]any, bool) {
 	switch v := val.(type) {
 	case []any:
 		return v, true
 	case immutable.Slice:
-		elems := make([]any, 0, v.Len())
-		for e := range v.Iter() {
-			elems = append(elems, e.Unwrap())
+		elems := make([]any, v.Len())
+		for i, e := range v.Iter2() {
+			elems[i] = e.Unwrap()
 		}
 		return elems, true
 	}
 	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice {
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
 		return nil, false
 	}
 	elems := make([]any, rv.Len())

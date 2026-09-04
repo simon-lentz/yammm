@@ -27,7 +27,7 @@ const fkPrefix = "_target_"
 func (v *Validator) validateEdges(
 	ctx context.Context,
 	typ *schema.Type,
-	in inputKeys,
+	rels map[*schema.Relation]relationInput,
 	collector *diag.Collector,
 	prov *location.Provenance,
 	base path.Builder,
@@ -41,12 +41,12 @@ func (v *Validator) validateEdges(
 
 		// Absent is valid for an association: presence and requiredness are
 		// graph.Check's question, reported there as E_UNRESOLVED_REQUIRED.
-		inputKey, rawValue, hasValue := v.lookupRelationInput(rel, in, collector, prov, base)
-		if !hasValue {
+		in := rels[rel]
+		if in.state != relationPresent {
 			continue
 		}
 
-		edgeData := v.validateEdgeData(ctx, rel, rawValue, collector, prov, base.Key(inputKey))
+		edgeData := v.validateEdgeData(ctx, rel, in.value, collector, prov, base.Key(in.key))
 		if edgeData != nil {
 			if edges == nil {
 				edges = make(map[string]*ValidEdgeData)
@@ -117,7 +117,7 @@ func shapeMismatch(rel *schema.Relation, message, expected, got string, prov *lo
 	issue := diag.NewIssue(diag.Error, ErrEdgeShapeMismatch, message).
 		WithExpectedGot(expected, got)
 	withProvenance(issue, prov, at.String()).
-		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
+		WithDetails(diag.PathRelation(rel.Name(), rel.FieldName())...)
 	return issue.Build()
 }
 
@@ -327,6 +327,24 @@ func (v *Validator) validateEdgeTarget(
 		allExpectedFKFields[i] = fkPrefix + pk.Name()
 	}
 
+	// Unknown keys first, as the node path reports them: a typo'd key is
+	// unknown whether or not the key it was meant to be is present.
+	if !v.cfg.allowUnknownFields {
+		for _, fieldName := range eo.unknown {
+			issue := diag.NewIssue(
+				diag.Error,
+				ErrUnknownEdgeField,
+				fmt.Sprintf("unknown field in edge object: %q", fieldName),
+			).WithDetails(diag.RelationField(rel.Name(), fieldName)...)
+			if member, ok := eo.shadowed[fieldName]; ok {
+				issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").
+					WithDetail(diag.DetailKeyPropertyName, member)
+			}
+			withProvenance(issue, prov, targetPath.Key(fieldName).String())
+			targetCollector.Collect(issue.Build())
+		}
+	}
+
 	pkComponents := make([]any, 0, len(pkFields))
 	presentFKFields := make([]string, 0, len(pkFields)) // Track key existence
 	missingFKFields := make([]string, 0, len(pkFields)) // Track truly absent keys
@@ -360,11 +378,16 @@ func (v *Validator) validateEdgeTarget(
 			continue
 		}
 
+		// A Fatal ends the target, as it ends the instance at the node site.
 		if err := v.checkValueWithRecovery(val, pk.Constraint()); err != nil {
 			issue := checkIssue(err, fmt.Sprintf("FK field %q", fkFieldName)).
 				WithDetails(diag.RelationField(rel.Name(), fkFieldName)...)
 			withProvenance(issue, prov, fkPath)
-			targetCollector.Collect(issue.Build())
+			built := issue.Build()
+			targetCollector.Collect(built)
+			if built.Severity() == diag.Fatal {
+				return nil
+			}
 			continue
 		}
 
@@ -373,7 +396,11 @@ func (v *Validator) validateEdgeTarget(
 			issue := coercionIssue(err, fmt.Sprintf("FK field %q", fkFieldName)).
 				WithDetails(diag.RelationField(rel.Name(), fkFieldName)...)
 			withProvenance(issue, prov, fkPath)
-			targetCollector.Collect(issue.Build())
+			built := issue.Build()
+			targetCollector.Collect(built)
+			if built.Severity() == diag.Fatal {
+				return nil
+			}
 			continue
 		}
 		pkComponents = append(pkComponents, coercedVal)
@@ -417,23 +444,6 @@ func (v *Validator) validateEdgeTarget(
 		return nil
 	}
 
-	// Unknown keys in the edge object.
-	if !v.cfg.allowUnknownFields {
-		for _, fieldName := range eo.unknown {
-			issue := diag.NewIssue(
-				diag.Error,
-				ErrUnknownEdgeField,
-				fmt.Sprintf("unknown field in edge object: %q", fieldName),
-			).WithDetails(diag.RelationField(rel.Name(), fieldName)...)
-			if member, ok := eo.shadowed[fieldName]; ok {
-				issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").
-					WithDetail(diag.DetailKeyPropertyName, member)
-			}
-			withProvenance(issue, prov, targetPath.Key(fieldName).String())
-			targetCollector.Collect(issue.Build())
-		}
-	}
-
 	// Edge properties. An explicit null is the absent case, exactly as it is
 	// for a node property: the required check below reports it, and an
 	// optional one is dropped.
@@ -456,7 +466,11 @@ func (v *Validator) validateEdgeTarget(
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyPropertyName, prop.Name())
 			withProvenance(issue, prov, propPath)
-			targetCollector.Collect(issue.Build())
+			built := issue.Build()
+			targetCollector.Collect(built)
+			if built.Severity() == diag.Fatal {
+				return nil
+			}
 			continue
 		}
 
@@ -466,7 +480,11 @@ func (v *Validator) validateEdgeTarget(
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyPropertyName, prop.Name())
 			withProvenance(issue, prov, propPath)
-			targetCollector.Collect(issue.Build())
+			built := issue.Build()
+			targetCollector.Collect(built)
+			if built.Severity() == diag.Fatal {
+				return nil
+			}
 			continue
 		}
 		edgeProps[prop.Name()] = coercedVal

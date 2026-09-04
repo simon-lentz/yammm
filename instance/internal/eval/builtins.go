@@ -432,31 +432,39 @@ func builtinSum(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 		return int64(0), nil
 	}
 
-	// Determine if we should return int64 or float64 based on input types
+	// Classify first, then sum in the kind the result has: a list holding a
+	// float is float arithmetic, and an integer subtotal it would discard
+	// cannot overflow it. An integer carried by a json.Number is an integer.
+	ints := make([]int64, 0, len(slice))
+	floats := make([]float64, 0, len(slice))
 	hasFloat := false
-	var intSum int64
-	var floatSum float64
-
 	for _, elem := range slice {
-		if f, ok := value.GetFloat64(elem); ok {
+		if i, ok := value.GetInt64(elem); ok {
+			ints = append(ints, i)
+			floats = append(floats, float64(i))
+		} else if f, ok := value.GetFloat64(elem); ok {
 			hasFloat = true
-			floatSum += f
-		} else if i, ok := value.GetInt64(elem); ok {
-			sum, err := checkedAdd(intSum, i)
-			if err != nil {
-				return nil, errors.New("integer overflow in Sum")
-			}
-			intSum = sum
-			floatSum += float64(i)
+			floats = append(floats, f)
 		} else {
 			return nil, fmt.Errorf("Sum() expects numeric elements, got %T", elem)
 		}
 	}
-
 	if hasFloat {
-		return floatSum, nil
+		var sum float64
+		for _, f := range floats {
+			sum += f
+		}
+		return sum, nil
 	}
-	return intSum, nil
+	var sum int64
+	for _, i := range ints {
+		next, err := checkedAdd(sum, i)
+		if err != nil {
+			return nil, errors.New("integer overflow in Sum")
+		}
+		sum = next
+	}
+	return sum, nil
 }
 
 func builtinFirst(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
@@ -547,17 +555,12 @@ func builtinFlatten(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Exp
 		return []any{}, nil
 	}
 
-	// Flatten one level of nesting
+	// Flatten one level of nesting; an element that is not a list is kept.
 	result := make([]any, 0, len(slice))
 	for _, elem := range slice {
-		if inner, ok := elem.([]any); ok {
+		if inner, ok := value.ListElems(elem); ok {
 			result = append(result, inner...)
-		} else if rv := reflect.ValueOf(elem); rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
-			for i := range rv.Len() {
-				result = append(result, rv.Index(i).Interface())
-			}
 		} else {
-			// Non-slice elements are kept as-is
 			result = append(result, elem)
 		}
 	}
@@ -615,9 +618,6 @@ func builtinWith(ev builtinEvaluator, lhs any, _ []any, params []string, body ex
 // --- Numeric Builtin implementations ---
 
 func builtinAbs(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if f, ok := value.GetFloat64(lhs); ok {
-		return math.Abs(f), nil
-	}
 	if i, ok := value.GetInt64(lhs); ok {
 		if i == math.MinInt64 {
 			return nil, errors.New("integer overflow in Abs")
@@ -627,35 +627,38 @@ func builtinAbs(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 		}
 		return i, nil
 	}
+	if f, ok := value.GetFloat64(lhs); ok {
+		return math.Abs(f), nil
+	}
 	return nil, fmt.Errorf("Abs() expects numeric argument, got %T", lhs)
 }
 
 func builtinFloor(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if f, ok := value.GetFloat64(lhs); ok {
-		return math.Floor(f), nil
-	}
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
+	}
+	if f, ok := value.GetFloat64(lhs); ok {
+		return math.Floor(f), nil
 	}
 	return nil, fmt.Errorf("Floor() expects numeric argument, got %T", lhs)
 }
 
 func builtinCeil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if f, ok := value.GetFloat64(lhs); ok {
-		return math.Ceil(f), nil
-	}
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
+	}
+	if f, ok := value.GetFloat64(lhs); ok {
+		return math.Ceil(f), nil
 	}
 	return nil, fmt.Errorf("Ceil() expects numeric argument, got %T", lhs)
 }
 
 func builtinRound(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if f, ok := value.GetFloat64(lhs); ok {
-		return math.RoundToEven(f), nil
-	}
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
+	}
+	if f, ok := value.GetFloat64(lhs); ok {
+		return math.RoundToEven(f), nil
 	}
 	return nil, fmt.Errorf("Round() expects numeric argument, got %T", lhs)
 }
@@ -1050,28 +1053,9 @@ func asSlice(funcName string, val any) ([]any, error) {
 	if val == nil {
 		return []any{}, nil
 	}
-
-	if slice, ok := val.([]any); ok {
-		return slice, nil
-	}
-
-	// Handle immutable.Slice (returned by property Unwrap for List-typed properties).
-	if is, ok := val.(immutable.Slice); ok {
-		result := make([]any, is.Len())
-		for i, v := range is.Iter2() {
-			result[i] = v.Unwrap()
-		}
-		return result, nil
-	}
-
-	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+	elems, ok := value.ListElems(val)
+	if !ok {
 		return nil, fmt.Errorf("%s expects slice or array input, got %T", funcName, val)
 	}
-
-	result := make([]any, rv.Len())
-	for i := range rv.Len() {
-		result[i] = rv.Index(i).Interface()
-	}
-	return result, nil
+	return elems, nil
 }

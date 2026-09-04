@@ -134,8 +134,14 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		// These three accept two Go representations and store one string. The
 		// rule lives in [value.Canonical] so the wire, both writers and the
 		// snapshot rebuild render a value the same way this does.
-		//nolint:wrapcheck // the canonicalizer's errors name the value and the layout; a wrapper here adds nothing
-		return value.Canonical(val, c)
+		// value.Canonical returns its input beside an error; every arm here
+		// returns nil beside one, so a caller never mistakes the input for a
+		// stored form.
+		out, err := value.Canonical(val, c)
+		if err != nil {
+			return nil, err //nolint:wrapcheck // the canonicalizer's errors name the value and the layout; a wrapper here adds nothing
+		}
+		return out, nil
 	case schema.KindString, schema.KindEnum, schema.KindPattern:
 		// A named type over string reaches here from a caller holding
 		// adapter/gogen's output. Store the base value: accepting the carrier
@@ -321,7 +327,7 @@ func checkInteger(val any, c schema.Constraint) error {
 			case !value.IsWholeNumber(f):
 				return typeMismatch("expected integer, got float with fractional part: %v", f)
 			default:
-				return constraintFail("expected integer, got whole float outside the int64 range: %v", f)
+				return typeMismatch("expected integer, got whole float outside the int64 range: %v", f)
 			}
 		}
 	default:
@@ -399,7 +405,7 @@ func checkTimestamp(val any, c schema.Constraint) error {
 		return nil
 	}
 
-	s, ok := val.(string)
+	s, ok := value.GetString(val)
 	if !ok {
 		return typeMismatch("expected timestamp string or time.Time, got %T", val)
 	}
@@ -433,7 +439,7 @@ func checkDate(val any) error {
 		return nil
 	}
 
-	s, ok := val.(string)
+	s, ok := value.GetString(val)
 	if !ok {
 		return typeMismatch("expected date string or time.Time, got %T", val)
 	}
@@ -622,22 +628,7 @@ func coerceList(val any, c schema.Constraint) (any, error) {
 
 // toSlice converts val to []any if it's a slice.
 func toSlice(val any) ([]any, bool) {
-	if val == nil {
-		return nil, false
-	}
-	if slice, ok := val.([]any); ok {
-		return slice, true
-	}
-	// Use reflection for typed slices
-	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice {
-		return nil, false
-	}
-	result := make([]any, rv.Len())
-	for i := range rv.Len() {
-		result[i] = rv.Index(i).Interface()
-	}
-	return result, true
+	return value.ListElems(val)
 }
 
 // TypeChecker is a function that checks if a value matches a type.

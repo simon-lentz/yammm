@@ -199,15 +199,15 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, callerPC uintptr) 
 
 	st := b.edgeStateFor(rel)
 	st.targets = append(st.targets, target)
-	// A (one) relation's second target is the call the caller has to delete,
-	// so the error is recorded here, at that call, and Build reports errors
-	// in call order.
-	if !rel.IsMany() && len(st.targets) == 2 {
+	// Every excess target on a (one) relation is the call the caller has to
+	// delete, so each is an error recorded at its own call; Build reports the
+	// first and counts the rest truly.
+	if !rel.IsMany() && len(st.targets) > 1 {
 		b.recordErr(&buildError{
 			kind:     kindCardinality,
 			typ:      b.typeName,
 			target:   rel.Name(),
-			detail:   fmt.Sprintf("%q is single-valued, got %d targets", rel.Name(), len(st.targets)),
+			detail:   fmt.Sprintf("%q is single-valued; this call adds target %d", rel.Name(), len(st.targets)),
 			callerPC: callerPC,
 		})
 	}

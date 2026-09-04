@@ -186,11 +186,19 @@ func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n}\n")
 	v := instance.NewValidator(s)
 	prov := location.NewProvenance("rows.json", path.Root().Index(7), location.Span{})
-	_, res := v.Validate(t.Context(), "NoSuchType", []instance.RawInstance{{Properties: map[string]any{"id": "x"}, Provenance: prov}})
+	valids, res := v.Validate(t.Context(), "NoSuchType", []instance.RawInstance{{Properties: map[string]any{"id": "x"}, Provenance: prov}})
 	if !res.HasCode(instance.ErrTypeNotFound) {
 		t.Fatalf("want E_TYPE_NOT_FOUND, got %v", codes(res))
 	}
+	if valids != nil {
+		t.Errorf("a batch that did not run returned %v, want a nil slice", valids)
+	}
 	for is := range res.Issues() {
+		for _, d := range is.Details() {
+			if d.Key == diag.DetailKeyInstanceIndex {
+				t.Errorf("a batch-wide error carries instance_index %q", d.Value)
+			}
+		}
 		if is.SourceName() != "rows.json" {
 			t.Errorf("the source name was dropped: %q", is.SourceName())
 		}
@@ -211,6 +219,14 @@ func TestNewValidInstance_DoesNotAliasCallerMaps(t *testing.T) {
 	if _, ok := vi.Edge("AT"); !ok {
 		t.Error("deleting from the caller's map removed the instance's edge")
 	}
+	composed["LINES"] = immutable.Wrap([]any{})
+	n := 0
+	for range vi.Compositions() {
+		n++
+	}
+	if n != 0 {
+		t.Error("adding to the caller's composed map reached the instance")
+	}
 }
 
 // A nil *ValidInstance — the documented shape of a failed entry in Validate's
@@ -220,6 +236,9 @@ func TestValidInstance_NilReceiverIsSafe(t *testing.T) {
 	var vi *instance.ValidInstance
 	if vi.TypeName() != "" || vi.Validated() || vi.Provenance() != nil {
 		t.Error("a nil instance must answer zero values")
+	}
+	if vi.TypeID() != (schema.TypeID{}) || vi.PrimaryKey().Len() != 0 || vi.Properties().Len() != 0 {
+		t.Error("a nil instance must answer zero identity, key and properties")
 	}
 	if _, ok := vi.Property("x"); ok {
 		t.Error("a nil instance has no properties")

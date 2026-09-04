@@ -19,7 +19,6 @@ func TestEvaluator_Literals(t *testing.T) {
 		expr expr.Expression
 		want any
 	}{
-		{"nil", nil, nil},
 		{"int", lit(int64(42)), int64(42)},
 		{"float", lit(3.14), 3.14},
 		{"string", lit("hello"), "hello"},
@@ -381,12 +380,6 @@ func TestEvaluator_EvaluateBool(t *testing.T) {
 		assert.False(t, result)
 	})
 
-	t.Run("nil_is_false", func(t *testing.T) {
-		result, err := ev.EvaluateBool(nil, scope)
-		require.NoError(t, err)
-		assert.False(t, result)
-	})
-
 	t.Run("non_bool_error", func(t *testing.T) {
 		_, err := ev.EvaluateBool(lit("string"), scope)
 		require.Error(t, err)
@@ -723,18 +716,4 @@ func TestEvaluator_Logging_SExprOp(t *testing.T) {
 func TestEvaluator_NoLogging_WhenNilLogger(t *testing.T) {
 	// No logger — must not panic.
 	evalEq(t, sx("+", lit(int64(2)), lit(int64(3))), int64(5))
-}
-
-func TestEvaluator_Logging_NilExpression(t *testing.T) {
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-
-	// Nil expression returns early and must not log an operation.
-	_, err := ev.Evaluate(nil, eval.EmptyScope())
-	if err != nil {
-		t.Fatalf("Evaluate failed: %v", err)
-	}
-	if yammmtest.HasAttr(h.Records(), "op", "yammm.eval.expr") {
-		t.Error("expected no logging for nil expression")
-	}
 }

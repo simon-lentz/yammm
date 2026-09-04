@@ -866,6 +866,7 @@ func TestBuilder_WithInvariant_EmptyNameFails(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("age", schema.NewIntegerConstraint()).
 		WithInvariant("", ageExpr, ""). // Empty name
 		Done().
@@ -876,7 +877,8 @@ func TestBuilder_WithInvariant_EmptyNameFails(t *testing.T) {
 
 	issues := slices.Collect(result.Issues())
 	require.NotEmpty(t, issues)
-	assert.Contains(t, issues[0].Message(), "invariant name cannot be empty")
+	assert.Equal(t, diag.E_INVALID_INVARIANT, issues[0].Code())
+	assert.Contains(t, issues[0].Message(), "invariant message must not be empty")
 }
 
 func TestBuilder_WithInvariant_NilExpression(t *testing.T) {
@@ -884,6 +886,7 @@ func TestBuilder_WithInvariant_NilExpression(t *testing.T) {
 	s, result := schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("age", schema.NewIntegerConstraint()).
 		WithInvariant("always true", nil, "").
 		Done().
@@ -896,7 +899,7 @@ func TestBuilder_WithInvariant_NilExpression(t *testing.T) {
 	issues := slices.Collect(result.Issues())
 	require.Len(t, issues, 1)
 	assert.Equal(t, diag.E_INVALID_INVARIANT, issues[0].Code())
-	assert.Contains(t, issues[0].Message(), "nil expression")
+	assert.Contains(t, issues[0].Message(), "has no expression")
 }
 
 func TestBuilder_ZeroSourceIDWithImports_Fails(t *testing.T) {

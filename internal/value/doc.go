@@ -24,6 +24,8 @@
 //   - bool (false < true)
 //   - integers: int, int8-64, uint, uint8-64, uintptr
 //   - floats: float32, float64 (with special handling: -Inf < finite < +Inf < NaN)
+//   - [encoding/json.Number], as the integer it holds when it holds one and as
+//     a float otherwise
 //   - string and *regexp.Regexp (regexp compared via String())
 //   - slices of supported types (lexicographic comparison)
 //
@@ -97,9 +99,13 @@
 // convert the float to integer (not vice versa) when the float is a whole number,
 // avoiding the precision loss that occurs when large integers are converted to float64.
 //
-// This ensures the ordering relation remains transitive across all supported values:
+// An integer takes the exact path whatever carries it: a json.Number that
+// parses as an int64 or a uint64 is compared as that integer, and only a
+// json.Number with a fraction is compared as a float. The order is therefore
+// transitive across every supported value:
 //   - Order(uint64(2^53+1), float64(2^53)) returns 1 (greater), not 0
 //   - Order(int64(2^53+1), float64(2^53)) returns 1 (greater), not 0
+//   - Order(json.Number("18446744073709551615"), float64(2^64)) returns -1, not 0
 //
 // # Thread Safety
 //

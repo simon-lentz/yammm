@@ -149,10 +149,6 @@ func Order(left, right any) (int, error) {
 		case luok && ruok:
 			return Uint64Compare(lu, ru), nil
 
-		// Both floats
-		case lfok && rfok:
-			return Float64Compare(lf, rf), nil
-
 		// Mixed signed/unsigned: negative signed is always less than unsigned
 		case liok && ruok:
 			if li < 0 {
@@ -177,6 +173,12 @@ func Order(left, right any) (int, error) {
 			return -CompareUint64Float64(ru, lf), nil
 		case luok && rfok:
 			return CompareUint64Float64(lu, rf), nil
+
+		// Both floats. Last, because a json.Number holding an integer answers
+		// GetFloat64 too: taking this arm for it rounds 2^64-1 up to 2^64 and
+		// the order lies at every power of two above 2^53.
+		case lfok && rfok:
+			return Float64Compare(lf, rf), nil
 		}
 		return 0, fmt.Errorf("value: expected numeric values (left %T, right %T)", left, right)
 

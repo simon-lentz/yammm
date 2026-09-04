@@ -319,9 +319,6 @@ var (
 	// E_MISSING_REQUIRED indicates a required property is missing.
 	E_MISSING_REQUIRED = NewCode("E_MISSING_REQUIRED", CategoryInstance)
 
-	// E_MISSING_PRIMARY_KEY indicates a primary key property is missing.
-	E_MISSING_PRIMARY_KEY = NewCode("E_MISSING_PRIMARY_KEY", CategoryInstance)
-
 	// E_UNKNOWN_FIELD indicates an unexpected field in instance data.
 	E_UNKNOWN_FIELD = NewCode("E_UNKNOWN_FIELD", CategoryInstance)
 

@@ -191,7 +191,9 @@ func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 			t.Errorf("path=%q source=%q span=%v", is.Path(), is.SourceName(), is.Span())
 		}
 	})
-	t.Run("missing_primary_key", func(t *testing.T) {
+	// A nil primary-key property is a missing required property: a primary
+	// key is required by definition, so no separate code exists for it.
+	t.Run("nil_primary_key_is_missing_required", func(t *testing.T) {
 		_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 			"id": nil, "lines": []any{map[string]any{"n": "a", "qty": 1}},
 		}, Provenance: prov})

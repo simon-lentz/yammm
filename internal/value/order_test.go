@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"regexp"
+	"strconv"
 	"testing"
 	"testing/quick"
 	"time"
@@ -174,6 +175,15 @@ func TestOrder_JSONNumberIsNumeric(t *testing.T) {
 		{"max uint64 lexical against uint64", json.Number("18446744073709551615"), uint64(math.MaxUint64), 0},
 		{"uint64 above int64 against its lexical", uint64(1 << 63), json.Number("9223372036854775808"), 0},
 		{"lexical one below max against max", json.Number("18446744073709551614"), uint64(math.MaxUint64), -1},
+		// A json.Number holding an integer compares as an integer whatever
+		// the other side is: through float64 the lexical 2^64-1 rounds up to
+		// 2^64 and the order lies at 2^64, 2^63 and 2^53 alike.
+		{"lexical max uint64 against float 2^64", json.Number("18446744073709551615"), float64(1 << 64), -1},
+		{"lexical 2^63+1 against float 2^63", json.Number("9223372036854775809"), float64(1 << 63), 1},
+		{"lexical 2^53+1 against float 2^53", json.Number("9007199254740993"), float64(1 << 53), 1},
+		{"lexical 2^53 against float 2^53", json.Number("9007199254740992"), float64(1 << 53), 0},
+		{"float 2^64 against lexical max uint64", float64(1 << 64), json.Number("18446744073709551615"), 1},
+		{"fractional lexical against float still exact", json.Number("2.5"), 2.5, 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := value.Order(tt.left, tt.right)
@@ -1505,7 +1515,44 @@ func TestOrder_Transitivity_Float64_Quick(t *testing.T) {
 
 // TestOrder_Transitivity_MixedNumeric_Quick verifies transitivity across
 // mixed numeric types (int64, uint64, float64).
+// Order is transitive with a json.Number in the unsigned role: the lexical
+// 2^64-1 ranks below uint64(2^64-1)'s float neighbour exactly as the uint64
+// does, so A == B and B < C implies A < C. Through the float arm A == C.
+func TestOrder_JSONNumberIsTransitiveAgainstFloat(t *testing.T) {
+	a := json.Number("18446744073709551615")
+	b := uint64(math.MaxUint64)
+	c := float64(1 << 64)
+	ab, _ := value.Order(a, b)
+	bc, _ := value.Order(b, c)
+	ac, _ := value.Order(a, c)
+	if ab != 0 || bc != -1 || ac != -1 {
+		t.Errorf("Order(A,B)=%d Order(B,C)=%d Order(A,C)=%d; want 0, -1, -1", ab, bc, ac)
+	}
+	if value.Equal(a, c) {
+		t.Error("Equal(json.Number(2^64-1), float64(2^64)) = true, want false")
+	}
+}
+
 func TestOrder_Transitivity_MixedNumeric_Quick(t *testing.T) {
+	// A json.Number holding u takes the unsigned role too: it must order
+	// exactly as u does against every i and flt.
+	t.Run("json.Number in the unsigned role", func(t *testing.T) {
+		f := func(i int64, u uint64, flt float64) bool {
+			n := json.Number(strconv.FormatUint(u, 10))
+			nu, err1 := value.Order(n, u)
+			nf, err2 := value.Order(n, flt)
+			uf, err3 := value.Order(u, flt)
+			ni, err4 := value.Order(n, i)
+			ui, err5 := value.Order(u, i)
+			if err1 != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil {
+				return false
+			}
+			return nu == 0 && nf == uf && ni == ui
+		}
+		if err := quick.Check(f, nil); err != nil {
+			t.Error(err)
+		}
+	})
 	f := func(i int64, u uint64, flt float64) bool {
 		// Test transitivity with i, u, flt in different roles
 		// If i < u and u < flt, then i < flt

@@ -474,21 +474,10 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 			}
 		}
 
+		// An empty message and an absent expression are the completer's to
+		// refuse, by the one rule the parse front door shares.
 		for _, inv := range t.invariants {
-			if inv.Name == "" {
-				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
-					fmt.Sprintf("invariant name cannot be empty in type %q", t.name)).
-					WithDetail(diag.DetailKeyName, "").
-					WithDetail(diag.DetailKeyTypeName, t.name).Build())
-				hasErrors = true
-			}
-			if inv.Expr == nil {
-				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
-					fmt.Sprintf("invariant %q in type %q has nil expression", inv.Name, t.name)).
-					WithDetail(diag.DetailKeyTypeName, t.name).
-					WithDetail(diag.DetailKeyName, inv.Name).Build())
-				hasErrors = true
-			} else if bad, found := unsupportedLiteral(inv.Expr); found {
+			if bad, found := unsupportedLiteral(inv.Expr); found {
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
 					fmt.Sprintf("invariant %q in type %q holds a literal of Go type %T; an expression literal is nil, string, int64, float64, bool or *regexp.Regexp", inv.Name, t.name, bad)).
 					WithDetail(diag.DetailKeyTypeName, t.name).

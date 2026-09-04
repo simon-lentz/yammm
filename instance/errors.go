@@ -35,9 +35,6 @@ var (
 	// ErrInvariantFail indicates a type invariant expression failed.
 	ErrInvariantFail = diag.E_INVARIANT_FAIL
 
-	// ErrMissingPrimaryKey indicates a required primary key property was absent.
-	ErrMissingPrimaryKey = diag.E_MISSING_PRIMARY_KEY
-
 	// ErrEdgeShapeMismatch indicates an edge object has an invalid shape.
 	ErrEdgeShapeMismatch = diag.E_EDGE_SHAPE_MISMATCH
 
@@ -129,8 +126,9 @@ func (e *InternalError) Is(target error) bool {
 	return target == ErrInternalFailure
 }
 
-// wrapPanicValue wraps a recovered panic value into an InternalError with stack trace.
-// This should be called with the result of recover() in a deferred function.
+// wrapPanicValue wraps a recovered panic value into an InternalError with a
+// stack trace. r is the non-nil value recover returned: every caller tests
+// recover's result before calling, so a nil r is a programmer error.
 func wrapPanicValue(r any, kind InternalErrorKind) *InternalError {
 	var cause error
 	switch v := r.(type) {

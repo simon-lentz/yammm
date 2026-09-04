@@ -2,6 +2,7 @@ package immutable
 
 import (
 	"slices"
+	"sync"
 	"testing"
 )
 
@@ -470,4 +471,50 @@ func TestProperties_GetFold_O1Performance(t *testing.T) {
 	if str, strOk := v2.String(); !strOk || str != "found" {
 		t.Errorf("expected 'found', got %v", v2.Unwrap())
 	}
+}
+
+// PropertiesOf computes a wrapped map's sorted keys and folded index once
+// and shares the view: the second call allocates nothing. Recomputing both
+// on every call made a fold miss in the evaluator 3-4x slower than the scan
+// it replaced.
+func TestPropertiesOf_ComputesTheFoldedViewOnce(t *testing.T) {
+	src := map[string]any{}
+	for i := range 40 {
+		src[string(rune('A'+i%26))+string(rune('a'+i/26))] = int64(i)
+	}
+	m := WrapMap(src)
+	first := PropertiesOf(m)
+	if v, ok := first.GetFold("aa"); !ok || v.Unwrap() != int64(0) {
+		t.Fatalf("GetFold(aa) = %v, %v; want 0, true", v.Unwrap(), ok)
+	}
+	if allocs := testing.AllocsPerRun(100, func() { _ = PropertiesOf(m) }); allocs != 0 {
+		t.Errorf("PropertiesOf allocates %v per call after the first, want 0", allocs)
+	}
+	// A nested map wrapped through Wrap shares the same rule.
+	nested := Wrap(map[string]any{"outer": src}).Unwrap().(Map[string])
+	inner, _ := nested.Get("outer")
+	im, _ := inner.Map()
+	_ = PropertiesOf(im)
+	if allocs := testing.AllocsPerRun(100, func() { _ = PropertiesOf(im) }); allocs != 0 {
+		t.Errorf("PropertiesOf on a nested wrapped map allocates %v per call after the first, want 0", allocs)
+	}
+	if p := PropertiesOf(Map[string]{}); p.Len() != 0 {
+		t.Errorf("PropertiesOf(zero Map).Len() = %d, want 0", p.Len())
+	}
+}
+
+// The first computation may race between goroutines; every caller must see
+// one complete view. Run under -race.
+func TestPropertiesOf_FirstUseIsSafeConcurrently(t *testing.T) {
+	m := WrapMap(map[string]any{"Alpha": int64(1), "beta": int64(2), "GAMMA": int64(3)})
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			p := PropertiesOf(m)
+			if v, ok := p.GetFold("gamma"); !ok || v.Unwrap() != int64(3) {
+				t.Errorf("GetFold(gamma) = %v, %v; want 3, true", v.Unwrap(), ok)
+			}
+		})
+	}
+	wg.Wait()
 }

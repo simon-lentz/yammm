@@ -12,6 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 func sourceID(t *testing.T, name string) location.SourceID {
@@ -1059,7 +1060,7 @@ func TestComplete_Invariant_Single(t *testing.T) {
 					{Name: "age", Constraint: schema.NewIntegerConstraint()},
 				},
 				Invariants: []*schema.TestInvariantDecl{
-					{Name: "valid_age", Expr: nil}, // nil expression is valid for testing
+					{Name: "valid_age", Expr: expr.NewLiteral(true)},
 				},
 			},
 		},
@@ -1085,17 +1086,17 @@ func TestComplete_InvariantInheritanceChain(t *testing.T) {
 					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
 					{Name: "n", Constraint: schema.NewIntegerConstraint()},
 				},
-				Invariants: []*schema.TestInvariantDecl{{Name: "a_rule", Expr: nil}},
+				Invariants: []*schema.TestInvariantDecl{{Name: "a_rule", Expr: expr.NewLiteral(true)}},
 			},
 			{
 				Name:       "B",
 				Inherits:   []*schema.TestASTTypeRef{{Name: "A"}},
-				Invariants: []*schema.TestInvariantDecl{{Name: "b_rule", Expr: nil}},
+				Invariants: []*schema.TestInvariantDecl{{Name: "b_rule", Expr: expr.NewLiteral(true)}},
 			},
 			{
 				Name:       "C",
 				Inherits:   []*schema.TestASTTypeRef{{Name: "B"}},
-				Invariants: []*schema.TestInvariantDecl{{Name: "c_rule", Expr: nil}},
+				Invariants: []*schema.TestInvariantDecl{{Name: "c_rule", Expr: expr.NewLiteral(true)}},
 			},
 		},
 	}
@@ -1115,8 +1116,8 @@ func TestComplete_Invariant_Multiple(t *testing.T) {
 					{Name: "max", Constraint: schema.NewIntegerConstraint()},
 				},
 				Invariants: []*schema.TestInvariantDecl{
-					{Name: "min_valid", Expr: nil},
-					{Name: "max_valid", Expr: nil},
+					{Name: "min_valid", Expr: expr.NewLiteral(true)},
+					{Name: "max_valid", Expr: expr.NewLiteral(true)},
 				},
 			},
 		},
@@ -1136,13 +1137,38 @@ func TestComplete_Invariant_NilSkipped(t *testing.T) {
 				},
 				Invariants: []*schema.TestInvariantDecl{
 					nil, // nil entry should be skipped
-					{Name: "check", Expr: nil},
+					{Name: "check", Expr: expr.NewLiteral(true)},
 				},
 			},
 		},
 	}
 
 	completeGolden(t, model)
+}
+
+// An invariant without an expression is refused by the completer — the one
+// layer that constructs an Invariant — so nothing downstream tolerates it.
+func TestComplete_Invariant_NilExpressionRefused(t *testing.T) {
+	model := &schema.TestModel{
+		Name: "test",
+		Types: []*schema.TestTypeDecl{
+			{
+				Name: "Person",
+				Properties: []*schema.TestPropertyDecl{
+					{Name: "id", Constraint: schema.NewStringConstraint(), IsPrimaryKey: true},
+				},
+				Invariants: []*schema.TestInvariantDecl{{Name: "check", Expr: nil}},
+			},
+		},
+	}
+	_, result := buildAndComplete(t, model)
+	var found bool
+	for is := range result.Issues() {
+		found = found || (is.Code() == diag.E_INVALID_INVARIANT && strings.Contains(is.Message(), "has no expression"))
+	}
+	if !found {
+		t.Errorf("want E_INVALID_INVARIANT naming the absent expression; got %v", result)
+	}
 }
 
 func TestComplete_Association_ValidTarget(t *testing.T) {

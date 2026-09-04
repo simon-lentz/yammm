@@ -335,13 +335,14 @@ func TestCanonical_UUIDReadsAStringCarrier(t *testing.T) {
 	}
 }
 
-// A non-slice under a List constraint is an error, not a value already in
-// canonical form: the check side's coerceList refuses it, and both halves of
-// the stored-form rule must agree.
-func TestCanonical_ListRefusesANonSlice(t *testing.T) {
+// A non-list under a List constraint is an error, not a value already in
+// canonical form: the check side's coerceList refuses it through the same
+// reader, and both halves of the stored-form rule agree. A uuid.UUID is
+// [16]byte, so under a List it reads as sixteen bytes and fails at the first.
+func TestCanonical_ListRefusesANonList(t *testing.T) {
 	t.Parallel()
 	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
-	for name, in := range map[string]any{"string": "2026-08-19T12:00:00Z", "array": [1]string{"2026-08-19T12:00:00Z"}, "int": 7} {
+	for name, in := range map[string]any{"string": "2026-08-19T12:00:00Z", "int": 7, "uuid under a list of timestamps": uuid.MustParse("123e4567-e89b-12d3-a456-426614174000")} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got, err := value.Canonical(in, lc)
@@ -368,5 +369,16 @@ func TestCanonical_ListReadsAnImmutableSlice(t *testing.T) {
 	want := []any{"2026-08-19T12:00:00Z", "2026-08-19T13:00:00Z"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Canonical(immutable.Slice) = %#v, want %#v", got, want)
+	}
+}
+
+// An array is a list at every reader, as a slice is: a [1]string under
+// List<Timestamp> canonicalizes elementwise.
+func TestCanonical_ListReadsAnArray(t *testing.T) {
+	t.Parallel()
+	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
+	got := canon(t, [1]string{"2026-08-19T12:00:00+00:00"}, lc)
+	if !reflect.DeepEqual(got, []any{"2026-08-19T12:00:00Z"}) {
+		t.Errorf("Canonical([1]string) = %#v, want the canonical element", got)
 	}
 }

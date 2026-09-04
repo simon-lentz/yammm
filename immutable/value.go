@@ -271,7 +271,7 @@ func wrapMapValue(rv reflect.Value, clone bool) any {
 			val := iter.Value().Interface()
 			m[key] = Value{val: wrapValue(val, clone)}
 		}
-		return Map[string]{entries: m}
+		return Map[string]{entries: m, folded: &foldedView{}}
 	}
 
 	// For non-string-keyed maps, store as-is (unusual case)

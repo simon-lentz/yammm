@@ -552,7 +552,7 @@ Inheritance rules:
 
 `E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
 
-**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity. A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. One definition reached through two ancestors merges silently.
+**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. One definition reached through two ancestors merges silently.
 
 ### Constraint Narrowing
 
@@ -1327,7 +1327,7 @@ Parentheses group as usual.
 %    modulo (integers only)
 ```
 
-`+` is polymorphic three ways: numbers add (mixed integer/float promotes to float), strings concatenate, and lists concatenate (`[1] + [2]` is `[1, 2]`). The static check refuses any other pairing at load — a list beside a scalar, a string beside a number, an instance or an association key on either side.
+`+` is polymorphic three ways: numbers add (mixed integer/float promotes to float), strings concatenate, and lists concatenate (`[1] + [2]` is `[1, 2]`). The static check refuses any other pairing at load — a list beside a scalar, a string beside a number, a boolean on either side, the `nil` literal on either side, an instance on either side. An association to a String-keyed type is a string here, as it is everywhere: `PLACED_BY + "!"` concatenates the key.
 
 Integer arithmetic is exact within `int64`. A result outside it — `+`, `-`, `*`, `/` (the minimum divided by `-1`), unary `-` of the minimum, `Sum`, `Abs` — is an evaluation error, as division and modulo by zero are; it never wraps and never promotes to a float. An arithmetic operator applied to `nil` is an evaluation error too, `+` included: guard an absent value with `IsNil`, `Then`, `Lest` or `Default` — an absent list under `+` is written `(xs -> Default([])) + [1]`.
 
@@ -1469,10 +1469,13 @@ relation evaluates to depends on where its data lives:
   `ITEMS -> All |$i| { $i.qty > 0 }` and `ITEMS[0].qty` all read real values.
 - An **association**'s target is a reference. The instance holds the foreign
   key, not the target's row, so the relation evaluates to the target key — a
-  list for a `many` association, the single key otherwise. Presence, cardinality
-  and key comparison are answerable; the target type's properties are not in
-  this instance to answer with, and reaching for one is rejected at load
-  (`E_INVALID_INVARIANT`).
+  list for a `many` association, the single key otherwise. A key reads as the
+  target's primary-key property, which is a string for every key kind, and a
+  composite key as a list of those strings: `PLACED_BY -> Upper`,
+  `PLACED_BY + "!"` and `REGION -> Len == 2` are typed as the values they
+  are. Presence, cardinality and key comparison are answerable; the target
+  type's properties are not in this instance to answer with, and reaching for
+  one is rejected at load (`E_INVALID_INVARIANT`).
 
 A relation with no value evaluates to `nil`, so the null-guard idioms apply to a
 relation exactly as they do to a property.
@@ -1565,7 +1568,7 @@ Results on an empty collection are a mixed family:
 | `Round` | Round to the nearest whole number (banker's rounding); the result keeps the operand's kind, as `Floor` and `Ceil` do — a Float yields a Float |
 | `Min` | Minimum value: `a -> Min(b)` or `items -> Min` |
 | `Max` | Maximum value: `a -> Max(b)` or `items -> Max` |
-| `Compare` | Three-way comparison: `a -> Compare(b)` returns -1, 0, or 1 |
+| `Compare` | Three-way comparison: `a -> Compare(b)` returns -1, 0, or 1, for any two values the total order ranks; an instance is refused |
 
 #### String Functions
 
@@ -1758,7 +1761,6 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_PART_TYPE_DIRECT` — attempt to directly instantiate part type
 - `E_TYPE_MISMATCH` — value has wrong type
 - `E_MISSING_REQUIRED` — required property missing
-- `E_MISSING_PRIMARY_KEY` — primary key property missing
 - `E_UNKNOWN_FIELD` — unexpected field in instance data
 - `E_CONSTRAINT_FAIL` — constraint check failed
 - `E_INVARIANT_FAIL` — invariant check failed

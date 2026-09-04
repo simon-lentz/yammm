@@ -4,6 +4,7 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/location"
@@ -130,8 +131,17 @@ func (v *ValidInstance) Edge(relationName string) (*ValidEdgeData, bool) {
 	if v == nil {
 		return nil, false
 	}
-	edge, ok := v.edges[relationName]
-	return edge, ok
+	if edge, ok := v.edges[relationName]; ok {
+		return edge, true
+	}
+	// The field-name spelling: the DSL name lower-cased, the rule every
+	// name-taking surface of this package accepts.
+	for name, edge := range v.edges {
+		if strings.ToLower(name) == relationName {
+			return edge, true
+		}
+	}
+	return nil, false
 }
 
 // Provenance returns the source location metadata.
@@ -172,7 +182,8 @@ type ValidEdgeData struct {
 // NewValidEdgeData asserts the caller's claim that the targets are valid.
 // It performs no validation; use [Validator] for validated edge data.
 func NewValidEdgeData(targets []ValidEdgeTarget) *ValidEdgeData {
-	return &ValidEdgeData{targets: targets}
+	// The caller keeps its slice; the edge must not see a later mutation.
+	return &ValidEdgeData{targets: slices.Clone(targets)}
 }
 
 // Targets returns a defensive copy of all edge targets.
@@ -190,7 +201,7 @@ func (e *ValidEdgeData) Targets() []ValidEdgeTarget {
 // Example:
 //
 //	for target := range edge.TargetsIter() {
-//	    fmt.Println(target.Key())
+//	    fmt.Println(target.TargetKey())
 //	}
 func (e *ValidEdgeData) TargetsIter() iter.Seq[ValidEdgeTarget] {
 	return func(yield func(ValidEdgeTarget) bool) {

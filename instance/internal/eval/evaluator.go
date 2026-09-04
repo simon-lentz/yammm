@@ -33,14 +33,18 @@ func NewEvaluator(opts ...Option) *Evaluator {
 // Evaluate evaluates an expression with the given scope.
 // Returns the result value, or an error if evaluation fails.
 func (e *Evaluator) Evaluate(expression expr.Expression, scope Scope) (result any, err error) {
-	if expression == nil {
-		return nil, nil //nolint:nilnil // nil expression evaluates to nil
-	}
-
 	// The evaluator takes no context; the op ends with the evaluation's own
-	// error, which is not known until the return, hence the closure.
+	// error, which is not known until the return, hence the closure. A panic
+	// never assigns the named return, so it is recovered here to end the op
+	// with it and re-raised for the recover that owns it.
 	op := trace.Begin(context.Background(), e.cfg.logger, "yammm.eval.expr")
-	defer func() { op.End(err) }()
+	defer func() {
+		if r := recover(); r != nil {
+			op.End(fmt.Errorf("panic: %v", r))
+			panic(r)
+		}
+		op.End(err)
+	}()
 
 	return e.evaluate(expression, scope)
 }
@@ -68,8 +72,6 @@ func (e *Evaluator) EvaluateBool(expression expr.Expression, scope Scope) (bool,
 // places one only at an S-expression's head, read through [expr.SExpr.Op].
 func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, error) {
 	switch ex := expression.(type) {
-	case nil:
-		return nil, nil //nolint:nilnil // nil expression evaluates to nil
 	case *expr.Literal:
 		return ex.Val, nil
 	case expr.DatatypeLiteral:
@@ -83,6 +85,14 @@ func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, erro
 }
 
 // evalSExpr evaluates an S-expression.
+// operatorOps are the operators evalSExpr dispatches after evaluating every
+// child; a special form or a builtin is handled before this set is consulted.
+var operatorOps = map[string]bool{
+	"+": true, "-": true, "*": true, "/": true, "%": true, "-x": true,
+	"==": true, "!=": true, "<": true, "<=": true, ">": true, ">=": true,
+	"=~": true, "!~": true, "in": true, "!": true, "^": true,
+}
+
 func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 	op := sexpr.Op()
 	children := sexpr.Children()
@@ -115,6 +125,12 @@ func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 	// Check if it's a builtin
 	if def, ok := lookupBuiltin(strings.ToLower(op)); ok {
 		return e.evalBuiltin(def, children, scope)
+	}
+
+	// An unknown function is reported before any child is evaluated: a
+	// parsed call carries a nil body slot, which is no expression to evaluate.
+	if !operatorOps[op] {
+		return nil, fmt.Errorf("unknown function: %s", op)
 	}
 
 	// Evaluate children for operators that need all args evaluated
@@ -848,24 +864,18 @@ func isNumericVar(name string) bool {
 // datatypeChecker returns the TypeChecker for a datatype name, by the set
 // [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
 // any other name at load.
+// datatypeCheckers maps each datatype check expr.IsDatatypeCheck admits to
+// its kind's checker. A name absent here is an error, never another kind's
+// check by default.
+var datatypeCheckers = map[string]func() TypeChecker{
+	"string": IsString, "integer": IsInteger, "float": IsFloat, "boolean": IsBoolean,
+	"uuid": IsUUID, "timestamp": IsTimestamp, "date": IsDate,
+}
+
 func (e *Evaluator) datatypeChecker(name string) (TypeChecker, error) {
-	if !expr.IsDatatypeCheck(name) {
+	mk, ok := datatypeCheckers[strings.ToLower(name)]
+	if !ok || !expr.IsDatatypeCheck(name) {
 		return nil, fmt.Errorf("unknown datatype: %s", name)
 	}
-	switch strings.ToLower(name) {
-	case "string":
-		return IsString(), nil
-	case "integer":
-		return IsInteger(), nil
-	case "float":
-		return IsFloat(), nil
-	case "boolean":
-		return IsBoolean(), nil
-	case "uuid":
-		return IsUUID(), nil
-	case "timestamp":
-		return IsTimestamp(), nil
-	default:
-		return IsDate(), nil
-	}
+	return mk(), nil
 }

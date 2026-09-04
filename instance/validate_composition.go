@@ -54,7 +54,7 @@ func pkPathFromInstance(basePath path.Builder, child *ValidInstance, childType *
 func (v *Validator) validateCompositions(
 	ctx context.Context,
 	typ *schema.Type,
-	in inputKeys,
+	rels map[*schema.Relation]relationInput,
 	collector *diag.Collector,
 	prov *location.Provenance,
 	base path.Builder,
@@ -67,11 +67,12 @@ func (v *Validator) validateCompositions(
 			return composed
 		}
 
-		inputKey, rawValue, hasValue := v.lookupRelationInput(rel, in, collector, prov, base)
-		if !hasValue {
+		in := rels[rel]
+		if in.state != relationPresent {
 			// A collision was reported as the whole of what is wrong; an
-			// absent required composition is reported here.
-			if !rel.IsOptional() && !collector.HasErrors() {
+			// absent required composition is reported here, whatever else
+			// the instance drew.
+			if !rel.IsOptional() && in.state == relationAbsent {
 				issue := diag.NewIssue(
 					diag.Error,
 					ErrUnresolvedRequiredComposition,
@@ -85,7 +86,7 @@ func (v *Validator) validateCompositions(
 			continue
 		}
 
-		composedValue := v.validateComposition(ctx, rel, rawValue, collector, prov, base.Key(inputKey), depth)
+		composedValue := v.validateComposition(ctx, rel, in.value, collector, prov, base.Key(in.key), depth)
 		if !composedValue.IsNil() {
 			if composed == nil {
 				composed = make(map[string]immutable.Value)
@@ -203,7 +204,7 @@ func (v *Validator) validateComposition(
 	relationDetails := diag.PathRelation(rel.Name(), rel.FieldName())
 	validChildren, childType := v.validateComposedBatch(ctx, rel, childRaws, childBases, childDepth, func(_ int, res diag.Result) {
 		collector.MergeFunc(res, func(issue diag.Issue) diag.Issue {
-			if hasDetailKey(issue, diag.DetailKeyRelationName) {
+			if hasDetailKey(issue, diag.DetailKeyRelationName) || hasDetailKey(issue, diag.DetailKeyJSONField) {
 				return issue
 			}
 			return diag.FromIssue(issue).WithDetails(relationDetails...).Build()

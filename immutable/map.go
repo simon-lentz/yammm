@@ -4,6 +4,8 @@ import (
 	"iter"
 	"maps"
 	"reflect"
+	"slices"
+	"sync"
 )
 
 // Map provides immutable access to a map with pre-wrapped values.
@@ -15,6 +17,31 @@ import (
 // Map is safe for concurrent read access.
 type Map[K comparable] struct {
 	entries map[K]Value
+
+	// folded memoises the sorted keys and the case-folded index a
+	// [Properties] view over these entries needs, so [PropertiesOf]
+	// computes them once per map rather than once per call. Nil on a zero
+	// Map; only read for string keys.
+	folded *foldedView
+}
+
+// foldedView is the sorted-key list and folded index of one string-keyed
+// entry set, computed on first use and shared by every Properties view over
+// it.
+type foldedView struct {
+	once        sync.Once
+	sortedKeys  []string
+	foldedIndex map[string]string
+}
+
+// get computes the view once for entries and returns it. Safe for
+// concurrent first use.
+func (f *foldedView) get(entries map[string]Value) ([]string, map[string]string) {
+	f.once.Do(func() {
+		f.sortedKeys = slices.Sorted(maps.Keys(entries))
+		f.foldedIndex = computeFoldedIndex(f.sortedKeys)
+	})
+	return f.sortedKeys, f.foldedIndex
 }
 
 // WrapMap wraps a map with ownership transfer semantics.
@@ -35,7 +62,7 @@ func WrapMap[K comparable](m map[K]any, opts ...Option) Map[K] {
 	for k, v := range m {
 		entries[k] = Value{val: wrapValue(v, cfg.clone)}
 	}
-	return Map[K]{entries: entries}
+	return Map[K]{entries: entries, folded: &foldedView{}}
 }
 
 // Get returns the value for the given key and true if the key exists.

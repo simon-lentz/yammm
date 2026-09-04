@@ -179,8 +179,11 @@ func TestAccessMember_FoldsByThePropertiesRule(t *testing.T) {
 	})
 }
 
-// Substring clamps in int64 before it narrows an index to int, so an index
-// no int can hold is clamped, not wrapped, on every architecture.
+// Substring clamps its indices before narrowing to int, so an index no int
+// can hold is clamped rather than wrapped. These rows pin the clamping at
+// the int64 edges on a 64-bit build, where int and int64 coincide; the
+// narrowing itself is observable only on a 32-bit target, which CI does not
+// run.
 func TestSubstring_ClampsInInt64(t *testing.T) {
 	t.Parallel()
 	sub := func(args ...any) expr.Expression {

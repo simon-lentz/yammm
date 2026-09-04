@@ -54,6 +54,11 @@ func TestCardinalityLocator_NamesTheFirstExcessCall(t *testing.T) {
 	if !strings.Contains(err.Error(), wantLine) {
 		t.Errorf("error = %v, want it to name the first excess call at %s", err, wantLine)
 	}
+	// Every excess call is an error at its own call: three targets are two
+	// errors, so Build's count is true and names the second beside the first.
+	if !strings.Contains(err.Error(), "this call adds target 2") || !strings.Contains(err.Error(), "and 1 more") {
+		t.Errorf("error = %v, want the first excess call's own wording and a count of one more", err)
+	}
 }
 
 // A single target on a single-valued relation still builds clean, so the

@@ -18,64 +18,111 @@ func Equal(a, b any) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	am, aIsMap := mapEntries(a)
-	bm, bIsMap := mapEntries(b)
-	if aIsMap || bIsMap {
-		if !aIsMap || !bIsMap || len(am) != len(bm) {
-			return false
-		}
-		for k, av := range am {
-			bv, ok := bm[k]
-			if !ok || !Equal(av, bv) {
+	as, bs := TypeStrata(a), TypeStrata(b)
+	if as != InvalidStrata && bs != InvalidStrata {
+		if as == SliceStrata && bs == SliceStrata {
+			an, aAt := sliceAccessor(a)
+			bn, bAt := sliceAccessor(b)
+			if an != bn {
 				return false
 			}
+			for i := range an {
+				if !Equal(aAt(i), bAt(i)) {
+					return false
+				}
+			}
+			return true
 		}
-		return true
+		cmp, err := Order(a, b)
+		return err == nil && cmp == 0
 	}
-	if TypeStrata(a) == SliceStrata && TypeStrata(b) == SliceStrata {
-		an, aAt := sliceAccessor(a)
-		bn, bAt := sliceAccessor(b)
-		if an != bn {
+	// Only a value the order cannot rank reaches here: a map compares in
+	// place, entry by entry, so an instance comparison allocates nothing.
+	if !isMap(a) || !isMap(b) || mapLen(a) != mapLen(b) {
+		return false
+	}
+	equal := true
+	rangeMap(a, func(k string, av any) bool {
+		bv, ok := mapLookup(b, k)
+		if !ok || !Equal(av, bv) {
+			equal = false
 			return false
 		}
-		for i := range an {
-			if !Equal(aAt(i), bAt(i)) {
-				return false
-			}
-		}
 		return true
-	}
-	cmp, err := Order(a, b)
-	return err == nil && cmp == 0
+	})
+	return equal
 }
 
-// mapEntries reads a map value as its unwrapped entries: an [immutable.Map],
-// [immutable.Properties], or a string-keyed Go map. Anything else is not a
-// map here.
-func mapEntries(v any) (map[string]any, bool) {
-	switch m := v.(type) {
-	case immutable.Map[string]:
-		out := make(map[string]any, m.Len())
-		for k, val := range m.Range() {
-			out[k] = val.Unwrap()
-		}
-		return out, true
-	case immutable.Properties:
-		out := make(map[string]any, m.Len())
-		for k, val := range m.Range() {
-			out[k] = val.Unwrap()
-		}
-		return out, true
-	case map[string]any:
-		return m, true
+// isMap reports whether v is a map shape [Equal] reads: an [immutable.Map],
+// [immutable.Properties], or a string-keyed Go map.
+func isMap(v any) bool {
+	switch v.(type) {
+	case immutable.Map[string], immutable.Properties, map[string]any:
+		return true
 	}
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String {
-		out := make(map[string]any, rv.Len())
-		for it := rv.MapRange(); it.Next(); {
-			out[it.Key().String()] = it.Value().Interface()
-		}
-		return out, true
+	return rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String
+}
+
+func mapLen(v any) int {
+	switch m := v.(type) {
+	case immutable.Map[string]:
+		return m.Len()
+	case immutable.Properties:
+		return m.Len()
+	case map[string]any:
+		return len(m)
 	}
-	return nil, false
+	return reflect.ValueOf(v).Len()
+}
+
+// mapLookup reads one entry of a map shape, unwrapped.
+func mapLookup(v any, key string) (any, bool) {
+	switch m := v.(type) {
+	case immutable.Map[string]:
+		val, ok := m.Get(key)
+		return val.Unwrap(), ok
+	case immutable.Properties:
+		val, ok := m.Get(key)
+		return val.Unwrap(), ok
+	case map[string]any:
+		val, ok := m[key]
+		return val, ok
+	}
+	rv := reflect.ValueOf(v).MapIndex(reflect.ValueOf(key))
+	if !rv.IsValid() {
+		return nil, false
+	}
+	return rv.Interface(), true
+}
+
+// rangeMap visits every entry of a map shape, unwrapped, until yield returns
+// false.
+func rangeMap(v any, yield func(string, any) bool) {
+	switch m := v.(type) {
+	case immutable.Map[string]:
+		for k, val := range m.Range() {
+			if !yield(k, val.Unwrap()) {
+				return
+			}
+		}
+	case immutable.Properties:
+		for k, val := range m.Range() {
+			if !yield(k, val.Unwrap()) {
+				return
+			}
+		}
+	case map[string]any:
+		for k, val := range m {
+			if !yield(k, val) {
+				return
+			}
+		}
+	default:
+		for it := reflect.ValueOf(v).MapRange(); it.Next(); {
+			if !yield(it.Key().String(), it.Value().Interface()) {
+				return
+			}
+		}
+	}
 }

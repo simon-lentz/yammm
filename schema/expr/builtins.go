@@ -66,10 +66,9 @@ const (
 	RecvAny ReceiverKind = iota
 	// RecvList: a list. A scalar, an instance or an association key is refused.
 	RecvList
-	// RecvScalar: any scalar, an association key among them. A list or an
-	// instance is refused. Compare ranks two values by strata, so it alone
-	// takes any scalar.
-	RecvScalar
+	// RecvOrdered: any value the total order ranks — a scalar, an association
+	// key, a list. An instance is refused. Compare alone takes it.
+	RecvOrdered
 	// RecvScalarList: a list of scalars. A list of instances is refused as a
 	// scalar is, because the elements are ordered.
 	RecvScalarList
@@ -151,7 +150,7 @@ func init() {
 	spec("Round", 0, 0, 0, false, RecvNumeric, ResultScalar, BindNone)
 	spec("Min", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone)
 	spec("Max", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone)
-	spec("Compare", 1, 1, 0, false, RecvScalar, ResultScalar, BindNone)
+	spec("Compare", 1, 1, 0, false, RecvOrdered, ResultScalar, BindNone)
 
 	// String
 	spec("Upper", 0, 0, 0, false, RecvString, ResultScalar, BindNone)

@@ -575,14 +575,24 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 
 		fieldName := strings.ToLower(rd.Name)
 
-		// Convert edge properties (associations only)
+		// Convert edge properties (associations only). A name declared twice
+		// is one error, as it is for a node property.
 		var props []*Property
 		if rd.Kind == RelationAssociation && len(rd.Properties) > 0 {
 			props = make([]*Property, 0, len(rd.Properties))
+			seenProp := make(map[string]*propertyDecl, len(rd.Properties))
 			for _, pd := range rd.Properties {
 				if pd == nil {
 					continue
 				}
+				if existing, ok := seenProp[pd.Name]; ok {
+					c.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PROPERTY,
+						fmt.Sprintf("edge property %q is defined multiple times on relation %q in type %q", pd.Name, rd.Name, ownerType)).
+						WithSpan(pd.Span).
+						WithRelated(location.RelatedInfo{Span: existing.Span, Message: "first defined here"}).Build())
+					continue
+				}
+				seenProp[pd.Name] = pd
 				scope := RelationScope(rd.Name)
 				p := newProperty(
 					pd.Name,
@@ -641,6 +651,19 @@ func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) [
 
 	for _, id := range decls {
 		if id == nil {
+			continue
+		}
+		// An invariant's message is its identity and the text a failure
+		// reports; its expression is what it checks. Either absent is refused
+		// here, once, and nothing downstream tolerates the state.
+		if id.Name == "" {
+			c.errorf(id.Span, diag.E_INVALID_INVARIANT,
+				"invariant message must not be empty in type %q", typeName)
+			continue
+		}
+		if id.Expr == nil {
+			c.errorf(id.Span, diag.E_INVALID_INVARIANT,
+				"invariant %q in type %q has no expression", id.Name, typeName)
 			continue
 		}
 		if prior, dup := first[id.Name]; dup {

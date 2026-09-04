@@ -59,12 +59,12 @@ func PropertiesOf(m Map[string]) Properties {
 	if m.entries == nil {
 		return Properties{}
 	}
-	sortedKeys := slices.Sorted(maps.Keys(m.entries))
-	return Properties{
-		entries:     m.entries,
-		sortedKeys:  sortedKeys,
-		foldedIndex: computeFoldedIndex(sortedKeys),
+	if m.folded == nil {
+		sortedKeys := slices.Sorted(maps.Keys(m.entries))
+		return Properties{entries: m.entries, sortedKeys: sortedKeys, foldedIndex: computeFoldedIndex(sortedKeys)}
 	}
+	sortedKeys, foldedIndex := m.folded.get(m.entries)
+	return Properties{entries: m.entries, sortedKeys: sortedKeys, foldedIndex: foldedIndex}
 }
 
 // Get returns the value for the given property name and true if it exists.

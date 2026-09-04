@@ -11,6 +11,10 @@
         "Value": "null"
       },
       {
+        "Key": "relation",
+        "Value": "EMPLOYER"
+      },
+      {
         "Key": "json_field",
         "Value": "employer"
       }
