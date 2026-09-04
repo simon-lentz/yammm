@@ -48,8 +48,29 @@ func (c *completer) detectTypeCollisions(t *Type) {
 	}
 
 	c.checkPropertyCaseCollisions(t)
+	c.checkEdgePropertyCaseCollisions(t)
 	c.checkPropertyRelationCollisions(t)
 	c.checkRelationCollisions(t)
+}
+
+// checkEdgePropertyCaseCollisions reports two edge properties on one of t's
+// own associations whose names differ only by case: the case-folded lookup
+// the validator reads them through is sound only when the schema guarantees
+// uniqueness under fold, as it does for node properties.
+func (c *completer) checkEdgePropertyCaseCollisions(t *Type) {
+	for r := range t.Associations() {
+		first := make(map[string]*Property)
+		for _, p := range r.properties {
+			lower := strings.ToLower(p.Name())
+			if prior, seen := first[lower]; seen {
+				c.errorfRelated(p.Span(), diag.E_CASE_COLLISION,
+					[]location.RelatedInfo{{Span: prior.Span(), Message: "collides with this declaration"}},
+					"edge property %q on relation %q in type %q collides with %q (case-insensitive)", p.Name(), r.Name(), t.Name(), prior.Name())
+				continue
+			}
+			first[lower] = p
+		}
+	}
 }
 
 // checkPropertyCaseCollisions detects case-insensitive property name collisions.

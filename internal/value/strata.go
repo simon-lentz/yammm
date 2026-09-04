@@ -49,9 +49,9 @@ func TypeStrata(a any) int {
 	case *regexp.Regexp:
 		return StringStrata
 	case json.Number:
-		// Numeric here because ClassifyWithRegistry says numeric; a lexical
-		// number that ordered as a string would compare against int64 by
-		// strata rank and answer without erroring.
+		// Numeric here because Classify says numeric; a lexical number that
+		// ordered as a string would compare against int64 by strata rank and
+		// answer without erroring.
 		return NumericStrata
 	case immutable.Slice:
 		// A List- or Vector-typed property carries this out of the

@@ -5,7 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"regexp"
-	"slices"
+	"strconv"
 	"testing"
 	"testing/quick"
 	"time"
@@ -151,8 +151,8 @@ func TestTypeStrata_ImmutableSliceIsASlice(t *testing.T) {
 	}
 }
 
-// A json.Number is numeric everywhere in this package. ClassifyWithRegistry
-// has always called it Int/Float; before TypeStrata agreed, a lexical number
+// A json.Number is numeric everywhere in this package. Classify has always
+// called it Int/Float; before TypeStrata agreed, a lexical number
 // took the String strata and compared against int64 by strata RANK — answering
 // "greater" with no error rather than comparing the two numbers.
 //
@@ -172,6 +172,18 @@ func TestOrder_JSONNumberIsNumeric(t *testing.T) {
 		{"less than int64", json.Number("4"), int64(5), -1},
 		{"fractional against float64", json.Number("2.5"), 2.5, 0},
 		{"int64 on the left", int64(9), json.Number("5"), 1},
+		{"max uint64 lexical against uint64", json.Number("18446744073709551615"), uint64(math.MaxUint64), 0},
+		{"uint64 above int64 against its lexical", uint64(1 << 63), json.Number("9223372036854775808"), 0},
+		{"lexical one below max against max", json.Number("18446744073709551614"), uint64(math.MaxUint64), -1},
+		// A json.Number holding an integer compares as an integer whatever
+		// the other side is: through float64 the lexical 2^64-1 rounds up to
+		// 2^64 and the order lies at 2^64, 2^63 and 2^53 alike.
+		{"lexical max uint64 against float 2^64", json.Number("18446744073709551615"), float64(1 << 64), -1},
+		{"lexical 2^63+1 against float 2^63", json.Number("9223372036854775809"), float64(1 << 63), 1},
+		{"lexical 2^53+1 against float 2^53", json.Number("9007199254740993"), float64(1 << 53), 1},
+		{"lexical 2^53 against float 2^53", json.Number("9007199254740992"), float64(1 << 53), 0},
+		{"float 2^64 against lexical max uint64", float64(1 << 64), json.Number("18446744073709551615"), 1},
+		{"fractional lexical against float still exact", json.Number("2.5"), 2.5, 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := value.Order(tt.left, tt.right)
@@ -330,8 +342,12 @@ func TestGetUint64(t *testing.T) {
 		{"uint64 large", uint64(1<<63 + 1000), 1<<63 + 1000, true},
 		{"uint64 max", uint64(1<<64 - 1), 1<<64 - 1, true},
 		{"uintptr", uintptr(12345), 12345, true},
+		{"json.Number max uint64", json.Number("18446744073709551615"), 1<<64 - 1, true},
+		{"json.Number small", json.Number("42"), 42, true},
 
 		// Non-unsigned types return false
+		{"json.Number negative", json.Number("-1"), 0, false},
+		{"json.Number fractional", json.Number("1.5"), 0, false},
 		{"int", int(42), 0, false},
 		{"int64", int64(42), 0, false},
 		{"float64", float64(42.5), 0, false},
@@ -666,71 +682,6 @@ func sign(n int) int {
 	default:
 		return -1
 	}
-}
-
-func TestLess(t *testing.T) {
-	t.Run("matches Order", func(t *testing.T) {
-		inputs := []struct {
-			a    any
-			b    any
-			want bool
-		}{
-			{nil, false, true},
-			{false, nil, false},
-			{int64(1), int64(2), true},
-			{uint64(1), uint64(2), true},
-			{float64(3), float64(3), false},
-			{"a", "b", true},
-			{[]any{"a"}, []any{"a", "b"}, true},
-		}
-		for _, tc := range inputs {
-			got, err := value.Less(tc.a, tc.b)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			assertEqual(t, tc.want, got)
-
-			ord, err := value.Order(tc.a, tc.b)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			assertEqual(t, ord < 0, got)
-		}
-	})
-
-	t.Run("errors propagate", func(t *testing.T) {
-		_, err := value.Less(struct{}{}, 1)
-		if err == nil {
-			t.Error("expected error for struct comparison")
-		}
-	})
-
-	t.Run("usable with sort helpers", func(t *testing.T) {
-		values := []any{"b", "a", "c"}
-		slices.SortFunc(values, func(a, b any) int {
-			lessAB, err := value.Less(a, b)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if lessAB {
-				return -1
-			}
-			lessBA, err := value.Less(b, a)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if lessBA {
-				return 1
-			}
-			return 0
-		})
-		expected := []any{"a", "b", "c"}
-		for i := range values {
-			if values[i] != expected[i] {
-				t.Errorf("at index %d: expected %v, got %v", i, expected[i], values[i])
-			}
-		}
-	})
 }
 
 func TestGetInt64(t *testing.T) {
@@ -1564,7 +1515,44 @@ func TestOrder_Transitivity_Float64_Quick(t *testing.T) {
 
 // TestOrder_Transitivity_MixedNumeric_Quick verifies transitivity across
 // mixed numeric types (int64, uint64, float64).
+// Order is transitive with a json.Number in the unsigned role: the lexical
+// 2^64-1 ranks below uint64(2^64-1)'s float neighbour exactly as the uint64
+// does, so A == B and B < C implies A < C. Through the float arm A == C.
+func TestOrder_JSONNumberIsTransitiveAgainstFloat(t *testing.T) {
+	a := json.Number("18446744073709551615")
+	b := uint64(math.MaxUint64)
+	c := float64(1 << 64)
+	ab, _ := value.Order(a, b)
+	bc, _ := value.Order(b, c)
+	ac, _ := value.Order(a, c)
+	if ab != 0 || bc != -1 || ac != -1 {
+		t.Errorf("Order(A,B)=%d Order(B,C)=%d Order(A,C)=%d; want 0, -1, -1", ab, bc, ac)
+	}
+	if value.Equal(a, c) {
+		t.Error("Equal(json.Number(2^64-1), float64(2^64)) = true, want false")
+	}
+}
+
 func TestOrder_Transitivity_MixedNumeric_Quick(t *testing.T) {
+	// A json.Number holding u takes the unsigned role too: it must order
+	// exactly as u does against every i and flt.
+	t.Run("json.Number in the unsigned role", func(t *testing.T) {
+		f := func(i int64, u uint64, flt float64) bool {
+			n := json.Number(strconv.FormatUint(u, 10))
+			nu, err1 := value.Order(n, u)
+			nf, err2 := value.Order(n, flt)
+			uf, err3 := value.Order(u, flt)
+			ni, err4 := value.Order(n, i)
+			ui, err5 := value.Order(u, i)
+			if err1 != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil {
+				return false
+			}
+			return nu == 0 && nf == uf && ni == ui
+		}
+		if err := quick.Check(f, nil); err != nil {
+			t.Error(err)
+		}
+	})
 	f := func(i int64, u uint64, flt float64) bool {
 		// Test transitivity with i, u, flt in different roles
 		// If i < u and u < flt, then i < flt
@@ -1711,10 +1699,11 @@ func TestIsWholeNumber(t *testing.T) {
 		{"negative_infinity", math.Inf(-1), false},
 		{"nan", math.NaN(), false},
 
-		// Out of int64 range
-		{"too_large", float64(1 << 63), false}, // 2^63 is too large for int64
-		{"too_large_positive", 1e20, false},    // Way too large
-		{"too_large_negative", -1e20, false},   // Way too negative (but still in range!)
+		// Whole but outside int64: whole all the same. GetInt64FromFloat
+		// carries the range and refuses these (whole_test.go).
+		{"too_large", float64(1 << 63), true},
+		{"too_large_positive", 1e20, true},
+		{"too_large_negative", -1e20, true},
 	}
 
 	for _, tt := range tests {
@@ -1792,11 +1781,15 @@ func TestGetInt64FromFloat_Quick(t *testing.T) {
 func TestIsWholeNumber_BoundaryConditions(t *testing.T) {
 	// Test specific boundary values around int64 limits
 
-	// float64(1<<63) is exactly 2^63, which is > MaxInt64 (2^63 - 1)
-	t.Run("at_2_63_is_false", func(t *testing.T) {
+	// float64(1<<63) is exactly 2^63: a whole number that is > MaxInt64
+	// (2^63 - 1), so it is whole and does not convert.
+	t.Run("at_2_63_is_whole_but_does_not_fit", func(t *testing.T) {
 		f := float64(1 << 63)
-		if value.IsWholeNumber(f) {
-			t.Errorf("IsWholeNumber(2^63) should be false, 2^63 exceeds MaxInt64")
+		if !value.IsWholeNumber(f) {
+			t.Errorf("IsWholeNumber(2^63) should be true: it has no fractional part")
+		}
+		if _, ok := value.GetInt64FromFloat(f); ok {
+			t.Errorf("GetInt64FromFloat(2^63) should refuse: 2^63 exceeds MaxInt64")
 		}
 	})
 
@@ -1852,5 +1845,18 @@ func TestOrder_TimeErrorsWhileItsStringFormDoesNot(t *testing.T) {
 	}
 	if got != -1 {
 		t.Errorf("Order(earlier, later) = %d, want -1", got)
+	}
+}
+
+// GetString refuses a json.Number: it is a named type over string, so the
+// reflect fallback would read a number's digits as a string, and every
+// string-kinded check would accept a value Classify calls numeric.
+func TestGetString_RefusesAJSONNumber(t *testing.T) {
+	if s, ok := value.GetString(json.Number("4200")); ok {
+		t.Errorf("GetString(json.Number) = %q, true; want refused", s)
+	}
+	type carrier string
+	if s, ok := value.GetString(carrier("x")); !ok || s != "x" {
+		t.Errorf("a named string carrier must still read: got %q, %v", s, ok)
 	}
 }

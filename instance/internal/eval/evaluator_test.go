@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema/expr"
@@ -18,7 +19,6 @@ func TestEvaluator_Literals(t *testing.T) {
 		expr expr.Expression
 		want any
 	}{
-		{"nil", nil, nil},
 		{"int", lit(int64(42)), int64(42)},
 		{"float", lit(3.14), 3.14},
 		{"string", lit("hello"), "hello"},
@@ -252,7 +252,7 @@ func TestEvaluator_NumericVarSet(t *testing.T) {
 
 func TestEvaluator_Variable_Self(t *testing.T) {
 	ev := eval.NewEvaluator()
-	scope := eval.EmptyScope().WithSelf(map[string]any{"name": "Test", "value": int64(42)})
+	scope := eval.EmptyScope().WithVar("self", map[string]any{"name": "Test", "value": int64(42)})
 
 	result, err := ev.Evaluate(sx("$", lit("self")), scope)
 	require.NoError(t, err)
@@ -380,12 +380,6 @@ func TestEvaluator_EvaluateBool(t *testing.T) {
 		assert.False(t, result)
 	})
 
-	t.Run("nil_is_false", func(t *testing.T) {
-		result, err := ev.EvaluateBool(nil, scope)
-		require.NoError(t, err)
-		assert.False(t, result)
-	})
-
 	t.Run("non_bool_error", func(t *testing.T) {
 		_, err := ev.EvaluateBool(lit("string"), scope)
 		require.Error(t, err)
@@ -399,11 +393,6 @@ func TestEvaluator_SliceConcat(t *testing.T) {
 		[]any{int64(1), int64(2), int64(3), int64(4)})
 }
 
-func TestEvaluator_Op(t *testing.T) {
-	// When Op is evaluated alone, it returns its string value.
-	evalEq(t, expr.Op("test"), "test")
-}
-
 // TestEvaluator_MemberAccess_EdgeCases is the canonical member-access table:
 // nil receiver, exact and case-insensitive map keys, missing keys, and
 // non-map receivers.
@@ -413,17 +402,17 @@ func TestEvaluator_MemberAccess_EdgeCases(t *testing.T) {
 	})
 
 	t.Run("access_map_exact_match", func(t *testing.T) {
-		m := map[string]any{"name": "Alice", "age": int64(30)}
+		m := immutable.WrapMap(map[string]any{"name": "Alice", "age": int64(30)})
 		evalEq(t, sx(".", lit(m), lit("name")), "Alice")
 	})
 
 	t.Run("access_map_case_insensitive", func(t *testing.T) {
-		m := map[string]any{"Name": "Alice"}
+		m := immutable.WrapMap(map[string]any{"Name": "Alice"})
 		evalEq(t, sx(".", lit(m), lit("name")), "Alice")
 	})
 
 	t.Run("access_map_missing_key_returns_nil", func(t *testing.T) {
-		m := map[string]any{"name": "Alice"}
+		m := immutable.WrapMap(map[string]any{"name": "Alice"})
 		evalEq(t, sx(".", lit(m), lit("nonexistent")), nil)
 	})
 
@@ -541,33 +530,16 @@ func TestEvaluator_DatatypeLiteral(t *testing.T) {
 	ev := eval.NewEvaluator()
 	scope := eval.EmptyScope()
 
-	datatypes := []struct {
-		name    string
-		aliases []string
-	}{
-		{"string", nil},
-		{"integer", []string{"int"}},
-		{"float", []string{"number"}},
-		{"boolean", []string{"bool"}},
-		{"uuid", nil},
-		{"timestamp", nil},
-		{"date", nil},
-	}
+	// The seven names expr.IsDatatypeCheck admits, in the spelling the
+	// evaluator folds them to; the parser only ever emits the capitalized form.
+	datatypes := []string{"string", "integer", "float", "boolean", "uuid", "timestamp", "date"}
 
-	for _, dt := range datatypes {
-		t.Run(dt.name, func(t *testing.T) {
-			result, err := ev.Evaluate(expr.DatatypeLiteral(dt.name), scope)
+	for _, name := range datatypes {
+		t.Run(name, func(t *testing.T) {
+			result, err := ev.Evaluate(expr.DatatypeLiteral(name), scope)
 			require.NoError(t, err)
 			assert.NotNil(t, result) // result is a TypeChecker function
 		})
-
-		for _, alias := range dt.aliases {
-			t.Run(alias, func(t *testing.T) {
-				result, err := ev.Evaluate(expr.DatatypeLiteral(alias), scope)
-				require.NoError(t, err)
-				assert.NotNil(t, result)
-			})
-		}
 	}
 
 	t.Run("unknown_datatype_errors", func(t *testing.T) {
@@ -575,82 +547,61 @@ func TestEvaluator_DatatypeLiteral(t *testing.T) {
 	})
 }
 
-func TestEvaluator_WithLogger(t *testing.T) {
-	ev := eval.NewEvaluator(eval.WithLogger(nil))
-	scope := eval.EmptyScope()
-
-	result, err := ev.Evaluate(lit(42), scope)
-	require.NoError(t, err)
-	assert.Equal(t, 42, result)
-}
-
-// TestEvaluator_DirectBuiltinCall covers the direct op-form
-// (SExpr{Op("len"), receiver, ...}) — the form the expression compiler emits
-// for every DSL function call. The .-member form is covered by the
-// TestBuiltin_* suite; this is the production form's happy-path coverage.
-func TestEvaluator_DirectBuiltinCall(t *testing.T) {
-	t.Run("len_direct", func(t *testing.T) {
-		evalEq(t, sx("len", lit("hello")), int64(5))
+// TestEvaluator_BuiltinCall covers the five-element call form the parser
+// emits for every DSL function call — receiver, args literal, params literal,
+// body, with an absent part as an empty literal or nil — through the lower-
+// case name the pipeline reaches the registry by.
+func TestEvaluator_BuiltinCall(t *testing.T) {
+	t.Run("len", func(t *testing.T) {
+		evalEq(t, makeBuiltinCall(lit("hello"), "len", nil, nil, nil), int64(5))
 	})
 
-	t.Run("abs_direct", func(t *testing.T) {
-		evalEq(t, sx("abs", lit(int64(-42))), int64(42))
+	t.Run("abs", func(t *testing.T) {
+		evalEq(t, makeBuiltinCall(lit(int64(-42)), "abs", nil, nil, nil), int64(42))
 	})
 
-	t.Run("floor_direct", func(t *testing.T) {
-		evalEq(t, sx("floor", lit(3.7)), 3.0)
+	t.Run("floor", func(t *testing.T) {
+		evalEq(t, makeBuiltinCall(lit(3.7), "floor", nil, nil, nil), 3.0)
 	})
 
-	t.Run("ceil_direct", func(t *testing.T) {
-		evalEq(t, sx("ceil", lit(3.2)), 4.0)
+	t.Run("ceil", func(t *testing.T) {
+		evalEq(t, makeBuiltinCall(lit(3.2), "ceil", nil, nil, nil), 4.0)
 	})
 
-	t.Run("round_direct", func(t *testing.T) {
-		evalEq(t, sx("round", lit(3.5)), 4.0)
+	t.Run("round", func(t *testing.T) {
+		evalEq(t, makeBuiltinCall(lit(3.5), "round", nil, nil, nil), 4.0)
 	})
 
 	t.Run("with_params_and_body", func(t *testing.T) {
-		// map([1,2,3], x => x + 1)
-		e := sx(
-			"map",
-			list(int64(1), int64(2), int64(3)),
-			lit([]string{"x"}),
-			sx("+", sx("$", lit("x")), lit(int64(1))),
-		)
+		// [1,2,3] -> Map(x => x + 1)
+		e := makeBuiltinCall(list(int64(1), int64(2), int64(3)), "map", nil, []string{"x"},
+			sx("+", sx("$", lit("x")), lit(int64(1))))
 		evalEq(t, e, []any{int64(2), int64(3), int64(4)})
 	})
 
 	t.Run("args_eval_error", func(t *testing.T) {
-		e := sx(
-			"min",
-			list(int64(1)),
-			callArgs(sx("$", lit("undefined"))),
-		)
+		e := makeBuiltinCall(list(int64(1)), "min", []expr.Expression{sx("$", lit("undefined"))}, nil, nil)
 		evalErr(t, e, "undefined")
 	})
-}
 
-// TestEvaluator_CompareDirect is the package's only direct-form coverage of
-// the compare builtin (the .-member form is covered by TestBuiltin_Compare).
-func TestEvaluator_CompareDirect(t *testing.T) {
-	t.Run("less", func(t *testing.T) {
-		evalEq(t, sx("compare", lit(int64(5)), callArgs(lit(int64(10)))), int64(-1))
+	t.Run("compare_less", func(t *testing.T) {
+		evalEq(t, makeBuiltinCall(lit(int64(5)), "compare", []expr.Expression{lit(int64(10))}, nil, nil), int64(-1))
 	})
 
-	t.Run("equal", func(t *testing.T) {
-		evalEq(t, sx("compare", lit(int64(5)), callArgs(lit(int64(5)))), int64(0))
+	t.Run("compare_equal", func(t *testing.T) {
+		evalEq(t, makeBuiltinCall(lit(int64(5)), "compare", []expr.Expression{lit(int64(5))}, nil, nil), int64(0))
 	})
 }
 
 func TestEvaluator_BuiltinErrors(t *testing.T) {
 	t.Run("too_many_args", func(t *testing.T) {
-		e := sx("abs", lit(int64(5)), callArgs(lit(int64(1)), lit(int64(2))))
+		e := makeBuiltinCall(lit(int64(5)), "abs", []expr.Expression{lit(int64(1)), lit(int64(2))}, nil, nil)
 		evalErr(t, e, "accepts at most")
 	})
 
 	t.Run("too_many_params", func(t *testing.T) {
 		// map only accepts 1 param
-		e := sx("map", list(int64(1)), lit([]string{"x", "y", "z"}), lit(int64(1)))
+		e := makeBuiltinCall(list(int64(1)), "map", nil, []string{"x", "y", "z"}, lit(int64(1)))
 		evalErr(t, e, "accepts at most")
 	})
 }
@@ -661,7 +612,7 @@ func TestEvaluator_BuiltinErrors(t *testing.T) {
 // pipeline is the only call form.
 func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 	t.Run("builtin_name_is_a_plain_member", func(t *testing.T) {
-		evalEq(t, sx(".", lit(map[string]any{"len": int64(7)}), lit("len")), int64(7))
+		evalEq(t, sx(".", lit(immutable.WrapMap(map[string]any{"len": int64(7)})), lit("len")), int64(7))
 	})
 
 	t.Run("builtin_name_on_a_list_is_not_a_call", func(t *testing.T) {
@@ -669,7 +620,7 @@ func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 	})
 
 	t.Run("sexpr_member_errors", func(t *testing.T) {
-		evalErr(t, sx(".", lit(map[string]any{"name": "Alice"}), sx("p", lit("name"))), "must be a string literal")
+		evalErr(t, sx(".", lit(immutable.WrapMap(map[string]any{"name": "Alice"})), sx("p", lit("name"))), "must be a string literal")
 	})
 
 	t.Run("third_operand_errors", func(t *testing.T) {
@@ -682,33 +633,33 @@ func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 // forms, plus the unsupported-type error.
 func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 	t.Run("typed_slice_int", func(t *testing.T) {
-		evalEq(t, sx("len", lit([]int{1, 2, 3, 4, 5})), int64(5))
+		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "len", nil, nil, nil), int64(5))
 	})
 
 	t.Run("typed_slice_string", func(t *testing.T) {
-		evalEq(t, sx("len", lit([]string{"a", "b", "c"})), int64(3))
+		evalEq(t, makeBuiltinCall(lit([]string{"a", "b", "c"}), "len", nil, nil, nil), int64(3))
 	})
 
 	t.Run("nil_slice_returns_zero", func(t *testing.T) {
 		var nilSlice []int
-		evalEq(t, sx("len", lit(nilSlice)), int64(0))
+		evalEq(t, makeBuiltinCall(lit(nilSlice), "len", nil, nil, nil), int64(0))
 	})
 
 	t.Run("array_type", func(t *testing.T) {
-		evalEq(t, sx("len", lit([4]int{1, 2, 3, 4})), int64(4))
+		evalEq(t, makeBuiltinCall(lit([4]int{1, 2, 3, 4}), "len", nil, nil, nil), int64(4))
 	})
 
 	t.Run("map_type", func(t *testing.T) {
-		evalEq(t, sx("len", lit(map[string]int{"a": 1, "b": 2})), int64(2))
+		evalEq(t, makeBuiltinCall(lit(map[string]int{"a": 1, "b": 2}), "len", nil, nil, nil), int64(2))
 	})
 
 	t.Run("nil_map_returns_zero", func(t *testing.T) {
 		var nilMap map[string]int
-		evalEq(t, sx("len", lit(nilMap)), int64(0))
+		evalEq(t, makeBuiltinCall(lit(nilMap), "len", nil, nil, nil), int64(0))
 	})
 
 	t.Run("unsupported_type_errors", func(t *testing.T) {
-		evalErr(t, sx("len", lit(struct{ X int }{X: 1})), "unsupported")
+		evalErr(t, makeBuiltinCall(lit(struct{ X int }{X: 1}), "len", nil, nil, nil), "unsupported")
 	})
 }
 
@@ -716,15 +667,15 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 // consume sequences must accept typed slices, not just []any.
 func TestEvaluator_SliceConversion(t *testing.T) {
 	t.Run("sum_typed_slice_int", func(t *testing.T) {
-		evalEq(t, sx("sum", lit([]int{1, 2, 3, 4, 5})), int64(15))
+		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "sum", nil, nil, nil), int64(15))
 	})
 
 	t.Run("sum_typed_slice_float", func(t *testing.T) {
-		evalEq(t, sx("sum", lit([]float64{1.5, 2.5, 3.0})), 7.0)
+		evalEq(t, makeBuiltinCall(lit([]float64{1.5, 2.5, 3.0}), "sum", nil, nil, nil), 7.0)
 	})
 
 	t.Run("non_slice_errors", func(t *testing.T) {
-		evalErr(t, sx("sum", lit(int64(42))), "slice or array")
+		evalErr(t, makeBuiltinCall(lit(int64(42)), "sum", nil, nil, nil), "slice or array")
 	})
 }
 
@@ -765,18 +716,4 @@ func TestEvaluator_Logging_SExprOp(t *testing.T) {
 func TestEvaluator_NoLogging_WhenNilLogger(t *testing.T) {
 	// No logger — must not panic.
 	evalEq(t, sx("+", lit(int64(2)), lit(int64(3))), int64(5))
-}
-
-func TestEvaluator_Logging_NilExpression(t *testing.T) {
-	h := yammmtest.NewRecordHandler(slog.LevelDebug)
-	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-
-	// Nil expression returns early and must not log an operation.
-	_, err := ev.Evaluate(nil, eval.EmptyScope())
-	if err != nil {
-		t.Fatalf("Evaluate failed: %v", err)
-	}
-	if yammmtest.HasAttr(h.Records(), "op", "yammm.eval.expr") {
-		t.Error("expected no logging for nil expression")
-	}
 }

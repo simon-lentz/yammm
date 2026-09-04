@@ -201,16 +201,8 @@ func (r *Relation) Property(name string) (*Property, bool) {
 // one exists. The caller lowercases the input key; this is the case-folded
 // half of [Relation.Property], answered from an index built at seal.
 func (r *Relation) PropertyFold(lower string) (*Property, bool) {
-	if r.propByFold != nil {
-		p, ok := r.propByFold[lower]
-		return p, ok
-	}
-	for _, p := range r.properties {
-		if strings.ToLower(p.name) == lower {
-			return p, true
-		}
-	}
-	return nil, false
+	p, ok := r.propByFold[lower]
+	return p, ok
 }
 
 // IsAssociation reports whether this relation is an association.

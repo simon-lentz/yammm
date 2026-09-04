@@ -41,7 +41,8 @@ func TestBuiltins_FieldsAgree(t *testing.T) {
 		}
 		elementOfReceiver := s.Params == expr.BindElement || s.Params == expr.BindAccumulatorElement ||
 			s.Result == expr.ResultElement || s.Result == expr.ResultFlattened
-		takesList := s.Receiver == expr.RecvList || s.Receiver == expr.RecvScalarList
+		takesList := s.Receiver == expr.RecvList || s.Receiver == expr.RecvScalarList ||
+			s.Receiver == expr.RecvStringList || s.Receiver == expr.RecvNumericList
 		if elementOfReceiver && !takesList {
 			t.Errorf("%s: binds or yields an element of its receiver but does not take a list", s.Name)
 		}
@@ -49,5 +50,21 @@ func TestBuiltins_FieldsAgree(t *testing.T) {
 	lest, _ := expr.LookupBuiltin("Lest")
 	if !lest.AcceptBody || lest.Params != expr.BindNone || lest.MaxParams != 0 {
 		t.Errorf("Lest evaluates its body in the caller's scope: AcceptBody, BindNone, MaxParams 0; got %+v", lest)
+	}
+}
+
+// The datatype checks are the seven kinds a value can be checked against at
+// runtime, matched case-insensitively; a shape or constraint keyword is not
+// one, although the parser emits a DatatypeLiteral for it.
+func TestIsDatatypeCheck(t *testing.T) {
+	for _, name := range []string{"String", "Integer", "Float", "Boolean", "UUID", "Timestamp", "Date", "integer", "uuid"} {
+		if !expr.IsDatatypeCheck(name) {
+			t.Errorf("IsDatatypeCheck(%q) = false", name)
+		}
+	}
+	for _, name := range []string{"Vector", "List", "Enum", "Pattern", "int", "number", "bool", ""} {
+		if expr.IsDatatypeCheck(name) {
+			t.Errorf("IsDatatypeCheck(%q) = true", name)
+		}
 	}
 }

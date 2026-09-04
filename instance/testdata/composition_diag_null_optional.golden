@@ -11,6 +11,10 @@
         "Value": "null"
       },
       {
+        "Key": "relation",
+        "Value": "ADDRESSES"
+      },
+      {
         "Key": "json_field",
         "Value": "addresses"
       }

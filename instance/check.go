@@ -20,30 +20,30 @@ func CheckValue(val any, c schema.Constraint) error {
 	if c == nil {
 		return nil
 	}
-	return checkValueRecovering(eval.DefaultChecker(), val, c)
+	return checkValueRecovering(val, c)
 }
 
-// checkValueRecovering runs ch.CheckValue and converts a panic into an
+// checkValueRecovering runs eval.CheckValue and converts a panic into an
 // InternalError of KindConstraintPanic, so the validator and CheckValue share
 // one recovery rule.
-func checkValueRecovering(ch *eval.Checker, val any, c schema.Constraint) (err error) {
+func checkValueRecovering(val any, c schema.Constraint) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = wrapPanicValue(r, KindConstraintPanic)
 		}
 	}()
 	//nolint:wrapcheck // the checker's error is the contract; callers classify CheckError vs InternalError
-	return ch.CheckValue(val, c)
+	return eval.CheckValue(val, c)
 }
 
-// coerceValueRecovering runs ch.CoerceValue under the same recovery rule as
+// coerceValueRecovering runs eval.CoerceValue under the same recovery rule as
 // [checkValueRecovering], so the validator and CanonicalValue share it.
-func coerceValueRecovering(ch *eval.Checker, val any, c schema.Constraint) (result any, err error) {
+func coerceValueRecovering(val any, c schema.Constraint) (result any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = wrapPanicValue(r, KindConstraintPanic)
 		}
 	}()
 	//nolint:wrapcheck // the checker's error is the contract; callers classify CheckError vs InternalError
-	return ch.CoerceValue(val, c)
+	return eval.CoerceValue(val, c)
 }

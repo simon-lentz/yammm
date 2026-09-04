@@ -153,7 +153,6 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_PART_TYPE_DIRECT` | Attempt to directly instantiate a part type |
 | `E_TYPE_MISMATCH` | Value has wrong type for its property |
 | `E_MISSING_REQUIRED` | Required property is missing |
-| `E_MISSING_PRIMARY_KEY` | Primary key property is missing |
 | `E_UNKNOWN_FIELD` | Unexpected field in instance data |
 | `E_CONSTRAINT_FAIL` | Constraint check failed (bounds, pattern, enum) |
 | `E_INVARIANT_FAIL` | Invariant expression evaluated to false |

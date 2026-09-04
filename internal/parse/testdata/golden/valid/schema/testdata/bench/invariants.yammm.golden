@@ -218,7 +218,7 @@
         },
         {
           "msg": "\"reference is not blank\"",
-          "expr": "(\u003e (Len (p \"reference\") (args ) (params ) nil) 0)",
+          "expr": "(\u003e (Len (p \"reference\") (args ) (params ) \u003cnil\u003e) 0)",
           "expr_span": {
             "s": 729,
             "e": 749
@@ -381,7 +381,7 @@
       "invariants": [
         {
           "msg": "\"a basket holds something\"",
-          "expr": "(\u003e (Len (p \"lines\") (args ) (params ) nil) 0)",
+          "expr": "(\u003e (Len (p \"lines\") (args ) (params ) \u003cnil\u003e) 0)",
           "expr_span": {
             "s": 1387,
             "e": 1403
@@ -393,7 +393,7 @@
         },
         {
           "msg": "\"owner is named\"",
-          "expr": "(\u003e= (Len (p \"owner\") (args ) (params ) nil) 3)",
+          "expr": "(\u003e= (Len (p \"owner\") (args ) (params ) \u003cnil\u003e) 3)",
           "expr_span": {
             "s": 1424,
             "e": 1441

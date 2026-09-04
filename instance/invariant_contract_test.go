@@ -39,15 +39,24 @@ type Customer {
     name String
 }
 
+type Region {
+    code String primary
+    zone String primary
+}
+
 type Order {
     id String primary
     name String
+    f1 Boolean
+    f2 Boolean
     tags List<String>
+    matrix List<List<Integer>>
     note String
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
     --> PLACED_BY (one) Customer
     --> CUSTOMERS (one:many) Customer
+    --> REGION (one) Region
 `
 
 func contractSource(inv string) string {
@@ -66,11 +75,13 @@ func goodOrder() map[string]any {
 		}
 	}
 	return map[string]any{
-		"id": "o1", "name": "north", "tags": []any{"alpha", "beta"},
+		"id": "o1", "name": "north", "f1": true, "f2": false, "tags": []any{"alpha", "beta"},
+		"matrix":    []any{[]any{int64(1), int64(2)}, []any{int64(3)}},
 		"lines":     []any{line("l1", 5, "s1"), line("l2", 7, "s2")},
 		"main_line": []any{line("m1", 9, "s3")},
 		"placed_by": map[string]any{"_target_id": "c1"},
 		"customers": []any{map[string]any{"_target_id": "c1"}, map[string]any{"_target_id": "c2"}},
+		"region":    map[string]any{"_target_code": "r1", "_target_zone": "z1"},
 	}
 }
 
@@ -90,6 +101,7 @@ func setItemSku(sku string) mutation {
 func setLineTags(tags ...any) mutation { return func(o map[string]any) { firstLine(o)["tags"] = tags } }
 func setName(n string) mutation        { return func(o map[string]any) { o["name"] = n } }
 func setTags(tags ...any) mutation     { return func(o map[string]any) { o["tags"] = tags } }
+
 func setPlacedBy(id string) mutation {
 	return func(o map[string]any) { o["placed_by"] = map[string]any{"_target_id": id} }
 }
@@ -156,6 +168,58 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		{`(3 -> Max(4)) == 4`, nil},
 		// Flatten of a list of instances is that list
 		{`(LINES -> Flatten) -> All |$l| { $l.qty > 0 }`, setLineQty(0)},
+		// a body that is the nil literal is a body: Then yields nil for a present receiver
+		{`(name -> Then |$n| { nil }) == nil`, nil},
+		{`(name -> Then |$n| { _ }) == nil`, nil},
+		{`(name -> Then |$n| { nil }) == nil && name -> Len > 0`, setName("")},
+		// + concatenates lists and strings, as SPEC defines it; pinned through a
+		// list-only builtin, which is where the static type is judged
+		{`([1] + [2]) -> First == 1`, nil},
+		{`(tags + ["x"]) -> Len == 3`, setTags()},
+		{`(tags + ["x"]) -> Last == "x"`, nil},
+		{`("a" + "b") -> Len == 2`, nil},
+		// the receiver kinds, honoured by both layers
+		{`name -> Upper == "NORTH"`, setName("south")},
+		{`MAIN_LINE.qty -> Abs == 9`, setMainQty(1)},
+		{`MAIN_LINE.qty -> Max(1) == 9`, setMainQty(0)},
+		{`name -> Compare("a") > 0`, setName("")},
+		{`tags -> Join(",") == "alpha,beta"`, setTags("x")},
+		{`LINES -> Map |$l| { $l.qty } -> Sum == 12`, setLineQty(0)},
+		{`name -> Len == 5`, setName("")},
+		// a ternary whose branches disagree in subkind is admitted as unknown
+		{`(name != "" ? { name : MAIN_LINE.qty }) -> Upper == "NORTH"`, setName("south")},
+		// equality is structural and never errors, on instances as on lists.
+		// Two members of one composition slot differ by key, so the same
+		// instance is compared with itself through a list literal.
+		{`LINES[0] == LINES[0]`, nil},
+		{`MAIN_LINE == MAIN_LINE`, nil},
+		{`LINES[0] != LINES[1]`, nil},
+		{`!(LINES[0] == LINES[1])`, nil},
+		{`[LINES[0], LINES[0]] -> Unique -> Len == 1`, nil},
+		{`[LINES[0], LINES[1]] -> Unique -> Len == 2`, nil},
+		{`LINES -> Contains(LINES[0])`, nil},
+		{`!([LINES[0]] -> Contains(LINES[1]))`, nil},
+		{`LINES[0] in LINES`, nil},
+		{`!(MAIN_LINE in LINES)`, nil},
+		{`[1, 1.0, 2] -> Unique -> Len == 2`, nil},
+		// an association reads as its target's primary key: a String key is a
+		// string, a composite key a list of strings
+		{`PLACED_BY + "!" == "c1!"`, setPlacedBy("c9")},
+		{`REGION -> Len == 2`, nil},
+		{`REGION[0] == "r1"`, nil},
+		{`REGION -> Default(["a", "b"]) -> Len == 2`, nil},
+		// the nil literal defaults any receiver; an empty list defaults any list
+		{`(tags -> Default(nil)) -> Len == 2`, setTags("a")},
+		{`(LINES -> Default(nil)) -> Len == 2`, nil},
+		{`(LINES -> Default([])) -> Len == 2`, nil},
+		{`(CUSTOMERS -> Default([])) -> Len == 2`, nil},
+		// in with the nil literal on its right is false, not an error
+		{`!(1 in nil)`, nil},
+		// Compare ranks any two values the total order ranks: a list above a string
+		{`LINES -> Compare("a") > 0`, nil},
+		// a stored nested list flattens
+		{`matrix -> Flatten -> Len == 3`, nil},
+		{`matrix -> Flatten -> Sum == 6`, nil},
 	}
 	for _, row := range rows {
 		t.Run(row.inv, func(t *testing.T) {
@@ -198,9 +262,9 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		t.Fatal(res.Err())
 	}
 	root := v.childScope(good)
-	scope := eval.PropertyScopeFromMap(root).WithSelf(root)
+	scope := eval.PropertyScopeFromMap(root)
 	empty := map[string]any{}
-	emptyScope := eval.PropertyScopeFromMap(empty).WithSelf(empty)
+	emptyScope := eval.PropertyScopeFromMap(empty)
 
 	rows := []struct {
 		inv     string
@@ -249,12 +313,47 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`1 -> All |$x| { true }`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array"},
 		{`PLACED_BY -> Sort -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array"},
 		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "list of scalars", ""},
-		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a scalar", ""},
+		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a string", ""},
 		// the bracket takes exactly one index, and a number cannot be indexed
 		{`tags[] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index", "slice access requires an index"},
 		{`tags[0, 1] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index", "slice access accepts exactly one index"},
 		{`[10, 20, 30][0, 2] == 10`, diag.E_INVALID_INVARIANT, "exactly one index", "slice access accepts exactly one index"},
 		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "cannot be indexed", "cannot index"},
+		// a receiver the builtin refuses on every input
+		{`MAIN_LINE.qty -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string"},
+		{`name -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric"},
+		{`MAIN_LINE.qty -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map", "unsupported for type"},
+		{`MAIN_LINE.qty -> Min == 1`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array"},
+		{`LINES -> Map |$l| { $l.qty } -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings", "expects all string"},
+		{`tags -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers", "expects numeric"},
+		{`name in name`, diag.E_INVALID_INVARIANT, "in takes a list", "slice or array"},
+		{`(name != "" ? { MAIN_LINE.qty : MAIN_LINE.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string"},
+		// every refuse row of the static table, judged by the evaluator too
+		{`MAIN_LINE -> Max(1) != nil`, diag.E_INVALID_INVARIANT, "cannot be ordered", "unsupported type comparison"},
+		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "cannot be indexed", "cannot index"},
+		{`(tags -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default", ""},
+		{`(name -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default", ""},
+		{`(tags -> Default([1]) -> First) == 1`, diag.E_INVALID_INVARIANT, "Default", ""},
+		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver"},
+		{`tags -> Min("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver"},
+		{`name =~ Vector`, diag.E_INVALID_INVARIANT, "Vector", "unknown datatype"},
+		{`name =~ List`, diag.E_INVALID_INVARIANT, "List", "unknown datatype"},
+		{`name =~ Enum`, diag.E_INVALID_INVARIANT, "Enum", "unknown datatype"},
+		{`name !~ Pattern`, diag.E_INVALID_INVARIANT, "Pattern", "unknown datatype"},
+		// a composite key is a list at evaluation time
+		{`REGION -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string"},
+		{`REGION + "!" != ""`, diag.E_INVALID_INVARIANT, "+ takes", ""},
+		// a list of lists or of keys into Sum or Join
+		{`matrix -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers", "expects numeric"},
+		{`matrix -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings", "expects all string"},
+		{`CUSTOMERS -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers", "expects numeric"},
+		// a boolean under + and the nil literal under +
+		{`(f1 + f2) != nil`, diag.E_INVALID_INVARIANT, "+ takes", "non-numeric"},
+		{`nil + 1 > 0`, diag.E_INVALID_INVARIANT, "+ takes", ""},
+		// the remaining refuse arms
+		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default", ""},
+		{`MAIN_LINE -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "total order", "unsupported type comparison"},
+		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "list of scalars", "unsupported type comparison"},
 	}
 	for _, row := range rows {
 		t.Run(row.inv, func(t *testing.T) {

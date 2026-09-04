@@ -161,7 +161,7 @@
         },
         {
           "msg": "\"norm_not_empty\"",
-          "expr": "(\u003e (Len (p \"name_norm\") (args ) (params ) nil) 0)",
+          "expr": "(\u003e (Len (p \"name_norm\") (args ) (params ) \u003cnil\u003e) 0)",
           "expr_span": {
             "s": 312,
             "e": 332
@@ -209,7 +209,7 @@
         },
         {
           "msg": "\"has_items\"",
-          "expr": "(\u003e (Len (p \"ITEMS\") (args ) (params ) nil) 0)",
+          "expr": "(\u003e (Len (p \"ITEMS\") (args ) (params ) \u003cnil\u003e) 0)",
           "expr_span": {
             "s": 545,
             "e": 561
@@ -221,7 +221,7 @@
         },
         {
           "msg": "\"pipeline_check\"",
-          "expr": "(!= (Trim (Upper (p \"name\") (args ) (params ) nil) (args ) (params ) nil) \"\")",
+          "expr": "(!= (Trim (Upper (p \"name\") (args ) (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) \"\")",
           "expr_span": {
             "s": 585,
             "e": 612
@@ -233,7 +233,7 @@
         },
         {
           "msg": "\"replace_check\"",
-          "expr": "(!= (Replace (p \"name\") (args \"old\" \"new\") (params ) nil) \"\")",
+          "expr": "(!= (Replace (p \"name\") (args \"old\" \"new\") (params ) \u003cnil\u003e) \"\")",
           "expr_span": {
             "s": 635,
             "e": 670

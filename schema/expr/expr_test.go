@@ -110,13 +110,6 @@ func TestStringLiteral(t *testing.T) {
 	})
 }
 
-func TestIsNilLiteral(t *testing.T) {
-	assert.True(t, expr.IsNilLiteral(nil))
-	assert.True(t, expr.IsNilLiteral(expr.NewLiteral(nil)))
-	assert.False(t, expr.IsNilLiteral(expr.NewLiteral("hello")))
-	assert.False(t, expr.IsNilLiteral(expr.NewLiteral(0)))
-}
-
 func TestIsRegexpLiteral(t *testing.T) {
 	re := regexp.MustCompile("test")
 	assert.True(t, expr.IsRegexpLiteral(expr.NewLiteral(re)))

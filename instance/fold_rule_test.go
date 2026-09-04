@@ -78,6 +78,14 @@ func TestEdgeTarget_TypoedFKFieldIsUnknown(t *testing.T) {
 	if got := mustIssue(t, res, instance.ErrUnknownEdgeField).Path(); got != "$.works_at._target_bogus" {
 		t.Errorf("path = %q", got)
 	}
+	// A typo'd key with no correct key beside it is still unknown, reported
+	// beside the missing target rather than hidden behind it.
+	_, res = v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
+		"id": "p", "works_at": map[string]any{"_target_di": "c1", "note": "n"},
+	}})
+	if !res.HasCode(instance.ErrMissingFKTarget) || !res.HasCode(instance.ErrUnknownEdgeField) {
+		t.Errorf("want E_MISSING_FK_TARGET beside E_UNKNOWN_EDGE_FIELD, got %s", res)
+	}
 }
 
 // FK fields fold under the default mode like every other input key; the

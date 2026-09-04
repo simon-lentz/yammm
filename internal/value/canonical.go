@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -59,17 +60,20 @@ func Canonical(val any, c schema.Constraint) (any, error) {
 // timestamp is stored in text that satisfies its own format.
 func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 	layout := timestampLayout(c)
-	switch v := val.(type) {
-	case time.Time:
-		return v.Format(layout), nil
-	case string:
-		t, err := parseTimestamp(v, c)
-		if err != nil {
-			return val, err
-		}
+	if t, ok := val.(time.Time); ok {
 		return t.Format(layout), nil
 	}
-	return val, fmt.Errorf("value: cannot canonicalize %T as a Timestamp (want a string or time.Time)", val)
+	// The string form is whatever GetString reads, as the check side accepts
+	// it: a carrier the check passes is one this side renders.
+	s, ok := GetString(val)
+	if !ok {
+		return val, fmt.Errorf("value: cannot canonicalize %T as a Timestamp (want a string or time.Time)", val)
+	}
+	t, err := parseTimestamp(s, c)
+	if err != nil {
+		return val, err
+	}
+	return t.Format(layout), nil
 }
 
 // timestampLayout returns the declared Go layout, or RFC 3339 with fractional
@@ -94,10 +98,9 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 		}
 		return t, nil
 	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	t, err := time.Parse(time.RFC3339Nano, s)
+	// RFC3339 parses fractional seconds too, so no RFC3339Nano fallback is
+	// needed: nothing that layout accepts, this one refuses.
+	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("value: %q is not an RFC 3339 timestamp", s)
 	}
@@ -106,19 +109,21 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 
 // canonicalUUID renders val through [uuid.UUID.String]. Parsing the string form
 // first is what collapses the brace, urn, uppercase and bare-hex spellings
-// [uuid.Parse] accepts onto one key.
+// [uuid.Parse] accepts onto one key. The string form is whatever [GetString]
+// reads, so a carrier the check side accepts is one this side renders.
 func canonicalUUID(val any) (any, error) {
-	switch v := val.(type) {
-	case uuid.UUID:
-		return v.String(), nil
-	case string:
-		u, err := uuid.Parse(v)
-		if err != nil {
-			return val, fmt.Errorf("value: %q is not a UUID", v)
-		}
+	if u, ok := val.(uuid.UUID); ok {
 		return u.String(), nil
 	}
-	return val, fmt.Errorf("value: cannot canonicalize %T as a UUID (want a string or uuid.UUID)", val)
+	s, ok := GetString(val)
+	if !ok {
+		return val, fmt.Errorf("value: cannot canonicalize %T as a UUID (want a string or uuid.UUID)", val)
+	}
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return val, fmt.Errorf("value: %q is not a UUID", s)
+	}
+	return u.String(), nil
 }
 
 // canonicalDate renders val through [time.DateOnly] in the value's own
@@ -130,29 +135,31 @@ func canonicalUUID(val any) (any, error) {
 // an identity today — the layout admits exactly one spelling. It exists so the
 // three kinds read alike, not because a second spelling is waiting for it.
 func canonicalDate(val any) (any, error) {
-	switch v := val.(type) {
-	case time.Time:
-		return v.Format(time.DateOnly), nil
-	case string:
-		t, err := time.Parse(time.DateOnly, v)
-		if err != nil {
-			return val, fmt.Errorf("value: %q is not a YYYY-MM-DD date", v)
-		}
+	if t, ok := val.(time.Time); ok {
 		return t.Format(time.DateOnly), nil
 	}
-	return val, fmt.Errorf("value: cannot canonicalize %T as a Date (want a string or time.Time)", val)
+	s, ok := GetString(val)
+	if !ok {
+		return val, fmt.Errorf("value: cannot canonicalize %T as a Date (want a string or time.Time)", val)
+	}
+	t, err := time.Parse(time.DateOnly, s)
+	if err != nil {
+		return val, fmt.Errorf("value: %q is not a YYYY-MM-DD date", s)
+	}
+	return t.Format(time.DateOnly), nil
 }
 
 // canonicalList canonicalizes each element under the list's element
 // constraint. A list whose element kind has no canonical form is returned as
-// it arrived, so a caller's concrete slice type survives untouched.
+// it arrived, so a caller's concrete slice type survives untouched. A value
+// that is not a list is an error, as it is to the check side's coerceList.
 func canonicalList(val any, elem schema.Constraint) (any, error) {
 	if !Canonicalizes(elem) {
 		return val, nil
 	}
-	elems, ok := listElems(val)
+	elems, ok := ListElems(val)
 	if !ok {
-		return val, nil
+		return val, fmt.Errorf("value: cannot canonicalize %T as a list (want a slice)", val)
 	}
 	out := make([]any, len(elems))
 	for i, e := range elems {
@@ -184,15 +191,24 @@ func Canonicalizes(c schema.Constraint) bool {
 	}
 }
 
-// listElems returns val's elements as []any for any slice. An array is not a
-// list position — a uuid.UUID is [16]byte, and reaching it through here would
-// canonicalize a scalar elementwise.
-func listElems(val any) ([]any, bool) {
-	if elems, ok := val.([]any); ok {
+// ListElems reads val as a list: a []any as it is, an [immutable.Slice] as
+// its unwrapped elements, and any other slice or array elementwise. Anything
+// else — nil included — is not a list. This is the one reader every list
+// position in the module goes through, so the check, coerce, canonical and
+// builtin paths agree on what a list is.
+func ListElems(val any) ([]any, bool) {
+	switch v := val.(type) {
+	case []any:
+		return v, true
+	case immutable.Slice:
+		elems := make([]any, v.Len())
+		for i, e := range v.Iter2() {
+			elems[i] = e.Unwrap()
+		}
 		return elems, true
 	}
 	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice {
+	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
 		return nil, false
 	}
 	elems := make([]any, rv.Len())

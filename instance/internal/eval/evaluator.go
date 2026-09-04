@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strings"
 
@@ -31,14 +32,19 @@ func NewEvaluator(opts ...Option) *Evaluator {
 
 // Evaluate evaluates an expression with the given scope.
 // Returns the result value, or an error if evaluation fails.
-func (e *Evaluator) Evaluate(expression expr.Expression, scope Scope) (any, error) {
-	if expression == nil {
-		return nil, nil //nolint:nilnil // nil expression evaluates to nil
-	}
-
-	// Operation boundary logging (evaluator doesn't take context)
+func (e *Evaluator) Evaluate(expression expr.Expression, scope Scope) (result any, err error) {
+	// The evaluator takes no context; the op ends with the evaluation's own
+	// error, which is not known until the return, hence the closure. A panic
+	// never assigns the named return, so it is recovered here to end the op
+	// with it and re-raised for the recover that owns it.
 	op := trace.Begin(context.Background(), e.cfg.logger, "yammm.eval.expr")
-	defer func() { op.End(nil) }()
+	defer func() {
+		if r := recover(); r != nil {
+			op.End(fmt.Errorf("panic: %v", r))
+			panic(r)
+		}
+		op.End(err)
+	}()
 
 	return e.evaluate(expression, scope)
 }
@@ -60,14 +66,14 @@ func (e *Evaluator) EvaluateBool(expression expr.Expression, scope Scope) (bool,
 	return b, nil
 }
 
-// evaluate is the internal evaluation dispatcher.
+// evaluate is the internal evaluation dispatcher. A nil expression — an
+// absent lambda body, or an absent operand — evaluates to nil, as the public
+// [Evaluator.Evaluate] promises. An Op is not an expression: the parser
+// places one only at an S-expression's head, read through [expr.SExpr.Op].
 func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, error) {
 	switch ex := expression.(type) {
 	case *expr.Literal:
 		return ex.Val, nil
-	case expr.Op:
-		// Op by itself is just its string value
-		return string(ex), nil
 	case expr.DatatypeLiteral:
 		// Return a type checker for the datatype
 		return e.datatypeChecker(string(ex))
@@ -79,6 +85,14 @@ func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, erro
 }
 
 // evalSExpr evaluates an S-expression.
+// operatorOps are the operators evalSExpr dispatches after evaluating every
+// child; a special form or a builtin is handled before this set is consulted.
+var operatorOps = map[string]bool{
+	"+": true, "-": true, "*": true, "/": true, "%": true, "-x": true,
+	"==": true, "!=": true, "<": true, "<=": true, ">": true, ">=": true,
+	"=~": true, "!~": true, "in": true, "!": true, "^": true,
+}
+
 func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 	op := sexpr.Op()
 	children := sexpr.Children()
@@ -111,6 +125,12 @@ func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 	// Check if it's a builtin
 	if def, ok := lookupBuiltin(strings.ToLower(op)); ok {
 		return e.evalBuiltin(def, children, scope)
+	}
+
+	// An unknown function is reported before any child is evaluated: a
+	// parsed call carries a nil body slot, which is no expression to evaluate.
+	if !operatorOps[op] {
+		return nil, fmt.Errorf("unknown function: %s", op)
 	}
 
 	// Evaluate children for operators that need all args evaluated
@@ -304,62 +324,25 @@ func (e *Evaluator) evalMember(children []expr.Expression, scope Scope) (any, er
 	return e.accessMember(obj, memberName)
 }
 
+// accessMember reads name from obj. Every object that reaches here is an
+// immutable.Map[string] — a stored value unwraps to one and every scope wraps
+// its map — so that is the only receiver. A name with no exact match folds
+// by immutable.Properties' rule, the one property lookup uses.
 func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	if obj == nil {
 		return nil, nil //nolint:nilnil // member access on nil returns nil
 	}
-
-	// Try as map[string]any
-	if m, ok := obj.(map[string]any); ok {
-		val, exists := m[name]
-		if !exists {
-			// Case-insensitive fallback: pick alphabetically first key on collision
-			// for deterministic behavior (matches immutable.Properties.GetFold behavior)
-			lower := strings.ToLower(name)
-			var matchKey string
-			var matchVal any
-			for k, v := range m {
-				if strings.ToLower(k) == lower {
-					if matchKey == "" || k < matchKey {
-						matchKey = k
-						matchVal = v
-					}
-				}
-			}
-			if matchKey != "" {
-				return matchVal, nil
-			}
-			return nil, nil //nolint:nilnil // missing key returns nil
-		}
-		return val, nil
+	m, ok := obj.(immutable.Map[string])
+	if !ok {
+		return nil, fmt.Errorf("cannot access member on %T", obj)
 	}
-
-	// Try as immutable.Map[string] (e.g. $self bound via WithSelf)
-	if m, ok := obj.(immutable.Map[string]); ok {
-		val, exists := m.Get(name)
-		if !exists {
-			// Case-insensitive fallback: pick alphabetically first key on collision
-			// for deterministic behavior (matches immutable.Properties.GetFold behavior)
-			lower := strings.ToLower(name)
-			var matchKey string
-			var matchVal immutable.Value
-			for k, v := range m.Range() {
-				if strings.ToLower(k) == lower {
-					if matchKey == "" || k < matchKey {
-						matchKey = k
-						matchVal = v
-					}
-				}
-			}
-			if matchKey != "" {
-				return matchVal.Unwrap(), nil
-			}
-			return nil, nil //nolint:nilnil // missing key returns nil
-		}
+	if val, exists := m.Get(name); exists {
 		return val.Unwrap(), nil
 	}
-
-	return nil, fmt.Errorf("cannot access member on %T", obj)
+	if val, exists := immutable.PropertiesOf(m).GetFold(name); exists {
+		return val.Unwrap(), nil
+	}
+	return nil, nil //nolint:nilnil // missing key returns nil
 }
 
 func (e *Evaluator) evalSlice(children []expr.Expression, scope Scope) (any, error) {
@@ -513,11 +496,9 @@ func (e *Evaluator) evalBuiltin(def builtinDef, children []expr.Expression, scop
 			continue
 		}
 
-		// Otherwise it's the body expression (don't evaluate yet).
-		// VisitFcall normalizes missing bodies to NewLiteral(nil) (a non-nil
-		// *Literal wrapping nil). Treat that as "no body" so callBuiltin's
-		// acceptBody validation works correctly for source-compiled ASTs.
-		if !expr.IsNilLiteral(child) {
+		// Otherwise it's the body expression (don't evaluate yet). The
+		// parser leaves an absent body nil; a nil LITERAL is a body.
+		if child != nil {
 			body = child
 		}
 	}
@@ -532,9 +513,18 @@ func (e *Evaluator) add(args []any) (any, error) {
 	}
 
 	left, right := args[0], args[1]
+	if left == nil || right == nil {
+		// nil is an error under + as under -, * and /; asSlice's nil-is-empty
+		// rule is the collection builtins', not an operator's.
+		return nil, errors.New("+ of nil operand")
+	}
 
 	// Try numeric addition
-	if result, ok := e.numericOp(left, right, func(a, b int64) any { return a + b }, func(a, b float64) any { return a + b }); ok {
+	result, err := e.numericOp(left, right, checkedAdd, func(a, b float64) any { return a + b })
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
 		return result, nil
 	}
 
@@ -563,8 +553,11 @@ func (e *Evaluator) sub(args []any) (any, error) {
 		return nil, errors.New("- requires 2 operands")
 	}
 
-	result, ok := e.numericOp(args[0], args[1], func(a, b int64) any { return a - b }, func(a, b float64) any { return a - b })
-	if !ok {
+	result, err := e.numericOp(args[0], args[1], checkedSub, func(a, b float64) any { return a - b })
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
 		return nil, errors.New("- of non-numeric values")
 	}
 	return result, nil
@@ -575,33 +568,29 @@ func (e *Evaluator) mul(args []any) (any, error) {
 		return nil, errors.New("* requires 2 operands")
 	}
 
-	result, ok := e.numericOp(args[0], args[1], func(a, b int64) any { return a * b }, func(a, b float64) any { return a * b })
-	if !ok {
+	result, err := e.numericOp(args[0], args[1], checkedMul, func(a, b float64) any { return a * b })
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
 		return nil, errors.New("* of non-numeric values")
 	}
 	return result, nil
 }
 
+// div divides: the integer domain through checkedDiv, which refuses a zero
+// divisor and the one overflowing quotient; the float domain by IEEE 754,
+// where a zero divisor yields ±Inf.
 func (e *Evaluator) div(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("/ requires 2 operands")
 	}
 
-	// Check for integer division by zero first (panics without this check)
-	li, liok := value.GetInt64(args[0])
-	ri, riok := value.GetInt64(args[1])
-	if liok && riok {
-		if ri == 0 {
-			return nil, errors.New("division by zero")
-		}
-		return li / ri, nil
+	result, err := e.numericOp(args[0], args[1], checkedDiv, func(a, b float64) any { return a / b })
+	if err != nil {
+		return nil, err
 	}
-
-	// Float division (returns ±Inf for /0, which is valid IEEE 754)
-	result, ok := e.numericOp(args[0], args[1],
-		func(a, b int64) any { return a / b }, // Won't reach here - integer case handled above
-		func(a, b float64) any { return a / b })
-	if !ok {
+	if result == nil {
 		return nil, errors.New("/ of non-numeric values")
 	}
 	return result, nil
@@ -632,6 +621,9 @@ func (e *Evaluator) negate(args []any) (any, error) {
 	}
 
 	if i, ok := value.GetInt64(args[0]); ok {
+		if i == math.MinInt64 {
+			return nil, errors.New("integer overflow in -x")
+		}
 		return -i, nil
 	}
 	if f, ok := value.GetFloat64(args[0]); ok {
@@ -640,12 +632,20 @@ func (e *Evaluator) negate(args []any) (any, error) {
 	return nil, errors.New("-x of non-numeric value")
 }
 
-// numericOp applies integer or float operation based on operand types.
-func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) any, floatOp func(float64, float64) any) (any, bool) {
+// numericOp applies the integer operation when both operands are integers
+// and the float operation when either is a float, promoting the other. It
+// returns (nil, nil) when neither operand is numeric. Integer arithmetic is
+// exact within int64 (docs/SPEC.md): an integer operation that leaves the
+// domain returns its error, and the caller never sees a wrapped result.
+func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) (int64, error), floatOp func(float64, float64) any) (any, error) {
 	li, liok := value.GetInt64(left)
 	ri, riok := value.GetInt64(right)
 	if liok && riok {
-		return intOp(li, ri), true
+		r, err := intOp(li, ri)
+		if err != nil {
+			return nil, err
+		}
+		return r, nil
 	}
 
 	lf, lfok := value.GetFloat64(left)
@@ -653,54 +653,71 @@ func (e *Evaluator) numericOp(left, right any, intOp func(int64, int64) any, flo
 
 	// Promote integers to floats if needed
 	if liok && rfok {
-		return floatOp(float64(li), rf), true
+		return floatOp(float64(li), rf), nil
 	}
 	if lfok && riok {
-		return floatOp(lf, float64(ri)), true
+		return floatOp(lf, float64(ri)), nil
 	}
 	if lfok && rfok {
-		return floatOp(lf, rf), true
+		return floatOp(lf, rf), nil
 	}
 
-	return nil, false
+	return nil, nil //nolint:nilnil // neither operand is numeric; the caller names the operator
 }
 
-// nilEquality decides a == b when either side is nil: the null-guard idiom
-// holds for every value kind, an instance included, which the total order
-// cannot rank. The second result is false when neither side is nil.
-func nilEquality(a, b any) (equal, decided bool) {
-	if a == nil || b == nil {
-		return (a == nil) == (b == nil), true
+// checkedAdd, checkedSub, checkedMul and checkedDiv are int64 arithmetic
+// that refuses to leave the int64 domain, as the zero guards in div and mod
+// refuse a zero divisor.
+func checkedAdd(a, b int64) (int64, error) {
+	if (b > 0 && a > math.MaxInt64-b) || (b < 0 && a < math.MinInt64-b) {
+		return 0, errors.New("integer overflow in +")
 	}
-	return false, false
+	return a + b, nil
 }
 
+func checkedSub(a, b int64) (int64, error) {
+	if (b < 0 && a > math.MaxInt64+b) || (b > 0 && a < math.MinInt64+b) {
+		return 0, errors.New("integer overflow in -")
+	}
+	return a - b, nil
+}
+
+func checkedMul(a, b int64) (int64, error) {
+	if a == 0 || b == 0 {
+		return 0, nil
+	}
+	p := a * b
+	if p/b != a || (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
+		return 0, errors.New("integer overflow in *")
+	}
+	return p, nil
+}
+
+func checkedDiv(a, b int64) (int64, error) {
+	if b == 0 {
+		return 0, errors.New("division by zero")
+	}
+	if a == math.MinInt64 && b == -1 {
+		return 0, errors.New("integer overflow in /")
+	}
+	return a / b, nil
+}
+
+// equal and notEqual never error (docs/SPEC.md): [value.Equal] decides
+// equality structurally, for instances the total order cannot rank as for
+// the scalars and lists it can.
 func (e *Evaluator) equal(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("== requires 2 operands")
 	}
-	if eq, decided := nilEquality(args[0], args[1]); decided {
-		return eq, nil
-	}
-	cmp, err := value.Order(args[0], args[1])
-	if err != nil {
-		return nil, fmt.Errorf("== comparison error: %w", err)
-	}
-	return cmp == 0, nil
+	return value.Equal(args[0], args[1]), nil
 }
 
 func (e *Evaluator) notEqual(args []any) (any, error) {
 	if len(args) != 2 {
 		return nil, errors.New("!= requires 2 operands")
 	}
-	if eq, decided := nilEquality(args[0], args[1]); decided {
-		return !eq, nil
-	}
-	cmp, err := value.Order(args[0], args[1])
-	if err != nil {
-		return nil, fmt.Errorf("!= comparison error: %w", err)
-	}
-	return cmp != 0, nil
+	return !value.Equal(args[0], args[1]), nil
 }
 
 func (e *Evaluator) lessThan(args []any) (any, error) {
@@ -798,11 +815,7 @@ func (e *Evaluator) inOp(args []any) (any, error) {
 	}
 
 	for _, elem := range slice {
-		cmp, err := value.Order(left, elem)
-		if err != nil {
-			continue // incomparable types are not equal
-		}
-		if cmp == 0 {
+		if value.Equal(left, elem) {
 			return true, nil
 		}
 	}
@@ -848,24 +861,21 @@ func isNumericVar(name string) bool {
 	return true
 }
 
-// datatypeChecker returns a TypeChecker for the given datatype name.
+// datatypeChecker returns the TypeChecker for a datatype name, by the set
+// [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
+// any other name at load.
+// datatypeCheckers maps each datatype check expr.IsDatatypeCheck admits to
+// its kind's checker. A name absent here is an error, never another kind's
+// check by default.
+var datatypeCheckers = map[string]func() TypeChecker{
+	"string": IsString, "integer": IsInteger, "float": IsFloat, "boolean": IsBoolean,
+	"uuid": IsUUID, "timestamp": IsTimestamp, "date": IsDate,
+}
+
 func (e *Evaluator) datatypeChecker(name string) (TypeChecker, error) {
-	switch strings.ToLower(name) {
-	case "string":
-		return IsString(), nil
-	case "integer", "int":
-		return IsInteger(), nil
-	case "float", "number":
-		return IsFloat(), nil
-	case "boolean", "bool":
-		return IsBoolean(), nil
-	case "uuid":
-		return IsUUID(), nil
-	case "timestamp":
-		return IsTimestamp(), nil
-	case "date":
-		return IsDate(), nil
-	default:
+	mk, ok := datatypeCheckers[strings.ToLower(name)]
+	if !ok || !expr.IsDatatypeCheck(name) {
 		return nil, fmt.Errorf("unknown datatype: %s", name)
 	}
+	return mk(), nil
 }

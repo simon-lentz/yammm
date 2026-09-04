@@ -375,7 +375,7 @@ validator := instance.NewValidator(schema, opts...)
 | `WithStrictPropertyNames` | Require exact case matching (default: false) |
 | `WithAllowUnknownFields` | Silently ignore unknown fields (default: false) |
 | `WithIssueLimit` | Cap the issues one instance stores; the rest are counted and reported as dropped, on the batch result too (default: 100; 0 is unlimited) |
-| `WithLogger` | Receive a debug record when a property name is normalized |
+| `WithLogger` | Receive a debug record when a property name is normalized, and — at Debug — the evaluator's per-node trace of every invariant it evaluates |
 
 The `RecommendedOptions()` function returns a curated set of defaults (`WithStrictPropertyNames(true)`, `WithAllowUnknownFields(false)`) as a starting point for common use cases.
 
@@ -403,13 +403,13 @@ one, result := validator.ValidateOne(ctx, "Person", rawInstance)
 composed, result := validator.ValidateForComposition(ctx, "Car", "WHEELS", rawWheels)
 ```
 
-Every diagnostic a batch call returns carries exactly one `instance_index` detail, the index into the slice the caller passed — the root's through `Validate`, the child's through `ValidateForComposition` — and the batch result carries each instance's truncation facts (`LimitReached`, `DroppedCount`), so a capped instance is never reported as complete.
+A batch call returns one entry per input instance when the batch ran — non-nil for a success, nil for a failure — and a nil slice when it did not: an unknown type, a relation that is not a composition, or a cancellation, before the first row or on one. A diagnostic that belongs to a row carries exactly one `instance_index` detail, the index into the slice the caller passed — the root's through `Validate`, the child's through `ValidateForComposition`; a batch-wide diagnostic carries none and is anchored on the batch's source at its root. A cancelled batch draws exactly one `E_CONTEXT_CANCELLED`, stamped with the row it stopped on. The batch result carries each instance's truncation facts (`LimitReached`, `DroppedCount`), so a capped instance is never reported as complete.
 
 **Paths name the input document.** A diagnostic's path, and a composed child's provenance path, address the token in the document the caller supplied: the input key as written (`$.Age` for an input `Age` matched to the property `age`, `$.lines[0].qty` for a child under the input key `lines`), or the parent object for something absent or for a collision between two of its keys. The schema spelling rides in the details (`property`, `relation`, `field`). A child's provenance is the parent's, extended by that path; a parent without provenance yields children without.
 
 **Composed nesting is bounded.** A root is depth 0 and its composed children depth 1; a child deeper than `instance.MaxComposedDepth` (32) draws `E_COMPOSITION_DEPTH_EXCEEDED`. The `.ys` wire enforces the same number on write and read, so every validated instance is one a snapshot can carry.
 
-> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state.
+> **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state — for `Validate`, whatever the batch, a nil or empty one included.
 
 Type names passed to the validator (`Validate`, `ValidateOne`, and `ValidateForComposition`'s parent tag) are entry-schema-relative: bare names for entry-schema types, alias-qualified names (`common.Region`) for directly imported ones. Relation *targets*, by contrast, are resolved internally by the absolute identity completion records (`Relation.TargetID`), never by re-reading the declared target name against the entry schema — so associations and compositions declared on imported types, or inherited from cross-schema parents, validate against the true target type even when the entry schema does not know the declaring schema's aliases or shadows the target's bare name with a type of its own.
 

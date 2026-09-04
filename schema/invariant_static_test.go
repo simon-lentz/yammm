@@ -33,14 +33,23 @@ type Customer {
     name String
 }
 
+type Region {
+    code String primary
+    zone String primary
+}
+
 type Order {
     id String primary
     name String
+    f1 Boolean
+    f2 Boolean
     tags List<String>
+    matrix List<List<Integer>>
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
     --> PLACED_BY (one) Customer
     --> CUSTOMERS (one:many) Customer
+    --> REGION (one) Region
 `
 
 func loadInvariant(t *testing.T, inv string) diag.Result {
@@ -89,6 +98,60 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`placed_by != nil`,
 		// a bare lambda variable name resolves like the evaluator's scope does
 		`LINES -> All |$l| { l != nil }`,
+		// a body that is the nil literal is a body, not an absent one
+		`(name -> Then |$n| { nil }) == nil`,
+		`(name -> Then |$n| { _ }) == nil`,
+		// + concatenates lists and strings, as SPEC defines it
+		`([1] + [2]) -> First == 1`,
+		`(tags + ["x"]) -> Len == 3`,
+		`("a" + "b") -> Len == 2`,
+		// the receiver kinds: a string builtin on a string, a numeric one on a number
+		`name -> Upper == "N"`,
+		`MAIN_LINE.qty -> Abs > 0`,
+		`MAIN_LINE.qty -> Max(1) >= 1`,
+		`name -> Compare("a") >= 0`,
+		`["a", "b"] -> Join(",") == "a,b"`,
+		`[1, 2] -> Sum == 3`,
+		`tags -> Len > 0`,
+		`name -> Len > 0`,
+		// a ternary whose branches disagree in subkind is a scalar of unknown kind
+		`(name != "" ? { name : MAIN_LINE.qty }) -> Upper != ""`,
+		// equality on instances is structural, and a boolean result is a number-or-boolean scalar
+		`LINES[0] != LINES[1]`,
+		`[LINES[0], LINES[0]] -> Unique -> Len == 1`,
+		`LINES -> Contains(LINES[0])`,
+		`LINES[0] in LINES`,
+		// a nested list's element is a list, and its element a number
+		`matrix -> All |$r| { $r -> Sum > 0 }`,
+		`matrix[0][0] > 0`,
+		// Default's fallback is of the receiver's kind, so the stage after it is typed
+		`(tags -> Default(["x"]) -> First) == "x"`,
+		`(tags -> Default([]) -> Len) == 0`,
+		`(name -> Default("n")) -> Upper == "N"`,
+		`MAIN_LINE.qty -> Default(0) > -1`,
+		`(PLACED_BY -> Default("c1")) == "c1"`,
+		// a datatype check names a kind a value can have
+		`name =~ String`,
+		`MAIN_LINE.qty =~ Integer`,
+		`name !~ Timestamp`,
+		// an association reads as its target's primary key: a String key is a
+		// string, a composite key a list of strings
+		`PLACED_BY + "!" == "c1!"`,
+		`REGION -> Len == 2`,
+		`REGION -> Default(["a", "b"]) -> Len == 2`,
+		`REGION[0] != ""`,
+		// the nil literal is a wildcard under Default, whatever the receiver
+		`(tags -> Default(nil)) -> Len == 2`,
+		`(LINES -> Default(nil)) -> Len > 0`,
+		`(MAIN_LINE -> Default(nil)) != nil`,
+		// an empty list literal is a list of anything, so it defaults any list
+		`(LINES -> Default([])) -> Len > 0`,
+		`(CUSTOMERS -> Default([])) -> Len > 0`,
+		// in with the nil literal on its right is false, not an error
+		`!(1 in nil)`,
+		// Compare ranks any two values the total order ranks: a list above a string
+		`LINES -> Compare("a") > 0`,
+		`REGION -> Compare("a") > 0`,
 	}
 	for _, inv := range accept {
 		t.Run("accepts "+inv, func(t *testing.T) {
@@ -141,12 +204,64 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// builtin on a list, an ordering builtin on instances
 		{`name -> Filter |$c| { true } -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
 		{`PLACED_BY -> Sort -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list"},
-		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a scalar"},
+		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a string"},
 		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "list of scalars"},
 		// the bracket takes one index, and a number cannot be indexed
 		{`tags[] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
 		{`tags[0, 1] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
 		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
+		// a receiver the builtin refuses on every input: a number into a string
+		// builtin, a string into a numeric one, a number into Len, Min or Max
+		{`MAIN_LINE.qty -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`name -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`MAIN_LINE.qty -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map"},
+		{`MAIN_LINE.qty -> Min == 1`, diag.E_INVALID_INVARIANT, "takes a list"},
+		{`MAIN_LINE -> Max(1) != nil`, diag.E_INVALID_INVARIANT, "cannot be ordered"},
+		{`LINES -> Map |$l| { $l.qty } -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings"},
+		{`tags -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers"},
+		// in takes a list on its right
+		{`name in name`, diag.E_INVALID_INVARIANT, "in takes a list"},
+		// a ternary keeps the subkind its branches agree on
+		{`(name != "" ? { MAIN_LINE.qty : MAIN_LINE.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`(name != "" ? { name : name }) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		// a boolean result cannot be indexed
+		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
+		// Default's fallback of another kind reaches the next stage unpredicted
+		{`(tags -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default"},
+		{`(name -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default"},
+		{`(tags -> Default([1]) -> First) == 1`, diag.E_INVALID_INVARIANT, "Default"},
+		// Min and Max with an argument rank a scalar against it, never a list
+		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument"},
+		{`tags -> Min("z") != ""`, diag.E_INVALID_INVARIANT, "argument"},
+		// a shape or a constraint keyword is not a datatype check
+		{`name =~ Vector`, diag.E_INVALID_INVARIANT, "Vector"},
+		{`name =~ List`, diag.E_INVALID_INVARIANT, "List"},
+		{`name =~ Enum`, diag.E_INVALID_INVARIANT, "Enum"},
+		{`name !~ Pattern`, diag.E_INVALID_INVARIANT, "Pattern"},
+		// a composite key is a list at evaluation time, not a string
+		{`REGION -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`REGION + "!" != ""`, diag.E_INVALID_INVARIANT, "+ takes"},
+		// a list of lists or of keys is not a list of numbers or strings
+		{`matrix -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers"},
+		{`matrix -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings"},
+		{`CUSTOMERS -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers"},
+		// a boolean is not a number: + refuses it, as the evaluator does
+		{`(f1 + f2) != nil`, diag.E_INVALID_INVARIANT, "+ takes"},
+		{`(f1 + MAIN_LINE.qty) != nil`, diag.E_INVALID_INVARIANT, "+ takes"},
+		{`f1 -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		// the nil literal under + is an error on every input
+		{`nil + 1 > 0`, diag.E_INVALID_INVARIANT, "+ takes"},
+		{`(name + nil) != ""`, diag.E_INVALID_INVARIANT, "+ takes"},
+		// every refuse arm of Default and the receiver kinds has its row
+		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default"},
+		{`MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil`, diag.E_INVALID_INVARIANT, "Default"},
+		{`MAIN_LINE -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "total order"},
+		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "list of scalars"},
+		{`MAIN_LINE -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`MAIN_LINE -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`LINES -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers"},
+		{`LINES -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings"},
+		{`f1 -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map"},
 	}
 	for _, tc := range refuse {
 		t.Run("refuses "+tc.inv, func(t *testing.T) {
@@ -250,5 +365,22 @@ type Order extends b.HasLines {
 	}
 	if res := load(t, app("label")); res.Err() == nil {
 		t.Error("the reader's shadowing property was accepted")
+	}
+}
+
+// One mistake is one diagnostic: a call with too many arguments is reported
+// for its arity alone, not also for the receiver shape the extra argument
+// implies.
+func TestStaticInvariant_OneMistakeOneDiagnostic(t *testing.T) {
+	t.Parallel()
+	res := loadInvariant(t, `tags -> Min("a", "b") != ""`)
+	var n int
+	for is := range res.Issues() {
+		if is.Code() == diag.E_INVALID_INVARIANT {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d E_INVALID_INVARIANT diagnostics, want 1: %v", n, res.Err())
 	}
 }

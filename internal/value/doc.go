@@ -6,7 +6,8 @@
 //
 // This package is internal to the YAMMM module and is not importable by external
 // consumers per Go's internal/ package semantics. It is used by the instance
-// validation layer (instance/eval) for type coercion and constraint evaluation.
+// validation layer (instance/internal/eval) for type coercion and constraint
+// evaluation.
 //
 // # Value Comparison
 //
@@ -15,13 +16,16 @@
 //
 //   - [TypeStrata] classifies values into ordered strata: Nil < Bool < Numeric < String < Slice
 //   - [Order] compares two values, returning -1/0/1 for ordering
-//   - [Less] is a convenience wrapper for sort operations
+//   - [Equal] decides equality structurally and never errors: what the total
+//     order cannot rank — an instance — it compares member by member
 //
 // Supported types for comparison:
 //   - nil
 //   - bool (false < true)
 //   - integers: int, int8-64, uint, uint8-64, uintptr
 //   - floats: float32, float64 (with special handling: -Inf < finite < +Inf < NaN)
+//   - [encoding/json.Number], as the integer it holds when it holds one and as
+//     a float otherwise
 //   - string and *regexp.Regexp (regexp compared via String())
 //   - slices of supported types (lexicographic comparison)
 //
@@ -47,15 +51,17 @@
 //
 // # Kind Detection
 //
-// [Classify] normalizes a runtime value to a semantic [Kind] constant, with the
-// value transformed where the kind requires it:
+// [Classify] normalizes a runtime scalar to a semantic [Kind] constant, with
+// the value transformed where the kind requires it:
 //
 //   - [IntKind]: Integer values (returns normalized int64 for json.Number)
 //   - [FloatKind]: Float values (returns normalized float64 for json.Number)
-//   - [VectorKind]: Float slices (coerces integer elements to float64)
 //   - [BoolKind]: Boolean values
 //   - [StringKind]: String values
-//   - [UnspecifiedKind]: Unsupported or nil values
+//   - [UnspecifiedKind]: Slices, unsupported or nil values
+//
+// A slice is never a scalar kind: a list or vector's shape is its constraint's
+// to judge, elementwise, in the instance layer.
 //
 // # json.Number Handling
 //
@@ -93,36 +99,13 @@
 // convert the float to integer (not vice versa) when the float is a whole number,
 // avoiding the precision loss that occurs when large integers are converted to float64.
 //
-// This ensures the ordering relation remains transitive across all supported values:
+// An integer takes the exact path whatever carries it: a json.Number that
+// parses as an int64 or a uint64 is compared as that integer, and only a
+// json.Number with a fraction is compared as a float. The order is therefore
+// transitive across every supported value:
 //   - Order(uint64(2^53+1), float64(2^53)) returns 1 (greater), not 0
 //   - Order(int64(2^53+1), float64(2^53)) returns 1 (greater), not 0
-//
-// # Vector Coercion
-//
-// For []any input (the JSON pathway), all elements are coerced to float64:
-//   - []any{1, 2, 3} → VectorKind, []float64{1, 2, 3}
-//   - []any{1.5, 2.5} → VectorKind, []float64{1.5, 2.5}
-//   - []any{1, 2.5, 3} → VectorKind, []float64{1, 2.5, 3}
-//   - []any{float32(1.5), float32(2.5)} → VectorKind, []float64{1.5, 2.5}
-//   - []any{1, "x", 3} → UnspecifiedKind (non-numeric element)
-//
-// Typed float slices are preserved as-is:
-//   - []float64{1, 2, 3} → VectorKind, []float64{1, 2, 3}
-//   - []float32{1, 2, 3} → VectorKind, []float32{1, 2, 3}
-//
-// # Empty Slice Handling
-//
-// Empty slices are classified based on their static type, not their contents:
-//   - []float64{} → VectorKind (typed, element type known)
-//   - []float32{} → VectorKind (typed, element type known)
-//   - []any{} → UnspecifiedKind (untyped, no elements to inspect)
-//
-// This follows the "determine what it IS, not what it should be" principle.
-// An empty []any{} is genuinely ambiguous—it could represent an empty vector,
-// an empty string list, or an empty object list. The instance validator has
-// schema context and can properly interpret empty arrays based on the expected
-// type. Note that Vector[N] constraints always require N > 0, so empty vectors
-// would fail validation regardless of classification.
+//   - Order(json.Number("18446744073709551615"), float64(2^64)) returns -1, not 0
 //
 // # Thread Safety
 //
@@ -133,10 +116,11 @@
 //
 // [Canonical] returns a value in the single stored representation its schema
 // constraint defines. Timestamp, UUID and Date each accept more than one Go
-// representation and store one; every other kind passes through. It is the one
-// implementation behind every call site that stores or writes a value, so a
-// value reaches one spelling whether it arrived through validation, a wire
-// write, a CSV or JSON export, or a snapshot rebuild.
+// representation and store one; every other kind passes through. It is the
+// temporal and UUID half of the stored-form rule: the instance layer's
+// CoerceValue — the rule itself — calls it for those kinds, and the graph
+// writer and the snapshot wire call it directly for a value that reached them
+// without validation.
 //
 // # Dependencies
 //

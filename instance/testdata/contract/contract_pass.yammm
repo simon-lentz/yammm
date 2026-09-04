@@ -74,6 +74,8 @@ type T {
 	! "p_with_always_runs" nil -> With |$v| { $v == nil }
 	! "p_default_nil" nil -> Default(7) == 7
 	! "p_default_nonnil" 5 -> Default(7) == 5
+	! "p_default_list_fallback_types_the_next_stage" (absent_list -> Default([7]) -> First) == 7
+	! "p_max_two_on_a_defaulted_scalar" (absent_str -> Default("a") -> Max("z")) == "z"
 	! "p_coalesce" nil -> Coalesce(nil, 3) == 3
 	! "p_coalesce_all_nil" (nil -> Coalesce(nil, nil)) == nil
 
@@ -114,7 +116,7 @@ type T {
 	! "d_mod_sign_of_dividend" (-7) % 3 == -1
 	! "p_promote_int_float" 1 + 2.5 == 3.5
 	! "p_string_concat" "a" + "b" == "ab"
-	! "d_list_concat" ([1] + [2]) -> Len == 2
+	! "d_list_concat" ([1] + [2]) -> First == 1
 
 	// --- Operators: membership, match, logic ---
 	! "p_in" 2 in [1, 2]
@@ -122,6 +124,8 @@ type T {
 	! "p_regex_match" "user@host.com" =~ /.+@.+\..+/
 	! "p_typecheck_int" 5 =~ Integer
 	! "p_typecheck_float" 5.5 =~ Float
+	! "p_typecheck_string_refuses_a_number" !(5 =~ String)
+	! "p_typecheck_timestamp_fraction" "2030-01-01T00:00:00.5Z" =~ Timestamp
 	! "d_int_matches_float" 5 =~ Float
 	! "d_wholefloat_matches_integer" 5.0 =~ Integer
 	! "p_typecheck_date" "2030-01-01" =~ Date

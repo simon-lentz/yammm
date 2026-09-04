@@ -100,7 +100,7 @@ func NewCollectorUnlimited() *Collector {
 // programmer errors where issues are constructed via direct struct literals
 // rather than the builder pattern.
 func (c *Collector) Collect(issue Issue) {
-	c.validateIssue(issue)
+	c.validateIssue("Collect", issue)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -117,7 +117,7 @@ func (c *Collector) Collect(issue Issue) {
 func (c *Collector) CollectAll(issues []Issue) {
 	// Validate all issues before acquiring lock
 	for _, issue := range issues {
-		c.validateIssue(issue)
+		c.validateIssue("CollectAll", issue)
 	}
 
 	c.mu.Lock()
@@ -153,7 +153,7 @@ func (c *Collector) CollectAll(issues []Issue) {
 func (c *Collector) Merge(res Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.mergeLocked(res, nil)
+	c.mergeLocked(res, res.issues)
 }
 
 // MergeFunc is [Collector.Merge] with fn applied to each of res's surviving
@@ -164,14 +164,32 @@ func (c *Collector) Merge(res Result) {
 // by one and losing both. fn must return a valid issue; [FromIssue] preserves
 // validity.
 func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
+	// fn runs outside c.mu, so a transform may read or write this collector.
+	// The severity counts are folded from res wholesale in mergeLocked, so a
+	// transform that changed an issue's severity or code would leave the
+	// counts describing issues that are no longer stored: only a from-scratch
+	// NewIssue can change either, and doing so is a programmer error.
+	transformed := make([]Issue, len(res.issues))
+	for i, issue := range res.issues {
+		out := fn(issue)
+		c.validateIssue("MergeFunc", out)
+		if out.Severity() != issue.Severity() || out.Code() != issue.Code() {
+			panic(fmt.Sprintf("diag.Collector.MergeFunc: fn changed an issue's severity or code (%s %s -> %s %s); rebuild with FromIssue",
+				issue.Severity(), issue.Code(), out.Severity(), out.Code()))
+		}
+		transformed[i] = out
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.mergeLocked(res, fn)
+	c.mergeLocked(res, transformed)
 }
 
 // mergeLocked folds res into c, storing fn(issue) for each survivor when fn is
 // non-nil. Caller must hold c.mu.
-func (c *Collector) mergeLocked(res Result, fn func(Issue) Issue) {
+// mergeLocked folds res's counts and truncation into c and stores issues,
+// which are res's surviving issues as the caller wants them stored. Caller
+// must hold c.mu.
+func (c *Collector) mergeLocked(res Result, issues []Issue) {
 	c.cachedResult = nil
 
 	// Fold in res's seen-severity counts wholesale. Each Result's counts reflect
@@ -191,23 +209,20 @@ func (c *Collector) mergeLocked(res Result, fn func(Issue) Issue) {
 	// Store res's surviving issues, honoring c's own limit. storeLocked does not
 	// re-count (the counts were folded in above); issues past c's limit are
 	// dropped and flagged.
-	for _, issue := range res.issues {
-		if fn != nil {
-			issue = fn(issue)
-			c.validateIssue(issue)
-		}
+	for _, issue := range issues {
 		c.storeLocked(issue)
 	}
 }
 
-// validateIssue panics if the issue is invalid.
-func (c *Collector) validateIssue(issue Issue) {
+// validateIssue panics if the issue is invalid, naming the entry point that
+// received it.
+func (c *Collector) validateIssue(entry string, issue Issue) {
 	if issue.IsZero() {
-		panic("diag.Collector.Collect: zero-value Issue")
+		panic("diag.Collector." + entry + ": zero-value Issue")
 	}
 	if !issue.IsValid() {
-		panic(fmt.Sprintf("diag.Collector.Collect: invalid Issue (code=%s, message=%q)",
-			issue.Code().String(), issue.Message()))
+		panic(fmt.Sprintf("diag.Collector.%s: invalid Issue (code=%s, message=%q)",
+			entry, issue.Code().String(), issue.Message()))
 	}
 }
 

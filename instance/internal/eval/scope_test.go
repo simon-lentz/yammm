@@ -3,7 +3,6 @@ package eval_test
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/stretchr/testify/assert"
 )
@@ -50,18 +49,6 @@ func TestMapScope_WithVar(t *testing.T) {
 	})
 }
 
-func TestMapScope_WithSelf(t *testing.T) {
-	scope := eval.EmptyScope()
-
-	data := map[string]any{"name": "Alice"}
-	newScope := scope.WithSelf(data)
-
-	val, found := newScope.Lookup("self")
-	assert.True(t, found)
-	// The value is wrapped in an immutable type
-	assert.NotNil(t, val.Unwrap())
-}
-
 // A variable name never folds: LookupFold on a variable-only scope is the
 // exact lookup, whichever spelling reaches it.
 func TestMapScope_LookupFold(t *testing.T) {
@@ -92,11 +79,11 @@ func TestMapScope_LookupFold(t *testing.T) {
 }
 
 func TestPropertyScope(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{
+	props := map[string]any{
 		"name": "Alice",
 		"age":  30,
-	})
-	scope := eval.PropertyScope(props)
+	}
+	scope := eval.PropertyScopeFromMap(props)
 
 	t.Run("lookup_property", func(t *testing.T) {
 		val, found := scope.Lookup("name")
@@ -111,10 +98,10 @@ func TestPropertyScope(t *testing.T) {
 }
 
 func TestPropertyScope_VariablePrecedence(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{
+	props := map[string]any{
 		"x": "from_props",
-	})
-	scope := eval.PropertyScope(props).WithVar("x", "from_var")
+	}
+	scope := eval.PropertyScopeFromMap(props).WithVar("x", "from_var")
 
 	val, found := scope.Lookup("x")
 	assert.True(t, found)
@@ -143,10 +130,10 @@ func TestPropertyScopeFromMap(t *testing.T) {
 }
 
 func TestPropertyScope_LookupFold(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{
+	props := map[string]any{
 		"UserName": "Alice",
-	})
-	scope := eval.PropertyScope(props)
+	}
+	scope := eval.PropertyScopeFromMap(props)
 
 	tests := []struct {
 		name     string
@@ -174,40 +161,26 @@ func TestPropertyScope_LookupFold(t *testing.T) {
 // differs only in case does not, because variable names never fold while
 // property names always do.
 func TestPropertyScope_LookupFold_VariablePrecedence(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{
+	props := map[string]any{
 		"Name": "FromProps",
-	})
+	}
 
-	exact := eval.PropertyScope(props).WithVar("name", "FromVar")
+	exact := eval.PropertyScopeFromMap(props).WithVar("name", "FromVar")
 	val, found := exact.LookupFold("name")
 	assert.True(t, found)
 	assert.Equal(t, "FromVar", val.Unwrap())
 
-	differing := eval.PropertyScope(props).WithVar("NAME", "FromVar")
+	differing := eval.PropertyScopeFromMap(props).WithVar("NAME", "FromVar")
 	val, found = differing.LookupFold("name")
 	assert.True(t, found)
 	assert.Equal(t, "FromProps", val.Unwrap())
 }
 
-func TestPropertyScope_WithSelf(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{
-		"name": "Alice",
-	})
-	scope := eval.PropertyScope(props)
-
-	selfData := map[string]any{"id": int64(42)}
-	newScope := scope.WithSelf(selfData)
-
-	val, found := newScope.Lookup("self")
-	assert.True(t, found)
-	assert.NotNil(t, val.Unwrap())
-}
-
 func TestPropertyScope_LookupFold_NotFound(t *testing.T) {
-	props := immutable.WrapProperties(map[string]any{
+	props := map[string]any{
 		"name": "Alice",
-	})
-	scope := eval.PropertyScope(props)
+	}
+	scope := eval.PropertyScopeFromMap(props)
 
 	_, found := scope.LookupFold("nonexistent")
 	assert.False(t, found)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -42,25 +41,10 @@ func constraintFail(format string, args ...any) *CheckError {
 	return &CheckError{Kind: KindConstraintFail, Msg: fmt.Sprintf(format, args...)}
 }
 
-// Checker performs constraint checking and coercion by the one value rule
-// [github.com/simon-lentz/yammm/internal/value] defines. It holds no state;
-// every Checker applies the same rule.
-type Checker struct{}
-
-// DefaultChecker returns the Checker.
-func DefaultChecker() *Checker {
-	return &Checker{}
-}
-
-// CheckValue validates that val conforms to the given constraint.
+// CheckValue validates that val conforms to the given constraint, by the one
+// value rule [github.com/simon-lentz/yammm/internal/value] defines.
 // Returns nil if valid, or an error describing the violation.
 func CheckValue(val any, c schema.Constraint) error {
-	return DefaultChecker().CheckValue(val, c)
-}
-
-// CheckValue validates that val conforms to the given constraint.
-// Returns nil if valid, or an error describing the violation.
-func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 	if val == nil {
 		// nil is valid for optional properties; required check is done elsewhere
 		return nil
@@ -71,9 +55,9 @@ func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 	case schema.KindString:
 		return checkString(val, c)
 	case schema.KindInteger:
-		return ch.checkInteger(val, c)
+		return checkInteger(val, c)
 	case schema.KindFloat:
-		return ch.checkFloat(val, c)
+		return checkFloat(val, c)
 	case schema.KindBoolean:
 		return checkBoolean(val)
 	case schema.KindTimestamp:
@@ -87,11 +71,10 @@ func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 	case schema.KindPattern:
 		return checkPattern(val, c)
 	case schema.KindVector:
-		return ch.checkVector(val, c)
+		return checkVector(val, c)
 	case schema.KindList:
-		return ch.checkList(val, c)
+		return checkList(val, c)
 	case schema.KindAlias:
-		// Resolve alias and check against resolved constraint
 		alias, ok := c.(schema.AliasConstraint)
 		if !ok {
 			return errors.New("invalid alias constraint type")
@@ -100,7 +83,7 @@ func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 		if resolved == nil {
 			return fmt.Errorf("unresolved alias constraint: %s", alias.DataTypeName())
 		}
-		return ch.CheckValue(val, resolved)
+		return CheckValue(val, resolved)
 	default:
 		return fmt.Errorf("unknown constraint kind: %s", c.Kind())
 	}
@@ -113,21 +96,16 @@ func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 // Canonical types:
 //   - Integer → int64
 //   - Float → float64
-//   - Boolean → bool (unchanged)
-//   - String, Enum, Pattern → string (unchanged)
+//   - Boolean → bool, a named carrier reduced to its base
+//   - String, Enum, Pattern → string, a named carrier reduced to its base
 //   - Timestamp, Date, UUID → string, rendered through the constraint
 //   - Vector → []float64
 //
-// Returns the coerced value and nil error on success.
-// Returns (nil, error) if coercion fails (should not happen after CheckValue).
+// Returns the coerced value and nil error on success. Returns (nil, error)
+// when the value is not of the kind: every arm refuses a wrong-typed value,
+// so a caller that coerces without checking gets an error, never the input
+// reported as its own stored form.
 func CoerceValue(val any, c schema.Constraint) (any, error) {
-	return DefaultChecker().CoerceValue(val, c)
-}
-
-// CoerceValue coerces a validated value to its canonical Go type.
-// This should be called after CheckValue succeeds to ensure the stored
-// value uses the canonical representation.
-func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 	if val == nil {
 		return nil, nil //nolint:nilnil // This is the expected behavior
 	}
@@ -135,15 +113,14 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 	//exhaustive:enforce
 	switch c.Kind() {
 	case schema.KindInteger:
-		return ch.coerceInteger(val)
+		return coerceInteger(val)
 	case schema.KindFloat:
-		return ch.coerceFloat(val)
+		return coerceFloat(val)
 	case schema.KindVector:
-		return ch.coerceVector(val)
+		return coerceVector(val)
 	case schema.KindList:
-		return ch.coerceList(val, c)
+		return coerceList(val, c)
 	case schema.KindAlias:
-		// Resolve alias and coerce against resolved constraint
 		alias, ok := c.(schema.AliasConstraint)
 		if !ok {
 			return nil, errors.New("invalid alias constraint type")
@@ -152,13 +129,19 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 		if resolved == nil {
 			return nil, fmt.Errorf("unresolved alias constraint: %s", alias.DataTypeName())
 		}
-		return ch.CoerceValue(val, resolved)
+		return CoerceValue(val, resolved)
 	case schema.KindTimestamp, schema.KindDate, schema.KindUUID:
 		// These three accept two Go representations and store one string. The
 		// rule lives in [value.Canonical] so the wire, both writers and the
 		// snapshot rebuild render a value the same way this does.
-		//nolint:wrapcheck // the canonicalizer's errors name the value and the layout; a wrapper here adds nothing
-		return value.Canonical(val, c)
+		// value.Canonical returns its input beside an error; every arm here
+		// returns nil beside one, so a caller never mistakes the input for a
+		// stored form.
+		out, err := value.Canonical(val, c)
+		if err != nil {
+			return nil, err //nolint:wrapcheck // the canonicalizer's errors name the value and the layout; a wrapper here adds nothing
+		}
+		return out, nil
 	case schema.KindString, schema.KindEnum, schema.KindPattern:
 		// A named type over string reaches here from a caller holding
 		// adapter/gogen's output. Store the base value: accepting the carrier
@@ -167,12 +150,12 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 		if s, ok := value.GetString(val); ok {
 			return s, nil
 		}
-		return val, nil
+		return nil, fmt.Errorf("cannot coerce %T to string", val)
 	case schema.KindBoolean:
 		if b, ok := value.GetBool(val); ok {
 			return b, nil
 		}
-		return val, nil
+		return nil, fmt.Errorf("cannot coerce %T to bool", val)
 	default:
 		// Defensive: schema.Constraint is sealed, so every kind is handled above.
 		return val, nil
@@ -181,7 +164,7 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 
 // coerceInteger converts any integer-compatible value to int64.
 // Accepts integer types and float64 whole numbers per spec.
-func (ch *Checker) coerceInteger(val any) (any, error) {
+func coerceInteger(val any) (any, error) {
 	// Try direct integer extraction first (fast path)
 	if i, ok := value.GetInt64(val); ok {
 		return i, nil
@@ -191,17 +174,20 @@ func (ch *Checker) coerceInteger(val any) (any, error) {
 		if i, ok := value.GetInt64FromFloat(f); ok {
 			return i, nil
 		}
-		if !value.IsFinite(f) {
+		switch {
+		case !value.IsFinite(f):
 			return nil, errors.New("cannot coerce non-finite float (NaN or Inf) to int64")
+		case !value.IsWholeNumber(f):
+			return nil, fmt.Errorf("cannot coerce float with fractional part %v to int64", f)
+		default:
+			return nil, fmt.Errorf("cannot coerce whole float %v outside the int64 range to int64", f)
 		}
-		return nil, fmt.Errorf("cannot coerce float with fractional part %v to int64", f)
 	}
 
-	// Reflection fallback for custom integer types recognized by registry
+	// A named integer type: Classify reads its base kind, reflect its value.
 	kind, _ := value.Classify(val)
 	if kind == value.IntKind {
 		rv := reflect.ValueOf(val)
-		// Dereference pointers
 		for rv.Kind() == reflect.Pointer {
 			if rv.IsNil() {
 				return nil, errors.New("cannot coerce nil pointer to int64")
@@ -224,7 +210,7 @@ func (ch *Checker) coerceInteger(val any) (any, error) {
 }
 
 // coerceFloat converts any float-compatible value to float64.
-func (ch *Checker) coerceFloat(val any) (any, error) {
+func coerceFloat(val any) (any, error) {
 	// Try direct float extraction first (fast path)
 	if f, ok := value.GetFloat64(val); ok {
 		// Defense in depth: reject NaN/Inf even if check was bypassed
@@ -237,11 +223,10 @@ func (ch *Checker) coerceFloat(val any) (any, error) {
 		return float64(i), nil // integers are always finite
 	}
 
-	// Reflection fallback for custom numeric types recognized by registry
+	// A named numeric type: Classify reads its base kind, reflect its value.
 	kind, _ := value.Classify(val)
 	if kind == value.FloatKind || kind == value.IntKind {
 		rv := reflect.ValueOf(val)
-		// Dereference pointers
 		for rv.Kind() == reflect.Pointer {
 			if rv.IsNil() {
 				return nil, errors.New("cannot coerce nil pointer to float64")
@@ -265,9 +250,9 @@ func (ch *Checker) coerceFloat(val any) (any, error) {
 	return nil, fmt.Errorf("cannot coerce %T to float64", val)
 }
 
-// coerceVector converts any numeric slice to []float64.
-// Uses registry for custom type recognition via coerceFloat for each element.
-func (ch *Checker) coerceVector(val any) (any, error) {
+// coerceVector converts any numeric slice to []float64, each element through
+// coerceFloat.
+func coerceVector(val any) (any, error) {
 	slice, ok := toSlice(val)
 	if !ok {
 		return nil, fmt.Errorf("cannot coerce %T to []float64", val)
@@ -275,8 +260,7 @@ func (ch *Checker) coerceVector(val any) (any, error) {
 
 	result := make([]float64, len(slice))
 	for i, elem := range slice {
-		// Use coerceFloat for registry-aware coercion of each element
-		coerced, err := ch.coerceFloat(elem)
+		coerced, err := coerceFloat(elem)
 		if err != nil {
 			return nil, fmt.Errorf("vector element [%d]: %w", i, err)
 		}
@@ -317,7 +301,7 @@ func checkString(val any, c schema.Constraint) error {
 
 // checkInteger validates that val is an integer with optional bounds.
 // Per spec, accepts integer types and float64 whole numbers (math.Trunc(f) == f).
-func (ch *Checker) checkInteger(val any, c schema.Constraint) error {
+func checkInteger(val any, c schema.Constraint) error {
 	kind, _ := value.Classify(val)
 
 	var i int64
@@ -337,10 +321,14 @@ func (ch *Checker) checkInteger(val any, c schema.Constraint) error {
 		}
 		i, ok = value.GetInt64FromFloat(f)
 		if !ok {
-			if !value.IsFinite(f) {
+			switch {
+			case !value.IsFinite(f):
 				return constraintFail("expected integer, got non-finite float (NaN or Inf)")
+			case !value.IsWholeNumber(f):
+				return typeMismatch("expected integer, got float with fractional part: %v", f)
+			default:
+				return typeMismatch("expected integer, got whole float outside the int64 range: %v", f)
 			}
-			return typeMismatch("expected integer, got float with fractional part: %v", f)
 		}
 	default:
 		return typeMismatch("expected integer, got %T", val)
@@ -362,18 +350,21 @@ func (ch *Checker) checkInteger(val any, c schema.Constraint) error {
 }
 
 // checkFloat validates that val is a float or integer with optional bounds.
-func (ch *Checker) checkFloat(val any, c schema.Constraint) error {
+// An unsigned value above math.MaxInt64 is a float like any other integer:
+// coerceFloat converts it, so the check must accept it.
+func checkFloat(val any, c schema.Constraint) error {
 	kind, _ := value.Classify(val)
 	if kind != value.FloatKind && kind != value.IntKind {
 		return typeMismatch("expected float, got %T", val)
 	}
 
-	// Get float64 value - handle both float and integer types
 	var f float64
 	if fv, ok := value.GetFloat64(val); ok {
 		f = fv
 	} else if iv, ok := value.GetInt64(val); ok {
 		f = float64(iv)
+	} else if uv, ok := value.GetUint64(val); ok {
+		f = float64(uv)
 	} else {
 		return typeMismatch("cannot convert %T to float64", val)
 	}
@@ -414,7 +405,7 @@ func checkTimestamp(val any, c schema.Constraint) error {
 		return nil
 	}
 
-	s, ok := val.(string)
+	s, ok := value.GetString(val)
 	if !ok {
 		return typeMismatch("expected timestamp string or time.Time, got %T", val)
 	}
@@ -428,12 +419,10 @@ func checkTimestamp(val any, c schema.Constraint) error {
 		return nil
 	}
 
-	// Default: RFC 3339
+	// RFC 3339 parses fractional seconds too, so no RFC3339Nano fallback is
+	// needed: nothing that layout accepts, this one refuses.
 	if _, err := time.Parse(time.RFC3339, s); err != nil {
-		// Also try RFC3339Nano
-		if _, err := time.Parse(time.RFC3339Nano, s); err != nil {
-			return constraintFail("invalid timestamp format: %s", s)
-		}
+		return constraintFail("invalid timestamp format: %s", s)
 	}
 	return nil
 }
@@ -450,7 +439,7 @@ func checkDate(val any) error {
 		return nil
 	}
 
-	s, ok := val.(string)
+	s, ok := value.GetString(val)
 	if !ok {
 		return typeMismatch("expected date string or time.Time, got %T", val)
 	}
@@ -512,7 +501,7 @@ func checkPattern(val any, c schema.Constraint) error {
 	compiled := pc.CompiledPatterns()
 	patterns := pc.Patterns()
 	for i, pattern := range compiled {
-		if pattern != nil && !pattern.MatchString(s) {
+		if !pattern.MatchString(s) {
 			return constraintFail("value %q does not match pattern %s", s, patterns[i])
 		}
 	}
@@ -520,7 +509,7 @@ func checkPattern(val any, c schema.Constraint) error {
 }
 
 // checkVector validates that val is a float slice with correct dimension.
-func (ch *Checker) checkVector(val any, c schema.Constraint) error {
+func checkVector(val any, c schema.Constraint) error {
 	// Get the slice as []any
 	slice, ok := toSlice(val)
 	if !ok {
@@ -562,7 +551,7 @@ func elementKindName(c schema.Constraint) string {
 }
 
 // checkList validates that val is a slice with elements matching the element constraint.
-func (ch *Checker) checkList(val any, c schema.Constraint) error {
+func checkList(val any, c schema.Constraint) error {
 	slice, ok := toSlice(val)
 	if !ok {
 		return typeMismatch("expected array for list, got %T", val)
@@ -592,7 +581,7 @@ func (ch *Checker) checkList(val any, c schema.Constraint) error {
 		if elem == nil {
 			return typeMismatch("element [%d]: expected %s, got null", i, elementKindName(elemConstraint))
 		}
-		if err := ch.CheckValue(elem, elemConstraint); err != nil {
+		if err := CheckValue(elem, elemConstraint); err != nil {
 			if ce, ok := errors.AsType[*CheckError](err); ok {
 				return &CheckError{
 					Kind: ce.Kind,
@@ -607,7 +596,7 @@ func (ch *Checker) checkList(val any, c schema.Constraint) error {
 }
 
 // coerceList coerces each element to its canonical type.
-func (ch *Checker) coerceList(val any, c schema.Constraint) (any, error) {
+func coerceList(val any, c schema.Constraint) (any, error) {
 	slice, ok := toSlice(val)
 	if !ok {
 		return nil, fmt.Errorf("expected array for list, got %T", val)
@@ -627,7 +616,7 @@ func (ch *Checker) coerceList(val any, c schema.Constraint) (any, error) {
 		if elem == nil {
 			return nil, fmt.Errorf("element [%d]: expected %s, got null", i, elementKindName(elemConstraint))
 		}
-		coerced, err := ch.CoerceValue(elem, elemConstraint)
+		coerced, err := CoerceValue(elem, elemConstraint)
 		if err != nil {
 			return nil, fmt.Errorf("element [%d]: %w", i, err)
 		}
@@ -639,32 +628,19 @@ func (ch *Checker) coerceList(val any, c schema.Constraint) (any, error) {
 
 // toSlice converts val to []any if it's a slice.
 func toSlice(val any) ([]any, bool) {
-	if val == nil {
-		return nil, false
-	}
-	if slice, ok := val.([]any); ok {
-		return slice, true
-	}
-	// Use reflection for typed slices
-	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice {
-		return nil, false
-	}
-	result := make([]any, rv.Len())
-	for i := range rv.Len() {
-		result[i] = rv.Index(i).Interface()
-	}
-	return result, true
+	return value.ListElems(val)
 }
 
 // TypeChecker is a function that checks if a value matches a type.
 // Returns (true, "") if valid, or (false, message) with an error description.
 type TypeChecker func(val any) (bool, string)
 
-// CheckerFor returns a TypeChecker for the given constraint.
-func CheckerFor(c schema.Constraint) TypeChecker {
+// checkerOf adapts a kind's check function to a TypeChecker, so a datatype
+// check (`=~ Kind`) applies exactly the rule a property of that kind does.
+// A nil constraint carries no bounds, layout or member set.
+func checkerOf(check func(val any, c schema.Constraint) error) TypeChecker {
 	return func(val any) (bool, string) {
-		if err := CheckValue(val, c); err != nil {
+		if err := check(val, nil); err != nil {
 			return false, err.Error()
 		}
 		return true, ""
@@ -673,118 +649,39 @@ func CheckerFor(c schema.Constraint) TypeChecker {
 
 // IsString returns a TypeChecker that validates string values.
 func IsString() TypeChecker {
-	return func(val any) (bool, string) {
-		if _, ok := val.(string); ok {
-			return true, ""
-		}
-		return false, fmt.Sprintf("expected string, got %T", val)
-	}
+	return checkerOf(checkString)
 }
 
 // IsInteger returns a TypeChecker that validates integer values.
 // Accepts integer types and float64 whole numbers per spec.
 func IsInteger() TypeChecker {
-	return func(val any) (bool, string) {
-		kind, _ := value.Classify(val)
-		switch kind {
-		case value.IntKind:
-			return true, ""
-		case value.FloatKind:
-			if f, ok := value.GetFloat64(val); ok && value.IsWholeNumber(f) {
-				return true, ""
-			}
-		}
-		return false, fmt.Sprintf("expected integer, got %T", val)
-	}
+	return checkerOf(checkInteger)
 }
 
-// IsFloat returns a TypeChecker that validates float values.
+// IsFloat returns a TypeChecker that validates finite float and integer values.
 func IsFloat() TypeChecker {
-	return func(val any) (bool, string) {
-		kind, _ := value.Classify(val)
-		if kind == value.FloatKind || kind == value.IntKind {
-			return true, ""
-		}
-		return false, fmt.Sprintf("expected float, got %T", val)
-	}
+	return checkerOf(checkFloat)
 }
 
 // IsBoolean returns a TypeChecker that validates boolean values.
 func IsBoolean() TypeChecker {
-	return func(val any) (bool, string) {
-		if _, ok := val.(bool); ok {
-			return true, ""
-		}
-		return false, fmt.Sprintf("expected boolean, got %T", val)
-	}
+	return checkerOf(func(val any, _ schema.Constraint) error { return checkBoolean(val) })
 }
 
 // IsUUID returns a TypeChecker that validates UUID values.
 func IsUUID() TypeChecker {
-	return func(val any) (bool, string) {
-		if err := checkUUID(val); err != nil {
-			return false, err.Error()
-		}
-		return true, ""
-	}
+	return checkerOf(func(val any, _ schema.Constraint) error { return checkUUID(val) })
 }
 
-// IsTimestamp returns a TypeChecker that validates timestamp values.
-// Accepts time.Time (always valid) or string (parsed as RFC3339).
+// IsTimestamp returns a TypeChecker that validates timestamp values: a
+// time.Time, or a string in RFC 3339. A bare datatype names no layout, so a
+// value stored under a Timestamp["layout"] property matches only when that
+// layout is RFC 3339.
 func IsTimestamp() TypeChecker {
-	return func(val any) (bool, string) {
-		// Accept time.Time directly
-		if _, ok := val.(time.Time); ok {
-			return true, ""
-		}
-
-		s, ok := val.(string)
-		if !ok {
-			return false, fmt.Sprintf("expected timestamp string or time.Time, got %T", val)
-		}
-		if _, err := time.Parse(time.RFC3339, s); err != nil {
-			if _, err := time.Parse(time.RFC3339Nano, s); err != nil {
-				return false, "invalid timestamp format: " + s
-			}
-		}
-		return true, ""
-	}
+	return checkerOf(checkTimestamp)
 }
 
 // IsDate returns a TypeChecker that validates date values.
 func IsDate() TypeChecker {
-	return func(val any) (bool, string) {
-		if err := checkDate(val); err != nil {
-			return false, err.Error()
-		}
-		return true, ""
-	}
-}
-
-// MatchesPattern returns a TypeChecker that validates values against a regex pattern.
-func MatchesPattern(pattern *regexp.Regexp) TypeChecker {
-	return func(val any) (bool, string) {
-		s, ok := val.(string)
-		if !ok {
-			return false, fmt.Sprintf("expected string for pattern, got %T", val)
-		}
-		if !pattern.MatchString(s) {
-			return false, fmt.Sprintf("value %q does not match pattern %s", s, pattern.String())
-		}
-		return true, ""
-	}
-}
-
-// InEnum returns a TypeChecker that validates values are in the allowed set.
-func InEnum(allowed []string) TypeChecker {
-	return func(val any) (bool, string) {
-		s, ok := val.(string)
-		if !ok {
-			return false, fmt.Sprintf("expected string for enum, got %T", val)
-		}
-		if slices.Contains(allowed, s) {
-			return true, ""
-		}
-		return false, fmt.Sprintf("value %q not in enum %v", s, allowed)
-	}
+	return checkerOf(func(val any, _ schema.Constraint) error { return checkDate(val) })
 }

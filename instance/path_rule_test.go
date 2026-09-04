@@ -174,6 +174,8 @@ func TestFatal_CarriesProvenance(t *testing.T) {
 
 // The provenance a caller supplies reaches every diagnostic about the
 // instance: the object-level ones at the object, the span where one exists.
+// A batch-wide failure is about no instance: it keeps the source, at its
+// root, with no span.
 func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 	src := location.NewSourceID("data.json")
 	span := location.Span{Source: src, Start: location.Position{Line: 7, Column: 3, Byte: 40}, End: location.Position{Line: 7, Column: 9, Byte: 46}}
@@ -189,7 +191,9 @@ func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 			t.Errorf("path=%q source=%q span=%v", is.Path(), is.SourceName(), is.Span())
 		}
 	})
-	t.Run("missing_primary_key", func(t *testing.T) {
+	// A nil primary-key property is a missing required property: a primary
+	// key is required by definition, so no separate code exists for it.
+	t.Run("nil_primary_key_is_missing_required", func(t *testing.T) {
 		_, res := v.ValidateOne(t.Context(), "Doc", instance.RawInstance{Properties: map[string]any{
 			"id": nil, "lines": []any{map[string]any{"n": "a", "qty": 1}},
 		}, Provenance: prov})
@@ -208,8 +212,8 @@ func TestProvenance_ReachesEveryDiagnostic(t *testing.T) {
 	t.Run("composition_not_found", func(t *testing.T) {
 		_, res := v.ValidateForComposition(t.Context(), "Doc", "NOPE", []instance.RawInstance{{Provenance: prov}})
 		is := mustIssue(t, res, instance.ErrCompositionNotFound)
-		if is.Path() != "$.Doc[2]" || is.Span() != span {
-			t.Errorf("path=%q span=%v", is.Path(), is.Span())
+		if is.Path() != "$" || is.SourceName() != "data.json" || is.Span() != (location.Span{}) {
+			t.Errorf("path=%q source=%q span=%v, want the batch's source at its root with no span", is.Path(), is.SourceName(), is.Span())
 		}
 	})
 }

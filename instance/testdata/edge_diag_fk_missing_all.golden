@@ -12,5 +12,19 @@
       }
     ],
     "Severity": "error"
+  },
+  {
+    "Code": "E_UNKNOWN_EDGE_FIELD",
+    "Details": [
+      {
+        "Key": "relation",
+        "Value": "EMPLOYER"
+      },
+      {
+        "Key": "field",
+        "Value": "weight"
+      }
+    ],
+    "Severity": "error"
   }
 ]

@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -148,10 +149,6 @@ func Order(left, right any) (int, error) {
 		case luok && ruok:
 			return Uint64Compare(lu, ru), nil
 
-		// Both floats
-		case lfok && rfok:
-			return Float64Compare(lf, rf), nil
-
 		// Mixed signed/unsigned: negative signed is always less than unsigned
 		case liok && ruok:
 			if li < 0 {
@@ -176,6 +173,12 @@ func Order(left, right any) (int, error) {
 			return -CompareUint64Float64(ru, lf), nil
 		case luok && rfok:
 			return CompareUint64Float64(lu, rf), nil
+
+		// Both floats. Last, because a json.Number holding an integer answers
+		// GetFloat64 too: taking this arm for it rounds 2^64-1 up to 2^64 and
+		// the order lies at every power of two above 2^53.
+		case lfok && rfok:
+			return Float64Compare(lf, rf), nil
 		}
 		return 0, fmt.Errorf("value: expected numeric values (left %T, right %T)", left, right)
 
@@ -216,17 +219,6 @@ func Order(left, right any) (int, error) {
 		return -1, nil
 	}
 	return 0, fmt.Errorf("value: unknown strata for comparison between %T and %T", left, right)
-}
-
-// Less returns true when left is strictly less than right according to Order. This is a
-// convenience for wiring canonical ordering into sort helpers; callers must handle the returned
-// error for unsupported inputs.
-func Less(left, right any) (bool, error) {
-	cmp, err := Order(left, right)
-	if err != nil {
-		return false, err
-	}
-	return cmp < 0, nil
 }
 
 // GetInt64 extracts an int64 from any integer type.
@@ -353,10 +345,14 @@ func GetBool(val any) (bool, bool) {
 
 // GetString extracts a string, accepting a pointer or a named type over string.
 // It rejects *regexp.Regexp, which toStringComparable accepts for ordering but
-// which is not a value any string-kinded constraint holds.
+// which is not a value any string-kinded constraint holds, and json.Number,
+// which is a named type over string but a number to every other getter here.
 func GetString(val any) (string, bool) {
 	if s, ok := val.(string); ok {
 		return s, true
+	}
+	if _, isNumber := val.(json.Number); isNumber {
+		return "", false
 	}
 	if rv, ok := underlying(val); ok && rv.Kind() == reflect.String {
 		return rv.String(), true
@@ -364,41 +360,34 @@ func GetString(val any) (string, bool) {
 	return "", false
 }
 
-// IsWholeNumber reports whether f is a finite float64 that represents
-// a whole number within int64 range. Used for Integer constraint coercion.
-//
-// Returns true if:
-//   - f is finite (not NaN, not Inf)
-//   - math.Trunc(f) == f (no fractional part)
-//   - f is within [MinInt64, MaxInt64) range
+// IsWholeNumber reports whether f is finite and has no fractional part. It
+// says nothing about range: see [GetInt64FromFloat] for the int64 bound.
 func IsWholeNumber(f float64) bool {
-	if !IsFinite(f) {
-		return false
-	}
-	if math.Trunc(f) != f {
-		return false
-	}
-	// Check int64 bounds.
-	// Note: float64(MaxInt64) rounds UP to 2^63, so we need f < 2^63.
-	// Note: float64(MinInt64) is exactly -2^63.
-	const maxInt64AsFloat = float64(1 << 63)  // 2^63
-	const minInt64AsFloat = -float64(1 << 63) // -2^63
-	return f >= minInt64AsFloat && f < maxInt64AsFloat
+	return IsFinite(f) && math.Trunc(f) == f
 }
 
-// GetInt64FromFloat extracts an int64 from a float64 that represents a whole number.
-// Returns (value, true) if f is a finite whole number within int64 range.
-// Returns (0, false) otherwise (fractional, NaN, Inf, or out of range).
+// GetInt64FromFloat extracts an int64 from a float64 that is whole AND within
+// int64. It reports false for a fractional, non-finite or out-of-range value;
+// a caller that must say which is which tests [IsWholeNumber] and [IsFinite].
 func GetInt64FromFloat(f float64) (int64, bool) {
-	if !IsWholeNumber(f) {
+	if !IsWholeNumber(f) || !fitsInt64(f) {
 		return 0, false
 	}
 	return int64(f), true
 }
 
-// GetUint64 extracts a uint64 from any unsigned integer type.
-// Returns (value, true) if the input is any unsigned integer type.
-// Returns (0, false) for non-unsigned types.
+// fitsInt64 reports whether a whole float64 is within int64: float64(MaxInt64)
+// rounds up to 2^63, so the upper bound is exclusive; float64(MinInt64) is
+// exactly -2^63.
+func fitsInt64(f float64) bool {
+	const maxInt64AsFloat = float64(1 << 63)
+	const minInt64AsFloat = -float64(1 << 63)
+	return f >= minInt64AsFloat && f < maxInt64AsFloat
+}
+
+// GetUint64 extracts a uint64 from any unsigned integer type, or from a
+// json.Number whose text is a non-negative integer within uint64.
+// Returns (0, false) for every other value.
 //
 // Unlike GetInt64, this function does not reject any valid unsigned values.
 // All uint64 values (including those > math.MaxInt64) are supported.
@@ -416,6 +405,9 @@ func GetUint64(val any) (uint64, bool) {
 		return x, true
 	case uintptr:
 		return uint64(x), true
+	case json.Number:
+		n, err := strconv.ParseUint(string(x), 10, 64)
+		return n, err == nil
 	}
 	rv, ok := underlying(val)
 	if !ok {
@@ -475,15 +467,9 @@ func CompareInt64Float64(i int64, f float64) int {
 	trunc, frac := math.Modf(f)
 
 	if frac != 0 {
-		// f is not a whole number - compare i with the truncated value
-		// Range check for trunc
-		if trunc > float64(math.MaxInt64) {
-			return -1 // trunc > MaxInt64, so f > any int64
-		}
-		if trunc < float64(math.MinInt64) {
-			return 1 // trunc < MinInt64, so f < any int64
-		}
-
+		// f is not a whole number: compare i with the truncated value. A
+		// float64 with a fractional part has magnitude below 2^52, so trunc
+		// is always within int64.
 		fi := int64(trunc)
 		if i < fi {
 			return -1

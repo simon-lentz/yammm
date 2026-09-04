@@ -216,10 +216,6 @@ func builtinFilter(ev builtinEvaluator, lhs any, _ []any, params []string, body 
 }
 
 func builtinCount(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
-	if body == nil {
-		return nil, errors.New("count function requires a lambda expression")
-	}
-
 	slice, err := asSlice("Count", lhs)
 	if err != nil {
 		return nil, err
@@ -368,16 +364,14 @@ func builtinUnique(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 		return []any{}, nil
 	}
 
-	// Use value.Order for all comparisons to ensure semantic equality.
-	// This handles edge cases like NaN correctly (NaN == NaN per DSL total ordering,
-	// not IEEE 754 where NaN != NaN). Using map keys for comparable types would
-	// break this semantic because Go's map equality follows IEEE 754.
+	// value.Equal is the DSL's equality: NaN equals NaN, 1 equals 1.0, and
+	// an instance equals another structurally. A Go map keyed on the element
+	// would follow IEEE 754 and could not hold an instance at all.
 	result := make([]any, 0, len(slice))
 	for _, elem := range slice {
 		found := false
 		for _, r := range result {
-			cmp, err := value.Order(elem, r)
-			if err == nil && cmp == 0 {
+			if value.Equal(elem, r) {
 				found = true
 				break
 			}
@@ -438,27 +432,39 @@ func builtinSum(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 		return int64(0), nil
 	}
 
-	// Determine if we should return int64 or float64 based on input types
+	// Classify first, then sum in the kind the result has: a list holding a
+	// float is float arithmetic, and an integer subtotal it would discard
+	// cannot overflow it. An integer carried by a json.Number is an integer.
+	ints := make([]int64, 0, len(slice))
+	floats := make([]float64, 0, len(slice))
 	hasFloat := false
-	var intSum int64
-	var floatSum float64
-
 	for _, elem := range slice {
-		if f, ok := value.GetFloat64(elem); ok {
+		if i, ok := value.GetInt64(elem); ok {
+			ints = append(ints, i)
+			floats = append(floats, float64(i))
+		} else if f, ok := value.GetFloat64(elem); ok {
 			hasFloat = true
-			floatSum += f
-		} else if i, ok := value.GetInt64(elem); ok {
-			intSum += i
-			floatSum += float64(i)
+			floats = append(floats, f)
 		} else {
 			return nil, fmt.Errorf("Sum() expects numeric elements, got %T", elem)
 		}
 	}
-
 	if hasFloat {
-		return floatSum, nil
+		var sum float64
+		for _, f := range floats {
+			sum += f
+		}
+		return sum, nil
 	}
-	return intSum, nil
+	var sum int64
+	for _, i := range ints {
+		next, err := checkedAdd(sum, i)
+		if err != nil {
+			return nil, errors.New("integer overflow in Sum")
+		}
+		sum = next
+	}
+	return sum, nil
 }
 
 func builtinFirst(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
@@ -549,17 +555,12 @@ func builtinFlatten(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Exp
 		return []any{}, nil
 	}
 
-	// Flatten one level of nesting
+	// Flatten one level of nesting; an element that is not a list is kept.
 	result := make([]any, 0, len(slice))
 	for _, elem := range slice {
-		if inner, ok := elem.([]any); ok {
+		if inner, ok := value.ListElems(elem); ok {
 			result = append(result, inner...)
-		} else if rv := reflect.ValueOf(elem); rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
-			for i := range rv.Len() {
-				result = append(result, rv.Index(i).Interface())
-			}
 		} else {
-			// Non-slice elements are kept as-is
 			result = append(result, elem)
 		}
 	}
@@ -567,10 +568,6 @@ func builtinFlatten(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Exp
 }
 
 func builtinContains(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("contains requires exactly one argument")
-	}
-
 	slice, err := asSlice("Contains", lhs)
 	if err != nil {
 		return nil, err
@@ -578,8 +575,7 @@ func builtinContains(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr
 
 	target := args[0]
 	for _, elem := range slice {
-		cmp, err := value.Order(elem, target)
-		if err == nil && cmp == 0 {
+		if value.Equal(elem, target) {
 			return true, nil
 		}
 	}
@@ -622,44 +618,47 @@ func builtinWith(ev builtinEvaluator, lhs any, _ []any, params []string, body ex
 // --- Numeric Builtin implementations ---
 
 func builtinAbs(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if f, ok := value.GetFloat64(lhs); ok {
-		return math.Abs(f), nil
-	}
 	if i, ok := value.GetInt64(lhs); ok {
+		if i == math.MinInt64 {
+			return nil, errors.New("integer overflow in Abs")
+		}
 		if i < 0 {
 			return -i, nil
 		}
 		return i, nil
 	}
+	if f, ok := value.GetFloat64(lhs); ok {
+		return math.Abs(f), nil
+	}
 	return nil, fmt.Errorf("Abs() expects numeric argument, got %T", lhs)
 }
 
 func builtinFloor(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if f, ok := value.GetFloat64(lhs); ok {
-		return math.Floor(f), nil
-	}
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
+	}
+	if f, ok := value.GetFloat64(lhs); ok {
+		return math.Floor(f), nil
 	}
 	return nil, fmt.Errorf("Floor() expects numeric argument, got %T", lhs)
 }
 
 func builtinCeil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if f, ok := value.GetFloat64(lhs); ok {
-		return math.Ceil(f), nil
-	}
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
+	}
+	if f, ok := value.GetFloat64(lhs); ok {
+		return math.Ceil(f), nil
 	}
 	return nil, fmt.Errorf("Ceil() expects numeric argument, got %T", lhs)
 }
 
 func builtinRound(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if f, ok := value.GetFloat64(lhs); ok {
-		return math.RoundToEven(f), nil
-	}
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
+	}
+	if f, ok := value.GetFloat64(lhs); ok {
+		return math.RoundToEven(f), nil
 	}
 	return nil, fmt.Errorf("Round() expects numeric argument, got %T", lhs)
 }
@@ -667,6 +666,9 @@ func builtinRound(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 func builtinMin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	// Two-arg form: Min(a, b)
 	if len(args) == 1 {
+		if err := refuseListReceiver("Min", lhs); err != nil {
+			return nil, err
+		}
 		cmp, err := value.Order(lhs, args[0])
 		if err != nil {
 			return nil, fmt.Errorf("min: %w", err)
@@ -702,6 +704,9 @@ func builtinMin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expr
 func builtinMax(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	// Two-arg form: Max(a, b)
 	if len(args) == 1 {
+		if err := refuseListReceiver("Max", lhs); err != nil {
+			return nil, err
+		}
 		cmp, err := value.Order(lhs, args[0])
 		if err != nil {
 			return nil, fmt.Errorf("max: %w", err)
@@ -734,10 +739,21 @@ func builtinMax(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expr
 	return result, nil
 }
 
-func builtinCompare(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("compare requires exactly one argument")
+// refuseListReceiver is the two-argument form's guard for Min and Max: they
+// rank a scalar against the argument and promise a scalar, where value.Order
+// would rank a list above every scalar and hand the list back. nil is a
+// scalar here — it ranks below everything.
+func refuseListReceiver(name string, lhs any) error {
+	if lhs == nil {
+		return nil
 	}
+	if _, err := asSlice(name, lhs); err == nil {
+		return fmt.Errorf("%s ranks its receiver against its argument, and a list cannot be ranked against a scalar", name)
+	}
+	return nil
+}
+
+func builtinCompare(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	cmp, err := value.Order(lhs, args[0])
 	if err != nil {
 		return nil, fmt.Errorf("compare: %w", err)
@@ -772,9 +788,6 @@ func builtinTrim(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expres
 }
 
 func builtinTrimPrefix(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("TrimPrefix requires exactly one argument")
-	}
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("TrimPrefix() expects string receiver, got %T", lhs)
@@ -787,9 +800,6 @@ func builtinTrimPrefix(_ builtinEvaluator, lhs any, args []any, _ []string, _ ex
 }
 
 func builtinTrimSuffix(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("TrimSuffix requires exactly one argument")
-	}
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("TrimSuffix() expects string receiver, got %T", lhs)
@@ -802,9 +812,6 @@ func builtinTrimSuffix(_ builtinEvaluator, lhs any, args []any, _ []string, _ ex
 }
 
 func builtinSplit(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("split requires exactly one argument")
-	}
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Split() expects string receiver, got %T", lhs)
@@ -823,9 +830,6 @@ func builtinSplit(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Ex
 }
 
 func builtinJoin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("join requires exactly one argument")
-	}
 	slice, err := asSlice("Join", lhs)
 	if err != nil {
 		return nil, err
@@ -847,9 +851,6 @@ func builtinJoin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Exp
 }
 
 func builtinStartsWith(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("StartsWith requires exactly one argument")
-	}
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("StartsWith() expects string receiver, got %T", lhs)
@@ -862,9 +863,6 @@ func builtinStartsWith(_ builtinEvaluator, lhs any, args []any, _ []string, _ ex
 }
 
 func builtinEndsWith(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("EndsWith requires exactly one argument")
-	}
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("EndsWith() expects string receiver, got %T", lhs)
@@ -877,9 +875,6 @@ func builtinEndsWith(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr
 }
 
 func builtinReplace(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 2 {
-		return nil, errors.New("replace requires exactly two arguments")
-	}
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Replace() expects string receiver, got %T", lhs)
@@ -896,31 +891,24 @@ func builtinReplace(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.
 }
 
 func builtinSubstring(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) < 1 || len(args) > 2 {
-		return nil, errors.New("substring requires one or two arguments")
-	}
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Substring() expects string receiver, got %T", lhs)
 	}
 
-	// Get start index
-	startVal, ok := value.GetInt64(args[0])
+	start, ok := value.GetInt64(args[0])
 	if !ok {
 		return nil, fmt.Errorf("Substring() expects integer start index, got %T", args[0])
 	}
-	start := int(startVal)
 
-	// Convert string to runes for proper Unicode handling
+	// Indexes are runes, and every clamp runs in int64: narrowing first would
+	// wrap an index no int can hold into range on a 32-bit build.
 	runes := []rune(s)
-	length := len(runes)
+	length := int64(len(runes))
 
-	// Handle negative start index (from end)
 	if start < 0 {
-		start = length + start
+		start += length
 	}
-
-	// Clamp start to valid range
 	if start < 0 {
 		start = 0
 	}
@@ -928,22 +916,16 @@ func builtinSubstring(_ builtinEvaluator, lhs any, args []any, _ []string, _ exp
 		return "", nil
 	}
 
-	// Get end index (optional)
 	end := length
 	if len(args) == 2 {
-		endVal, ok := value.GetInt64(args[1])
+		end, ok = value.GetInt64(args[1])
 		if !ok {
 			return nil, fmt.Errorf("Substring() expects integer end index, got %T", args[1])
 		}
-		end = int(endVal)
-
-		// Handle negative end index (from end)
 		if end < 0 {
-			end = length + end
+			end += length
 		}
 	}
-
-	// Clamp end to valid range
 	if end < start {
 		return "", nil
 	}
@@ -951,16 +933,12 @@ func builtinSubstring(_ builtinEvaluator, lhs any, args []any, _ []string, _ exp
 		end = length
 	}
 
-	return string(runes[start:end]), nil
+	return string(runes[int(start):int(end)]), nil
 }
 
 // --- Pattern Matching Builtin ---
 
 func builtinMatch(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("match requires exactly one argument")
-	}
-
 	re, ok := args[0].(*regexp.Regexp)
 	if !ok {
 		return nil, fmt.Errorf("match expects regexp argument, got %T", args[0])
@@ -992,10 +970,11 @@ func builtinTypeOf(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 
 // dslTypeName maps an evaluator value onto the DSL type vocabulary that TypeOf
 // reports: "nil", "boolean", "integer", "float", "string", "list", "map",
-// "pattern", or "unknown" for any shape outside it. It recognises the Go scalar
-// types [value.TypeStrata] does but reports them at finer grain — strata group
-// every numeric together and patterns with strings, where the DSL vocabulary
-// separates both.
+// "pattern", or "unknown" for any shape outside it. A scalar is read the way
+// [value.Classify] reads it, so a json.Number is the number it spells and a
+// named carrier is its base kind; the vocabulary is finer than
+// [value.TypeStrata]'s, which groups every numeric together and patterns with
+// strings.
 //
 // A Timestamp, Date or UUID reports as "string": [CoerceValue] renders all
 // three to text, and invariants evaluate on coerced values, so no time.Time or
@@ -1005,21 +984,23 @@ func dslTypeName(v any) string {
 		return "nil"
 	}
 	switch v.(type) {
-	case bool:
-		return "boolean"
-	case int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64, uintptr:
-		return "integer"
-	case float32, float64:
-		return "float"
-	case string:
-		return "string"
 	case *regexp.Regexp:
 		return "pattern"
 	case immutable.Slice:
 		return "list"
 	case immutable.Map[string]:
 		return "map"
+	}
+	switch kind, _ := value.Classify(v); kind {
+	case value.BoolKind:
+		return "boolean"
+	case value.IntKind:
+		return "integer"
+	case value.FloatKind:
+		return "float"
+	case value.StringKind:
+		return "string"
+	case value.UnspecifiedKind:
 	}
 	if t := reflect.TypeOf(v); t != nil {
 		switch t.Kind() {
@@ -1036,20 +1017,17 @@ func builtinIsNil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	if lhs == nil {
 		return true, nil
 	}
-	// Check for nil interface values
+	// A typed nil: reflect.ValueOf never yields Kind Interface, so that
+	// kind is not listed.
 	rv := reflect.ValueOf(lhs)
-	if rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Interface ||
-		rv.Kind() == reflect.Map || rv.Kind() == reflect.Slice ||
-		rv.Kind() == reflect.Chan || rv.Kind() == reflect.Func {
+	if rv.Kind() == reflect.Pointer || rv.Kind() == reflect.Map ||
+		rv.Kind() == reflect.Slice || rv.Kind() == reflect.Chan || rv.Kind() == reflect.Func {
 		return rv.IsNil(), nil
 	}
 	return false, nil
 }
 
 func builtinDefault(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
-	if len(args) != 1 {
-		return nil, errors.New("default requires exactly one argument")
-	}
 	if lhs == nil {
 		return args[0], nil
 	}
@@ -1075,28 +1053,9 @@ func asSlice(funcName string, val any) ([]any, error) {
 	if val == nil {
 		return []any{}, nil
 	}
-
-	if slice, ok := val.([]any); ok {
-		return slice, nil
-	}
-
-	// Handle immutable.Slice (returned by property Unwrap for List-typed properties).
-	if is, ok := val.(immutable.Slice); ok {
-		result := make([]any, is.Len())
-		for i, v := range is.Iter2() {
-			result[i] = v.Unwrap()
-		}
-		return result, nil
-	}
-
-	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+	elems, ok := value.ListElems(val)
+	if !ok {
 		return nil, fmt.Errorf("%s expects slice or array input, got %T", funcName, val)
 	}
-
-	result := make([]any, rv.Len())
-	for i := range rv.Len() {
-		result[i] = rv.Index(i).Interface()
-	}
-	return result, nil
+	return elems, nil
 }

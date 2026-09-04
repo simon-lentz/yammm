@@ -98,7 +98,6 @@ func TestContract_ErrCorpus(t *testing.T) {
 	s, data := contractFixture(t, "contract_err.yammm", "data_err.json")
 
 	want := []string{
-		"E_EVAL_ERROR: invariant evaluation error: Upper() expects string argument, got int64",
 		"E_EVAL_ERROR: invariant evaluation error: division by zero",
 		"E_EVAL_ERROR: invariant evaluation error: expected boolean, got int64",
 		"E_EVAL_ERROR: invariant evaluation error: min of empty sequence",
