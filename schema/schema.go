@@ -4,6 +4,7 @@ import (
 	"iter"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/simon-lentz/yammm/location"
@@ -95,6 +96,25 @@ func (s *Schema) Types() iter.Seq2[string, *Type] {
 // TypesSlice returns a defensive copy of all types.
 func (s *Schema) TypesSlice() []*Type {
 	return slices.Clone(s.types)
+}
+
+// ResolveTypeName resolves an entry-relative type name: a bare name for a
+// type this schema declares, or "alias.Name" for a type of a schema this
+// schema imports directly. It is the one by-name resolve every name-taking
+// entry point applies — the validator's, the instance builder's, the CLI's —
+// so a name means the same thing at each. A transitively imported type has no
+// name form; [Schema.TypeByID] addresses it.
+func (s *Schema) ResolveTypeName(name string) (*Type, bool) {
+	return s.ResolveType(typeRefFromName(name))
+}
+
+// typeRefFromName reads "alias.Name" as a qualified reference and any other
+// spelling — a bare name, a leading dot, a trailing dot — as a local one.
+func typeRefFromName(name string) TypeRef {
+	if idx := strings.Index(name, "."); idx > 0 {
+		return NewTypeRef(name[:idx], name[idx+1:], location.Span{})
+	}
+	return LocalTypeRef(name, location.Span{})
 }
 
 // ResolveType resolves a TypeRef to a Type, handling qualified references

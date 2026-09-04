@@ -138,6 +138,9 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		// relation names resolve in either case
 		{`lines -> Len > 0`, nil},
 		{`placed_by != nil`, nil},
+		// a $ variable names a member by its exact spelling
+		{`$name -> Len > 0`, setName("")},
+		{`$lines -> Len > 0`, nil},
 		// a bare lambda variable name resolves like the evaluator's scope does
 		{`LINES -> All |$l| { l != nil }`, nil},
 		// a parameter shadows a same-named property, and $self may be rebound
@@ -231,6 +234,9 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		// an undefined named variable, and a variable that differs only in case
 		{`$undefined > 0`, diag.E_INVALID_INVARIANT, "undefined variable", "undefined variable"},
 		{`tags -> All |$myVar| { $myvar -> Len > 0 }`, diag.E_INVALID_INVARIANT, "undefined variable", "undefined variable"},
+		// a $ member reference differing from the member's spelling only in case
+		{`$nAme -> Len > 0`, diag.E_INVALID_INVARIANT, "undefined variable", "undefined variable"},
+		{`$lInes -> Len > 0`, diag.E_INVALID_INVARIANT, "undefined variable", "undefined variable"},
 		// an unknown function, and a call shape the builtin refuses
 		{`LINES -> Bogus > 0`, diag.E_INVALID_INVARIANT, "Bogus", "unknown function"},
 		{`LINES -> Len |$l| { $l.qty } > 0`, diag.E_INVALID_INVARIANT, "lambda", "does not accept a lambda"},

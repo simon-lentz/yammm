@@ -3,6 +3,7 @@ package schema
 import (
 	"iter"
 	"slices"
+	"strings"
 
 	"github.com/simon-lentz/yammm/location"
 )
@@ -35,17 +36,18 @@ func (k RelationKind) String() string {
 // Relations are immutable after schema completion.
 type Relation struct {
 	kind       RelationKind
-	name       string        // DSL name (e.g., "OWNER")
-	fieldName  string        // lower-case name, cached at completion
-	target     TypeRef       // syntactic reference
-	targetID   TypeID        // resolved identity
-	span       location.Span // source location
-	doc        string        // documentation comment
-	optional   bool          // forward multiplicity: optional?
-	many       bool          // forward multiplicity: many?
-	owner      string        // declaring type name
-	properties []*Property   // edge properties (associations only)
-	sealed     bool          // true after completion; prevents further mutation
+	name       string               // DSL name (e.g., "OWNER")
+	fieldName  string               // lower-case name, cached at completion
+	target     TypeRef              // syntactic reference
+	targetID   TypeID               // resolved identity
+	span       location.Span        // source location
+	doc        string               // documentation comment
+	optional   bool                 // forward multiplicity: optional?
+	many       bool                 // forward multiplicity: many?
+	owner      string               // declaring type name
+	properties []*Property          // edge properties (associations only)
+	propByFold map[string]*Property // lowercased name → property, built at seal
+	sealed     bool                 // true after completion; prevents further mutation
 }
 
 // newRelation creates a new Relation. This is primarily for internal use;
@@ -125,6 +127,10 @@ func (r *Relation) seal() {
 	if r.sealed {
 		panic("relation: sealed twice")
 	}
+	r.propByFold = make(map[string]*Property, len(r.properties))
+	for _, p := range r.properties {
+		r.propByFold[strings.ToLower(p.name)] = p
+	}
 	r.sealed = true
 }
 
@@ -185,6 +191,22 @@ func (r *Relation) PropertiesSlice() []*Property {
 func (r *Relation) Property(name string) (*Property, bool) {
 	for _, p := range r.properties {
 		if p.name == name {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+// PropertyFold returns the edge property whose lowercased name is lower, if
+// one exists. The caller lowercases the input key; this is the case-folded
+// half of [Relation.Property], answered from an index built at seal.
+func (r *Relation) PropertyFold(lower string) (*Property, bool) {
+	if r.propByFold != nil {
+		p, ok := r.propByFold[lower]
+		return p, ok
+	}
+	for _, p := range r.properties {
+		if strings.ToLower(p.name) == lower {
 			return p, true
 		}
 	}

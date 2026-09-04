@@ -3,8 +3,7 @@ package instance
 import (
 	"context"
 	"fmt"
-	"slices"
-	"strings"
+	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
@@ -12,6 +11,13 @@ import (
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
+
+// MaxComposedDepth is the deepest composed nesting a validated instance may
+// hold: a root is depth 0, its composed children depth 1, and a child at a
+// depth past this bound draws [ErrCompositionDepthExceeded]. The .ys wire
+// enforces the same number on write and read, so every validated instance is
+// one a snapshot can carry.
+const MaxComposedDepth = 32
 
 // pkPathFromInstance builds a PK-based path segment for a validated instance.
 // Returns basePath.PK(...) if the child type has a primary key, otherwise basePath.Index(i).
@@ -42,14 +48,17 @@ func pkPathFromInstance(basePath path.Builder, child *ValidInstance, childType *
 	return basePath.PK(fields...)
 }
 
-// validateCompositions validates all composition relations for an instance.
-// Returns a map of relation name -> composed children as immutable.Value.
+// validateCompositions validates all composition relations for an instance
+// at the given composed depth. Returns a map of relation name -> composed
+// children as immutable.Value.
 func (v *Validator) validateCompositions(
 	ctx context.Context,
 	typ *schema.Type,
-	props map[string]any,
+	in inputKeys,
 	collector *diag.Collector,
 	prov *location.Provenance,
+	base path.Builder,
+	depth int,
 ) map[string]immutable.Value {
 	composed := make(map[string]immutable.Value)
 
@@ -58,43 +67,25 @@ func (v *Validator) validateCompositions(
 			return composed
 		}
 
-		// Get the raw composition value from properties.
-		// Per architecture spec, use FieldName() (JSON field name) only,
-		// not the schema relation Name() (DSL name).
-		fieldName := rel.FieldName()
-		rawValue, hasValue := props[fieldName]
-
-		// Also check case-insensitive match on FieldName only, with collision detection
-		if !hasValue && !v.cfg.strictPropertyNames {
-			lower := strings.ToLower(fieldName)
-			var candidates []string
-			for k, val := range props {
-				if strings.ToLower(k) == lower {
-					candidates = append(candidates, k)
-					rawValue = val
-					hasValue = true
-				}
-			}
-			if len(candidates) > 1 {
-				// Collision: multiple input names fold to same composition field
-				slices.Sort(candidates) // Deterministic error message
+		inputKey, rawValue, hasValue := v.lookupRelationInput(rel, in, collector, prov, base)
+		if !hasValue {
+			// A collision was reported as the whole of what is wrong; an
+			// absent required composition is reported here.
+			if !rel.IsOptional() && !collector.HasErrors() {
 				issue := diag.NewIssue(
 					diag.Error,
-					ErrCaseFoldCollision,
-					fmt.Sprintf("multiple input fields %v fold to composition field %q", candidates, fieldName),
-				).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-					WithDetail(diag.DetailKeyJSONField, fieldName)
-				withProvenance(issue, prov, provenancePathBuilder(prov).String())
+					ErrUnresolvedRequiredComposition,
+					fmt.Sprintf("missing required composition %q", rel.Name()),
+				).WithDetail(diag.DetailKeyReason, "absent").
+					WithDetail(diag.DetailKeyRelationName, rel.Name()).
+					WithDetail(diag.DetailKeyJSONField, rel.FieldName())
+				withProvenance(issue, prov, base.String())
 				collector.Collect(issue.Build())
-				hasValue = false // Don't proceed with ambiguous match
 			}
+			continue
 		}
 
-		// Use schema relation name for path, not JSON field name
-		basePath := provenancePathBuilder(prov).Key(rel.Name())
-
-		// Validate the composition
-		composedValue := v.validateComposition(ctx, rel, rawValue, hasValue, collector, prov, basePath)
+		composedValue := v.validateComposition(ctx, rel, rawValue, collector, prov, base.Key(inputKey), depth)
 		if !composedValue.IsNil() {
 			composed[rel.Name()] = composedValue
 		}
@@ -106,58 +97,29 @@ func (v *Validator) validateCompositions(
 	return composed
 }
 
-// validateComposition validates a single composition relation.
+// validateComposition validates a present composition value at relPath, the
+// input key's location, whose children sit at depth+1.
 func (v *Validator) validateComposition(
 	ctx context.Context,
 	rel *schema.Relation,
 	rawValue any,
-	hasValue bool,
 	collector *diag.Collector,
 	prov *location.Provenance,
-	basePath path.Builder,
+	relPath path.Builder,
+	depth int,
 ) immutable.Value {
-	// Handle absent field - emit error for required compositions.
-	// Unlike associations, composition presence is validated at instance layer.
-	if !hasValue {
-		if !rel.IsOptional() {
-			issue := diag.NewIssue(
-				diag.Error,
-				ErrUnresolvedRequiredComposition,
-				fmt.Sprintf("missing required composition %q", rel.Name()),
-			).WithDetail(diag.DetailKeyReason, "absent").
-				WithDetail(diag.DetailKeyRelationName, rel.Name()).
-				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			withProvenance(issue, prov, basePath.String())
-			collector.Collect(issue.Build())
-		}
-		return immutable.Value{}
-	}
-
-	// Handle explicit null - always a shape error per spec.
-	// Null is never valid for composition fields regardless of optionality.
+	// An explicit null is a shape error whatever the optionality.
 	if rawValue == nil {
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrEdgeShapeMismatch,
-			fmt.Sprintf("composition %q: null is not a valid composition value", rel.Name()),
-		).WithExpectedGot("array", "null")
-		withProvenance(issue, prov, basePath.String()).
-			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-		collector.Collect(issue.Build())
+		collector.Collect(shapeMismatch(rel, fmt.Sprintf("composition %q: null is not a valid composition value", rel.Name()),
+			"array", "null", prov, relPath))
 		return immutable.Value{}
 	}
 
 	// Compositions always expect an array (accept typed slices via reflection)
 	arr, ok := toSliceOfAny(rawValue)
 	if !ok {
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrEdgeShapeMismatch,
-			fmt.Sprintf("composition %q: expected array, got %s", rel.Name(), kindOf(rawValue)),
-		)
-		withProvenance(issue, prov, basePath.String()).
-			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-		collector.Collect(issue.Build())
+		collector.Collect(shapeMismatch(rel, fmt.Sprintf("composition %q: expected array, got %s", rel.Name(), kindOf(rawValue)),
+			"array", kindOf(rawValue), prov, relPath))
 		return immutable.Value{}
 	}
 
@@ -171,73 +133,77 @@ func (v *Validator) validateComposition(
 			).WithDetail(diag.DetailKeyReason, "empty").
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			withProvenance(issue, prov, basePath.String())
+			withProvenance(issue, prov, relPath.String())
 			collector.Collect(issue.Build())
 			return immutable.Value{}
 		}
-		// Return empty slice wrapped
 		return immutable.Wrap([]*ValidInstance{})
 	}
 
 	// A composition always arrives as an array, so its multiplicity is not
-	// settled by the shape the way a (one) association's object form is.
+	// settled by the shape the way a (one) association's object form is. A
+	// slot given more children than it holds is the fact graph assembly
+	// reports under the same code.
 	if !rel.IsMany() && len(arr) > 1 {
 		issue := diag.NewIssue(
 			diag.Error,
-			ErrEdgeShapeMismatch,
+			ErrDuplicateComposedPK,
 			fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", rel.Name(), len(arr)),
 		).WithExpectedGot("1 child", fmt.Sprintf("%d children", len(arr))).
-			WithDetail(diag.DetailKeyRelationName, rel.Name())
-		withProvenance(issue, prov, basePath.String()).
+			WithDetail(diag.DetailKeyRelationName, rel.Name()).
 			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
+		withProvenance(issue, prov, relPath.String())
 		collector.Collect(issue.Build())
 		return immutable.Value{}
 	}
 
-	// Build raw instances for children
+	childDepth := depth + 1
+	if childDepth > MaxComposedDepth {
+		issue := diag.NewIssue(
+			diag.Error,
+			ErrCompositionDepthExceeded,
+			fmt.Sprintf("composition %q: composed nesting depth %d exceeds limit %d", rel.Name(), childDepth, MaxComposedDepth),
+		).WithDetail(diag.DetailKeyDepth, strconv.Itoa(childDepth)).
+			WithDetail(diag.DetailKeyRelationName, rel.Name()).
+			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
+		withProvenance(issue, prov, relPath.String())
+		collector.Collect(issue.Build())
+		return immutable.Value{}
+	}
+
+	// Build raw instances for the children, each remembering its position in
+	// the caller's array so a later diagnostic names that position and not
+	// its position among the survivors of the shape filter.
 	childRaws := make([]RawInstance, 0, len(arr))
+	childBases := make([]path.Builder, 0, len(arr))
+	inputIndex := make([]int, 0, len(arr))
 	for i, elem := range arr {
-		// Accept typed maps via reflection for programmatic callers
 		childObj, ok := toMapOfAny(elem)
 		if !ok {
-			issue := diag.NewIssue(
-				diag.Error,
-				ErrEdgeShapeMismatch,
-				"composition child must be an object, got "+kindOf(elem),
-			)
-			withProvenance(issue, prov, basePath.Index(i).String()).
-				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-			collector.Collect(issue.Build())
+			collector.Collect(shapeMismatch(rel, "composition child must be an object, got "+kindOf(elem),
+				"object", kindOf(elem), prov, relPath.Index(i)))
 			continue
 		}
 
-		// Propagate parent's sourceName and span to children.
+		childBase := relPath.Index(i)
 		var childProv *location.Provenance
 		if prov != nil {
-			childProv = location.NewProvenance(prov.SourceName(), basePath.Index(i), prov.Span())
-		} else {
-			childProv = location.NewProvenance("", basePath.Index(i), location.Span{})
+			childProv = location.NewProvenance(prov.SourceName(), childBase, prov.Span())
 		}
-
-		childRaws = append(childRaws, RawInstance{
-			Properties: childObj,
-			Provenance: childProv,
-		})
+		childRaws = append(childRaws, RawInstance{Properties: childObj, Provenance: childProv})
+		childBases = append(childBases, childBase)
+		inputIndex = append(inputIndex, i)
 	}
 
 	// Recursively validate children against the relation already in hand;
 	// rel.Owner() is a declaring-schema-local name the entry schema may not
 	// know, so no name round-trips through public tag resolution.
-	validChildren, childResult := v.validateComposedBatch(ctx, rel, childRaws)
-
-	// Collect child diagnostics into the parent collector with relation context.
 	relationDetails := diag.PathRelation(rel.Name(), rel.FieldName())
-	for issue := range childResult.Issues() {
-		augmented := diag.FromIssue(issue).
-			WithDetails(relationDetails...).
-			Build()
-		collector.Collect(augmented)
-	}
+	validChildren := v.validateComposedBatch(ctx, rel, childRaws, childBases, childDepth, func(_ int, res diag.Result) {
+		collector.MergeFunc(res, func(issue diag.Issue) diag.Issue {
+			return diag.FromIssue(issue).WithDetails(relationDetails...).Build()
+		})
+	})
 
 	// Check for duplicate PKs among children - only for types that have PKs.
 	// PK-less composed children use structural position (array index) for identity,
@@ -245,7 +211,7 @@ func (v *Validator) validateComposition(
 	if len(validChildren) > 0 {
 		childType, found := resolveRelationTarget(v.schema, rel)
 		if found && childType.HasPrimaryKey() {
-			seenPKs := make(map[string]int) // pk string -> first occurrence index
+			seenPKs := make(map[string]int) // pk string -> first occurrence's input index
 			for i, child := range validChildren {
 				if child == nil {
 					continue // failed validation; diagnostics already collected
@@ -255,14 +221,14 @@ func (v *Validator) validateComposition(
 					issue := diag.NewIssue(
 						diag.Error,
 						ErrDuplicateComposedPK,
-						fmt.Sprintf("duplicate primary key in composed children at indices %d and %d", firstIdx, i),
+						fmt.Sprintf("duplicate primary key in composed children at indices %d and %d", firstIdx, inputIndex[i]),
 					).WithDetail(diag.DetailKeyRelationName, rel.Name()).
 						WithDetail(diag.DetailKeyJSONField, rel.FieldName()).
 						WithDetail(diag.DetailKeyPrimaryKey, pkStr)
-					withProvenance(issue, prov, pkPathFromInstance(basePath, child, childType, i).String())
+					withProvenance(issue, prov, pkPathFromInstance(relPath, child, childType, inputIndex[i]).String())
 					collector.Collect(issue.Build())
 				} else {
-					seenPKs[pkStr] = i
+					seenPKs[pkStr] = inputIndex[i]
 				}
 			}
 		}
@@ -272,6 +238,5 @@ func (v *Validator) validateComposition(
 		return immutable.Value{}
 	}
 
-	// Wrap the valid children
 	return immutable.Wrap(validChildren)
 }

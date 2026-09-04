@@ -30,7 +30,4 @@ func TestType_CanonicalPropertyName_AgreesBeforeAndAfterSealing(t *testing.T) {
 	if got, ok := typ.CanonicalPropertyName("name"); !ok || got != "Name" {
 		t.Errorf("sealed: CanonicalPropertyName(name) = %q, %v; want Name", got, ok)
 	}
-	if got := typ.CanonicalPropertyMap()["name"]; got != "Name" {
-		t.Errorf("the map and the accessor disagree: %q", got)
-	}
 }

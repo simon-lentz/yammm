@@ -9,8 +9,7 @@ import (
 // applies to every property value: Go kind, bounds, enum membership, pattern,
 // list length and element rule, with an alias resolved to its DataType. A nil
 // value and a nil constraint are both valid — presence is the caller's rule,
-// as it is the validator's. Built-in type detection only: a Validator's custom
-// value registry is not consulted.
+// as it is the validator's.
 //
 // This is the check half of the boundary contract [CanonicalValue] renders the
 // other half of, exported for a caller that admits schema-typed values at a
@@ -35,4 +34,16 @@ func checkValueRecovering(ch *eval.Checker, val any, c schema.Constraint) (err e
 	}()
 	//nolint:wrapcheck // the checker's error is the contract; callers classify CheckError vs InternalError
 	return ch.CheckValue(val, c)
+}
+
+// coerceValueRecovering runs ch.CoerceValue under the same recovery rule as
+// [checkValueRecovering], so the validator and CanonicalValue share it.
+func coerceValueRecovering(ch *eval.Checker, val any, c schema.Constraint) (result any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = wrapPanicValue(r, KindConstraintPanic)
+		}
+	}()
+	//nolint:wrapcheck // the checker's error is the contract; callers classify CheckError vs InternalError
+	return ch.CoerceValue(val, c)
 }

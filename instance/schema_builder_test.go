@@ -367,7 +367,7 @@ func TestSchemaBuilder_RelationNameFormParity(t *testing.T) {
 
 	bB, err := instance.BuilderFor(s, "Person")
 	require.NoError(t, err)
-	rawB, err := bB.Property("id", "a").EdgeTo("WORKS_AT", "c1").Build()
+	rawB, err := bB.Property("id", "a").EdgeTo("works_at", "c1").Build()
 	require.NoError(t, err)
 
 	assertPropertiesEqual(t, rawA.Properties, rawB.Properties)

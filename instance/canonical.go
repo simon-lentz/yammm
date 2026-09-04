@@ -1,28 +1,36 @@
 package instance
 
 import (
-	"github.com/simon-lentz/yammm/internal/value"
+	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// CanonicalValue returns val in the single stored representation c defines.
+// CanonicalValue returns val in the single stored representation c defines —
+// the value [Validator] stores for the same input: an Integer as int64, a
+// Float as float64, a Vector as []float64, a List with each element
+// canonicalized through the element constraint, a Timestamp rendered through
+// its declared format (RFC 3339 with fractional seconds otherwise), a UUID in
+// canonical lowercase form, a Date as "2006-01-02" in the value's own
+// location, and a String, Enum, Pattern or Boolean carried by a named Go type
+// as the base value. A nil value and a nil constraint pass through untouched.
 //
-// Timestamp, UUID and Date each accept more than one Go representation and
-// store one: a Timestamp renders through its declared format when it has one
-// and through RFC 3339 with fractional seconds otherwise, a UUID through its
-// canonical lowercase form, a Date through "2006-01-02" in the value's own
-// location, and a List by canonicalizing each element through the element
-// constraint. Every other kind, an unresolved alias and a nil value pass through
-// untouched.
-//
-// This is the rule the validator applies, exported for a caller that renders
-// schema-typed values at a boundary this library does not own — a hand-built
-// export, a direct-Cypher parameter map. Values reaching a graph through
-// [Validator] are already canonical.
+// This is the render half of the boundary contract [CheckValue] checks the
+// other half of, exported for a caller that renders schema-typed values at a
+// boundary this library does not own — a hand-built export, a direct-Cypher
+// parameter map. Values reaching a graph through [Validator] are already
+// canonical.
 //
 // On error the returned value is val unchanged, so a caller that heals what it
-// can and passes through what it cannot may ignore the error.
+// can and passes through what it cannot may ignore the error. A panic inside
+// the coercion returns an [InternalError] that matches [ErrInternalFailure],
+// as it does for the validator.
 func CanonicalValue(val any, c schema.Constraint) (any, error) {
-	//nolint:wrapcheck // the delegate's errors are the contract; wrapping them adds a layer naming this package for no gain
-	return value.Canonical(val, c)
+	if val == nil || c == nil {
+		return val, nil
+	}
+	out, err := coerceValueRecovering(eval.DefaultChecker(), val, c)
+	if err != nil {
+		return val, err
+	}
+	return out, nil
 }

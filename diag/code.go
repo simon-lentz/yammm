@@ -352,6 +352,12 @@ var (
 	// E_COMPOSITION_NOT_FOUND indicates a referenced composition cannot be found.
 	E_COMPOSITION_NOT_FOUND = NewCode("E_COMPOSITION_NOT_FOUND", CategoryInstance)
 
+	// E_COMPOSITION_DEPTH_EXCEEDED indicates composed nesting deeper than
+	// [github.com/simon-lentz/yammm/instance.MaxComposedDepth], the bound the
+	// .ys wire enforces; the validator refuses it first so a validated
+	// instance is always one a snapshot can carry.
+	E_COMPOSITION_DEPTH_EXCEEDED = NewCode("E_COMPOSITION_DEPTH_EXCEEDED", CategoryInstance)
+
 	// E_INVALID_TYPE_TAG indicates a $type tag has an invalid format.
 	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG", CategoryInstance)
 

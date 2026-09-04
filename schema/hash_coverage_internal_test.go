@@ -47,6 +47,7 @@ func TestStructuralHash_TypeFieldCoverage(t *testing.T) {
 		"subTypes":     "excluded: derived from the subtypes' own extends rows",
 		"propByName":   "excluded: lookup index over allProperties",
 		"relByName":    "excluded: lookup index over relations",
+		"relByField":   "excluded: lookup index over relations by field name",
 		"canonicalMap": "excluded: lookup cache",
 		"sealed":       "excluded: lifecycle marker",
 	}

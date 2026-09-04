@@ -153,6 +153,25 @@ func (c *Collector) CollectAll(issues []Issue) {
 func (c *Collector) Merge(res Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.mergeLocked(res, nil)
+}
+
+// MergeFunc is [Collector.Merge] with fn applied to each of res's surviving
+// issues before it is stored. The severity counts and truncation facts carry
+// over exactly as Merge carries them, so a caller that must re-wrap each issue
+// with batch context — an instance index, a relation — keeps res's dropped
+// errors and its LimitReached state instead of re-collecting the survivors one
+// by one and losing both. fn must return a valid issue; [FromIssue] preserves
+// validity.
+func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.mergeLocked(res, fn)
+}
+
+// mergeLocked folds res into c, storing fn(issue) for each survivor when fn is
+// non-nil. Caller must hold c.mu.
+func (c *Collector) mergeLocked(res Result, fn func(Issue) Issue) {
 	c.cachedResult = nil
 
 	// Fold in res's seen-severity counts wholesale. Each Result's counts reflect
@@ -173,6 +192,10 @@ func (c *Collector) Merge(res Result) {
 	// re-count (the counts were folded in above); issues past c's limit are
 	// dropped and flagged.
 	for _, issue := range res.issues {
+		if fn != nil {
+			issue = fn(issue)
+			c.validateIssue(issue)
+		}
 		c.storeLocked(issue)
 	}
 }

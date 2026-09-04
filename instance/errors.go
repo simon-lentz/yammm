@@ -56,6 +56,9 @@ var (
 	// ErrCompositionNotFound indicates a composition relation was not found on the parent type.
 	ErrCompositionNotFound = diag.E_COMPOSITION_NOT_FOUND
 
+	// ErrCompositionDepthExceeded indicates composed nesting deeper than [MaxComposedDepth].
+	ErrCompositionDepthExceeded = diag.E_COMPOSITION_DEPTH_EXCEEDED
+
 	// ErrDuplicateComposedPK indicates duplicate primary keys in composed children.
 	ErrDuplicateComposedPK = diag.E_DUPLICATE_COMPOSED_PK
 

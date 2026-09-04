@@ -2,14 +2,12 @@ package eval_test
 
 import (
 	"math"
-	"reflect"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
-	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -774,32 +772,6 @@ func TestCheckerFor(t *testing.T) {
 //
 // These tests verify the registry wiring is correct AND that named scalars work.
 
-func TestChecker_NewChecker_WithRegistry(t *testing.T) {
-	// Verify NewChecker accepts a Registry and the Checker is usable
-	var hookCalled bool
-	reg := value.Registry{
-		BaseKindOfReflectType: func(_ reflect.Type) value.Kind {
-			hookCalled = true
-			return value.UnspecifiedKind // Hook doesn't recognize the type
-		},
-	}
-
-	checker := eval.NewChecker(reg)
-
-	// Built-in types should still work (hook returns UnspecifiedKind, falls back to built-in)
-	err := checker.CheckValue(int64(42), schema.NewIntegerConstraint())
-	require.NoError(t, err)
-
-	// Hook is called for non-built-in types during Integer/Float/Vector classification.
-	// Using a struct type with integer constraint to trigger the classify path.
-	// Note: Only Integer, Float, and Vector constraints call ClassifyWithRegistry;
-	// String just does a type assertion.
-	type customType struct{}
-	_ = checker.CheckValue(customType{}, schema.NewIntegerConstraint())
-	// We don't care about the error; we just want to verify the hook was called
-	assert.True(t, hookCalled, "registry hook should be called for unrecognized types in Integer check")
-}
-
 func TestChecker_Method_vs_PackageLevel(t *testing.T) {
 	// Verify method and package-level function produce same results
 	checker := eval.DefaultChecker()
@@ -827,7 +799,7 @@ func TestChecker_Method_vs_PackageLevel(t *testing.T) {
 }
 
 func TestCoerceValue_AliasConstraint(t *testing.T) {
-	checker := eval.NewChecker(value.Registry{})
+	checker := eval.DefaultChecker()
 
 	// Test alias that resolves to integer
 	intAlias := schema.NewAliasConstraint("MyInt", schema.NewIntegerConstraint())
@@ -874,102 +846,6 @@ func TestCoerceValue_AliasConstraint(t *testing.T) {
 		result, err := checker.CoerceValue(nil, intAlias)
 		require.NoError(t, err)
 		assert.Nil(t, result)
-	})
-}
-
-// Custom types for testing registry-aware coercion
-type (
-	myCustomInt   int64
-	myCustomFloat float64
-)
-
-func TestChecker_CoerceValue_RegistryAwareInteger(t *testing.T) {
-	// Registry that recognizes myCustomInt as IntKind
-	reg := value.Registry{
-		BaseKindOfReflectType: func(rt reflect.Type) value.Kind {
-			if rt.Name() == "myCustomInt" {
-				return value.IntKind
-			}
-			return value.UnspecifiedKind
-		},
-	}
-
-	checker := eval.NewChecker(reg)
-	intConstraint := schema.NewIntegerConstraint()
-
-	// CheckValue and CoerceValue agree on a named type. They did not: the
-	// checker gates the coercer, so the coercer's named-type arm was
-	// unreachable through Validator and adapter/gogen's own emitted carriers
-	// failed the validation they were generated from.
-	//
-	// Mutation: reverting GetInt64's reflect fallback turns this red.
-	t.Run("custom_int_check_accepts_the_named_type", func(t *testing.T) {
-		err := checker.CheckValue(myCustomInt(42), intConstraint)
-		assert.NoError(t, err)
-	})
-
-	// CoerceValue now uses registry-aware reflection fallback
-	t.Run("custom_int_coerce_succeeds", func(t *testing.T) {
-		result, err := checker.CoerceValue(myCustomInt(42), intConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, int64(42), result)
-	})
-
-	t.Run("custom_int_negative", func(t *testing.T) {
-		result, err := checker.CoerceValue(myCustomInt(-100), intConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, int64(-100), result)
-	})
-}
-
-func TestChecker_CoerceValue_RegistryAwareFloat(t *testing.T) {
-	// Registry that recognizes myCustomFloat as FloatKind
-	reg := value.Registry{
-		BaseKindOfReflectType: func(rt reflect.Type) value.Kind {
-			if rt.Name() == "myCustomFloat" {
-				return value.FloatKind
-			}
-			return value.UnspecifiedKind
-		},
-	}
-
-	checker := eval.NewChecker(reg)
-	floatConstraint := schema.NewFloatConstraint()
-
-	// Mutation: reverting GetFloat64's reflect fallback turns this red.
-	t.Run("custom_float_check_accepts_the_named_type", func(t *testing.T) {
-		err := checker.CheckValue(myCustomFloat(3.14), floatConstraint)
-		assert.NoError(t, err)
-	})
-
-	// CoerceValue now uses registry-aware reflection fallback
-	t.Run("custom_float_coerce_succeeds", func(t *testing.T) {
-		result, err := checker.CoerceValue(myCustomFloat(3.14), floatConstraint)
-		require.NoError(t, err)
-		assert.InDelta(t, 3.14, result.(float64), 0.0001)
-	})
-}
-
-func TestChecker_CoerceValue_VectorWithCustomTypes(t *testing.T) {
-	// Registry that recognizes myCustomFloat as FloatKind
-	reg := value.Registry{
-		BaseKindOfReflectType: func(rt reflect.Type) value.Kind {
-			if rt.Name() == "myCustomFloat" {
-				return value.FloatKind
-			}
-			return value.UnspecifiedKind
-		},
-	}
-
-	checker := eval.NewChecker(reg)
-	vectorConstraint := schema.NewVectorConstraint(3)
-
-	// CoerceValue now uses registry-aware reflection fallback for each element
-	t.Run("vector_with_custom_float_elements", func(t *testing.T) {
-		input := []any{myCustomFloat(1.0), myCustomFloat(2.0), myCustomFloat(3.0)}
-		result, err := checker.CoerceValue(input, vectorConstraint)
-		require.NoError(t, err)
-		assert.Equal(t, []float64{1.0, 2.0, 3.0}, result)
 	})
 }
 
@@ -1062,7 +938,7 @@ func TestCheckValue_List_Nested(t *testing.T) {
 
 func TestCoerceValue_List(t *testing.T) {
 	t.Parallel()
-	checker := eval.NewChecker(value.Registry{})
+	checker := eval.DefaultChecker()
 
 	t.Run("coerce integer elements", func(t *testing.T) {
 		t.Parallel()
@@ -1152,7 +1028,7 @@ func TestCoerceValue_List(t *testing.T) {
 // identical, or coercion would not be idempotent.
 func TestCoerceValue_CanonicalFormsAreStable(t *testing.T) {
 	t.Parallel()
-	checker := eval.NewChecker(value.Registry{})
+	checker := eval.DefaultChecker()
 
 	cases := []struct {
 		name string

@@ -374,6 +374,8 @@ validator := instance.NewValidator(schema, opts...)
 | ------ | ----------- |
 | `WithStrictPropertyNames` | Require exact case matching (default: false) |
 | `WithAllowUnknownFields` | Silently ignore unknown fields (default: false) |
+| `WithIssueLimit` | Cap the issues one instance stores; the rest are counted and reported as dropped, on the batch result too (default: 100; 0 is unlimited) |
+| `WithLogger` | Receive a debug record when a property name is normalized |
 
 The `RecommendedOptions()` function returns a curated set of defaults (`WithStrictPropertyNames(true)`, `WithAllowUnknownFields(false)`) as a starting point for common use cases.
 
@@ -394,9 +396,18 @@ one, result := validator.ValidateOne(ctx, "Person", rawInstance)
 // Validate instances in a composition context (part types allowed). Primary keys
 // are enforced exactly as ValidateOne enforces them; what is relaxed lives
 // elsewhere: a part type may declare no primary key at load, and a keyless
-// child type skips the duplicate-key scan.
+// child type skips the duplicate-key scan. The relation is named by its DSL
+// name or its field name; an association's name, or a name the parent does
+// not declare, is E_COMPOSITION_NOT_FOUND — resolved before the batch is
+// inspected, so an empty or nil batch reports it too.
 composed, result := validator.ValidateForComposition(ctx, "Car", "WHEELS", rawWheels)
 ```
+
+Every diagnostic a batch call returns carries exactly one `instance_index` detail, the index into the slice the caller passed — the root's through `Validate`, the child's through `ValidateForComposition` — and the batch result carries each instance's truncation facts (`LimitReached`, `DroppedCount`), so a capped instance is never reported as complete.
+
+**Paths name the input document.** A diagnostic's path, and a composed child's provenance path, address the token in the document the caller supplied: the input key as written (`$.Age` for an input `Age` matched to the property `age`, `$.lines[0].qty` for a child under the input key `lines`), or the parent object for something absent or for a collision between two of its keys. The schema spelling rides in the details (`property`, `relation`, `field`). A child's provenance is the parent's, extended by that path; a parent without provenance yields children without.
+
+**Composed nesting is bounded.** A root is depth 0 and its composed children depth 1; a child deeper than `instance.MaxComposedDepth` (32) draws `E_COMPOSITION_DEPTH_EXCEEDED`. The `.ys` wire enforces the same number on write and read, so every validated instance is one a snapshot can carry.
 
 > **Note:** Passing an unknown type name to `Validate` or `ValidateOne` produces a validation failure (via `diag.Result`), not a panic or unexpected state.
 
@@ -423,7 +434,7 @@ Instance data is a top-level object keyed by type names whose values are arrays 
 
 ### Input Format
 
-`RawInstance.Properties` is `map[string]any` of native Go values; marshaling a struct through JSON is one way to build it, not a requirement. Property names may use any casing by default, and the validator normalizes them — under `WithStrictPropertyNames(true)`, which `RecommendedOptions()` sets, a name that differs in case goes unmatched and draws `E_UNKNOWN_FIELD` unless `WithAllowUnknownFields(true)` is also set.
+`RawInstance.Properties` is `map[string]any` of native Go values; marshaling a struct through JSON is one way to build it, not a requirement. Every input key — a property, a relation field, an edge property, a `_target_` foreign-key field — is matched by one rule: an exact match first, then, by default, an ASCII case-fold (identifiers are ASCII, so a key carrying a non-ASCII letter matches nothing). An exact match is claimed first and never collides; two keys folding to one member none matches exactly is `E_CASE_FOLD_COLLISION`, reported once at the object that holds them. Under `WithStrictPropertyNames(true)`, which `RecommendedOptions()` sets, no fold is attempted: a name that differs in case goes unmatched and draws `E_UNKNOWN_FIELD` (or `E_UNKNOWN_EDGE_FIELD`, or a missing foreign key) unless `WithAllowUnknownFields(true)` is also set. A `_target_`-prefixed key that is not one of the target's foreign-key fields is an unknown edge field.
 
 ### Schema-Aware Raw Instance Builder
 
@@ -472,21 +483,22 @@ The validator's per-value rules, exported for a caller that admits or renders sc
 // CheckValue reports whether val conforms to c by the rule the validator applies
 // to every property value: Go kind, bounds, enum membership, pattern, list length
 // and element rule, with an alias resolved to its DataType. A nil value and a nil
-// constraint are both valid — presence is the caller's rule. Built-in type
-// detection only: a Validator's custom value registry is not consulted.
+// constraint are both valid — presence is the caller's rule.
 func CheckValue(val any, c schema.Constraint) error
 
-// CanonicalValue returns val in the single stored representation c defines: a
-// Timestamp through its declared format (RFC 3339 with nanoseconds otherwise), a
-// UUID in canonical lowercase form, a Date as "2006-01-02" in the value's own
-// location, and a List by canonicalizing each element through the element
-// constraint. Every other kind, an unresolved alias and a nil value pass through.
-// On error the returned value is val unchanged, so a caller that heals what it
-// can may ignore the error.
+// CanonicalValue returns val in the single stored representation c defines — the
+// value the validator stores for the same input: an Integer as int64, a Float as
+// float64, a Vector as []float64, a List with each element canonicalized through
+// the element constraint, a Timestamp rendered through its declared format
+// (RFC 3339 with fractional seconds otherwise), a UUID in canonical lowercase
+// form, a Date as "2006-01-02" in the value's own location, and a String, Enum,
+// Pattern or Boolean carried by a named Go type as the base value. A nil value
+// and a nil constraint pass through. On error the returned value is val
+// unchanged, so a caller that heals what it can may ignore the error.
 func CanonicalValue(val any, c schema.Constraint) (any, error)
 ```
 
-`CheckValue`'s error is the checker's message and is meant for reading, not matching, with one exception: a panic inside a check is recovered into an `*InternalError` that matches `errors.Is(err, instance.ErrInternalFailure)`, exactly as it does inside the validator. `CanonicalValue` is the rule `adapter/json` and `adapter/csv` render through, and the approved facade over it for the adapter layer.
+`CheckValue`'s error is the checker's message and is meant for reading, not matching, with one exception: a panic inside a check or a coercion is recovered into an `*InternalError` that matches `errors.Is(err, instance.ErrInternalFailure)`, exactly as it does inside the validator. `CanonicalValue` is the rule `adapter/json` and `adapter/csv` render through, and the approved facade over it for the adapter layer.
 
 ## Graph Construction
 
@@ -526,7 +538,7 @@ for _, typeID := range snap.Types() {
 
 **A non-OK `Add` leaves the graph unchanged.** `Add` and `AddComposed` walk an instance once. That walk both checks the whole structure — the names and multiplicities of its edges, and every slot and child of its composition tree at any depth — and assembles the tree to install, touching no graph state; only a walk that raised no error reaches the commit. A record that violates one of those rules is refused entire: no instance, no child, no edge and no duplicate record survives it. The check runs for every instance, whatever `ValidInstance.Validated()` reports, because the graph cannot verify that bit and because a validator hole in one of these rules is exactly what the check exists to catch.
 
-The codes it can raise are `E_GRAPH_UNKNOWN_RELATION` (data filed under a name the type does not declare in that slot), `E_GRAPH_CARDINALITY` (a `(one)` association carrying several targets), `E_GRAPH_INVALID_COMPOSITION` (a composed child that is not an instance of its relation's target type), `E_DUPLICATE_COMPOSED_PK` (a `(one)` composition carrying several children, or two children of one `(many)` slot sharing a primary key), `E_GRAPH_TYPE_NOT_FOUND` (a composed child whose type is not in the schema's import closure at all) and `E_GRAPH_INVALID_PK` (a composed child of a keyed part type whose key is empty, has the wrong arity, or disagrees with its own key property). See the package doc's Error Handling section for the full per-method list.
+The codes it can raise are `E_GRAPH_UNKNOWN_RELATION` (data filed under a name the type does not declare in that slot), `E_GRAPH_CARDINALITY` (a `(one)` association carrying several targets), `E_GRAPH_INVALID_COMPOSITION` (a composed child that is not an instance of its relation's target type), `E_DUPLICATE_COMPOSED_PK` (a `(one)` composition carrying several children, or two children of one `(many)` slot sharing a primary key — the same code, for the same fact, that the validator raises over children it validates together), `E_GRAPH_TYPE_NOT_FOUND` (a composed child whose type is not in the schema's import closure at all) and `E_GRAPH_INVALID_PK` (a composed child of a keyed part type whose key is empty, has the wrong arity, or disagrees with its own key property). See the package doc's Error Handling section for the full per-method list.
 
 ### Batch Assembly
 

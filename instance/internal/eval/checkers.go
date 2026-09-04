@@ -42,39 +42,24 @@ func constraintFail(format string, args ...any) *CheckError {
 	return &CheckError{Kind: KindConstraintFail, Msg: fmt.Sprintf(format, args...)}
 }
 
-// Checker performs constraint checking with an optional custom type registry.
-// The registry enables recognition of custom Go types (e.g., `type MyInt int`)
-// during value classification.
-type Checker struct {
-	registry value.Registry
-}
+// Checker performs constraint checking and coercion by the one value rule
+// [github.com/simon-lentz/yammm/internal/value] defines. It holds no state;
+// every Checker applies the same rule.
+type Checker struct{}
 
-// NewChecker creates a Checker with the given value registry.
-// A zero-value Registry falls back to built-in type detection.
-func NewChecker(reg value.Registry) *Checker {
-	return &Checker{registry: reg}
-}
-
-// DefaultChecker returns a Checker using built-in type detection only.
-// This is equivalent to NewChecker(value.Registry{}).
+// DefaultChecker returns the Checker.
 func DefaultChecker() *Checker {
 	return &Checker{}
 }
 
 // CheckValue validates that val conforms to the given constraint.
 // Returns nil if valid, or an error describing the violation.
-//
-// This package-level function uses built-in type detection. For custom type
-// recognition, use Checker.CheckValue with a configured registry.
 func CheckValue(val any, c schema.Constraint) error {
 	return DefaultChecker().CheckValue(val, c)
 }
 
 // CheckValue validates that val conforms to the given constraint.
 // Returns nil if valid, or an error describing the violation.
-//
-// The Checker's registry is used for custom type recognition during
-// value classification.
 func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 	if val == nil {
 		// nil is valid for optional properties; required check is done elsewhere
@@ -135,9 +120,6 @@ func (ch *Checker) CheckValue(val any, c schema.Constraint) error {
 //
 // Returns the coerced value and nil error on success.
 // Returns (nil, error) if coercion fails (should not happen after CheckValue).
-//
-// This package-level function uses built-in type detection. For custom type
-// recognition, use Checker.CoerceValue with a configured registry.
 func CoerceValue(val any, c schema.Constraint) (any, error) {
 	return DefaultChecker().CoerceValue(val, c)
 }
@@ -145,9 +127,6 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 // CoerceValue coerces a validated value to its canonical Go type.
 // This should be called after CheckValue succeeds to ensure the stored
 // value uses the canonical representation.
-//
-// The Checker's registry is used for custom type recognition, enabling
-// coercion of custom Go types (e.g., `type MyInt int64`) to canonical types.
 func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 	if val == nil {
 		return nil, nil //nolint:nilnil // This is the expected behavior
@@ -202,7 +181,6 @@ func (ch *Checker) CoerceValue(val any, c schema.Constraint) (any, error) {
 
 // coerceInteger converts any integer-compatible value to int64.
 // Accepts integer types and float64 whole numbers per spec.
-// Uses registry for custom type recognition, with reflection fallback.
 func (ch *Checker) coerceInteger(val any) (any, error) {
 	// Try direct integer extraction first (fast path)
 	if i, ok := value.GetInt64(val); ok {
@@ -220,7 +198,7 @@ func (ch *Checker) coerceInteger(val any) (any, error) {
 	}
 
 	// Reflection fallback for custom integer types recognized by registry
-	kind, _ := value.ClassifyWithRegistry(ch.registry, val)
+	kind, _ := value.Classify(val)
 	if kind == value.IntKind {
 		rv := reflect.ValueOf(val)
 		// Dereference pointers
@@ -246,7 +224,6 @@ func (ch *Checker) coerceInteger(val any) (any, error) {
 }
 
 // coerceFloat converts any float-compatible value to float64.
-// Uses registry for custom type recognition, with reflection fallback.
 func (ch *Checker) coerceFloat(val any) (any, error) {
 	// Try direct float extraction first (fast path)
 	if f, ok := value.GetFloat64(val); ok {
@@ -261,7 +238,7 @@ func (ch *Checker) coerceFloat(val any) (any, error) {
 	}
 
 	// Reflection fallback for custom numeric types recognized by registry
-	kind, _ := value.ClassifyWithRegistry(ch.registry, val)
+	kind, _ := value.Classify(val)
 	if kind == value.FloatKind || kind == value.IntKind {
 		rv := reflect.ValueOf(val)
 		// Dereference pointers
@@ -341,7 +318,7 @@ func checkString(val any, c schema.Constraint) error {
 // checkInteger validates that val is an integer with optional bounds.
 // Per spec, accepts integer types and float64 whole numbers (math.Trunc(f) == f).
 func (ch *Checker) checkInteger(val any, c schema.Constraint) error {
-	kind, _ := value.ClassifyWithRegistry(ch.registry, val)
+	kind, _ := value.Classify(val)
 
 	var i int64
 	var ok bool
@@ -386,7 +363,7 @@ func (ch *Checker) checkInteger(val any, c schema.Constraint) error {
 
 // checkFloat validates that val is a float or integer with optional bounds.
 func (ch *Checker) checkFloat(val any, c schema.Constraint) error {
-	kind, _ := value.ClassifyWithRegistry(ch.registry, val)
+	kind, _ := value.Classify(val)
 	if kind != value.FloatKind && kind != value.IntKind {
 		return typeMismatch("expected float, got %T", val)
 	}
@@ -563,7 +540,7 @@ func (ch *Checker) checkVector(val any, c schema.Constraint) error {
 
 	// Check each element is numeric and finite
 	for i, elem := range slice {
-		kind, _ := value.ClassifyWithRegistry(ch.registry, elem)
+		kind, _ := value.Classify(elem)
 		if kind != value.FloatKind && kind != value.IntKind {
 			return typeMismatch("vector element [%d]: expected number, got %T", i, elem)
 		}
