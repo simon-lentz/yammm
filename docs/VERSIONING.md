@@ -851,7 +851,48 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 ## Unreleased
 
-*Two blocks: unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass committed as `e70a383`, the clause-5 round's second fix pass committed as `ebdeb6a`, the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105, 2026-09-04) — and unit 4's, merged as `fabed40`. Each says which.*
+*Three blocks: the condition-1 tier-1 round's fix pass — over the second fix passes of units 1–5, landing one commit per decision group on `review`, written per group as each lands — then unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass committed as `e70a383`, the clause-5 round's second fix pass committed as `ebdeb6a`, the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105, 2026-09-04) — and unit 4's, merged as `fabed40`. Each says which.*
+
+### Condition-1 tier-1 round — the fix pass over units 1–5's second fix passes, one commit per group on `review`: group 1 `2b13068`, group 2 `1a3dd57` (A-300…A-345)
+
+*Written per group, in the session that lands it (A-227, A-346). The round read the five second fix passes enumerated below and the `v0.20.0` fix as diffs; its 42 confirmed gate findings resolve to thirty-eight repairs, landing in six groups. **The declaration delta is measured at each commit: `gorelease -base=v0.20.0` at `2b13068` and at `1a3dd57` is byte-identical to the run at `ebdeb6a` — twelve incompatible, forty-six additive, suggested `v0.21.0` — so neither group moves a declaration**, and everything below moved none. Evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_2b13068.txt` and `gorelease_v020_base_1a3dd57.txt`.*
+
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0`: every repair was measured zero-cost in its tree at the round's fix-shape reads (it declares no `Vector`, no composition, no `extends` across schemas, no property named `self`, no builtin with an argument, and imports with a module root in play). **Its unit-lane suite against `1a3dd57`, with the same suite at the pin as the control, fails exactly the four tests unit 4's hash re-key fails and nothing else — the delta is EMPTY** (`.claude/plans/2026-09/evidence/rdata_tier1_group2_consumer_run_summary.txt`); the run is repeated at every later group that moves behaviour and at the final candidate.
+
+#### Group 1 — the corpus and the instruments (`2b13068`)
+
+##### Behaviour, non-breaking
+
+- **Two module-wide documentation gates**, in `internal/doclint` and driven from `docs/`: every package `doc.go` Dependencies line must name exactly the package's non-stdlib imports, and no exported declaration may have its doc comment detached from it by a blank line or carry `**` emphasis, which `go/doc/comment` does not render. On their first run they found `schema/doc.go`, `adapter/jschema/doc.go` and `adapter/markdown/doc.go` each naming a package it does not import (`location` for the two adapters); `**` emphasis in `graph/doc.go`, `adapter/neo4j/adapter.go`, `adapter/neo4j/drop.go` and `snapshot/option.go`; and **`snapshot.WithRevalidation`'s entire godoc detached from its declaration and invisible to `go doc`** — all corrected, so `go doc ./snapshot WithRevalidation` now prints it.
+- **The composition corpus gains the `(one)` and keyless shapes** in `adapter/neo4j/testdata/` and `graph/testdata/`, exercised from disk; module-wide, exactly one fixture had declared a `(one)` composition and it belonged to `adapter/gogen`. The static and contract invariant tables gain the rows the unit-5 block's mirror claim below was short of — nine static refuse rows mirrored, five evaluator fragments, two accept rows, and rows for `-nil` and `nil` under `-`, `*`, `/` and `%` — so that claim is now true but for one static refuse row whose evaluator arm cannot be judged, stated in the contract table's own comment.
+- **The repo gate reads the git index**: the three `*-repo` pre-commit hooks that walked the filesystem are replaced by file-based `gofumpt` and `goimports` hooks and `scripts/gomodtidy.sh`, which runs `go mod tidy -diff` in every directory holding a tracked `go.mod`.
+
+##### Prose
+
+- The unit-4 "Additive API surface" line below names `RecvOrdered` and all ten `ReceiverKind` constants, where it named `RecvScalar` — a declaration nothing in the module carries — and four (corrected in place, dated).
+
+#### Group 2 — `schema/` (`1a3dd57`)
+
+Ten repairs, each behavioural one reproduced as a failing test first. No declaration moved; every change below is behind an unexported symbol.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **A `Vector` property types as a list of numbers** (A-306, completing A-286's scalar split): `vec -> Sum > 0.0` and `vec -> All |$x| { $x > 0.0 }` load, where `f049740` refused them at load — a false positive on a legal SPEC shape, injected by unit 5's second fix pass, which redefined the "other" scalar to a pattern literal and left this arm on the old meaning.
+- **A member read through a type from another schema is checked against that type** (A-316): an imported type is complete in its own schema, so `hasUnresolvedSupertype` answers false for it, and a typo'd member read through an imported composition target is refused at load (`E_UNKNOWN_PROPERTY`) where the unit-4 and unit-5 trees loaded it silently and `v0.20.0` refused it. A member the imported type really inherits still resolves.
+- **Two lists of instances, a list literal of instances and a conditional with two list branches type as what they hold** (A-317): one `mergeType` at concatenation, the list literal's element fold and the ternary, so `(LINES + LINES) -> First.qty > 0` and `(matrix + [[9]]) -> First -> Sum > 0` load and the stage after is typed, where `+` on two instance lists dropped to a list of unknown scalars and refused the member read after it. `Default`'s fallback rule is unchanged.
+- **`self` is bound in the checker's root scope as the evaluator binds it** (A-318): bare `self.name` resolves and a parameter named `self` shadows it by binding order alone; `typeVariable`'s `self` special case is deleted as dead. No schema loads or is refused differently.
+- **The index refusal names the kind it refused** (A-320): *"a pattern cannot be indexed"* for a regex literal, where the message said *"a number or boolean"*; every non-string scalar arm shares the one message.
+
+##### Breaking — the loader and the registry, `schema`
+
+- **The loader's last unsandboxed read is deleted** (A-311): with no module root in play, an import that misses the pre-registered sources is `E_IMPORT_RESOLVE` naming that condition, where `readImportFile` read the relative path from the working directory with no size bound and no non-blocking open. Measured: no caller in this module, the LSP or rdata reached that branch (`LoadString` disallows imports; every empty-root load passes a synthetic root under `WithSourcesOnly`).
+- **A non-regular file whose open itself fails — a unix socket — is reported as *"not a regular file"*** at the entry, at every import and at the `yammm.mod` marker (`E_LOAD_MODULE_ROOT_MALFORMED` for the marker), where the platform's errno surfaced (A-313). A FIFO was already refused from the open descriptor; the socket has no descriptor to read, so `openRegular` classifies a failed open by `Stat`, after the open and with nothing opened afterwards.
+- **`Registry.Register`'s refusal says why** (A-319): a schema re-registered under one `SourceID` whose bytes differ, and one where the registered schema carries no sources and the new one does (or the reverse), draw two messages; the loader's `E_LOAD_SOURCE_CHANGED` carries the registry's message without its former *"source re-registered with different content:"* prefix. The code is unchanged; rdata matches codes.
+- **A part type inheriting an association through a non-part intermediate is refused once** (A-312): the once-rule walks the linearized ancestry, so `part type P0 extends HasOwner`, `abstract type Mid extends P0`, `part type P1 extends Mid` draws one `E_INVALID_ASSOCIATION_TARGET`, on `P0`, where it drew two. A non-part type may still extend a part type.
+
+##### Prose
+
+- `sameSources`' stale `sameEntryBytes` paragraph deleted; `registerFailureIssue`'s godoc states the two-way partition the code implements; `invariantScope`'s godoc and its sibling test comment name the schema completer's `membersOf` index where they named `buildStaticScope`, a symbol no package declares (A-321).
 
 ### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the clause-5 second fix pass committed as `ebdeb6a`; the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105)
 
