@@ -333,11 +333,12 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 //   - parentType: the parent's type identity, as [Snapshot.Types] and
 //     [Instance.TypeID] carry it. A rendered name cannot denote a type exactly
 //     — see the package doc's Type Identity and Type Names section.
-//   - parentKey: the parent's primary key as the parent instance carries it,
-//     [Instance.PrimaryKey]'s String — for example `["alice"]`, which
-//     [FormatKey]("alice") renders. A Timestamp, Date or UUID key is the
-//     canonical text the graph stored, not whatever spelling the caller holds;
-//     see [Snapshot.InstanceByKey].
+//   - parentKey: the parent's primary key in [FormatKey]'s form — for example
+//     `["alice"]`, which [FormatKey]("alice") renders, or the String of the
+//     [instance.ValidInstance] handed to [Graph.Add]. A Timestamp, Date or UUID
+//     component is canonicalized here as [Graph.Add] canonicalized it, so any
+//     spelling of the instant addresses the parent; a refusal names the
+//     spelling the caller wrote.
 //   - relationName: the composition relation name as declared in the schema
 //   - child: the validated child instance to attach
 //
@@ -412,7 +413,10 @@ func (g *Graph) AddComposed(
 
 	parentName := g.instanceTagForm(parentType)
 
-	parentInst := g.findInstance(parentType, parentKey)
+	// The address is canonicalized as Add canonicalized the key it installed,
+	// so the caller's spelling never decides the lookup. A string ParseKey
+	// refuses addresses nothing, and misses under its own spelling.
+	parentInst := g.findInstance(parentType, g.canonicalAddress(parentType, parentKey))
 	if parentInst == nil {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_PARENT_NOT_FOUND,
 			fmt.Sprintf("parent instance %s[%s] not found", parentName, parentKey)).
@@ -841,6 +845,16 @@ func (g *Graph) instanceTagForm(id schema.TypeID) string {
 }
 
 // findInstance looks up an instance by TypeID and key.
+// canonicalAddress renders a FormatKey-form address under the type's
+// primary-key constraints, as the index holds it.
+func (g *Graph) canonicalAddress(typeID schema.TypeID, key string) string {
+	components, err := ParseKey(key)
+	if err != nil {
+		return key
+	}
+	return g.canon.key(typeID, immutable.WrapKey(components)).String()
+}
+
 func (g *Graph) findInstance(typeID schema.TypeID, key string) *Instance {
 	if typeInstances := g.instances[typeID]; typeInstances != nil {
 		return typeInstances[key]

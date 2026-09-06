@@ -184,3 +184,39 @@ func TestLoad_TwoSpellingsOfOneKeyAreOneDuplicate(t *testing.T) {
 		t.Errorf("Verify: want E_DUPLICATE_PK, got %s", vres)
 	}
 }
+
+// TestLoad_UnresolvedTargetIsCanonicalized pins the reader's half of A-352:
+// a document whose unresolved record carries a non-canonical spelling of the
+// target instant loads with the canonical target key, as the graph would
+// have written it.
+func TestLoad_UnresolvedTargetIsCanonicalized(t *testing.T) {
+	t.Parallel()
+	s := linkedTimestampSchema(t)
+	noteID, _ := s.Type("Note")
+	const canon = "2020-01-02T03:04:05Z"
+	const raw = "2020-01-02T03:04:05+00:00"
+	edges := map[string]*instance.ValidEdgeData{"ABOUT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		instance.NewValidEdgeTarget(immutable.WrapKey([]any{canon}), immutable.WrapProperties(nil)),
+	})}
+	note := instance.NewValidInstance("Note", noteID.ID(), immutable.WrapKey([]any{"n1"}),
+		immutable.WrapProperties(map[string]any{"id": "n1"}), edges, nil, nil)
+	g := graph.New(s)
+	if r := g.Add(t.Context(), note); !r.OK() {
+		t.Fatalf("add: %s", r)
+	}
+	data, mr := snapshot.Marshal(t.Context(), g.Snapshot())
+	if mr.HasErrors() {
+		t.Fatalf("marshal: %s", mr)
+	}
+	if !bytes.Contains(data, []byte(canon)) {
+		t.Fatal("fixture shape changed; the unresolved target key not found")
+	}
+	doc := rehashDocument(t, bytes.ReplaceAll(data, []byte(canon), []byte(raw)))
+	snap, res := snapshot.Load(t.Context(), doc, s)
+	if res.HasErrors() {
+		t.Fatalf("Load: %s", res)
+	}
+	if u := snap.Unresolved(); len(u) != 1 || u[0].TargetKey != graph.FormatKey(canon) {
+		t.Errorf("unresolved target after Load = %v, want %s", u, graph.FormatKey(canon))
+	}
+}

@@ -17,8 +17,10 @@ import (
 // an instance by the key it carries, and for a Timestamp, Date or UUID key
 // that is the canonical text the value was rewritten into at entry — so
 // FormatKey over the stored text is an address, and FormatKey over another
-// spelling of the same instant is not. [Snapshot.InstanceByKey] states the
-// rule; [Instance.PrimaryKey] is the address itself.
+// spelling of the same instant is not — except at [Graph.AddComposed], which
+// canonicalizes the address it receives as [Graph.Add] canonicalized the key
+// it installed. [Snapshot.InstanceByKey] states the rule for a read;
+// [Instance.PrimaryKey] is the address itself.
 //
 // Examples:
 //

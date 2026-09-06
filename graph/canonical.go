@@ -243,14 +243,17 @@ func (c *canonicalizer) duplicate(dp DuplicateParts) DuplicateParts {
 }
 
 // unresolved rewrites a forward reference's edge properties, which reach the
-// wire through the same relation a resolved edge's do, and its source address.
-// The TARGET key is left as the caller wrote it: it addresses an instance that
-// does not exist, so no type's constraints could render it.
+// wire through the same relation a resolved edge's do, and both its addresses.
+// The target key renders under the target type's constraints as the Add path
+// renders a staged edge's target: the instance it names does not exist, but
+// the relation's declared target type does, and a record built through Add
+// and one rebuilt from parts must carry one address for one input.
 func (c *canonicalizer) unresolved(up UnresolvedParts) UnresolvedParts {
 	if c.inactive {
 		return up
 	}
 	up.Properties = apply(up.Properties, c.edgeProps(up.SourceType, up.Relation))
 	up.SourceKey = c.key(up.SourceType, up.SourceKey)
+	up.TargetKey = c.key(up.TargetType, up.TargetKey)
 	return up
 }

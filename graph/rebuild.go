@@ -236,8 +236,9 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	// Step 4: Create UnresolvedEdge records.
 	unresolvedEdges := make([]*UnresolvedEdge, 0, len(parts.Unresolved))
 	for _, up := range parts.Unresolved {
-		// The source address moves with the instances step 1 rewrote; the
-		// target does not, because no instance carries it to render against.
+		// Both addresses move: the source with the instances step 1 rewrote,
+		// the target under the relation's declared target type, as the Add
+		// path rendered it.
 		up = canon.unresolved(up)
 		source := lookupInstance(instanceIndex, up.SourceType, up.SourceKey.String())
 		if source == nil {
