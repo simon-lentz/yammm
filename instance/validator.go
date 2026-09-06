@@ -941,7 +941,7 @@ func (v *Validator) evaluateInvariants(
 			scope = eval.PropertyScopeOf(v.scopeOf(inst))
 		}
 
-		result, err := v.evaluator.EvaluateBool(expr, scope) //nolint:contextcheck // Evaluator API doesn't accept context
+		result, err := v.evaluator.EvaluateBool(ctx, expr, scope)
 		if err != nil {
 			issue := diag.NewIssue(
 				diag.Error,

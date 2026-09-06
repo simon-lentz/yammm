@@ -104,7 +104,7 @@ func TestDatatypeCheck_IsTheCheckerRule(t *testing.T) {
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := eval.NewEvaluator().Evaluate(sx("=~", lit(r.val), expr.DatatypeLiteral(r.kind)), eval.EmptyScope())
+			got, err := eval.NewEvaluator().Evaluate(t.Context(), sx("=~", lit(r.val), expr.DatatypeLiteral(r.kind)), eval.EmptyScope())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -121,7 +121,7 @@ func TestEvaluate_EndsTheTraceOpWithItsError(t *testing.T) {
 	t.Parallel()
 	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
-	if _, err := ev.Evaluate(lit(int64(42)), eval.EmptyScope()); err != nil {
+	if _, err := ev.Evaluate(t.Context(), lit(int64(42)), eval.EmptyScope()); err != nil {
 		t.Fatal(err)
 	}
 	if !yammmtest.HasAttr(h.Records(), "op", "yammm.eval.expr") {
@@ -130,7 +130,7 @@ func TestEvaluate_EndsTheTraceOpWithItsError(t *testing.T) {
 	if hasAttrKey(h.Records(), "error") {
 		t.Error("a successful evaluation logged an error attribute")
 	}
-	if _, err := ev.Evaluate(sx("/", lit(int64(1)), lit(int64(0))), eval.EmptyScope()); err == nil {
+	if _, err := ev.Evaluate(t.Context(), sx("/", lit(int64(1)), lit(int64(0))), eval.EmptyScope()); err == nil {
 		t.Fatal("control: 1/0 did not error")
 	}
 	if !yammmtest.HasAttr(h.Records(), "error", "division by zero") {

@@ -22,8 +22,8 @@
 // stateless and safe for concurrent use.
 //
 //	evaluator := eval.NewEvaluator()
-//	result, err := evaluator.Evaluate(expr, scope)
-//	boolResult, err := evaluator.EvaluateBool(expr, scope)
+//	result, err := evaluator.Evaluate(ctx, expr, scope)
+//	boolResult, err := evaluator.EvaluateBool(ctx, expr, scope)
 //
 // # Type Checking
 //

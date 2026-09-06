@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -18,8 +19,9 @@ import (
 // builtinEvaluator is the interface that builtins use to evaluate sub-expressions.
 // This is passed to builtin functions so they can evaluate body expressions.
 type builtinEvaluator interface {
-	// evaluate evaluates an expression in the given scope.
-	evaluate(e expr.Expression, scope Scope) (any, error)
+	// evaluate evaluates an expression in the given scope under the
+	// evaluation's context.
+	evaluate(ctx context.Context, e expr.Expression, scope Scope) (any, error)
 }
 
 // builtinFunc is the signature for builtin function implementations.
@@ -28,8 +30,8 @@ type builtinEvaluator interface {
 // params are the lambda parameter names (for functions with body).
 // body is the unevaluated body expression for lambdas.
 // scope is the evaluation scope.
-// ev allows evaluating sub-expressions.
-type builtinFunc func(ev builtinEvaluator, lhs any, args []any, params []string, body expr.Expression, scope Scope) (any, error)
+// ev allows evaluating sub-expressions, under ctx, the evaluation's context.
+type builtinFunc func(ctx context.Context, ev builtinEvaluator, lhs any, args []any, params []string, body expr.Expression, scope Scope) (any, error)
 
 // builtinDef pairs a builtin's implementation with the spec the language
 // defines for it in [expr.BuiltinSpec]; the arity rules live only there.
@@ -120,7 +122,7 @@ func lookupBuiltin(name string) (builtinDef, bool) {
 
 // --- Collection Builtin implementations ---
 
-func builtinReduce(ev builtinEvaluator, lhs any, args []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinReduce(ctx context.Context, ev builtinEvaluator, lhs any, args []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	slice, err := asSlice("Reduce", lhs)
 	if err != nil {
 		return nil, err
@@ -154,7 +156,7 @@ func builtinReduce(ev builtinEvaluator, lhs any, args []any, params []string, bo
 
 	for i := startIdx; i < len(slice); i++ {
 		childScope := scope.WithVar(memoName, memo).WithVar(nextName, slice[i])
-		result, err := ev.evaluate(body, childScope)
+		result, err := ev.evaluate(ctx, body, childScope)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +165,7 @@ func builtinReduce(ev builtinEvaluator, lhs any, args []any, params []string, bo
 	return memo, nil
 }
 
-func builtinMap(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinMap(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	slice, err := asSlice("Map", lhs)
 	if err != nil {
 		return nil, err
@@ -177,7 +179,7 @@ func builtinMap(ev builtinEvaluator, lhs any, _ []any, params []string, body exp
 	result := make([]any, len(slice))
 	for i, elem := range slice {
 		childScope := scope.WithVar(paramName, elem)
-		val, err := ev.evaluate(body, childScope)
+		val, err := ev.evaluate(ctx, body, childScope)
 		if err != nil {
 			return nil, err
 		}
@@ -186,7 +188,7 @@ func builtinMap(ev builtinEvaluator, lhs any, _ []any, params []string, body exp
 	return result, nil
 }
 
-func builtinFilter(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinFilter(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	slice, err := asSlice("Filter", lhs)
 	if err != nil {
 		return nil, err
@@ -200,7 +202,7 @@ func builtinFilter(ev builtinEvaluator, lhs any, _ []any, params []string, body 
 	result := make([]any, 0, len(slice))
 	for _, elem := range slice {
 		childScope := scope.WithVar(paramName, elem)
-		val, err := ev.evaluate(body, childScope)
+		val, err := ev.evaluate(ctx, body, childScope)
 		if err != nil {
 			return nil, err
 		}
@@ -215,7 +217,7 @@ func builtinFilter(ev builtinEvaluator, lhs any, _ []any, params []string, body 
 	return result, nil
 }
 
-func builtinCount(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinCount(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	slice, err := asSlice("Count", lhs)
 	if err != nil {
 		return nil, err
@@ -229,7 +231,7 @@ func builtinCount(ev builtinEvaluator, lhs any, _ []any, params []string, body e
 	var count int64
 	for _, elem := range slice {
 		childScope := scope.WithVar(paramName, elem)
-		val, err := ev.evaluate(body, childScope)
+		val, err := ev.evaluate(ctx, body, childScope)
 		if err != nil {
 			return nil, err
 		}
@@ -244,7 +246,7 @@ func builtinCount(ev builtinEvaluator, lhs any, _ []any, params []string, body e
 	return count, nil
 }
 
-func builtinAll(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinAll(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	slice, err := asSlice("All", lhs)
 	if err != nil {
 		return nil, err
@@ -262,7 +264,7 @@ func builtinAll(ev builtinEvaluator, lhs any, _ []any, params []string, body exp
 
 	for _, elem := range slice {
 		childScope := scope.WithVar(paramName, elem)
-		val, err := ev.evaluate(body, childScope)
+		val, err := ev.evaluate(ctx, body, childScope)
 		if err != nil {
 			return nil, err
 		}
@@ -277,7 +279,7 @@ func builtinAll(ev builtinEvaluator, lhs any, _ []any, params []string, body exp
 	return true, nil
 }
 
-func builtinAny(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinAny(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	slice, err := asSlice("Any", lhs)
 	if err != nil {
 		return nil, err
@@ -290,7 +292,7 @@ func builtinAny(ev builtinEvaluator, lhs any, _ []any, params []string, body exp
 
 	for _, elem := range slice {
 		childScope := scope.WithVar(paramName, elem)
-		val, err := ev.evaluate(body, childScope)
+		val, err := ev.evaluate(ctx, body, childScope)
 		if err != nil {
 			return nil, err
 		}
@@ -305,7 +307,7 @@ func builtinAny(ev builtinEvaluator, lhs any, _ []any, params []string, body exp
 	return false, nil
 }
 
-func builtinAllOrNone(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinAllOrNone(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	slice, err := asSlice("AllOrNone", lhs)
 	if err != nil {
 		return nil, err
@@ -324,7 +326,7 @@ func builtinAllOrNone(ev builtinEvaluator, lhs any, _ []any, params []string, bo
 	count := 0
 	for _, elem := range slice {
 		childScope := scope.WithVar(paramName, elem)
-		val, err := ev.evaluate(body, childScope)
+		val, err := ev.evaluate(ctx, body, childScope)
 		if err != nil {
 			return nil, err
 		}
@@ -339,7 +341,7 @@ func builtinAllOrNone(ev builtinEvaluator, lhs any, _ []any, params []string, bo
 	return count == 0 || count == len(slice), nil
 }
 
-func builtinCompact(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinCompact(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Compact", lhs)
 	if err != nil {
 		return nil, err
@@ -354,7 +356,7 @@ func builtinCompact(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Exp
 	return result, nil
 }
 
-func builtinUnique(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinUnique(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Unique", lhs)
 	if err != nil {
 		return nil, err
@@ -383,7 +385,7 @@ func builtinUnique(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expr
 	return result, nil
 }
 
-func builtinLen(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinLen(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	switch v := lhs.(type) {
 	case nil:
 		return int64(0), nil
@@ -422,7 +424,7 @@ func builtinLen(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 	return nil, fmt.Errorf("Len() unsupported for type %T", lhs)
 }
 
-func builtinSum(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinSum(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Sum", lhs)
 	if err != nil {
 		return nil, err
@@ -472,7 +474,7 @@ func builtinSum(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 	return sum, nil
 }
 
-func builtinFirst(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinFirst(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("First", lhs)
 	if err != nil {
 		return nil, err
@@ -484,7 +486,7 @@ func builtinFirst(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	return slice[0], nil
 }
 
-func builtinLast(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinLast(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Last", lhs)
 	if err != nil {
 		return nil, err
@@ -496,7 +498,7 @@ func builtinLast(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expres
 	return slice[len(slice)-1], nil
 }
 
-func builtinSort(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinSort(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Sort", lhs)
 	if err != nil {
 		return nil, err
@@ -532,7 +534,7 @@ func builtinSort(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expres
 	return result, nil
 }
 
-func builtinReverse(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinReverse(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Reverse", lhs)
 	if err != nil {
 		return nil, err
@@ -550,7 +552,7 @@ func builtinReverse(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Exp
 	return result, nil
 }
 
-func builtinFlatten(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinFlatten(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Flatten", lhs)
 	if err != nil {
 		return nil, err
@@ -572,7 +574,7 @@ func builtinFlatten(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Exp
 	return result, nil
 }
 
-func builtinContains(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinContains(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Contains", lhs)
 	if err != nil {
 		return nil, err
@@ -589,7 +591,7 @@ func builtinContains(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr
 
 // --- Control Flow Builtin implementations ---
 
-func builtinThen(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinThen(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	if lhs == nil {
 		return nil, nil //nolint:nilnil // short-circuit: nothing to evaluate
 	}
@@ -600,29 +602,29 @@ func builtinThen(ev builtinEvaluator, lhs any, _ []any, params []string, body ex
 	}
 
 	childScope := scope.WithVar(paramName, lhs)
-	return ev.evaluate(body, childScope)
+	return ev.evaluate(ctx, body, childScope)
 }
 
-func builtinLest(ev builtinEvaluator, lhs any, _ []any, _ []string, body expr.Expression, scope Scope) (any, error) {
+func builtinLest(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, _ []string, body expr.Expression, scope Scope) (any, error) {
 	if lhs != nil {
 		return lhs, nil
 	}
-	return ev.evaluate(body, scope)
+	return ev.evaluate(ctx, body, scope)
 }
 
-func builtinWith(ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func builtinWith(ctx context.Context, ev builtinEvaluator, lhs any, _ []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	paramName := "0"
 	if len(params) > 0 {
 		paramName = params[0]
 	}
 
 	childScope := scope.WithVar(paramName, lhs)
-	return ev.evaluate(body, childScope)
+	return ev.evaluate(ctx, body, childScope)
 }
 
 // --- Numeric Builtin implementations ---
 
-func builtinAbs(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinAbs(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	if i, ok := value.GetInt64(lhs); ok {
 		if i == math.MinInt64 {
 			return nil, errors.New("integer overflow in Abs")
@@ -638,7 +640,7 @@ func builtinAbs(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 	return nil, fmt.Errorf("Abs() expects numeric argument, got %T", lhs)
 }
 
-func builtinFloor(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinFloor(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
 	}
@@ -648,7 +650,7 @@ func builtinFloor(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	return nil, fmt.Errorf("Floor() expects numeric argument, got %T", lhs)
 }
 
-func builtinCeil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinCeil(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
 	}
@@ -658,7 +660,7 @@ func builtinCeil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expres
 	return nil, fmt.Errorf("Ceil() expects numeric argument, got %T", lhs)
 }
 
-func builtinRound(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinRound(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	if i, ok := value.GetInt64(lhs); ok {
 		return i, nil
 	}
@@ -668,7 +670,7 @@ func builtinRound(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	return nil, fmt.Errorf("Round() expects numeric argument, got %T", lhs)
 }
 
-func builtinMin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinMin(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	// Two-arg form: Min(a, b)
 	if len(args) == 1 {
 		if err := refuseListReceiver("Min", lhs); err != nil {
@@ -706,7 +708,7 @@ func builtinMin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expr
 	return result, nil
 }
 
-func builtinMax(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinMax(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	// Two-arg form: Max(a, b)
 	if len(args) == 1 {
 		if err := refuseListReceiver("Max", lhs); err != nil {
@@ -758,7 +760,7 @@ func refuseListReceiver(name string, lhs any) error {
 	return nil
 }
 
-func builtinCompare(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinCompare(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	cmp, err := value.Order(lhs, args[0])
 	if err != nil {
 		return nil, fmt.Errorf("compare: %w", err)
@@ -768,7 +770,7 @@ func builtinCompare(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.
 
 // --- String Builtin implementations ---
 
-func builtinUpper(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinUpper(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Upper() expects string argument, got %T", lhs)
@@ -776,7 +778,7 @@ func builtinUpper(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	return strings.ToUpper(s), nil
 }
 
-func builtinLower(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinLower(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Lower() expects string argument, got %T", lhs)
@@ -784,7 +786,7 @@ func builtinLower(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	return strings.ToLower(s), nil
 }
 
-func builtinTrim(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinTrim(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Trim() expects string argument, got %T", lhs)
@@ -792,7 +794,7 @@ func builtinTrim(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expres
 	return strings.TrimSpace(s), nil
 }
 
-func builtinTrimPrefix(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinTrimPrefix(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("TrimPrefix() expects string receiver, got %T", lhs)
@@ -804,7 +806,7 @@ func builtinTrimPrefix(_ builtinEvaluator, lhs any, args []any, _ []string, _ ex
 	return strings.TrimPrefix(s, prefix), nil
 }
 
-func builtinTrimSuffix(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinTrimSuffix(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("TrimSuffix() expects string receiver, got %T", lhs)
@@ -816,7 +818,7 @@ func builtinTrimSuffix(_ builtinEvaluator, lhs any, args []any, _ []string, _ ex
 	return strings.TrimSuffix(s, suffix), nil
 }
 
-func builtinSplit(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinSplit(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Split() expects string receiver, got %T", lhs)
@@ -834,7 +836,7 @@ func builtinSplit(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Ex
 	return result, nil
 }
 
-func builtinJoin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinJoin(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	slice, err := asSlice("Join", lhs)
 	if err != nil {
 		return nil, err
@@ -855,7 +857,7 @@ func builtinJoin(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Exp
 	return strings.Join(parts, sep), nil
 }
 
-func builtinStartsWith(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinStartsWith(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("StartsWith() expects string receiver, got %T", lhs)
@@ -867,7 +869,7 @@ func builtinStartsWith(_ builtinEvaluator, lhs any, args []any, _ []string, _ ex
 	return strings.HasPrefix(s, prefix), nil
 }
 
-func builtinEndsWith(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinEndsWith(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("EndsWith() expects string receiver, got %T", lhs)
@@ -879,7 +881,7 @@ func builtinEndsWith(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr
 	return strings.HasSuffix(s, suffix), nil
 }
 
-func builtinReplace(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinReplace(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Replace() expects string receiver, got %T", lhs)
@@ -895,7 +897,7 @@ func builtinReplace(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.
 	return strings.ReplaceAll(s, old, replacement), nil
 }
 
-func builtinSubstring(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinSubstring(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	s, ok := lhs.(string)
 	if !ok {
 		return nil, fmt.Errorf("Substring() expects string receiver, got %T", lhs)
@@ -943,7 +945,7 @@ func builtinSubstring(_ builtinEvaluator, lhs any, args []any, _ []string, _ exp
 
 // --- Pattern Matching Builtin ---
 
-func builtinMatch(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinMatch(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	re, ok := args[0].(*regexp.Regexp)
 	if !ok {
 		return nil, fmt.Errorf("match expects regexp argument, got %T", args[0])
@@ -969,7 +971,7 @@ func builtinMatch(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Ex
 
 // --- Utility Builtin implementations ---
 
-func builtinTypeOf(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinTypeOf(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	return dslTypeName(lhs), nil
 }
 
@@ -1018,7 +1020,7 @@ func dslTypeName(v any) string {
 	return "unknown"
 }
 
-func builtinIsNil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinIsNil(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	if lhs == nil {
 		return true, nil
 	}
@@ -1032,14 +1034,14 @@ func builtinIsNil(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Expre
 	return false, nil
 }
 
-func builtinDefault(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinDefault(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	if lhs == nil {
 		return args[0], nil
 	}
 	return lhs, nil
 }
 
-func builtinCoalesce(_ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
+func builtinCoalesce(_ context.Context, _ builtinEvaluator, lhs any, args []any, _ []string, _ expr.Expression, _ Scope) (any, error) {
 	// Check lhs first
 	if lhs != nil {
 		return lhs, nil

@@ -32,7 +32,7 @@ func list(vals ...any) expr.SExpr {
 // shared instance.
 func evalEq(t *testing.T, e expr.Expression, want any) {
 	t.Helper()
-	result, err := eval.NewEvaluator().Evaluate(e, eval.EmptyScope())
+	result, err := eval.NewEvaluator().Evaluate(t.Context(), e, eval.EmptyScope())
 	if err != nil {
 		t.Fatalf("Evaluate(%v): %v", e, err)
 	}
@@ -43,7 +43,7 @@ func evalEq(t *testing.T, e expr.Expression, want any) {
 // is non-empty — requires the error message to contain substr.
 func evalErr(t *testing.T, e expr.Expression, substr string) {
 	t.Helper()
-	_, err := eval.NewEvaluator().Evaluate(e, eval.EmptyScope())
+	_, err := eval.NewEvaluator().Evaluate(t.Context(), e, eval.EmptyScope())
 	if err == nil {
 		t.Fatalf("Evaluate(%v): want error containing %q, got nil", e, substr)
 	}

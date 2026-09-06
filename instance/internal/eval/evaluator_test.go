@@ -1,12 +1,14 @@
 package eval_test
 
 import (
+	"context"
 	"log/slog"
 	"regexp"
 	"testing"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/trace"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema/expr"
 	"github.com/stretchr/testify/assert"
@@ -218,7 +220,7 @@ func TestEvaluator_Variables(t *testing.T) {
 
 	t.Run("lookup_existing", func(t *testing.T) {
 		scope := eval.EmptyScope().WithVar("x", 42)
-		result, err := ev.Evaluate(sx("$", lit("x")), scope)
+		result, err := ev.Evaluate(t.Context(), sx("$", lit("x")), scope)
 		require.NoError(t, err)
 		assert.Equal(t, 42, result)
 	})
@@ -238,13 +240,13 @@ func TestEvaluator_NumericVarSet(t *testing.T) {
 	scope := eval.EmptyScope().WithVar("0", "first").WithVar("1", "second")
 
 	t.Run("numeric_var_zero", func(t *testing.T) {
-		result, err := ev.Evaluate(sx("$", lit("0")), scope)
+		result, err := ev.Evaluate(t.Context(), sx("$", lit("0")), scope)
 		require.NoError(t, err)
 		assert.Equal(t, "first", result)
 	})
 
 	t.Run("numeric_var_one", func(t *testing.T) {
-		result, err := ev.Evaluate(sx("$", lit("1")), scope)
+		result, err := ev.Evaluate(t.Context(), sx("$", lit("1")), scope)
 		require.NoError(t, err)
 		assert.Equal(t, "second", result)
 	})
@@ -254,7 +256,7 @@ func TestEvaluator_Variable_Self(t *testing.T) {
 	ev := eval.NewEvaluator()
 	scope := eval.EmptyScope().WithVar("self", map[string]any{"name": "Test", "value": int64(42)})
 
-	result, err := ev.Evaluate(sx("$", lit("self")), scope)
+	result, err := ev.Evaluate(t.Context(), sx("$", lit("self")), scope)
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 }
@@ -267,13 +269,13 @@ func TestEvaluator_Properties(t *testing.T) {
 	})
 
 	t.Run("lookup_property", func(t *testing.T) {
-		result, err := ev.Evaluate(sx("p", lit("name")), scope)
+		result, err := ev.Evaluate(t.Context(), sx("p", lit("name")), scope)
 		require.NoError(t, err)
 		assert.Equal(t, "Alice", result)
 	})
 
 	t.Run("case_insensitive", func(t *testing.T) {
-		result, err := ev.Evaluate(sx("p", lit("NAME")), scope)
+		result, err := ev.Evaluate(t.Context(), sx("p", lit("NAME")), scope)
 		require.NoError(t, err)
 		assert.Equal(t, "Alice", result)
 	})
@@ -282,7 +284,7 @@ func TestEvaluator_Properties(t *testing.T) {
 		// Missing optional properties evaluate to nil, enabling patterns like:
 		//   age lest 0        (default value)
 		//   age then age > 18 (conditional validation)
-		result, err := ev.Evaluate(sx("p", lit("unknown")), scope)
+		result, err := ev.Evaluate(t.Context(), sx("p", lit("unknown")), scope)
 		require.NoError(t, err)
 		assert.Nil(t, result)
 	})
@@ -369,19 +371,19 @@ func TestEvaluator_EvaluateBool(t *testing.T) {
 	scope := eval.EmptyScope()
 
 	t.Run("true", func(t *testing.T) {
-		result, err := ev.EvaluateBool(lit(true), scope)
+		result, err := ev.EvaluateBool(t.Context(), lit(true), scope)
 		require.NoError(t, err)
 		assert.True(t, result)
 	})
 
 	t.Run("false", func(t *testing.T) {
-		result, err := ev.EvaluateBool(lit(false), scope)
+		result, err := ev.EvaluateBool(t.Context(), lit(false), scope)
 		require.NoError(t, err)
 		assert.False(t, result)
 	})
 
 	t.Run("non_bool_error", func(t *testing.T) {
-		_, err := ev.EvaluateBool(lit("string"), scope)
+		_, err := ev.EvaluateBool(t.Context(), lit("string"), scope)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "expected boolean")
 	})
@@ -536,7 +538,7 @@ func TestEvaluator_DatatypeLiteral(t *testing.T) {
 
 	for _, name := range datatypes {
 		t.Run(name, func(t *testing.T) {
-			result, err := ev.Evaluate(expr.DatatypeLiteral(name), scope)
+			result, err := ev.Evaluate(t.Context(), expr.DatatypeLiteral(name), scope)
 			require.NoError(t, err)
 			assert.NotNil(t, result) // result is a TypeChecker function
 		})
@@ -685,7 +687,7 @@ func TestEvaluator_Logging(t *testing.T) {
 	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
 
-	_, err := ev.Evaluate(sx("+", lit(int64(2)), lit(int64(3))), eval.EmptyScope())
+	_, err := ev.Evaluate(t.Context(), sx("+", lit(int64(2)), lit(int64(3))), eval.EmptyScope())
 	if err != nil {
 		t.Fatalf("Evaluate failed: %v", err)
 	}
@@ -703,7 +705,7 @@ func TestEvaluator_Logging_SExprOp(t *testing.T) {
 	h := yammmtest.NewRecordHandler(slog.LevelDebug)
 	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
 
-	_, err := ev.Evaluate(sx("*", lit(int64(4)), lit(int64(5))), eval.EmptyScope())
+	_, err := ev.Evaluate(t.Context(), sx("*", lit(int64(4)), lit(int64(5))), eval.EmptyScope())
 	if err != nil {
 		t.Fatalf("Evaluate failed: %v", err)
 	}
@@ -716,4 +718,49 @@ func TestEvaluator_Logging_SExprOp(t *testing.T) {
 func TestEvaluator_NoLogging_WhenNilLogger(t *testing.T) {
 	// No logger — must not panic.
 	evalEq(t, sx("+", lit(int64(2)), lit(int64(3))), int64(5))
+}
+
+// ctxRecorder keeps the context each record was logged with, which the
+// shared record handler discards.
+type ctxRecorder struct {
+	ctxs []context.Context
+	recs []slog.Record
+}
+
+func (r *ctxRecorder) Enabled(context.Context, slog.Level) bool { return true }
+func (r *ctxRecorder) Handle(ctx context.Context, rec slog.Record) error {
+	r.ctxs = append(r.ctxs, ctx)
+	r.recs = append(r.recs, rec)
+	return nil
+}
+func (r *ctxRecorder) WithAttrs([]slog.Attr) slog.Handler { return r }
+func (r *ctxRecorder) WithGroup(string) slog.Handler      { return r }
+
+// The context passed to Evaluate reaches every trace record the evaluation
+// writes: a request id on it is on the operation's start record and on the
+// per-node records, at the top level and inside a lambda body.
+func TestEvaluate_TraceCarriesTheCallersContext(t *testing.T) {
+	h := &ctxRecorder{}
+	ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
+	ctx := trace.WithRequestID(t.Context(), "req-42")
+
+	body := sx(">", sx("$", lit("0")), lit(int64(1)))
+	e := makeBuiltinCall(list(int64(1), int64(2), int64(3)), "all", nil, nil, body)
+	if _, err := ev.EvaluateBool(ctx, e, eval.EmptyScope()); err != nil {
+		t.Fatalf("EvaluateBool: %v", err)
+	}
+
+	if !yammmtest.HasAttr(h.recs, "request_id", "req-42") {
+		t.Error("the operation's start record does not carry the caller's request id")
+	}
+	// Six records: the op's start and end, and one per node reached — the
+	// call, its receiver list, and the body evaluated per element.
+	if len(h.ctxs) < 6 {
+		t.Fatalf("expected the per-node trace, got %d records", len(h.ctxs))
+	}
+	for i, c := range h.ctxs {
+		if id, ok := trace.RequestIDFrom(c); !ok || id != "req-42" {
+			t.Errorf("record %d (%q) was logged without the caller's context", i, h.recs[i].Message)
+		}
+	}
 }

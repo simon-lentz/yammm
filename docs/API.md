@@ -375,7 +375,7 @@ validator := instance.NewValidator(schema, opts...)
 | `WithStrictPropertyNames` | Require exact case matching (default: false) |
 | `WithAllowUnknownFields` | Silently ignore unknown fields (default: false) |
 | `WithIssueLimit` | Cap the issues one instance stores; the rest are counted and reported as dropped, on the batch result too (default: 100; 0 is unlimited) |
-| `WithLogger` | Receive a debug record when a property name is normalized, and — at Debug — the evaluator's per-node trace of every invariant it evaluates |
+| `WithLogger` | Receive a debug record when a property name is normalized, and — at Debug — the evaluator's per-node trace of every invariant it evaluates, each record logged with the context passed to `Validate`, so a request id on it is on every record |
 
 The `RecommendedOptions()` function returns a curated set of defaults (`WithStrictPropertyNames(true)`, `WithAllowUnknownFields(false)`) as a starting point for common use cases.
 

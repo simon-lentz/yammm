@@ -551,9 +551,9 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 					e = ty.Invariants[0].Expr
 				}
 			}
-			ok, err := v.evaluator.EvaluateBool(e, scope)
+			ok, err := v.evaluator.EvaluateBool(t.Context(), e, scope)
 			if err == nil && ok {
-				onEmpty, emptyErr := v.evaluator.EvaluateBool(e, emptyScope)
+				onEmpty, emptyErr := v.evaluator.EvaluateBool(t.Context(), e, emptyScope)
 				if emptyErr != nil || !onEmpty {
 					t.Fatal("the evaluator honoured, on a conforming instance, a shape the checker refuses")
 				}
