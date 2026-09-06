@@ -218,6 +218,9 @@ func (c *completer) complete() *Schema {
 	// in the same pass; the final error gate below ends completion.
 	c.validatePrimaryKeys()
 
+	// Phase 5c: A property may not carry the name the evaluator binds.
+	c.validatePropertyNames()
+
 	// Phase 6: Detect collisions
 	c.detectCollisions()
 
@@ -1159,6 +1162,25 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 // LSP), not only graph construction. Abstract types (not instantiable) and part types
 // (embedded, no independent identity — PK-less parts are a supported composition
 // feature) are exempt. Errors are collected; the caller's final error gate aborts.
+// validatePropertyNames refuses an own property named self, at its declaration:
+// self is bound to the instance in every invariant, at load and at evaluation
+// alike, so the property could never be read. Own properties only — an
+// inherited one was refused where it was declared. The grammar admits the
+// spelling; this is a binding rule, not a lexical one, and it is the one rule
+// the parse front door and the Builder share.
+func (c *completer) validatePropertyNames() {
+	for _, t := range c.schema.types {
+		for _, p := range t.properties {
+			if p.Name() != selfVariable {
+				continue
+			}
+			c.errorf(p.Span(), diag.E_INVALID_NAME,
+				"property %q in type %q cannot be named self: self is bound to the instance in every invariant, so the property could never be read",
+				p.Name(), t.Name())
+		}
+	}
+}
+
 func (c *completer) validatePrimaryKeys() {
 	for _, t := range c.schema.types {
 		if t.IsAbstract() || t.IsPart() || t.HasPrimaryKey() {

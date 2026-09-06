@@ -96,6 +96,11 @@ func (t staticType) element() staticType {
 	return unknownType
 }
 
+// selfVariable is the name both layers bind to the instance: the evaluator's
+// PropertyScopeFromMap seeds it and the checker's root scope binds it. A
+// property so named could never be read, so completion refuses it.
+const selfVariable = "self"
+
 // staticScope is the lambda bindings in force at one point of the walk. Names
 // match exactly, as the evaluator's Scope.Lookup resolves them.
 type staticScope struct {
@@ -355,7 +360,7 @@ func (c *completer) validateInvariantExpressions() {
 		// self is a bound variable at evaluation, where PropertyScopeFromMap
 		// seeds it, so the checker binds it too and a parameter named self
 		// shadows it through child exactly as WithVar does.
-		scope := (&staticScope{}).child("self", instanceOf(t))
+		scope := (&staticScope{}).child(selfVariable, instanceOf(t))
 		for inv := range t.Invariants() {
 			c.invariantSeen = nil
 			c.typeExpr(inv.Expression(), scope, t, inv)

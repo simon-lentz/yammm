@@ -112,7 +112,7 @@ field_name Type required   // must be non-null
 field_name Type            // optional (nullable)
 ```
 
-- Names must start with a lowercase letter.
+- Names must start with a lowercase letter, and may not be `self` (it is bound to the instance in every invariant; refused at load with `E_INVALID_NAME`).
 - Using `primary required` together is a **parse error** -- the grammar treats them as mutually exclusive (`(is_primary | is_required)?`). `primary` already implies required.
 
 ### Built-in Constraint Types

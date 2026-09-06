@@ -853,7 +853,7 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 *Three blocks: the condition-1 tier-1 round's fix pass — over the second fix passes of units 1–5, landing one commit per decision group on `review`, written per group as each lands — then unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass committed as `e70a383`, the clause-5 round's second fix pass committed as `ebdeb6a`, the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105, 2026-09-04) — and unit 4's, merged as `fabed40`. Each says which.*
 
-### Condition-1 tier-1 round — the fix pass over units 1–5's second fix passes, one commit per group on `review`: group 1 `2b13068`, group 2 `1a3dd57` (A-300…A-345)
+### Condition-1 tier-1 round — the fix pass over units 1–5's second fix passes, one commit per group on `review`: group 1 `2b13068`, group 2 `1a3dd57`, group 3 (A-300…A-347)
 
 *Written per group, in the session that lands it (A-227, A-346). The round read the five second fix passes enumerated below and the `v0.20.0` fix as diffs; its 42 confirmed gate findings resolve to thirty-eight repairs, landing in six groups. **The declaration delta is measured at each commit: `gorelease -base=v0.20.0` at `2b13068` and at `1a3dd57` is byte-identical to the run at `ebdeb6a` — twelve incompatible, forty-six additive, suggested `v0.21.0` — so neither group moves a declaration**, and everything below moved none. Evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_2b13068.txt` and `gorelease_v020_base_1a3dd57.txt`.*
 
@@ -893,6 +893,14 @@ Ten repairs, each behavioural one reproduced as a failing test first. No declara
 ##### Prose
 
 - `sameSources`' stale `sameEntryBytes` paragraph deleted; `registerFailureIssue`'s godoc states the two-way partition the code implements; `invariantScope`'s godoc and its sibling test comment name the schema completer's `membersOf` index where they named `buildStaticScope`, a symbol no package declares (A-321).
+
+#### Group 3 — a property named `self` (A-309)
+
+One repair; no declaration moves.
+
+##### Breaking — the DSL
+
+- **A property may not be named `self`** (A-309): it is refused at schema load with `E_INVALID_NAME` at its declaration, once, where it is declared — for the parse front door and the Go `Builder` alike, by one completer rule beside the binding it protects. Ground: both layers bind `self` to the instance in every invariant — the evaluator's `PropertyScopeFromMap` seeds it and the checker's root scope binds it — so a property so named could never be read by a bare name, `$self` or a member read, and a declaration nothing can read is a model mismatch the load-time refusal repairs. Measured: no fixture in the module and no rdata schema declares one. **Delivered with one correction to A-309's stated site.** The decision put the entry in the parser's `propertyNameExclusions` list; the six spellings there are refused by a grammar lookahead and draw `E_SYNTAX`, not the `E_INVALID_NAME` the decision names, and that one set also governs annotation names and annotation-argument identifiers, which the decision does not reach. `self` stays grammatical as a property name (the parser's `TestReserved_SelfIsAGrammaticalPropertyName` pins it) and the rule lives in the schema completer, where `self` is bound and where the Builder's declarations also arrive. `docs/SPEC.md` names it in the lexical-structure, property-declaration and scope sections.
 
 ### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the clause-5 second fix pass committed as `ebdeb6a`; the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105)
 

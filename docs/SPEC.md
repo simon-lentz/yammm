@@ -196,6 +196,8 @@ includes    abstract    one    many    import
 
 Six spellings cannot be used as property names. The keywords `as`, `part`, and `in` would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively. The literals `true`, `false`, and `nil` are also barred. The rule table is keywordless, so all six lex as ordinary words; what rejects them is a negative lookahead on the property-name production. All six are rejected where the property is declared, not where it is used.
 
+A seventh spelling, `self`, is grammatical and is refused at schema load rather than by the grammar (`E_INVALID_NAME`, at the declaration): `self` is bound to the instance in every invariant, at load and at evaluation alike, so a property so named could never be read. The rule is the schema layer's, and it applies to the parse front door and to the Go `Builder` alike.
+
 ### Operators and Punctuation
 
 The following character sequences represent operators and punctuation:
@@ -600,7 +602,7 @@ Property     = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required"
 PropertyName = LC_WORD .   // except as, part, in, nil, true, false
 ```
 
-Property names must start with a lower-case letter.
+Property names must start with a lower-case letter. A property may not be named `self`; see Lexical Structure.
 
 ### Property Modifiers
 
@@ -1505,7 +1507,7 @@ type Order {
 
 **Numeric variables** (`$0`, `$1`, ...) are evaluator-local and default to `nil` when unset.
 
-**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body.
+**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body. A property may not be named `self`: the binding would leave it unreadable, so it is refused at load (`E_INVALID_NAME`).
 
 **`$self`** is bound when evaluating invariants against property maps and is inherited by child evaluators unless explicitly overridden.
 

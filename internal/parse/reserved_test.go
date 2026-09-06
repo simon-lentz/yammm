@@ -169,3 +169,19 @@ func TestReserved_DatatypeAliasTargetsAreBuiltInOnly(t *testing.T) {
 		t.Errorf("datatypes = %+v, want only Code", file.DataTypes)
 	}
 }
+
+// TestReserved_SelfIsAGrammaticalPropertyName pins that self is NOT among the
+// grammar's exclusions: it parses as a property name, and the schema layer
+// refuses it where self is bound. The six above are grammar facts; this one
+// is a binding rule, and it lives beside the binding.
+func TestReserved_SelfIsAGrammaticalPropertyName(t *testing.T) {
+	src := "schema \"s\"\ntype T {\n\tid String primary\n\tself String\n}\n"
+	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
+	if len(issues) != 0 {
+		t.Fatalf("self rejected by the grammar: %v", issues)
+	}
+	props := file.Types[0].Properties
+	if len(props) != 2 || props[1].Name != "self" {
+		t.Errorf("properties = %+v, want a second named self", props)
+	}
+}
