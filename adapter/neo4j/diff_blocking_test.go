@@ -122,3 +122,48 @@ func TestDiffConstraints_FulltextOnASolePrimaryKeyConverges(t *testing.T) {
 		t.Errorf("Create=%d, want all %d constraints planned", len(plan.Create), len(constraints))
 	}
 }
+
+// TestDiffConstraints_CompositeIndexBlocksInDeclaredOrderOnly pins what both
+// server generations do with a composite backing index: property order is
+// significant for an index, so a RANGE index over the constraint's properties
+// in another order is an object the constraint is created beside, not a
+// blocker. Sorting the definition key would report Drift the server never
+// raises, on every run.
+func TestDiffConstraints_CompositeIndexBlocksInDeclaredOrderOnly(t *testing.T) {
+	t.Parallel()
+	desired := []Constraint{{
+		Name:       "probe__Doc_title_year_unique",
+		Kind:       ConstraintUnique,
+		Label:      "probe__Doc",
+		Properties: []string{"title", "year"},
+	}}
+	index := func(props ...string) RemoteIndex {
+		return RemoteIndex{
+			Name:          "other_idx",
+			EntityType:    "NODE",
+			Type:          "RANGE",
+			LabelsOrTypes: []string{"probe__Doc"},
+			Properties:    props,
+			State:         "ONLINE",
+		}
+	}
+	for _, tc := range []struct {
+		name      string
+		index     RemoteIndex
+		wantDrift bool
+	}{
+		{"the same order blocks", index("title", "year"), true},
+		{"the reversed order does not", index("year", "title"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			plan := New().DiffConstraints(desired, nil, ownedSet("probe__Doc"), tc.index)
+			if gotDrift := len(plan.Drift) > 0; gotDrift != tc.wantDrift {
+				t.Errorf("Drift=%d Create=%d; want blocking=%v", len(plan.Drift), len(plan.Create), tc.wantDrift)
+			}
+			if !tc.wantDrift && len(plan.Create) != 1 {
+				t.Errorf("Create=%d, want the constraint planned for creation", len(plan.Create))
+			}
+		})
+	}
+}

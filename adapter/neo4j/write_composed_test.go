@@ -304,8 +304,8 @@ func oneCompositionGraphResult(t *testing.T) (*Adapter, *GraphShape, *graph.Snap
 
 // TestBatchNodeQueries_OneCompositionComposedKeys pins the _composed_key a
 // (one) slot writes, for a keyed part and a keyless one. A (one) slot holds
-// exactly one child, so the trailing index is always 0 and the child's own key
-// identifies nothing the relation name does not.
+// exactly one child, so the relation name alone is the segment: an index would
+// always be 0 and the child's own key identifies nothing the name does not.
 func TestBatchNodeQueries_OneCompositionComposedKeys(t *testing.T) {
 	t.Parallel()
 	a, shape, snap := oneCompositionGraphResult(t)
@@ -333,8 +333,8 @@ func TestBatchNodeQueries_OneCompositionComposedKeys(t *testing.T) {
 	// LITERALS, not a second call to the renderer under test. Comparing the
 	// adapter's output against a value computed the same way pins nothing.
 	want := map[string]string{
-		"Address": `["one_test__Invoice",["i1"],["BILL_TO",["a1"]]]`,
-		"Summary": `["one_test__Invoice",["i1"],["SUMMARY",0]]`,
+		"Address": `["one_test__Invoice",["i1"],["BILL_TO"]]`,
+		"Summary": `["one_test__Invoice",["i1"],["SUMMARY"]]`,
 	}
 	for label, wantCK := range want {
 		if got[label] != wantCK {

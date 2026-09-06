@@ -124,6 +124,15 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		inv string
 		bad mutation // turns the good instance into one the rule must fail on
 	}{
+		// the argument rule admits the right kinds, and the evaluator honours them
+		{`name -> TrimPrefix("n") == "orth"`, setName("x")},
+		{`name -> Substring(1) == "orth"`, setName("x")},
+		{`name -> Substring(1, 3) == "or"`, setName("x")},
+		{`name -> Match(/n.*/) -> Len > 0`, setName("x")},
+		{`name -> Replace("n", "N") == "North"`, setName("x")},
+		{`name -> Split("r") -> Len == 2`, setName("x")},
+		{`name -> Compare("m") > 0`, setName("a")},
+		{`name -> Min("z") == "north"`, setName("zz")},
 		// compositions: children are instances, a (one) composition the single child
 		{`LINES -> All |$l| { $l.qty > 0 }`, setLineQty(0)},
 		{`LINES -> All { $0.qty > 0 }`, setLineQty(0)},
@@ -327,6 +336,21 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`LINES -> Len |$l| { $l.qty } > 0`, diag.E_INVALID_INVARIANT, "lambda", "does not accept a lambda"},
 		{`LINES -> All > 0`, diag.E_INVALID_INVARIANT, "lambda", "requires a lambda"},
 		{`name -> Substring(1, 2, 3) != ""`, diag.E_INVALID_INVARIANT, "argument", "at most"},
+		// the argument rule: a literal the builtin refuses on every input
+		{`name -> TrimPrefix(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects string argument"},
+		{`name -> TrimSuffix(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects string argument"},
+		{`name -> StartsWith(1)`, diag.E_INVALID_INVARIANT, "as its argument", "expects string argument"},
+		{`name -> EndsWith(true)`, diag.E_INVALID_INVARIANT, "as its argument", "expects string argument"},
+		{`name -> Split(1) -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument", "expects string separator"},
+		{`tags -> Join(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects string separator"},
+		{`name -> Replace(1, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects string for old value"},
+		{`name -> Replace("a", 1) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects string for new value"},
+		{`name -> Substring("a") != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects integer start index"},
+		{`name -> Substring(1, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects integer end index"},
+		{`name -> Match("nor") -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument", "expects regexp argument"},
+		{`name -> Compare(MAIN_LINE) > 0`, diag.E_INVALID_INVARIANT, "as its argument", "comparison"},
+		{`name -> Min(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "comparison"},
+		{`name -> Max(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "comparison"},
 		{`note -> Lest |$x| { true }`, diag.E_INVALID_INVARIANT, "lambda parameter", "at most 0 parameters"},
 		// a list builtin on a scalar, an instance or a key; a scalar builtin on a list
 		{`name -> Filter |$c| { true } -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array"},

@@ -64,6 +64,17 @@ func TestStaticInvariant_Table(t *testing.T) {
 	t.Parallel()
 
 	accept := []string{
+		// the argument rule admits the right kinds, a property among them
+		`name -> TrimPrefix("n") != ""`,
+		`name -> Substring(1) != ""`,
+		`name -> Substring(1, 3) != ""`,
+		`name -> Match(/n.*/) -> Len > 0`,
+		`name -> Replace("n", "N") != ""`,
+		`name -> Split(name) -> Len > 0`,
+		`name -> Compare("m") > 0`,
+		`name -> Min("z") != ""`,
+		`tags -> Contains(MAIN_LINE) == false`,
+		`name -> Default(MAIN_LINE.id) != ""`,
 		// compositions: children are instances
 		`LINES -> All |$l| { $l.qty > 0 }`,
 		`LINES -> All { $0.qty > 0 }`,
@@ -205,6 +216,21 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`LINES -> Len |$l| { $l.qty } > 0`, diag.E_INVALID_INVARIANT, "lambda"},
 		{`LINES -> All > 0`, diag.E_INVALID_INVARIANT, "lambda"},
 		{`name -> Substring(1, 2, 3) != ""`, diag.E_INVALID_INVARIANT, "argument"},
+		// the argument rule: a literal the builtin refuses on every input
+		{`name -> TrimPrefix(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> TrimSuffix(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> StartsWith(1)`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> EndsWith(true)`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Split(1) -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`tags -> Join(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Replace(1, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Replace("a", 1) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Substring("a") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Substring(1, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Match("nor") -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Compare(MAIN_LINE) > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Min(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Max(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
 		{`name -> Lest |$x| { true }`, diag.E_INVALID_INVARIANT, "lambda parameter"},
 		// the receiver rule: a list builtin on a scalar or a key, a scalar
 		// builtin on a list, an ordering builtin on instances

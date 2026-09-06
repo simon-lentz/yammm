@@ -718,6 +718,7 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 			"%s accepts at most %d argument(s) in invariant %q on type %q", spec.Name, spec.MaxArgs, inv.Name(), owner.Name())
 	default:
 		c.checkReceiver(spec, recv, len(args), owner, inv)
+		c.checkArgs(spec, argTypes, owner, inv)
 	}
 	// One mistake in the lambda's shape is one diagnostic, and a body the
 	// builtin would never evaluate is not typed.
@@ -855,6 +856,38 @@ func paramOr(params []string, i int, implicit string) string {
 // checkReceiver refuses a receiver the builtin refuses on every input, by the
 // catalogue's [expr.ReceiverKind]. A receiver of unknown kind, or a scalar of
 // unknown subkind, is admitted: the checker refuses only what it knows.
+// checkArgs refuses an argument of a kind the builtin refuses on every input,
+// as checkReceiver refuses such a receiver: the catalogue states each
+// position's kind and the same admission applies — a value the checker cannot
+// type, and the nil literal, pass.
+func (c *completer) checkArgs(spec expr.BuiltinSpec, argTypes []staticType, owner *Type, inv *Invariant) {
+	for i, at := range argTypes {
+		kind, ok := spec.ArgAt(i)
+		if !ok {
+			return
+		}
+		open := at.kind == kindUnknown || at.kind == kindNil ||
+			(at.kind == kindScalar && at.scalar == scalarAny)
+		admitted := true
+		switch kind {
+		case expr.ArgAny:
+		case expr.ArgString:
+			admitted = open || (at.kind == kindScalar && at.scalar == scalarString)
+		case expr.ArgNumber:
+			admitted = open || (at.kind == kindScalar && at.scalar == scalarNumber)
+		case expr.ArgPattern:
+			admitted = open || (at.kind == kindScalar && at.scalar == scalarOther)
+		case expr.ArgOrdered:
+			admitted = at.kind != kindInstance
+		}
+		if !admitted {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s takes %s as its argument, and argument %d is not one in invariant %q on type %q",
+				spec.Name, kind, i+1, inv.Name(), owner.Name())
+		}
+	}
+}
+
 func (c *completer) checkReceiver(spec expr.BuiltinSpec, recv staticType, nargs int, owner *Type, inv *Invariant) {
 	refuse := func(what string) {
 		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,

@@ -35,13 +35,14 @@ type OwnedLabels struct {
 // newly desired and no spurious DROP arises. A later change must not split
 // them.
 //
-// The set is every such type's label — a SUPERSET of what the emitters
-// produce. [Adapter.ConstraintsStructured], [Adapter.IndexesStructured]
-// and [Adapter.ShapeForSchema] additionally skip a type whose label is not a
-// valid Neo4j identifier, and emit nothing for it; ownership deliberately does
-// not, because a database may still hold objects on that label from an earlier
-// configuration and they are the schema's to report. The set is therefore not a
-// count of what will be emitted.
+// The set is every such type's label, and ownership checks no identifier.
+// [Adapter.ShapeForSchema], [Adapter.ConstraintsStructured] and
+// [Adapter.IndexesStructured] each REFUSE the whole schema with
+// [E_NEO4J_INVALID_IDENTIFIER] when a type's label is not a valid Neo4j
+// identifier, emitting nothing (see [SanitizeIdentifier]); this set still
+// names such a label, because a database may hold objects on it from an
+// earlier configuration and they are the schema's to report. The set is
+// therefore not a count of what will be emitted.
 //
 // It is derived from the schema in hand, which fixes what a diff can see. An
 // object left behind by a type that has since been DELETED or RENAMED sits on a

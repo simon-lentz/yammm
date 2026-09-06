@@ -95,9 +95,50 @@ const (
 	RecvNumericList
 )
 
+// ArgKind states what a builtin accepts at one argument position. As with
+// [ReceiverKind], the evaluator refuses the rest on every input, so the static
+// checker refuses it at load.
+type ArgKind uint8
+
+const (
+	// ArgAny: any value, nil included (Contains, Default, Reduce's seed).
+	ArgAny ArgKind = iota
+	// ArgString: a string. A number, a boolean, a list or an instance is
+	// refused (TrimPrefix, Split, Join's separator, Replace's two).
+	ArgString
+	// ArgNumber: a number (Substring's indices).
+	ArgNumber
+	// ArgPattern: a regular-expression literal (Match).
+	ArgPattern
+	// ArgOrdered: any value the total order ranks — a scalar, an association
+	// key, a list. An instance is refused (Compare, and Min and Max with an
+	// argument).
+	ArgOrdered
+)
+
+// String names the kind as a diagnostic reads it.
+func (k ArgKind) String() string {
+	switch k {
+	case ArgString:
+		return "a string"
+	case ArgNumber:
+		return "a number"
+	case ArgPattern:
+		return "a pattern"
+	case ArgOrdered:
+		return "a value the total order ranks"
+	case ArgAny:
+	}
+	return "any value"
+}
+
 // BuiltinSpec describes one pipeline builtin as the language defines it. The
 // evaluator enforces the arity fields; the static checker uses all of them.
 // Both read this one table, so neither can drift from the other.
+//
+// Args states the kind at each argument position, one entry per position up
+// to MaxArgs; for an unbounded builtin the last entry repeats. It is empty
+// exactly when the builtin takes no argument.
 type BuiltinSpec struct {
 	Name       string
 	MinArgs    int
@@ -107,20 +148,34 @@ type BuiltinSpec struct {
 	Receiver   ReceiverKind
 	Result     BuiltinResult
 	Params     ParamBinding
+	Args       []ArgKind
+}
+
+// ArgAt returns the kind the builtin accepts at 0-based argument position i:
+// the entry at i, or the last entry when the builtin's arguments repeat. It
+// reports false for a builtin that takes no argument.
+func (s BuiltinSpec) ArgAt(i int) (ArgKind, bool) {
+	if len(s.Args) == 0 || i < 0 {
+		return ArgAny, false
+	}
+	if i >= len(s.Args) {
+		return s.Args[len(s.Args)-1], true
+	}
+	return s.Args[i], true
 }
 
 var builtinSpecs = map[string]BuiltinSpec{}
 
-func spec(name string, minArgs, maxArgs, maxParams int, acceptBody bool, recv ReceiverKind, result BuiltinResult, params ParamBinding) {
+func spec(name string, minArgs, maxArgs, maxParams int, acceptBody bool, recv ReceiverKind, result BuiltinResult, params ParamBinding, args ...ArgKind) {
 	builtinSpecs[strings.ToLower(name)] = BuiltinSpec{
 		Name: name, MinArgs: minArgs, MaxArgs: maxArgs, MaxParams: maxParams,
-		AcceptBody: acceptBody, Receiver: recv, Result: result, Params: params,
+		AcceptBody: acceptBody, Receiver: recv, Result: result, Params: params, Args: args,
 	}
 }
 
 func init() {
 	// Collection
-	spec("Reduce", 0, 1, 2, true, RecvList, ResultUnknown, BindAccumulatorElement)
+	spec("Reduce", 0, 1, 2, true, RecvList, ResultUnknown, BindAccumulatorElement, ArgAny)
 	spec("Map", 0, 0, 1, true, RecvList, ResultBodyList, BindElement)
 	spec("Filter", 0, 0, 1, true, RecvList, ResultReceiver, BindElement)
 	spec("Count", 0, 0, 1, true, RecvList, ResultScalar, BindElement)
@@ -136,7 +191,7 @@ func init() {
 	spec("Sort", 0, 0, 0, false, RecvScalarList, ResultReceiver, BindNone)
 	spec("Reverse", 0, 0, 0, false, RecvList, ResultReceiver, BindNone)
 	spec("Flatten", 0, 0, 0, false, RecvList, ResultFlattened, BindNone)
-	spec("Contains", 1, 1, 0, false, RecvList, ResultScalar, BindNone)
+	spec("Contains", 1, 1, 0, false, RecvList, ResultScalar, BindNone, ArgAny)
 
 	// Control flow
 	spec("Then", 0, 0, 1, true, RecvAny, ResultUnknown, BindReceiver)
@@ -148,31 +203,31 @@ func init() {
 	spec("Floor", 0, 0, 0, false, RecvNumeric, ResultScalar, BindNone)
 	spec("Ceil", 0, 0, 0, false, RecvNumeric, ResultScalar, BindNone)
 	spec("Round", 0, 0, 0, false, RecvNumeric, ResultScalar, BindNone)
-	spec("Min", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone)
-	spec("Max", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone)
-	spec("Compare", 1, 1, 0, false, RecvOrdered, ResultScalar, BindNone)
+	spec("Min", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone, ArgOrdered)
+	spec("Max", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone, ArgOrdered)
+	spec("Compare", 1, 1, 0, false, RecvOrdered, ResultScalar, BindNone, ArgOrdered)
 
 	// String
 	spec("Upper", 0, 0, 0, false, RecvString, ResultScalar, BindNone)
 	spec("Lower", 0, 0, 0, false, RecvString, ResultScalar, BindNone)
 	spec("Trim", 0, 0, 0, false, RecvString, ResultScalar, BindNone)
-	spec("TrimPrefix", 1, 1, 0, false, RecvString, ResultScalar, BindNone)
-	spec("TrimSuffix", 1, 1, 0, false, RecvString, ResultScalar, BindNone)
-	spec("Split", 1, 1, 0, false, RecvString, ResultList, BindNone)
-	spec("Join", 1, 1, 0, false, RecvStringList, ResultScalar, BindNone)
-	spec("StartsWith", 1, 1, 0, false, RecvString, ResultScalar, BindNone)
-	spec("EndsWith", 1, 1, 0, false, RecvString, ResultScalar, BindNone)
-	spec("Replace", 2, 2, 0, false, RecvString, ResultScalar, BindNone)
-	spec("Substring", 1, 2, 0, false, RecvString, ResultScalar, BindNone)
+	spec("TrimPrefix", 1, 1, 0, false, RecvString, ResultScalar, BindNone, ArgString)
+	spec("TrimSuffix", 1, 1, 0, false, RecvString, ResultScalar, BindNone, ArgString)
+	spec("Split", 1, 1, 0, false, RecvString, ResultList, BindNone, ArgString)
+	spec("Join", 1, 1, 0, false, RecvStringList, ResultScalar, BindNone, ArgString)
+	spec("StartsWith", 1, 1, 0, false, RecvString, ResultScalar, BindNone, ArgString)
+	spec("EndsWith", 1, 1, 0, false, RecvString, ResultScalar, BindNone, ArgString)
+	spec("Replace", 2, 2, 0, false, RecvString, ResultScalar, BindNone, ArgString, ArgString)
+	spec("Substring", 1, 2, 0, false, RecvString, ResultScalar, BindNone, ArgNumber, ArgNumber)
 
 	// Pattern matching
-	spec("Match", 1, 1, 0, false, RecvString, ResultList, BindNone)
+	spec("Match", 1, 1, 0, false, RecvString, ResultList, BindNone, ArgPattern)
 
 	// Utility
 	spec("TypeOf", 0, 0, 0, false, RecvAny, ResultScalar, BindNone)
 	spec("IsNil", 0, 0, 0, false, RecvAny, ResultScalar, BindNone)
-	spec("Default", 1, 1, 0, false, RecvAny, ResultReceiverOrArg, BindNone)
-	spec("Coalesce", 1, -1, 0, false, RecvAny, ResultUnknown, BindNone)
+	spec("Default", 1, 1, 0, false, RecvAny, ResultReceiverOrArg, BindNone, ArgAny)
+	spec("Coalesce", 1, -1, 0, false, RecvAny, ResultUnknown, BindNone, ArgAny)
 }
 
 // LookupBuiltin returns the spec for a builtin by name, matched

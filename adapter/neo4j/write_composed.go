@@ -293,14 +293,19 @@ func collectCreateRows(
 
 			children := parent.Composed(relName)
 			for i, child := range children {
-				// A keyed child's composed key carries its own key values;
-				// a keyless child's is positional — documented as NOT a
-				// stable identity across writes, which replace semantics
-				// make safe.
+				// A (one) slot holds exactly one child, so its segment is the
+				// relation alone: an index would always be 0 and the child's
+				// own key would identify nothing the name does not. Under
+				// (many), a keyed child's segment carries its key values and a
+				// keyless child's is positional — documented as NOT a stable
+				// identity across writes, which replace semantics make safe.
 				var keyOrIndex any
-				if partType.HasPrimaryKey() && child.PrimaryKey().Len() > 0 {
+				switch {
+				case !rel.IsMany():
+					keyOrIndex = nil
+				case partType.HasPrimaryKey() && child.PrimaryKey().Len() > 0:
 					keyOrIndex = child.PrimaryKey().Clone()
-				} else {
+				default:
 					keyOrIndex = i
 				}
 				childPath := append(slices.Clip(path), composedStep{relation: relName, keyOrIndex: keyOrIndex})
