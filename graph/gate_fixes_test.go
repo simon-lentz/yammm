@@ -356,6 +356,7 @@ part type Wheel {
 				instancetest.VI(
 					"Wheel",
 					instancetest.TypeID(mustTypeID(t, s, "Wheel")),
+					instancetest.NoKey(),
 					instancetest.Props(map[string]any{"position": "left"}),
 				),
 			}),
@@ -454,6 +455,7 @@ func TestAddComposed_KeylessOneSlot_NamesThePositionalAddress(t *testing.T) {
 		return instancetest.VI(
 			"Wheel",
 			instancetest.TypeID(mustTypeID(t, s, "Wheel")),
+			instancetest.NoKey(),
 			instancetest.Props(map[string]any{"position": pos}),
 		)
 	}

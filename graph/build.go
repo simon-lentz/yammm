@@ -48,20 +48,22 @@ func newInstanceBuilder(g *Graph, c *diag.Collector) *instanceBuilder {
 	return &instanceBuilder{g: g, c: c, attested: true}
 }
 
-// build walks inst and returns the Instance to install. stage receives the
-// instance's association records, and is nil for a composed child: a child's
-// edges are checked like any other, but no path installs them — the package
-// doc's Composed Children section states that gap.
-func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, stage *[]stagedEdge) *Instance {
+// build walks inst and returns the Instance to install. key is inst's
+// primary key in canonical form, computed once by the caller so every address
+// the caller derives — a root's index entry, a sibling scan, a duplicate
+// record — is the one the Instance carries. stage receives the instance's
+// association records, and is nil for a composed child: a child's edges are
+// checked like any other, but no path installs them — the package doc's
+// Composed Children section states that gap.
+//
+// Properties are canonicalized here beside the key, as the rebuild path's
+// canonicalizer.instance does, so a graph built through Add holds the same
+// bytes for a value as one rebuilt from parts.
+func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, key immutable.Key, stage *[]stagedEdge) *Instance {
 	b.attested = b.attested && inst.Validated()
-	// The key is canonicalized HERE, once, and every address downstream reads
-	// it from the Instance rather than from the caller's ValidInstance — the
-	// index, the sort, the duplicate check and the wire. A key rewritten in
-	// one of those places and not the others is what put two spellings of one
-	// value into a single document.
-	graphInst := newInstance(b.g.instanceTagForm(inst.TypeID()), inst.TypeID(),
-		b.g.canon.key(inst.TypeID(), inst.PrimaryKey()),
-		inst.Properties(), inst.Provenance(), inst.Validated())
+	graphInst := newInstance(b.g.instanceTagForm(inst.TypeID()), inst.TypeID(), key,
+		b.g.canon.properties(inst.TypeID(), inst.Properties()),
+		inst.Provenance(), inst.Validated())
 
 	// Diagnostics name the graph's canonical tag form, never the instance's
 	// self-declared TypeName: a consumer keying on type_name must get a name
@@ -260,6 +262,9 @@ func (b *instanceBuilder) child(
 		return
 	}
 
+	// Canonicalized once, here: the sibling scan and the installed instance
+	// read one value, so two spellings of one key cannot pass as two children.
+	key := b.g.canon.key(child.TypeID(), child.PrimaryKey())
 	if childTyp.HasPrimaryKey() {
 		if err := checkInstanceKey(childTyp, child); err != nil {
 			b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
@@ -270,24 +275,25 @@ func (b *instanceBuilder) child(
 			return
 		}
 		if seen != nil && rel.IsMany() {
-			keyStr := child.PrimaryKey().String()
+			keyStr := key.String()
 			if first, dup := seen[keyStr]; dup {
-				b.c.Collect(b.g.siblingDuplicateIssue(parentName, relationName, rel, child, first, index))
+				b.c.Collect(b.g.siblingDuplicateIssue(parentName, relationName, rel, keyStr, first, index))
 			} else {
 				seen[keyStr] = index
 			}
 		}
 	}
 
-	graphParent.addComposed(relationName, b.build(childTyp, child, nil))
+	graphParent.addComposed(relationName, b.build(childTyp, child, key, nil))
 }
 
 // unresolvableChildType reports a composed child whose identity is not in the
-// schema's import closure.
+// schema's import closure, on the inline path and on [Graph.AddComposed]'s.
 //
-// No public constructor reaches it: the caller's identity must already equal
-// the relation's target, and a relation's target is resolved by the schema
-// layer at load, so it is always in the closure. Reaching this means the
+// Neither entry point reaches it: the child's identity must already equal the
+// relation's target, and a relation's target is resolved by the schema layer
+// at load, so it is always in the closure; a child from outside the closure
+// stops at the schema guard before either arm. Reaching this means the
 // closure and the relation disagree, which is why it is Fatal E_INTERNAL and
 // not a graph-category error — and why no test drives it. Dropping the subtree
 // in silence was the alternative, and that is the regression it exists to
@@ -300,8 +306,7 @@ func unresolvableChildType(child *instance.ValidInstance) diag.Issue {
 }
 
 // composedOverflowIssue reports a (one) composition slot carrying several
-// children. The address it names is the second child's, which is the one the
-// slot cannot hold.
+// children.
 func (g *Graph) composedOverflowIssue(
 	parentName string,
 	relationName string,
@@ -327,16 +332,16 @@ func (g *Graph) siblingDuplicateIssue(
 	parentName string,
 	relationName string,
 	rel *schema.Relation,
-	child *instance.ValidInstance,
+	keyStr string,
 	firstIndex, index int,
 ) diag.Issue {
 	return diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 		fmt.Sprintf("duplicate composed child primary key %s at indices %d and %d",
-			child.PrimaryKey().String(), firstIndex, index)).
+			keyStr, firstIndex, index)).
 		WithDetail(diag.DetailKeyTypeName, parentName).
 		WithDetail(diag.DetailKeyRelationName, relationName).
 		WithDetail(diag.DetailKeyJSONField, rel.FieldName()).
-		WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).
+		WithDetail(diag.DetailKeyPrimaryKey, keyStr).
 		Build()
 }
 

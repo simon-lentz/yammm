@@ -237,8 +237,7 @@
 // [Graph.Add] emits:
 //
 //   - E_GRAPH_TYPE_NOT_FOUND: a root's type is not declared by this graph's
-//     schema or a direct import, or a composed child's type is not in the
-//     import closure at all
+//     schema or a direct import
 //   - E_GRAPH_MISSING_PK: the type declares no primary key
 //   - E_GRAPH_INVALID_COMPOSITION: a part type was added directly, or a
 //     composed child is not an instance of its relation's target type
@@ -269,6 +268,12 @@
 //
 // It does NOT emit E_GRAPH_MISSING_PK, E_GRAPH_ABSTRACT_TYPE or
 // E_DUPLICATE_PK; those three belong to a root.
+//
+// A composed child whose identity is not in the import closure is an
+// invariant guard on both paths, Fatal E_INTERNAL: the child must already
+// equal its relation's target, which the schema resolved at load, and a
+// child from outside the closure stops at the schema guard before either
+// arm. No public constructor reaches it.
 //
 // [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
 //

@@ -112,8 +112,8 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 	}
 
 	// Build header and assemble document.
-	createdAt := ""
-	if !cfg.createdAt.IsZero() {
+	createdAt := cfg.createdAtText
+	if createdAt == "" && !cfg.createdAt.IsZero() {
 		createdAt = cfg.createdAt.UTC().Format(time.RFC3339)
 	}
 
@@ -427,7 +427,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags
 					WithDetail(diag.DetailKeyRelationName, u.Relation).
 					Build())
 			}
-			if len(u.Properties().Clone()) > 0 {
+			if u.Properties().Len() > 0 {
 				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
 					fmt.Sprintf("unresolved record %s[%s].%s states reason %q and carries edge properties, which the wire cannot hold under that reason",
 						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.Reason)).

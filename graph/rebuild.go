@@ -120,12 +120,14 @@ type UnresolvedParts struct {
 // validated value would. A value the constraint cannot render is kept as it
 // arrived, because this entry point reconstructs a document rather than
 // validating one, and a document written before that rule existed must still
-// load. Primary keys are not rewritten: the wire holds canonical text, so a
-// loaded key is already canonical.
+// load. Primary keys are rewritten the same way, before the instance index is
+// built, and every position that addresses an instance moves with them, so an
+// edge or a duplicate record spelled another way still resolves.
 //
 // Returns a diag.Result with Fatal-severity E_INTERNAL diagnostics if
 // internal consistency checks fail (e.g., edge references to missing
-// instances, or a zero [schema.TypeID] at any parts position — identity is
+// instances, two instances of one type whose keys canonicalize to one
+// address, or a zero [schema.TypeID] at any parts position — identity is
 // total at this boundary). snapshot.Load validates these invariants before
 // calling RebuildSnapshot; failures here indicate a bug in the caller.
 func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Result) {
@@ -153,8 +155,21 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 
 		for _, ip := range instParts {
 			inst := rebuildInstance(canon.instance(ip))
+			// Indexed by the key the instance CARRIES, never the caller's
+			// spelling: every lookup below canonicalizes first, and the
+			// snapshot's own accessors read this same index. Two parts that
+			// spell one key two ways are one address, and a graph the API
+			// cannot build is refused here rather than handed back with its
+			// slice and its index disagreeing.
+			keyStr := inst.PrimaryKey().String()
+			if _, taken := idx[keyStr]; taken {
+				collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+					fmt.Sprintf("RebuildSnapshot: two instances of type %s at address %s (the parts spell one primary key two ways)",
+						typeID, keyStr)).Build())
+				continue
+			}
 			insts = append(insts, inst)
-			idx[ip.PrimaryKey.String()] = inst
+			idx[keyStr] = inst
 		}
 
 		instances[typeID] = insts
@@ -577,9 +592,10 @@ func compareDuplicates(a, b *Duplicate) int {
 }
 
 // provenanceKeyOf renders an instance's source position for ordering. A loaded
-// snapshot carries no provenance, so both sides render empty and the arm ties —
-// which is correct there: two records with nothing left to tell apart are the
-// same record.
+// instance carries a provenance with its source name and a zero span (the
+// decoder builds one), so within one source name every loaded record ties at
+// 0:0 and across source names the arm orders by name — a stable order, kept.
+// An instance with no provenance at all renders empty and ties.
 func provenanceKeyOf(i *Instance) string {
 	prov := i.Provenance()
 	if prov == nil {

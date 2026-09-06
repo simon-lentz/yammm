@@ -108,12 +108,16 @@ type BatchAssembler struct {
 	attempts  atomic.Int64
 	successes atomic.Int64
 
-	// finalizeOnce memoizes Finalize's result, which its contract promises
-	// a second call returns without a second Check pass. Guarded by
-	// lifecycleMu's write lock.
+	// finalizeDone memoizes Finalize's outcome, which its contract promises
+	// a second call returns without a second Check pass. finalizeSnap holds
+	// the snapshot from the first call that took one, whatever that call's
+	// outcome: once finalized the graph cannot change, so a retry after a
+	// cancelled Check reuses it rather than cloning the graph again. All
+	// three guarded by lifecycleMu's write lock.
 	finalizeDone bool
 	finalizeRes  FinalizeResult
 	finalizeErr  error
+	finalizeSnap *Snapshot
 }
 
 // FinalizeResult is the structured return value from
@@ -414,6 +418,9 @@ func (ba *BatchAssembler) wrapAddError(typeName string, attemptN int64, res diag
 // is unchanged, and a retry with a live context can still finalize. The
 // assembler still refuses further Add / AddValid calls, so retrying Finalize
 // is the only recovery there is and memoizing the cancellation would remove it.
+// The snapshot that call built is kept, though: the graph cannot change once
+// finalized, so the retry returns the same Snapshot rather than cloning every
+// instance and edge a second time.
 //
 // Panics if ctx is nil (consistent with [Graph.Check]).
 func (ba *BatchAssembler) Finalize(ctx context.Context) (FinalizeResult, error) {
@@ -442,7 +449,10 @@ func (ba *BatchAssembler) Finalize(ctx context.Context) (FinalizeResult, error) 
 	}
 
 	checkRes := ba.graph.Check(ctx)
-	res := FinalizeResult{Snapshot: ba.graph.Snapshot()} // always non-nil
+	if ba.finalizeSnap == nil {
+		ba.finalizeSnap = ba.graph.Snapshot() // once; the graph is fixed from here
+	}
+	res := FinalizeResult{Snapshot: ba.finalizeSnap} // always non-nil
 
 	// A Fatal is a cancelled Check — an abort, not a result. The graph is
 	// unchanged and a retry with a live context can still finalize, so this

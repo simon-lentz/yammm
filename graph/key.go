@@ -10,13 +10,15 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 )
 
-// FormatKey produces a canonical JSON array string for primary key lookup.
-// The format is a JSON array: ["value1", value2, ...].
+// FormatKey renders primary key components as the JSON array string the
+// graph's addresses use: ["value1", value2, ...].
 //
-// This is the canonical form used for:
-//   - Map key indexing within the graph
-//   - Diagnostic messages showing duplicate keys
-//   - InstanceByKey lookups
+// It renders the values AS GIVEN and canonicalizes nothing. The graph indexes
+// an instance by the key it carries, and for a Timestamp, Date or UUID key
+// that is the canonical text the value was rewritten into at entry — so
+// FormatKey over the stored text is an address, and FormatKey over another
+// spelling of the same instant is not. [Snapshot.InstanceByKey] states the
+// rule; [Instance.PrimaryKey] is the address itself.
 //
 // Examples:
 //

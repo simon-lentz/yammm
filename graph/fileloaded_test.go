@@ -183,6 +183,7 @@ func TestFileLoadedSchema_OneCompositionShapes(t *testing.T) {
 	stamp := instancetest.VI(
 		"Stamp",
 		instancetest.TypeID(mustTypeID(t, s, "Stamp")),
+		instancetest.NoKey(),
 		instancetest.Props(map[string]any{"mark": "paid"}),
 	)
 	order := instancetest.VI(

@@ -169,8 +169,13 @@ func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
 
 // InstanceByKey looks up a single instance by type identity and primary key.
 //
-// The key must be in canonical string form (use [FormatKey] to convert values).
-// Returns (nil, false) if no matching instance exists.
+// The key is the string the instance itself carries, [Instance.PrimaryKey]'s
+// String: a JSON array of the key's components in the form their constraints
+// store. For a String or Integer key that is [FormatKey] over the values; for
+// a Timestamp, Date or UUID key it is the canonical text the graph rewrote
+// the value into at entry, so a value spelled another way must be
+// canonicalized first — [FormatKey] renders values as given and canonicalizes
+// nothing. Returns (nil, false) if no matching instance exists.
 func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool) {
 	if r == nil || r.instanceIndex == nil {
 		return nil, false

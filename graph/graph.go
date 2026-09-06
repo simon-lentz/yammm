@@ -217,7 +217,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	// leaves no trace of the record it refused.
 	b := newInstanceBuilder(g, opCollector)
 	var staged []stagedEdge
-	graphInst := b.build(typ, inst, &staged)
+	graphInst := b.build(typ, inst, g.canon.key(typeID, inst.PrimaryKey()), &staged)
 	// Merged whatever the severity: the walks this replaced collected into
 	// both collectors at every site, and gating on HasErrors would drop the
 	// first sub-Error issue the check ever produces from Snapshot.Diagnostics().
@@ -238,8 +238,9 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	if typeInstances != nil {
 		if existing, found := typeInstances[pkString]; found {
 			// Duplicate.Instance is documented as carrying no composed
-			// children, so the record gets its own childless instance.
-			rejected := newInstance(typeName, typeID, graphInst.PrimaryKey(), inst.Properties(), inst.Provenance(), inst.Validated())
+			// children, so the record gets its own childless instance, with
+			// the key and properties the graph would have stored.
+			rejected := newInstance(typeName, typeID, graphInst.PrimaryKey(), graphInst.Properties(), inst.Provenance(), inst.Validated())
 			diagBuilder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
 				fmt.Sprintf("duplicate primary key %s for type %q", pkString, typeName)).
 				WithDetail(diag.DetailKeyTypeName, typeName).
@@ -332,8 +333,11 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 //   - parentType: the parent's type identity, as [Snapshot.Types] and
 //     [Instance.TypeID] carry it. A rendered name cannot denote a type exactly
 //     — see the package doc's Type Identity and Type Names section.
-//   - parentKey: the parent's primary key in canonical string form, as returned by
-//     [FormatKey]. For example, FormatKey("alice") returns `["alice"]`.
+//   - parentKey: the parent's primary key as the parent instance carries it,
+//     [Instance.PrimaryKey]'s String — for example `["alice"]`, which
+//     [FormatKey]("alice") renders. A Timestamp, Date or UUID key is the
+//     canonical text the graph stored, not whatever spelling the caller holds;
+//     see [Snapshot.InstanceByKey].
 //   - relationName: the composition relation name as declared in the schema
 //   - child: the validated child instance to attach
 //
@@ -370,6 +374,9 @@ func (g *Graph) AddComposed(
 	opCollector := diag.NewCollector(0)
 
 	// Opened before the context check so a cancelled AddComposed is still traced.
+	// The trace takes the full identity deliberately, where the diagnostics
+	// below take the tag form: the identity needs no alias scan, and the trace
+	// attribute is built on every call.
 	op := trace.Begin(
 		ctx, g.config.logger, "yammm.graph.add_composed",
 		slog.String("parent_type", parentType.String()),
@@ -435,12 +442,12 @@ func (g *Graph) AddComposed(
 			WithDetail(diag.DetailKeyGot, got).Build())
 	}
 
-	// Identity, not name — see [instanceBuilder.child].
+	// Identity, not name — see [instanceBuilder.child], whose classification
+	// this shares: the schema guard above and the target check make the miss
+	// an invariant violation on this path too.
 	childTyp, ok := g.schema.TypeByID(child.TypeID())
 	if !ok {
-		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
-			fmt.Sprintf("child type %q not found in schema", child.TypeName())).
-			WithDetail(diag.DetailKeyTypeName, child.TypeName()).Build())
+		return g.reject(opCollector, unresolvableChildType(child))
 	}
 
 	// The child's own key and subtree run the same rules Add applies to a root
@@ -455,19 +462,27 @@ func (g *Graph) AddComposed(
 				WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
 		}
 	}
+	// The key is canonicalized once and read by the sibling scan, the duplicate
+	// record and the installed instance alike — see [instanceBuilder.child].
+	childKey := g.canon.key(child.TypeID(), child.PrimaryKey())
 	b := newInstanceBuilder(g, opCollector)
-	builtChild := b.build(childTyp, child, nil)
+	builtChild := b.build(childTyp, child, childKey, nil)
 	g.collector.Merge(opCollector.Result())
 	if opCollector.HasErrors() {
 		return opCollector.Result()
+	}
+	// Duplicate.Instance carries no composed children, so a rejected child's
+	// record is a childless instance holding what the graph would have stored.
+	rejectedChild := func() *Instance {
+		return newInstance(builtChild.TypeName(), builtChild.TypeID(),
+			builtChild.PrimaryKey(), builtChild.Properties(), child.Provenance(), child.Validated())
 	}
 
 	isMany := rel.IsMany()
 
 	if !isMany {
 		if parentInst.HasComposed(relationName) {
-			childInst := newInstance(g.instanceTagForm(child.TypeID()), child.TypeID(),
-				child.PrimaryKey(), child.Properties(), child.Provenance(), child.Validated())
+			childInst := rejectedChild()
 
 			var conflictInst *Instance
 			if existing := parentInst.composed[relationName]; len(existing) > 0 {
@@ -481,10 +496,12 @@ func (g *Graph) AddComposed(
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			// The key must name the occupant that EXISTS, not the rejected
 			// child, which never attaches. Whether there is a key at all is a
-			// question for the SCHEMA: a part type declaring none has no key to
-			// report however an instance was constructed, and the detail is
-			// then absent rather than carrying a stand-in.
-			if conflictInst != nil && childTyp.HasPrimaryKey() {
+			// question for the SCHEMA and for the OCCUPANT: a part type
+			// declaring none has no key to report however an instance was
+			// constructed, and a rebuilt occupant of a keyed type can carry
+			// none, since RebuildSnapshot checks identity and not keys. The
+			// detail is then absent rather than carrying the "[]" stand-in.
+			if conflictInst != nil && childTyp.HasPrimaryKey() && conflictInst.PrimaryKey().Len() > 0 {
 				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, conflictInst.PrimaryKey().String())
 			}
 			issue := builder.Build()
@@ -499,13 +516,12 @@ func (g *Graph) AddComposed(
 			return g.reject(opCollector, issue)
 		}
 	} else if childTyp.HasPrimaryKey() {
-		childPKString := child.PrimaryKey().String()
+		childPKString := builtChild.PrimaryKey().String()
 		for _, existing := range parentInst.composed[relationName] {
 			if existing.PrimaryKey().String() != childPKString {
 				continue
 			}
-			childInst := newInstance(g.instanceTagForm(child.TypeID()), child.TypeID(),
-				child.PrimaryKey(), child.Properties(), child.Provenance(), child.Validated())
+			childInst := rejectedChild()
 
 			issue := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 				"duplicate composed child primary key "+childPKString).

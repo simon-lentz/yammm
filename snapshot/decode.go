@@ -401,7 +401,10 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 	sd.checkProvenancePath(inst, row)
 	sd.checkValueConformance(inst, row)
 
-	keyStr := formatWireKey(inst.Key)
+	// Every address in the index is the CANONICAL key — the spelling the
+	// rebuilt instance will carry — so two roots that spell one instant two
+	// ways are one address here, as they are in the graph.
+	keyStr := sd.canonicalWireKey(row, inst.Key)
 	if depth == 0 {
 		// Two roots at one address is not data the wire can carry: the format
 		// has a diagnostics section for a rejected duplicate, and the graph
@@ -435,7 +438,7 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 					sourceRow: row,
 					sourceKey: keyStr,
 					targetRow: targetRow,
-					targetKey: formatWireKey(e.TargetKey),
+					targetKey: sd.canonicalWireKey(targetRow, e.TargetKey),
 				})
 			}
 		}
@@ -833,7 +836,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if !conflictOK {
 			continue
 		}
-		conflictKey := formatWireKey(dup.Conflict.Key)
+		conflictKey := sd.canonicalWireKey(conflictRow, dup.Conflict.Key)
 
 		if dup.Relation == "" {
 			// Parent coordinates address a slot, and a root duplicate has none.
@@ -863,7 +866,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if !ok {
 			continue
 		}
-		parentKey := formatWireKey(dup.ParentKey)
+		parentKey := sd.canonicalWireKey(parentRow, dup.ParentKey)
 		if !idx.rootExists(parentRow, parentKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("duplicate parent %s[%s] does not resolve to a root instance",
@@ -890,7 +893,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			return fmt.Sprintf("unresolved record %d source", ui)
 		})
 		if ok {
-			sourceKey := formatWireKey(u.SourceKey)
+			sourceKey := sd.canonicalWireKey(sourceRow, u.SourceKey)
 			if !idx.rootExists(sourceRow, sourceKey) {
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 					fmt.Sprintf("unresolved edge source %s[%s] references non-existent instance",
@@ -1273,6 +1276,37 @@ func formatWireKey(key []any) string {
 	}
 	k := immutable.WrapKey(normalizeSlice(key))
 	return k.String()
+}
+
+// canonicalWireKey renders a wire key as the address the rebuilt instance
+// will carry: each component under a Timestamp, Date or UUID primary-key
+// constraint of the row's type is rewritten to its canonical text, as
+// graph.RebuildSnapshot rewrites it. A component the constraint cannot render,
+// a row that resolves to no type, or a schema-less read leave the key as
+// written. Every position that addresses an instance goes through it, so the
+// document's index and the graph's agree on what one key is.
+func (sd *streamDecoder) canonicalWireKey(row int, key []any) string {
+	if key == nil {
+		return "[]"
+	}
+	components := normalizeSlice(key)
+	if sd.schema != nil && row >= 0 && row < len(sd.tableIDs) {
+		if t, ok := sd.schema.TypeByID(sd.tableIDs[row]); ok {
+			i := 0
+			for pk := range t.PrimaryKeys() {
+				if i >= len(components) {
+					break
+				}
+				if value.Canonicalizes(pk.Constraint()) {
+					if canonical, err := value.Canonical(components[i], pk.Constraint()); err == nil {
+						components[i] = canonical
+					}
+				}
+				i++
+			}
+		}
+	}
+	return immutable.WrapKey(components).String()
 }
 
 // normalizeSlice applies NormalizeValue to each element in a slice.
