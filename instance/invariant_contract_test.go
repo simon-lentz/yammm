@@ -53,6 +53,7 @@ type Order {
     matrix List<List<Integer>>
     note String
     extras List<String>
+    vec Vector[4]
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
     --> PLACED_BY (one) Customer
@@ -78,6 +79,7 @@ func goodOrder() map[string]any {
 	return map[string]any{
 		"id": "o1", "name": "north", "f1": true, "f2": false, "tags": []any{"alpha", "beta"},
 		"matrix":    []any{[]any{int64(1), int64(2)}, []any{int64(3)}},
+		"vec":       []any{1.5, 2.5, 3.0, 3.0},
 		"lines":     []any{line("l1", 5, "s1"), line("l2", 7, "s2")},
 		"main_line": []any{line("m1", 9, "s3")},
 		"placed_by": map[string]any{"_target_id": "c1"},
@@ -151,6 +153,10 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		// relation names resolve in either case
 		{`lines -> Len > 0`, nil},
 		{`placed_by != nil`, nil},
+		// self is a bound variable at both layers, so a bare self reads the
+		// owner's members and a parameter named self shadows it
+		{`self.name -> Len > 0`, setName("")},
+		{`self.LINES -> Len > 0`, nil},
 		// a $ variable names a member by its exact spelling
 		{`$name -> Len > 0`, setName("")},
 		{`$lines -> Len > 0`, nil},
@@ -220,6 +226,14 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		// Compare ranks any two values the total order ranks: a list above a string
 		{`LINES -> Compare("a") > 0`, nil},
 		{`REGION -> Compare("a") > 0`, nil},
+		// two lists of one shape concatenate to a list of that shape, and the
+		// stage after the merge is typed by it — instances and nested lists
+		// alike, not only scalars
+		{`(LINES + LINES) -> First.qty > 0`, setLineQty(0)},
+		{`(matrix + [[9]]) -> First -> Sum > 0`, nil},
+		// a Vector's element is a number, at both layers
+		{`(vec -> Sum) > 0.0`, nil},
+		{`vec -> All |$x| { $x > 0.0 }`, nil},
 		// a stored nested list flattens
 		{`matrix -> Flatten -> Len == 3`, nil},
 		{`matrix -> Flatten -> Sum == 6`, nil},

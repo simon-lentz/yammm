@@ -37,6 +37,23 @@ const (
 	scalarOther                     // a pattern literal: no operator takes it
 )
 
+// String names the kind as a diagnostic reads it, so a message naming a scalar
+// cannot drift from the definition it names.
+func (k scalarKind) String() string {
+	switch k {
+	case scalarString:
+		return "a string"
+	case scalarNumber:
+		return "a number"
+	case scalarBoolean:
+		return "a boolean"
+	case scalarOther:
+		return "a pattern"
+	case scalarAny:
+	}
+	return "a scalar"
+}
+
 // staticType is what one expression evaluates to. An association reads as its
 // target's primary key — a string, or a list of strings for a composite key —
 // and viaAssociation records that origin so a member read through it names
@@ -170,7 +187,7 @@ func propertyType(con Constraint) staticType {
 		}
 		return listOf(scalarType)
 	case KindVector:
-		return listOf(otherScalarType)
+		return listOf(numberType)
 	case KindAlias:
 		if a, ok := con.(AliasConstraint); ok {
 			return propertyType(a.Resolved())
@@ -220,6 +237,28 @@ func mergeScalar(a, b staticType) staticType {
 		return a
 	}
 	return scalarType
+}
+
+// mergeType is the static type two expressions agree on: the same instance, a
+// list of their merged element, a merged scalar, or unknown. It serves every
+// position where two expressions meet and the stage after them reads the
+// answer — concatenation, a list literal's elements, a conditional's branches.
+func mergeType(a, b staticType) staticType {
+	if a.kind != b.kind {
+		return unknownType
+	}
+	switch a.kind {
+	case kindInstance:
+		if a.typ == b.typ {
+			return a
+		}
+	case kindList:
+		return listOf(mergeType(a.element(), b.element()))
+	case kindScalar:
+		return mergeScalar(a, b)
+	case kindUnknown, kindNil:
+	}
+	return unknownType
 }
 
 // typeBinary types a binary operator's result and checks the two operand
@@ -278,7 +317,7 @@ func (c *completer) typePlus(l, r staticType, owner *Type, inv *Invariant) stati
 		return unknownType
 	}
 	if l.kind == kindList && r.kind == kindList {
-		return listOf(mergeScalar(l.element(), r.element()))
+		return listOf(mergeType(l.element(), r.element()))
 	}
 	if l.kind == kindList || r.kind == kindList {
 		return refuse()
@@ -313,7 +352,10 @@ func (c *completer) validateInvariantExpressions() {
 		if c.hasUnresolvedSupertype(t) {
 			continue
 		}
-		scope := &staticScope{}
+		// self is a bound variable at evaluation, where PropertyScopeFromMap
+		// seeds it, so the checker binds it too and a parameter named self
+		// shadows it through child exactly as WithVar does.
+		scope := (&staticScope{}).child("self", instanceOf(t))
 		for inv := range t.Invariants() {
 			c.invariantSeen = nil
 			c.typeExpr(inv.Expression(), scope, t, inv)
@@ -370,20 +412,18 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 	case "@":
 		return c.typeIndexExpr(children, sc, owner, inv)
 	case "[]":
-		elem := scalarType
-		for i, child := range children {
+		elem, seen := scalarType, false
+		for _, child := range children {
 			t := c.typeExpr(child, sc, owner, inv)
-			switch {
-			case t.kind == kindNil:
-				// A nil element is any scalar's peer.
-			case t.kind != kindScalar:
-				elem = unknownType
-			case elem.kind == kindUnknown:
-			case i == 0:
-				elem = t
-			default:
-				elem = mergeScalar(elem, t)
+			// A nil element is any element's peer.
+			if t.kind == kindNil {
+				continue
 			}
+			if !seen {
+				elem, seen = t, true
+				continue
+			}
+			elem = mergeType(elem, t)
 		}
 		return listOf(elem)
 	case "?":
@@ -398,13 +438,7 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 		c.typeExpr(children[0], sc, owner, inv)
 		then := c.typeExpr(children[1], sc, owner, inv)
 		otherwise := c.typeExpr(children[2], sc, owner, inv)
-		if then.kind == otherwise.kind && then.typ == otherwise.typ && then.kind != kindList {
-			if then.kind == kindScalar {
-				return mergeScalar(then, otherwise)
-			}
-			return then
-		}
-		return unknownType
+		return mergeType(then, otherwise)
 	case "-x":
 		for _, child := range children {
 			if c.typeExpr(child, sc, owner, inv).kind == kindNil {
@@ -495,10 +529,11 @@ func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, ow
 	return unknownType
 }
 
-// typeVariable resolves a lambda parameter, $self, a member of the owner, or
-// a numeric variable, in the evaluator's order: a parameter named self shadows
-// the owner. A numeric variable evaluates to nil when unbound; any other
-// unbound name is a guaranteed evaluation error, so it is refused here.
+// typeVariable resolves a lambda parameter, a member of the owner, or a
+// numeric variable, in the evaluator's order. self is an ordinary bound
+// variable, so a parameter of that name shadows it by binding order alone. A
+// numeric variable evaluates to nil when unbound; any other unbound name is a
+// guaranteed evaluation error, so it is refused here.
 func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
 	if len(children) != 1 {
 		return unknownType
@@ -509,9 +544,6 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 	}
 	if t, found := sc.lookupVar(name); found {
 		return t
-	}
-	if name == "self" {
-		return instanceOf(owner)
 	}
 	// A $ variable names a member by its exact spelling, as the evaluator's
 	// scope resolves it; only a bare name folds.
@@ -621,7 +653,7 @@ func (c *completer) typeIndexExpr(children []expr.Expression, sc *staticScope, o
 			return stringType
 		case scalarNumber, scalarBoolean, scalarOther:
 			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"a number or boolean cannot be indexed in invariant %q on type %q", inv.Name(), owner.Name())
+				"%s cannot be indexed in invariant %q on type %q", recv.scalar, inv.Name(), owner.Name())
 			return unknownType
 		case scalarAny:
 		}

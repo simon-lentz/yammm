@@ -272,10 +272,10 @@ func (c *completer) validateAssociationTargets() {
 					continue
 				}
 				// Reported once, on the first part type in the chain that
-				// inherits it; a part-type ancestor carrying it has already.
-				if c.aSuperCarries(t, func(s *Type) bool {
-					return s.IsPart() && slices.Contains(s.AllAssociationsSlice(), r)
-				}) {
+				// inherits it. The whole linearized ancestry is read, so a
+				// non-part type between two part types does not hide the one
+				// that already reported.
+				if c.aPartAncestorCarries(t, r) {
 					continue
 				}
 				c.errorfRelated(t.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
@@ -364,6 +364,18 @@ func (c *completer) validateCompositionTarget(t *Type, r *Relation) {
 			"composition %q in type %q must reference a concrete type, but %q is abstract",
 			r.Name(), t.Name(), target.Name())
 	}
+}
+
+// aPartAncestorCarries reports whether a part type anywhere in t's linearized
+// ancestry already carries r, and so has already drawn the refusal.
+func (c *completer) aPartAncestorCarries(t *Type, r *Relation) bool {
+	for ref := range t.SuperTypes() {
+		s := c.resolveTypeID(ref.ID())
+		if s != nil && s.IsPart() && slices.Contains(s.AllAssociationsSlice(), r) {
+			return true
+		}
+	}
+	return false
 }
 
 // aSuperCarries reports whether some direct supertype of t satisfies has.

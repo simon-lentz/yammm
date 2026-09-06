@@ -1228,6 +1228,12 @@ func (c *completer) hasUnresolvedSupertype(t *Type) bool {
 	if cached, ok := c.unresolvedSupertypeMemo[t]; ok {
 		return cached
 	}
+	// A type from another schema completed in its own, where its supertypes
+	// resolved or the import would have failed. Its refs do not resolve here.
+	if t.SourceID() != c.schema.SourceID() {
+		c.unresolvedSupertypeMemo[t] = false
+		return false
+	}
 	c.unresolvedSupertypeMemo[t] = false // cycle-termination guard; overwritten below
 
 	result := false

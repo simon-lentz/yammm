@@ -2,6 +2,7 @@ package schema_test
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -492,5 +493,46 @@ func BenchmarkRegisterIdempotent_LargeSchema(b *testing.B) {
 		if err := r.Register(s2); err != nil {
 			b.Fatalf("idempotent re-register must succeed: %v", err)
 		}
+	}
+}
+
+// A schema registered with its sources, re-registered without them, is not the
+// same source: the provenance differs. The refusal names that rather than
+// reporting bytes that were never compared.
+func TestRegistry_ProvenanceDifferenceNamesItself(t *testing.T) {
+	t.Parallel()
+	const src = `schema "s"
+
+type T {
+	id String primary
+}
+`
+	loaded, res := schema.LoadString(t.Context(), src, "s.yammm")
+	if res.Err() != nil {
+		t.Fatal(res.Err())
+	}
+	// A Builder-built schema carries no sources, which is the other half of
+	// the provenance question.
+	built, res := schema.NewBuilder().
+		WithName("s").
+		WithSourceID(loaded.SourceID()).
+		AddType("T").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		Done().
+		Build()
+	if res.Err() != nil {
+		t.Fatal(res.Err())
+	}
+
+	r := schema.NewRegistry()
+	if err := r.Register(loaded); err != nil {
+		t.Fatalf("first registration: %v", err)
+	}
+	err := r.Register(built)
+	if err == nil {
+		t.Fatal("re-registering one source ID with different provenance was accepted")
+	}
+	if !strings.Contains(err.Error(), "carries no sources") {
+		t.Errorf("the refusal should name the provenance difference; got %v", err)
 	}
 }

@@ -393,3 +393,46 @@ type T extends A, B {
 		t.Errorf("the diagnostic anchors at %q, want the combining type", strings.TrimSpace(line))
 	}
 }
+
+// The inherited-association refusal is reported once, on the first part type
+// in the chain. Asking only the direct supertypes lets a non-part type between
+// two part types hide the one that already reported, so the refusal is drawn
+// twice for one declaration.
+func TestPartType_InheritedAssociationReportedOncePerChain(t *testing.T) {
+	t.Parallel()
+	const src = `schema "s"
+
+type Owner {
+	id String primary
+}
+
+abstract type HasOwner {
+	--> OWNED_BY (one) Owner
+}
+
+part type P0 extends HasOwner {
+	id String primary
+}
+
+abstract type Mid extends P0 {
+	m String
+}
+
+part type P1 extends Mid {
+	pid String primary
+}
+`
+	_, res := schema.LoadString(t.Context(), src, "s.yammm")
+	var reported []string
+	for is := range res.Issues() {
+		if strings.Contains(is.Message(), "cannot carry an association") {
+			reported = append(reported, is.Message())
+		}
+	}
+	if len(reported) != 1 {
+		t.Fatalf("the refusal was reported %d times, want 1: %v", len(reported), reported)
+	}
+	if !strings.Contains(reported[0], `"P0"`) {
+		t.Errorf("reported on %q; want the first part type in the chain, P0", reported[0])
+	}
+}

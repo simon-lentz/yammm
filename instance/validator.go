@@ -759,8 +759,8 @@ func (v *Validator) exactMatchShadowing(typ *schema.Type, inputName string, mapp
 // invariantScope returns the name→value map an invariant is evaluated against:
 // the validated properties, plus one entry per relation keyed by FieldName.
 //
-// Relations belong here because buildStaticScope admits their field names, so
-// an invariant may reference one. The two relation kinds carry different
+// Relations belong here because the schema completer's membersOf index admits
+// their field names, so an invariant may reference one. The two relation kinds carry different
 // amounts of information, and the difference is not incidental:
 //
 //   - A COMPOSITION's children are part of this instance, so the entry is the

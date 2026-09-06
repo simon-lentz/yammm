@@ -45,6 +45,7 @@ type Order {
     f2 Boolean
     tags List<String>
     matrix List<List<Integer>>
+    vec Vector[4]
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
     --> PLACED_BY (one) Customer
@@ -83,6 +84,8 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`LINES -> All |$self| { $self.qty > 0 }`,
 		// Lest binds nothing; its body reads the caller's scope
 		`name -> Lest { true }`,
+		// self is a bound variable, so a bare self reads the owner's members
+		`self.name -> Len > 0`,
 		// member then pipeline, member then index
 		`$self.name -> Len > 0`,
 		`$self.tags[0] != ""`,
@@ -121,6 +124,9 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`[LINES[0], LINES[0]] -> Unique -> Len == 1`,
 		`LINES -> Contains(LINES[0])`,
 		`LINES[0] in LINES`,
+		// a Vector's element is a number, as a List<Float>'s is
+		`(vec -> Sum) > 0.0`,
+		`vec -> All |$x| { $x > 0.0 }`,
 		// a nested list's element is a list, and its element a number
 		`matrix -> All |$r| { $r -> Sum > 0 }`,
 		`matrix[0][0] > 0`,
@@ -389,4 +395,84 @@ func TestStaticInvariant_OneMistakeOneDiagnostic(t *testing.T) {
 	if n != 1 {
 		t.Errorf("%d E_INVALID_INVARIANT diagnostics, want 1: %v", n, res.Err())
 	}
+}
+
+// A type reached through an import completed in its own schema, where its
+// supertypes resolved. Judging it by whether its own inheritance refs resolve
+// against the importing schema makes every such type look incomplete, and the
+// member check on it is then skipped — so a typo'd member read through an
+// imported type loads clean.
+func TestStaticInvariant_MemberOnImportedTypeIsChecked(t *testing.T) {
+	t.Parallel()
+	sources := map[string][]byte{
+		"entry.yammm": []byte(`schema "entry"
+
+import "base.yammm" as base
+
+type T {
+	tid String primary
+	*-> PART (one) base.Mid
+	! "m" PART.nonexistent > 0
+}
+`),
+		"base.yammm": []byte(`schema "base"
+
+abstract type Ancestor {
+	note String
+}
+
+part type Mid extends Ancestor {
+	id String primary
+}
+`),
+	}
+	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	if res.Err() == nil {
+		t.Fatal("a typo'd member read through an imported type loaded clean")
+	}
+	if _, ok := issueWithCode(res, diag.E_UNKNOWN_PROPERTY); !ok {
+		t.Errorf("want E_UNKNOWN_PROPERTY; got %v", res.Err())
+	}
+}
+
+// A member the imported type really declares, inherited from its own
+// schema's ancestor, still resolves — the guard admits the type rather than
+// skipping the check.
+func TestStaticInvariant_InheritedMemberOnImportedTypeResolves(t *testing.T) {
+	t.Parallel()
+	sources := map[string][]byte{
+		"entry.yammm": []byte(`schema "entry"
+
+import "base.yammm" as base
+
+type T {
+	tid String primary
+	*-> PART (one) base.Mid
+	! "m" PART.note != ""
+}
+`),
+		"base.yammm": []byte(`schema "base"
+
+abstract type Ancestor {
+	note String
+}
+
+part type Mid extends Ancestor {
+	id String primary
+}
+`),
+	}
+	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	if res.Err() != nil {
+		t.Errorf("a member inherited inside the imported schema was refused: %v", res.Err())
+	}
+}
+
+func issueWithCode(res diag.Result, code diag.Code) (diag.Issue, bool) {
+	for is := range res.Issues() {
+		if is.Code() == code {
+			return is, true
+		}
+	}
+	return diag.Issue{}, false
 }
