@@ -5,6 +5,8 @@ type Order {
     customer String required
 
     *-> SECTIONS (_:many) Section
+    *-> INVOICE (one) Invoice
+    *-> STAMP (one) Stamp
 }
 
 part type Section {
@@ -17,4 +19,13 @@ part type Section {
 part type Note {
     note_id String primary
     body    String required
+}
+
+part type Invoice {
+    invoice_id String primary
+    amount     String required
+}
+
+part type Stamp {
+    mark String required
 }

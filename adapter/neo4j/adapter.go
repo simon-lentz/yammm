@@ -81,7 +81,7 @@ func WithLabelPrefix(prefix string) Option {
 // gating them apart suppressed the constraint for one declaration and not for
 // an identical one.
 //
-// **Property-type constraints require Neo4j 5.9**, which is older than the 5.0
+// Property-type constraints require Neo4j 5.9, which is older than the 5.0
 // floor this adapter otherwise supports. On a server between 5.0 and 5.8 this
 // option is what turns them off; nothing else does, and the adapter has no
 // version input with which to decide for itself.

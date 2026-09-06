@@ -134,8 +134,8 @@
 // # Composed Children
 //
 // A composed child is checked exactly as a root is — its edge names and
-// multiplicities, its own key, and its own composition tree — but **its
-// association edges are never installed.** A part type that declares or
+// multiplicities, its own key, and its own composition tree — but its
+// association edges are never installed. A part type that declares or
 // inherits an association therefore produces no [Edge], no
 // [UnresolvedEdge], and no effect on [Attestation]'s Associations dimension.
 // The check still runs, so data filed under a name the part type does not

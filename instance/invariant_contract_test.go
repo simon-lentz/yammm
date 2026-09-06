@@ -52,6 +52,7 @@ type Order {
     tags List<String>
     matrix List<List<Integer>>
     note String
+    extras List<String>
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
     --> PLACED_BY (one) Customer
@@ -211,12 +212,14 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		// the nil literal defaults any receiver; an empty list defaults any list
 		{`(tags -> Default(nil)) -> Len == 2`, setTags("a")},
 		{`(LINES -> Default(nil)) -> Len == 2`, nil},
+		{`(MAIN_LINE -> Default(nil)) != nil`, nil},
 		{`(LINES -> Default([])) -> Len == 2`, nil},
 		{`(CUSTOMERS -> Default([])) -> Len == 2`, nil},
 		// in with the nil literal on its right is false, not an error
 		{`!(1 in nil)`, nil},
 		// Compare ranks any two values the total order ranks: a list above a string
 		{`LINES -> Compare("a") > 0`, nil},
+		{`REGION -> Compare("a") > 0`, nil},
 		// a stored nested list flattens
 		{`matrix -> Flatten -> Len == 3`, nil},
 		{`matrix -> Flatten -> Sum == 6`, nil},
@@ -331,9 +334,15 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		// every refuse row of the static table, judged by the evaluator too
 		{`MAIN_LINE -> Max(1) != nil`, diag.E_INVALID_INVARIANT, "cannot be ordered", "unsupported type comparison"},
 		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "cannot be indexed", "cannot index"},
-		{`(tags -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default", ""},
-		{`(name -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default", ""},
+		// The receiver is absent in these two, so the fallback is taken and the
+		// stage after it is what the evaluator refuses.
+		{`(extras -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default", "expects slice or array input"},
+		{`(note -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default", "expects string argument"},
+		// Present receiver, so the fallback never fires: the evaluator answers
+		// false rather than erroring, which is all this row can assert.
 		{`(tags -> Default([1]) -> First) == 1`, diag.E_INVALID_INVARIANT, "Default", ""},
+		// MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil has no row here: the
+		// checker refuses it and the evaluator holds it on a conforming instance.
 		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver"},
 		{`tags -> Min("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver"},
 		{`name =~ Vector`, diag.E_INVALID_INVARIANT, "Vector", "unknown datatype"},
@@ -342,16 +351,34 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`name !~ Pattern`, diag.E_INVALID_INVARIANT, "Pattern", "unknown datatype"},
 		// a composite key is a list at evaluation time
 		{`REGION -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string"},
-		{`REGION + "!" != ""`, diag.E_INVALID_INVARIANT, "+ takes", ""},
+		{`REGION + "!" != ""`, diag.E_INVALID_INVARIANT, "+ takes", "+ of non-numeric values"},
 		// a list of lists or of keys into Sum or Join
 		{`matrix -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers", "expects numeric"},
 		{`matrix -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings", "expects all string"},
 		{`CUSTOMERS -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers", "expects numeric"},
 		// a boolean under + and the nil literal under +
 		{`(f1 + f2) != nil`, diag.E_INVALID_INVARIANT, "+ takes", "non-numeric"},
-		{`nil + 1 > 0`, diag.E_INVALID_INVARIANT, "+ takes", ""},
+		{`nil + 1 > 0`, diag.E_INVALID_INVARIANT, "+ takes", "of nil operand"},
+		{`(name + nil) != ""`, diag.E_INVALID_INVARIANT, "+ takes", "of nil operand"},
+		// the nil literal under the other arithmetic operators, and unary minus
+		{`(-nil) > 0`, diag.E_INVALID_INVARIANT, "unary - takes a number", "-x of non-numeric value"},
+		{`nil - 1 > 0`, diag.E_INVALID_INVARIANT, "- takes two numbers", "- of non-numeric values"},
+		{`nil * 1 > 0`, diag.E_INVALID_INVARIANT, "* takes two numbers", "* of non-numeric values"},
+		{`nil / 1 > 0`, diag.E_INVALID_INVARIANT, "/ takes two numbers", "/ of non-numeric values"},
+		{`nil % 1 > 0`, diag.E_INVALID_INVARIANT, "% takes two numbers", "% requires integer operands"},
+		// a boolean is not a number, and an instance is neither a string nor one
+		{`(f1 + MAIN_LINE.qty) != nil`, diag.E_INVALID_INVARIANT, "+ takes", "+ of non-numeric values"},
+		{`f1 -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument"},
+		{`f1 -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map", "unsupported for type bool"},
+		{`MAIN_LINE -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument"},
+		{`MAIN_LINE -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument"},
+		// a ternary whose branches agree keeps their subkind
+		{`(name != "" ? { name : name }) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument"},
+		// a list of instances is not a list of numbers or of strings
+		{`LINES -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers", "expects numeric elements"},
+		{`LINES -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings", "expects all string elements"},
 		// the remaining refuse arms
-		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default", ""},
+		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default", "expects numeric argument"},
 		{`MAIN_LINE -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "total order", "unsupported type comparison"},
 		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "list of scalars", "unsupported type comparison"},
 	}

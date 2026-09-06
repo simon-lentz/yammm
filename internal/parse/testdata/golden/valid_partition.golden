@@ -76,6 +76,7 @@ adapter/neo4j/testdata/abstract_types.yammm
 adapter/neo4j/testdata/aliases.yammm
 adapter/neo4j/testdata/basic.yammm
 adapter/neo4j/testdata/composed_nested.yammm
+adapter/neo4j/testdata/composed_one.yammm
 adapter/neo4j/testdata/composite_pk.yammm
 adapter/neo4j/testdata/edge_mixed.yammm
 adapter/neo4j/testdata/edge_typed_props.yammm

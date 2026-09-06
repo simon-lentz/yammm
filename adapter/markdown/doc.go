@@ -153,7 +153,7 @@
 //
 // # Dependencies
 //
-//	adapter/markdown  ──imports──▶  schema, location
+//	adapter/markdown  ──imports──▶  schema
 //
 // markdown imports only public yammm packages and the standard library —
 // no internal/* (the adapter-layer carve-out documented in adapter/doc.go

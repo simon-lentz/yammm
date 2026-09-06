@@ -1,0 +1,18 @@
+schema "one_test"
+
+type Invoice {
+    invoice_id String primary
+    customer   String required
+
+    *-> BILL_TO (one) Address
+    *-> SUMMARY (one) Summary
+}
+
+part type Address {
+    address_id String primary
+    line1      String required
+}
+
+part type Summary {
+    note String required
+}

@@ -130,7 +130,7 @@ func WithIssueLimit(limit int) LoadOption {
 //
 // It reports values of the three kinds that have a canonical stored form —
 // Timestamp, Date and UUID — and nothing else. Bounds, enums, patterns and
-// invariants stay unchecked. **This is not re-validation**, and a document it
+// invariants stay unchecked. This is not re-validation, and a document it
 // reports nothing for is not thereby valid; [WithRevalidation] is the full
 // check.
 //
@@ -174,7 +174,6 @@ func WithValueConformance(report bool) LoadOption {
 // chosen severity, and neither is visible to the validator alone — the
 // rebuilt input takes its types from the relation, so the document's own claim
 // is only checked here.
-
 func WithRevalidation(severity diag.Severity) LoadOption {
 	return func(c *loadConfig) {
 		c.revalidate = true

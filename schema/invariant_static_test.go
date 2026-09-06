@@ -252,6 +252,12 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// the nil literal under + is an error on every input
 		{`nil + 1 > 0`, diag.E_INVALID_INVARIANT, "+ takes"},
 		{`(name + nil) != ""`, diag.E_INVALID_INVARIANT, "+ takes"},
+		// and under the other arithmetic operators, and unary minus
+		{`(-nil) > 0`, diag.E_INVALID_INVARIANT, "unary - takes a number"},
+		{`nil - 1 > 0`, diag.E_INVALID_INVARIANT, "- takes two numbers"},
+		{`nil * 1 > 0`, diag.E_INVALID_INVARIANT, "* takes two numbers"},
+		{`nil / 1 > 0`, diag.E_INVALID_INVARIANT, "/ takes two numbers"},
+		{`nil % 1 > 0`, diag.E_INVALID_INVARIANT, "% takes two numbers"},
 		// every refuse arm of Default and the receiver kinds has its row
 		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default"},
 		{`MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil`, diag.E_INVALID_INVARIANT, "Default"},

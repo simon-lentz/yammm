@@ -64,18 +64,56 @@
             "s": 98,
             "e": 127
           }
+        },
+        {
+          "kind": "comp",
+          "name": "INVOICE",
+          "name_span": {
+            "s": 136,
+            "e": 143
+          },
+          "target": {
+            "name": "Invoice",
+            "span": {
+              "s": 150,
+              "e": 157
+            }
+          },
+          "span": {
+            "s": 132,
+            "e": 157
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "STAMP",
+          "name_span": {
+            "s": 166,
+            "e": 171
+          },
+          "target": {
+            "name": "Stamp",
+            "span": {
+              "s": 178,
+              "e": 183
+            }
+          },
+          "span": {
+            "s": 162,
+            "e": 183
+          }
         }
       ],
       "span": {
         "s": 23,
-        "e": 129
+        "e": 185
       }
     },
     {
       "name": "Section",
       "name_span": {
-        "s": 141,
-        "e": 148
+        "s": 197,
+        "e": 204
       },
       "part": true,
       "props": [
@@ -84,14 +122,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 166,
-              "e": 172
+              "s": 222,
+              "e": 228
             }
           },
           "primary": true,
           "span": {
-            "s": 155,
-            "e": 180
+            "s": 211,
+            "e": 236
           }
         },
         {
@@ -99,14 +137,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 196,
-              "e": 202
+              "s": 252,
+              "e": 258
             }
           },
           "required": true,
           "span": {
-            "s": 185,
-            "e": 211
+            "s": 241,
+            "e": 267
           }
         }
       ],
@@ -115,34 +153,34 @@
           "kind": "comp",
           "name": "NOTES",
           "name_span": {
-            "s": 221,
-            "e": 226
+            "s": 277,
+            "e": 282
           },
           "target": {
             "name": "Note",
             "span": {
-              "s": 236,
-              "e": 240
+              "s": 292,
+              "e": 296
             }
           },
           "optional": true,
           "many": true,
           "span": {
-            "s": 217,
-            "e": 240
+            "s": 273,
+            "e": 296
           }
         }
       ],
       "span": {
-        "s": 131,
-        "e": 242
+        "s": 187,
+        "e": 298
       }
     },
     {
       "name": "Note",
       "name_span": {
-        "s": 254,
-        "e": 258
+        "s": 310,
+        "e": 314
       },
       "part": true,
       "props": [
@@ -151,14 +189,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 273,
-              "e": 279
+              "s": 329,
+              "e": 335
             }
           },
           "primary": true,
           "span": {
-            "s": 265,
-            "e": 287
+            "s": 321,
+            "e": 343
           }
         },
         {
@@ -166,20 +204,93 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 300,
-              "e": 306
+              "s": 356,
+              "e": 362
             }
           },
           "required": true,
           "span": {
-            "s": 292,
-            "e": 315
+            "s": 348,
+            "e": 371
           }
         }
       ],
       "span": {
-        "s": 244,
-        "e": 317
+        "s": 300,
+        "e": 373
+      }
+    },
+    {
+      "name": "Invoice",
+      "name_span": {
+        "s": 385,
+        "e": 392
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "invoice_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 410,
+              "e": 416
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 399,
+            "e": 424
+          }
+        },
+        {
+          "name": "amount",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 440,
+              "e": 446
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 429,
+            "e": 455
+          }
+        }
+      ],
+      "span": {
+        "s": 375,
+        "e": 457
+      }
+    },
+    {
+      "name": "Stamp",
+      "name_span": {
+        "s": 469,
+        "e": 474
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "mark",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 486,
+              "e": 492
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 481,
+            "e": 501
+          }
+        }
+      ],
+      "span": {
+        "s": 459,
+        "e": 503
       }
     }
   ]
