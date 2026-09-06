@@ -3,6 +3,7 @@ package doclint
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -42,11 +43,15 @@ type Module struct {
 	byName   map[string][]*Package
 }
 
-// Load parses every Go file under root, skipping directories that hold no
-// source a consumer reads: testdata, node_modules, and anything whose name
-// starts with "." or "_". Files that do not parse are an error rather than a
-// skip — a gate that quietly drops the file it cannot read reports a clean run
-// over nothing.
+// Load parses every Go file under root that the default build includes,
+// skipping directories that hold no source a consumer reads: testdata,
+// node_modules, and anything whose name starts with "." or "_". A file the
+// default build excludes — by a build constraint or a GOOS/GOARCH suffix —
+// contributes no names and has no links checked, which is what go doc reads:
+// a symbol declared only under a tag resolves nothing for the published
+// documentation. Files that do not parse are an error rather than a skip — a
+// gate that quietly drops the file it cannot read reports a clean run over
+// nothing.
 func Load(root string) (*Module, error) {
 	modPath, err := modulePath(root)
 	if err != nil {
@@ -118,7 +123,8 @@ func modulePath(root string) (string, error) {
 	return "", fmt.Errorf("no module directive in %s", filepath.Join(root, "go.mod"))
 }
 
-// loadDir parses dir's Go files, reporting false when it holds none.
+// loadDir parses dir's Go files that the default build includes, reporting
+// false when it holds none.
 func loadDir(fset *token.FileSet, root, dir string) (pkg *Package, found bool, err error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -128,6 +134,13 @@ func loadDir(fset *token.FileSet, root, dir string) (pkg *Package, found bool, e
 	var testName string
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		included, err := build.Default.MatchFile(dir, e.Name())
+		if err != nil {
+			return nil, false, fmt.Errorf("reading the build constraints of %s: %w", filepath.Join(dir, e.Name()), err)
+		}
+		if !included {
 			continue
 		}
 		full := filepath.Join(dir, e.Name())
