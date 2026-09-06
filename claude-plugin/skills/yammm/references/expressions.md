@@ -151,7 +151,7 @@ address.city        // nested property access
 
 Property access on existing instances returns **nil** for properties not present on the object (enabling `Then`/`Lest` nil-guarded patterns). This allows safe navigation without raising evaluation errors.
 
-Every reference is checked statically at schema load: the checker types each sub-expression and follows the type through member access, indexing and pipeline stages. A property the type does not declare draws `E_UNKNOWN_PROPERTY`; a member read through an association key (`$c.name` over `--> CUSTOMERS`), a scalar or a list, an undefined named variable, an unknown function, a call shape the builtin refuses, or a receiver or argument of a kind the builtin refuses on every input (`age -> Upper`, `name -> Match("nor")`) draws `E_INVALID_INVARIANT`.
+Every reference is checked statically at schema load: the checker types each sub-expression and follows the type through member access, indexing and pipeline stages. A property the type does not declare draws `E_UNKNOWN_PROPERTY`; a member read through an association key (`$c.name` over `--> CUSTOMERS`), a scalar or a list, an undefined named variable, an unknown function, a call shape the builtin refuses, or a receiver or argument of a kind the builtin refuses on every input (`age -> Upper`, `name -> Match("nor")`) draws `E_INVALID_INVARIANT`. A builtin's result is typed by its subkind — `Len` a number, `Upper` a string, `StartsWith` a boolean — so `name -> Len -> Upper` is refused too.
 
 ---
 

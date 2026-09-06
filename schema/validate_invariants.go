@@ -819,8 +819,12 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 	}
 
 	switch spec.Result {
-	case expr.ResultScalar:
-		return scalarType
+	case expr.ResultNumber:
+		return numberType
+	case expr.ResultString:
+		return stringType
+	case expr.ResultBoolean:
+		return boolType
 	case expr.ResultReceiver:
 		return recv
 	case expr.ResultElement:
@@ -842,7 +846,10 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 		if len(args) == 0 {
 			return recv.element()
 		}
-		return scalarType
+		// The receiver or the argument, whichever the order ranks: their join,
+		// admitting a mixed pair as a scalar of unknown subkind, as a
+		// conditional admits its branches.
+		return mergeType(recv, argTypes[0])
 	case expr.ResultReceiverOrArg:
 		if len(argTypes) == 0 {
 			return unknownType

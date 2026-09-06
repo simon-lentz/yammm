@@ -11,9 +11,11 @@ import (
 type BuiltinResult uint8
 
 const (
-	// ResultScalar is a value with no members: a number, string, boolean,
-	// nil or pattern.
-	ResultScalar BuiltinResult = iota
+	// ResultNumber is a number (Len, Sum, Count, Abs, Floor, Ceil, Round,
+	// Compare). The static checker types each result by its subkind, as it
+	// types a receiver and an argument by theirs, so the stage after the call
+	// is judged: a number into a string builtin is refused at load.
+	ResultNumber BuiltinResult = iota
 	// ResultReceiver is the receiver's own type (Sort, Filter, Default).
 	ResultReceiver
 	// ResultElement is one element of the receiver (First, Last).
@@ -29,7 +31,8 @@ const (
 	// ResultList is a list of scalars (Split, Match).
 	ResultList
 	// ResultElementOrArg is one element of a list receiver when the call has
-	// no argument, and a scalar when it has one (Min, Max).
+	// no argument, and the receiver or the argument when it has one (Min,
+	// Max), typed as their join.
 	ResultElementOrArg
 	// ResultReceiverOrArg is the receiver's type when the receiver holds a
 	// value and the first non-nil argument's when it is nil (Default,
@@ -43,6 +46,12 @@ const (
 	// value and the body's when it is nil (Lest), typed as their join under
 	// the rule [ResultReceiverOrArg] states.
 	ResultReceiverOrBody
+	// ResultString is a string (Upper, Lower, Trim, TrimPrefix, TrimSuffix,
+	// Join, Replace, Substring, TypeOf).
+	ResultString
+	// ResultBoolean is a boolean (All, Any, AllOrNone, Contains, StartsWith,
+	// EndsWith, IsNil).
+	ResultBoolean
 )
 
 // ParamBinding states what a builtin binds its lambda parameters to.
@@ -184,20 +193,20 @@ func init() {
 	spec("Reduce", 0, 1, 2, true, RecvList, ResultUnknown, BindAccumulatorElement, ArgAny)
 	spec("Map", 0, 0, 1, true, RecvList, ResultBodyList, BindElement)
 	spec("Filter", 0, 0, 1, true, RecvList, ResultReceiver, BindElement)
-	spec("Count", 0, 0, 1, true, RecvList, ResultScalar, BindElement)
-	spec("All", 0, 0, 1, true, RecvList, ResultScalar, BindElement)
-	spec("Any", 0, 0, 1, true, RecvList, ResultScalar, BindElement)
-	spec("AllOrNone", 0, 0, 1, true, RecvList, ResultScalar, BindElement)
+	spec("Count", 0, 0, 1, true, RecvList, ResultNumber, BindElement)
+	spec("All", 0, 0, 1, true, RecvList, ResultBoolean, BindElement)
+	spec("Any", 0, 0, 1, true, RecvList, ResultBoolean, BindElement)
+	spec("AllOrNone", 0, 0, 1, true, RecvList, ResultBoolean, BindElement)
 	spec("Compact", 0, 0, 0, false, RecvList, ResultReceiver, BindNone)
 	spec("Unique", 0, 0, 0, false, RecvList, ResultReceiver, BindNone)
-	spec("Len", 0, 0, 0, false, RecvSized, ResultScalar, BindNone)
-	spec("Sum", 0, 0, 0, false, RecvNumericList, ResultScalar, BindNone)
+	spec("Len", 0, 0, 0, false, RecvSized, ResultNumber, BindNone)
+	spec("Sum", 0, 0, 0, false, RecvNumericList, ResultNumber, BindNone)
 	spec("First", 0, 0, 0, false, RecvList, ResultElement, BindNone)
 	spec("Last", 0, 0, 0, false, RecvList, ResultElement, BindNone)
 	spec("Sort", 0, 0, 0, false, RecvScalarList, ResultReceiver, BindNone)
 	spec("Reverse", 0, 0, 0, false, RecvList, ResultReceiver, BindNone)
 	spec("Flatten", 0, 0, 0, false, RecvList, ResultFlattened, BindNone)
-	spec("Contains", 1, 1, 0, false, RecvList, ResultScalar, BindNone, ArgAny)
+	spec("Contains", 1, 1, 0, false, RecvList, ResultBoolean, BindNone, ArgAny)
 
 	// Control flow
 	spec("Then", 0, 0, 1, true, RecvAny, ResultBody, BindReceiver)
@@ -205,33 +214,33 @@ func init() {
 	spec("With", 0, 0, 1, true, RecvAny, ResultBody, BindReceiver)
 
 	// Numeric
-	spec("Abs", 0, 0, 0, false, RecvNumeric, ResultScalar, BindNone)
-	spec("Floor", 0, 0, 0, false, RecvNumeric, ResultScalar, BindNone)
-	spec("Ceil", 0, 0, 0, false, RecvNumeric, ResultScalar, BindNone)
-	spec("Round", 0, 0, 0, false, RecvNumeric, ResultScalar, BindNone)
+	spec("Abs", 0, 0, 0, false, RecvNumeric, ResultNumber, BindNone)
+	spec("Floor", 0, 0, 0, false, RecvNumeric, ResultNumber, BindNone)
+	spec("Ceil", 0, 0, 0, false, RecvNumeric, ResultNumber, BindNone)
+	spec("Round", 0, 0, 0, false, RecvNumeric, ResultNumber, BindNone)
 	spec("Min", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone, ArgOrdered)
 	spec("Max", 0, 1, 0, false, RecvListOrArg, ResultElementOrArg, BindNone, ArgOrdered)
-	spec("Compare", 1, 1, 0, false, RecvOrdered, ResultScalar, BindNone, ArgOrdered)
+	spec("Compare", 1, 1, 0, false, RecvOrdered, ResultNumber, BindNone, ArgOrdered)
 
 	// String
-	spec("Upper", 0, 0, 0, false, RecvString, ResultScalar, BindNone)
-	spec("Lower", 0, 0, 0, false, RecvString, ResultScalar, BindNone)
-	spec("Trim", 0, 0, 0, false, RecvString, ResultScalar, BindNone)
-	spec("TrimPrefix", 1, 1, 0, false, RecvString, ResultScalar, BindNone, ArgString)
-	spec("TrimSuffix", 1, 1, 0, false, RecvString, ResultScalar, BindNone, ArgString)
+	spec("Upper", 0, 0, 0, false, RecvString, ResultString, BindNone)
+	spec("Lower", 0, 0, 0, false, RecvString, ResultString, BindNone)
+	spec("Trim", 0, 0, 0, false, RecvString, ResultString, BindNone)
+	spec("TrimPrefix", 1, 1, 0, false, RecvString, ResultString, BindNone, ArgString)
+	spec("TrimSuffix", 1, 1, 0, false, RecvString, ResultString, BindNone, ArgString)
 	spec("Split", 1, 1, 0, false, RecvString, ResultList, BindNone, ArgString)
-	spec("Join", 1, 1, 0, false, RecvStringList, ResultScalar, BindNone, ArgString)
-	spec("StartsWith", 1, 1, 0, false, RecvString, ResultScalar, BindNone, ArgString)
-	spec("EndsWith", 1, 1, 0, false, RecvString, ResultScalar, BindNone, ArgString)
-	spec("Replace", 2, 2, 0, false, RecvString, ResultScalar, BindNone, ArgString, ArgString)
-	spec("Substring", 1, 2, 0, false, RecvString, ResultScalar, BindNone, ArgNumber, ArgNumber)
+	spec("Join", 1, 1, 0, false, RecvStringList, ResultString, BindNone, ArgString)
+	spec("StartsWith", 1, 1, 0, false, RecvString, ResultBoolean, BindNone, ArgString)
+	spec("EndsWith", 1, 1, 0, false, RecvString, ResultBoolean, BindNone, ArgString)
+	spec("Replace", 2, 2, 0, false, RecvString, ResultString, BindNone, ArgString, ArgString)
+	spec("Substring", 1, 2, 0, false, RecvString, ResultString, BindNone, ArgNumber, ArgNumber)
 
 	// Pattern matching
 	spec("Match", 1, 1, 0, false, RecvString, ResultList, BindNone, ArgPattern)
 
 	// Utility
-	spec("TypeOf", 0, 0, 0, false, RecvAny, ResultScalar, BindNone)
-	spec("IsNil", 0, 0, 0, false, RecvAny, ResultScalar, BindNone)
+	spec("TypeOf", 0, 0, 0, false, RecvAny, ResultString, BindNone)
+	spec("IsNil", 0, 0, 0, false, RecvAny, ResultBoolean, BindNone)
 	spec("Default", 1, 1, 0, false, RecvAny, ResultReceiverOrArg, BindNone, ArgAny)
 	spec("Coalesce", 1, -1, 0, false, RecvAny, ResultReceiverOrArg, BindNone, ArgAny)
 }

@@ -214,6 +214,19 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).id != ""`,
 		`[MAIN_LINE, MAIN_LINE.ITEM] -> All |$x| { $x.id -> Len < 5 }`,
 		`(f1 ? { nil : name }) -> Default("x") -> Upper == "X"`,
+		// a builtin's result is typed by its subkind — a number, a string, a
+		// boolean — so the stage after it is judged; Min and Max with an
+		// argument yield one of the two
+		`(name -> Len) -> Abs == 5`,
+		`(name -> Upper) -> Len == 5`,
+		`(name -> StartsWith("n")) == true`,
+		`(tags -> Count |$t| { true }) -> Abs == 2`,
+		`(name -> TypeOf) -> Upper == "STRING"`,
+		`(MAIN_LINE.qty -> Compare(1)) -> Abs == 1`,
+		`(name -> Substring(1)) -> Upper == "ORTH"`,
+		`(name -> Min("z")) -> Upper == "NORTH"`,
+		`(name -> Min(1)) == 1`,
+		`(tags -> Join(",")) -> Len > 0`,
 	}
 	for _, inv := range accept {
 		t.Run("accepts "+inv, func(t *testing.T) {
@@ -356,6 +369,16 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`(LINES -> Default([MAIN_LINE.ITEM]) -> First).qty > 0`, diag.E_UNKNOWN_PROPERTY, "qty"},
 		// a non-empty scalar list is not the empty-list wildcard
 		{`LINES -> Default(["a", 1]) -> Len > 0`, diag.E_INVALID_INVARIANT, "Default"},
+		// a builtin's result of one subkind into a builtin that refuses it
+		{`name -> Len -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`name -> Upper -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(name -> StartsWith("n")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(name -> TypeOf) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(tags -> Contains("a")) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`(MAIN_LINE.qty -> Compare(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`(name -> Min("z")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(tags -> Join(",")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(name -> IsNil) -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map"},
 		{`MAIN_LINE -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "total order"},
 		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "list of scalars"},
 		{`MAIN_LINE -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},

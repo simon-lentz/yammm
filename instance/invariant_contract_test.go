@@ -292,6 +292,19 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		{`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).id == "m1"`, setF1(false)},
 		{`[MAIN_LINE, MAIN_LINE.ITEM] -> All |$x| { $x.id -> Len < 5 }`, setMainField("id", "longer")},
 		{`(f1 ? { nil : name }) -> Default("x") -> Upper == "X"`, setF1(false)},
+		// a builtin's result is typed by its subkind — a number, a string, a
+		// boolean — so the stage after it is judged; Min and Max with an
+		// argument yield one of the two
+		{`(name -> Len) -> Abs == 5`, setName("x")},
+		{`(name -> Upper) -> Len == 5`, setName("x")},
+		{`(name -> StartsWith("n")) == true`, setName("x")},
+		{`(tags -> Count |$t| { true }) -> Abs == 2`, setTags("a")},
+		{`(name -> TypeOf) -> Upper == "STRING"`, nil},
+		{`(MAIN_LINE.qty -> Compare(1)) -> Abs == 1`, setMainQty(1)},
+		{`(name -> Substring(1)) -> Upper == "ORTH"`, setName("x")},
+		{`(name -> Min("z")) -> Upper == "NORTH"`, setName("zz")},
+		{`(name -> Min(1)) == 1`, nil},
+		{`(tags -> Join(",")) -> Len == 10`, setTags("a")},
 		// in with the nil literal on its right is false, not an error
 		{`!(1 in nil)`, nil},
 		// Compare ranks any two values the total order ranks: a list above a string
@@ -463,6 +476,16 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`(LINES -> Default([MAIN_LINE.ITEM]) -> First).qty == nil`, diag.E_UNKNOWN_PROPERTY, "qty", ""},
 		// a non-empty scalar list is not the empty-list wildcard
 		{`(LINES -> Default(["a", 1]) -> First).qty == nil`, diag.E_INVALID_INVARIANT, "Default", ""},
+		// a builtin's result of one subkind into a builtin that refuses it
+		{`name -> Len -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument"},
+		{`name -> Upper -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument"},
+		{`(name -> StartsWith("n")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument"},
+		{`(name -> TypeOf) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument"},
+		{`(tags -> Contains("a")) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument"},
+		{`(MAIN_LINE.qty -> Compare(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument"},
+		{`(name -> Min("z")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument"},
+		{`(tags -> Join(",")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument"},
+		{`(name -> IsNil) -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map", "unsupported for type bool"},
 		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver"},
 		{`tags -> Min("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver"},
 		{`name =~ Vector`, diag.E_INVALID_INVARIANT, "Vector", "unknown datatype"},
