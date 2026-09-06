@@ -372,13 +372,13 @@ func TestCanonical_ListReadsAnImmutableSlice(t *testing.T) {
 	}
 }
 
-// An array is a list at every reader, as a slice is: a [1]string under
-// List<Timestamp> canonicalizes elementwise.
-func TestCanonical_ListReadsAnArray(t *testing.T) {
+// An array is not a list at any reader: a fixed-size array is how a scalar
+// carrier is spelled (uuid.UUID is [16]byte), so a [1]string under
+// List<Timestamp> is refused rather than read elementwise.
+func TestCanonical_ListRefusesAnArray(t *testing.T) {
 	t.Parallel()
 	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
-	got := canon(t, [1]string{"2026-08-19T12:00:00+00:00"}, lc)
-	if !reflect.DeepEqual(got, []any{"2026-08-19T12:00:00Z"}) {
-		t.Errorf("Canonical([1]string) = %#v, want the canonical element", got)
+	if got, err := value.Canonical([1]string{"2026-08-19T12:00:00+00:00"}, lc); err == nil {
+		t.Errorf("Canonical([1]string) = %#v, want an error: an array is not a list", got)
 	}
 }

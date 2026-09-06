@@ -65,6 +65,16 @@ func PropertyScopeFromMap(props map[string]any) Scope {
 	}
 }
 
+// PropertyScopeOf returns a Scope over a map that is already wrapped, with
+// $self bound to it. Nothing is copied: the caller holds the map as a memo
+// and hands the same one to every evaluation that reads it.
+func PropertyScopeOf(m immutable.Map[string]) Scope {
+	return &propertyScope{
+		props: immutable.PropertiesOf(m),
+		vars:  map[string]immutable.Value{"self": immutable.Wrap(m)},
+	}
+}
+
 // mapScope is a simple variable-only scope.
 type mapScope struct {
 	vars map[string]immutable.Value

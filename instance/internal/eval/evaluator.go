@@ -66,10 +66,11 @@ func (e *Evaluator) EvaluateBool(expression expr.Expression, scope Scope) (bool,
 	return b, nil
 }
 
-// evaluate is the internal evaluation dispatcher. A nil expression — an
-// absent lambda body, or an absent operand — evaluates to nil, as the public
-// [Evaluator.Evaluate] promises. An Op is not an expression: the parser
-// places one only at an S-expression's head, read through [expr.SExpr.Op].
+// evaluate is the internal evaluation dispatcher. A nil expression is an
+// error, as [Evaluator.Evaluate] states; an absent lambda body never reaches
+// it, because the builtins that take a body test for nil first. An Op is not
+// an expression: the parser places one only at an S-expression's head, read
+// through [expr.SExpr.Op].
 func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, error) {
 	switch ex := expression.(type) {
 	case *expr.Literal:

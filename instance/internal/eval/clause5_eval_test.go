@@ -61,11 +61,12 @@ func TestListPositionsReadTheStoredForm(t *testing.T) {
 			t.Errorf("CoerceValue(immutable.Slice) = %#v, %v; want [1.5 2.5]", got, err)
 		}
 	})
-	t.Run("an array is a list", func(t *testing.T) {
+	t.Run("an array is not a list", func(t *testing.T) {
 		t.Parallel()
-		got, err := eval.CoerceValue([2]string{"a", "b"}, lc)
-		if err != nil || !reflect.DeepEqual(got, []any{"a", "b"}) {
-			t.Errorf("CoerceValue([2]string) = %#v, %v; want [a b]", got, err)
+		// A fixed-size array is a scalar carrier's spelling (uuid.UUID is
+		// [16]byte); no decoder produces one for a list position.
+		if _, err := eval.CoerceValue([2]string{"a", "b"}, lc); err == nil {
+			t.Error("CoerceValue([2]string) under List accepted an array as a list")
 		}
 	})
 	t.Run("Flatten unwraps a stored nested list", func(t *testing.T) {

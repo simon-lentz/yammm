@@ -97,6 +97,8 @@ func setMainQty(q int64) mutation {
 	return func(o map[string]any) { o["main_line"].([]any)[0].(map[string]any)["qty"] = q }
 }
 
+func dropMainTags(o map[string]any) { delete(o["main_line"].([]any)[0].(map[string]any), "tags") }
+
 func setItemSku(sku string) mutation {
 	return func(o map[string]any) { firstLine(o)["item"].([]any)[0].(map[string]any)["sku"] = sku }
 }
@@ -171,6 +173,9 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		{`LINES -> Map |$l| { $l.qty } -> Max == 7`, setLineQty(9)},
 		// the null-guard idiom applies to a present composition as to a property
 		{`MAIN_LINE != nil`, nil},
+		// a (one) composition is the single child, so Len counts its members
+		// — id, qty, tags and ITEM — where a list would count one element
+		{`MAIN_LINE -> Len == 4`, dropMainTags},
 		{`LINES -> All |$l| { $l.ITEM != nil }`, nil},
 		{`(3 -> Max(4)) == 4`, nil},
 		// Flatten of a list of instances is that list
@@ -278,8 +283,7 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 	if res.Err() != nil {
 		t.Fatal(res.Err())
 	}
-	root := v.childScope(good)
-	scope := eval.PropertyScopeFromMap(root)
+	scope := eval.PropertyScopeOf(v.scopeOf(good))
 	empty := map[string]any{}
 	emptyScope := eval.PropertyScopeFromMap(empty)
 

@@ -69,9 +69,12 @@ func (v *Validator) validateCompositions(
 
 		in := rels[rel]
 		if in.state != relationPresent {
-			// A collision was reported as the whole of what is wrong; an
-			// absent required composition is reported here, whatever else
-			// the instance drew.
+			// A collision is the whole of what is wrong with that slot, and
+			// this pass reports it; an absent required composition is
+			// reported here too, whatever else the instance drew.
+			if in.state == relationCollided {
+				reportRelationCollision(rel, in, collector, prov, base)
+			}
 			if !rel.IsOptional() && in.state == relationAbsent {
 				issue := diag.NewIssue(
 					diag.Error,

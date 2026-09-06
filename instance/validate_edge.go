@@ -40,9 +40,13 @@ func (v *Validator) validateEdges(
 		}
 
 		// Absent is valid for an association: presence and requiredness are
-		// graph.Check's question, reported there as E_UNRESOLVED_REQUIRED.
+		// graph.Check's question, reported there as E_UNRESOLVED_REQUIRED. A
+		// collision is this pass's to report, beside the entry it reads.
 		in := rels[rel]
 		if in.state != relationPresent {
+			if in.state == relationCollided {
+				reportRelationCollision(rel, in, collector, prov, base)
+			}
 			continue
 		}
 

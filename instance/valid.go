@@ -5,6 +5,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/location"
@@ -27,6 +28,19 @@ type ValidInstance struct {
 	// validated is set only by newValidatedInstance, which the validator
 	// alone calls. A bypass-built instance always reports false.
 	validated bool
+
+	// scope is the instance's invariant scope, built once by
+	// [Validator.scopeOf] and shared by the instance's own invariants and by
+	// every parent that holds the instance as a composed child.
+	scope scopeMemo
+}
+
+// scopeMemo holds one instance's invariant scope, built on first use. It
+// lives on the instance so that a parent's scope can hold the child's
+// scope itself rather than rebuild the child's subtree at every level.
+type scopeMemo struct {
+	once sync.Once
+	m    immutable.Map[string]
 }
 
 // NewValidInstance asserts the caller's claim that the data is valid. It

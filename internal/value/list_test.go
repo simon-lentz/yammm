@@ -28,20 +28,17 @@ func TestListElems(t *testing.T) {
 	}{
 		{"[]any", []any{int64(1), "a"}, []any{int64(1), "a"}, true},
 		{"typed slice", []string{"a", "b"}, []any{"a", "b"}, true},
-		{"array", [3]int64{1, 2, 3}, []any{int64(1), int64(2), int64(3)}, true},
+		// A fixed-size array is how a scalar carrier is spelled in this
+		// module (uuid.UUID is [16]byte), never how a list arrives: JSON gives
+		// []any, the wire an immutable.Slice, a caller a []T.
+		{"array", [3]int64{1, 2, 3}, nil, false},
 		{"immutable.Slice", wrapped, []any{int64(1), "a", immutable.Wrap([]any{int64(2)}).Unwrap()}, true},
 		{"empty", []any{}, []any{}, true},
 		{"nil", nil, nil, false},
 		{"string", "abc", nil, false},
 		{"map", map[string]any{"a": 1}, nil, false},
 		{"scalar", int64(7), nil, false},
-		{"uuid is an array of bytes", id, func() []any {
-			out := make([]any, 0, len(id))
-			for _, b := range id {
-				out = append(out, b)
-			}
-			return out
-		}(), true},
+		{"uuid is a scalar carrier, not a list", id, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

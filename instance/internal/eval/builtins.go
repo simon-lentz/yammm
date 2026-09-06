@@ -432,32 +432,37 @@ func builtinSum(_ builtinEvaluator, lhs any, _ []any, _ []string, _ expr.Express
 		return int64(0), nil
 	}
 
-	// Classify first, then sum in the kind the result has: a list holding a
-	// float is float arithmetic, and an integer subtotal it would discard
-	// cannot overflow it. An integer carried by a json.Number is an integer.
-	ints := make([]int64, 0, len(slice))
-	floats := make([]float64, 0, len(slice))
+	// Two passes over the slice, no slice of its own: the first classifies —
+	// every element numeric, and whether any is a float — and the second sums
+	// in the kind the result has. A list holding a float is float arithmetic,
+	// so the integer subtotal it would discard cannot overflow it; an integer
+	// carried by a json.Number is an integer.
 	hasFloat := false
 	for _, elem := range slice {
-		if i, ok := value.GetInt64(elem); ok {
-			ints = append(ints, i)
-			floats = append(floats, float64(i))
-		} else if f, ok := value.GetFloat64(elem); ok {
-			hasFloat = true
-			floats = append(floats, f)
-		} else {
-			return nil, fmt.Errorf("Sum() expects numeric elements, got %T", elem)
+		if _, ok := value.GetInt64(elem); ok {
+			continue
 		}
+		if _, ok := value.GetFloat64(elem); ok {
+			hasFloat = true
+			continue
+		}
+		return nil, fmt.Errorf("Sum() expects numeric elements, got %T", elem)
 	}
 	if hasFloat {
 		var sum float64
-		for _, f := range floats {
+		for _, elem := range slice {
+			if i, ok := value.GetInt64(elem); ok {
+				sum += float64(i)
+				continue
+			}
+			f, _ := value.GetFloat64(elem)
 			sum += f
 		}
 		return sum, nil
 	}
 	var sum int64
-	for _, i := range ints {
+	for _, elem := range slice {
+		i, _ := value.GetInt64(elem)
 		next, err := checkedAdd(sum, i)
 		if err != nil {
 			return nil, errors.New("integer overflow in Sum")

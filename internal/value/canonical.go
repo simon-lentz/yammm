@@ -192,10 +192,12 @@ func Canonicalizes(c schema.Constraint) bool {
 }
 
 // ListElems reads val as a list: a []any as it is, an [immutable.Slice] as
-// its unwrapped elements, and any other slice or array elementwise. Anything
-// else — nil included — is not a list. This is the one reader every list
-// position in the module goes through, so the check, coerce, canonical and
-// builtin paths agree on what a list is.
+// its unwrapped elements, and any other slice elementwise. Anything else —
+// nil and a fixed-size array included — is not a list: no decoder in the
+// module produces an array for a list position, and an array is how a scalar
+// carrier is spelled (uuid.UUID is [16]byte). This is the one reader every
+// list position in the module goes through, so the check, coerce, canonical
+// and builtin paths agree on what a list is.
 func ListElems(val any) ([]any, bool) {
 	switch v := val.(type) {
 	case []any:
@@ -208,7 +210,7 @@ func ListElems(val any) ([]any, bool) {
 		return elems, true
 	}
 	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+	if rv.Kind() != reflect.Slice {
 		return nil, false
 	}
 	elems := make([]any, rv.Len())

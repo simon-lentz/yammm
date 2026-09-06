@@ -89,7 +89,11 @@ func mapLookup(v any, key string) (any, bool) {
 		val, ok := m[key]
 		return val, ok
 	}
-	rv := reflect.ValueOf(v).MapIndex(reflect.ValueOf(key))
+	// The key is built in the map's own key type: isMap admits any map whose
+	// key KIND is string, and MapIndex refuses a plain string against a named
+	// key type.
+	m := reflect.ValueOf(v)
+	rv := m.MapIndex(reflect.ValueOf(key).Convert(m.Type().Key()))
 	if !rv.IsValid() {
 		return nil, false
 	}
