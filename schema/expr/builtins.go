@@ -20,7 +20,8 @@ const (
 	ResultElement
 	// ResultBodyList is a list whose element is the body's type (Map).
 	ResultBodyList
-	// ResultBody is the body's type (With).
+	// ResultBody is the body's type (With; Then, whose nil for an absent
+	// receiver any type absorbs).
 	ResultBody
 	// ResultFlattened is the receiver with one level of nesting removed; a
 	// list whose elements are not lists is unchanged.
@@ -31,12 +32,17 @@ const (
 	// no argument, and a scalar when it has one (Min, Max).
 	ResultElementOrArg
 	// ResultReceiverOrArg is the receiver's type when the receiver holds a
-	// value and the argument's when it is nil (Default). The static checker
-	// requires the two to be of one kind, so the stage after the call is typed
-	// by a value it predicted, and types the result as their merge.
+	// value and the first non-nil argument's when it is nil (Default,
+	// Coalesce). The static checker types the result as the join of the
+	// receiver and every argument and refuses alternatives of disjoint kinds,
+	// so the stage after the call is typed by a value it predicted.
 	ResultReceiverOrArg
-	// ResultUnknown makes no claim (Reduce, Then, Lest, Coalesce).
+	// ResultUnknown makes no claim (Reduce).
 	ResultUnknown
+	// ResultReceiverOrBody is the receiver's type when the receiver holds a
+	// value and the body's when it is nil (Lest), typed as their join under
+	// the rule [ResultReceiverOrArg] states.
+	ResultReceiverOrBody
 )
 
 // ParamBinding states what a builtin binds its lambda parameters to.
@@ -194,8 +200,8 @@ func init() {
 	spec("Contains", 1, 1, 0, false, RecvList, ResultScalar, BindNone, ArgAny)
 
 	// Control flow
-	spec("Then", 0, 0, 1, true, RecvAny, ResultUnknown, BindReceiver)
-	spec("Lest", 0, 0, 0, true, RecvAny, ResultUnknown, BindNone)
+	spec("Then", 0, 0, 1, true, RecvAny, ResultBody, BindReceiver)
+	spec("Lest", 0, 0, 0, true, RecvAny, ResultReceiverOrBody, BindNone)
 	spec("With", 0, 0, 1, true, RecvAny, ResultBody, BindReceiver)
 
 	// Numeric
@@ -227,7 +233,7 @@ func init() {
 	spec("TypeOf", 0, 0, 0, false, RecvAny, ResultScalar, BindNone)
 	spec("IsNil", 0, 0, 0, false, RecvAny, ResultScalar, BindNone)
 	spec("Default", 1, 1, 0, false, RecvAny, ResultReceiverOrArg, BindNone, ArgAny)
-	spec("Coalesce", 1, -1, 0, false, RecvAny, ResultUnknown, BindNone, ArgAny)
+	spec("Coalesce", 1, -1, 0, false, RecvAny, ResultReceiverOrArg, BindNone, ArgAny)
 }
 
 // LookupBuiltin returns the spec for a builtin by name, matched

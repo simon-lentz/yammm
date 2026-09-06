@@ -44,6 +44,24 @@ type Region {
     zone String primary
 }
 
+abstract type Named {
+    label String
+}
+
+abstract type Stamped {
+    at String
+}
+
+part type Alt extends Named, Stamped {
+    id String primary
+    extra String
+}
+
+part type Other extends Named, Stamped {
+    id String primary
+    other String
+}
+
 type Order {
     id String primary
     name String
@@ -56,6 +74,8 @@ type Order {
     vec Vector[4]
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
+    *-> ALT (_) Alt
+    *-> OTHER (_) Other
     --> PLACED_BY (one) Customer
     --> CUSTOMERS (one:many) Customer
     --> REGION (one) Region
@@ -82,6 +102,7 @@ func goodOrder() map[string]any {
 		"vec":       []any{1.5, 2.5, 3.0, 3.0},
 		"lines":     []any{line("l1", 5, "s1"), line("l2", 7, "s2")},
 		"main_line": []any{line("m1", 9, "s3")},
+		"alt":       []any{map[string]any{"id": "a1", "extra": "e1", "label": "L", "at": "t1"}},
 		"placed_by": map[string]any{"_target_id": "c1"},
 		"customers": []any{map[string]any{"_target_id": "c1"}, map[string]any{"_target_id": "c2"}},
 		"region":    map[string]any{"_target_code": "r1", "_target_zone": "z1"},
@@ -106,6 +127,18 @@ func setItemSku(sku string) mutation {
 func setLineTags(tags ...any) mutation { return func(o map[string]any) { firstLine(o)["tags"] = tags } }
 func setName(n string) mutation        { return func(o map[string]any) { o["name"] = n } }
 func setTags(tags ...any) mutation     { return func(o map[string]any) { o["tags"] = tags } }
+func setNote(n string) mutation        { return func(o map[string]any) { o["note"] = n } }
+func setExtras(x ...any) mutation      { return func(o map[string]any) { o["extras"] = x } }
+func setF1(b bool) mutation            { return func(o map[string]any) { o["f1"] = b } }
+
+func setMainField(field string, v any) mutation {
+	return func(o map[string]any) { o["main_line"].([]any)[0].(map[string]any)[field] = v }
+}
+
+// setAlt overwrites one field of the alt part with a value no row expects.
+func setAlt(field string) mutation {
+	return func(o map[string]any) { o["alt"].([]any)[0].(map[string]any)[field] = "x" }
+}
 
 func setPlacedBy(id string) mutation {
 	return func(o map[string]any) { o["placed_by"] = map[string]any{"_target_id": id} }
@@ -154,8 +187,8 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		{`name -> Then |$n| { $n -> Len > 0 }`, setName("")},
 		{`MAIN_LINE -> Then |$l| { $l.qty > 0 }`, setMainQty(0)},
 		// Lest evaluates its body in the caller's scope and binds nothing
-		{`note -> Lest { name -> Len > 0 }`, setName("")},
-		{`note -> Lest { true }`, nil},
+		{`(note -> Lest { name -> Upper }) == "NORTH"`, setName("x")},
+		{`(note -> Lest { name }) == "north"`, setName("x")},
 		// associations: keys are answerable for presence, count and comparison
 		{`PLACED_BY != nil`, nil},
 		{`CUSTOMERS -> Len > 1`, nil},
@@ -235,6 +268,30 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		{`(MAIN_LINE -> Default(nil)) != nil`, nil},
 		{`(LINES -> Default([])) -> Len == 2`, nil},
 		{`(CUSTOMERS -> Default([])) -> Len == 2`, nil},
+		// the nil-guard family types by one rule, the join of every value it can
+		// yield: Coalesce and Lest as Default does, Then as its body
+		{`(note -> Coalesce("x")) -> Upper == "X"`, setNote("y")},
+		{`(name -> Coalesce(nil, "x")) -> Upper == "NORTH"`, setName("x")},
+		{`(extras -> Coalesce([]) -> Len) == 0`, setExtras("a")},
+		{`(note -> Lest { "x" }) -> Upper == "X"`, setNote("y")},
+		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Abs > 0`, setMainQty(0)},
+		{`(MAIN_LINE -> Then |$l| { $l.ITEM }).sku == "s3"`, setMainField("item", []any{map[string]any{"id": "i", "sku": "x"}})},
+		// two instances join to their union, whose members are those every
+		// alternative declares — through two shared bases, or declared on each;
+		// an absent receiver takes the fallback and the shared member reads
+		{`(ALT -> Default(OTHER)).at == "t1"`, setAlt("at")},
+		{`(ALT -> Default(OTHER)).label == "L"`, setAlt("label")},
+		{`(ALT -> Default(OTHER)).id == "a1"`, setAlt("id")},
+		{`(OTHER -> Default(ALT)).at == "t1"`, setAlt("at")},
+		{`(OTHER -> Lest { ALT }).label == "L"`, setAlt("label")},
+		{`(OTHER -> Coalesce(nil, ALT)).id == "a1"`, setAlt("id")},
+		{`MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil`, nil},
+		{`(MAIN_LINE -> Default(MAIN_LINE.ITEM)).id == "m1"`, setMainField("id", "x")},
+		// a conditional and a list literal join the same way, and the nil
+		// literal is the bottom of the lattice in every position
+		{`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).id == "m1"`, setF1(false)},
+		{`[MAIN_LINE, MAIN_LINE.ITEM] -> All |$x| { $x.id -> Len < 5 }`, setMainField("id", "longer")},
+		{`(f1 ? { nil : name }) -> Default("x") -> Upper == "X"`, setF1(false)},
 		// in with the nil literal on its right is false, not an error
 		{`!(1 in nil)`, nil},
 		// Compare ranks any two values the total order ranks: a list above a string
@@ -383,8 +440,29 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		// Present receiver, so the fallback never fires: the evaluator answers
 		// false rather than erroring, which is all this row can assert.
 		{`(tags -> Default([1]) -> First) == 1`, diag.E_INVALID_INVARIANT, "Default", ""},
-		// MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil has no row here: the
-		// checker refuses it and the evaluator holds it on a conforming instance.
+		// the nil-guard family refuses alternatives of disjoint kinds, on an
+		// absent receiver so the fallback is what the evaluator refuses
+		{`(note -> Coalesce(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce", "expects string argument"},
+		{`(note -> Coalesce(nil, 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce", "expects string argument"},
+		{`(note -> Lest { 1 }) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Lest", "expects string argument"},
+		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest", "expects slice or array input"},
+		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument"},
+		// a string receiver beside a boolean body: with the receiver present the
+		// invariant evaluates to the string, which is an evaluation error. Both
+		// were accept rows while Lest was untyped.
+		{`note -> Lest { true }`, diag.E_INVALID_INVARIANT, "Lest", ""},
+		{`name -> Lest { true }`, diag.E_INVALID_INVARIANT, "Lest", "expected boolean, got string"},
+		// a member read through a union of instances must be declared on every
+		// alternative; these rows read one that one alternative lacks
+		{`(MAIN_LINE -> Lest { LINES[0].ITEM }).sku -> Len > 0`, diag.E_UNKNOWN_PROPERTY, "sku", ""},
+		{`(MAIN_LINE -> Coalesce(MAIN_LINE.ITEM)).qty == nil`, diag.E_UNKNOWN_PROPERTY, "qty", ""},
+		{`(MAIN_LINE -> Default(MAIN_LINE.ITEM)).sku -> Len > 0`, diag.E_UNKNOWN_PROPERTY, "sku", ""},
+		{`(ALT -> Default(OTHER)).extra == nil`, diag.E_UNKNOWN_PROPERTY, "extra", ""},
+		{`(OTHER -> Default(ALT)).other -> Len > 0`, diag.E_UNKNOWN_PROPERTY, "other", ""},
+		{`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).qty == nil`, diag.E_UNKNOWN_PROPERTY, "qty", ""},
+		{`(LINES -> Default([MAIN_LINE.ITEM]) -> First).qty == nil`, diag.E_UNKNOWN_PROPERTY, "qty", ""},
+		// a non-empty scalar list is not the empty-list wildcard
+		{`(LINES -> Default(["a", 1]) -> First).qty == nil`, diag.E_INVALID_INVARIANT, "Default", ""},
 		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver"},
 		{`tags -> Min("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver"},
 		{`name =~ Vector`, diag.E_INVALID_INVARIANT, "Vector", "unknown datatype"},

@@ -14,15 +14,17 @@ import (
 // staticKind is what the static checker knows an expression evaluates to.
 // The lattice mirrors what the evaluator produces: a composition yields its
 // child instances, an association yields the target key, a property yields a
-// scalar or a list, and a pipeline stage maps one kind to another.
+// scalar or a list, and a pipeline stage maps one kind to another. The nil
+// literal is its bottom — joined with anything it yields that thing, as an
+// absent value stands in for any value — and unknown its top.
 type staticKind uint8
 
 const (
 	kindUnknown  staticKind = iota // no claim; member access is not checked
-	kindInstance                   // an instance of typ: its members are typ's properties and relations
+	kindInstance                   // an instance of one of typs: its members are those every one declares
 	kindList                       // a list of elem
 	kindScalar                     // a string, number, boolean or pattern: no members
-	kindNil                        // the nil literal: a wildcard under Default, an error under arithmetic
+	kindNil                        // the nil literal: the bottom of the lattice, an error under arithmetic
 )
 
 // scalarKind narrows a scalar to what the operators and builtins distinguish:
@@ -58,10 +60,17 @@ func (k scalarKind) String() string {
 // target's primary key — a string, or a list of strings for a composite key —
 // and viaAssociation records that origin so a member read through it names
 // the association rather than "a value with no members".
+//
+// An instance type holds every type the value may be: one after a member
+// read, several after a guard, a conditional or a list literal whose
+// alternatives are instances of different types. A member reads through it
+// only when every alternative declares it, which is what the evaluator's map
+// lookup honours on every input. Ancestry is never consulted: two types with
+// no common ancestor still share the members each declares.
 type staticType struct {
 	kind           staticKind
 	scalar         scalarKind  // kindScalar
-	typ            *Type       // kindInstance; nil when the target did not resolve
+	typs           []*Type     // kindInstance; ordered by identity, no duplicates
 	elem           *staticType // kindList
 	viaAssociation bool
 }
@@ -85,7 +94,32 @@ func instanceOf(t *Type) staticType {
 	if t == nil {
 		return unknownType
 	}
-	return staticType{kind: kindInstance, typ: t}
+	return staticType{kind: kindInstance, typs: []*Type{t}}
+}
+
+// typeName names an instance type as a diagnostic reads it: one type's name,
+// or every alternative's joined by "or".
+func (t staticType) typeName() string {
+	names := make([]string, len(t.typs))
+	for i, ty := range t.typs {
+		names[i] = ty.Name()
+	}
+	return strings.Join(names, " or ")
+}
+
+// unionTypes is the set of both operands' types, deduplicated and ordered by
+// identity so a union built in either order is one value. Identity, not the
+// pointer: two loads sharing a registry can hold two objects for one type.
+func unionTypes(a, b []*Type) []*Type {
+	out := make([]*Type, 0, len(a)+len(b))
+	out = append(out, a...)
+	for _, t := range b {
+		if !slices.ContainsFunc(out, func(x *Type) bool { return x.ID() == t.ID() }) {
+			out = append(out, t)
+		}
+	}
+	slices.SortFunc(out, func(x, y *Type) int { return strings.Compare(x.ID().String(), y.ID().String()) })
+	return out
 }
 
 // element is the type of one element of t: a list's element, else unknown.
@@ -235,35 +269,56 @@ var binaryOps = map[string]bool{
 	"&&": true, "||": true, "^": true,
 }
 
-// mergeScalar is the type of a value that is one of two scalars: the shared
-// subkind when both agree, else a scalar of unknown kind.
-func mergeScalar(a, b staticType) staticType {
-	if a.kind == kindScalar && b.kind == kindScalar && a.scalar == b.scalar {
-		return a
+// join is the static type a value that is one of two expressions has, and
+// whether the two are disjoint: of different kinds, or scalars of different
+// known subkinds. The nil literal yields the other side, unknown yields
+// unknown, two instances yield their union, two lists a list of their joined
+// element, two scalars their shared subkind or a scalar of unknown subkind.
+// It is the one join every position where two expressions meet reads —
+// a guard, a conditional, a list literal, concatenation — so no two of them
+// can disagree about what a value may be.
+func join(a, b staticType) (staticType, bool) {
+	switch {
+	case a.kind == kindNil:
+		return b, false
+	case b.kind == kindNil:
+		return a, false
+	case a.kind == kindUnknown || b.kind == kindUnknown:
+		return unknownType, false
+	case a.kind != b.kind:
+		return unknownType, true
 	}
-	return scalarType
-}
-
-// mergeType is the static type two expressions agree on: the same instance, a
-// list of their merged element, a merged scalar, or unknown. It serves every
-// position where two expressions meet and the stage after them reads the
-// answer — concatenation, a list literal's elements, a conditional's branches.
-func mergeType(a, b staticType) staticType {
-	if a.kind != b.kind {
-		return unknownType
-	}
+	via := a.viaAssociation || b.viaAssociation
 	switch a.kind {
 	case kindInstance:
-		if a.typ == b.typ {
-			return a
-		}
+		return staticType{kind: kindInstance, typs: unionTypes(a.typs, b.typs)}, false
 	case kindList:
-		return listOf(mergeType(a.element(), b.element()))
+		elem, disjoint := join(a.element(), b.element())
+		t := listOf(elem)
+		t.viaAssociation = via
+		return t, disjoint
 	case kindScalar:
-		return mergeScalar(a, b)
+		t := staticType{kind: kindScalar, scalar: a.scalar, viaAssociation: via}
+		switch {
+		case a.scalar == b.scalar:
+			return t, false
+		case a.scalar == scalarAny || b.scalar == scalarAny:
+			t.scalar = scalarAny
+			return t, false
+		}
+		t.scalar = scalarAny
+		return t, true
 	case kindUnknown, kindNil:
 	}
-	return unknownType
+	return unknownType, false
+}
+
+// mergeType is join for a position that admits disjoint alternatives — a
+// conditional, a list literal, concatenation — where the result is what the
+// two agree on and a disagreement is no claim.
+func mergeType(a, b staticType) staticType {
+	t, _ := join(a, b)
+	return t
 }
 
 // typeBinary types a binary operator's result and checks the two operand
@@ -417,18 +472,11 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 	case "@":
 		return c.typeIndexExpr(children, sc, owner, inv)
 	case "[]":
-		elem, seen := scalarType, false
+		// An empty list is a list of nothing, which any element type absorbs,
+		// so the empty literal defaults any list.
+		elem := nilType
 		for _, child := range children {
-			t := c.typeExpr(child, sc, owner, inv)
-			// A nil element is any element's peer.
-			if t.kind == kindNil {
-				continue
-			}
-			if !seen {
-				elem, seen = t, true
-				continue
-			}
-			elem = mergeType(elem, t)
+			elem = mergeType(elem, c.typeExpr(child, sc, owner, inv))
 		}
 		return listOf(elem)
 	case "?":
@@ -604,17 +652,7 @@ func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owne
 
 	switch recv.kind {
 	case kindInstance:
-		// A type whose supertype chain has an unresolved link has an incomplete
-		// member set; the unresolved reference already carries its diagnostic.
-		if recv.typ == nil || c.hasUnresolvedSupertype(recv.typ) {
-			return unknownType
-		}
-		if t, found := c.membersOf(recv.typ)[strings.ToLower(name)]; found {
-			return t
-		}
-		c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
-			"unknown property %q on type %q in invariant %q on type %q",
-			name, recv.typ.Name(), inv.Name(), owner.Name())
+		return c.typeInstanceMember(recv, name, owner, inv)
 	case kindList, kindScalar, kindNil:
 		switch {
 		case recv.viaAssociation:
@@ -633,6 +671,38 @@ func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owne
 	case kindUnknown:
 	}
 	return unknownType
+}
+
+// typeInstanceMember resolves name on every type the receiver may be: the
+// member is the join of what each declares, and an alternative that lacks it
+// is the unknown-property error, since the evaluator reads nil there on the
+// input that selects it. A type whose supertype chain has an unresolved link
+// has an incomplete member set, so nothing is claimed; the unresolved
+// reference already carries its diagnostic.
+func (c *completer) typeInstanceMember(recv staticType, name string, owner *Type, inv *Invariant) staticType {
+	for _, ty := range recv.typs {
+		if ty == nil || c.hasUnresolvedSupertype(ty) {
+			return unknownType
+		}
+	}
+	member := nilType
+	for _, ty := range recv.typs {
+		t, found := c.membersOf(ty)[strings.ToLower(name)]
+		if !found {
+			if len(recv.typs) == 1 {
+				c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
+					"unknown property %q on type %q in invariant %q on type %q",
+					name, ty.Name(), inv.Name(), owner.Name())
+			} else {
+				c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
+					"unknown property %q on type %q, one of the types the value may be (%s), in invariant %q on type %q",
+					name, ty.Name(), recv.typeName(), inv.Name(), owner.Name())
+			}
+			return unknownType
+		}
+		member = mergeType(member, t)
+	}
+	return member
 }
 
 // typeIndexExpr resolves receiver[index]: a list yields its element, a string a
@@ -664,10 +734,8 @@ func (c *completer) typeIndexExpr(children []expr.Expression, sc *staticScope, o
 		}
 		return scalarType
 	case kindInstance:
-		if recv.typ != nil {
-			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"type %q cannot be indexed in invariant %q on type %q", recv.typ.Name(), inv.Name(), owner.Name())
-		}
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"type %q cannot be indexed in invariant %q on type %q", recv.typeName(), inv.Name(), owner.Name())
 	case kindNil, kindUnknown:
 	}
 	return unknownType
@@ -779,69 +847,34 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 		if len(argTypes) == 0 {
 			return unknownType
 		}
-		return c.typeReceiverOrArg(spec, recv, argTypes[0], owner, inv)
+		return c.typeGuard(spec, "a fallback", append([]staticType{recv}, argTypes...), owner, inv)
+	case expr.ResultReceiverOrBody:
+		if body == nil {
+			return unknownType
+		}
+		return c.typeGuard(spec, "a body", []staticType{recv, bodyType}, owner, inv)
 	case expr.ResultUnknown:
 	}
 	return unknownType
 }
 
-// typeReceiverOrArg types a call that yields its receiver or its argument —
-// Default — as their merge, and refuses the two when they are of different
-// kinds: the stage after the call would then meet a value the checker did
-// not predict. A kind the checker does not know is admitted. An association
-// key is a string at evaluation time, so a string fallback matches it.
-func (c *completer) typeReceiverOrArg(spec expr.BuiltinSpec, recv, arg staticType, owner *Type, inv *Invariant) staticType {
-	refuse := func() staticType {
-		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-			"%s takes a fallback of its receiver's kind in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
-		return unknownType
-	}
-	switch {
-	case recv.kind == kindUnknown || arg.kind == kindUnknown:
-		return unknownType
-	case arg.kind == kindNil:
-		// The nil literal is every kind's fallback: the receiver's value stands
-		// when present and nil stands in for it when absent.
-		return recv
-	case recv.kind == kindNil:
-		return arg
-	case recv.kind != arg.kind:
-		return refuse()
-	}
-	switch recv.kind {
-	case kindScalar:
-		if recv.scalar != scalarAny && arg.scalar != scalarAny && recv.scalar != arg.scalar {
-			return refuse()
+// typeGuard types a nil guard — Default, Coalesce, Lest — as the join of every
+// value it can yield, and refuses alternatives of disjoint kinds: the stage
+// after the guard would meet, on the input that selects one of them, a value
+// it cannot take. A kind the checker does not know is admitted, and the nil
+// literal stands in for any receiver. An association key is a string at
+// evaluation time, so a string fallback matches it.
+func (c *completer) typeGuard(spec expr.BuiltinSpec, what string, alts []staticType, owner *Type, inv *Invariant) staticType {
+	t := alts[0]
+	for _, alt := range alts[1:] {
+		var disjoint bool
+		if t, disjoint = join(t, alt); disjoint {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s takes %s of its receiver's kind in invariant %q on type %q", spec.Name, what, inv.Name(), owner.Name())
+			return unknownType
 		}
-		return mergeScalar(recv, arg)
-	case kindList:
-		re, ae := recv.element(), arg.element()
-		switch {
-		case re.kind == kindUnknown || ae.kind == kindUnknown:
-			return listOf(unknownType)
-		case re.kind == kindScalar && re.scalar == scalarAny, ae.kind == kindScalar && ae.scalar == scalarAny:
-			// An empty list literal is a list of anything, so it defaults
-			// any list; the receiver's element kind stands.
-			if re.kind == kindScalar && re.scalar == scalarAny {
-				return arg
-			}
-			return recv
-		case re.kind != ae.kind, re.kind == kindInstance && re.typ != ae.typ:
-			return refuse()
-		case re.kind == kindScalar:
-			if re.scalar != ae.scalar {
-				return refuse()
-			}
-			return recv
-		}
-		return recv
-	case kindInstance:
-		if recv.typ != arg.typ {
-			return refuse()
-		}
-	case kindNil, kindUnknown:
 	}
-	return recv
+	return t
 }
 
 // paramOr returns the i-th declared parameter name, or the implicit numeric

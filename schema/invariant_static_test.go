@@ -38,6 +38,24 @@ type Region {
     zone String primary
 }
 
+abstract type Named {
+    label String
+}
+
+abstract type Stamped {
+    at String
+}
+
+part type Alt extends Named, Stamped {
+    id String primary
+    extra String
+}
+
+part type Other extends Named, Stamped {
+    id String primary
+    other String
+}
+
 type Order {
     id String primary
     name String
@@ -45,9 +63,13 @@ type Order {
     f2 Boolean
     tags List<String>
     matrix List<List<Integer>>
+    note String
+    extras List<String>
     vec Vector[4]
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
+    *-> ALT (_) Alt
+    *-> OTHER (_) Other
     --> PLACED_BY (one) Customer
     --> CUSTOMERS (one:many) Customer
     --> REGION (one) Region
@@ -94,7 +116,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`LINES -> All |$name| { name.qty > 0 }`,
 		`LINES -> All |$self| { $self.qty > 0 }`,
 		// Lest binds nothing; its body reads the caller's scope
-		`name -> Lest { true }`,
+		`(note -> Lest { name }) != ""`,
 		// self is a bound variable, so a bare self reads the owner's members
 		`self.name -> Len > 0`,
 		// member then pipeline, member then index
@@ -169,6 +191,29 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// Compare ranks any two values the total order ranks: a list above a string
 		`LINES -> Compare("a") > 0`,
 		`REGION -> Compare("a") > 0`,
+		// the nil-guard family types by one rule, the join of every value it can
+		// yield: Coalesce and Lest as Default does, Then as its body
+		`(note -> Coalesce("x")) -> Upper == "X"`,
+		`(name -> Coalesce(nil, "x")) -> Upper == "X"`,
+		`(extras -> Coalesce([]) -> Len) == 0`,
+		`(note -> Lest { "x" }) -> Upper == "X"`,
+		`(MAIN_LINE -> Then |$l| { $l.qty }) -> Abs > 0`,
+		`(MAIN_LINE -> Then |$l| { $l.ITEM }).sku != ""`,
+		// two instances join to their union, whose members are those every
+		// alternative declares — through two shared bases, or declared on each
+		`(ALT -> Default(OTHER)).at != ""`,
+		`(ALT -> Default(OTHER)).label != ""`,
+		`(ALT -> Default(OTHER)).id != ""`,
+		`(OTHER -> Default(ALT)).at != ""`,
+		`(OTHER -> Lest { ALT }).label != ""`,
+		`(OTHER -> Coalesce(nil, ALT)).id != ""`,
+		`MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil`,
+		`(MAIN_LINE -> Default(MAIN_LINE.ITEM)).id != ""`,
+		// a conditional and a list literal join the same way, and the nil
+		// literal is the bottom of the lattice in every position
+		`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).id != ""`,
+		`[MAIN_LINE, MAIN_LINE.ITEM] -> All |$x| { $x.id -> Len < 5 }`,
+		`(f1 ? { nil : name }) -> Default("x") -> Upper == "X"`,
 	}
 	for _, inv := range accept {
 		t.Run("accepts "+inv, func(t *testing.T) {
@@ -292,7 +337,25 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`nil % 1 > 0`, diag.E_INVALID_INVARIANT, "% takes two numbers"},
 		// every refuse arm of Default and the receiver kinds has its row
 		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default"},
-		{`MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil`, diag.E_INVALID_INVARIANT, "Default"},
+		// the nil-guard family refuses alternatives of disjoint kinds, and a
+		// member read through a union of instances must be declared on every one
+		{`(name -> Coalesce(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		{`(name -> Coalesce(nil, 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		{`(note -> Lest { 1 }) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Lest"},
+		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest"},
+		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		// a string receiver beside a boolean body: with the receiver present the
+		// invariant evaluates to the string, which is an evaluation error
+		{`name -> Lest { true }`, diag.E_INVALID_INVARIANT, "Lest"},
+		{`(MAIN_LINE -> Lest { LINES[0].ITEM }).sku != ""`, diag.E_UNKNOWN_PROPERTY, "sku"},
+		{`(MAIN_LINE -> Coalesce(MAIN_LINE.ITEM)).qty > 0`, diag.E_UNKNOWN_PROPERTY, "qty"},
+		{`(MAIN_LINE -> Default(MAIN_LINE.ITEM)).sku != ""`, diag.E_UNKNOWN_PROPERTY, "sku"},
+		{`(ALT -> Default(OTHER)).extra != ""`, diag.E_UNKNOWN_PROPERTY, "extra"},
+		{`(OTHER -> Default(ALT)).other != ""`, diag.E_UNKNOWN_PROPERTY, "other"},
+		{`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).qty > 0`, diag.E_UNKNOWN_PROPERTY, "qty"},
+		{`(LINES -> Default([MAIN_LINE.ITEM]) -> First).qty > 0`, diag.E_UNKNOWN_PROPERTY, "qty"},
+		// a non-empty scalar list is not the empty-list wildcard
+		{`LINES -> Default(["a", 1]) -> Len > 0`, diag.E_INVALID_INVARIANT, "Default"},
 		{`MAIN_LINE -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "total order"},
 		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "list of scalars"},
 		{`MAIN_LINE -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},

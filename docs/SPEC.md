@@ -1459,7 +1459,9 @@ name               // implicit property reference
 $item.price        // lambda parameter property
 ```
 
-Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage, so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. It rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters or arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where a number is — because an invariant that fails on every instance is a defect in the schema, not in the data. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
+Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage, so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. It rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters or arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where a number is — because an invariant that fails on every instance is a defect in the schema, not in the data.
+
+**The nil guards are typed by one rule.** `Default`, `Coalesce` and `Lest` evaluate to one of their alternatives — the receiver, or the fallback that stands in for it when the receiver is nil — and `Then` to its body, or nil for an absent receiver. The checker types each as what every alternative agrees on, so the stage after the guard is typed by a value it predicted. Alternatives of different kinds — a string beside a number, a list beside a scalar, an instance beside either — are refused at load (`E_INVALID_INVARIANT`): `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` are refused as `(name -> Default(1)) -> Upper` is, and `note -> Lest { true }` is refused because with `note` present the invariant evaluates to a string. The nil literal stands in for any receiver and the empty list literal for any list. Two instance types agree on the members both declare, whatever their ancestry: after `(A_SLOT -> Default(B_SLOT))` a member declared on `A` and on `B` reads, and a member declared on one of them alone is `E_UNKNOWN_PROPERTY`, since the evaluator would read nil there on the input that selects the other. A conditional and a list literal join their branches the same way, and admit alternatives of different kinds as a value of unknown kind. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
 
 **Relations are in scope**, under the relation's field name — the UPPER_SNAKE
 name in lower case — so `WORKS_AT` and `works_at` read one entry. What a
@@ -1592,8 +1594,8 @@ Results on an empty collection are a mixed family:
 
 | Function | Description |
 | -------- | ----------- |
-| `Then` | Execute body when non-nil: `value -> Then \|$v\| { $v.prop }` |
-| `Lest` | Execute body when nil: `value -> Lest { default }` |
+| `Then` | Execute body when non-nil: `value -> Then \|$v\| { $v.prop }`; typed as the body |
+| `Lest` | Execute body when nil: `value -> Lest { default }`; typed as the join of receiver and body |
 | `With` | Bind params and execute: `value -> With \|$v\| { $v.prop }` |
 
 #### Pattern Matching
@@ -1608,8 +1610,8 @@ Results on an empty collection are a mixed family:
 | -------- | ----------- |
 | `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"pattern"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type, so a `Timestamp`, `Date` or `UUID` property yields `"string"` — validation stores all three as text, whichever Go representation the caller submitted |
 | `IsNil` | Check if nil: `value -> IsNil` |
-| `Default` | Return default if nil: `value -> Default(fallback)` |
-| `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)` |
+| `Default` | Return default if nil: `value -> Default(fallback)`; typed as the join of receiver and fallback |
+| `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)`; typed as the join of receiver and every argument |
 
 ### Example Invariants
 

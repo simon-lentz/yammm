@@ -275,11 +275,13 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 
 | Function | Signature | Description |
 | -------- | --------- | ----------- |
-| `Then` | `val -> Then \|$v\| { expr }` | Execute body when val is non-nil; returns nil otherwise |
-| `Lest` | `val -> Lest { expr }` | Execute body when val is nil; returns val otherwise. Accepts but ignores a lambda parameter. |
+| `Then` | `val -> Then \|$v\| { expr }` | Execute body when val is non-nil; returns nil otherwise. Typed as the body |
+| `Lest` | `val -> Lest { expr }` | Execute body when val is nil; returns val otherwise. Accepts but ignores a lambda parameter. Typed as the join of receiver and body |
 | `With` | `val -> With \|$v\| { expr }` | Bind value to parameter and execute body |
-| `Default` | `val -> Default(fallback)` | Return fallback if val is nil |
-| `Coalesce` | `a -> Coalesce(b, c, ...)` | Return first non-nil value |
+| `Default` | `val -> Default(fallback)` | Return fallback if val is nil. Typed as the join of receiver and fallback |
+| `Coalesce` | `a -> Coalesce(b, c, ...)` | Return first non-nil value. Typed as the join of receiver and every argument |
+
+The nil guards are typed by one rule: each yields one of its alternatives, and the checker types the result as what every alternative agrees on. Alternatives of different kinds are refused at load (`E_INVALID_INVARIANT`) — `(name -> Coalesce(1)) -> Upper`, `(note -> Lest { 1 }) -> Upper`, and `note -> Lest { true }`, which evaluates to a string when `note` is present. The nil literal stands in for any receiver and `[]` for any list. Two instance types agree on the members both declare, so after `(A_SLOT -> Default(B_SLOT))` a member declared on one type alone is `E_UNKNOWN_PROPERTY`.
 
 ### Type Functions
 
