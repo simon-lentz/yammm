@@ -65,6 +65,10 @@ type Snapshot struct {
 	// schema is the schema used for validation.
 	schema *schema.Schema
 
+	// canon rewrites a received address into the spelling instanceIndex holds,
+	// as the constructor that built the index rewrote every key it installed.
+	canon *canonicalizer
+
 	// types contains every type identity in sorted order.
 	types []schema.TypeID
 
@@ -169,13 +173,12 @@ func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
 
 // InstanceByKey looks up a single instance by type identity and primary key.
 //
-// The key is the string the instance itself carries, [Instance.PrimaryKey]'s
-// String: a JSON array of the key's components in the form their constraints
-// store. For a String or Integer key that is [FormatKey] over the values; for
-// a Timestamp, Date or UUID key it is the canonical text the graph rewrote
-// the value into at entry, so a value spelled another way must be
-// canonicalized first — [FormatKey] renders values as given and canonicalizes
-// nothing. Returns (nil, false) if no matching instance exists.
+// The key is a [FormatKey]-form address. Any spelling of a component its
+// constraint accepts addresses the instance: a Timestamp, Date or UUID
+// component is canonicalized under the type's key constraints before the
+// lookup, as [Graph.AddComposed] canonicalizes the parent address it receives.
+// [Instance.PrimaryKey]'s String is the address the instance carries; a string
+// [ParseKey] refuses addresses nothing. Returns (nil, false) on a miss.
 func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool) {
 	if r == nil || r.instanceIndex == nil {
 		return nil, false
@@ -184,7 +187,7 @@ func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool)
 	if typeIndex == nil {
 		return nil, false
 	}
-	inst, ok := typeIndex[key]
+	inst, ok := typeIndex[r.canon.address(id, key)]
 	return inst, ok
 }
 
@@ -310,6 +313,7 @@ func (r *Snapshot) Unresolved() []*UnresolvedEdge {
 // and a keyless child's position IS its identity ([InstanceParts]).
 func newSnapshot(
 	s *schema.Schema,
+	canon *canonicalizer,
 	types []schema.TypeID,
 	instances map[schema.TypeID][]*Instance,
 	instanceIndex map[schema.TypeID]map[string]*Instance,
@@ -337,6 +341,7 @@ func newSnapshot(
 
 	snap := &Snapshot{
 		schema:        s,
+		canon:         canon,
 		types:         types,
 		instances:     instances,
 		instanceIndex: instanceIndex,

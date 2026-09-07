@@ -416,7 +416,7 @@ func (g *Graph) AddComposed(
 	// The address is canonicalized as Add canonicalized the key it installed,
 	// so the caller's spelling never decides the lookup. A string ParseKey
 	// refuses addresses nothing, and misses under its own spelling.
-	parentInst := g.findInstance(parentType, g.canonicalAddress(parentType, parentKey))
+	parentInst := g.findInstance(parentType, g.canon.address(parentType, parentKey))
 	if parentInst == nil {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_PARENT_NOT_FOUND,
 			fmt.Sprintf("parent instance %s[%s] not found", parentName, parentKey)).
@@ -800,7 +800,7 @@ func (g *Graph) Snapshot() *Snapshot {
 		Associations: !requiredUnresolved,
 	}
 
-	return newSnapshot(g.schema, types, instances, instanceIndex, edges, duplicates, unresolved, g.collector.Result(), att)
+	return newSnapshot(g.schema, g.canon, types, instances, instanceIndex, edges, duplicates, unresolved, g.collector.Result(), att)
 }
 
 // isKnownSchema reports whether schemaPath is anywhere in the bound schema's
@@ -845,16 +845,6 @@ func (g *Graph) instanceTagForm(id schema.TypeID) string {
 }
 
 // findInstance looks up an instance by TypeID and key.
-// canonicalAddress renders a FormatKey-form address under the type's
-// primary-key constraints, as the index holds it.
-func (g *Graph) canonicalAddress(typeID schema.TypeID, key string) string {
-	components, err := ParseKey(key)
-	if err != nil {
-		return key
-	}
-	return g.canon.key(typeID, immutable.WrapKey(components)).String()
-}
-
 func (g *Graph) findInstance(typeID schema.TypeID, key string) *Instance {
 	if typeInstances := g.instances[typeID]; typeInstances != nil {
 		return typeInstances[key]

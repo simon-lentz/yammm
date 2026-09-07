@@ -274,8 +274,9 @@ func rawKeyedEventParts(t *testing.T, s *schema.Schema, edgeSpelling string) gra
 }
 
 // TestRebuildSnapshot_IndexesByTheCanonicalKey pins that the rebuilt
-// snapshot's index holds the key the instance carries, so InstanceByKey by an
-// instance's own key hits and the caller's raw spelling does not.
+// snapshot's instance carries the canonical key and is found by it and by
+// the caller's raw spelling alike; [TestRebuildSnapshot_IndexKeyIsTheCanonicalKey]
+// pins the index's own keying, which a lookup that canonicalizes cannot show.
 func TestRebuildSnapshot_IndexesByTheCanonicalKey(t *testing.T) {
 	t.Parallel()
 	s := linkedTimestampSchema(t)
@@ -293,8 +294,8 @@ func TestRebuildSnapshot_IndexesByTheCanonicalKey(t *testing.T) {
 	if _, ok := snap.InstanceByKey(eventID, inst.PrimaryKey().String()); !ok {
 		t.Error("InstanceByKey by the instance's own key misses")
 	}
-	if _, ok := snap.InstanceByKey(eventID, graph.FormatKey("2020-01-02T03:04:05+00:00")); ok {
-		t.Error("InstanceByKey by the raw spelling hits; the index is keyed by a spelling the instance does not carry")
+	if got, ok := snap.InstanceByKey(eventID, graph.FormatKey("2020-01-02T03:04:05+00:00")); !ok || got != inst {
+		t.Errorf("InstanceByKey by the raw spelling = %v, %v; want the one instance, found", got, ok)
 	}
 }
 

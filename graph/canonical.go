@@ -151,6 +151,21 @@ func (c *canonicalizer) key(id schema.TypeID, k immutable.Key) immutable.Key {
 	return immutable.WrapKey(out)
 }
 
+// address renders a FormatKey-form address as the index holds it: parsed,
+// then rewritten component-wise by key. A key with no canonicalizing position
+// is returned as spelled, unparsed, so a String key stays one map read; so is
+// a string ParseKey refuses, which addresses nothing under any spelling.
+func (c *canonicalizer) address(id schema.TypeID, key string) string {
+	if c.inactive || len(c.keyPositions(id)) == 0 {
+		return key
+	}
+	components, err := ParseKey(key)
+	if err != nil {
+		return key
+	}
+	return c.key(id, immutable.WrapKey(components)).String()
+}
+
 // properties rewrites an instance's properties under the declared constraints
 // of id. The Add path and the rebuild path both reach it, so the two cannot
 // store one value two ways.

@@ -13,14 +13,13 @@ import (
 // FormatKey renders primary key components as the JSON array string the
 // graph's addresses use: ["value1", value2, ...].
 //
-// It renders the values AS GIVEN and canonicalizes nothing. The graph indexes
-// an instance by the key it carries, and for a Timestamp, Date or UUID key
-// that is the canonical text the value was rewritten into at entry — so
-// FormatKey over the stored text is an address, and FormatKey over another
-// spelling of the same instant is not — except at [Graph.AddComposed], which
-// canonicalizes the address it receives as [Graph.Add] canonicalized the key
-// it installed. [Snapshot.InstanceByKey] states the rule for a read;
-// [Instance.PrimaryKey] is the address itself.
+// It renders the values AS GIVEN and canonicalizes nothing; the graph does,
+// at every address it receives. The graph indexes an instance by the key it
+// carries, and for a Timestamp, Date or UUID key that is the canonical text
+// the value was rewritten into at entry — so [Graph.AddComposed] and
+// [Snapshot.InstanceByKey] canonicalize the address they are handed under the
+// type's key constraints before the lookup, and FormatKey over any spelling
+// of the instant addresses it. [Instance.PrimaryKey] is the address itself.
 //
 // Examples:
 //

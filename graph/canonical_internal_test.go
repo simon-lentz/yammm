@@ -1,10 +1,13 @@
 package graph
 
 import (
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
@@ -63,6 +66,59 @@ func TestCanonicalizerKey_MemoisesPerType(t *testing.T) {
 	c.key(plain.ID(), immutable.WrapKey([]any{"x"}))
 	if positions, ok := c.byKeyType[plain.ID()]; !ok || len(positions) != 0 {
 		t.Errorf("byKeyType[Plain] = %v, %v; want an empty entry", positions, ok)
+	}
+}
+
+// TestCanonicalizerAddress_PlainKeyAllocatesNothing pins that a received
+// address for a type whose key does not canonicalize is returned unparsed, so
+// [Snapshot.InstanceByKey] on a String key stays one map read.
+func TestCanonicalizerAddress_PlainKeyAllocatesNothing(t *testing.T) {
+	s := canonicalizerSchema(t)
+	plain, _ := s.Type("Plain")
+	stamped, _ := s.Type("Stamped")
+	c := newCanonicalizer(s)
+	if allocs := testing.AllocsPerRun(100, func() { c.address(plain.ID(), `["x"]`) }); allocs != 0 {
+		t.Errorf("address allocates %v per call on a type whose key does not canonicalize; want 0", allocs)
+	}
+	if got := c.address(stamped.ID(), `["2020-01-02T03:04:05+00:00"]`); got != `["2020-01-02T03:04:05Z"]` {
+		t.Errorf("address on a Timestamp key = %s, want the canonical rendering", got)
+	}
+	if got := c.address(stamped.ID(), "not an address"); got != "not an address" {
+		t.Errorf("address on a string ParseKey refuses = %q, want it as spelled", got)
+	}
+}
+
+// TestRebuildSnapshot_IndexKeyIsTheCanonicalKey pins the index's own keying,
+// which a lookup that canonicalizes its address cannot show: a rebuilt
+// Timestamp-keyed instance entered by a raw spelling is indexed once, under
+// the canonical text, on the rebuild path and on the Add path alike.
+func TestRebuildSnapshot_IndexKeyIsTheCanonicalKey(t *testing.T) {
+	s := canonicalizerSchema(t)
+	stamped, _ := s.Type("Stamped")
+	const raw, canonical = "2020-01-02T03:04:05+00:00", `["2020-01-02T03:04:05Z"]`
+	rebuilt, res := RebuildSnapshot(s, SnapshotParts{
+		Types: []schema.TypeID{stamped.ID()},
+		Instances: map[schema.TypeID][]InstanceParts{stamped.ID(): {{
+			TypeName: "Stamped", TypeID: stamped.ID(), PrimaryKey: immutable.WrapKey([]any{raw}),
+			Properties: immutable.WrapProperties(map[string]any{"observed_at": raw}),
+		}}},
+	})
+	if res.HasErrors() {
+		t.Fatalf("RebuildSnapshot: %s", res)
+	}
+	g := New(s)
+	if r := g.Add(t.Context(), instance.NewValidInstance("Stamped", stamped.ID(), immutable.WrapKey([]any{raw}),
+		immutable.WrapProperties(map[string]any{"observed_at": raw}), nil, nil, nil)); !r.OK() {
+		t.Fatalf("add: %s", r)
+	}
+	for name, snap := range map[string]*Snapshot{"RebuildSnapshot": rebuilt, "Add": g.Snapshot()} {
+		idx := snap.instanceIndex[stamped.ID()]
+		if len(idx) != 1 {
+			t.Errorf("%s path: index holds %d entries, want 1", name, len(idx))
+		}
+		if _, ok := idx[canonical]; !ok {
+			t.Errorf("%s path: index keys = %v, want %s", name, slices.Collect(maps.Keys(idx)), canonical)
+		}
 	}
 }
 

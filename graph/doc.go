@@ -217,7 +217,10 @@
 //	graph.FormatKey("ABC123")       // ["ABC123"]
 //	graph.FormatKey("us", 12345)    // ["us",12345]
 //
-// Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey].
+// Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey]. A
+// Timestamp, Date or UUID component may be spelled any way its constraint
+// accepts: every address the graph receives is canonicalized under the type's
+// key constraints before the lookup, as the key was at entry.
 //
 // Composed children have no key of their own. A part instance is identified
 // through its parent composition, so this package mints no address for one; a

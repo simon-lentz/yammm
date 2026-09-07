@@ -641,7 +641,7 @@ The `Snapshot` type provides read-only access to graph state:
 | `Types()` | All type identities (`[]schema.TypeID`, sorted by TypeID) |
 | `InstancesOf(typeID)` | Instances of a type (sorted by primary key) |
 | `AllInstances()` | Iterator over all **root** instances in deterministic order. Composed children are not yielded — walk `Instance.ComposedRelations` and `Instance.Composed` for the subtree |
-| `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key |
+| `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key. The key is a `FormatKey` string in any spelling the type's key constraints accept: a Timestamp, Date or UUID component is canonicalized before the lookup |
 | `Edges()` | All resolved edges (sorted) |
 | `EdgesFrom(inst)` | Outgoing edges for a specific instance |
 | `Duplicates()` | Duplicate primary key records (sorted) |
@@ -667,7 +667,7 @@ Types are identified by `schema.TypeID`, never by name. A name is a rendering of
 
 ### Key Formatting and Parsing
 
-A primary key is carried as a canonical JSON array string — the form `Snapshot.InstanceByKey` takes and `immutable.Key.String` produces.
+A primary key is carried as a canonical JSON array string — the form `immutable.Key.String` produces and `Snapshot.InstanceByKey` takes. An address handed to the graph may spell a Timestamp, Date or UUID component any way its constraint accepts: every received address is canonicalized under the type's key constraints before the lookup, so `FormatKey` over the value as the caller holds it is an address.
 
 | Function | Description |
 | -------- | ----------- |
