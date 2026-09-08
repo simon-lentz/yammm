@@ -130,10 +130,11 @@ func (t staticType) element() staticType {
 	return unknownType
 }
 
-// selfVariable is the name both layers bind to the instance: the evaluator's
-// PropertyScopeFromMap seeds it and the checker's root scope binds it. A
-// property so named could never be read, so completion refuses it.
-const selfVariable = "self"
+// selfVariable is the name both layers bind to the instance, held once in
+// schema/expr so the completer, the checker and the evaluator cannot drift:
+// the evaluator's PropertyScopeOf seeds it and the checker's root scope binds
+// it. A member so named could never be read, so completion refuses it.
+const selfVariable = expr.SelfVariable
 
 // staticScope is the lambda bindings in force at one point of the walk. Names
 // match exactly, as the evaluator's Scope.Lookup resolves them.

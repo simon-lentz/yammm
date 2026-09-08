@@ -372,7 +372,6 @@ func TestWireElems_ReachesEveryContainer(t *testing.T) {
 		{"byte slice", []byte{1, 2, 3}},
 		{"float32 slice", []float32{1, 2, 3}},
 		{"int slice", []int{1, 2, 3}},
-		{"array", [3]float64{1, 2, 3}},
 		{"any slice", []any{float64(1), float64(2), float64(3)}},
 	}
 
@@ -393,6 +392,14 @@ func TestWireElems_ReachesEveryContainer(t *testing.T) {
 				}
 			}
 		})
+	}
+
+	// An ARRAY is not a list — the rule value.ListElems states and every reader
+	// follows — so it does NOT reach the vector arm and takes the same
+	// pass-through path a non-container takes.
+	arr := [3]float64{1, 2, 3}
+	if got := wireValue(arr, schema.VectorConstraint{}); got != any(arr) {
+		t.Errorf("wireValue over an array returned %#v, want it untouched: an array is not a list", got)
 	}
 
 	// A non-container under the same constraint passes through untouched, or

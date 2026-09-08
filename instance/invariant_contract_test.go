@@ -488,10 +488,10 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`name -> Max(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "comparison", evalErrors},
 		{`note -> Lest |$x| { true }`, diag.E_INVALID_INVARIANT, "lambda parameter", "at most 0 parameters", evalErrors},
 		// a list builtin on a scalar, an instance or a key; a scalar builtin on a list
-		{`name -> Filter |$c| { true } -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array", evalErrors},
-		{`"abc" -> Contains("b")`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array", evalErrors},
-		{`1 -> All |$x| { true }`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array", evalErrors},
-		{`PLACED_BY -> Sort -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array", evalErrors},
+		{`name -> Filter |$c| { true } -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list", "expects a list", evalErrors},
+		{`"abc" -> Contains("b")`, diag.E_INVALID_INVARIANT, "takes a list", "expects a list", evalErrors},
+		{`1 -> All |$x| { true }`, diag.E_INVALID_INVARIANT, "takes a list", "expects a list", evalErrors},
+		{`PLACED_BY -> Sort -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a list", "expects a list", evalErrors},
 		{`LINES -> Sort -> First.qty > 0`, diag.E_INVALID_INVARIANT, "list of scalars", "unsupported type comparison", evalErrors},
 		{`tags -> Upper == "A"`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument", evalErrors},
 		// the bracket takes exactly one index, and a number cannot be indexed
@@ -503,10 +503,10 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`MAIN_LINE.qty -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string", evalErrors},
 		{`name -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric", evalErrors},
 		{`MAIN_LINE.qty -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map", "unsupported for type", evalErrors},
-		{`MAIN_LINE.qty -> Min == 1`, diag.E_INVALID_INVARIANT, "takes a list", "slice or array", evalErrors},
+		{`MAIN_LINE.qty -> Min == 1`, diag.E_INVALID_INVARIANT, "takes a list", "expects a list", evalErrors},
 		{`LINES -> Map |$l| { $l.qty } -> Join(",") != ""`, diag.E_INVALID_INVARIANT, "list of strings", "expects all string", evalErrors},
 		{`tags -> Sum > 0`, diag.E_INVALID_INVARIANT, "list of numbers", "expects numeric", evalErrors},
-		{`name in name`, diag.E_INVALID_INVARIANT, "in takes a list", "slice or array", evalErrors},
+		{`name in name`, diag.E_INVALID_INVARIANT, "in takes a list", "expects a list", evalErrors},
 		{`(name != "" ? { MAIN_LINE.qty : MAIN_LINE.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string", evalErrors},
 		// every refuse row of the static table, judged by the evaluator too
 		{`MAIN_LINE -> Max(1) != nil`, diag.E_INVALID_INVARIANT, "cannot be ordered", "unsupported type comparison", evalErrors},
@@ -514,7 +514,7 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`/re/[0] != nil`, diag.E_INVALID_INVARIANT, "a pattern cannot be indexed", "cannot index", evalErrors},
 		// The receiver is absent in these two, so the fallback is taken and the
 		// stage after it is what the evaluator refuses.
-		{`(extras -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default", "expects slice or array input", evalErrors},
+		{`(extras -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default", "expects a list", evalErrors},
 		{`(note -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default", "expects string argument", evalErrors},
 		// Present receiver, so the fallback never fires: the evaluator answers
 		// false rather than erroring, which is all this row can assert.
@@ -528,7 +528,7 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`(note -> Coalesce((f1 ? { note : MAIN_LINE.qty }), 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce", "expects string argument", evalErrors},
 		{`(note -> Coalesce(1, (f1 ? { note : MAIN_LINE.qty }))) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce", "expects string argument", evalErrors},
 		{`(note -> Lest { 1 }) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Lest", "expects string argument", evalErrors},
-		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest", "expects slice or array input", evalErrors},
+		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest", "expects a list", evalErrors},
 		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument", evalErrors},
 		// a string receiver beside a boolean body: with the receiver present the
 		// invariant evaluates to the string, which is an evaluation error. Both

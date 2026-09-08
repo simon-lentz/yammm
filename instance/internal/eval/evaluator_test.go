@@ -310,7 +310,7 @@ func TestEvaluator_In(t *testing.T) {
 	})
 
 	t.Run("non_array_errors", func(t *testing.T) {
-		evalErr(t, sx("in", lit("world"), lit("hello world")), "slice or array")
+		evalErr(t, sx("in", lit("world"), lit("hello world")), "expects a list")
 	})
 }
 
@@ -631,8 +631,8 @@ func TestEvaluator_MemberAccess_NameOnly(t *testing.T) {
 }
 
 // TestEvaluator_BuiltinLenReflectPaths covers len's reflect fallback for
-// receivers that are not []any: typed slices, arrays, maps, and their nil
-// forms, plus the unsupported-type error.
+// receivers that are not []any: typed slices, maps, and their nil forms, plus
+// the unsupported-type error an array now draws with them.
 func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 	t.Run("typed_slice_int", func(t *testing.T) {
 		evalEq(t, makeBuiltinCall(lit([]int{1, 2, 3, 4, 5}), "len", nil, nil, nil), int64(5))
@@ -647,8 +647,10 @@ func TestEvaluator_BuiltinLenReflectPaths(t *testing.T) {
 		evalEq(t, makeBuiltinCall(lit(nilSlice), "len", nil, nil, nil), int64(0))
 	})
 
-	t.Run("array_type", func(t *testing.T) {
-		evalEq(t, makeBuiltinCall(lit([4]int{1, 2, 3, 4}), "len", nil, nil, nil), int64(4))
+	// An array is not a list, so Len refuses one as it refuses a number: the
+	// rule value.ListElems states, now at every reader.
+	t.Run("array_type_is_refused", func(t *testing.T) {
+		evalErr(t, makeBuiltinCall(lit([4]int{1, 2, 3, 4}), "len", nil, nil, nil), "unsupported for type")
 	})
 
 	t.Run("map_type", func(t *testing.T) {
@@ -677,7 +679,7 @@ func TestEvaluator_SliceConversion(t *testing.T) {
 	})
 
 	t.Run("non_slice_errors", func(t *testing.T) {
-		evalErr(t, makeBuiltinCall(lit(int64(42)), "sum", nil, nil, nil), "slice or array")
+		evalErr(t, makeBuiltinCall(lit(int64(42)), "sum", nil, nil, nil), "expects a list")
 	})
 }
 

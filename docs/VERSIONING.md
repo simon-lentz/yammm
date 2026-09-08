@@ -1044,7 +1044,7 @@ Found by a state analysis rather than by a pass: the GitHub CI workflow's pre-co
 
 - **`scripts/gomodtidy.sh` takes `go mod tidy -diff`'s exit code as its verdict** (A-358) and shows stderr only when the command fails. It had treated any output as a change, and on a cold module cache stderr carries download progress with exit 0 and an empty stdout, so the gate was red in CI and green locally for thirteen pushes. Proved in three directions: a planted `require` in a fixture module fails with the diff, the clean tree passes, an empty module cache passes.
 
-### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `49b1be6`, group 3 `<pending>` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
+### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `49b1be6`, group 3 `1718ca2`, group 4 `<pending>` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
 
 *Written per group, in the session that lands it (A-227, A-346). The A-323 read of the fix pass above ran as four passes over its thirteen groups and produced **forty-one repairs R1…R41**, planned into seven groups. **The declaration delta is measured at each commit**; evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_<commit>.txt` for each.*
 
@@ -1099,14 +1099,14 @@ whose six schemas ship none of the three shapes — every one validated clean un
 - **`ResultElementOrArg`'s godoc states the ranked typing** (A-393), and group 8's entry above is amended rather than left to contradict it.
 
 
-#### Group 3 — the graph's addresses (A-401, A-402, A-388, A-380; `<pending>`)
+#### Group 3 — the graph's addresses (A-401, A-402, A-388, A-380; `1718ca2`)
 
 **One silent-corruption fix and one new refusal.** Together these make
 `graph/doc.go`'s claim — *"every address the graph receives is canonicalized"* —
 true for the first time, and they assert the premise the `(one)` composed key
 rests on. Every item is measured at **zero cost to rdata**, whose six schemas
 declare **no composition and no Timestamp, Date or UUID primary key** —
-re-counted in its tree at `09e5e970`, not inherited from the decisions.
+re-counted in its tree at `09e5e970`, not inherited from the decisions. `gorelease -base=v0.20.0` at `1718ca2` is byte-identical to `49b1be6`'s (twelve incompatible, fifty-five additive), so **no declaration moves and the tool reports none of this**: a silent-corruption fix and a new load-path refusal are invisible to it.
 
 ##### Fixed — silent corruption, `graph`
 
@@ -1123,6 +1123,39 @@ re-counted in its tree at `09e5e970`, not inherited from the decisions.
 ##### Changed — lookup cost, `graph`
 
 - **A lookup tries the address as spelled before it canonicalizes** (A-402). `Snapshot.InstanceByKey` and `Graph.AddComposed` read the index directly and fall back to the canonical form only on a miss. Strictly semantics-preserving: every address that resolved before resolves now. `docs/API.md` advertises `InstanceByKey` as an O(1) lookup while every call on a Timestamp, Date or UUID key ran a parse, a re-render and a marshal, and `AddComposed` paid it once per composed child under the graph's lock held exclusively.
+
+
+#### Group 4 — the evaluator and the validator (A-397, A-368, A-369, A-370, A-371, A-373, A-374; `<pending>`)
+
+**The first residue group that moves a declaration**, and the group whose whole
+shape is *a rule delivered at some of its sites*. Every item below is a rule
+this round already ratified, carried to the readers, exits and member kinds it
+had not reached. Measured at **zero cost to rdata**: it installs no logger,
+declares no relation named `SELF`, and its suite shows no delta beyond unit 4's
+hash re-key.
+
+##### Additive — Go API, `schema/expr`
+
+- **`SelfVariable` names the variable bound to the instance** (A-373). The name stood as a private constant in `schema` and as a string literal at two evaluator sites, so the completer, the static checker and the evaluator agreed by coincidence. All three now read one exported constant.
+
+##### Breaking — the schema loader
+
+- **A relation whose FIELD name is `self` is refused** (A-373), with `E_INVALID_NAME` at the relation's span, as a property of that name already was. A relation is a member too and is read by its field name, so the same rule decides it; the member was otherwise unreachable by its own name with no diagnostic. The ground is stated truly for the first time: the bare name and `$self` resolve to the instance first, so the member is readable only as `self.self`.
+
+##### Fixed — diagnostics a row could not report
+
+- **Each validation pass is gated on ITS OWN errors** (A-368). The gates asked `HasErrors`, so any earlier issue — a property error, or the member index's own case-fold collision — silenced every pass after it and a row reported one defect per round trip. Each gate now compares `Collector.ErrorCount` before and after its pass, the use that primitive's godoc names. A case-fold collision is reported once, by the member index, before any pass runs, rather than by whichever pass happened to read the slot. The final gate before the instance is built stays `HasErrors`: a row with any error yields nil and runs no invariants.
+- **A cancelled row records its cancellation whatever else it drew** (A-369), at every exit of the property pass rather than four of eight; and **`ValidateOne` applies the batch rule** — on a cancelled context it returns the cancellation alone, as `Validate` does. Its two callers, `graph.BatchAssembler`'s serial add and the snapshot revalidator, were returning a timeout's leftover diagnostics as findings about the data.
+- **A cancelled row keeps its Fatal `E_INTERNAL`** (A-370). A library defect and a deadline can land on one row, and the drop that removes the row's partial diagnostics removed the defect with them, so a bug reported as a timeout.
+
+##### Fixed — one rule, every reader
+
+- **An array is not a list, at all five readers and in both messages** (A-371). `value.ListElems` states the rule; `Len`'s collection arm, `TypeOf`'s type name, the edge-shape message's kind and the `.ys` writer's element reader each went on accepting one, and `asSlice` said "expects slice or array input" for a reader that accepts neither. `Len` now refuses an array as it refuses a number, `TypeOf` names the Go type, the shape message reads "expected array, got [16]uint8", the list message says "expects a list", and an array at a list position takes the writer's existing dropped-value path. Contingent: no producer yields one, and it is taken so the rule has no stated exception. **Message text only reaches a consumer, and rdata matches codes.**
+
+##### Documentation
+
+- **`sameSources`' unreachable arm is deleted and its invariant stated** (A-374). One schema holding its own source entry while the other does not cannot occur: a schema carries `Sources` only through the loader, `setSources` has one caller, and it is handed the registry holding the schema's own entry. A dead arm in a four-way partition is what the round retired elsewhere.
+- **The `WithLogger` claim is true in the code** (A-397). `instance/options.go`, the package doc and `docs/API.md` all say each record is logged with the context passed to `Validate`; the property-name-normalization record went through `slog.Logger.Debug`, which the standard library hard-codes to `context.Background`. It now takes the package's ctx-taking helper, as every other logging site in `instance/` does. **The prose was right and the code was wrong**, so the code moved.
 
 
 ### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the clause-5 second fix pass committed as `ebdeb6a`; the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105)

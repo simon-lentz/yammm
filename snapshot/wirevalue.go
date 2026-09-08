@@ -273,14 +273,17 @@ func wireJSONNumber(n json.Number) any {
 	return n
 }
 
-// wireElems returns v's elements as []any for any slice or array, so a vector
-// or list position is reached whatever concrete container the caller built.
+// wireElems returns v's elements as []any for any slice, so a vector or list
+// position is reached whatever concrete slice the caller built. An ARRAY is
+// not a list — the rule [value.ListElems] states and every reader follows — so
+// one at a list position takes the writer's dropped-value path rather than
+// being written as a list.
 func wireElems(v any) ([]any, bool) {
 	if elems, ok := v.([]any); ok {
 		return elems, true
 	}
 	rv := reflect.ValueOf(v)
-	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
+	if rv.Kind() != reflect.Slice {
 		return nil, false
 	}
 	elems := make([]any, rv.Len())

@@ -2,10 +2,12 @@ package schema
 
 import (
 	"fmt"
+	"iter"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // completionRegistry provides lookup for cross-schema type resolution.
@@ -1169,17 +1171,33 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 // spelling; this is a binding rule, not a lexical one, and it is the one rule
 // the parse front door and the Builder share.
 func (c *completer) validatePropertyNames() {
+	const why = "the bare name and $self resolve to the instance first, so the member is unreachable by its own name and readable only as self.self"
 	for _, t := range c.schema.types {
 		for _, p := range t.properties {
-			if p.Name() != selfVariable {
+			if p.Name() != expr.SelfVariable {
 				continue
 			}
 			c.errorf(p.Span(), diag.E_INVALID_NAME,
-				"property %q in type %q cannot be named self: self is bound to the instance in every invariant, so the property could never be read",
-				p.Name(), t.Name())
+				"property %q in type %q cannot be named %s: %s",
+				p.Name(), t.Name(), expr.SelfVariable, why)
+		}
+		// A relation is a member too, and it is read by its FIELD name, so the
+		// same rule decides it: one rule for both member kinds.
+		for _, rels := range []iterRelationSeq{t.AllAssociations(), t.AllCompositions()} {
+			for rel := range rels {
+				if rel.FieldName() != expr.SelfVariable {
+					continue
+				}
+				c.errorf(rel.Span(), diag.E_INVALID_NAME,
+					"relation %q in type %q cannot have field name %s: %s",
+					rel.Name(), t.Name(), expr.SelfVariable, why)
+			}
 		}
 	}
 }
+
+// iterRelationSeq is the shape both relation iterators share.
+type iterRelationSeq = iter.Seq[*Relation]
 
 func (c *completer) validatePrimaryKeys() {
 	for _, t := range c.schema.types {

@@ -412,8 +412,6 @@ func builtinLen(_ context.Context, _ builtinEvaluator, lhs any, _ []any, _ []str
 			return int64(0), nil
 		}
 		return int64(rv.Len()), nil
-	case reflect.Array:
-		return int64(rv.Len()), nil
 	case reflect.Map:
 		if rv.IsNil() {
 			return int64(0), nil
@@ -1011,7 +1009,7 @@ func dslTypeName(v any) string {
 	}
 	if t := reflect.TypeOf(v); t != nil {
 		switch t.Kind() {
-		case reflect.Slice, reflect.Array:
+		case reflect.Slice:
 			return "list"
 		case reflect.Map:
 			return "map"
@@ -1062,7 +1060,7 @@ func asSlice(funcName string, val any) ([]any, error) {
 	}
 	elems, ok := value.ListElems(val)
 	if !ok {
-		return nil, fmt.Errorf("%s expects slice or array input, got %T", funcName, val)
+		return nil, fmt.Errorf("%s expects a list, got %T", funcName, val)
 	}
 	return elems, nil
 }

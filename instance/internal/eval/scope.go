@@ -4,6 +4,7 @@ import (
 	"maps"
 
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // Scope provides variable bindings for expression evaluation.
@@ -61,7 +62,7 @@ func PropertyScopeFromMap(props map[string]any) Scope {
 	m := immutable.WrapMap(props, immutable.WithClone(true))
 	return &propertyScope{
 		props: immutable.PropertiesOf(m),
-		vars:  map[string]immutable.Value{"self": immutable.Wrap(m)},
+		vars:  map[string]immutable.Value{expr.SelfVariable: immutable.Wrap(m)},
 	}
 }
 
@@ -71,7 +72,7 @@ func PropertyScopeFromMap(props map[string]any) Scope {
 func PropertyScopeOf(m immutable.Map[string]) Scope {
 	return &propertyScope{
 		props: immutable.PropertiesOf(m),
-		vars:  map[string]immutable.Value{"self": immutable.Wrap(m)},
+		vars:  map[string]immutable.Value{expr.SelfVariable: immutable.Wrap(m)},
 	}
 }
 

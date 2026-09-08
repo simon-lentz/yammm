@@ -44,9 +44,8 @@ func (v *Validator) validateEdges(
 		// collision is this pass's to report, beside the entry it reads.
 		in := rels[rel]
 		if in.state != relationPresent {
-			if in.state == relationCollided {
-				reportRelationCollision(rel, in, collector, prov, base)
-			}
+			// A collided slot has nothing to read. The member index already
+			// reported it, before any pass ran.
 			continue
 		}
 
@@ -547,7 +546,7 @@ func kindOf(v any) string {
 	switch reflect.TypeOf(v).Kind() {
 	case reflect.Map, reflect.Struct:
 		return "object"
-	case reflect.Slice, reflect.Array:
+	case reflect.Slice:
 		return "array"
 	case reflect.String:
 		return "string"

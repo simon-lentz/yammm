@@ -1065,7 +1065,9 @@ func TestBuiltin_TypeOf(t *testing.T) {
 		{"regexp", regexp.MustCompile("a"), "pattern"},
 		{"slice", []any{1, 2, 3}, "list"},
 		{"typed_slice", []string{"a"}, "list"},
-		{"array", [2]int{1, 2}, "list"},
+		// An array is not a list, so TypeOf names its Go type rather than
+		// claiming a shape every other reader refuses.
+		{"array", [2]int{1, 2}, "unknown"},
 		{"immutable_slice", immutable.WrapSlice([]any{int64(1)}), "list"},
 		{"map", map[string]any{"a": 1}, "map"},
 		{"typed_map", map[int]string{}, "map"},

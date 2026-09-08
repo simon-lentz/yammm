@@ -301,6 +301,12 @@ const (
 // sameSources reports whether two schemas under one SourceID are the same
 // source, and why: the entry and every source both carry match byte for byte.
 // Two source-less schemas leave the question to the hash.
+//
+// One schema holding its own entry while the other does not is not a case this
+// returns: a schema carries Sources only through the loader, setSources has one
+// caller, and it is handed the registry that holds the schema's own entry, so
+// either both lookups find their entry or neither does. Register's provenance
+// message is exact for the arm that remains.
 func sameSources(a, b *Schema) sourceVerdict {
 	as, bs := a.Sources(), b.Sources()
 	if as == nil && bs == nil {
@@ -310,10 +316,7 @@ func sameSources(a, b *Schema) sourceVerdict {
 		return sourcesProvenanceDiffers
 	}
 	ca, okA := as.ContentBySource(a.sourceID)
-	cb, okB := bs.ContentBySource(b.sourceID)
-	if okA != okB {
-		return sourcesProvenanceDiffers
-	}
+	cb, _ := bs.ContentBySource(b.sourceID)
 	if okA && !bytes.Equal(ca, cb) {
 		return sourcesBytesDiffer
 	}
