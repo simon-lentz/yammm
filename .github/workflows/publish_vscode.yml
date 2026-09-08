@@ -111,4 +111,34 @@ jobs:
       - name: Publish
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: vsce publish --packagePath vsix/*.vsix -p "$VSCE_PAT"
+        # One vsce call per VSIX, so a platform already at this version is
+        # skipped instead of ending the step. A single call over the whole glob
+        # cannot tell "already published" from "failed to publish": it stops on
+        # the first already-published target and leaves every later platform
+        # unpublished, which makes a partly-published version unrecoverable by
+        # re-dispatch. Re-running this step must always be safe.
+        run: |
+          shopt -s nullglob
+          vsixes=(vsix/*.vsix)
+          if [ ${#vsixes[@]} -eq 0 ]; then
+            echo "::error::no VSIX files under vsix/ — the build job produced nothing to publish"
+            exit 1
+          fi
+
+          published=0
+          skipped=0
+          for vsix in "${vsixes[@]}"; do
+            if out=$(vsce publish --packagePath "$vsix" -p "$VSCE_PAT" 2>&1); then
+              echo "published: $vsix"
+              published=$((published + 1))
+            elif printf '%s' "$out" | grep -qi 'already exists'; then
+              echo "skipped, already at this version: $vsix"
+              skipped=$((skipped + 1))
+            else
+              printf '%s\n' "$out" >&2
+              echo "::error::failed to publish $vsix"
+              exit 1
+            fi
+          done
+
+          echo "published $published, skipped $skipped, of ${#vsixes[@]} target(s)"
