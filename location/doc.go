@@ -74,7 +74,8 @@
 //
 // # Dependencies
 //
-// This package depends only on the standard library, golang.org/x/text/unicode/norm
-// (for NFC normalization), and its own sub-package location/path (for provenance
-// path tracking). It can be imported by all other packages without cycles.
+//	location  ──imports──▶  location/path, golang.org/x/text/unicode/norm
+//
+// The sub-package carries provenance paths and the x/text import is NFC
+// normalization. It can be imported by all other packages without cycles.
 package location

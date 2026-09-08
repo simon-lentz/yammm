@@ -124,8 +124,10 @@
 //
 // # Dependencies
 //
-// Comparison and kind detection depend only on stdlib. [Canonical] additionally
-// imports schema, time and github.com/google/uuid, because a canonical form is
+//	internal/value  ──imports──▶  immutable, schema, github.com/google/uuid
+//
+// Comparison and kind detection depend only on stdlib; [Canonical] is what
+// reaches schema and github.com/google/uuid, because a canonical form is
 // defined by a constraint. The edge is one-directional: schema does not import
 // this package, and adding that edge would create a cycle.
 package value

@@ -15,7 +15,10 @@ func TestModuleDocCommentsRender(t *testing.T) {
 	checked := doclint.AssertDocCommentsRender(t, "..")
 	// The walk is the only thing standing between "every doc renders" and "no
 	// doc was read", so a shrunken walk is an error rather than a silent pass.
-	if checked < 500 {
+	// The floor sits just under the count at the tree that raised it, not at a
+	// round number: a build-constraint filter once dropped ten tracked files
+	// and both trees stayed green because the floor was six times lower.
+	if checked < 3200 {
 		t.Errorf("read only %d doc comments across the module; the walk is not reaching the source", checked)
 	}
 	t.Logf("read %d doc comments", checked)

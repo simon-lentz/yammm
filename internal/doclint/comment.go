@@ -2,16 +2,24 @@ package doclint
 
 import (
 	"go/ast"
+	"go/doc/comment"
 	"go/token"
+	"regexp"
 	"strings"
 )
 
 // AssertDocCommentsRender reports every doc comment this module publishes that
 // go/doc/comment does not render as written, and returns how many it read.
 //
-// Two shapes, both silent in source: a comment block a blank line detaches from
-// the declaration it documents, which go/doc drops entirely, and asterisk-pair
-// emphasis, which go/doc/comment has no syntax for and renders literally. Test
+// Two shapes, both silent in source. A comment block a blank line detaches from
+// the declaration it documents, which go/doc drops entirely. And markup go/doc
+// has no syntax for, which it renders literally, character for character:
+//
+//	*emphasis*   **emphasis**   _emphasis_   ```fence```
+//
+// The markup check reads the PARSED comment rather than its text, so a spelling
+// inside a code block is left alone: an indented block is code by go/doc's own
+// rule, and code is exactly where these characters are meant literally. Test
 // files are not read, because nothing in one reaches go doc.
 func AssertDocCommentsRender(t TB, root string) (checked int) {
 	t.Helper()
@@ -20,15 +28,17 @@ func AssertDocCommentsRender(t TB, root string) (checked int) {
 		t.Errorf("loading %s: %v", root, err)
 		return 0
 	}
+	parser := &comment.Parser{}
 	for _, p := range m.Packages {
 		for _, f := range p.files {
-			if strings.HasSuffix(p.fset.Position(f.Package).Filename, "_test.go") {
+			if isTestFile(p.fset.Position(f.Package).Filename) {
 				continue
 			}
 			for _, g := range docGroups(f) {
 				checked++
-				if strings.Contains(g.Text(), "**") {
-					t.Errorf("%s: doc comment uses ** emphasis, which go/doc/comment renders literally", p.fset.Position(g.Pos()))
+				for _, what := range literalMarkup(parser, g.Text()) {
+					t.Errorf("%s: doc comment uses %s, which go/doc/comment renders literally",
+						p.fset.Position(g.Pos()), what)
 				}
 			}
 			for _, d := range detachedDocs(p.fset, f) {
@@ -38,6 +48,72 @@ func AssertDocCommentsRender(t TB, root string) (checked int) {
 		}
 	}
 	return checked
+}
+
+// emphasisPattern matches the word-bounded asterisk and underscore spellings a
+// reader writes expecting emphasis, which go/doc prints as typed. A name that
+// merely carries underscores is quoted in this module's prose, which the word
+// boundary then excludes.
+var emphasisPattern = regexp.MustCompile(`(^|[\s(\[])(\*\*?[^\s*][^*]*\*\*?|_[^\s_][^_]*_)($|[\s.,;:!?)\]])`)
+
+// literalMarkup returns what a doc comment spells as markup that go/doc renders
+// literally. Only Plain text is read: the parser has already separated code
+// blocks, where these characters are meant as written.
+func literalMarkup(parser *comment.Parser, doc string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	report := func(what string) {
+		if !seen[what] {
+			seen[what] = true
+			out = append(out, what)
+		}
+	}
+	for _, block := range parser.Parse(doc).Content {
+		for _, line := range plainLines(block) {
+			if emphasisPattern.MatchString(line) {
+				report("* or _ emphasis")
+			}
+			if strings.HasPrefix(strings.TrimSpace(line), "```") {
+				report("a ``` fence")
+			}
+		}
+	}
+	return out
+}
+
+// plainLines returns a block's plain text, one line per source line. A Code
+// block contributes nothing: its content is meant literally.
+func plainLines(block comment.Block) []string {
+	var texts []comment.Text
+	switch b := block.(type) {
+	case *comment.Paragraph:
+		texts = b.Text
+	case *comment.Heading:
+		texts = b.Text
+	case *comment.List:
+		for _, item := range b.Items {
+			for _, inner := range item.Content {
+				texts = append(texts, plainTextOf(inner)...)
+			}
+		}
+	case *comment.Code:
+		return nil
+	}
+	var sb strings.Builder
+	for _, t := range texts {
+		if plain, ok := t.(comment.Plain); ok {
+			sb.WriteString(string(plain))
+		}
+	}
+	return strings.Split(sb.String(), "\n")
+}
+
+// plainTextOf unwraps a list item's inner block to its text spans.
+func plainTextOf(block comment.Block) []comment.Text {
+	if p, ok := block.(*comment.Paragraph); ok {
+		return p.Text
+	}
+	return nil
 }
 
 // docGroups returns every comment group the file attaches to a declaration it
@@ -78,14 +154,47 @@ type detached struct {
 // detachedDocs returns every exported declaration in f whose preceding comment
 // block a blank line separates from it. The parser attaches a doc comment only
 // when it abuts the declaration, so such a block documents nothing.
+//
+// Every position a doc can occupy is scanned: the package clause, each
+// top-level declaration, each spec of a parenthesised const, var or type block
+// and each exported struct field. A Doc holding only directives (//go:build and
+// its kin) has no text and counts as absent, because go/doc shows nothing for
+// it either.
+//
+// A gap comment is reported only when its text BEGINS WITH the declaration's
+// name. That is the shape of a doc comment by Go's own convention, and it is
+// what separates one from the trailing note, banner or commented-out code that
+// also live in a gap — a distinction no heuristic about blank lines can make.
 func detachedDocs(fset *token.FileSet, f *ast.File) []detached {
 	var out []detached
+	check := func(name string, doc *ast.CommentGroup, after, before token.Pos) {
+		if name == "" || !ast.IsExported(name) || docText(doc) != "" {
+			return
+		}
+		g := detachedGroupBefore(fset, f, after, before)
+		if g == nil || !beginsWithName(g.Text(), name) {
+			return
+		}
+		out = append(out, detached{comment: g, name: name})
+	}
+
+	check(packageDocName, f.Doc, f.FileStart, f.Package)
+
 	prevEnd := f.Name.End()
 	for _, d := range f.Decls {
-		name, exported := exportedDeclName(d)
-		if exported && declDoc(d) == nil {
-			if g := detachedGroupBefore(fset, f, prevEnd, d.Pos()); g != nil {
-				out = append(out, detached{comment: g, name: name})
+		name, _ := exportedDeclName(d)
+		check(name, declDoc(d), prevEnd, d.Pos())
+		if gd, ok := d.(*ast.GenDecl); ok {
+			// A spec's own gap exists only inside a parenthesised block; a bare
+			// declaration's spec shares the declaration's. Struct fields are
+			// scanned either way, since a struct is usually declared bare.
+			specEnd := gd.Lparen
+			for _, spec := range gd.Specs {
+				if gd.Lparen.IsValid() {
+					check(specName(spec), specDoc(spec), specEnd, spec.Pos())
+					specEnd = spec.End()
+				}
+				checkStructFields(fset, f, spec, &out)
 			}
 		}
 		prevEnd = d.End()
@@ -93,12 +202,86 @@ func detachedDocs(fset *token.FileSet, f *ast.File) []detached {
 	return out
 }
 
+// packageDocName is the subject a detached package doc documents. It is not an
+// identifier, so it is reported by this name rather than by a declaration's.
+const packageDocName = "the package"
+
+// checkStructFields scans a type spec's exported struct fields, where a doc can also be
+// detached and where go/doc also shows nothing for it.
+func checkStructFields(fset *token.FileSet, f *ast.File, spec ast.Spec, out *[]detached) {
+	ts, ok := spec.(*ast.TypeSpec)
+	if !ok {
+		return
+	}
+	st, ok := ts.Type.(*ast.StructType)
+	if !ok || st.Fields == nil {
+		return
+	}
+	prev := st.Fields.Opening
+	for _, field := range st.Fields.List {
+		for _, id := range field.Names {
+			if !id.IsExported() || docText(field.Doc) != "" {
+				continue
+			}
+			if g := detachedGroupBefore(fset, f, prev, field.Pos()); g != nil && beginsWithName(g.Text(), id.Name) {
+				*out = append(*out, detached{comment: g, name: ts.Name.Name + "." + id.Name})
+			}
+		}
+		prev = field.End()
+	}
+}
+
+// docText is a comment group's rendered text. A group holding only directives
+// renders empty, which is the same as carrying no doc at all.
+func docText(g *ast.CommentGroup) string {
+	if g == nil {
+		return ""
+	}
+	return strings.TrimSpace(g.Text())
+}
+
+// beginsWithName reports whether a comment reads as documentation for name:
+// its first word is that name, which is how Go doc comments open.
+func beginsWithName(text, name string) bool {
+	if name == packageDocName {
+		return strings.HasPrefix(strings.TrimSpace(text), "Package ")
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(text), " ")
+	return first == name
+}
+
+// specName returns the name a spec inside a parenthesised block publishes.
+func specName(spec ast.Spec) string {
+	switch s := spec.(type) {
+	case *ast.TypeSpec:
+		return s.Name.Name
+	case *ast.ValueSpec:
+		for _, n := range s.Names {
+			if n.IsExported() {
+				return n.Name
+			}
+		}
+	}
+	return ""
+}
+
+// specDoc returns a spec's own doc comment.
+func specDoc(spec ast.Spec) *ast.CommentGroup {
+	switch s := spec.(type) {
+	case *ast.TypeSpec:
+		return s.Doc
+	case *ast.ValueSpec:
+		return s.Doc
+	}
+	return nil
+}
+
 // detachedGroupBefore returns the last comment block in the gap between two
-// declarations, when a blank line separates it from the second.
+// positions, when a blank line separates it from the second.
 func detachedGroupBefore(fset *token.FileSet, f *ast.File, after, before token.Pos) *ast.CommentGroup {
 	var found *ast.CommentGroup
 	for _, g := range f.Comments {
-		if g.Pos() > after && g.End() < before {
+		if g.Pos() >= after && g.End() < before {
 			found = g
 		}
 	}

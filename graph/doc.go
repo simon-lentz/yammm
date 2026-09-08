@@ -180,7 +180,7 @@
 // # Type Identity and Type Names
 //
 // A type is identified by [github.com/simon-lentz/yammm/schema.TypeID] — its
-// declaring schema path plus its name. A type *name* is a rendering of that
+// declaring schema path plus its name. A type NAME is a rendering of that
 // identity, in canonical instance tag form:
 //
 //   - Local types: unqualified name (e.g., "Person")

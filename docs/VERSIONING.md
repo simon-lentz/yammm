@@ -1044,7 +1044,7 @@ Found by a state analysis rather than by a pass: the GitHub CI workflow's pre-co
 
 - **`scripts/gomodtidy.sh` takes `go mod tidy -diff`'s exit code as its verdict** (A-358) and shows stderr only when the command fails. It had treated any output as a change, and on a cold module cache stderr carries download progress with exit 0 and an empty stdout, so the gate was red in CI and green locally for thirteen pushes. Proved in three directions: a planted `require` in a fixture module fails with the diff, the clean tree passes, an empty module cache passes.
 
-### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `49b1be6`, group 3 `1718ca2`, group 4 `<pending>` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
+### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `49b1be6`, group 3 `1718ca2`, group 4 `df28cac`, group 5 `<pending>` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
 
 *Written per group, in the session that lands it (A-227, A-346). The A-323 read of the fix pass above ran as four passes over its thirteen groups and produced **forty-one repairs R1…R41**, planned into seven groups. **The declaration delta is measured at each commit**; evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_<commit>.txt` for each.*
 
@@ -1125,14 +1125,14 @@ re-counted in its tree at `09e5e970`, not inherited from the decisions. `gorelea
 - **A lookup tries the address as spelled before it canonicalizes** (A-402). `Snapshot.InstanceByKey` and `Graph.AddComposed` read the index directly and fall back to the canonical form only on a miss. Strictly semantics-preserving: every address that resolved before resolves now. `docs/API.md` advertises `InstanceByKey` as an O(1) lookup while every call on a Timestamp, Date or UUID key ran a parse, a re-render and a marshal, and `AddComposed` paid it once per composed child under the graph's lock held exclusively.
 
 
-#### Group 4 — the evaluator and the validator (A-397, A-368, A-369, A-370, A-371, A-373, A-374; `<pending>`)
+#### Group 4 — the evaluator and the validator (A-397, A-368, A-369, A-370, A-371, A-373, A-374; `df28cac`)
 
 **The first residue group that moves a declaration**, and the group whose whole
 shape is *a rule delivered at some of its sites*. Every item below is a rule
 this round already ratified, carried to the readers, exits and member kinds it
 had not reached. Measured at **zero cost to rdata**: it installs no logger,
 declares no relation named `SELF`, and its suite shows no delta beyond unit 4's
-hash re-key.
+hash re-key. `gorelease -base=v0.20.0` at `df28cac` reads twelve incompatible, **fifty-six additive** — one more than every group since 8, the addition being `SelfVariable` below; groups 1 to 3 moved no declaration at all, so the tool reported none of their load-breaking refusals, the silent-corruption fix or the new load-path guard.
 
 ##### Additive — Go API, `schema/expr`
 
@@ -1156,6 +1156,29 @@ hash re-key.
 
 - **`sameSources`' unreachable arm is deleted and its invariant stated** (A-374). One schema holding its own source entry while the other does not cannot occur: a schema carries `Sources` only through the loader, `setSources` has one caller, and it is handed the registry holding the schema's own entry. A dead arm in a four-way partition is what the round retired elsewhere.
 - **The `WithLogger` claim is true in the code** (A-397). `instance/options.go`, the package doc and `docs/API.md` all say each record is logged with the context passed to `Validate`; the property-name-normalization record went through `slog.Logger.Debug`, which the standard library hard-codes to `context.Background`. It now takes the package's ctx-taking helper, as every other logging site in `instance/` does. **The prose was right and the code was wrong**, so the code moved.
+
+
+#### Group 5 — the gates (A-396, A-359, A-360, A-361, A-362, A-403; `<pending>`)
+
+**No shipped surface moves.** Every change is one of the repo's own gates or the
+prose a gate reads, and the one signature that moves is in `internal/`. Recorded
+here because the group is a commit in the release's range: it is the group that
+makes the gates able to fail, and three of them could not.
+
+##### The gates, each measured against what it missed
+
+- **The dependency gate reads every ROW, not one line per directory** (A-359). A row's subject names a package, which need not be the one whose `doc.go` carries it, so `adapter/doc.go`'s family table is read row by row against each sibling's own imports — and the doc-only skip, which exempted that file entirely, is deleted. A `# Dependencies` heading with no row the gate can read is now an error. **Measured: 10 rows read before, 23 under 18 headings after.** Six headings stated their claim in prose or in an ASCII arrow the gate does not read (`adapter/neo4j`, `diag`, `immutable`, `internal/value`, `location`, `lsp`) and are converted; two rows in `adapter/doc.go` were false and are corrected; `adapter/json` gains the block its five siblings carry.
+- **The doc-comment gate reads the PARSED comment** (A-360), so it reports `*x*`, `**x**` and `_x_` emphasis and a ``` fence in plain text and never inside a code block, where those characters are meant as written. The detached-doc rule now covers every position a doc can occupy — each spec of a parenthesised block, each exported struct field and the package clause — and reports a gap comment only when its text begins with the declaration's name, which is what separates lost documentation from an ordinary trailing note. **Nine sites found: five were real emphasis go/doc printed as typed; four were identifiers carrying underscores, now quoted.**
+- **The gate loader reads the TRACKED tree** (A-362) and applies a build constraint to a NON-TEST file only (A-396). `go doc` renders no test declaration under any tag, so the published-documentation ground could not justify dropping test files — and dropping them removed the regression anchors the gate exists to check. **Measured: 1,551 doc links resolved before, 1,555 after**; the build context is now pinned to one GOOS/GOARCH rather than the machine's, and both module gates carry a floor set just under the true count rather than three times below it.
+- **One pinned toolchain in both environments** (A-361). `gofumpt` and `goimports` become `tool` directives in `go.mod`, as `golangci-lint` already was, and the hooks run them through `go tool`; CI's two `go install …@latest` steps are deleted. The tidy hook's file filter gains `go.sum`, and `scripts/gomodtidy.sh` resolves the repo root through git, fails when the module list is empty or unreadable, and refuses an untracked `go.mod` that CI would never see.
+- **The tidy gate discriminates on the EVIDENCE** (A-403). Output means untidy whatever the exit status; a non-zero status with no output means the command failed to RUN, reported as that with its stderr. **Demonstrated directly**: given a command that cannot run, the old shape printed "this module is untidy" above an empty diff, and the new one names the failure and shows the reason.
+
+##### Note for a contributor
+
+`go.mod`'s Go directive reads `go 1.26.0` rather than `go 1.26`: adding the tool
+directives made `go mod tidy` normalize it, and the tidy gate enforces what tidy
+wants. `gofumpt` and `goimports` are no longer expected on `PATH`; `go tool`
+runs the pinned ones.
 
 
 ### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the clause-5 second fix pass committed as `ebdeb6a`; the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105)

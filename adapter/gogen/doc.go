@@ -80,7 +80,7 @@
 //
 // Each declared association is emitted as one struct named
 // EDGE_<Owner>_<edge>_<Target>, carrying the target type's primary-key
-// fields under the parser's reserved _target_ keys, with the association's
+// fields under the parser's reserved "_target_" keys, with the association's
 // own edge properties beside them — the shape adapter/json's parser and
 // writer exchange:
 //
@@ -94,7 +94,7 @@
 // emitted once, by its declaring type, with every subtype's field pointing at that
 // same struct. A completed schema guarantees every association targets a concrete
 // type (E_INVALID_ASSOCIATION_TARGET) that carries a primary key
-// (E_NO_PRIMARY_KEY), so the _target_ fields always exist. Compositions, by
+// (E_NO_PRIMARY_KEY), so the "_target_" fields always exist. Compositions, by
 // contrast, are inlined as ownership slices ([]*Child for every
 // multiplicity — the parser exchanges an array for (one) too) on the owning
 // struct.

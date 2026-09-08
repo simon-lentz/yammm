@@ -54,5 +54,10 @@
 // for values exceeding 2^53. This is inherent to JSON and not specific to this
 // adapter.
 //
+// # Dependencies
+//
+//	adapter/json  ──imports──▶  instance, diag, location, graph, immutable, schema,
+//	                            adapter/json/internal/typetag, github.com/tidwall/jsonc
+//
 // [tidwall/jsonc]: https://github.com/tidwall/jsonc
 package json

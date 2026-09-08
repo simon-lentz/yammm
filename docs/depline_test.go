@@ -13,11 +13,16 @@ import (
 // paragraph asserting the opposite, because no gate read the claim.
 func TestModuleDependencyLines(t *testing.T) {
 	t.Parallel()
-	checked := doclint.AssertDependencyLines(t, "..")
-	// The walk is the only thing standing between "no line disagrees" and "no
-	// line was read", so a shrunken walk is an error rather than a silent pass.
-	if checked < 8 {
-		t.Errorf("checked only %d dependency lines across the module; the walk is not reaching the package docs", checked)
+	checked, headings := doclint.AssertDependencyLines(t, "..")
+	// Every heading was read, which is stronger than a floor: a floor measures
+	// the walk, and this measures the claims. A heading the gate cannot read is
+	// an error inside the gate, so reaching this with headings > checked means
+	// the walk lost a file rather than that a claim went unstated.
+	if headings == 0 {
+		t.Error("no # Dependencies heading was found; the walk is not reaching the package docs")
 	}
-	t.Logf("checked %d dependency lines", checked)
+	if checked < headings {
+		t.Errorf("read %d rows under %d headings; every heading owes at least one row", checked, headings)
+	}
+	t.Logf("checked %d dependency rows under %d headings", checked, headings)
 }

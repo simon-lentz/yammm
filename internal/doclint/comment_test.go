@@ -37,8 +37,20 @@ func TestAssertDocCommentsRender_WellFormedDocsAreSilent(t *testing.T) {
 func TestAssertDocCommentsRender_ReportsADetachedBlock(t *testing.T) {
 	t.Parallel()
 	r, _ := runCommentGate(t)
-	if !r.reports("separates this comment block from Orphan") {
-		t.Errorf("the detached block was not reported: %v", r.msgs)
+	// Every position a doc can occupy: a top-level declaration, a spec inside a
+	// parenthesised block, and an exported struct field. The scan reached only
+	// the first, so the other two lost their documentation silently.
+	for _, name := range []string{"from Orphan", "from OrphanConst", "from Holder.OrphanField"} {
+		if !r.reports("separates this comment block " + name) {
+			t.Errorf("%s was not reported: %v", name, r.msgs)
+		}
+	}
+	// A gap comment that names no declaration is a note, not lost
+	// documentation, and reporting it is what made the rule unusable.
+	for _, m := range r.msgs {
+		if strings.Contains(m, "from Noted") || strings.Contains(m, "from KeptConst") || strings.Contains(m, "KeptField") {
+			t.Errorf("a note or an attached doc was reported: %s", m)
+		}
 	}
 }
 

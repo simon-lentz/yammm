@@ -158,7 +158,7 @@ func checkTopLevelKeys(data []byte) error {
 // skipValue advances past one top-level value and reports a null.
 //
 // It decodes into a json.RawMessage, which copies the value. A token walk
-// avoids the copy and is *slower* — encoding/json finds a value's bounds with
+// avoids the copy and is SLOWER — encoding/json finds a value's bounds with
 // its scanner and only tokenizes on demand, so walking every token to skip a
 // section costs more than copying it. Measured: the token form put
 // UpdateMetadata below the 3x floor TestUpdateMetadataRatioFloor

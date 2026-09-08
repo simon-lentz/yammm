@@ -4,79 +4,94 @@ import (
 	"errors"
 	"fmt"
 	"go/build"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"unicode"
 )
 
-// depArrow introduces the import list in a package doc's Dependencies block.
-const depArrow = "──imports──▶"
+const (
+	// depArrow introduces the import list in a package doc's Dependencies
+	// block. It is the ONE spelling the gate reads; an ASCII variant is a row
+	// the gate does not see, under a heading that says it does.
+	depArrow = "──imports──▶"
+	// depHeading is the section a dependency claim lives under. A file carrying
+	// it owes at least one depArrow row.
+	depHeading = "# Dependencies"
+)
 
-// AssertDependencyLines reports every package doc whose dependency line
-// disagrees with the directory's real non-stdlib imports, and returns how many
-// lines it checked.
+// AssertDependencyLines reports every dependency ROW in the module that
+// disagrees with the imports of the package its subject names, and returns how
+// many rows it read and how many "# Dependencies" headings it found.
 //
-// The count is returned rather than asserted internally so the caller keeps its
-// own floor visible: a walk that reaches no package doc checks no line and
-// would otherwise pass.
-func AssertDependencyLines(t TB, root string) (checked int) {
+// A row's subject names a package, which need not be the one whose doc.go
+// carries it: adapter/doc.go tabulates its whole family, one row per sibling,
+// and each row is read against that sibling's own imports. A directory whose
+// only Go file is doc.go imports nothing itself, which says nothing about the
+// rows it publishes, so there is no doc-only skip.
+//
+// A heading with no row this gate can read is an ERROR: it is prose where the
+// module states a machine-checked claim everywhere else, and the gate that
+// cannot read it reports nothing about it. The one spelling is [depArrow].
+//
+// Both counts are returned rather than asserted internally so the caller keeps
+// its own floor visible, and so it can require that every heading was read.
+func AssertDependencyLines(t TB, root string) (checked, headings int) {
 	t.Helper()
 	m, err := Load(root)
 	if err != nil {
 		t.Errorf("loading %s: %v", root, err)
-		return 0
+		return 0, 0
 	}
 	for _, p := range m.Packages {
-		dir := filepath.Join(root, filepath.FromSlash(p.Dir))
-		// A directory whose only Go file is doc.go documents a family's edges
-		// rather than its own, and go/build reports it importing nothing.
-		docOnly, err := onlyDocGo(dir)
-		if err != nil {
-			t.Errorf("%s: %v", p.Dir, err)
+		rows, file, hasHeading := p.dependencyRows()
+		if !hasHeading {
 			continue
 		}
-		if docOnly {
+		headings++
+		if len(rows) == 0 {
+			t.Errorf("%s: a # Dependencies heading with no %s row; the gate reads rows, so this claim is unchecked", file, depArrow)
 			continue
 		}
-		documented, file, ok := p.dependencyLine()
-		if !ok {
-			continue
-		}
-		checked++
-		actual, err := nonStdImports(dir, m.Path)
-		if err != nil {
-			t.Errorf("%s: %v", file, err)
-			continue
-		}
-		for _, extra := range notIn(documented, actual) {
-			t.Errorf("%s: the dependency line names %s, which the directory does not import", file, extra)
-		}
-		for _, absent := range notIn(actual, documented) {
-			t.Errorf("%s: the directory imports %s, which the dependency line does not name", file, absent)
+		for _, row := range rows {
+			checked++
+			subject, ok := m.packageForSubject(row.subject, p.Dir)
+			if !ok {
+				t.Errorf("%s: the dependency row names %q, which is no package in this module", file, row.subject)
+				continue
+			}
+			actual, err := nonStdImports(filepath.Join(root, filepath.FromSlash(subject.Dir)), m.Path)
+			if err != nil {
+				t.Errorf("%s: %v", file, err)
+				continue
+			}
+			for _, extra := range notIn(row.paths, actual) {
+				t.Errorf("%s: the %s row names %s, which that directory does not import", file, row.subject, extra)
+			}
+			for _, absent := range notIn(actual, row.paths) {
+				t.Errorf("%s: %s imports %s, which its dependency row does not name", file, row.subject, absent)
+			}
 		}
 	}
-	return checked
+	return checked, headings
 }
 
-// onlyDocGo reports whether dir holds Go source and every file of it is doc.go.
-func onlyDocGo(dir string) (bool, error) {
-	ents, err := os.ReadDir(dir)
-	if err != nil {
-		return false, fmt.Errorf("reading %s: %w", dir, err)
-	}
-	var found bool
-	for _, e := range ents {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
-			continue
+// packageForSubject resolves a row's subject to a package: the module-relative
+// directory it spells, or the doc's own directory for a row that names it.
+func (m *Module) packageForSubject(subject, own string) (*Package, bool) {
+	if subject == own {
+		for _, p := range m.Packages {
+			if p.Dir == own {
+				return p, true
+			}
 		}
-		if e.Name() != "doc.go" {
-			return false, nil
-		}
-		found = true
 	}
-	return found, nil
+	for _, p := range m.Packages {
+		if p.Dir == subject {
+			return p, true
+		}
+	}
+	return nil, false
 }
 
 // nonStdImports returns dir's non-test imports outside the standard library,
@@ -110,11 +125,19 @@ func nonStdImports(dir, modulePath string) ([]string, error) {
 	return slices.Compact(out), nil
 }
 
-// dependencyLine returns the import paths this directory's doc.go names for
-// itself, and the file that names them. Only doc.go is read: a dependency line
-// describes a directory's non-test imports, and a test file's package doc
-// would be compared against a list that excludes its own.
-func (p *Package) dependencyLine() (paths []string, file string, ok bool) {
+// depRow is one arrow line: the package its subject names, and the import paths
+// the line claims for it.
+type depRow struct {
+	subject string
+	paths   []string
+}
+
+// dependencyRows returns every arrow row this directory's doc.go publishes, the
+// file that publishes them, and whether the file carries a # Dependencies
+// heading at all. Only doc.go is read: a row describes a directory's non-test
+// imports, and a test file's package doc would be compared against a list that
+// excludes its own.
+func (p *Package) dependencyRows() (rows []depRow, file string, hasHeading bool) {
 	for _, f := range p.files {
 		if f.Doc == nil {
 			continue
@@ -123,27 +146,44 @@ func (p *Package) dependencyLine() (paths []string, file string, ok bool) {
 		if filepath.Base(name) != "doc.go" {
 			continue
 		}
-		if paths, ok = dependencyPaths(f.Doc.Text(), p.Dir); ok {
-			return paths, name, true
+		doc := f.Doc.Text()
+		rows := dependencyRowsIn(doc)
+		// Rows are the claim, and a heading is how a file announces it carries
+		// them. Either alone is enough to read the file: adapter/doc.go
+		// tabulates its family under "Dependency Direction" and owes its rows
+		// just the same, and a heading with no row is the error below.
+		if len(rows) == 0 && !strings.Contains(doc, depHeading) {
+			continue
 		}
+		return rows, name, true
 	}
 	return nil, "", false
 }
 
-// dependencyPaths returns the import paths a doc comment's dependency lines
-// name for subject. The second result distinguishes a line naming nothing
-// outside the standard library from no line at all.
-func dependencyPaths(doc, subject string) (paths []string, ok bool) {
+// dependencyRowsIn returns one row per arrow line in a doc comment, in the
+// order written, merging the paths of two rows naming one subject.
+func dependencyRowsIn(doc string) []depRow {
+	var rows []depRow
+	index := make(map[string]int)
 	for _, line := range depLogicalLines(doc) {
 		before, after, found := strings.Cut(line, depArrow)
-		if !found || strings.TrimSpace(before) != subject {
+		if !found {
 			continue
 		}
-		ok = true
-		paths = append(paths, depFields(after)...)
+		subject := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(before), "//"))
+		i, seen := index[subject]
+		if !seen {
+			index[subject] = len(rows)
+			rows = append(rows, depRow{subject: subject})
+			i = len(rows) - 1
+		}
+		rows[i].paths = append(rows[i].paths, depFields(after)...)
 	}
-	slices.Sort(paths)
-	return slices.Compact(paths), ok
+	for i := range rows {
+		slices.Sort(rows[i].paths)
+		rows[i].paths = slices.Compact(rows[i].paths)
+	}
+	return rows
 }
 
 // depLogicalLines joins a dependency list wrapped across several comment lines
