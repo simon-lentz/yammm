@@ -392,12 +392,12 @@ func (b *builder) unquoteAt(t *strTok, what string) (string, bool) {
 	return text, true
 }
 
-// errUnquoteSyntax keeps the exact message the strconv-backed unquoter
-// produced, so consumers matching diagnostic text see no change.
-// unquoteSyntaxCause is the same message without the prefix, for the one
+// unquoteSyntaxCause is the unquoter's message without the prefix, for the one
 // reporting site that supplies its own.
 const unquoteSyntaxCause = "invalid syntax"
 
+// errUnquoteSyntax keeps the exact message the strconv-backed unquoter
+// produced, so consumers matching diagnostic text see no change.
 var errUnquoteSyntax = errors.New("unquote string: " + unquoteSyntaxCause)
 
 // unquote strips a literal's surrounding quotes and resolves exactly the

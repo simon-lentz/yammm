@@ -86,7 +86,7 @@ func (rl *rootLoader) openFile(relativePath string) (*os.File, error) {
 			return nil, rl.handleOpenError(err, relativePath)
 		}
 		return f, nil
-	})
+	}, func() (os.FileInfo, error) { return rl.root.Stat(cleanPath) })
 }
 
 // maxSchemaSourceBytes bounds one schema source, entry or import. The largest
@@ -128,9 +128,16 @@ var errNotRegularFile = errors.New("not a regular file")
 // openRegular opens a file for reading and refuses anything but a regular
 // file. The open is non-blocking so a FIFO cannot stall it, and the kind is
 // read from the open descriptor so nothing can change between check and read.
-func openRegular(open func(flag int) (*os.File, error)) (*os.File, error) {
+//
+// stat classifies a FAILED open, which a socket produces: there is no
+// descriptor to read the kind from, and the platform's errno is not an answer
+// a caller can report. Nothing is opened afterwards, so there is no window.
+func openRegular(open func(flag int) (*os.File, error), stat func() (os.FileInfo, error)) (*os.File, error) {
 	f, err := open(os.O_RDONLY | syscall.O_NONBLOCK)
 	if err != nil {
+		if info, serr := stat(); serr == nil && !info.Mode().IsRegular() {
+			return nil, errNotRegularFile
+		}
 		return nil, err
 	}
 	info, err := f.Stat()
@@ -147,7 +154,9 @@ func openRegular(open func(flag int) (*os.File, error)) (*os.File, error) {
 
 // readSourceFile opens and reads one schema file within the source bound.
 func readSourceFile(absPath string) ([]byte, error) {
-	f, err := openRegular(func(flag int) (*os.File, error) { return os.OpenFile(absPath, flag, 0) })
+	f, err := openRegular(
+		func(flag int) (*os.File, error) { return os.OpenFile(absPath, flag, 0) },
+		func() (os.FileInfo, error) { return os.Stat(absPath) })
 	if err != nil {
 		if errors.Is(err, errNotRegularFile) {
 			return nil, fmt.Errorf("schema path %q is not a regular file", absPath)
@@ -794,11 +803,12 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 }
 
 // registerFailureIssue renders a Registry.Register refusal at the schema
-// declaration it is about, naming the source that already holds the name so a
-// reader can find the other half of the clash. Only DuplicateName is an
-// authoring mistake — a registry holds one schema per name, whichever loads
-// registered them — and it draws E_DUPLICATE_SCHEMA; the other kinds mean the
-// loader built something it should not have.
+// declaration it is about, over a two-way partition. DuplicateName and
+// DuplicateSourceID are the caller's conditions and name what clashed:
+// E_DUPLICATE_SCHEMA, which points at the source already holding the name, and
+// E_LOAD_SOURCE_CHANGED, whose message the registry writes. InvalidSourceID
+// and InvalidName mean the loader built something unregisterable, and draw
+// E_INTERNAL, as does any error that is not a RegistryError.
 func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
 	regErr, ok := errors.AsType[*RegistryError](err)
 	if !ok {
@@ -827,9 +837,8 @@ func (l *loader) registerFailureIssue(s *Schema, err error) diag.Issue {
 		return b.Build()
 	case DuplicateSourceID:
 		// A caller's condition, not the loader's: the registry holds this
-		// source as another load compiled it, and the file has changed since.
-		return diag.NewIssue(diag.Error, diag.E_LOAD_SOURCE_CHANGED,
-			"source re-registered with different content: "+regErr.Message).
+		// source as another load compiled it, and it no longer matches.
+		return diag.NewIssue(diag.Error, diag.E_LOAD_SOURCE_CHANGED, regErr.Message).
 			WithSpan(s.Span()).Build()
 	case InvalidSourceID, InvalidName:
 		return diag.NewIssue(diag.Error, diag.E_INTERNAL,
@@ -1293,8 +1302,9 @@ func (l *loader) registerCachedClosureSources(s *Schema) {
 	}
 }
 
-// readImportFile reads an import file using sandboxed access via rootLoader.
-// Falls back to in-memory sources if available.
+// readImportFile reads an import file from the in-memory sources, else through
+// the sandboxed rootLoader. Every read it makes is bounded and non-blocking;
+// there is no unsandboxed fallback.
 func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, location.SourceID, error) {
 	candidates := importCandidates(relativePath)
 
@@ -1313,7 +1323,7 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 	// Under WithSourcesOnly the in-memory set is the whole universe:
 	// a miss is an error, never a filesystem read.
 	if l.cfg.sourcesOnly {
-		return nil, location.SourceID{}, fmt.Errorf("import file %q not found in pre-registered sources", relativePath)
+		return nil, location.SourceID{}, errors.New("not among the pre-registered sources")
 	}
 
 	// Use rootLoader for sandboxed file access
@@ -1322,18 +1332,11 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 	}
 
 	if l.rootLoader == nil {
-		// No module root and not in sourceContent - try direct file access (legacy)
-		for _, candidate := range candidates {
-			content, err := os.ReadFile(candidate)
-			if err == nil {
-				sourceID, err := location.SourceIDFromAbsolutePath(candidate)
-				if err != nil {
-					return nil, location.SourceID{}, fmt.Errorf("create source ID for %q: %w", candidate, err)
-				}
-				return content, sourceID, nil
-			}
-		}
-		return nil, location.SourceID{}, fmt.Errorf("import file not found: %s", relativePath)
+		// No module root is in play, so there is no sandbox to read through and
+		// no tier of the resolution ladder left: the import misses the
+		// in-memory set and has nowhere else to resolve.
+		return nil, location.SourceID{}, errors.New(
+			"not among the pre-registered sources, and no module root is in play")
 	}
 
 	// Try each candidate with rootLoader.

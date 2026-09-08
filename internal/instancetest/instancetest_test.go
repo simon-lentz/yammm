@@ -86,3 +86,15 @@ func TestVI_Options(t *testing.T) {
 		t.Error("Provenance() = nil, want set")
 	}
 }
+
+// TestVI_NoKey pins the option a keyless part needs: the built instance
+// carries an empty key rather than the [1] default.
+func TestVI_NoKey(t *testing.T) {
+	vi := instancetest.VI("Wheel", instancetest.NoKey())
+	if got := vi.PrimaryKey().Len(); got != 0 {
+		t.Errorf("PrimaryKey().Len() = %d, want 0", got)
+	}
+	if got := vi.PrimaryKey().String(); got != "[]" {
+		t.Errorf("PrimaryKey() = %s, want []", got)
+	}
+}

@@ -120,12 +120,14 @@ type UnresolvedParts struct {
 // validated value would. A value the constraint cannot render is kept as it
 // arrived, because this entry point reconstructs a document rather than
 // validating one, and a document written before that rule existed must still
-// load. Primary keys are not rewritten: the wire holds canonical text, so a
-// loaded key is already canonical.
+// load. Primary keys are rewritten the same way, before the instance index is
+// built, and every position that addresses an instance moves with them, so an
+// edge or a duplicate record spelled another way still resolves.
 //
 // Returns a diag.Result with Fatal-severity E_INTERNAL diagnostics if
 // internal consistency checks fail (e.g., edge references to missing
-// instances, or a zero [schema.TypeID] at any parts position — identity is
+// instances, two instances of one type whose keys canonicalize to one
+// address, or a zero [schema.TypeID] at any parts position — identity is
 // total at this boundary). snapshot.Load validates these invariants before
 // calling RebuildSnapshot; failures here indicate a bug in the caller.
 func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Result) {
@@ -133,6 +135,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 
 	validatePartsIdentity(parts, collector)
 	validatePartsRootTypes(s, parts, collector)
+	validatePartsCardinality(s, parts, collector)
 	if collector.HasErrors() {
 		return nil, collector.Result()
 	}
@@ -153,8 +156,21 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 
 		for _, ip := range instParts {
 			inst := rebuildInstance(canon.instance(ip))
+			// Indexed by the key the instance CARRIES, never the caller's
+			// spelling: every lookup below canonicalizes first, and the
+			// snapshot's own accessors read this same index. Two parts that
+			// spell one key two ways are one address, and a graph the API
+			// cannot build is refused here rather than handed back with its
+			// slice and its index disagreeing.
+			keyStr := inst.PrimaryKey().String()
+			if _, taken := idx[keyStr]; taken {
+				collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+					fmt.Sprintf("RebuildSnapshot: two instances of type %s at address %s (the parts spell one primary key two ways)",
+						typeID, keyStr)).Build())
+				continue
+			}
 			insts = append(insts, inst)
-			idx[ip.PrimaryKey.String()] = inst
+			idx[keyStr] = inst
 		}
 
 		instances[typeID] = insts
@@ -221,8 +237,9 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	// Step 4: Create UnresolvedEdge records.
 	unresolvedEdges := make([]*UnresolvedEdge, 0, len(parts.Unresolved))
 	for _, up := range parts.Unresolved {
-		// The source address moves with the instances step 1 rewrote; the
-		// target does not, because no instance carries it to render against.
+		// Both addresses move: the source with the instances step 1 rewrote,
+		// the target under the relation's declared target type, as the Add
+		// path rendered it.
 		up = canon.unresolved(up)
 		source := lookupInstance(instanceIndex, up.SourceType, up.SourceKey.String())
 		if source == nil {
@@ -253,7 +270,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		types = []schema.TypeID{}
 	}
 
-	snap := newSnapshot(s, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK(), parts.Attestation)
+	snap := newSnapshot(s, canon, types, instances, instanceIndex, edges, duplicates, unresolvedEdges, diag.OK(), parts.Attestation)
 	return snap, diag.OK()
 }
 
@@ -311,6 +328,44 @@ func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *di
 				fmt.Sprintf("RebuildSnapshot: duplicate record %d is a root duplicate of type %s, which %s",
 					i, dp.Type, rule)).Build())
 		}
+	}
+}
+
+// validatePartsCardinality refuses a non-many composition slot carrying more
+// than one occupant. The (one) composed key segment carries no discriminating
+// element because such a slot holds exactly one child, and this is the entry
+// point where that premise is asserted: without it two occupants are accepted
+// with no diagnostic and the adapter mints one byte-identical _composed_key
+// for both.
+func validatePartsCardinality(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
+	if s == nil {
+		return
+	}
+	var walk func(ip InstanceParts)
+	walk = func(ip InstanceParts) {
+		t, known := s.TypeByID(ip.TypeID)
+		for relName, children := range ip.Composed {
+			if known && len(children) > 1 {
+				if rel, ok := t.Relation(relName); ok && rel.Kind() == schema.RelationComposition && !rel.IsMany() {
+					collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+						fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", relName, len(children))).
+						WithDetail(diag.DetailKeyTypeName, ip.TypeName).
+						WithDetail(diag.DetailKeyRelationName, relName).
+						WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
+				}
+			}
+			for _, child := range children {
+				walk(child)
+			}
+		}
+	}
+	for _, instParts := range parts.Instances {
+		for _, ip := range instParts {
+			walk(ip)
+		}
+	}
+	for _, dp := range parts.Duplicates {
+		walk(dp.Instance)
 	}
 }
 
@@ -576,10 +631,14 @@ func compareDuplicates(a, b *Duplicate) int {
 	return cmp.Compare(provenanceKeyOf(a.Instance), provenanceKeyOf(b.Instance))
 }
 
-// provenanceKeyOf renders an instance's source position for ordering. A loaded
-// snapshot carries no provenance, so both sides render empty and the arm ties —
-// which is correct there: two records with nothing left to tell apart are the
-// same record.
+// provenanceKeyOf renders an instance's source position for ordering.
+//
+// A loaded instance carries a provenance only when the document's instance did:
+// the decoder guards on a present provenance and the writer emits none for an
+// instance without one. Where it does, the span is zero because the decoder
+// builds it that way, so within one source name every loaded record ties at 0:0
+// and across source names the arm orders by name — a stable order, kept. An
+// instance with no provenance renders empty and ties.
 func provenanceKeyOf(i *Instance) string {
 	prov := i.Provenance()
 	if prov == nil {

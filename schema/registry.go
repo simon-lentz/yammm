@@ -104,7 +104,8 @@ func (r *Registry) Register(s *Schema) error {
 	// hash is cached on first use; steady-state re-registrations pay only the
 	// incoming schema's hash.
 	if existing, ok := r.schemas[s.sourceID]; ok {
-		if same, decided := sameSources(existing, s); decided && !same {
+		switch sameSources(existing, s) {
+		case sourcesBytesDiffer:
 			return &RegistryError{
 				Kind: DuplicateSourceID,
 				Message: fmt.Sprintf(
@@ -112,6 +113,15 @@ func (r *Registry) Register(s *Schema) error {
 					s.sourceID.String(),
 				),
 			}
+		case sourcesProvenanceDiffers:
+			return &RegistryError{
+				Kind: DuplicateSourceID,
+				Message: fmt.Sprintf(
+					"schema already registered with source ID: %s (the registered schema carries no sources and this one does, or the reverse)",
+					s.sourceID.String(),
+				),
+			}
+		case sourcesSame, sourcesUndecided:
 		}
 		existingHash, cached := r.hashes[s.sourceID]
 		if !cached {
@@ -275,31 +285,46 @@ func (e *RegistryError) Error() string {
 	return e.Message
 }
 
-// sameEntryBytes compares the entry source each schema carries for its own
-// SourceID. It is undecided when either schema has no sources or no content
-// for the ID, which is where the structural hash decides alone.
+// sourceVerdict is why two schemas under one SourceID were judged the same
+// source or not, so a refusal names the difference instead of assuming bytes.
+type sourceVerdict uint8
+
+const (
+	// sourcesUndecided: neither schema carries sources, so the hash decides.
+	sourcesUndecided sourceVerdict = iota
+	sourcesSame
+	sourcesBytesDiffer
+	// sourcesProvenanceDiffers: one carries the source and the other does not.
+	sourcesProvenanceDiffers
+)
+
 // sameSources reports whether two schemas under one SourceID are the same
-// source: the entry and every source both carry match byte for byte. Two
-// source-less schemas leave the question to the hash. A schema with sources
-// beside one without is not the same source — the provenance differs.
-func sameSources(a, b *Schema) (same, decided bool) {
+// source, and why: the entry and every source both carry match byte for byte.
+// Two source-less schemas leave the question to the hash.
+//
+// One schema holding its own entry while the other does not is not a case this
+// returns: a schema carries Sources only through the loader, setSources has one
+// caller, and it is handed the registry that holds the schema's own entry, so
+// either both lookups find their entry or neither does. Register's provenance
+// message is exact for the arm that remains.
+func sameSources(a, b *Schema) sourceVerdict {
 	as, bs := a.Sources(), b.Sources()
 	if as == nil && bs == nil {
-		return false, false
+		return sourcesUndecided
 	}
 	if as == nil || bs == nil {
-		return false, true
+		return sourcesProvenanceDiffers
 	}
 	ca, okA := as.ContentBySource(a.sourceID)
-	cb, okB := bs.ContentBySource(b.sourceID)
-	if okA != okB || (okA && !bytes.Equal(ca, cb)) {
-		return false, true
+	cb, _ := bs.ContentBySource(b.sourceID)
+	if okA && !bytes.Equal(ca, cb) {
+		return sourcesBytesDiffer
 	}
 	for _, id := range as.SourceIDs() {
 		x, _ := as.ContentBySource(id)
 		if y, ok := bs.ContentBySource(id); ok && !bytes.Equal(x, y) {
-			return false, true
+			return sourcesBytesDiffer
 		}
 	}
-	return true, true
+	return sourcesSame
 }

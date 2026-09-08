@@ -19,10 +19,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Install Go tools
-        run: |
-          go install mvdan.cc/gofumpt@latest
-          go install golang.org/x/tools/cmd/goimports@latest
       - name: Install pre-commit
         run: pip install pre-commit
       - name: Run all checks

@@ -42,7 +42,7 @@ func TestPropertyScopeFromMap_BindsSelfWithoutRewrapping(t *testing.T) {
 	}
 
 	ev := eval.NewEvaluator()
-	got, err := ev.Evaluate(expr.SExpr{expr.Op("."), expr.SExpr{expr.Op("$"), expr.NewLiteral("self")}, expr.NewLiteral("x")}, scope)
+	got, err := ev.Evaluate(t.Context(), expr.SExpr{expr.Op("."), expr.SExpr{expr.Op("$"), expr.NewLiteral("self")}, expr.NewLiteral("x")}, scope)
 	if err != nil || got != int64(1) {
 		t.Errorf("$self.x = %v, %v; want 1", got, err)
 	}

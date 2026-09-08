@@ -46,6 +46,28 @@ func TestBuiltins_FieldsAgree(t *testing.T) {
 		if elementOfReceiver && !takesList {
 			t.Errorf("%s: binds or yields an element of its receiver but does not take a list", s.Name)
 		}
+		// Args states one kind per position: none for a builtin that takes no
+		// argument, exactly MaxArgs for a bounded one, at least one — the
+		// repeating entry — for an unbounded one.
+		switch {
+		case s.MaxArgs == 0 && len(s.Args) != 0:
+			t.Errorf("%s: takes no argument but states %d argument kinds", s.Name, len(s.Args))
+		case s.MaxArgs > 0 && len(s.Args) != s.MaxArgs:
+			t.Errorf("%s: takes up to %d arguments but states %d argument kinds", s.Name, s.MaxArgs, len(s.Args))
+		case s.MaxArgs < 0 && len(s.Args) == 0:
+			t.Errorf("%s: takes unbounded arguments but states no repeating argument kind", s.Name)
+		}
+	}
+	sub, _ := expr.LookupBuiltin("Substring")
+	if k, ok := sub.ArgAt(1); !ok || k != expr.ArgNumber {
+		t.Errorf("Substring's second argument: %v, %v; want a number", k, ok)
+	}
+	coalesce, _ := expr.LookupBuiltin("Coalesce")
+	if k, ok := coalesce.ArgAt(7); !ok || k != expr.ArgAny {
+		t.Errorf("Coalesce's eighth argument: %v, %v; want the repeating entry", k, ok)
+	}
+	if _, ok := sub.ArgAt(-1); ok {
+		t.Error("ArgAt(-1) reported a kind")
 	}
 	lest, _ := expr.LookupBuiltin("Lest")
 	if !lest.AcceptBody || lest.Params != expr.BindNone || lest.MaxParams != 0 {

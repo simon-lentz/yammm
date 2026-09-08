@@ -184,7 +184,7 @@
 //
 // # Dependencies
 //
-//	adapter/jschema  ──imports──▶  schema, location
+//	adapter/jschema  ──imports──▶  schema
 //
 // jschema imports only public yammm packages and the standard library —
 // no internal/* (the adapter-layer carve-out documented in adapter/doc.go

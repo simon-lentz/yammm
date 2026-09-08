@@ -5,6 +5,8 @@ type Order {
     customer String required
 
     *-> SECTIONS (_:many) Section
+    *-> INVOICE (one) Invoice
+    *-> STAMP (one) Stamp
 }
 
 part type Section {
@@ -17,4 +19,38 @@ part type Section {
 part type Note {
     note_id String primary
     body    String required
+}
+
+part type Invoice {
+    invoice_id String primary
+    amount     String required
+}
+
+part type Stamp {
+    mark String required
+}
+
+// A Timestamp-keyed root composing a (_:many) part, which composes a (one)
+// part, which composes keyless (_:many) parts: the depth-two and depth-three
+// composed-key shapes, under a root key that canonicalizes.
+type Run {
+    at Timestamp primary
+
+    *-> STEPS (_:many) Step
+}
+
+part type Step {
+    step_id String primary
+
+    *-> SUMMARY (one) StepSummary
+}
+
+part type StepSummary {
+    label String required
+
+    *-> MARKS (_:many) Mark
+}
+
+part type Mark {
+    mark String required
 }

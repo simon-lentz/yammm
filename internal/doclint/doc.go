@@ -24,7 +24,9 @@
 // # Resolution
 //
 // The resolution unit is the directory, not the package: every .go file in a
-// directory contributes names, test files included. That is what lets a
+// directory that the default build includes contributes names, test files
+// included; a file behind a build constraint is outside the default build's
+// documentation and outside this gate, as it is outside go doc. That is what lets a
 // production doc comment anchor a regression test by name — the convention the
 // repo's comment rules sanction — while still catching an anchor that names a
 // test somebody deleted.

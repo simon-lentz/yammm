@@ -52,6 +52,11 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 		}
 		for _, inst := range snap.InstancesOf(typeID) {
 			cloned := cloneInstance(inst, cloneMap)
+			// Re-keyed under THIS graph's canonicalizer, not the one that wrote
+			// the snapshot: a document persisted before a key's constraint
+			// changed carries addresses the importing schema no longer spells
+			// that way, and every lookup here canonicalizes.
+			g.canon.reinstance(cloned)
 			g.instances[typeID][cloned.PrimaryKey().String()] = cloned
 			imported++
 		}
@@ -74,7 +79,8 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	for _, edge := range snap.Edges() {
 		srcClone := cloneMap[edge.Source()]
 		tgtClone := cloneMap[edge.Target()]
-		g.edges = append(g.edges, newEdge(edge.Relation(), srcClone, tgtClone, edge.Properties()))
+		g.edges = append(g.edges, newEdge(edge.Relation(), srcClone, tgtClone,
+			g.canon.edgeProperties(edge.Source().TypeID(), edge.Relation(), edge.Properties())))
 	}
 
 	// Step 3: Install unresolved edges as pending.
@@ -99,14 +105,17 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			}
 		}
 
-		pk := pendingKey{targetTypeID: unres.TargetType, targetKey: unres.TargetKey}
+		// The pending index is read by the address Add installs, so the target
+		// key moves with the instances this same pass re-keyed.
+		targetKey := g.canon.address(unres.TargetType, unres.TargetKey)
+		pk := pendingKey{targetTypeID: unres.TargetType, targetKey: targetKey}
 		g.pending[pk] = append(g.pending[pk], &pendingEdge{
 			source:       srcClone,
 			relation:     unres.Relation,
 			jsonField:    jsonField,
 			targetType:   unres.TargetType,
-			targetKey:    unres.TargetKey,
-			properties:   unres.Properties(),
+			targetKey:    targetKey,
+			properties:   g.canon.edgeProperties(unres.Source.TypeID(), unres.Relation, unres.Properties()),
 			isRequired:   unres.Required,
 			reasonDetail: reasonDetail,
 		})
@@ -121,6 +130,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			// Duplicate's Instance was rejected and is not in the snapshot's
 			// instance list. Clone it directly.
 			instClone = cloneInstance(dup.Instance, cloneMap)
+			g.canon.reinstance(instClone)
 		}
 
 		conflictClone := cloneMap[dup.Conflict]
@@ -130,6 +140,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			parentClone = cloneMap[dup.Parent]
 			if parentClone == nil {
 				parentClone = cloneInstance(dup.Parent, cloneMap)
+				g.canon.reinstance(parentClone)
 			}
 		}
 

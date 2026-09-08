@@ -22,7 +22,11 @@ func TestModuleDocLinks(t *testing.T) {
 	checked := doclint.AssertNoDanglingLinks(t, "..")
 	// The walk is the only thing standing between "no link dangles" and "no
 	// link was read", so a shrunken walk is an error rather than a silent pass.
-	if checked < 500 {
+	// The floor is set just under the count at the tree that raised it, not at
+	// a round number: a build-constraint filter once dropped ten tracked files
+	// and took three live anchors with them, and both trees stayed green
+	// because the floor was three times lower than the truth.
+	if checked < 1500 {
 		t.Errorf("resolved only %d doc links across the module; the walk is not reaching the source", checked)
 	}
 	t.Logf("resolved %d doc links", checked)

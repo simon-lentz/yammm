@@ -187,9 +187,9 @@ func (a *Adapter) readHeader(reader *csv.Reader) (columns []string, startRow int
 }
 
 // recordToProps converts a CSV record to a property map with type
-// coercion. Dotted edge columns (<field>._target_<pk>, <field>.<prop>)
+// coercion. Dotted edge columns (<field>."_target_"<pk>, <field>.<prop>)
 // classify before the null mapping — an empty cell there means an absent
-// group, never a null property — and assemble into the _target_ objects
+// group, never a null property — and assemble into the "_target_" objects
 // the validator accepts.
 func (a *Adapter) recordToProps(
 	record []string,

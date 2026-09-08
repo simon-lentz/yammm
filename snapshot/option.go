@@ -13,7 +13,11 @@ type Option func(*config)
 type config struct {
 	indent    string
 	createdAt time.Time
-	metadata  map[string]string
+	// createdAtText is a header's created_at carried byte-for-byte, which
+	// the fallback in UpdateMetadataOrReMarshal needs and no caller does; it
+	// wins over createdAt when set.
+	createdAtText string
+	metadata      map[string]string
 }
 
 func applyOptions(opts []Option) config {
@@ -50,6 +54,15 @@ func WithIndent(indent string) Option {
 func WithCreatedAt(t time.Time) Option {
 	return func(c *config) {
 		c.createdAt = t
+	}
+}
+
+// withCreatedAtText writes text as the created_at field verbatim. The caller
+// has parsed it as RFC 3339 already; carrying the bytes rather than the parsed
+// value keeps a foreign header's fractional seconds and offset.
+func withCreatedAtText(text string) Option {
+	return func(c *config) {
+		c.createdAtText = text
 	}
 }
 
@@ -130,7 +143,7 @@ func WithIssueLimit(limit int) LoadOption {
 //
 // It reports values of the three kinds that have a canonical stored form —
 // Timestamp, Date and UUID — and nothing else. Bounds, enums, patterns and
-// invariants stay unchecked. **This is not re-validation**, and a document it
+// invariants stay unchecked. This is not re-validation, and a document it
 // reports nothing for is not thereby valid; [WithRevalidation] is the full
 // check.
 //
@@ -174,7 +187,6 @@ func WithValueConformance(report bool) LoadOption {
 // chosen severity, and neither is visible to the validator alone — the
 // rebuilt input takes its types from the relation, so the document's own claim
 // is only checked here.
-
 func WithRevalidation(severity diag.Severity) LoadOption {
 	return func(c *loadConfig) {
 		c.revalidate = true

@@ -128,3 +128,17 @@ func TestAssertNoDanglingLinks_MissingRootIsReported(t *testing.T) {
 		t.Error("a missing root passed silently")
 	}
 }
+
+// The gate reads the default build, as go doc does: a symbol declared only
+// under a build tag resolves nothing in a default-build file, and a link
+// written inside a tag-only file is not the default build's to check.
+func TestAssertNoDanglingLinks_HonoursBuildConstraints(t *testing.T) {
+	t.Parallel()
+	r, _ := runGate(t)
+	if !r.reports("[TagOnly]") {
+		t.Errorf("a link to a tag-only declaration was not reported; got %v", r.msgs)
+	}
+	if r.reports("[NeverAnywhere]") {
+		t.Errorf("a link inside a tag-only file was checked: %v", r.msgs)
+	}
+}

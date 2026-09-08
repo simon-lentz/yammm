@@ -759,12 +759,12 @@ Module-root discovery adds thirteen declarations across two packages. All are ad
 - **The primary key is canonicalized where it enters the graph.** `Graph.Add`, `Graph.AddComposed` and `RebuildSnapshot` rewrite a `Timestamp`, `Date` or `UUID` primary key into the representation its constraint stores, once, at construction — and every position that addresses an instance moves with it: the instance index, an edge's endpoint keys, a duplicate's key, conflict and parent, and an unresolved record's source key. **What changes for a caller:** two spellings of one key value — `…T03:04:05+00:00` and `…T03:04:05Z`, or a UUID in two cases — are now **one instance**, so a second `Add` under the other spelling draws `E_DUPLICATE_PK` where the graph previously held two, and an edge written with one spelling resolves against a target written with the other. Only a key entering through the bypass constructor `instance.NewValidInstance` was ever non-canonical; a validated instance already carried the canonical form. `graph/canonical.go`'s type doc had stated the opposite rule on a ground that was false, and the first fix — canonicalizing at the snapshot writer — left the graph indexing by one spelling while its document carried another; it was replaced by this one and its writer-side machinery deleted.
 - **`RebuildSnapshot` refuses a root of a type that cannot hold one.** An instances group, or a root duplicate record, keyed by an abstract type, a part type or a type declaring no primary key draws a Fatal `E_INTERNAL` naming the rule, as `validatePartsIdentity` already does for a zero identity: `Graph.Add` refuses all three, so admitting them here made the rebuild path the one way to assemble a graph the API cannot build, and the writer would then emit a document its own reader refuses. A **composed** duplicate legitimately names a part type and is untouched; `Relation` is what separates the two.
 - **`E_CONTEXT_CANCELLED` from `Add` and `AddComposed` reaches `Snapshot.Diagnostics()`.** It was the only rejection those methods did not merge into the cumulative collector, so a half-built graph whose construction was cancelled reported `diag.OK()` construction diagnostics.
-- **A composed child's type resolves across the whole import closure.** The graph resolved every type through one name-oriented lookup that reaches local and directly imported schemas only. That rule is right for a root, where it expresses *ownership* — a graph bound to a schema holds instances of the types that schema declares or directly imports — and right for `AddComposed`'s `parentType` argument, which is a name needing an alias. It is wrong for a composed child, whose type comes from a relation the schema already resolved and which arrived inside a parent the graph does own. The consequence was measured end to end: a schema where an imported type composes a part type from a further import loads clean and validates clean, and `Graph.Add` then dropped the child subtree silently on the inline path and disabled sibling duplicate-primary-key detection on the streamed one. Composed children now resolve through `schema.Schema.TypeByID`, which indexes the closure — the same call, and the same reason, `graph`'s snapshot import already used. A child whose identity is not in the closure at all still draws `E_GRAPH_TYPE_NOT_FOUND`. **The root path's direct-imports-only contract is unchanged**, including its transitive-import hint.
+- **A composed child's type resolves across the whole import closure.** The graph resolved every type through one name-oriented lookup that reaches local and directly imported schemas only. That rule is right for a root, where it expresses *ownership* — a graph bound to a schema holds instances of the types that schema declares or directly imports — and right for `AddComposed`'s `parentType` argument, which is a name needing an alias. It is wrong for a composed child, whose type comes from a relation the schema already resolved and which arrived inside a parent the graph does own. The consequence was measured end to end: a schema where an imported type composes a part type from a further import loads clean and validates clean, and `Graph.Add` then dropped the child subtree silently on the inline path and disabled sibling duplicate-primary-key detection on the streamed one. Composed children now resolve through `schema.Schema.TypeByID`, which indexes the closure — the same call, and the same reason, `graph`'s snapshot import already used. A child whose identity is not in the closure at all still draws `E_GRAPH_TYPE_NOT_FOUND`. *(Corrected 2026-09-06, A-345: on both paths that state is an unreachable invariant guard — the child must already equal its relation's resolved target, and a child from outside the closure stops at the schema guard first — and it draws Fatal `E_INTERNAL`; the inline path has since this release, the streamed path from the tier-1 fix pass.)* **The root path's direct-imports-only contract is unchanged**, including its transitive-import hint.
 - **A composed child's primary key is checked against its own properties, on both paths.** `Graph.Add` applied that rule to a root and neither composed path applied it at all: a child of a keyed part type could carry an empty key, a key of the wrong arity, or a key disagreeing with its own key property. Both paths now draw `E_GRAPH_INVALID_PK`, and the rule subsumes a false positive it used to produce — two keyless children of a keyed part type both render `[]`, so the sibling scan reported `E_DUPLICATE_COMPOSED_PK` on a primary key neither child carried.
 - **`BatchAssembler.AddValid(nil)` returns a per-record error instead of panicking.** `instance.Validator.ValidateForComposition` documents returning nil for each failed child, so the documented consumer loop crashed the process on the first failure. The rejection draws `E_INTERNAL` — the record is absent, not mis-keyed, and a consumer routing remediation off the code would otherwise be sent to inspect a primary key that does not exist. It reaches `Snapshot.Diagnostics()` like every other Add rejection, so a caller that discards per-record errors still has a record of the loss, and its contextual tag is the single token `"nil-instance (attempt #N)"` rather than an empty type name.
 - **`BatchAssembler.Finalize` memoizes a completed outcome, and only a completed one.** Its godoc already promised that a second call returns the same result with no second `Check` pass; the body re-ran `Check` and re-took the snapshot on every call, so a second `Finalize` with a cancelled context turned a finished batch into a failed one. The first call's result and error are now stored and returned. **A `Check` that returned a Fatal — ctx already cancelled — is NOT stored:** cancellation is an abort rather than a result, the graph is unchanged, and a retry with a live context can still finalize. Since the assembler refuses further `Add` calls once `Finalize` has run, memoizing that outcome would leave a batch whose records are all present and valid with no recovery at all.
 - **`RebuildSnapshot` returns a Snapshot with the ordering its accessors document.** It sorted edges and types and nothing else, so a snapshot assembled from parts violated the ordering `Snapshot.InstancesOf`, `Snapshot.Duplicates` and `Snapshot.Unresolved` promise, while one built through `Graph.Snapshot` honoured it — the same type, two constructors, two answers. A repeated identity in `SnapshotParts.Types` also made every instance of that type appear twice in `AllInstances` and twice in the persisted document. The invariant now lives in `newSnapshot`, which both constructors reach, so neither can get it wrong and a third cannot either. **Composed children are deliberately untouched:** `InstanceParts` documents that their order is the caller's, and a keyless child's position is its identity, so re-sorting them would move the address the writers assign. What changes for a `snapshot.Load` consumer: the per-type instance, duplicate and unresolved orderings become the documented ones where a writer had supplied another, and a duplicated type identity no longer double-counts.
-- **`Snapshot.Duplicates` orders by the rejected instance's source position when nothing else separates two records.** `compareDuplicates` walked to the rejected instance's properties and stopped, so two rows of one file colliding with one instance — identical in every field and in their properties, differing only in where they came from — tied, and `slices.SortFunc` is not stable. A consumer pairing the Nth record with the Nth input row paired the wrong span. A loaded snapshot carries no provenance, so both sides render empty and the arm ties there, which is correct: two records with nothing left to tell apart are the same record.
+- **`Snapshot.Duplicates` orders by the rejected instance's source position when nothing else separates two records.** `compareDuplicates` walked to the rejected instance's properties and stopped, so two rows of one file colliding with one instance — identical in every field and in their properties, differing only in where they came from — tied, and `slices.SortFunc` is not stable. A consumer pairing the Nth record with the Nth input row paired the wrong span. A loaded snapshot carries no provenance, so both sides render empty and the arm ties there, which is correct: two records with nothing left to tell apart are the same record. *(Corrected 2026-09-06, A-338, and again 2026-09-08, A-384: a loaded instance carries a provenance ONLY WHEN THE DOCUMENT'S INSTANCE DID — the writer emits none for an instance without one — and where it does, the span is zero. So within one source name loaded records tie at `0:0`, across source names the arm orders by name, and a document written from a provenance-less graph ties everywhere. A stable order, accepted as the behaviour.)*
 - **`Graph.AddComposed` resolves the parent's type before looking for the parent.** An identity the schema closure does not contain — or the zero `TypeID` a caller reaches by forgetting to set one — now draws `E_GRAPH_TYPE_NOT_FOUND` rather than `E_GRAPH_PARENT_NOT_FOUND`, so a wrong type and a wrong key stay distinguishable and a caller does not retry keys forever against an identity that can never match.
 - **`Add`'s error tag reads `"<TypeName> (attempt #N)"`, not `"<TypeName> (record #N)"`.** The number is the assembler-wide attempt ordinal across every goroutine, which cannot identify a caller's input row; the tag and `docs/API.md` no longer claim it can.
 - **The `E_DUPLICATE_COMPOSED_PK` detail carries the child's primary key.** It was built with a nil child key, rendering a composed address `[["vin"],"SPARE"]` that `adapter/neo4j` assigned to nothing; an interim form carried the occupant's composed address instead. Both are gone with `FormatComposedKey`: on every path the `pk` detail is the duplicated child's own primary key — on `AddComposed`'s `(one)` path the **occupant's**, the child that actually attached, since the rejected child never does — and on a part type that declares no key the detail is **absent** rather than a stand-in. Whether a key exists is asked of the schema, not of the instance, because a test instance defaults to a key of its own.
@@ -849,11 +849,461 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 - **`Marshal` returns Fatal `E_INTERNAL` and no bytes for a target key `graph.ParseKey` cannot read** (A-191), where v0.19.0 wrote the document with the address dropped and a `W_SNAPSHOT_VALUE_DROPPED` Warning. `UnresolvedEdge.TargetKey` is written from `immutable.Key.String()` on every library path, `graph.ParseKey` is its pinned inverse, and no consumer path supplies the string — so the branch guarded an event the module's own invariant excludes, and a broken invariant is an internal failure rather than a sampled warning. The one reachable input is caller-assembled `RebuildSnapshot` parts whose key holds a non-scalar component, which `Marshal`'s contract already assigns to Fatal `E_INTERNAL`. The two `W_SNAPSHOT_VALUE_DROPPED` arms for a target key or edge properties under an `absent`/`empty` reason are unchanged, and the code's own description is narrowed to them. Consumer cost is zero by absence: every key the consumer writes is a `String` primary key rendered by the library.
 
-## Unreleased
+## v0.21.0 under this policy
 
-*Two blocks: unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass committed as `e70a383`, the unit NOT closed; the clause-5 round will add to it — and unit 4's, merged as `fabed40`. Each says which.*
+Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:
 
-### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the clause-5 second fix pass committed as `ebdeb6a`; the unit is not closed
+| Stream | Where it landed |
+| :-- | :-- |
+| The tier-1 round's **fix pass**, over units 1–5's second fix passes | thirteen commits on `review`, `2b13068`…`b73eca5` |
+| That fix pass's **residue fix pass**, over the round's own read of it | seven commits on `review`, `d2cf794`…`e989131` |
+| **Condition-1 unit 5** — `instance/` and `internal/value/` | four passes; closed by decision (A-297) and merged to `main` as `f049740` (PR #105) |
+| **Condition-1 unit 4** — `schema/` | merged to `main` as `fabed40` (PR #102) |
+
+Units 1, 2 and 3's fixes shipped in `v0.19.0` and the consumer cross-read's fixes in `v0.20.0`; neither is repeated here.
+
+**The declaration delta is measured, not written from memory.** `gorelease -base=v0.20.0` on the release candidate reports **twelve incompatible changes and fifty-six additions**, and suggests `v0.21.0`. The measured tree is `e989131`, the last commit that moves a Go file; every commit above it changes this document alone, and the run at the tip is byte-identical to the run at `e989131`. **Each stream below carries its own intermediate counts, measured at its own commits and true there**; the release's numbers are the twelve and fifty-six enumerated here.
+
+### Every incompatible change — the enumeration clause (c) asks for
+
+**Twelve, and they are the twelve `gorelease` reports at the candidate.** Each is described in the stream named beside it.
+
+| Package | Change | Described in |
+| :-- | :-- | :-- |
+| `diag` | `E_MISSING_PRIMARY_KEY` — removed | unit 5, the clause-5 second fix pass |
+| `diag` | `E_RELATION_NORMALIZATION_COLLISION` — removed | unit 4, "Breaking — Go API" |
+| `instance` | `ErrCorruptedSchema` — removed | unit 5, the clause-3/4 pass |
+| `instance` | `ErrMissingPrimaryKey` — removed | unit 5, the clause-5 second fix pass |
+| `instance` | `ErrNilValidator` — removed | unit 5, the clause-3/4 pass |
+| `instance` | `KindCorruptedSchema` — removed | unit 5, the clause-3/4 pass |
+| `instance` | `KindNilValidator` — removed | unit 5, the clause-3/4 pass |
+| `instance` | `KindConstraintPanic` — value changed from 3 to 1 | unit 5, the clause-3/4 pass |
+| `instance` | `KindInvariantPanic` — value changed from 2 to 0 | unit 5, the clause-3/4 pass |
+| `schema` | `(*Type).CanonicalPropertyMap` — removed | unit 4, "Breaking — Go API" |
+| `schema` | `StructuralHashVersion` — value changed from 3 to 4 | unit 4, "Breaking — the structural hash" |
+| `schema/expr` | `IsNilLiteral` — removed | unit 5, pass B |
+
+### Every additive declaration
+
+**Fifty-six, and they are the fifty-six `gorelease` reports at the candidate.** Listed here so the enumeration is one list rather than a search across four streams.
+
+- **`diag`** (6) — `(*Collector).MergeFunc`, `E_COMPOSITION_DEPTH_EXCEEDED`, `E_DUPLICATE_INVARIANT`, `E_DUPLICATE_SCHEMA`, `E_INVARIANT_CONFLICT`, `E_LOAD_SOURCE_CHANGED`.
+- **`immutable`** (1) — `PropertiesOf`.
+- **`instance`** (4) — `ErrCompositionDepthExceeded`, `MaxComposedDepth`, `WithIssueLimit`, `WithLogger`.
+- **`schema`** (4) — `(*Relation).PropertyFold`, `(*Schema).ResolveTypeName`, `(*Type).CanonicalPropertyName`, `(*Type).RelationByField`.
+- **`schema/expr`** (41) — the builtin catalogue and the constant it binds `self` under. `BuiltinSpec`, `Builtins`, `LookupBuiltin`, `IsDatatypeCheck` and `SelfVariable`; `ArgKind` with `ArgAny`, `ArgNumber`, `ArgOrdered`, `ArgPattern` and `ArgString`; `ParamBinding` with `BindNone`, `BindElement`, `BindReceiver` and `BindAccumulatorElement`; `ReceiverKind` with `RecvAny`, `RecvList`, `RecvListOrArg`, `RecvNumeric`, `RecvNumericList`, `RecvOrdered`, `RecvScalarList`, `RecvSized`, `RecvString` and `RecvStringList`; `BuiltinResult` with `ResultBody`, `ResultBodyList`, `ResultBoolean`, `ResultElement`, `ResultElementOrArg`, `ResultFlattened`, `ResultList`, `ResultNumber`, `ResultReceiver`, `ResultReceiverOrArg`, `ResultReceiverOrBody`, `ResultString` and `ResultUnknown`.
+
+`BuiltinSpec`'s `Args` field and its `ArgAt` method are additive too. `gorelease` counts them under `BuiltinSpec`, which is itself new since the base, so they carry no row of their own.
+
+### What no declaration-level tool reports
+
+**Six changes move no declaration, so `gorelease` is silent on every one.** Four refuse at load what loaded before; the fifth repairs a silent corruption; the sixth is the only change in this release that **discards instance data** rather than refusing it. They are this release's real risk surface, and each is measured at zero cost to the single external consumer.
+
+| Change | What it refuses, and where | Described in |
+| :-- | :-- | :-- |
+| The nil literal at a typed argument position | `name -> Substring(nil)` draws `E_INVALID_INVARIANT` at **schema load**, where it loaded and then failed on every conforming instance. An `ArgAny` position still accepts it — `Coalesce(nil)`, `Default(nil)`, `Contains(nil)` | the residue fix pass, group 2 |
+| A nil guard's disjoint alternatives, in either written order | `note -> Coalesce((f1 ? { note : qty }), 1)` draws `E_INVALID_INVARIANT` at **schema load**. The same two alternatives were refused in one order and accepted in the other | the residue fix pass, group 2 |
+| A union's member read whose alternatives disagree | a member two alternatives declare with disjoint kinds is refused at **schema load**, where it typed as a scalar of unknown subkind and drew `E_EVAL_ERROR` on every instance selecting the disagreeing alternative | the residue fix pass, group 2 |
+| A `(one)` composition slot holding more than one occupant | `graph.RebuildSnapshot` and `snapshot.Load` draw `E_DUPLICATE_COMPOSED_PK` — the code the `Graph.Add` path already raised for the same shape. **A document that loaded before can now be refused** | the residue fix pass, group 3 |
+| An imported snapshot's addresses | **a fix, not a refusal.** `graph.NewFromSnapshot` re-keys each cloned instance under the importing schema's canonicalizer. Before it, an instance imported under a changed key constraint was addressable by nothing — not even by its own carried key — and a re-add installed a second copy with no `E_DUPLICATE_PK` | the residue fix pass, group 3 |
+| A Go **array** at a list position, on the `.ys` write path | **the one change that discards instance data rather than refusing it.** `wireElems` in `snapshot/wirevalue.go` takes the writer's dropped-value path for a Go array, where it wrote the array as a list. The drop is marked with `W_SNAPSHOT_VALUE_DROPPED`, which a caller has to be reading to see. Contingent — no in-module producer yields an array at a list position — and taken so the array-is-not-a-list rule has no stated exception | the residue fix pass, group 4 (A-371) |
+
+### Rule (a), measured against the single external consumer
+
+**rdata at `09e5e970`, pin `v0.20.0` read from its own `go.mod`.** Its suite ran against a `git archive` export of the candidate, with an explicit `go get github.com/simon-lentz/yammm@v0.20.0` baseline rather than an inference from the pin equalling the tag. Build and vet are green on both sides, and the baseline suite is green.
+
+**The delta is four tests in one cause, and it is exhausted by that cause.** `TestGeneratedPackagesMatchSchemas`, `TestSchemaIdentityIsEmbedded`, `TestWireGolden_DateShape` and `TestWireGolden_TimestampShapes` fail, and all four are the structural-hash re-key. Regeneration moves **exactly one line in each generated package**, and it is always `const SchemaHash`: no type, field, method, tag or import. Updating the wire goldens moves **exactly three header FIELDS in each of the six `.ys` goldens** — `schema_hash`, `schema_hash_algorithm` 3 → 4, and the `integrity_hash` that follows — and **no instance byte moves**, across the whole-second, half-second, nanosecond, named-zone, bare-offset and date shapes. **A `.ys` document is one line of compact JSON**, so those three fields move within that line; a reviewer diffing goldens sees one changed line per file, not three. **And read the two `4`s carefully:** the header's `version` — the wire format — also reads `4` and **does not move**, so after the re-key `version` and `schema_hash_algorithm` sit next to each other both reading 4 for unrelated reasons. With only that applied the candidate suite is `30 ok, 0 FAIL`, exactly the baseline.
+
+**All six of the consumer's schemas validate clean under the candidate** — exit 0, no output — so the four load-time refusals above are measured to reach nothing rather than inferred from a green suite.
+
+**So the whole consumer-visible cargo of this release, for that consumer, is the structural-hash re-key: five generated constants and six `.ys` goldens.**
+
+**The generated Neo4j DDL does not move — measured, and stated here so a consumer holding a live graph does not have to derive it.** `yammm neo4j constraints` and `yammm neo4j indexes` were run for all five of the consumer's pipeline schemas under the `v0.20.0` CLI and under the candidate: **every output is byte-identical**, 141/13, 154/14, 366/33, 183/15 and 191/13 lines. The source agrees — of the nine `adapter/neo4j` production files this release touches, **eight change comments only**, and the ninth is `write_composed.go`, whose change is the `(one)` `_composed_key` segment that no schema without a composition can reach. `constraintDefinitionKey` gained a long comment stating that its properties are deliberately unsorted; the body is unchanged, so it documents existing behaviour. **A consumer with deployed constraints and indexes has no migration in this release.**
+
+### What a consumer does at the pin move
+
+1. **Regenerate and update wire goldens in the same commit that moves the pin.** `schema.StructuralHashVersion` is 4, so every generated `SchemaHash` constant and every `.ys` document moves. Doing it in a second commit leaves the tree red in between.
+2. **Read the four load-time refusals above against your own schemas.** A schema that loaded under `v0.20.0` can be refused here, and a `.ys` document that loaded under `v0.20.0` can be refused here.
+3. **Work out what your own stale-schema path does with a whole volume at once.** If you test `HeaderInfo.SchemaHashMatches` before you load — which is the natural shape — the Error-severity refusal never fires and the entire re-key lands on that path instead. Check it is not silent about it. See the stale-document entry in unit 4's "Breaking — the structural hash".
+4. **Re-key nothing else.** The `.ys` wire stays at `version: 4`, unchanged since `v0.19.0`. The hash algorithm's counter and the wire's version are distinct and both now read 4.
+
+### Condition-1 tier-1 round — the fix pass over units 1–5's second fix passes, one commit per group on `review`: group 1 `2b13068`, group 2 `1a3dd57`, group 3 `5d2b711`, group 4 `5025d6f`, group 5 `db467f5`, group 6 `ef94124`, group 7 `32ad09f`, group 8 `05f152b`, group 9 `de704d3`, group 10 `679b463`, group 11 `c97d194`, group 13 `5e4b27c` (landed before group 12), group 12 `b73eca5` (A-300…A-353, A-355, A-358)
+
+*Written per group, in the session that lands it (A-227, A-346). The round read the five second fix passes enumerated below and the `v0.20.0` fix as diffs; its 42 confirmed gate findings resolve to thirty-eight repairs, plus T39 (A-347, its join amended by A-349) from the fix pass's own finding, A-348 amending A-335, and A-350…A-353 from the verification pass over the audit's open items, plus A-355 and A-358, landing in THIRTEEN groups. **The declaration delta is measured at each commit: `gorelease -base=v0.20.0` at `2b13068`, `1a3dd57`, `5d2b711`, `5025d6f` and `db467f5` is byte-identical to the run at `ebdeb6a` — twelve incompatible, forty-six additive, suggested `v0.21.0` — so groups 1 to 5 move no declaration; at `ef94124` it reads twelve incompatible, FIFTY-TWO additive, the six additions being group 6's `schema/expr.ArgKind` and its five constants** (`BuiltinSpec.Args` and `BuiltinSpec.ArgAt` ride `BuiltinSpec`'s own row, the type being new since the base); **at `32ad09f` twelve / FIFTY-THREE, the one addition being group 7's `schema/expr.ResultReceiverOrBody`; at `05f152b` twelve / FIFTY-FIVE — group 8's `ResultNumber`, `ResultString` and `ResultBoolean` added and `ResultScalar` gone from the additions, since it was added after the base and never shipped, so its removal is not a break against `v0.20.0`; at `de704d3`, `679b463` and `c97d194` byte-identical to `05f152b`'s, groups 9 to 11 moving no declaration — and at `5e4b27c` and `b73eca5` byte-identical again, groups 13 and 12 moving none either — so the fix pass's candidate `b73eca5` reads twelve incompatible / fifty-five additive against `v0.20.0`**. A `gorelease` run is persisted with the release record for each of the thirteen.*
+
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0`: every repair was measured zero-cost in its tree at the round's fix-shape reads (it declares no `Vector`, no composition, no `extends` across schemas, no property named `self`, no builtin with an argument, and imports with a module root in play). **Its unit-lane suite against `1a3dd57`, `5d2b711`, `5025d6f`, `db467f5`, `ef94124`, `32ad09f`, `05f152b`, `de704d3`, `679b463` and `c97d194` — the last being the fix pass's candidate — with the same suite at the pin as the control, fails exactly the four tests unit 4's hash re-key fails and nothing else — the delta is EMPTY at every group so far**; the run is repeated at every later group that moves behaviour and at the final candidate.
+
+#### Group 1 — the corpus and the instruments (`2b13068`)
+
+##### Behaviour, non-breaking
+
+- **Two module-wide documentation gates**, in `internal/doclint` and driven from `docs/`: every package `doc.go` Dependencies line must name exactly the package's non-stdlib imports, and no exported declaration may have its doc comment detached from it by a blank line or carry `**` emphasis, which `go/doc/comment` does not render. On their first run they found `schema/doc.go`, `adapter/jschema/doc.go` and `adapter/markdown/doc.go` each naming a package it does not import (`location` for the two adapters); `**` emphasis in `graph/doc.go`, `adapter/neo4j/adapter.go`, `adapter/neo4j/drop.go` and `snapshot/option.go`; and **`snapshot.WithRevalidation`'s entire godoc detached from its declaration and invisible to `go doc`** — all corrected, so `go doc ./snapshot WithRevalidation` now prints it.
+- **The composition corpus gains the `(one)` and keyless shapes** in `adapter/neo4j/testdata/` and `graph/testdata/`, exercised from disk; module-wide, exactly one fixture had declared a `(one)` composition and it belonged to `adapter/gogen`. The static and contract invariant tables gain the rows the unit-5 block's mirror claim below was short of — nine static refuse rows mirrored, five evaluator fragments, two accept rows, and rows for `-nil` and `nil` under `-`, `*`, `/` and `%` — so that claim is now true but for one static refuse row whose evaluator arm cannot be judged, stated in the contract table's own comment.
+- **The repo gate reads the git index**: the three `*-repo` pre-commit hooks that walked the filesystem are replaced by file-based `gofumpt` and `goimports` hooks and `scripts/gomodtidy.sh`, which runs `go mod tidy -diff` in every directory holding a tracked `go.mod`.
+
+##### Prose
+
+- The unit-4 "Additive API surface" line below names `RecvOrdered` and all ten `ReceiverKind` constants, where it named `RecvScalar` — a declaration nothing in the module carries — and four (corrected in place, dated).
+
+#### Group 2 — `schema/` (`1a3dd57`)
+
+Ten repairs, each behavioural one reproduced as a failing test first. No declaration moved; every change below is behind an unexported symbol.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **A `Vector` property types as a list of numbers** (A-306, completing A-286's scalar split): `vec -> Sum > 0.0` and `vec -> All |$x| { $x > 0.0 }` load, where `f049740` refused them at load — a false positive on a legal SPEC shape, injected by unit 5's second fix pass, which redefined the "other" scalar to a pattern literal and left this arm on the old meaning.
+- **A member read through a type from another schema is checked against that type** (A-316): an imported type is complete in its own schema, so `hasUnresolvedSupertype` answers false for it, and a typo'd member read through an imported composition target is refused at load (`E_UNKNOWN_PROPERTY`) where the unit-4 and unit-5 trees loaded it silently and `v0.20.0` refused it. A member the imported type really inherits still resolves.
+- **Two lists of instances, a list literal of instances and a conditional with two list branches type as what they hold** (A-317): one `mergeType` at concatenation, the list literal's element fold and the ternary, so `(LINES + LINES) -> First.qty > 0` and `(matrix + [[9]]) -> First -> Sum > 0` load and the stage after is typed, where `+` on two instance lists dropped to a list of unknown scalars and refused the member read after it. `Default`'s fallback rule is unchanged.
+- **`self` is bound in the checker's root scope as the evaluator binds it** (A-318): bare `self.name` resolves and a parameter named `self` shadows it by binding order alone; `typeVariable`'s `self` special case is deleted as dead. No schema loads or is refused differently.
+- **The index refusal names the kind it refused** (A-320): *"a pattern cannot be indexed"* for a regex literal, where the message said *"a number or boolean"*; every non-string scalar arm shares the one message.
+
+##### Breaking — the loader and the registry, `schema`
+
+- **The loader's last unsandboxed read is deleted** (A-311): with no module root in play, an import that misses the pre-registered sources is `E_IMPORT_RESOLVE` naming that condition, where `readImportFile` read the relative path from the working directory with no size bound and no non-blocking open. Measured: no caller in this module, the LSP or rdata reached that branch (`LoadString` disallows imports; every empty-root load passes a synthetic root under `WithSourcesOnly`).
+- **A non-regular file whose open itself fails — a unix socket — is reported as *"not a regular file"*** at the entry, at every import and at the `yammm.mod` marker (`E_LOAD_MODULE_ROOT_MALFORMED` for the marker), where the platform's errno surfaced (A-313). A FIFO was already refused from the open descriptor; the socket has no descriptor to read, so `openRegular` classifies a failed open by `Stat`, after the open and with nothing opened afterwards.
+- **`Registry.Register`'s refusal says why** (A-319): a schema re-registered under one `SourceID` whose bytes differ, and one where the registered schema carries no sources and the new one does (or the reverse), draw two messages; the loader's `E_LOAD_SOURCE_CHANGED` carries the registry's message without its former *"source re-registered with different content:"* prefix. The code is unchanged; rdata matches codes.
+- **A part type inheriting an association through a non-part intermediate is refused once** (A-312): the once-rule walks the linearized ancestry, so `part type P0 extends HasOwner`, `abstract type Mid extends P0`, `part type P1 extends Mid` draws one `E_INVALID_ASSOCIATION_TARGET`, on `P0`, where it drew two. A non-part type may still extend a part type.
+
+##### Prose
+
+- `sameSources`' stale `sameEntryBytes` paragraph deleted; `registerFailureIssue`'s godoc states the two-way partition the code implements; `invariantScope`'s godoc and its sibling test comment name the schema completer's `membersOf` index where they named `buildStaticScope`, a symbol no package declares (A-321).
+
+#### Group 3 — a property named `self` (A-309)
+
+One repair; no declaration moves.
+
+##### Breaking — the DSL
+
+- **A property may not be named `self`** (A-309): it is refused at schema load with `E_INVALID_NAME` at its declaration, once, where it is declared — for the parse front door and the Go `Builder` alike, by one completer rule beside the binding it protects. Ground: both layers bind `self` to the instance in every invariant — the evaluator's `PropertyScopeFromMap` seeds it and the checker's root scope binds it — so a property so named could never be read by a bare name, `$self` or a member read, and a declaration nothing can read is a model mismatch the load-time refusal repairs. Measured: no fixture in the module and no rdata schema declares one. **Delivered with one correction to A-309's stated site.** The decision put the entry in the parser's `propertyNameExclusions` list; the six spellings there are refused by a grammar lookahead and draw `E_SYNTAX`, not the `E_INVALID_NAME` the decision names, and that one set also governs annotation names and annotation-argument identifiers, which the decision does not reach. `self` stays grammatical as a property name (the parser's `TestReserved_SelfIsAGrammaticalPropertyName` pins it) and the rule lives in the schema completer, where `self` is bound and where the Builder's declarations also arrive. `docs/SPEC.md` names it in the lexical-structure, property-declaration and scope sections.
+
+#### Group 4 — `instance/` and `internal/value/` (A-300…A-304, A-307, A-314, A-315, A-322 (v))
+
+Nine repairs from the round's pass 1 over unit 5's second fix pass, each behavioural one reproduced as a failing test first. No declaration moves; every change is behind an unexported symbol or a package-internal one.
+
+##### Breaking — behaviour, `instance`
+
+- **A relation fold collision no longer hides every edge and composition diagnostic** (A-300): two input keys folding onto one relation field is recorded in the member index and reported by the pass that reads the entry — `validateEdges` or `validateCompositions`, beside the absent state they already report — so it no longer trips the property pass's error gate. Measured: `Lines` and `LINES` beside an absent required `NOTES` drew `E_CASE_FOLD_COLLISION` alone at `f049740`; both codes at the base and now. The collision's message, code and details are unchanged.
+- **One cancellation rule at every point that ends work** (A-301, delivering A-273 at all its sites): a batch that did not complete returns a nil slice and exactly one `E_CONTEXT_CANCELLED`, stamped with the row it stopped on — `Validate` and `ValidateForComposition` alike, and a cancellation raised INSIDE a nested composed batch is one issue on the root row, not one per nesting level (measured: two at `f049740`, on `$` and on `$.lines[0]`). The batch loops check at the iteration head, so no further row is validated, and a cancelled row's partial diagnostics are not merged into a result returned with a nil slice; one helper records the cancellation once per instance, at the site that met it.
+- **A Go array is not a list** (A-302, amending A-287): `value.ListElems` — the one list reader — takes a `[]any`, an `immutable.Slice` or a typed slice, and no longer a fixed-size array, because no decoder in the module produces one for a list position and an array is how a scalar carrier is spelled. **A `uuid.UUID` at a `List<Integer>` property is `E_TYPE_MISMATCH` again**, where `f049740` stored it as sixteen integers; the same at `CheckValue`, `CoerceValue` and `Canonical`. rdata passes no Go array as instance data, measured.
+- **`==`, `!=`, `in`, `Contains` and `Unique` over a map whose key is a named string type answer instead of panicking** (A-303): `value.Equal`'s reflect fallback builds the key in the map's own key type, as its three sibling readers already admit the shape. At `f049740` the panic would have reached a caller as a Fatal `E_INTERNAL` through `evaluateInvariants`'s recover — every `value.Equal` caller is the evaluator — so no crash, but a schema-and-data condition reported as an internal error; no in-module producer emits such a map, so the reach was a caller-built value.
+- **`Sum` allocates nothing per element** (A-304): two passes over the slice — classify, then sum in the kind the result has — replace the two slices `f049740` filled at `len(slice)`, one of them never read. P3's rule is unchanged: a list holding a float is float arithmetic and its integer subtotal cannot overflow.
+
+##### Behaviour, non-breaking
+
+- **One invariant scope per instance, built once and shared upward** (A-315): a `ValidInstance` memoises its scope; a parent's scope holds each composed child's memo itself, and an instance's own invariants read the memo its parent will. Evaluation over a composed tree is linear in its depth where it was quadratic (a chain of depth 30 cost 4.2× the base at `f049740`, doubling the depth multiplied the cost by 3.2). The instance is now built before its invariants run — a failed invariant discards it, as before — so the scope is built from the instance's own immutable values and nothing is cloned. `eval.PropertyScopeOf` (internal) takes an already-wrapped map.
+- `MAIN_LINE -> Len` on a `(one)` composition is enumerated and pinned as the child's member count (A-314; the unit-4 block below carries the enumeration).
+
+##### Prose
+
+- `evaluate`'s godoc no longer promises that a nil expression evaluates to nil — `Evaluate` on a nil expression is an error (A-289) — and `mergeLocked`'s stacked pre-change comment naming an `fn` parameter the signature no longer has is deleted (A-307).
+
+#### Group 5 — `graph/` and `snapshot/` (A-330, A-332 (i), A-335…A-339, A-341…A-345, A-348)
+
+Twelve repairs from the round's passes 3 and 4 over units 1 and 3's second fix passes, each behavioural one reproduced as a failing test first. No exported declaration moves; the one new helper is under `internal/`.
+
+##### Breaking — behaviour, `graph`
+
+- **The canonicalization rule reaches every position on the Add path** (A-335): `Graph.Add` and `Graph.AddComposed` store a Timestamp, Date or UUID **property** as the text its constraint stores, as `RebuildSnapshot` already did — a `time.Time` handed to the bypass constructor `instance.NewValidInstance` now reaches `Instance.Properties()` as `"2020-01-02T03:04:05Z"`, not as a `time.Time`; a validated instance already carried the text. Two composed siblings whose keys spell one instant two ways are **one child** on the inline and the streamed path alike (`E_DUPLICATE_COMPOSED_PK`), where the sibling scan compared the caller's spellings and admitted both; and a duplicate record's instance carries the key and properties the graph would have stored. Measured: one record built through `Add` and rebuilt from parts now hold the same bytes at every position.
+- **Identity is the canonical key at every layer that decides it** (A-348, amending A-335): `RebuildSnapshot` indexes an instance by the key the instance carries — the canonical text — where it indexed by the caller's parts spelling, so `Snapshot.InstanceByKey` by an instance's own key hits and an edge, duplicate or unresolved record addressing a Timestamp, Date or UUID key spelled another way resolves instead of drawing Fatal `E_INTERNAL`; two parts of one type whose keys canonicalize to one address are refused with Fatal `E_INTERNAL`, as a root the API cannot build is. **The `.ys` reader decides root uniqueness on the canonical key** and resolves every address — an edge's target, a duplicate's conflict and parent, an unresolved record's source, a slot's occupant — the same way, so a foreign document holding two roots that spell one instant two ways draws `E_DUPLICATE_PK` from `Load` and `Verify`, where it loaded as two instances with one index entry, and a foreign document spelling one key differently at its instance and at an edge loads and resolves. Diagnostic messages keep the document's own spelling. A document this library wrote is unaffected: its keys are canonical. `InstanceByKey`, `Graph.AddComposed`'s `parentKey` and `FormatKey` now say that the address is the spelling the instance carries and that `FormatKey` canonicalizes nothing. *(Amended by A-352 in group 10 below: `AddComposed` canonicalizes the parent address it receives, so any spelling of the instant attaches; `InstanceByKey` and `FormatKey` are as stated.)* *(Amended again by A-355 in group 12 below: `InstanceByKey` canonicalizes the address it receives too, and `FormatKey`'s godoc names no exception.)*
+- **The `(one)`-overflow `primary_key` detail is absent when the occupant carries no key** (A-330), where it carried the literal `"[]"`: a keyed part's occupant can arrive without a key through `RebuildSnapshot`, which checks identity and not keys. The guard asks the schema and the occupant.
+- **A composed child outside the import closure is Fatal `E_INTERNAL` on `AddComposed` too** (A-345), matching the inline path since v0.19.0; both arms are unreachable invariant guards, and the v0.19.0 sentence above is corrected in place.
+
+##### Behaviour, non-breaking
+
+- **A `BatchAssembler.Finalize` retry after a cancelled `Check` reuses the snapshot the first call built** (A-344): the graph cannot change once finalized, so the clone of every instance and edge happens once; the cancelled outcome itself is still not memoized.
+- **The graph's canonicalizer computes its memo once, at construction, from the schema's closure** (A-336): the canonicalizing properties, edge properties and primary-key positions of every type are recorded before the first `Add` and never written again, so `Graph.Add` reads them concurrently with no lock, `key` no longer resolves the type and walks its primary keys on every call, and a schema declaring no Timestamp, Date or UUID anywhere is inactive — every rewrite returns its input untouched with no map lookup. A type whose key does not canonicalize allocates nothing, pinned. **The cost, stated beside the benefit:** the maps are built at every `graph.New` and every `RebuildSnapshot` — hence every `snapshot.Load` — over the whole import closure, so construction scales with the SCHEMA rather than with the data. Sharing one memo per `*schema.Schema` is not done here: it is a model change, and its precondition is a benchmark of `graph.New` and `snapshot.Load` against a large closure, which has not been run.
+- **`UpdateMetadataOrReMarshal`'s fallback carries a foreign header's `created_at` byte-for-byte** (A-342): fractional seconds and a non-UTC offset survive Load + Marshal as they survive the fast path, where the fallback re-parsed and re-formatted to whole seconds in UTC. A `created_at` that is not RFC 3339 is still reported with `W_SNAPSHOT_VALUE_DROPPED` and omitted. **An explicit `WithUpdateCreatedAt` bypasses the fix**: the new path applies only when the caller sets no such option, so a caller that parses the header's `CreatedAt` itself and passes it back keeps the old lossy round trip. That is inert for a document this library wrote — `Marshal` emits `RFC3339` in UTC, which round-trips exactly — and becomes a defect the day such a caller reads a header it did not write.
+- `marshalDiagnostics` asks an unresolved record's property count instead of deep-cloning the properties to count them (A-343).
+
+##### Prose
+
+- `RebuildSnapshot`'s godoc stops stating that primary keys are not rewritten because the wire holds canonical text — the ground unit 3's second fix pass retired while leaving the sentence (A-337); `provenanceKeyOf`'s godoc and this document's v0.19.0 `Snapshot.Duplicates` sentence state what a loaded record's provenance is (A-338); a comment records that the `add_composed` trace takes the full identity deliberately (A-339); `composedOverflowIssue`'s false address sentence is deleted (A-332 (i)); `graph/doc.go`'s `[Graph.Add]` emits list stops promising `E_GRAPH_TYPE_NOT_FOUND` for a composed child outside the closure (A-345); `W_SNAPSHOT_VALUE_DROPPED`'s registry doc states the invariant — every write path that discards a stated value marks it — instead of enumerating sites (A-341). `internal/instancetest.VI` gains `NoKey()`, so a keyless part in a test carries no key rather than the `[1]` default that once defeated the overflow guard.
+
+#### Group 6 — `adapter/neo4j/`, and the builtin catalogue's argument kinds (A-310, A-329, A-332 (ii)(iii), A-333)
+
+Four repairs from the round's passes 2 and 3, each behavioural one reproduced as a failing test first; `make test-integration` over the full three-image matrix (5.26 Enterprise, 2026.05 Enterprise, 2026.05 Community) is part of this group's gate. **One additive declaration**: `schema/expr.ArgKind` with its five constants, `BuiltinSpec.Args` and `BuiltinSpec.ArgAt`.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **An argument the builtin refuses on every input is refused at load** (A-310, `E_INVALID_INVARIANT`), as a receiver has been since the unit-5 block below: the catalogue states each argument position's kind — a string for `TrimPrefix`, `TrimSuffix`, `StartsWith`, `EndsWith`, `Split`, `Join` and both of `Replace`'s; a number for `Substring`'s indices; a pattern for `Match`; a value the total order ranks for `Compare` and for `Min` and `Max` with an argument; any value for `Contains`, `Default`, `Coalesce` and `Reduce`'s seed — and `typeCall` checks every argument against it. `name -> Match("nor")`, `name -> Substring("a")` and `name -> Compare(MAIN_LINE)` loaded clean and failed every instance; each is now refused at load, and the static and contract tables carry a refuse row for every argument-taking builtin and accept rows for the right kinds. A value the checker cannot type and the nil literal pass, as they do for a receiver. `docs/SPEC.md`'s static-check paragraph names the receiver and argument rules, which it had not.
+
+##### Breaking — the Neo4j wire, `adapter/neo4j`
+
+- **A `(one)` composition's `_composed_key` segment is the relation name alone** (A-329): `["shop__Order",["o1"],["INVOICE"]]` where the writer emitted `["INVOICE",0]` for a keyless part and `["INVOICE",["k"]]` for a keyed one — a slot that holds exactly one child carries no index and no key that the name does not already identify. This is the form `composedKey`'s `case nil` arm, the package doc's Composition Ownership section and this document's v0.19.0 section have described all along; the writer never produced it. **A store written before this change holds `(one)` part nodes under the old address; a parent's next write replaces its composed subtree, deleting them by traversal, so the address changes on the next write of each root and nothing matches an old one by key.** rdata declares no composition and never reads `_composed_key`, measured.
+
+##### Behaviour, non-breaking
+
+- **`constraintDefinitionKey` states why it does not sort the constraint's properties** (A-333) where `desiredSemanticKey` and `remoteSemanticKey` sort theirs — an index's backing identity is order-significant and a constraint's is not, measured on all three server images for `UNIQUE` and `NODE KEY` — and a test pins that a composite `RANGE` index in reversed property order does not block. No behaviour moves; the round's proposal to sort would have reported drift the server never raises.
+
+##### Prose
+
+- `OwnedLabels`' godoc no longer says the three emitters skip a type whose label is not a valid Neo4j identifier: `ShapeForSchema`, `ConstraintsStructured` and `IndexesStructured` each refuse the whole schema with `E_NEO4J_INVALID_IDENTIFIER`, measured (A-332 (ii)); the RANGE-only blocking rule's comment names 2026.05 Community among the images it was measured on (A-332 (iii)). `docs/SPEC.md` and `docs/API.md` state the `(one)` segment; the plugin's expression reference names the receiver and argument rules.
+
+#### Group 7 — the nil guards typed by one rule (A-347, amended by A-349)
+
+The fix pass's own finding, traced from source: the fallback-kind rule A-263 put on `Default` was delivered at one of the four nil guards, and the checker had no join for two instance types. Every new refusal reproduced as a failing row in both tables first. **One additive declaration**: `schema/expr.ResultReceiverOrBody`.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **`Coalesce`, `Lest` and `Then` are typed as `Default` is** (A-347): each yields one of its alternatives, the checker types the result as what every alternative agrees on, and alternatives of different kinds are refused at load with `E_INVALID_INVARIANT` — `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` loaded clean and failed on the input that selects the fallback; `note -> Lest { true }` loaded clean and evaluated to a string when `note` is present, which is an evaluation error, and both contract tables carried that idiom as an accept row. `Then` yields its body's type, so `(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper` is refused and a typo'd member read after a `Then`, `Lest` or `Coalesce` of an instance is `E_UNKNOWN_PROPERTY`, as it has been after `Default`. The nil literal and the empty list literal keep standing in for any receiver and any list.
+- **Two instance types join to their union, and a member reads through it only when every alternative declares it** (A-349, amending A-347's nearest common ancestor, which multiple `extends` makes non-unique). `MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil` is admitted where the unit-5 block below refused it — the guard fails on no instance — and `(MAIN_LINE -> Default(MAIN_LINE.ITEM)).qty` is refused, since `Item` does not declare `qty` and the evaluator reads nil there on the input that selects it. A conditional and a list literal join two instances the same way, so `(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).qnty` is refused where it loaded. A non-empty scalar list is no longer taken for the empty-list wildcard: `LINES -> Default(["a", 1])` is refused as `LINES -> Default(["a"])` already was. No ancestry is consulted; two types with no common ancestor share the members each declares.
+
+##### Prose
+
+- `docs/SPEC.md`'s static-check section states the rule and its four builtin rows say what each is typed as; the plugin's expression reference likewise. The catalogue's `ResultReceiverOrArg` now covers `Coalesce`, `ResultBody` covers `Then`, and `ResultUnknown` names `Reduce` alone.
+
+#### Group 8 — the catalogue's result subkinds (A-350)
+
+Found by group 7, whose `Then` body could not be pinned through `Len`, and probed before the ask: four expressions loaded clean and failed on every instance. Every new refusal reproduced as a failing row in both tables first. **Declarations, measured at `05f152b`**: `ResultNumber`, `ResultString` and `ResultBoolean` added; `ResultScalar`, which unit 4 added after `v0.20.0` and no release shipped, is gone — not a break against the base, and `gorelease` reports none.
+
+##### Additive — Go API, `schema/expr`
+
+- **Three result subkinds replace the unshipped `ResultScalar`** (A-350): `ResultNumber` (`Count`, `Len`, `Sum`, `Abs`, `Floor`, `Ceil`, `Round`, `Compare`), `ResultString` (`Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring`, `TypeOf`) and `ResultBoolean` (`All`, `Any`, `AllOrNone`, `Contains`, `StartsWith`, `EndsWith`, `IsNil`), each read from the implementation's returns; `ResultNumber` takes the removed constant's position so no other constant's value moves. ~~`ResultElementOrArg` with an argument (`Min`, `Max`) is typed as the join of receiver and argument.~~ *(Amended by A-393 in the residue pass's group 2 below: the two are ranked by the total order, which is deterministic, so the result is typed as one of them exactly. The justification by analogy to a conditional's branches is withdrawn — a conditional's branch is input-dependent and this pair is not.)* rdata does not import `schema/expr`.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **A builtin's result of one subkind into a builtin that refuses it is refused at load** (`E_INVALID_INVARIANT`), as a receiver has been since unit 5 and an argument since group 6: `name -> Len -> Upper`, `name -> Upper -> Abs`, `(name -> StartsWith("n")) -> Abs`, `(name -> TypeOf) -> Abs`, `(tags -> Contains("a")) -> Upper`, `(MAIN_LINE.qty -> Compare(1)) -> Upper` and `(name -> IsNil) -> Len` loaded clean and failed on every instance — A-254's rule at the result position. `Min` and `Max` with an argument of the receiver's subkind keep it (`(name -> Min("z")) -> Upper` loads); a mixed pair is admitted as a scalar of unknown subkind, as a conditional's branches are. Consumer-visible in principle; rdata's thirty invariants pipe no scalar result into a refusing builtin, measured.
+
+##### Prose
+
+- `docs/SPEC.md`'s static-check section and the plugin's expression reference state that a result is typed by its subkind; the unit-4 block's catalogue enumeration above says `ResultScalar` is gone before the tag.
+
+#### Group 9 — the evaluator's trace carries the caller's context (A-351)
+
+Unit 5's B-K19, deferred with the tier-1 round as its trigger; the round ran without dispositioning it, and the verification pass did. No declaration moves: the evaluator is `instance/internal/eval`.
+
+##### Behaviour, non-breaking — `instance`
+
+- **The evaluator's trace records are logged with the context passed to `Validate`** (A-351). `Evaluator.Evaluate` and `EvaluateBool` take a context and every evaluation method and body-evaluating builtin passes it on, so the operation's start and end records and each per-node record carry it; a request id on the context (the trace package's `request_id` attribute) is on every record where it was on none — both the operation and the per-node trace had opened on a background context. The validator passes the context it already holds and its `contextcheck` suppression is gone. `WithLogger`'s godoc, the package doc's option list and `docs/API.md`'s options row say so. Zero consumer reach: no exported signature moves.
+
+#### Group 10 — every address the graph receives is canonicalized (A-352, amending A-348)
+
+Three of the round's acknowledge rows, folded into T29 as fixed and read back against the delivered code at the verification pass: two outside every delivered shape, one half-pinned. Every new refusal or address reproduced as a failing test first, and each test turns red when its site alone is reverted, measured. No declaration moves.
+
+##### Behaviour, non-breaking — `graph`, `snapshot`
+
+- **`Graph.AddComposed` canonicalizes the parent address it receives** (A-352 (1)), as `Graph.Add` canonicalized the key it installed: the natural sequence — `Add` an instance, then `AddComposed` with that instance's own `PrimaryKey().String()` — attaches whatever spelling of a Timestamp, Date or UUID key the caller holds, where the group-5 change above had made it miss with `E_GRAPH_PARENT_NOT_FOUND` and its godoc told the caller to supply the canonical text the graph stored, which `Add` returns to no one. A refusal keeps the spelling the caller wrote. `FormatKey`'s godoc names the exception.
+- **An unresolved record's target key is canonical on every path** (A-352 (2)). The Add path rendered a staged edge's target under the relation's declared target type; the rebuild path left the unresolved record's target as the parts spelled it, and its comment's ground — no type could render it — was false, the relation's declared target type being exactly that type. `RebuildSnapshot`, and so `Load`, now canonicalize it, and one forward reference carries one target address through `Add`, `RebuildSnapshot` and the reader alike.
+- **Two rebuild-path sites are pinned** (A-352 (3)): a rebuilt edge's source key and an unresolved record's source key, which mutation had shown no test turning red for; a test now does for each.
+
+##### Prose
+
+- `Graph.AddComposed`'s parameter doc says any spelling addresses the parent; `FormatKey`'s godoc names the exception; the `canonicalizer.unresolved` and `RebuildSnapshot` comments state the rule.
+
+#### Group 11 — the doc-link gate honours build constraints (A-353)
+
+The latent gap the round's pass-3 checks measured at zero live instances, taken because a gate that passes on a tag-only symbol is a false green. No declaration moves: `internal/doclint` is internal.
+
+##### Instrument — `internal/doclint`
+
+- **The gate reads the default build, as `go doc` does** (A-353): the loader passes every `.go` file through `go/build`'s default context before parsing it, so a file behind a build constraint or a GOOS/GOARCH suffix contributes no names and has no links checked. A doc link in a default-build file naming a symbol declared only under a tag is now reported as dangling, where it resolved and the gate reported green on a link the published documentation cannot follow. The same loader serves the doc-comment and dependency-line gates, which therefore read the default build too. Measured on the tracked tree by the same match over every tracked `.go` file: nine files are excluded — the integration suite's seven tests and its `integration_export.go` aliases under the `neo4j_integration` tag, and `snapshot/race_on_test.go` under the `race` tag — and no default-build link names a declaration in any of them, so the three module-wide gates pass unchanged. A regression anchor in production prose naming a tag-only test would now be reported, as `go doc`'s reader cannot follow it; none exists. The gate's own fixture gains the tagged shape, checked in both directions.
+
+#### Group 12 — the read's received address is canonicalized (A-355, amending A-348 (3) and completing A-352; `b73eca5`)
+
+Every address the graph receives is now canonicalized where it is received, the read included. No declaration moves: `Snapshot` gains an unexported field and `newSnapshot` an unexported parameter.
+
+##### Behaviour, non-breaking
+
+- **`Snapshot.InstanceByKey` canonicalizes the address it receives** (A-355): a `FormatKey` string spelling a Timestamp, Date or UUID component any way its constraint accepts finds the instance, on a snapshot built through `Add` and on one rebuilt from parts, where it found it only under the canonical text. The helper `Graph.AddComposed` used moves onto the canonicalizer and both call it; a snapshot carries the canonicalizer its constructor built the index with. A type whose key has no canonicalizing component keeps the bare map read, measured allocation-free; a string `ParseKey` refuses addresses nothing. Consumer-visible in principle and measured at zero cost: rdata calls neither `InstanceByKey` nor `RebuildSnapshot` and declares no Timestamp, Date or UUID primary key.
+
+##### Prose
+
+- `InstanceByKey`'s godoc, `FormatKey`'s godoc, `graph/doc.go`'s Key Formatting paragraph and `docs/API.md`'s two `InstanceByKey` sentences say any spelling addresses the instance; `FormatKey`'s "except at `AddComposed`" clause becomes the rule for every received address. `AddComposed`'s own godoc is unchanged.
+
+#### Group 13 — the tidy gate judges on the exit code (A-358; `5e4b27c`, landed before group 12)
+
+Found by a state analysis rather than by a pass: the GitHub CI workflow's pre-commit job had failed on every push to `review` since group 1 while the local gate passed. No declaration moves and no Go file changes.
+
+##### Instrument — the repo gate
+
+- **`scripts/gomodtidy.sh` takes `go mod tidy -diff`'s exit code as its verdict** (A-358) and shows stderr only when the command fails. It had treated any output as a change, and on a cold module cache stderr carries download progress with exit 0 and an empty stdout, so the gate was red in CI and green locally for thirteen pushes. Proved in three directions: a planted `require` in a fixture module fails with the diff, the clean tree passes, an empty module cache passes.
+
+### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `49b1be6`, group 3 `1718ca2`, group 4 `df28cac`, group 5 `af50494`, group 6 `9efcac1`, group 7 `e989131` — THE LAST (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
+
+*Written per group, in the session that lands it (A-227, A-346). The A-323 read of the fix pass above ran as four passes over its thirteen groups and produced **forty-one repairs R1…R41**, planned into seven groups — **all seven landed**. **The declaration delta is measured at each commit**: `gorelease -base=v0.20.0` reads twelve incompatible / fifty-five additive at `d2cf794`, `49b1be6` and `1718ca2`, and twelve / **fifty-six** from `df28cac` on, the one addition being `schema/expr.SelfVariable` — the only declaration the whole residue pass moves. Byte-identical thereafter at `af50494`, `9efcac1` and `e989131`. **A-186 is EMPTY beyond unit 4's hash re-key at every group**, and the full three-image server matrix ran at groups 3, 4, 6 and 7. A `gorelease` run is persisted with the release record for each.*
+
+#### Group 1 — the instruments (A-385, A-399, A-366, A-376; `d2cf794`)
+
+**No shipped surface moves.** Every change is a test instrument, and the whole
+group exists because the passes above measured each of these assertions unable
+to fail for the property it names. Recorded here because the group is a commit
+in the release's range, not because it changes anything a consumer can observe:
+`gorelease -base=v0.20.0` at `d2cf794` is byte-identical to the run at
+`b73eca5` — twelve incompatible, fifty-five additive, suggested `v0.21.0` — and
+no `.go` file outside a `_test.go` moves.
+
+##### Instruments repaired, each measured against the mutation that reverts it
+
+- **The Add-versus-Rebuild agreement instrument compares both sides and every edge position** (A-385). `assertSameInstance` walked only the rebuild side's property names and compared no edge or edge-property position. Measured: with the rebuild path dropping a property, the old one-sided walk is GREEN and the repaired one is RED; with the Add path's edge target key left raw, only the new edge comparison catches it.
+- **Six canonicalized positions gain the pin they lacked** (A-385), each confirmed unpinned first — the suite stayed green under every one of the six reverting mutations: the sibling-duplicate message and its `primary_key` detail, the rejected composed child's key and properties, the root duplicate record built from the graph's own instance, `canonicalizer.duplicate`'s three key rewrites (each pinned separately), the reader's three record-addressing sites (duplicate conflict, duplicate parent, unresolved source — each pinned separately), and the `inactive` term edge properties contribute.
+- **The invariant corpus gains an alternative pair whose shared member has disjoint kinds** (A-399). `Alt` and `Other` took every shared member from the same two abstract bases, so no pair in the corpus could express a union whose member read disagrees.
+- **Every stated builtin result subkind is pinned by a consumer that refuses it** (A-399). Twenty-four builtins declare a result subkind and none was pinned: reverting all of them, or any single one, now turns the set red.
+- **`unionTypes`' dedup and ordering, and `typeIndexExpr`'s instance arm, gain rows** (A-399). A naive concat and a deleted refusal each left the suite green.
+- **The evaluator's context-threading assertion runs over twelve expression shapes** rather than one (A-399). Measured over every buildable single-site reversion of an inward `ctx` pass in `instance/internal/eval`: the one-shape assertion caught **11 of 37**, the widened one catches **20 of 37**.
+- **Three accept rows that could not fail gain mutations** (A-399), one of them restated — `MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil` holds on every conforming instance whatever the guard does, so it reads a member both alternatives declare instead.
+- **`TestInstanceByKey_RefusedAddressMisses`' second arm reaches the code it names** (A-399). It addressed a PART type, which no snapshot index holds, so the arm returned at `InstanceByKey`'s `typeIndex == nil` guard; it now addresses a root and the test fails if that stops being true.
+- **Every contract refuse row states what the evaluator does** (A-366). The table gained the verdicts beside the error fragments, and asserting them **corrected six rows**: three produce an evaluator error the table did not record, and three hold vacuously where the row implied a failure.
+- **Three instrument pins** (A-376): the loader's deleted working-directory read is pinned by a test that places a real file at the import's own relative path and requires the refusal; the index-refusal rows name the kind refused, with a pattern row added to both tables (measured: collapsing the three scalar names to one turns six rows red); and the scope memo's ratio test becomes a linearity assertion over three depths — the deltas are 544 then 552 with the memo and **1,090 then 1,458 without it**, where the ratio test passed either way.
+
+#### Group 2 — the checker's lattice (A-392, A-394, A-393, A-379, A-383, A-390; `49b1be6`)
+
+**Three of these are LOAD-BREAKING.** A schema shipping any of the three shapes
+below loads today and is refused after this group. Each was measured to load
+clean and then fail on every instance that reaches it — the class the static
+checker exists to refuse — and each is measured at **zero cost to rdata**,
+whose six schemas ship none of the three shapes — every one validated clean under this checker, and rdata's suite showing no delta beyond unit 4's hash re-key. `gorelease -base=v0.20.0` at `49b1be6` is byte-identical to `d2cf794`'s (twelve incompatible, fifty-five additive), so no declaration moves: a declaration-level tool cannot see a load-time refusal, which is why the consumer run is the instrument of record here.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **A nil guard refuses two alternatives of disjoint kinds wherever they stand** (A-392). `typeGuard` folded each alternative into a widening accumulator, so an alternative the checker could not narrow — a conditional whose branches disagree, for instance — masked a genuinely disjoint one written after it. The same two alternatives were therefore refused in one order and accepted in the other: `note -> Coalesce((f1 ? { note : qty }), 1)` loaded clean and failed on every selecting instance, while `note -> Coalesce(1, (f1 ? { note : qty }))` was refused. Every pair is now compared, so the order the alternatives are written in does not decide the verdict.
+- **A union's member read refuses a member its alternatives declare with disjoint kinds** (A-394). The read merged the alternatives' member types and discarded the one bit the join computes to answer this, so the member typed as a scalar of unknown subkind and every later stage admitted it. A schema whose `Alt` takes `label String` from an abstract base while `Other` declares `label Integer` loaded clean and returned `E_EVAL_ERROR` on every instance selecting the disagreeing alternative.
+- **The nil literal is refused at an argument position the catalogue types** (A-379). `checkArgs` admitted it everywhere, so `name -> Substring(nil)` loaded clean and returned `E_EVAL_ERROR: Substring() expects integer start index, got <nil>` on every conforming instance. It is still admitted at an `ArgAny` position — `Coalesce(nil)`, `Default(nil)`, `Contains(nil)` — and the receiver rule is unchanged.
+
+##### Changed typing — the static invariant checker, `schema`
+
+- **`Min` and `Max` with an argument are typed by the total order, not by the join** (A-393). The evaluator ranks receiver against argument through a total order — nil, then boolean, then number, then string — so `Min(string, number)` is always the number and `Max(string, number)` always the string. The result is decidable, and typing it as a scalar of unknown subkind admitted `(name -> Min(1)) -> Upper` and `(name -> Max(1)) -> Abs`, each of which fails at evaluation on every instance. Not listed as breaking on its own: it refuses only shapes that were already an evaluation error on every input.
+
+##### Additive — Go API, `schema/expr`
+
+- **The builtin catalogue is not mutable through its own accessor** (A-390). `LookupBuiltin` and `Builtins` returned specs whose `Args` slice aliased the package-level table, so a caller writing through one corrupted the catalogue for the rest of the process — measured, two lookups of one builtin shared a backing array. Both now return a clone. `Args` and `ArgAt` are additive and unreleased in `v0.21.0`, so no consumer holds the aliasing behaviour.
+
+##### Documentation
+
+- **The stacked doc block on `checkArgs` and `checkReceiver` is split** (A-383). `checkArgs` had been inserted between `checkReceiver`'s doc comment and `checkReceiver`, so one block opening "checkReceiver refuses a receiver…" documented `checkArgs` and `checkReceiver` had no doc at all. This is the class's second site in one fix pass, and the gate rule that catches it lands with A-372.
+- **`ResultElementOrArg`'s godoc states the ranked typing** (A-393), and group 8's entry above is amended rather than left to contradict it.
+
+
+#### Group 3 — the graph's addresses (A-401, A-402, A-388, A-380; `1718ca2`)
+
+**One silent-corruption fix and one new refusal.** Together these make
+`graph/doc.go`'s claim — *"every address the graph receives is canonicalized"* —
+true for the first time, and they assert the premise the `(one)` composed key
+rests on. Every item is measured at **zero cost to rdata**, whose six schemas
+declare **no composition and no Timestamp, Date or UUID primary key** —
+re-counted in its tree at `09e5e970`, not inherited from the decisions. `gorelease -base=v0.20.0` at `1718ca2` is byte-identical to `49b1be6`'s (twelve incompatible, fifty-five additive), so **no declaration moves and the tool reports none of this**: a silent-corruption fix and a new load-path refusal are invisible to it.
+
+##### Fixed — silent corruption, `graph`
+
+- **An imported snapshot is re-keyed under the importing schema** (A-401). `NewFromSnapshot` installed each cloned instance under the address the snapshot carried while every lookup canonicalized. Replay a document persisted before a key's constraint changed — a `String` key migrated to `Timestamp` — and the imported instance was addressable by **nothing**: not by `FormatKey` of the raw text, not by `FormatKey` of the canonical text, **not even by its own carried key** — and a re-`Add` installed a second copy with no `E_DUPLICATE_PK`. Reachable from `cmd/yammm` and from the documented resume path `graph.NewBatchAssemblerFromSnapshot`. The instance itself is re-keyed, not the map entry: `Graph.Snapshot` builds its index from the instance's own key, so re-keying the map alone is defeated one layer up. The pending unresolved target key and every edge's own properties move with it. **A no-op on the common path**, where a same-schema import's addresses are already canonical.
+
+##### Breaking — a document the reader used to accept
+
+- **A `(one)` composition slot carrying more than one occupant is refused** (A-380), at `graph.RebuildSnapshot` and at `snapshot.Load`, with `E_DUPLICATE_COMPOSED_PK` — the code `Graph.Add` and `Graph.AddComposed` already raise for the same shape. The `(one)` hop's `_composed_key` segment carries no discriminating element on the ground that such a slot holds exactly one child, and **no layer enforced that**: both public entry points accepted two occupants with no diagnostic, and the adapter then minted **one byte-identical `_composed_key` for both**. With the part DDL deployed, the second `CREATE` violates the `UNIQUE` constraint and the whole batch fails at the server. The premise is enforced rather than the address reverted, which would move a persisted format a second time.
+
+##### Fixed — one value, one spelling, at the three layers that disagreed
+
+- **An identity comparison is decided on the canonical address** (A-388), at three sites. `Graph.Add`'s `checkInstanceKey` compared a key component against its key property in their raw forms, so Add **refused with `E_GRAPH_INVALID_PK` a record `RebuildSnapshot` accepts and stores** — the write path contradicting the model the same range installed. The reader's duplicate-record key equality compared the document's raw text where every other address in that function had moved to the canonical form. And the Add path passed an association edge's **own properties** through raw while canonicalizing the target key beside them. A key that names a genuinely different value is still refused.
+
+##### Changed — lookup cost, `graph`
+
+- **A lookup tries the address as spelled before it canonicalizes** (A-402). `Snapshot.InstanceByKey` and `Graph.AddComposed` read the index directly and fall back to the canonical form only on a miss. Strictly semantics-preserving: every address that resolved before resolves now. `docs/API.md` advertises `InstanceByKey` as an O(1) lookup while every call on a Timestamp, Date or UUID key ran a parse, a re-render and a marshal, and `AddComposed` paid it once per composed child under the graph's lock held exclusively.
+
+
+#### Group 4 — the evaluator and the validator (A-397, A-368, A-369, A-370, A-371, A-373, A-374; `df28cac`)
+
+**The first residue group that moves a declaration**, and the group whose whole
+shape is *a rule delivered at some of its sites*. Every item below is a rule
+this round already ratified, carried to the readers, exits and member kinds it
+had not reached. Measured at **zero cost to rdata**: it installs no logger,
+declares no relation named `SELF`, and its suite shows no delta beyond unit 4's
+hash re-key. `gorelease -base=v0.20.0` at `df28cac` reads twelve incompatible, **fifty-six additive** — one more than every group since 8, the addition being `SelfVariable` below; groups 1 to 3 moved no declaration at all, so the tool reported none of their load-breaking refusals, the silent-corruption fix or the new load-path guard.
+
+##### Additive — Go API, `schema/expr`
+
+- **`SelfVariable` names the variable bound to the instance** (A-373). The name stood as a private constant in `schema` and as a string literal at two evaluator sites, so the completer, the static checker and the evaluator agreed by coincidence. All three now read one exported constant.
+
+##### Breaking — the schema loader
+
+- **A relation whose FIELD name is `self` is refused** (A-373), with `E_INVALID_NAME` at the relation's span, as a property of that name already was. A relation is a member too and is read by its field name, so the same rule decides it; the member was otherwise unreachable by its own name with no diagnostic. The ground is stated truly for the first time: the bare name and `$self` resolve to the instance first, so the member is readable only as `self.self`.
+
+##### Fixed — diagnostics a row could not report
+
+- **Each validation pass is gated on ITS OWN errors** (A-368). The gates asked `HasErrors`, so any earlier issue — a property error, or the member index's own case-fold collision — silenced every pass after it and a row reported one defect per round trip. Each gate now compares `Collector.ErrorCount` before and after its pass, the use that primitive's godoc names. A case-fold collision is reported once, by the member index, before any pass runs, rather than by whichever pass happened to read the slot. The final gate before the instance is built stays `HasErrors`: a row with any error yields nil and runs no invariants.
+- **A cancelled row records its cancellation whatever else it drew** (A-369), at every exit of the property pass rather than four of eight; and **`ValidateOne` applies the batch rule** — on a cancelled context it returns the cancellation alone, as `Validate` does. Its two callers, `graph.BatchAssembler`'s serial add and the snapshot revalidator, were returning a timeout's leftover diagnostics as findings about the data.
+- **A cancelled row keeps its Fatal `E_INTERNAL`** (A-370). A library defect and a deadline can land on one row, and the drop that removes the row's partial diagnostics removed the defect with them, so a bug reported as a timeout.
+
+##### Fixed — one rule, every reader
+
+- **An array is not a list, at all five readers and in both messages** (A-371). `value.ListElems` states the rule; `Len`'s collection arm, `TypeOf`'s type name, the edge-shape message's kind and the `.ys` writer's element reader each went on accepting one, and `asSlice` said "expects slice or array input" for a reader that accepts neither. `Len` now refuses an array as it refuses a number, `TypeOf` names the Go type, the shape message reads "expected array, got [16]uint8", the list message says "expects a list", and an array at a list position takes the writer's existing dropped-value path. Contingent: no producer yields one, and it is taken so the rule has no stated exception. **Message text only reaches a consumer, and rdata matches codes.**
+
+##### Documentation
+
+- **`sameSources`' unreachable arm is deleted and its invariant stated** (A-374). One schema holding its own source entry while the other does not cannot occur: a schema carries `Sources` only through the loader, `setSources` has one caller, and it is handed the registry holding the schema's own entry. A dead arm in a four-way partition is what the round retired elsewhere.
+- **The `WithLogger` claim is true in the code** (A-397). `instance/options.go`, the package doc and `docs/API.md` all say each record is logged with the context passed to `Validate`; the property-name-normalization record went through `slog.Logger.Debug`, which the standard library hard-codes to `context.Background`. It now takes the package's ctx-taking helper, as every other logging site in `instance/` does. **The prose was right and the code was wrong**, so the code moved.
+
+
+#### Group 5 — the gates (A-396, A-359, A-360, A-361, A-362, A-403; `af50494`)
+
+**No shipped surface moves.** Every change is one of the repo's own gates or the
+prose a gate reads, and the one signature that moves is in `internal/`. Recorded
+here because the group is a commit in the release's range: it is the group that
+makes the gates able to fail, and three of them could not.
+
+##### The gates, each measured against what it missed
+
+- **The dependency gate reads every ROW, not one line per directory** (A-359). A row's subject names a package, which need not be the one whose `doc.go` carries it, so `adapter/doc.go`'s family table is read row by row against each sibling's own imports — and the doc-only skip, which exempted that file entirely, is deleted. A `# Dependencies` heading with no row the gate can read is now an error. **Measured: 10 rows read before, 23 under 18 headings after.** Six headings stated their claim in prose or in an ASCII arrow the gate does not read (`adapter/neo4j`, `diag`, `immutable`, `internal/value`, `location`, `lsp`) and are converted; two rows in `adapter/doc.go` were false and are corrected; `adapter/json` gains the block its five siblings carry.
+- **The doc-comment gate reads the PARSED comment** (A-360), so it reports `*x*`, `**x**` and `_x_` emphasis and a ``` fence in plain text and never inside a code block, where those characters are meant as written. The detached-doc rule now covers every position a doc can occupy — each spec of a parenthesised block, each exported struct field and the package clause — and reports a gap comment only when its text begins with the declaration's name, which is what separates lost documentation from an ordinary trailing note. **Nine sites found: five were real emphasis go/doc printed as typed; four were identifiers carrying underscores, now quoted.**
+- **The gate loader reads the TRACKED tree** (A-362) and applies a build constraint to a NON-TEST file only (A-396). `go doc` renders no test declaration under any tag, so the published-documentation ground could not justify dropping test files — and dropping them removed the regression anchors the gate exists to check. **Measured: 1,551 doc links resolved before, 1,555 after**; the build context is now pinned to one GOOS/GOARCH rather than the machine's, and both module gates carry a floor set just under the true count rather than three times below it.
+- **One pinned toolchain in both environments** (A-361). `gofumpt` and `goimports` become `tool` directives in `go.mod`, as `golangci-lint` already was, and the hooks run them through `go tool`; CI's two `go install …@latest` steps are deleted. The tidy hook's file filter gains `go.sum`, and `scripts/gomodtidy.sh` resolves the repo root through git, fails when the module list is empty or unreadable, and refuses an untracked `go.mod` that CI would never see.
+- **The tidy gate discriminates on the EVIDENCE** (A-403). Output means untidy whatever the exit status; a non-zero status with no output means the command failed to RUN, reported as that with its stderr. **Demonstrated directly**: given a command that cannot run, the old shape printed "this module is untidy" above an empty diff, and the new one names the failure and shows the reason.
+
+##### Note for a contributor
+
+`go.mod`'s Go directive reads `go 1.26.0` rather than `go 1.26`: adding the tool
+directives made `go mod tidy` normalize it, and the tidy gate enforces what tidy
+wants. `gofumpt` and `goimports` are no longer expected on `PATH`; `go tool`
+runs the pinned ones.
+
+
+#### Group 6 — the adapter and the reader (A-382, A-381, A-384, A-386, A-372, A-375; `9efcac1`)
+
+**No shipped surface moves and no behaviour changes but one message.** Five of
+the six repairs correct a document, an enumeration or a gate; the sixth is a
+memoization on the read path. Every declaration in `adapter/neo4j`, `snapshot`,
+`graph`, `schema`, `diag` and `instance` is identical to group 5's, and the
+full three-image server matrix ran because two `adapter/neo4j` files moved.
+
+##### Fixed — documents that contradicted the code they describe
+
+- **`Adapter.DiffConstraints`' godoc no longer contradicts its own file** (A-382). It said property order is not significant, without qualification, four hundred lines above a comment stating the opposite for the blocking path — measured on three server images. Order is not significant for PAIRING and IS significant for BLOCKING, and `yammm neo4j diff` passes every introspected index as `alsoBlocking`, so the order-sensitive path runs on every diff.
+- **`emittableTypes`' godoc names the consequence** (A-382). "A type whose label fails validation is skipped" reads as "the rest still emits"; all three callers return nil on a non-OK result, so the schema is refused entirely.
+- **`W_SNAPSHOT_VALUE_DROPPED`'s registry doc returns to a site enumeration** (A-381). It claimed every write path discarding a stated value marks it, which the writer falsifies: a duplicate record's `Diagnostic` has no wire field and is dropped silently, as is an instance provenance's span. The doc names its three real sites and both deliberate silent drops, so a consumer cannot gate loss detection on the code and be wrong. **Both emission sites gain a driving test; they were asserted only ABSENT.**
+- **`provenanceKeyOf`'s godoc states the condition first** (A-384). It asserted that a loaded instance carries a provenance, while its own closing sentence conditioned the same claim and the writer emits none for an instance without one. `docs/VERSIONING.md`'s v0.19.0 correction, which took the same unconditional wording, is corrected with it.
+- **The import-miss messages name the condition and the wrapper names the import** (A-375), once rather than twice.
+
+##### The gate that catches the class
+
+- **The doc-comment gate reports a STACKED doc** (A-372): a comment whose leading identifier names another declaration of the same file. Nothing is detached in this shape — the block abuts a declaration — so the detached rule cannot see it, and go doc shows the paragraph under a name its author did not mean. **It found SIX across the module** on its first run, including the one it was ratified for and one this fix pass had itself injected one group earlier.
+
+##### Changed — read-path cost, `snapshot`
+
+- **The reader memoizes the key positions it re-derives** (A-386). Every address a `Load` resolves — each root key, edge target, duplicate conflict, duplicate parent and unresolved source — called `TypeByID` and walked `Type.PrimaryKeys()` again. The same range memoized this exact work on the graph side and left the reader per-call. No output changes.
+
+
+#### Group 7 — the prose and the enumerations, THE LAST (A-400, A-398, A-365, A-387, A-389, A-395, A-363, A-364; `e989131`)
+
+**No shipped surface moves.** Last by design, so every enumeration below is
+written against the tree as it finally stands.
+
+##### Corrected — claims this document and its neighbours made falsely
+
+- **`docs/SPEC.md` no longer says "the string functions … a string"** (A-400): `Split` and `Match` are `ResultList`, and the sentence now names the nine builtins that yield a string, the two that yield a list of strings, and that `Min`/`Max` with an argument are ranked by the total order.
+- **The plugin reference's `Lest` row stops claiming a lambda parameter is accepted and ignored** (A-400): `Lest` declares `MaxParams` 0, and both the checker and the evaluator refuse one.
+- **This document's own round paragraph names THIRTEEN groups and `b73eca5`** (A-400), where it said eleven and named `c97d194` under a heading that already enumerated thirteen.
+- **The unit-4 catalogue enumeration names every constant `gorelease` reports** (A-365): all thirteen `BuiltinResult` and all five `ArgKind`, where it named twelve including the retired `ResultScalar` and omitted two.
+- **The A-336 bullet names T30's COST beside its benefit** (A-387): the memo is built at every `graph.New` and every `RebuildSnapshot` — hence every `snapshot.Load` — over the whole import closure, so construction scales with the schema rather than with the data. Sharing one memo per schema is NOT done: it is a model change whose precondition is a benchmark that has not been run. **That benchmark needs a SYNTHETIC closure**, established by measurement rather than assumed: the single external consumer's largest closure that any code actually loads is three schemas and twelve types, and its largest declared closure — five schemas, sixteen types — is documentation that nothing loads. Neither produces a signal above noise, so no real consumer can supply this evidence.
+- **The v0.19.0 provenance correction is conditioned** (A-384, landed in group 6 and restated here).
+- **`instance/internal/eval`'s package doc shows one signature for one method** (A-398): its third `Evaluate` example takes the context form the other two already did.
+- **The catalogue's two comments describe the code** (A-395): `RecvListOrArg` stops promising a scalar and stops calling itself the mirror of `ResultElementOrArg`; `ResultBody` stops claiming any type absorbs `Then`'s nil.
+- **The `BatchAssembler` finalize comment counts four fields, not three** (A-389).
+- **Four test comments state the fact rather than the history** (A-364): the tree counts they cited are over trees that no longer exist, and the history lives in the review ledger.
+
+##### The corpus reaches deeper
+
+- **A `(one)` composition nested below the first hop is in the corpus, and pinned** (A-363). `graph/testdata/composed.yammm` and `adapter/neo4j/testdata/composed_nested.yammm` each gain a `Timestamp primary` root composing a `(_:many)` keyed part, which composes a `(one)` part, which composes keyless `(_:many)` parts. The depth-one, depth-two and depth-three `_composed_key` literals are pinned through `BatchNodeQueries` — the depth-two segment carrying the relation NAME ALONE, which is the premise the reader and `RebuildSnapshot` now enforce — and the root's key is written in a non-canonical spelling and stored canonical. `TestFileLoadedSchema_OneCompositionShapes` now asserts the declared cardinality and that a second occupant is refused, where counting children alone stayed green if the slot became `(_:many)`.
+
+
+### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the clause-5 second fix pass committed as `ebdeb6a`; the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105)
 
 *Written in the fix pass that landed the behaviour, not at the tag (A-227). Pass A's declaration delta was enumerated from the diff and confirmed by `gorelease -base=v0.20.0` at `e8547b6`: across both units' cargo, **three incompatible changes and thirty-seven additions** (recounted from the persisted run; an earlier sentence here said thirty-eight), suggested `v0.21.0` — this unit's share one removal and ten additions, matching the list below symbol for symbol. **Pass B's block follows pass A's, measured by `gorelease -base=v0.20.0` at its commit `2b28aab`: across both units' cargo, four incompatible changes — `E_RELATION_NORMALIZATION_COLLISION` and `Type.CanonicalPropertyMap` removed, `StructuralHashVersion` 3 → 4, and `expr.IsNilLiteral` removed — and forty-four additions, suggested `v0.21.0`; pass B's share is the one removal and seven additions named below. **The clause-3/4 block follows pass B's, measured by `gorelease -base=v0.20.0` at its commit `e70a383`: ten incompatible and forty-six additive across units 4 and 5, suggested `v0.21.0` — this pass's share the four `instance` removals, the two `Kind` value shifts and the two `schema/expr` additions named below (identical to the working-tree export run that preceded the commit).** The tag-time run re-confirms it.***
 
@@ -956,7 +1406,7 @@ Sixty-six fixes from the 130 acknowledge- and corpus-lane findings of both readi
 
 Twenty-eight repairs from the unit's fix-diff round, read in two passes and ratified in two sittings, delivered under TDD as one pass. Every clause-5 finding — 33 in pass 1, 41 in pass 2 — is retired by one of them; none is deferred, none wontfix but A4 (A-265). The static checker's lattice is the largest change: an association now reads as its target's primary key and the checker distinguishes what the evaluator distinguishes.
 
-**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0` — its unit-lane suite against this working tree fails **exactly the four top-level tests unit 4's hash re-key fails** (`TestGeneratedPackagesMatchSchemas`, `TestSchemaIdentityIsEmbedded`, `TestWireGolden_DateShape`, `TestWireGolden_TimestampShapes`), and the suite at the pin is green; **the delta is empty**, the two load-time tightenings (an empty invariant message, an edge-property collision) included. Every rdata type has one primary key and no invariant reads a relation field, so the lattice change reaches nothing there. **Measured, not written from the diff: `gorelease -base=v0.20.0` at the commit `ebdeb6a` reports twelve incompatible changes and forty-six additions across units 4 and 5, suggested `v0.21.0`** — two removals more than the clause-3/4 commit (`E_MISSING_PRIMARY_KEY`, `instance.ErrMissingPrimaryKey`), the additions unchanged in count (`RecvScalar`, added and renamed inside the unreleased range, leaves no trace; `RecvOrdered` is the addition). Evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_ebdeb6a.txt`.
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0` — its unit-lane suite against this working tree fails **exactly the four top-level tests unit 4's hash re-key fails** (`TestGeneratedPackagesMatchSchemas`, `TestSchemaIdentityIsEmbedded`, `TestWireGolden_DateShape`, `TestWireGolden_TimestampShapes`), and the suite at the pin is green; **the delta is empty**, the two load-time tightenings (an empty invariant message, an edge-property collision) included. Every rdata type has one primary key and no invariant reads a relation field, so the lattice change reaches nothing there. **Measured, not written from the diff: `gorelease -base=v0.20.0` at the commit `ebdeb6a` reports twelve incompatible changes and forty-six additions across units 4 and 5, suggested `v0.21.0`** — two removals more than the clause-3/4 commit (`E_MISSING_PRIMARY_KEY`, `instance.ErrMissingPrimaryKey`), the additions unchanged in count (`RecvScalar`, added and renamed inside the unreleased range, leaves no trace; `RecvOrdered` is the addition).
 
 ##### Breaking — behaviour, `instance`
 
@@ -1011,11 +1461,13 @@ Twenty-eight repairs from the unit's fix-diff round, read in two passes and rati
 
 - `docs/SPEC.md`: an association reads as its target's primary key (the static-check section); `+`'s refusal list names a boolean and the nil literal and accepts a String key; an invariant's message must not be empty; `Compare` ranks any ordered value; the `E_MISSING_PRIMARY_KEY` row deleted. `docs/API.md`: the batch contract (a nil slice when the batch did not run; one `instance_index` per row's diagnostic, none on a batch-wide one; one stamped cancellation); `WithLogger` states the evaluator trace. `instance/doc.go`: the Dependencies line lists the six packages `go list` reports (`internal/value` is `eval`'s import, not this package's); `WithLogger`'s bullet. `ValidEdgeData.TargetsIter`'s example calls `target.TargetKey()`. `internal/value/doc.go`: `json.Number` among the supported types; the transitivity paragraph states the rule. `wrapPanicValue`'s and `coerceValueWithRecovery`'s comments state what the code does. The plugin's `diagnostics.md` drops the deleted code. *This section's own earlier line "two of seven" (unit 5's imports) is corrected above to one of six.*
 
+#### Pass A — the unit's first reading round (A-237…A-250)
+
 Minor tier, under the pre-1.0 subtractive rules. Fourteen repairs from the unit's round (A-237…A-250), every one a model change: one member index and one fold rule for every input key, one path rule, one type-identity rendering, one meaning per diagnostic code, one stored-form rule, and one composed-nesting bound shared with the wire.
 
 **Rule (a), measured against the single external consumer** — rdata at `09e5e970`, which pins `v0.20.0` — by running its unit-lane suite three ways: at the pin (green), against `main` at `6264040` with unit 4 merged and this unit absent, and against this tree. **The last two fail identically** — five generated `SchemaHash` constants, five embedded-identity pins and seven `.ys` wire goldens, all moved by unit 4's hash re-key above — **so this unit adds no failure the consumer's suite can see.** rdata builds every production validator with `RecommendedOptions()` (strict names, so the fold path below is never entered), validates by bare type names, and declares no composition; what does reach it is the FK-field rule, and its suite is green under it.
 
-### Breaking — behaviour, `instance`
+##### Breaking — behaviour, `instance`
 
 - **A `_target_`-prefixed key that is not one of the target's foreign-key fields is `E_UNKNOWN_EDGE_FIELD`** where it was skipped silently (the scan skipped the prefix rather than the expected names) — the one change that can surface in a consumer's data, as a typo it never saw.
 - **Foreign-key fields and edge properties fold like every other input key**: exact match first, then under the default mode an ASCII case-fold; an exact match never collides; two keys folding to one member is one `E_CASE_FOLD_COLLISION` at the object, and the colliding keys are not also reported unknown. `_target_ID` now matches `_target_id` under the default mode, where it drew `E_MISSING_FK_TARGET`; the strict mode is unchanged. A key carrying a non-ASCII letter matches nothing.
@@ -1033,29 +1485,31 @@ Minor tier, under the pre-1.0 subtractive rules. Fourteen repairs from the unit'
 - **`SchemaBuilder.Build`'s cardinality error names the relation whose `EdgeTo` call first violated it**, every run; it named one of them by map order.
 - **`yammm data`'s `--type` resolves by the validator's rule** (A-233): an alias-qualified type name now drives CSV coercion, where `LoadAndParseCSV` resolved local-only, discarded the miss, and handed the adapter a nil type that kept every value a string for the validator to refuse; **an unknown `--type` is an error naming the type** rather than a parse that fails row by row downstream. A type-column value resolves the same way.
 
-### Breaking — the static invariant checker, `schema`
+##### Breaking — the static invariant checker, `schema`
 
 - **A `$name` variable is matched against a type's members by its exact spelling**, as `docs/SPEC.md` "Expressions and Invariants" states and the evaluator already did. A schema whose `$startdate` named a `startDate` property loaded clean and failed every instance with `E_EVAL_ERROR`; it is refused at load with `E_INVALID_INVARIANT`. rdata's 30 invariants use no `$` member reference. `instance/invariant_contract_test.go` judges the rows.
 
-### Breaking — Go API
+##### Breaking — Go API
 
 - **`schema.Type.CanonicalPropertyMap` is removed.** Its one caller cloned the whole map once per validated instance; `CanonicalPropertyName` answers the lookup with no allocation.
 
-### Additive — Go API
+##### Additive — Go API
 
 - `instance.WithIssueLimit(int)` — the per-instance cap, restored to match `schema.WithIssueLimit` and `snapshot.WithIssueLimit` (default 100, 0 unlimited); `instance.WithLogger(*slog.Logger)` — restored beside `schema.WithLogger` and `graph.WithLogger`; `instance.MaxComposedDepth`; `instance.ErrCompositionDepthExceeded` and `diag.E_COMPOSITION_DEPTH_EXCEEDED` (`CategoryInstance`).
 - `schema.Type.RelationByField` — the exact lookup on a relation's field name, beside `Relation` on the DSL name; `schema.Relation.PropertyFold` — the case-folded lookup on an edge-property block.
 - `schema.Schema.ResolveTypeName` — the one entry-relative by-name resolve (a bare name for a declared type, `alias.Name` for a directly imported one), which the validator, `instance.BuilderFor` and the CLI now share (A-233).
 - `diag.Collector.MergeFunc` — `Merge` with a transform on each stored issue, carrying the source's severity counts and truncation facts.
 
-### Removed — dead machinery
+##### Removed — dead machinery
 
 - `validatorConfig.valueRegistry`, `eval.NewChecker`, `eval.Checker.registry`, `value.Registry` and `value.ClassifyWithRegistry` (A-243): one func field with no setter since v0.12.0, no consumer, and a reflection fallback that already classifies named basic types. `eval.DefaultChecker` is the one checker; the "a Validator's custom value registry is not consulted" sentences are deleted as true by construction.
 - `edgeState.excessCallerPC` and `SchemaBuilder.relByFieldName`: retired by the call-time cardinality check and `Type.RelationByField`.
 
-### Prose
+##### Prose
 
 - `docs/API.md` "Instance Validation": the options table gains `WithIssueLimit` and `WithLogger`; "Validation" states the relation-argument rule, the `instance_index` and truncation contract, the path rule and the depth bound; "Input Format" states the one fold rule; "Value Functions" describes `CanonicalValue` as the stored-form rule and drops the registry sentences. `docs/SPEC.md` lists `E_COMPOSITION_DEPTH_EXCEEDED` under Instance and `E_DUPLICATE_COMPOSED_PK` under Instance and Graph with the note `E_DUPLICATE_PK` carries. `instance/doc.go`'s `WithStrictPropertyNames` sentence described `WithAllowUnknownFields`; its Dependencies line ~~omitted two of seven imports~~ *(struck 2026-09-04: `instance` imports six packages, and the line had listed a seventh that is `eval`'s — corrected in the clause-5 round's second fix pass, F9)*; `ValidEdgeData.TargetsIter`'s example ~~called a method that does not exist~~ *(struck 2026-09-04: it still called `target.Key()` after this pass — found by the clause-5 round (G13) and corrected to `target.TargetKey()` by its second fix pass)*. **§v0.12.0 below said `RawInstance.Provenance` is "populated by the parsing adapters"; no adapter has since `adapter/json`'s location tracking was removed in the same release** (A-232) — the field is a caller-supplied input.
+
+### Condition-1 unit 4 — `schema/`, merged to `main` as `fabed40` (PR #102)
 
 *Condition-1 unit 4's fixes (`schema/`), merged to `main` as `fabed40` (PR #102) on 2026-09-03 and not yet released. Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration count below is measured at `9007281`, whose Go tree is `main`'s; the tag-time run re-confirms it.*
 
@@ -1063,35 +1517,37 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 
 **Rule (a), measured against the single external consumer** — rdata at `09e5e970`, which pins `v0.20.0`: its six schemas validate clean under this tree's checker; its 19 relation names are all UPPER_SNAKE and none carries a digit; it declares no lambda parameter; its 30 invariants use no affected shape. The unit-lane suite runs at the merge (A-186), where the hash re-key alone moves five generated `SchemaHash` constants and six `.ys` goldens.
 
-### Breaking — the DSL
+#### Breaking — the DSL
 
 - **Relation names are UPPER_SNAKE** — `upper_letter { upper_letter | decimal_digit | "_" }` — and a relation's field name is that name in lower case, by construction. `--> worksAt` draws `E_INVALID_NAME` where it loaded. The Builder applies the same production. Consumer cost zero, measured.
 - **The three postfix operators `[]`, `->` and `.` bind at one left-associative level**, and the name after `.` is one word. `$self.name -> Len` pipes the property where it evaluated `Len($self)`; `$self.tags[0]` indexes the property where it read a member named `@`. The member-position builtin call is gone: `LINES.Len` is a member read, and the pipeline is the only call form. A design-era rule, not a regression, pinned by no test until now.
 - **The member position after `.` takes any word, keywords included** — `$self.type` reads a property named `type`, `$self.in` a relation named `IN`. The grammar defines `Name = LC_WORD | UC_WORD` for it. `v0.20.0` refused `in` there; `c41c79e` refused eleven legal names.
 - **An empty schema name is refused at its declaration** (`E_INVALID_NAME`). `v0.20.0` reported it as a span-less `E_DUPLICATE_TYPE`.
 
-### Breaking — the structural hash
+#### Breaking — the structural hash
 
 - **`schema.StructuralHashVersion` is 4** (was 3). A relation target hashes as its owning schema's name beside its type name, so two closure members' same-named types no longer produce one digest; `-0.0` hashes as `0.0`, as `FloatConstraint.Equal` compares. **Every `.ys` regenerates and every gogen `SchemaHash` moves.** This is the hash algorithm's counter, distinct from the `.ys` wire's `version: 4` of `v0.19.0`; both now read 4.
+- **What a document written before this release does, stated as `v0.17.0`'s algorithm bump stated it.** **Every persisted `.ys` draws `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` until it is re-marshalled** — at `Error` on a body read (`Load`, `Verify`), which fails the load, and at `Warning` on a header-only read (`Info`, `HeaderOnly`, `HeaderOnlyRead`), where `HeaderInfo.SchemaHashMatches` reports false and the document classifies as stale. **`E_SNAPSHOT_INCOMPATIBLE_SCHEMA` does NOT fire on such a document**: an algorithm mismatch skips the hash comparison entirely, so a consumer routing on the stale-schema code sees nothing and one routing on the unsupported-algorithm code sees every document. Neither code is new and neither moves a declaration, so no declaration-level tool reports this. **A consumer regenerates its fleet**; the release runbook's PVC-purge clause is the shape for a volume.
+- **The failure mode to plan for is silence, not refusal** — measured in the one external consumer and stated because any consumer routing on `SchemaHashMatches` can reproduce it. Where a caller tests the hash *before* it loads, the Error-severity refusal above never fires: every pre-pin document classifies stale, and what happens next is whatever the stale path does. In that consumer it was three things, and **only the first clears on its own if you do nothing: it does not.** A retention sweep that reclaims a run directory only when every sibling is Done stops reclaiming permanently, because nothing rewrites a `.ys` header's hash and no path can return a stale sibling to Done. A link step that skips a hash mismatch with a bare `continue` reports zero work, no error and no warning. A dispatch step refuses only on a *targeted* resume, so a run that allocates a fresh directory each time never meets it. **Check the sweep, and check that the skip logs.**
 
-### Breaking — Go API
+#### Breaking — Go API
 
 - **`diag.E_RELATION_NORMALIZATION_COLLISION` is removed.** Two UPPER_SNAKE names cannot lower to one field, so the code could never fire; the one remaining shape, an association and a composition under one name, reports as `E_RELATION_COLLISION`, whose meaning widens to both. rdata matches neither.
 - **`expr.StringLiteral` is strict**: it returns a string for a `*Literal` holding one and false for every other node, as its godoc always said. It had returned an S-expression's operator name, which is how a non-literal member dispatched as a method call.
 
-### Additive API surface
+#### Additive API surface
 
 - `diag.E_DUPLICATE_SCHEMA`, `diag.E_DUPLICATE_INVARIANT`, `diag.E_INVARIANT_CONFLICT`, `diag.E_LOAD_SOURCE_CHANGED`.
-- **The builtin catalogue in `schema/expr`**: `BuiltinSpec`, `LookupBuiltin`, `Builtins`; `BuiltinResult` with `ResultScalar`, `ResultReceiver`, `ResultElement`, `ResultBodyList`, `ResultBody`, `ResultFlattened`, `ResultList`, `ResultUnknown`; `ParamBinding` with `BindNone`, `BindElement`, `BindReceiver`, `BindAccumulatorElement`; `ResultElementOrArg`; `ReceiverKind` with `RecvAny`, `RecvList`, `RecvScalar`, `RecvScalarList`, and the `Receiver` field on `BuiltinSpec`. The evaluator registers its implementations against this one table and enforces its arity fields; the static checker reads all of it.
+- **The builtin catalogue in `schema/expr`**: `BuiltinSpec`, `LookupBuiltin`, `Builtins`; `BuiltinResult` with all THIRTEEN constants `gorelease` reports at the candidate — `ResultNumber`, `ResultReceiver`, `ResultElement`, `ResultBodyList`, `ResultBody`, `ResultFlattened`, `ResultList`, `ResultElementOrArg`, `ResultReceiverOrArg`, `ResultUnknown`, `ResultReceiverOrBody`, `ResultString` and `ResultBoolean`; `ArgKind` with `ArgAny`, `ArgString`, `ArgNumber`, `ArgPattern` and `ArgOrdered`, and the `Args` field and `ArgAt` method on `BuiltinSpec`; `ParamBinding` with `BindNone`, `BindElement`, `BindReceiver`, `BindAccumulatorElement`; `ReceiverKind` with `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList` and `RecvNumericList`, and the `Receiver` field on `BuiltinSpec`. The evaluator registers its implementations against this one table and enforces its arity fields; the static checker reads all of it. *(`ResultScalar`, added by this unit, was replaced by `ResultNumber`, `ResultString` and `ResultBoolean` in the tier-1 round's group 8 before the tag, so it is not in the release's surface — the enumeration is what `gorelease` reports at the candidate.)*
 - `(*schema.Type).CanonicalPropertyName`.
 
-### Behaviour changes — `schema`, the static invariant checker
+#### Behaviour changes — `schema`, the static invariant checker
 
 - **The checker is a typed walk** and refuses at load what the evaluator refuses on every input: a member reached through an association key, a scalar or a list; an undefined named variable; an unknown function; a call shape the builtin refuses; a property named inside a builtin's arguments; a list builtin on a scalar, an instance or a key; a scalar builtin on a list or an instance; an ordering builtin on a list of instances; a bracket with other than one index; a number or boolean indexed. **Consumer-visible in both directions**: a schema `v0.20.0` accepted may now be refused where the evaluator failed it on every input, and a legal schema `v0.20.0` refused now loads — a lambda parameter sharing a property's name, a parameter named `$self`, an inherited composition binding through a shadowing type, a `Map` that changes the element type. rdata: zero, measured.
 - **Name resolution follows the evaluator**: a lambda parameter first, then the owner's members, for bare names and `$` variables alike; **variable names match exactly** where property names fold, so `$myVar` and `$myvar` are two names and the second is refused as undefined.
 - One mistake in one invariant is one diagnostic: an unknown function's lambda is walked with its parameters bound, a refused body is not typed, a repeated bad name reports once, and a member reached through a composition whose target has an unresolved supertype is not reported over the unresolved reference.
 
-### Behaviour changes — `schema`, completion and the registry
+#### Behaviour changes — `schema`, completion and the registry
 
 - Own relation targets resolve before inheritance merges (phase 3c), so an own relation shadowing an inherited one bound to a different type draws `E_RELATION_COLLISION` where it loaded clean, `Relation.Equal` compares identities and is never true for an unresolved side, and **a schema carrying both an inheritance cycle and an unresolved target draws both codes** where the cycle alone was reported.
 - **An invariant's message is its identity**: one type declaring a message twice draws `E_DUPLICATE_INVARIANT`; two inherited definitions with different expressions draw `E_INVARIANT_CONFLICT`, once per name and naming every rival; expressions compare structurally, so `n > 1` and `n > 1.0` differ.
@@ -1101,14 +1557,14 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **The field name of a digit-bearing relation changes**: `HTTP2SERVER` keys instance data as `http2server` where the retired derivation gave `http_2_server`. Consumer cost zero, measured on 19 names.
 - The Builder refuses an expression literal of a Go type the language does not define (`E_INVALID_INVARIANT`) instead of panicking under the hash that completion now runs over invariants; the synthetic root is NFC-normalised as its keys are; `schema/cross_cycle.go` is deleted as unreachable.
 
-### Behaviour changes — `instance`, the evaluator
+#### Behaviour changes — `instance`, the evaluator
 
-- **A composition that is not `many` evaluates to the single child**, not a one-element list, and **a child in scope is an instance with its own relations**, so nested compositions are reachable: `LINES -> Map |$l| { $l.ITEM } -> All |$x| { $x.sku != "" }` reads real values where it was vacuous. As `docs/SPEC.md` stated at `v0.20.0`.
+- **A composition that is not `many` evaluates to the single child**, not a one-element list, and **a child in scope is an instance with its own relations**, so nested compositions are reachable: `LINES -> Map |$l| { $l.ITEM } -> All |$x| { $x.sku != "" }` reads real values where it was vacuous. As `docs/SPEC.md` stated at `v0.20.0`. **One consequence, enumerated 2026-09-06 (A-314): piped into `Len`, such a composition counts the child's members** — `Len` counts a map, as `v0.12.0` shipped it — **where it counted the one-element list**; a presence test is written `X != nil`. `instance/invariant_contract_test.go` pins `MAIN_LINE -> Len` as the member count.
 - **Variable names match exactly**; the bare-name fallback into variables no longer folds.
 - **Equality with `nil` is decided by nil-ness for every value kind**, so `MAIN_LINE != nil` holds on a present composition where it drew an evaluation error.
 - A lambda's shape errors name the body before the parameters, as the checker does; an unknown function reads "unknown function"; member access takes exactly two operands and the three-operand method form is gone.
 
-### Documentation
+#### Documentation
 
 `docs/SPEC.md`: the precedence table and the `Expr "." Name` production with `Name` defined; `RelationName`; the static-check paragraph and the variables section; invariant merging and the part-type rule; the code list. `docs/API.md`: the Schema Identity exclusion paragraph, the registry's idempotence and one-object rules. The plugin's references follow.
 
@@ -1168,3 +1624,5 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **2026-09-02 (later)** — **Added the "Unreleased — merged to `main`" section** for the tier-1 condition-1 release: `HeaderInfo.UnknownTypes` removed (A-190) and `Marshal`'s unreadable-target-key arm reclassified from a Warning to Fatal `E_INTERNAL` (A-191), both from the consumer's cross-read of the v0.19.0 hand-off. Added the `schema.TypeID.SchemaPath` name-search caveat to the v0.19.0 `TypeRef.SchemaPath` entry, the same shape as the `ImmutableKeysFor` caveat beside it — the consumer's cross-read named the trap.
 - **2026-09-02 (later still)** — **Retitled the accumulating section as "v0.20.0 under this policy"** and added the `gorelease -base=v0.19.0` measurement (one incompatible change, no additions). Released ahead of condition-1 unit 4 rather than with the tier-1 release so the consumer's pin move, which rides its own cutover window, targets the tree that already carries both corrections.
 - **2026-09-03** — **Added the "Unreleased — merged to `main`" section for condition-1 unit 4 (`schema/`), written in the fix pass that landed the behaviour rather than at the tag (A-227).** It enumerates the two incompatible and twenty-eight additive declarations `gorelease -base=v0.20.0` reports at `9007281`, and every behaviour change that moves no declaration — the UPPER_SNAKE relation names, one postfix level, the typed static checker and the evaluator conforming to one scope contract, byte-decided registry idempotence, the 16 MiB bound and the non-blocking open at every read, the hash at version 4 — each marked consumer-visible where rdata's tree measured it so. The enumeration of record had carried none of this half when the unit's fix-diff round read it.
+- **2026-09-04 (late)** — Corrected the Unreleased section's preamble and the condition-1 unit-5 heading, which still said the unit was not closed after A-297 closed it and `f049740` (PR #105) merged it. Prose only; no enumeration changed.
+- **2026-09-06** — **Corrected the unit-4 "Additive API surface" enumeration of `ReceiverKind`.** It named `RecvScalar`, which no declaration in the module carries, and listed four constants where `gorelease -base=v0.20.0` reports ten. The line now names all ten as declared: `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList`, `RecvNumericList`. `RecvScalar` was added and renamed inside the unreleased range, so it leaves no trace for a consumer; the enumeration had kept its old spelling. Prose only; no behaviour changed.

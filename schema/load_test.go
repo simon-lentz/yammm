@@ -2051,7 +2051,7 @@ func TestWithSourcesOnly(t *testing.T) {
 			"sub/entry.yammm": entrySrc,
 		}, "sub/entry.yammm", root, schema.WithSourcesOnly(true))
 		require.True(t, res.HasErrors(), "expected the import miss to fail under WithSourcesOnly")
-		assert.Contains(t, res.Err().Error(), "not found in pre-registered sources")
+		assert.Contains(t, res.Err().Error(), "not among the pre-registered sources")
 	})
 
 	t.Run("same layout loads via disk without the option", func(t *testing.T) {

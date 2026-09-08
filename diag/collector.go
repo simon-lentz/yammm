@@ -184,8 +184,6 @@ func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
 	c.mergeLocked(res, transformed)
 }
 
-// mergeLocked folds res into c, storing fn(issue) for each survivor when fn is
-// non-nil. Caller must hold c.mu.
 // mergeLocked folds res's counts and truncation into c and stores issues,
 // which are res's surviving issues as the caller wants them stored. Caller
 // must hold c.mu.

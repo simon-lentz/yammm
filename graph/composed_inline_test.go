@@ -64,6 +64,7 @@ func TestAdd_InlineComposition_OneCardinalityViolated(t *testing.T) {
 		return instancetest.VI(
 			"Wheel",
 			instancetest.TypeID(mustTypeID(t, s, "Wheel")),
+			instancetest.NoKey(),
 			instancetest.Props(map[string]any{"position": position}),
 		)
 	}
@@ -124,6 +125,7 @@ part type Wheel {
 		return instancetest.VI(
 			"Wheel",
 			instancetest.TypeID(mustTypeID(t, s, "Wheel")),
+			instancetest.NoKey(),
 			instancetest.Props(map[string]any{"position": position}),
 		)
 	}

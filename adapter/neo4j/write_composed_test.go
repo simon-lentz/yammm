@@ -279,3 +279,66 @@ func TestBatchNodeQueries_ComposedChunkStraddle(t *testing.T) {
 		}
 	}
 }
+
+// oneCompositionGraphResult drives testdata/composed_one.yammm: a keyed part
+// and a keyless part, each reached by a (one) slot. Until this fixture existed
+// no schema in this package declared a (one) composition at all, so nothing
+// here could exercise the address a (one) slot writes.
+func oneCompositionGraphResult(t *testing.T) (*Adapter, *GraphShape, *graph.Snapshot) {
+	t.Helper()
+	a, s, v, shape := setupWrite(t, "composed_one.yammm")
+	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
+		"Invoice": {{
+			"invoice_id": "i1",
+			"customer":   "c",
+			"bill_to": []any{
+				map[string]any{"address_id": "a1", "line1": "1 Main St"},
+			},
+			"summary": []any{
+				map[string]any{"note": "paid"},
+			},
+		}},
+	})
+	return a, shape, snap
+}
+
+// TestBatchNodeQueries_OneCompositionComposedKeys pins the _composed_key a
+// (one) slot writes, for a keyed part and a keyless one. A (one) slot holds
+// exactly one child, so the relation name alone is the segment: an index would
+// always be 0 and the child's own key identifies nothing the name does not.
+func TestBatchNodeQueries_OneCompositionComposedKeys(t *testing.T) {
+	t.Parallel()
+	a, shape, snap := oneCompositionGraphResult(t)
+
+	queries, err := a.BatchNodeQueries(context.Background(), snap, shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := map[string]string{}
+	for _, q := range queries {
+		if q.Kind != CompositionCreate {
+			continue
+		}
+		label := "Address"
+		if strings.Contains(q.Statement, "__Summary)") {
+			label = "Summary"
+		}
+		for _, row := range q.Params["rows"].([]map[string]any) {
+			props := row["props"].(map[string]any)
+			got[label] = props[composedKeyProp].(string)
+		}
+	}
+
+	// LITERALS, not a second call to the renderer under test. Comparing the
+	// adapter's output against a value computed the same way pins nothing.
+	want := map[string]string{
+		"Address": `["one_test__Invoice",["i1"],["BILL_TO"]]`,
+		"Summary": `["one_test__Invoice",["i1"],["SUMMARY"]]`,
+	}
+	for label, wantCK := range want {
+		if got[label] != wantCK {
+			t.Errorf("%s composed key = %s; want %s", label, got[label], wantCK)
+		}
+	}
+}

@@ -14,15 +14,17 @@ import (
 // staticKind is what the static checker knows an expression evaluates to.
 // The lattice mirrors what the evaluator produces: a composition yields its
 // child instances, an association yields the target key, a property yields a
-// scalar or a list, and a pipeline stage maps one kind to another.
+// scalar or a list, and a pipeline stage maps one kind to another. The nil
+// literal is its bottom — joined with anything it yields that thing, as an
+// absent value stands in for any value — and unknown its top.
 type staticKind uint8
 
 const (
 	kindUnknown  staticKind = iota // no claim; member access is not checked
-	kindInstance                   // an instance of typ: its members are typ's properties and relations
+	kindInstance                   // an instance of one of typs: its members are those every one declares
 	kindList                       // a list of elem
 	kindScalar                     // a string, number, boolean or pattern: no members
-	kindNil                        // the nil literal: a wildcard under Default, an error under arithmetic
+	kindNil                        // the nil literal: the bottom of the lattice, an error under arithmetic
 )
 
 // scalarKind narrows a scalar to what the operators and builtins distinguish:
@@ -37,14 +39,38 @@ const (
 	scalarOther                     // a pattern literal: no operator takes it
 )
 
+// String names the kind as a diagnostic reads it, so a message naming a scalar
+// cannot drift from the definition it names.
+func (k scalarKind) String() string {
+	switch k {
+	case scalarString:
+		return "a string"
+	case scalarNumber:
+		return "a number"
+	case scalarBoolean:
+		return "a boolean"
+	case scalarOther:
+		return "a pattern"
+	case scalarAny:
+	}
+	return "a scalar"
+}
+
 // staticType is what one expression evaluates to. An association reads as its
 // target's primary key — a string, or a list of strings for a composite key —
 // and viaAssociation records that origin so a member read through it names
 // the association rather than "a value with no members".
+//
+// An instance type holds every type the value may be: one after a member
+// read, several after a guard, a conditional or a list literal whose
+// alternatives are instances of different types. A member reads through it
+// only when every alternative declares it, which is what the evaluator's map
+// lookup honours on every input. Ancestry is never consulted: two types with
+// no common ancestor still share the members each declares.
 type staticType struct {
 	kind           staticKind
 	scalar         scalarKind  // kindScalar
-	typ            *Type       // kindInstance; nil when the target did not resolve
+	typs           []*Type     // kindInstance; ordered by identity, no duplicates
 	elem           *staticType // kindList
 	viaAssociation bool
 }
@@ -68,7 +94,32 @@ func instanceOf(t *Type) staticType {
 	if t == nil {
 		return unknownType
 	}
-	return staticType{kind: kindInstance, typ: t}
+	return staticType{kind: kindInstance, typs: []*Type{t}}
+}
+
+// typeName names an instance type as a diagnostic reads it: one type's name,
+// or every alternative's joined by "or".
+func (t staticType) typeName() string {
+	names := make([]string, len(t.typs))
+	for i, ty := range t.typs {
+		names[i] = ty.Name()
+	}
+	return strings.Join(names, " or ")
+}
+
+// unionTypes is the set of both operands' types, deduplicated and ordered by
+// identity so a union built in either order is one value. Identity, not the
+// pointer: two loads sharing a registry can hold two objects for one type.
+func unionTypes(a, b []*Type) []*Type {
+	out := make([]*Type, 0, len(a)+len(b))
+	out = append(out, a...)
+	for _, t := range b {
+		if !slices.ContainsFunc(out, func(x *Type) bool { return x.ID() == t.ID() }) {
+			out = append(out, t)
+		}
+	}
+	slices.SortFunc(out, func(x, y *Type) int { return strings.Compare(x.ID().String(), y.ID().String()) })
+	return out
 }
 
 // element is the type of one element of t: a list's element, else unknown.
@@ -78,6 +129,12 @@ func (t staticType) element() staticType {
 	}
 	return unknownType
 }
+
+// selfVariable is the name both layers bind to the instance, held once in
+// schema/expr so the completer, the checker and the evaluator cannot drift:
+// the evaluator's PropertyScopeOf seeds it and the checker's root scope binds
+// it. A member so named could never be read, so completion refuses it.
+const selfVariable = expr.SelfVariable
 
 // staticScope is the lambda bindings in force at one point of the walk. Names
 // match exactly, as the evaluator's Scope.Lookup resolves them.
@@ -170,7 +227,7 @@ func propertyType(con Constraint) staticType {
 		}
 		return listOf(scalarType)
 	case KindVector:
-		return listOf(otherScalarType)
+		return listOf(numberType)
 	case KindAlias:
 		if a, ok := con.(AliasConstraint); ok {
 			return propertyType(a.Resolved())
@@ -213,13 +270,56 @@ var binaryOps = map[string]bool{
 	"&&": true, "||": true, "^": true,
 }
 
-// mergeScalar is the type of a value that is one of two scalars: the shared
-// subkind when both agree, else a scalar of unknown kind.
-func mergeScalar(a, b staticType) staticType {
-	if a.kind == kindScalar && b.kind == kindScalar && a.scalar == b.scalar {
-		return a
+// join is the static type a value that is one of two expressions has, and
+// whether the two are disjoint: of different kinds, or scalars of different
+// known subkinds. The nil literal yields the other side, unknown yields
+// unknown, two instances yield their union, two lists a list of their joined
+// element, two scalars their shared subkind or a scalar of unknown subkind.
+// It is the one join every position where two expressions meet reads —
+// a guard, a conditional, a list literal, concatenation — so no two of them
+// can disagree about what a value may be.
+func join(a, b staticType) (staticType, bool) {
+	switch {
+	case a.kind == kindNil:
+		return b, false
+	case b.kind == kindNil:
+		return a, false
+	case a.kind == kindUnknown || b.kind == kindUnknown:
+		return unknownType, false
+	case a.kind != b.kind:
+		return unknownType, true
 	}
-	return scalarType
+	via := a.viaAssociation || b.viaAssociation
+	switch a.kind {
+	case kindInstance:
+		return staticType{kind: kindInstance, typs: unionTypes(a.typs, b.typs)}, false
+	case kindList:
+		elem, disjoint := join(a.element(), b.element())
+		t := listOf(elem)
+		t.viaAssociation = via
+		return t, disjoint
+	case kindScalar:
+		t := staticType{kind: kindScalar, scalar: a.scalar, viaAssociation: via}
+		switch {
+		case a.scalar == b.scalar:
+			return t, false
+		case a.scalar == scalarAny || b.scalar == scalarAny:
+			t.scalar = scalarAny
+			return t, false
+		}
+		t.scalar = scalarAny
+		return t, true
+	case kindUnknown, kindNil:
+	}
+	return unknownType, false
+}
+
+// mergeType is join for a position that admits disjoint alternatives — a
+// conditional, a list literal, concatenation — where the result is what the
+// two agree on and a disagreement is no claim.
+func mergeType(a, b staticType) staticType {
+	t, _ := join(a, b)
+	return t
 }
 
 // typeBinary types a binary operator's result and checks the two operand
@@ -278,7 +378,7 @@ func (c *completer) typePlus(l, r staticType, owner *Type, inv *Invariant) stati
 		return unknownType
 	}
 	if l.kind == kindList && r.kind == kindList {
-		return listOf(mergeScalar(l.element(), r.element()))
+		return listOf(mergeType(l.element(), r.element()))
 	}
 	if l.kind == kindList || r.kind == kindList {
 		return refuse()
@@ -313,7 +413,10 @@ func (c *completer) validateInvariantExpressions() {
 		if c.hasUnresolvedSupertype(t) {
 			continue
 		}
-		scope := &staticScope{}
+		// self is a bound variable at evaluation, where PropertyScopeFromMap
+		// seeds it, so the checker binds it too and a parameter named self
+		// shadows it through child exactly as WithVar does.
+		scope := (&staticScope{}).child(selfVariable, instanceOf(t))
 		for inv := range t.Invariants() {
 			c.invariantSeen = nil
 			c.typeExpr(inv.Expression(), scope, t, inv)
@@ -370,20 +473,11 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 	case "@":
 		return c.typeIndexExpr(children, sc, owner, inv)
 	case "[]":
-		elem := scalarType
-		for i, child := range children {
-			t := c.typeExpr(child, sc, owner, inv)
-			switch {
-			case t.kind == kindNil:
-				// A nil element is any scalar's peer.
-			case t.kind != kindScalar:
-				elem = unknownType
-			case elem.kind == kindUnknown:
-			case i == 0:
-				elem = t
-			default:
-				elem = mergeScalar(elem, t)
-			}
+		// An empty list is a list of nothing, which any element type absorbs,
+		// so the empty literal defaults any list.
+		elem := nilType
+		for _, child := range children {
+			elem = mergeType(elem, c.typeExpr(child, sc, owner, inv))
 		}
 		return listOf(elem)
 	case "?":
@@ -398,13 +492,7 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 		c.typeExpr(children[0], sc, owner, inv)
 		then := c.typeExpr(children[1], sc, owner, inv)
 		otherwise := c.typeExpr(children[2], sc, owner, inv)
-		if then.kind == otherwise.kind && then.typ == otherwise.typ && then.kind != kindList {
-			if then.kind == kindScalar {
-				return mergeScalar(then, otherwise)
-			}
-			return then
-		}
-		return unknownType
+		return mergeType(then, otherwise)
 	case "-x":
 		for _, child := range children {
 			if c.typeExpr(child, sc, owner, inv).kind == kindNil {
@@ -495,10 +583,11 @@ func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, ow
 	return unknownType
 }
 
-// typeVariable resolves a lambda parameter, $self, a member of the owner, or
-// a numeric variable, in the evaluator's order: a parameter named self shadows
-// the owner. A numeric variable evaluates to nil when unbound; any other
-// unbound name is a guaranteed evaluation error, so it is refused here.
+// typeVariable resolves a lambda parameter, a member of the owner, or a
+// numeric variable, in the evaluator's order. self is an ordinary bound
+// variable, so a parameter of that name shadows it by binding order alone. A
+// numeric variable evaluates to nil when unbound; any other unbound name is a
+// guaranteed evaluation error, so it is refused here.
 func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
 	if len(children) != 1 {
 		return unknownType
@@ -509,9 +598,6 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 	}
 	if t, found := sc.lookupVar(name); found {
 		return t
-	}
-	if name == "self" {
-		return instanceOf(owner)
 	}
 	// A $ variable names a member by its exact spelling, as the evaluator's
 	// scope resolves it; only a bare name folds.
@@ -567,17 +653,7 @@ func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owne
 
 	switch recv.kind {
 	case kindInstance:
-		// A type whose supertype chain has an unresolved link has an incomplete
-		// member set; the unresolved reference already carries its diagnostic.
-		if recv.typ == nil || c.hasUnresolvedSupertype(recv.typ) {
-			return unknownType
-		}
-		if t, found := c.membersOf(recv.typ)[strings.ToLower(name)]; found {
-			return t
-		}
-		c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
-			"unknown property %q on type %q in invariant %q on type %q",
-			name, recv.typ.Name(), inv.Name(), owner.Name())
+		return c.typeInstanceMember(recv, name, owner, inv)
 	case kindList, kindScalar, kindNil:
 		switch {
 		case recv.viaAssociation:
@@ -596,6 +672,50 @@ func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owne
 	case kindUnknown:
 	}
 	return unknownType
+}
+
+// typeInstanceMember resolves name on every type the receiver may be: the
+// member is the join of what each declares, and an alternative that lacks it
+// is the unknown-property error, since the evaluator reads nil there on the
+// input that selects it. A type whose supertype chain has an unresolved link
+// has an incomplete member set, so nothing is claimed; the unresolved
+// reference already carries its diagnostic.
+func (c *completer) typeInstanceMember(recv staticType, name string, owner *Type, inv *Invariant) staticType {
+	for _, ty := range recv.typs {
+		if ty == nil || c.hasUnresolvedSupertype(ty) {
+			return unknownType
+		}
+	}
+	member := nilType
+	declared := make([]staticType, 0, len(recv.typs))
+	for _, ty := range recv.typs {
+		t, found := c.membersOf(ty)[strings.ToLower(name)]
+		if !found {
+			if len(recv.typs) == 1 {
+				c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
+					"unknown property %q on type %q in invariant %q on type %q",
+					name, ty.Name(), inv.Name(), owner.Name())
+			} else {
+				c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
+					"unknown property %q on type %q, one of the types the value may be (%s), in invariant %q on type %q",
+					name, ty.Name(), recv.typeName(), inv.Name(), owner.Name())
+			}
+			return unknownType
+		}
+		declared = append(declared, t)
+		member = mergeType(member, t)
+	}
+	for i, a := range declared {
+		for _, b := range declared[i+1:] {
+			if _, disjoint := join(a, b); disjoint {
+				c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+					"the types the value may be (%s) declare %q with disjoint kinds in invariant %q on type %q",
+					recv.typeName(), name, inv.Name(), owner.Name())
+				return unknownType
+			}
+		}
+	}
+	return member
 }
 
 // typeIndexExpr resolves receiver[index]: a list yields its element, a string a
@@ -621,16 +741,14 @@ func (c *completer) typeIndexExpr(children []expr.Expression, sc *staticScope, o
 			return stringType
 		case scalarNumber, scalarBoolean, scalarOther:
 			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"a number or boolean cannot be indexed in invariant %q on type %q", inv.Name(), owner.Name())
+				"%s cannot be indexed in invariant %q on type %q", recv.scalar, inv.Name(), owner.Name())
 			return unknownType
 		case scalarAny:
 		}
 		return scalarType
 	case kindInstance:
-		if recv.typ != nil {
-			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"type %q cannot be indexed in invariant %q on type %q", recv.typ.Name(), inv.Name(), owner.Name())
-		}
+		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+			"type %q cannot be indexed in invariant %q on type %q", recv.typeName(), inv.Name(), owner.Name())
 	case kindNil, kindUnknown:
 	}
 	return unknownType
@@ -681,6 +799,7 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 			"%s accepts at most %d argument(s) in invariant %q on type %q", spec.Name, spec.MaxArgs, inv.Name(), owner.Name())
 	default:
 		c.checkReceiver(spec, recv, len(args), owner, inv)
+		c.checkArgs(spec, argTypes, owner, inv)
 	}
 	// One mistake in the lambda's shape is one diagnostic, and a body the
 	// builtin would never evaluate is not typed.
@@ -713,8 +832,12 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 	}
 
 	switch spec.Result {
-	case expr.ResultScalar:
-		return scalarType
+	case expr.ResultNumber:
+		return numberType
+	case expr.ResultString:
+		return stringType
+	case expr.ResultBoolean:
+		return boolType
 	case expr.ResultReceiver:
 		return recv
 	case expr.ResultElement:
@@ -736,74 +859,85 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 		if len(args) == 0 {
 			return recv.element()
 		}
-		return scalarType
+		return rankedResult(spec, recv, argTypes[0])
 	case expr.ResultReceiverOrArg:
 		if len(argTypes) == 0 {
 			return unknownType
 		}
-		return c.typeReceiverOrArg(spec, recv, argTypes[0], owner, inv)
+		return c.typeGuard(spec, "a fallback", append([]staticType{recv}, argTypes...), owner, inv)
+	case expr.ResultReceiverOrBody:
+		if body == nil {
+			return unknownType
+		}
+		return c.typeGuard(spec, "a body", []staticType{recv, bodyType}, owner, inv)
 	case expr.ResultUnknown:
 	}
 	return unknownType
 }
 
-// typeReceiverOrArg types a call that yields its receiver or its argument —
-// Default — as their merge, and refuses the two when they are of different
-// kinds: the stage after the call would then meet a value the checker did
-// not predict. A kind the checker does not know is admitted. An association
-// key is a string at evaluation time, so a string fallback matches it.
-func (c *completer) typeReceiverOrArg(spec expr.BuiltinSpec, recv, arg staticType, owner *Type, inv *Invariant) staticType {
-	refuse := func() staticType {
-		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-			"%s takes a fallback of its receiver's kind in invariant %q on type %q", spec.Name, inv.Name(), owner.Name())
-		return unknownType
-	}
-	switch {
-	case recv.kind == kindUnknown || arg.kind == kindUnknown:
-		return unknownType
-	case arg.kind == kindNil:
-		// The nil literal is every kind's fallback: the receiver's value stands
-		// when present and nil stands in for it when absent.
-		return recv
-	case recv.kind == kindNil:
-		return arg
-	case recv.kind != arg.kind:
-		return refuse()
-	}
-	switch recv.kind {
-	case kindScalar:
-		if recv.scalar != scalarAny && arg.scalar != scalarAny && recv.scalar != arg.scalar {
-			return refuse()
-		}
-		return mergeScalar(recv, arg)
-	case kindList:
-		re, ae := recv.element(), arg.element()
-		switch {
-		case re.kind == kindUnknown || ae.kind == kindUnknown:
-			return listOf(unknownType)
-		case re.kind == kindScalar && re.scalar == scalarAny, ae.kind == kindScalar && ae.scalar == scalarAny:
-			// An empty list literal is a list of anything, so it defaults
-			// any list; the receiver's element kind stands.
-			if re.kind == kindScalar && re.scalar == scalarAny {
-				return arg
+// typeGuard types a nil guard — Default, Coalesce, Lest — as the join of every
+// value it can yield, and refuses any two alternatives join reports disjoint:
+// the stage after would meet a value it cannot take. Every pair is compared, so
+// the order the alternatives are written in does not decide the verdict.
+func (c *completer) typeGuard(spec expr.BuiltinSpec, what string, alts []staticType, owner *Type, inv *Invariant) staticType {
+	for i, a := range alts {
+		for _, b := range alts[i+1:] {
+			if _, disjoint := join(a, b); disjoint {
+				c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+					"%s takes %s of its receiver's kind in invariant %q on type %q", spec.Name, what, inv.Name(), owner.Name())
+				return unknownType
 			}
-			return recv
-		case re.kind != ae.kind, re.kind == kindInstance && re.typ != ae.typ:
-			return refuse()
-		case re.kind == kindScalar:
-			if re.scalar != ae.scalar {
-				return refuse()
-			}
-			return recv
 		}
-		return recv
-	case kindInstance:
-		if recv.typ != arg.typ {
-			return refuse()
-		}
-	case kindNil, kindUnknown:
 	}
-	return recv
+	t := alts[0]
+	for _, alt := range alts[1:] {
+		t, _ = join(t, alt)
+	}
+	return t
+}
+
+// scalarRank places a scalar subkind in the total order internal/value.Order
+// implements: boolean below number below string. A pattern, a subkind the
+// checker has not narrowed, and any kind that is not a scalar report false.
+func scalarRank(t staticType) (int, bool) {
+	if t.kind != kindScalar {
+		return 0, false
+	}
+	switch t.scalar {
+	case scalarBoolean:
+		return 1, true
+	case scalarNumber:
+		return 2, true
+	case scalarString:
+		return 3, true
+	case scalarAny, scalarOther:
+	}
+	return 0, false
+}
+
+// rankedGuards names the builtins whose one-argument form yields the LOWER of
+// receiver and argument. The catalogue states no direction, so it is named
+// here; a ranking builtin added without a row yields the higher.
+var rankedGuards = map[string]bool{"min": true}
+
+// rankedResult types Min or Max with an argument. The evaluator ranks the two
+// through a total order, so the result is the receiver or the argument exactly
+// rather than a claim about both; a pair the order does not separate statically
+// falls back to their join.
+func rankedResult(spec expr.BuiltinSpec, recv, arg staticType) staticType {
+	recvRank, recvOK := scalarRank(recv)
+	argRank, argOK := scalarRank(arg)
+	if !recvOK || !argOK || recvRank == argRank {
+		return mergeType(recv, arg)
+	}
+	lower, higher := recv, arg
+	if recvRank > argRank {
+		lower, higher = arg, recv
+	}
+	if rankedGuards[strings.ToLower(spec.Name)] {
+		return lower
+	}
+	return higher
 }
 
 // paramOr returns the i-th declared parameter name, or the implicit numeric
@@ -813,6 +947,37 @@ func paramOr(params []string, i int, implicit string) string {
 		return params[i]
 	}
 	return implicit
+}
+
+// checkArgs refuses an argument of a kind the builtin refuses on every input,
+// by the catalogue's [expr.ArgKind]. A value the checker cannot type passes, as
+// it does at a receiver; the nil literal does not, because a position stating a
+// kind fails on nil for every instance.
+func (c *completer) checkArgs(spec expr.BuiltinSpec, argTypes []staticType, owner *Type, inv *Invariant) {
+	for i, at := range argTypes {
+		kind, ok := spec.ArgAt(i)
+		if !ok {
+			return
+		}
+		open := at.kind == kindUnknown || (at.kind == kindScalar && at.scalar == scalarAny)
+		admitted := true
+		switch kind {
+		case expr.ArgAny:
+		case expr.ArgString:
+			admitted = open || (at.kind == kindScalar && at.scalar == scalarString)
+		case expr.ArgNumber:
+			admitted = open || (at.kind == kindScalar && at.scalar == scalarNumber)
+		case expr.ArgPattern:
+			admitted = open || (at.kind == kindScalar && at.scalar == scalarOther)
+		case expr.ArgOrdered:
+			admitted = at.kind != kindInstance
+		}
+		if !admitted {
+			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+				"%s takes %s as its argument, and argument %d is not one in invariant %q on type %q",
+				spec.Name, kind, i+1, inv.Name(), owner.Name())
+		}
+	}
 }
 
 // checkReceiver refuses a receiver the builtin refuses on every input, by the

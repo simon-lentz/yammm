@@ -69,7 +69,8 @@
 //   - [WithAllowUnknownFields]: allow extra properties without diagnostics
 //   - [WithIssueLimit]: cap the issues one instance stores
 //   - [WithLogger]: receive a debug record when a property name is normalized,
-//     and the evaluator's per-node Debug trace for every invariant evaluated
+//     and the evaluator's per-node Debug trace for every invariant evaluated,
+//     each record logged with the context passed to Validate
 //
 // # Value Functions
 //
@@ -88,5 +89,5 @@
 // # Dependencies
 //
 //	instance  ──imports──▶  schema, diag, location, location/path, immutable,
-//	                        instance/internal/eval
+//	                        instance/internal/eval, internal/trace
 package instance

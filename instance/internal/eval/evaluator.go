@@ -30,14 +30,16 @@ func NewEvaluator(opts ...Option) *Evaluator {
 	}
 }
 
-// Evaluate evaluates an expression with the given scope.
+// Evaluate evaluates an expression with the given scope. The context reaches
+// every trace record the evaluation writes, so a request id it carries is on
+// each of them; cancellation is the caller's to check between evaluations.
 // Returns the result value, or an error if evaluation fails.
-func (e *Evaluator) Evaluate(expression expr.Expression, scope Scope) (result any, err error) {
-	// The evaluator takes no context; the op ends with the evaluation's own
-	// error, which is not known until the return, hence the closure. A panic
-	// never assigns the named return, so it is recovered here to end the op
-	// with it and re-raised for the recover that owns it.
-	op := trace.Begin(context.Background(), e.cfg.logger, "yammm.eval.expr")
+func (e *Evaluator) Evaluate(ctx context.Context, expression expr.Expression, scope Scope) (result any, err error) {
+	// The op ends with the evaluation's own error, which is not known until
+	// the return, hence the closure. A panic never assigns the named return,
+	// so it is recovered here to end the op with it and re-raised for the
+	// recover that owns it.
+	op := trace.Begin(ctx, e.cfg.logger, "yammm.eval.expr")
 	defer func() {
 		if r := recover(); r != nil {
 			op.End(fmt.Errorf("panic: %v", r))
@@ -46,13 +48,13 @@ func (e *Evaluator) Evaluate(expression expr.Expression, scope Scope) (result an
 		op.End(err)
 	}()
 
-	return e.evaluate(expression, scope)
+	return e.evaluate(ctx, expression, scope)
 }
 
 // EvaluateBool evaluates an expression and returns it as a boolean.
 // Returns an error if the result is not a boolean.
-func (e *Evaluator) EvaluateBool(expression expr.Expression, scope Scope) (bool, error) {
-	result, err := e.Evaluate(expression, scope)
+func (e *Evaluator) EvaluateBool(ctx context.Context, expression expr.Expression, scope Scope) (bool, error) {
+	result, err := e.Evaluate(ctx, expression, scope)
 	if err != nil {
 		return false, err
 	}
@@ -66,11 +68,12 @@ func (e *Evaluator) EvaluateBool(expression expr.Expression, scope Scope) (bool,
 	return b, nil
 }
 
-// evaluate is the internal evaluation dispatcher. A nil expression — an
-// absent lambda body, or an absent operand — evaluates to nil, as the public
-// [Evaluator.Evaluate] promises. An Op is not an expression: the parser
-// places one only at an S-expression's head, read through [expr.SExpr.Op].
-func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, error) {
+// evaluate is the internal evaluation dispatcher. A nil expression is an
+// error, as [Evaluator.Evaluate] states; an absent lambda body never reaches
+// it, because the builtins that take a body test for nil first. An Op is not
+// an expression: the parser places one only at an S-expression's head, read
+// through [expr.SExpr.Op].
+func (e *Evaluator) evaluate(ctx context.Context, expression expr.Expression, scope Scope) (any, error) {
 	switch ex := expression.(type) {
 	case *expr.Literal:
 		return ex.Val, nil
@@ -78,13 +81,12 @@ func (e *Evaluator) evaluate(expression expr.Expression, scope Scope) (any, erro
 		// Return a type checker for the datatype
 		return e.datatypeChecker(string(ex))
 	case expr.SExpr:
-		return e.evalSExpr(ex, scope)
+		return e.evalSExpr(ctx, ex, scope)
 	default:
 		return nil, fmt.Errorf("unknown expression type: %T", expression)
 	}
 }
 
-// evalSExpr evaluates an S-expression.
 // operatorOps are the operators evalSExpr dispatches after evaluating every
 // child; a special form or a builtin is handled before this set is consulted.
 var operatorOps = map[string]bool{
@@ -93,38 +95,39 @@ var operatorOps = map[string]bool{
 	"=~": true, "!~": true, "in": true, "!": true, "^": true,
 }
 
-func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
+// evalSExpr evaluates an S-expression.
+func (e *Evaluator) evalSExpr(ctx context.Context, sexpr expr.SExpr, scope Scope) (any, error) {
 	op := sexpr.Op()
 	children := sexpr.Children()
 
 	trace.Debug(
-		context.Background(), e.cfg.logger, "evaluating s-expression",
+		ctx, e.cfg.logger, "evaluating s-expression",
 		slog.String("op", op),
 	)
 
 	// Special forms that don't evaluate all children upfront
 	switch op {
 	case "&&":
-		return e.evalAnd(children, scope)
+		return e.evalAnd(ctx, children, scope)
 	case "||":
-		return e.evalOr(children, scope)
+		return e.evalOr(ctx, children, scope)
 	case "?":
-		return e.evalTernary(children, scope)
+		return e.evalTernary(ctx, children, scope)
 	case "$":
 		return e.evalVar(children, scope)
 	case "p":
 		return e.evalProperty(children, scope)
 	case ".":
-		return e.evalMember(children, scope)
+		return e.evalMember(ctx, children, scope)
 	case "@":
-		return e.evalSlice(children, scope)
+		return e.evalSlice(ctx, children, scope)
 	case "[]":
-		return e.evalList(children, scope)
+		return e.evalList(ctx, children, scope)
 	}
 
 	// Check if it's a builtin
 	if def, ok := lookupBuiltin(strings.ToLower(op)); ok {
-		return e.evalBuiltin(def, children, scope)
+		return e.evalBuiltin(ctx, def, children, scope)
 	}
 
 	// An unknown function is reported before any child is evaluated: a
@@ -136,7 +139,7 @@ func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 	// Evaluate children for operators that need all args evaluated
 	args := make([]any, len(children))
 	for i, child := range children {
-		val, err := e.evaluate(child, scope)
+		val, err := e.evaluate(ctx, child, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -194,9 +197,9 @@ func (e *Evaluator) evalSExpr(sexpr expr.SExpr, scope Scope) (any, error) {
 
 // --- Special forms ---
 
-func (e *Evaluator) evalAnd(children []expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) evalAnd(ctx context.Context, children []expr.Expression, scope Scope) (any, error) {
 	for _, child := range children {
-		val, err := e.evaluate(child, scope)
+		val, err := e.evaluate(ctx, child, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -211,9 +214,9 @@ func (e *Evaluator) evalAnd(children []expr.Expression, scope Scope) (any, error
 	return true, nil
 }
 
-func (e *Evaluator) evalOr(children []expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) evalOr(ctx context.Context, children []expr.Expression, scope Scope) (any, error) {
 	for _, child := range children {
-		val, err := e.evaluate(child, scope)
+		val, err := e.evaluate(ctx, child, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -228,12 +231,12 @@ func (e *Evaluator) evalOr(children []expr.Expression, scope Scope) (any, error)
 	return false, nil
 }
 
-func (e *Evaluator) evalTernary(children []expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) evalTernary(ctx context.Context, children []expr.Expression, scope Scope) (any, error) {
 	if len(children) != 3 {
 		return nil, errors.New("ternary operator requires 3 operands")
 	}
 
-	cond, err := e.evaluate(children[0], scope)
+	cond, err := e.evaluate(ctx, children[0], scope)
 	if err != nil {
 		return nil, err
 	}
@@ -244,9 +247,9 @@ func (e *Evaluator) evalTernary(children []expr.Expression, scope Scope) (any, e
 	}
 
 	if b {
-		return e.evaluate(children[1], scope)
+		return e.evaluate(ctx, children[1], scope)
 	}
-	return e.evaluate(children[2], scope)
+	return e.evaluate(ctx, children[2], scope)
 }
 
 func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error) {
@@ -306,12 +309,12 @@ func (e *Evaluator) evalProperty(children []expr.Expression, scope Scope) (any, 
 // evalMember reads one named member of the receiver. The member position holds
 // a name and nothing else: a builtin's name there is an ordinary member, never
 // a call — the pipeline is the only call form.
-func (e *Evaluator) evalMember(children []expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) evalMember(ctx context.Context, children []expr.Expression, scope Scope) (any, error) {
 	if len(children) != 2 {
 		return nil, errors.New("member access requires exactly 2 operands")
 	}
 
-	obj, err := e.evaluate(children[0], scope)
+	obj, err := e.evaluate(ctx, children[0], scope)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +348,7 @@ func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	return nil, nil //nolint:nilnil // missing key returns nil
 }
 
-func (e *Evaluator) evalSlice(children []expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) evalSlice(ctx context.Context, children []expr.Expression, scope Scope) (any, error) {
 	if len(children) < 2 {
 		return nil, errors.New("slice access requires an index")
 	}
@@ -354,13 +357,13 @@ func (e *Evaluator) evalSlice(children []expr.Expression, scope Scope) (any, err
 	}
 
 	// Evaluate the receiver
-	obj, err := e.evaluate(children[0], scope)
+	obj, err := e.evaluate(ctx, children[0], scope)
 	if err != nil {
 		return nil, err
 	}
 
 	// Evaluate the index
-	idx, err := e.evaluate(children[1], scope)
+	idx, err := e.evaluate(ctx, children[1], scope)
 	if err != nil {
 		return nil, err
 	}
@@ -415,10 +418,10 @@ func (e *Evaluator) accessIndex(obj, idx any) (any, error) {
 	return nil, fmt.Errorf("cannot index %T", obj)
 }
 
-func (e *Evaluator) evalList(children []expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) evalList(ctx context.Context, children []expr.Expression, scope Scope) (any, error) {
 	result := make([]any, len(children))
 	for i, child := range children {
-		val, err := e.evaluate(child, scope)
+		val, err := e.evaluate(ctx, child, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -432,7 +435,7 @@ func (e *Evaluator) evalList(children []expr.Expression, scope Scope) (any, erro
 // callBuiltin validates builtin constraints and invokes the function. It is the
 // single helper that enforces minArgs, maxArgs, maxParams and acceptBody for
 // every builtin call; the pipeline is the only call form.
-func (e *Evaluator) callBuiltin(def builtinDef, lhs any, args []any, params []string, body expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) callBuiltin(ctx context.Context, def builtinDef, lhs any, args []any, params []string, body expr.Expression, scope Scope) (any, error) {
 	// Validate args count
 	if len(args) < def.spec.MinArgs {
 		return nil, fmt.Errorf("%s requires at least %d arguments", def.spec.Name, def.spec.MinArgs)
@@ -453,17 +456,17 @@ func (e *Evaluator) callBuiltin(def builtinDef, lhs any, args []any, params []st
 		return nil, fmt.Errorf("%s accepts at most %d parameters", def.spec.Name, def.spec.MaxParams)
 	}
 
-	return def.fn(e, lhs, args, params, body, scope)
+	return def.fn(ctx, e, lhs, args, params, body, scope)
 }
 
-func (e *Evaluator) evalBuiltin(def builtinDef, children []expr.Expression, scope Scope) (any, error) {
+func (e *Evaluator) evalBuiltin(ctx context.Context, def builtinDef, children []expr.Expression, scope Scope) (any, error) {
 	// First child (if present) is the receiver (lhs)
 	var lhs any
 	var err error
 	childStart := 0
 
 	if len(children) > 0 {
-		lhs, err = e.evaluate(children[0], scope)
+		lhs, err = e.evaluate(ctx, children[0], scope)
 		if err != nil {
 			return nil, err
 		}
@@ -481,7 +484,7 @@ func (e *Evaluator) evalBuiltin(def builtinDef, children []expr.Expression, scop
 		// Check if it's an args literal
 		if argList, ok := expr.ArgsLiteral(child); ok {
 			for _, arg := range argList {
-				val, err := e.evaluate(arg, scope)
+				val, err := e.evaluate(ctx, arg, scope)
 				if err != nil {
 					return nil, err
 				}
@@ -504,7 +507,7 @@ func (e *Evaluator) evalBuiltin(def builtinDef, children []expr.Expression, scop
 	}
 
 	// Use unified validation and dispatch
-	return e.callBuiltin(def, lhs, args, params, body, scope)
+	return e.callBuiltin(ctx, def, lhs, args, params, body, scope)
 }
 
 func (e *Evaluator) add(args []any) (any, error) {
@@ -861,9 +864,6 @@ func isNumericVar(name string) bool {
 	return true
 }
 
-// datatypeChecker returns the TypeChecker for a datatype name, by the set
-// [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
-// any other name at load.
 // datatypeCheckers maps each datatype check expr.IsDatatypeCheck admits to
 // its kind's checker. A name absent here is an error, never another kind's
 // check by default.
@@ -872,6 +872,9 @@ var datatypeCheckers = map[string]func() TypeChecker{
 	"uuid": IsUUID, "timestamp": IsTimestamp, "date": IsDate,
 }
 
+// datatypeChecker returns the TypeChecker for a datatype name, by the set
+// [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
+// any other name at load.
 func (e *Evaluator) datatypeChecker(name string) (TypeChecker, error) {
 	mk, ok := datatypeCheckers[strings.ToLower(name)]
 	if !ok || !expr.IsDatatypeCheck(name) {

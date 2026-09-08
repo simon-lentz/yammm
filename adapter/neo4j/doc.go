@@ -379,5 +379,6 @@
 //
 // # Dependencies
 //
-//	adapter/neo4j  --imports-->  schema, graph, immutable, diag, neo4j-go-driver/v6 (dbtype only)
+//	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, location,
+//	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j

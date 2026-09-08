@@ -8,8 +8,8 @@ import (
 // DropConstraintStatement returns the Cypher that removes a constraint by name.
 //
 // The name comes from introspection or from a diff result, so it is whatever a
-// person or another tool created, not something this package generated. **Every
-// non-empty name is backtick-quoted**, so it cannot alter the statement's
+// person or another tool created, not something this package generated. Every
+// non-empty name is backtick-quoted, so it cannot alter the statement's
 // shape and no name is undroppable — including a Cypher reserved word, where
 // refusing would be the opposite of what a DROP builder is for. An empty or
 // all-space name is an error wrapping [ErrEmptyIdentifier] — there is no object

@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+// SelfVariable is the name bound to the instance under evaluation. The
+// completer refuses a member of this name, the static checker binds it in the
+// root scope and the evaluator's property scopes bind it to the instance map,
+// so all three layers read one constant rather than agreeing by coincidence.
+const SelfVariable = "self"
+
 // Expression represents a node in the expression AST.
 //
 // Expression nodes are immutable after construction. The AST is built during

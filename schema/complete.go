@@ -2,10 +2,12 @@ package schema
 
 import (
 	"fmt"
+	"iter"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema/expr"
 )
 
 // completionRegistry provides lookup for cross-schema type resolution.
@@ -217,6 +219,9 @@ func (c *completer) complete() *Schema {
 	// (not aborted here) so collision/relation/invariant diagnostics still surface
 	// in the same pass; the final error gate below ends completion.
 	c.validatePrimaryKeys()
+
+	// Phase 5c: A property may not carry the name the evaluator binds.
+	c.validatePropertyNames()
 
 	// Phase 6: Detect collisions
 	c.detectCollisions()
@@ -1152,6 +1157,41 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 	}
 }
 
+// validatePropertyNames refuses an own property named self, at its declaration:
+// self is bound to the instance in every invariant, at load and at evaluation
+// alike, so the property could never be read. Own properties only — an
+// inherited one was refused where it was declared. The grammar admits the
+// spelling; this is a binding rule, not a lexical one, and it is the one rule
+// the parse front door and the Builder share.
+func (c *completer) validatePropertyNames() {
+	const why = "the bare name and $self resolve to the instance first, so the member is unreachable by its own name and readable only as self.self"
+	for _, t := range c.schema.types {
+		for _, p := range t.properties {
+			if p.Name() != expr.SelfVariable {
+				continue
+			}
+			c.errorf(p.Span(), diag.E_INVALID_NAME,
+				"property %q in type %q cannot be named %s: %s",
+				p.Name(), t.Name(), expr.SelfVariable, why)
+		}
+		// A relation is a member too, and it is read by its FIELD name, so the
+		// same rule decides it: one rule for both member kinds.
+		for _, rels := range []iterRelationSeq{t.AllAssociations(), t.AllCompositions()} {
+			for rel := range rels {
+				if rel.FieldName() != expr.SelfVariable {
+					continue
+				}
+				c.errorf(rel.Span(), diag.E_INVALID_NAME,
+					"relation %q in type %q cannot have field name %s: %s",
+					rel.Name(), t.Name(), expr.SelfVariable, why)
+			}
+		}
+	}
+}
+
+// iterRelationSeq is the shape both relation iterators share.
+type iterRelationSeq = iter.Seq[*Relation]
+
 // validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
 // declares or inherits at least one primary key. A node needs identity to be added to
 // a graph (see Graph.Add / E_GRAPH_MISSING_PK) or referenced by an association;
@@ -1227,6 +1267,12 @@ func hasDeclaredPrimary(t *Type) bool {
 func (c *completer) hasUnresolvedSupertype(t *Type) bool {
 	if cached, ok := c.unresolvedSupertypeMemo[t]; ok {
 		return cached
+	}
+	// A type from another schema completed in its own, where its supertypes
+	// resolved or the import would have failed. Its refs do not resolve here.
+	if t.SourceID() != c.schema.SourceID() {
+		c.unresolvedSupertypeMemo[t] = false
+		return false
 	}
 	c.unresolvedSupertypeMemo[t] = false // cycle-termination guard; overwritten below
 

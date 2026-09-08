@@ -112,6 +112,14 @@
 //
 // # Dependencies
 //
-// The lsp package depends on yammm library packages (schema, diag, location,
-// format) and [github.com/creachadair/jrpc2] for JSON-RPC 2.0 transport.
+//	lsp  ──imports──▶  format, lsp/internal/completion, lsp/internal/definition,
+//	                   lsp/internal/docstate, lsp/internal/hover,
+//	                   lsp/internal/lsputil, lsp/internal/protocol,
+//	                   lsp/internal/symbols, lsp/internal/workspace,
+//	                   github.com/creachadair/jrpc2,
+//	                   github.com/creachadair/jrpc2/channel,
+//	                   github.com/creachadair/jrpc2/handler
+//
+// The server package itself holds the transport and the handler wiring; schema,
+// diag and location are reached through the internal sub-packages.
 package lsp

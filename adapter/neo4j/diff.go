@@ -110,8 +110,13 @@ type ConstraintDrift struct {
 // order matters. Constraint names are absent under [WithNamedConstraints](false),
 // in which case every pairing falls through to identity.
 //
-// Unlike [Adapter.DiffIndexes], property order is NOT significant: a
-// constraint's members are a set, so the identity sorts them.
+// Property order is not significant for PAIRING: a constraint's members are a
+// set, so desiredSemanticKey and remoteSemanticKey sort them, where
+// [Adapter.DiffIndexes] compares an index's properties as a sequence. It IS
+// significant for BLOCKING: the server backs a constraint only with an index in
+// the same property order, so constraintDefinitionKey does not sort and an
+// alsoBlocking index is matched in DECLARED order. `yammm neo4j diff` passes
+// every introspected index as alsoBlocking, so that path runs on every diff.
 func (a *Adapter) DiffConstraints(
 	desired []Constraint,
 	actual []RemoteConstraint,
@@ -150,7 +155,8 @@ func (a *Adapter) DiffConstraints(
 		// Only a NODE index over the same label can serve a node constraint's
 		// backing index, and only a RANGE one: a uniqueness constraint backs
 		// itself with a range index, and the server refuses only a duplicate of
-		// THAT. Measured on 5.26 Enterprise and 2026.05 Enterprise -- RANGE is
+		// THAT. Measured on 5.26 Enterprise, 2026.05 Enterprise and 2026.05
+		// Community -- RANGE is
 		// refused ("a constraint cannot be created until the index is
 		// dropped"), while TEXT, POINT, FULLTEXT, VECTOR and any relationship
 		// index are accepted alongside it. Blocking on those reported permanent
@@ -497,6 +503,15 @@ var communityConstraintKinds = []ConstraintKind{ConstraintUnique}
 // constraintDefinitionKey identifies a constraint by what it constrains rather
 // than by its name, so an index serving the same thing under another name is
 // recognisable as a blocker.
+//
+// The properties are NOT sorted, where [desiredSemanticKey] and
+// [remoteSemanticKey] sort theirs. A constraint's members are a set, so
+// constraint identity is order-free; an index's are a sequence, and the server
+// refuses a constraint only for a backing index in the SAME property order —
+// measured on 5.26 Enterprise, 2026.05 Enterprise and 2026.05 Community, for
+// UNIQUE and NODE KEY alike, with SHOW INDEXES reporting declaration order.
+// Sorting here would report a reversed-order index as a blocker the server
+// never raises, and the plan would never converge.
 func constraintDefinitionKey(label string, properties []string) string {
 	return identityKey(append([]string{label}, properties...)...)
 }

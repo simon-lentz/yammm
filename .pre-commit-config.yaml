@@ -27,16 +27,39 @@ repos:
       - id: actionlint
         name: actionlint (GHA)
         files: ^\.github/workflows/.*\.ya?ml$
-  # --- Go formatting & imports ---
-  - repo: https://github.com/tekwizely/pre-commit-golang
-    rev: v1.0.0-rc.4
+  # --- Go formatting, imports & modules ---
+  #
+  # Every tool is a `tool` directive in go.mod and is run through `go tool`, so
+  # the local hook and CI run one pinned version; CI installs none.
+  #
+  # File-based and local, rather than tekwizely/pre-commit-golang's *-repo
+  # hooks. Those run `gofumpt -l -d .` and `go mod tidy` from the repo root and
+  # ignore the file list pre-commit passes; neither tool takes an exclude, so
+  # the walk reached the gitignored .claude/ tree and failed on work product
+  # that is never committed — formatter backups, and probe modules whose
+  # replace directives name export directories that no longer exist. A
+  # file-based hook sees only what git tracks, which is the same rule the repo
+  # already applies to what may be committed.
+  - repo: local
     hooks:
-      - id: go-fumpt-repo
+      - id: gofumpt
         name: gofumpt
-      - id: go-imports-repo
+        language: system
+        types: [go]
+        exclude: '(^|/)vendor/'
+        entry: go tool gofumpt -l -w
+      - id: goimports
         name: goimports
-      - id: go-mod-tidy-repo
+        language: system
+        types: [go]
+        exclude: '(^|/)vendor/'
+        entry: go tool goimports -l -w
+      - id: go-mod-tidy
         name: go mod tidy
+        language: system
+        pass_filenames: false
+        files: '(\.go$)|(\bgo\.mod$)|(\bgo\.sum$)'
+        entry: scripts/gomodtidy.sh
   # --- lint & test ---
   - repo: local
     hooks:

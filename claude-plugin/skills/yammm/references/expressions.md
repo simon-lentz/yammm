@@ -151,7 +151,7 @@ address.city        // nested property access
 
 Property access on existing instances returns **nil** for properties not present on the object (enabling `Then`/`Lest` nil-guarded patterns). This allows safe navigation without raising evaluation errors.
 
-Every reference is checked statically at schema load: the checker types each sub-expression and follows the type through member access, indexing and pipeline stages. A property the type does not declare draws `E_UNKNOWN_PROPERTY`; a member read through an association key (`$c.name` over `--> CUSTOMERS`), a scalar or a list, an undefined named variable, an unknown function, or a call shape the builtin refuses draws `E_INVALID_INVARIANT`.
+Every reference is checked statically at schema load: the checker types each sub-expression and follows the type through member access, indexing and pipeline stages. A property the type does not declare draws `E_UNKNOWN_PROPERTY`; a member read through an association key (`$c.name` over `--> CUSTOMERS`), a scalar or a list, an undefined named variable, an unknown function, a call shape the builtin refuses, or a receiver or argument of a kind the builtin refuses on every input (`age -> Upper`, `name -> Match("nor")`) draws `E_INVALID_INVARIANT`. A builtin's result is typed by its subkind — `Len` a number, `Upper` a string, `StartsWith` a boolean — so `name -> Len -> Upper` is refused too.
 
 ---
 
@@ -275,11 +275,13 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 
 | Function | Signature | Description |
 | -------- | --------- | ----------- |
-| `Then` | `val -> Then \|$v\| { expr }` | Execute body when val is non-nil; returns nil otherwise |
-| `Lest` | `val -> Lest { expr }` | Execute body when val is nil; returns val otherwise. Accepts but ignores a lambda parameter. |
+| `Then` | `val -> Then \|$v\| { expr }` | Execute body when val is non-nil; returns nil otherwise. Typed as the body |
+| `Lest` | `val -> Lest { expr }` | Execute body when val is nil; returns val otherwise. A lambda parameter is refused at load. Typed as the join of receiver and body |
 | `With` | `val -> With \|$v\| { expr }` | Bind value to parameter and execute body |
-| `Default` | `val -> Default(fallback)` | Return fallback if val is nil |
-| `Coalesce` | `a -> Coalesce(b, c, ...)` | Return first non-nil value |
+| `Default` | `val -> Default(fallback)` | Return fallback if val is nil. Typed as the join of receiver and fallback |
+| `Coalesce` | `a -> Coalesce(b, c, ...)` | Return first non-nil value. Typed as the join of receiver and every argument |
+
+The nil guards are typed by one rule: each yields one of its alternatives, and the checker types the result as what every alternative agrees on. Alternatives of different kinds are refused at load (`E_INVALID_INVARIANT`) — `(name -> Coalesce(1)) -> Upper`, `(note -> Lest { 1 }) -> Upper`, and `note -> Lest { true }`, which evaluates to a string when `note` is present. The nil literal stands in for any receiver and `[]` for any list. Two instance types agree on the members both declare, so after `(A_SLOT -> Default(B_SLOT))` a member declared on one type alone is `E_UNKNOWN_PROPERTY`.
 
 ### Type Functions
 

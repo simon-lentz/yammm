@@ -1,12 +1,15 @@
 package doclint
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -42,11 +45,23 @@ type Module struct {
 	byName   map[string][]*Package
 }
 
-// Load parses every Go file under root, skipping directories that hold no
-// source a consumer reads: testdata, node_modules, and anything whose name
+// Load parses the module's Go files under root, skipping directories that hold
+// no source a consumer reads: testdata, node_modules, and anything whose name
 // starts with "." or "_". Files that do not parse are an error rather than a
 // skip — a gate that quietly drops the file it cannot read reports a clean run
 // over nothing.
+//
+// The file set is the TRACKED tree where root sits in a git work tree, and a
+// filesystem walk where git is unavailable. An untracked file is not source the
+// module ships, and reading it gave a local run a verdict CI could not
+// reproduce.
+//
+// A build constraint excludes a NON-TEST file only. go doc renders no test
+// declaration under any tag, so "outside the published documentation" cannot
+// justify dropping a test file — and dropping one silently removes the
+// regression anchors this gate exists to check. The constraints are evaluated
+// against a PINNED context (see [buildContext]), so the verdict does not depend
+// on the machine the gate runs on.
 func Load(root string) (*Module, error) {
 	modPath, err := modulePath(root)
 	if err != nil {
@@ -58,6 +73,13 @@ func Load(root string) (*Module, error) {
 		byName:   make(map[string][]*Package),
 	}
 	fset := token.NewFileSet()
+	tracked, hasTracked, err := trackedGoFiles(context.Background(), root)
+	if err != nil {
+		return nil, err
+	}
+	if !hasTracked {
+		tracked = nil
+	}
 
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -69,7 +91,7 @@ func Load(root string) (*Module, error) {
 		if p != root && skipDir(d.Name()) {
 			return fs.SkipDir
 		}
-		pkg, found, err := loadDir(fset, root, p)
+		pkg, found, err := loadDir(fset, root, p, tracked)
 		if err != nil {
 			return err
 		}
@@ -118,12 +140,61 @@ func modulePath(root string) (string, error) {
 	return "", fmt.Errorf("no module directive in %s", filepath.Join(root, "go.mod"))
 }
 
+// buildContext is the context the constraint filter reads. It pins GOOS and
+// GOARCH rather than inheriting them: measured, the ambient context excludes
+// nine files under darwin/arm64 and linux/amd64 and ten under windows/amd64,
+// so an inherited context makes the gate's verdict a property of the machine —
+// the local-versus-CI divergence class this repo has closed twice elsewhere.
+func buildContext() build.Context {
+	ctx := build.Default
+	ctx.GOOS, ctx.GOARCH = "linux", "amd64"
+	return ctx
+}
+
+// isTestFile reports whether name is a Go test file, which no build constraint
+// excludes here: go doc renders none of its declarations under any tag.
+func isTestFile(name string) bool { return strings.HasSuffix(name, "_test.go") }
+
+// gitTracks reports whether git can list root's tracked files: the binary
+// exists and root is inside a work tree. Neither absence is a failure to read
+// the module — both mean there is no tracked set — so neither is an error.
+func gitTracks(ctx context.Context, root string) bool {
+	if _, err := exec.LookPath("git"); err != nil {
+		return false
+	}
+	return exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "--is-inside-work-tree").Run() == nil
+}
+
+// trackedGoFiles returns every .go file git tracks under root, keyed by its
+// path as the walk spells it. The second result is false when there is no
+// tracked set to read — git is unavailable, or root is outside a work tree —
+// and the caller then walks the filesystem, which is what keeps the gate
+// runnable outside a checkout.
+func trackedGoFiles(ctx context.Context, root string) (tracked map[string]bool, ok bool, err error) {
+	if !gitTracks(ctx, root) {
+		return nil, false, nil
+	}
+	out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--", "*.go").Output()
+	if err != nil {
+		return nil, false, fmt.Errorf("listing the tracked files of %s: %w", root, err)
+	}
+	tracked = make(map[string]bool)
+	for name := range strings.SplitSeq(string(out), "\x00") {
+		if name == "" {
+			continue
+		}
+		tracked[filepath.ToSlash(filepath.Join(root, name))] = true
+	}
+	return tracked, true, nil
+}
+
 // loadDir parses dir's Go files, reporting false when it holds none.
-func loadDir(fset *token.FileSet, root, dir string) (pkg *Package, found bool, err error) {
+func loadDir(fset *token.FileSet, root, dir string, tracked map[string]bool) (pkg *Package, found bool, err error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, false, fmt.Errorf("reading %s: %w", dir, err)
 	}
+	bctx := buildContext()
 	pkg = &Package{fset: fset, names: make(map[string]struct{})}
 	var testName string
 	for _, e := range ents {
@@ -131,6 +202,18 @@ func loadDir(fset *token.FileSet, root, dir string) (pkg *Package, found bool, e
 			continue
 		}
 		full := filepath.Join(dir, e.Name())
+		if tracked != nil && !tracked[filepath.ToSlash(full)] {
+			continue
+		}
+		if !isTestFile(e.Name()) {
+			included, err := bctx.MatchFile(dir, e.Name())
+			if err != nil {
+				return nil, false, fmt.Errorf("reading the build constraints of %s: %w", full, err)
+			}
+			if !included {
+				continue
+			}
+		}
 		f, err := parser.ParseFile(fset, full, nil, parser.ParseComments)
 		if err != nil {
 			return nil, false, fmt.Errorf("parsing %s: %w", full, err)

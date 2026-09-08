@@ -9,7 +9,9 @@ import (
 
 // The three readers of a list position read every list shape alike, through
 // value.ListElems: asSlice keeps the builtins' nil-is-empty rule in front of
-// it, toSlice refuses nil, and both read an immutable.Slice and an array.
+// it, toSlice refuses nil, and both read an immutable.Slice and a typed slice
+// — and neither reads a fixed-size array, which is how a scalar carrier is
+// spelled (uuid.UUID is [16]byte).
 func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 	t.Parallel()
 	s := immutable.Wrap([]any{int64(1), "a"}).Unwrap()
@@ -20,7 +22,7 @@ func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 		ok   bool
 	}{
 		{"immutable.Slice", s, []any{int64(1), "a"}, true},
-		{"array", [2]int64{1, 2}, []any{int64(1), int64(2)}, true},
+		{"array", [2]int64{1, 2}, nil, false},
 		{"typed slice", []string{"x"}, []any{"x"}, true},
 		{"scalar", "x", nil, false},
 	} {

@@ -8,8 +8,8 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 )
 
-// Error codes for validation failures.
-// These are aliases to the canonical codes in the diag package.
+// Validation failure codes, aliased to the canonical ones in the diag package.
+// A caller matches on these rather than on message text.
 var (
 	// ErrTypeNotFound indicates the type name was not found in the schema.
 	ErrTypeNotFound = diag.E_INSTANCE_TYPE_NOT_FOUND

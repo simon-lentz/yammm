@@ -31,7 +31,7 @@ func TestArithmetic_Int64OverflowIsAnError(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := ev.Evaluate(tc.e, scope)
+			got, err := ev.Evaluate(t.Context(), tc.e, scope)
 			if err == nil {
 				t.Fatalf("evaluated to %v (%T); want an overflow error", got, got)
 			}
@@ -54,7 +54,7 @@ func TestArithmetic_Int64OverflowIsAnError(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := ev.Evaluate(tc.e, scope)
+			got, err := ev.Evaluate(t.Context(), tc.e, scope)
 			if err != nil || got != tc.want {
 				t.Errorf("got %v, %v; want %v", got, err, tc.want)
 			}
@@ -87,7 +87,7 @@ func TestAdd_NilOperandIsAnError(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got, err := ev.Evaluate(tc.e, scope); err == nil {
+			if got, err := ev.Evaluate(t.Context(), tc.e, scope); err == nil {
 				t.Errorf("evaluated to %#v; want an error", got)
 			}
 		})
@@ -102,14 +102,14 @@ func TestAdd_NilOperandIsAnError(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got, err := ev.Evaluate(tc.e, scope); err != nil || got != tc.want {
+			if got, err := ev.Evaluate(t.Context(), tc.e, scope); err != nil || got != tc.want {
 				t.Errorf("got %v, %v; want %v", got, err, tc.want)
 			}
 		})
 	}
 	t.Run("lists", func(t *testing.T) {
 		t.Parallel()
-		got, err := ev.Evaluate(expr.SExpr{expr.Op("+"), list(int64(1)), list(int64(2))}, scope)
+		got, err := ev.Evaluate(t.Context(), expr.SExpr{expr.Op("+"), list(int64(1)), list(int64(2))}, scope)
 		s, ok := got.([]any)
 		if err != nil || !ok || len(s) != 2 || s[0] != int64(1) || s[1] != int64(2) {
 			t.Errorf("got %#v, %v; want [1 2]", got, err)

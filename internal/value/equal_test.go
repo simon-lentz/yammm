@@ -91,3 +91,24 @@ func TestEqual_ComparesWrappedMapsWithoutMaterialising(t *testing.T) {
 		t.Errorf("Equal on two Properties allocates %v per call, want 0", allocs)
 	}
 }
+
+type namedKey string
+
+// T4 (A-303): the reflect fallback builds the key in the map's own key type,
+// so a map whose key is a named string type — which isMap, mapLen and rangeMap
+// all declare supported — compares instead of panicking in MapIndex.
+func TestEqual_NamedStringKeyMaps(t *testing.T) {
+	t.Parallel()
+	a := map[namedKey]any{"x": int64(1), "y": "s"}
+	b := map[namedKey]any{"x": int64(1), "y": "s"}
+	c := map[namedKey]any{"x": int64(2), "y": "s"}
+	if !value.Equal(a, b) {
+		t.Error("two equal named-key maps compared unequal")
+	}
+	if value.Equal(a, c) {
+		t.Error("two different named-key maps compared equal")
+	}
+	if !value.Equal(a, map[string]any{"x": int64(1), "y": "s"}) {
+		t.Error("a named-key map and a plain map with the same entries compared unequal")
+	}
+}

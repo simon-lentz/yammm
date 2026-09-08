@@ -156,9 +156,11 @@ func (a *Adapter) IndexesStructured(ctx context.Context, s *schema.Schema) ([]In
 // order.
 //
 // A type whose label fails identifier validation is skipped after collecting
-// E_NEO4J_INVALID_IDENTIFIER. This is the shared gate of
-// [Adapter.ConstraintsStructured], [Adapter.IndexesStructured], and
-// [Adapter.ShapeForSchema].
+// E_NEO4J_INVALID_IDENTIFIER — and the SCHEMA IS THEN REFUSED ENTIRELY: this is
+// the shared gate of [Adapter.ConstraintsStructured],
+// [Adapter.IndexesStructured] and [Adapter.ShapeForSchema], and all three end
+// on a non-OK result by returning nil. "Skipped" describes this iterator's
+// walk, never a partial emission.
 //
 // Callers that also run [Adapter.DetectLabelCollisions] walk the type list
 // twice. That is deliberate: the collision check is public API with its own

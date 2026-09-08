@@ -31,6 +31,12 @@ func PK(parts ...any) VIOption {
 	return func(c *viConfig) { c.pk = immutable.WrapKey(parts) }
 }
 
+// NoKey builds a keyless instance: the primary key is empty rather than the
+// default [1], which is what a part type declaring no key carries.
+func NoKey() VIOption {
+	return func(c *viConfig) { c.pk = immutable.WrapKey(nil) }
+}
+
 // Props sets the instance properties (defaults to none).
 func Props(m map[string]any) VIOption {
 	return func(c *viConfig) { c.props = immutable.WrapProperties(m) }

@@ -270,8 +270,9 @@ func UpdateMetadata(
 // (E_UPDATE_METADATA_BODY_OFFSET, E_SNAPSHOT_MALFORMED, or any other
 // Fatal-severity issue that is NOT E_CONTEXT_CANCELLED), transparently
 // falls back to [Load] + [Marshal] using s for the Load. The fallback
-// carries the input's indentation and its created_at across, so the result
-// differs from a direct Marshal only where the input document did.
+// carries the input's indentation and its created_at across — the created_at
+// byte-for-byte, as the fast path keeps it — so the result differs from a
+// direct Marshal only where the input document did.
 //
 // Panics if s is nil (programming error), on every call rather than only the
 // ones that reach the fallback: the function cannot complete without it, and
@@ -356,9 +357,11 @@ func UpdateMetadataOrReMarshal(
 	ucfg := applyUpdateOptions(opts)
 	if !ucfg.createdAtSet || ucfg.createdAt.IsZero() {
 		if hdr, hdrRes := HeaderOnly(ctx, data); !hdrRes.HasErrors() && hdr != nil && hdr.CreatedAt != "" {
-			when, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt)
-			if err == nil {
-				marshalOpts = append(marshalOpts, WithCreatedAt(when))
+			// Parsed to know it is RFC 3339, then carried as bytes: a
+			// re-format through time.Time drops fractional seconds and the
+			// offset, which the fast path keeps.
+			if _, err := time.Parse(time.RFC3339Nano, hdr.CreatedAt); err == nil {
+				marshalOpts = append(marshalOpts, withCreatedAtText(hdr.CreatedAt))
 			} else {
 				// Dropping it silently loses a value the input stated. The
 				// primitive preserves the header's bytes whatever they say;

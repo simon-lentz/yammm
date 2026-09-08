@@ -57,8 +57,10 @@ func WithIssueLimit(limit int) Option {
 // WithLogger provides a structured logger for validation diagnostics: a
 // debug record when a property name is normalized, and — at Debug — the
 // evaluator's per-node trace of every invariant it evaluates, one record per
-// s-expression plus the operation's start and end. If not provided, logging
-// is disabled. Symmetric with [github.com/simon-lentz/yammm/schema.WithLogger].
+// s-expression plus the operation's start and end, each logged with the
+// context passed to Validate, so a request id it carries is on every record.
+// If not provided, logging is disabled. Symmetric with
+// [github.com/simon-lentz/yammm/schema.WithLogger].
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *validatorConfig) {
 		c.logger = logger

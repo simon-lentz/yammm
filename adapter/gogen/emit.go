@@ -115,7 +115,7 @@ func (g *generator) emitEnumConsts(enumGoName string, values []string) {
 // is relative to the parent's schema, not the emitting type's) maps to the correct
 // named DataType. Fields whose type is not a named DataType (primitive, inline enum,
 // List of a primitive or inline enum) have a zero DataTypeRef and are skipped. A
-// list-of-DataType property carries its *element's* DataTypeRef, so it is registered
+// list-of-DataType property carries its ELEMENT's DataTypeRef, so it is registered
 // here too (goListType wraps the recorded name in "[]").
 func (g *generator) registerDataTypeFields() error {
 	record := func(sc *schema.Schema, kind, owner string, p *schema.Property) error {
@@ -526,7 +526,7 @@ func (g *generator) goFieldType(owner *schema.Type, p *schema.Property) (string,
 
 // goListType renders a List property's Go type, keeping a named DataType element
 // (List<FipsCode> -> []FipsCode) instead of degrading to []string. For a
-// list-of-datatype property the parser records the *element's* DataTypeRef as the
+// list-of-datatype property the parser records the ELEMENT's DataTypeRef as the
 // property's DataTypeRef, so registerDataTypeFields resolved and recorded the
 // element's DataType Go name (in the property's declaring schema, keyed by the
 // property pointer). Primitive elements (List<String>) and inline-(anonymous-)enum

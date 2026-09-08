@@ -131,8 +131,9 @@
 //
 // # Dependencies
 //
-// diag imports only stdlib and [github.com/simon-lentz/yammm/location]. It must not import schema, instance,
-// graph, or adapter.
+//	diag  ──imports──▶  location
+//
+// It must not import schema, instance, graph, or adapter.
 //
 // # v0.3.0 Diagnostic Code Additions
 //

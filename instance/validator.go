@@ -12,6 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/trace"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
@@ -84,18 +85,22 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 	valids := make([]*ValidInstance, 0, len(raws))
 
 	for i := range raws {
-		inst, result := v.validateComposedInstance(ctx, typeName, typ, raws[i], provenancePathBuilder(raws[i].Provenance), false, 0)
-		batchCollector.MergeFunc(result, stampIndex(i))
+		// One cancellation rule: a batch that did not complete returns nil and
+		// exactly one E_CONTEXT_CANCELLED, stamped with the row it stopped on.
+		// The check at the head means no further row is validated; the check
+		// after the row drops that row's partial diagnostics, because the
+		// caller is told the batch did not run.
 		if err := ctx.Err(); err != nil {
-			// A cancelled batch is not a completed one: the "one entry per
-			// input" contract is the completed batch's, so no partial slice —
-			// and exactly one E_CONTEXT_CANCELLED, stamped with the row it
-			// stopped on, which the row's own result may already carry.
-			if !result.HasCode(diag.E_CONTEXT_CANCELLED) {
-				batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
-			}
+			batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
 			return nil, batchCollector.Result()
 		}
+		inst, result := v.validateComposedInstance(ctx, typeName, typ, raws[i], provenancePathBuilder(raws[i].Provenance), false, 0)
+		if err := ctx.Err(); err != nil {
+			batchCollector.MergeFunc(keepInternalErrors(result), stampIndex(i))
+			batchCollector.MergeFunc(cancelledResult(err, raws[i].Provenance), stampIndex(i))
+			return nil, batchCollector.Result()
+		}
+		batchCollector.MergeFunc(result, stampIndex(i))
 		valids = append(valids, inst)
 	}
 
@@ -124,7 +129,18 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 	if err != nil {
 		return nil, createErrorResult(ErrTypeNotFound, err.Error(), raw.Provenance)
 	}
-	return v.validateComposedInstance(ctx, typeName, typ, raw, provenancePathBuilder(raw.Provenance), false, 0)
+	inst, res := v.validateComposedInstance(ctx, typeName, typ, raw, provenancePathBuilder(raw.Provenance), false, 0)
+	// The batch rule, at the entry BatchAssembler.addSerial and the snapshot
+	// revalidator use: a row the caller is told did not run reports the
+	// cancellation and no partial finding, so a timeout's leftovers are never
+	// read as findings about the data.
+	if err := ctx.Err(); err != nil {
+		out := diag.NewCollectorUnlimited()
+		out.Merge(keepInternalErrors(res))
+		out.Merge(cancelledResult(err, raw.Provenance))
+		return nil, out.Result()
+	}
+	return inst, res
 }
 
 // ValidateForComposition validates instances as composed children of the
@@ -208,6 +224,41 @@ func cancelledIssue(err error, prov *location.Provenance, base path.Builder) dia
 	return issue.Build()
 }
 
+// cancelled reports whether ctx is done and, when it is, records the one
+// E_CONTEXT_CANCELLED an instance carries — at base, unless a child batch
+// already put one in the collector. Every point in an instance's validation
+// that ends work on cancellation goes through here, so a cancelled row records
+// its cancellation whatever else it drew and no instance reports it twice.
+//
+// A cancelled row's other diagnostics are dropped by its caller, because the
+// caller is told the row did not run — except its Fatal E_INTERNAL, which
+// [keepInternalErrors] carries through: a library defect outranks a deadline on
+// the same row, and reporting the defect as the deadline hides it.
+func cancelled(ctx context.Context, collector *diag.Collector, prov *location.Provenance, base path.Builder) bool {
+	err := ctx.Err()
+	if err == nil {
+		return false
+	}
+	if !collector.Result().HasCode(diag.E_CONTEXT_CANCELLED) {
+		collector.Collect(cancelledIssue(err, prov, base))
+	}
+	return true
+}
+
+// keepInternalErrors is the part of a cancelled row's diagnostics that
+// outlives the drop: its Fatal E_INTERNAL issues, and nothing else. A library
+// defect and a deadline can land on one row, and reporting the defect as the
+// deadline hides a class of bug behind a timeout.
+func keepInternalErrors(res diag.Result) diag.Result {
+	c := diag.NewCollectorUnlimited()
+	for is := range res.Issues() {
+		if is.Code() == diag.E_INTERNAL {
+			c.Collect(is)
+		}
+	}
+	return c.Result()
+}
+
 // internalIssue is the Fatal E_INTERNAL an InternalError becomes, carrying
 // its stack and the provenance in hand.
 func internalIssue(internalErr *InternalError, prov *location.Provenance, base path.Builder) diag.Issue {
@@ -258,16 +309,19 @@ func (v *Validator) validateComposedBatch(
 
 	valids := make([]*ValidInstance, 0, len(raws))
 	for i := range raws {
-		inst, result := v.validateComposedInstance(ctx, targetTypeName, targetType, raws[i], bases[i], true, depth)
-		collect(i, result)
+		// The one cancellation rule, as in Validate: no further child, no
+		// partial diagnostics, one cancellation on the child it stopped on.
 		if err := ctx.Err(); err != nil {
-			// A cancelled batch is not a completed one; no partial slice and
-			// one stamped cancellation, as in Validate.
-			if !result.HasCode(diag.E_CONTEXT_CANCELLED) {
-				collect(i, cancelledResult(err, raws[i].Provenance))
-			}
+			collect(i, cancelledResult(err, raws[i].Provenance))
 			return nil, targetType
 		}
+		inst, result := v.validateComposedInstance(ctx, targetTypeName, targetType, raws[i], bases[i], true, depth)
+		if err := ctx.Err(); err != nil {
+			collect(i, keepInternalErrors(result))
+			collect(i, cancelledResult(err, raws[i].Provenance))
+			return nil, targetType
+		}
+		collect(i, result)
 		valids = append(valids, inst)
 	}
 	return valids, targetType
@@ -369,14 +423,22 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 	input := v.indexInput(raw.Properties)
 
 	// Build the member index: every schema property and relation resolved
-	// to the input key it is read from, once, by one fold rule.
-	propMapping, accounted := v.buildPropertyMapping(typ, input, collector, prov, base)
+	// to the input key it is read from, once, by one fold rule. Every
+	// collision it finds is reported HERE, before any pass, so no pass has to
+	// carry the report and no gate can swallow it.
+	propMapping, accounted := v.buildPropertyMapping(ctx, typ, input, collector, prov, base)
 	relInputs := v.buildRelationMapping(typ, input, accounted, collector, prov, base)
 
 	// Check for unknown fields
 	if !v.cfg.allowUnknownFields {
 		v.checkUnknownFields(typ, typeName, input, propMapping, accounted, collector, prov, base)
 	}
+
+	// Each pass is gated on ITS OWN errors, taken as a count before and after —
+	// the use Collector.ErrorCount's godoc names. Asking HasErrors made an
+	// index error, or an earlier pass's, stop every pass after it, so a row
+	// reported one defect per round trip.
+	beforeProperties := collector.ErrorCount()
 
 	// Validate each property and build the validated properties map
 	validatedProps := make(map[string]any)
@@ -418,6 +480,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 			built := issue.Build()
 			collector.Collect(built)
 			if built.Severity() == diag.Fatal {
+				cancelled(ctx, collector, prov, base)
 				return nil, collector.Result()
 			}
 			continue
@@ -428,6 +491,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 		if err != nil {
 			if internalErr, ok := errors.AsType[*InternalError](err); ok {
 				collector.Collect(internalIssue(internalErr, prov, base))
+				cancelled(ctx, collector, prov, base)
 				return nil, collector.Result()
 			}
 			// This should not happen after successful CheckValue
@@ -448,59 +512,46 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 		validatedProps[prop.Name()] = coercedValue
 	}
 
-	// If we have errors, return diagnostic result
-	if collector.HasErrors() {
+	// The property pass's own errors stop it; an index error or a collision
+	// does not, so the edge and composition passes still run and the row
+	// reports everything wrong with it at once.
+	if cancelled(ctx, collector, prov, base) {
+		return nil, collector.Result()
+	}
+	if collector.ErrorCount() > beforeProperties {
 		return nil, collector.Result()
 	}
 
-	if err := ctx.Err(); err != nil {
-		collector.Collect(cancelledIssue(err, prov, base))
-		return nil, collector.Result()
-	}
-
-	// Extract primary key
+	// extractPrimaryKey reports nothing; it reads what the pass above validated.
 	pkComponents := v.extractPrimaryKey(typ, validatedProps)
-	if collector.HasErrors() {
-		return nil, collector.Result()
-	}
 
-	// Validate edges (associations)
+	beforeEdges := collector.ErrorCount()
 	edges := v.validateEdges(ctx, typ, relInputs, collector, prov, base)
-	if err := ctx.Err(); err != nil {
-		collector.Collect(cancelledIssue(err, prov, base))
+	if cancelled(ctx, collector, prov, base) {
 		return nil, collector.Result()
 	}
-	if collector.HasErrors() {
+	if collector.ErrorCount() > beforeEdges {
 		return nil, collector.Result()
 	}
 
-	// Validate compositions
+	beforeCompositions := collector.ErrorCount()
 	composed := v.validateCompositions(ctx, typ, relInputs, collector, prov, base, depth)
-	if err := ctx.Err(); err != nil {
-		collector.Collect(cancelledIssue(err, prov, base))
+	if cancelled(ctx, collector, prov, base) {
 		return nil, collector.Result()
 	}
+	if collector.ErrorCount() > beforeCompositions {
+		return nil, collector.Result()
+	}
+
+	// The final gate before the instance is built stays HasErrors: a row with
+	// ANY error yields nil and runs no invariants.
 	if collector.HasErrors() {
 		return nil, collector.Result()
 	}
 
-	// Evaluate invariants LAST, over properties AND relations: an invariant
-	// may name a relation, and evaluating before the relations were computed
-	// left every one of them reading nil.
-	if err := v.evaluateInvariants(ctx, typ, typeName, validatedProps, edges, composed, collector, prov, base); err != nil {
-		if internalErr, ok := errors.AsType[*InternalError](err); ok {
-			collector.Collect(internalIssue(internalErr, prov, base))
-		} else {
-			collector.Collect(cancelledIssue(err, prov, base))
-		}
-		return nil, collector.Result()
-	}
-	if collector.HasErrors() {
-		return nil, collector.Result()
-	}
-
-	// Create ValidInstance with immutable wrappers
-	// Use WithClone to ensure defensive copying from raw input
+	// The instance is built before its invariants run, so they read the one
+	// scope its parent will read too (scopeOf). A failed invariant discards it.
+	// WithClone isolates the instance from the caller's raw input.
 	validInstance := newValidatedInstance(
 		typeName,
 		typ.ID(),
@@ -510,6 +561,21 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 		composed,
 		prov,
 	)
+
+	// Evaluate invariants LAST, over properties AND relations: an invariant
+	// may name a relation, and evaluating before the relations were computed
+	// left every one of them reading nil.
+	if err := v.evaluateInvariants(ctx, typ, typeName, validInstance, collector, prov, base); err != nil {
+		if internalErr, ok := errors.AsType[*InternalError](err); ok {
+			collector.Collect(internalIssue(internalErr, prov, base))
+		} else {
+			cancelled(ctx, collector, prov, base)
+		}
+		return nil, collector.Result()
+	}
+	if collector.HasErrors() {
+		return nil, collector.Result()
+	}
 
 	return validInstance, collector.Result()
 }
@@ -578,18 +644,21 @@ const (
 )
 
 type relationInput struct {
-	state relationState
-	key   string
-	value any
+	state      relationState
+	key        string
+	value      any
+	candidates []string // relationCollided: the keys that folded to the field
 }
 
 // buildRelationMapping resolves each of typ's relations to the input key its
 // value is under, by the rule properties follow: the exact field name first,
 // then under the default mode the one unclaimed key that folds to it; two
-// keys folding to it is one E_CASE_FOLD_COLLISION at the object. Every key a
-// relation claims is added to accounted, so the unknown-field check does not
-// report it again — and a key that folds onto a claimed field is not claimed
-// by it, so that check does.
+// keys folding to it is a collision, recorded in the entry and reported by
+// the member index, before any pass runs, so both member kinds report from one
+// site and no pass's gate can swallow the report.
+// Every key a relation claims is added to accounted, so the unknown-field
+// check does not report it again — and a key that folds onto a claimed field
+// is not claimed by it, so that check does.
 func (v *Validator) buildRelationMapping(typ *schema.Type, in inputKeys, accounted map[string]bool, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[*schema.Relation]relationInput {
 	rels := make(map[*schema.Relation]relationInput)
 	resolve := func(rel *schema.Relation) {
@@ -610,22 +679,12 @@ func (v *Validator) buildRelationMapping(typ *schema.Type, in inputKeys, account
 			accounted[candidates[0]] = true
 			return
 		}
-		kind := "relation"
-		if rel.IsComposition() {
-			kind = "composition"
-		}
-		issue := diag.NewIssue(
-			diag.Error,
-			ErrCaseFoldCollision,
-			fmt.Sprintf("multiple input fields %v fold to %s field %q", candidates, kind, rel.FieldName()),
-		).WithDetail(diag.DetailKeyRelationName, rel.Name()).
-			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
-		withProvenance(issue, prov, base.String())
-		collector.Collect(issue.Build())
 		for _, c := range candidates {
 			accounted[c] = true
 		}
-		rels[rel] = relationInput{state: relationCollided}
+		in := relationInput{state: relationCollided, candidates: candidates}
+		rels[rel] = in
+		reportRelationCollision(rel, in, collector, prov, base)
 	}
 	for rel := range typ.AllAssociations() {
 		resolve(rel)
@@ -636,12 +695,29 @@ func (v *Validator) buildRelationMapping(typ *schema.Type, in inputKeys, account
 	return rels
 }
 
+// reportRelationCollision is the one E_CASE_FOLD_COLLISION a collided relation
+// entry draws, emitted by the member index that finds it.
+func reportRelationCollision(rel *schema.Relation, in relationInput, collector *diag.Collector, prov *location.Provenance, base path.Builder) {
+	kind := "relation"
+	if rel.IsComposition() {
+		kind = "composition"
+	}
+	issue := diag.NewIssue(
+		diag.Error,
+		ErrCaseFoldCollision,
+		fmt.Sprintf("multiple input fields %v fold to %s field %q", in.candidates, kind, rel.FieldName()),
+	).WithDetail(diag.DetailKeyRelationName, rel.Name()).
+		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
+	withProvenance(issue, prov, base.String())
+	collector.Collect(issue.Build())
+}
+
 // buildPropertyMapping maps each schema property to the input key it is read
 // from: exact matches first, then under the default mode case-fold matches,
 // where two unclaimed keys folding to one property are an E_CASE_FOLD_COLLISION
 // at the object and neither is mapped. accounted is every key the mapping
 // spoke for, so the unknown-field check does not report it again.
-func (v *Validator) buildPropertyMapping(typ *schema.Type, in inputKeys, collector *diag.Collector, prov *location.Provenance, base path.Builder) (mapping map[string]string, accounted map[string]bool) {
+func (v *Validator) buildPropertyMapping(ctx context.Context, typ *schema.Type, in inputKeys, collector *diag.Collector, prov *location.Provenance, base path.Builder) (mapping map[string]string, accounted map[string]bool) {
 	mapping = make(map[string]string, len(in.names))
 	accounted = make(map[string]bool, len(in.names))
 
@@ -695,14 +771,14 @@ func (v *Validator) buildPropertyMapping(typ *schema.Type, in inputKeys, collect
 		inputName := inputs[0]
 		mapping[schemaName] = inputName
 		accounted[inputName] = true
-		if v.cfg.logger != nil {
-			v.cfg.logger.Debug(
-				"property name normalized",
-				slog.String(diag.DetailKeyTypeName, typ.Name()),
-				slog.String("input", inputName),
-				slog.String("resolved", schemaName),
-			)
-		}
+		// Through the package's ctx-taking helper, not slog.Logger.Debug, which
+		// the standard library hard-codes to context.Background: WithLogger
+		// promises every record carries the context passed to Validate.
+		trace.Debug(ctx, v.cfg.logger, "property name normalized",
+			slog.String(diag.DetailKeyTypeName, typ.Name()),
+			slog.String("input", inputName),
+			slog.String("resolved", schemaName),
+		)
 	}
 	return mapping, accounted
 }
@@ -756,38 +832,51 @@ func (v *Validator) exactMatchShadowing(typ *schema.Type, inputName string, mapp
 	return "", false
 }
 
-// invariantScope returns the name→value map an invariant is evaluated against:
+// scopeOf returns inst's invariant scope, built once per instance and shared:
+// the instance's own invariants read it, and every parent that holds the
+// instance as a composed child holds this same map in its own scope. One
+// scope per instance is what keeps a composed tree's evaluation linear in
+// its depth.
+func (v *Validator) scopeOf(inst *ValidInstance) immutable.Map[string] {
+	inst.scope.once.Do(func() {
+		inst.scope.m = immutable.WrapMap(v.invariantScope(inst))
+	})
+	return inst.scope.m
+}
+
+// invariantScope builds the name→value map an invariant is evaluated against:
 // the validated properties, plus one entry per relation keyed by FieldName.
+// Every value is the instance's own immutable one, so nothing is cloned.
 //
-// Relations belong here because buildStaticScope admits their field names, so
-// an invariant may reference one. The two relation kinds carry different
-// amounts of information, and the difference is not incidental:
+// Relations belong here because the schema completer's membersOf index admits
+// their field names, so an invariant may reference one. The two relation
+// kinds carry different amounts of information, and the difference is not
+// incidental:
 //
 //   - A COMPOSITION's children are part of this instance, so the entry is the
-//     validated child data itself. `ITEMS -> Len`, and a lambda over a child's
-//     own properties, both read real values.
+//     child's own scope. `ITEMS -> Len`, and a lambda over a child's own
+//     properties, both read real values.
 //   - An ASSOCIATION's target is a REFERENCE. The instance holds the foreign
 //     key, never the target's row, so the entry is the list of target keys.
 //     Presence and cardinality are answerable; the target's properties are not
 //     in this instance to answer with.
 //
 // A relation with no value is absent from the map, so it evaluates to nil and
-// the `!= nil` idiom means what it says.
-func (v *Validator) invariantScope(
-	typ *schema.Type,
-	props map[string]any,
-	edges map[string]*ValidEdgeData,
-	composed map[string]immutable.Value,
-) map[string]any {
-	if len(edges) == 0 && len(composed) == 0 {
-		return props
+// the `!= nil` idiom means what it says. An instance whose type the schema
+// does not hold — a caller-built one — is its properties alone.
+func (v *Validator) invariantScope(inst *ValidInstance) map[string]any {
+	props := inst.Properties()
+	scope := make(map[string]any, props.Len()+len(inst.edges)+len(inst.composed))
+	for k, val := range props.Range() {
+		scope[k] = val.Unwrap()
+	}
+	typ, ok := v.schema.TypeByID(inst.TypeID())
+	if !ok {
+		return scope
 	}
 
-	scope := make(map[string]any, len(props)+len(edges)+len(composed))
-	maps.Copy(scope, props)
-
 	for rel := range typ.AllAssociations() {
-		edge, ok := edges[rel.Name()]
+		edge, ok := inst.edges[rel.Name()]
 		if !ok {
 			continue
 		}
@@ -799,7 +888,7 @@ func (v *Validator) invariantScope(
 	}
 
 	for rel := range typ.AllCompositions() {
-		value, ok := composed[rel.Name()]
+		value, ok := inst.composed[rel.Name()]
 		if !ok {
 			continue
 		}
@@ -810,13 +899,14 @@ func (v *Validator) invariantScope(
 }
 
 // composedScopeValue renders a composition as docs/SPEC.md states: the single
-// child for a composition that is not many, a list otherwise, each child an
-// instance whose own properties and relations are in scope.
+// child for a composition that is not many, a list otherwise, each child its
+// own memoised scope — an instance whose properties and relations are in
+// scope, held rather than rebuilt.
 func (v *Validator) composedScopeValue(rel *schema.Relation, value any) any {
 	children := composedChildren(value)
 	scopes := make([]any, 0, len(children))
 	for _, child := range children {
-		scopes = append(scopes, v.childScope(child))
+		scopes = append(scopes, v.scopeOf(child))
 	}
 	if rel.IsMany() {
 		return scopes
@@ -840,17 +930,6 @@ func composedChildren(value any) []*ValidInstance {
 		return out
 	}
 	return nil
-}
-
-// childScope is a composed child as an instance in scope, built by the rule
-// its parent's scope was built by: properties, then relations by field name.
-func (v *Validator) childScope(child *ValidInstance) map[string]any {
-	props := child.Properties().Clone()
-	typ, ok := v.schema.TypeByID(child.TypeID())
-	if !ok {
-		return props
-	}
-	return v.invariantScope(typ, props, child.edges, child.composed)
 }
 
 // relationValue renders a relation's entries for the invariant scope: a
@@ -877,8 +956,8 @@ func keyValue(k immutable.Key) any {
 	return parts
 }
 
-// evaluateInvariants evaluates every invariant of typ against the validated
-// members. The scope is built here, under the recover that turns an
+// evaluateInvariants evaluates every invariant of typ against inst's members.
+// The scope is inst's memo, built here under the recover that turns an
 // invariant-path panic into an InternalError, and only for a type that
 // declares an invariant to read it.
 //
@@ -889,9 +968,7 @@ func (v *Validator) evaluateInvariants(
 	ctx context.Context,
 	typ *schema.Type,
 	typeName string,
-	props map[string]any,
-	edges map[string]*ValidEdgeData,
-	composed map[string]immutable.Value,
+	inst *ValidInstance,
 	collector *diag.Collector,
 	prov *location.Provenance,
 	base path.Builder,
@@ -910,11 +987,10 @@ func (v *Validator) evaluateInvariants(
 
 		expr := inv.Expression()
 		if scope == nil {
-			members := v.invariantScope(typ, props, edges, composed)
-			scope = eval.PropertyScopeFromMap(members)
+			scope = eval.PropertyScopeOf(v.scopeOf(inst))
 		}
 
-		result, err := v.evaluator.EvaluateBool(expr, scope) //nolint:contextcheck // Evaluator API doesn't accept context
+		result, err := v.evaluator.EvaluateBool(ctx, expr, scope)
 		if err != nil {
 			issue := diag.NewIssue(
 				diag.Error,

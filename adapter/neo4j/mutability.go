@@ -9,7 +9,7 @@ package neo4j
 // integration_export.go.
 //
 // Layering. keyMutability is a per-call query-shape selector. A type's
-// derived @writeOnce key set carries the *property-name filter* that feeds
+// derived @writeOnce key set carries the property-name FILTER that feeds
 // the `update_props` parameter at write time; the two are complementary, not
 // overlapping. [Adapter.BatchNodeQueries] derives the enum per type from
 // whether that set is non-empty, so the pair stays consistent at the

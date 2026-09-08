@@ -164,3 +164,76 @@ func TestDiagnosticDetails_CarryNoSchemaPath(t *testing.T) {
 		}
 	}
 }
+
+// TestFileLoadedSchema_OneCompositionShapes exercises the two shapes this
+// corpus had never carried: a (one) slot to a keyed part, and a (one) slot to
+// a keyless one. Every other composition here is (_:many) to a keyed part, so
+// nothing loaded from disk reached the address a (one) slot writes.
+func TestFileLoadedSchema_OneCompositionShapes(t *testing.T) {
+	t.Parallel()
+	s := loadFromDisk(t)
+	ctx := t.Context()
+
+	invoice := instancetest.VI(
+		"Invoice",
+		instancetest.TypeID(mustTypeID(t, s, "Invoice")),
+		instancetest.PK("inv1"),
+		instancetest.Props(map[string]any{"invoice_id": "inv1", "amount": "10"}),
+	)
+	stamp := instancetest.VI(
+		"Stamp",
+		instancetest.TypeID(mustTypeID(t, s, "Stamp")),
+		instancetest.NoKey(),
+		instancetest.Props(map[string]any{"mark": "paid"}),
+	)
+	order := instancetest.VI(
+		"Order",
+		instancetest.TypeID(mustTypeID(t, s, "Order")),
+		instancetest.PK("o1"),
+		instancetest.Props(map[string]any{"order_id": "o1", "customer": "c"}),
+		instancetest.Composed(map[string]immutable.Value{
+			"INVOICE": immutable.Wrap([]any{invoice}),
+			"STAMP":   immutable.Wrap([]any{stamp}),
+		}),
+	)
+
+	g := graph.New(s)
+	if res := g.Add(ctx, order); !res.OK() {
+		t.Fatalf("a (one) composition to a keyed and a keyless part was refused: %s", res.String())
+	}
+
+	roots := g.Snapshot().InstancesOf(mustTypeID(t, s, "Order"))
+	if len(roots) != 1 {
+		t.Fatalf("got %d Order instances; want 1", len(roots))
+	}
+
+	// The SHAPE, not just the count: one child in a slot is what a (_:many)
+	// slot holds too, so counting alone stays green if the schema's (one)
+	// becomes (_:many). Assert the cardinality the fixture declares, and that
+	// the slot refuses a second occupant.
+	orderType, ok := s.Type("Order")
+	if !ok {
+		t.Fatal("Order is not in the schema")
+	}
+	for _, rel := range []string{"INVOICE", "STAMP"} {
+		if n := roots[0].ComposedCount(rel); n != 1 {
+			t.Errorf("%s holds %d composed children; want 1", rel, n)
+		}
+		r, ok := orderType.Relation(rel)
+		if !ok {
+			t.Fatalf("%s is not a relation on Order", rel)
+		}
+		if r.IsMany() {
+			t.Errorf("%s is declared (many); the fixture's whole point is a (one) slot", rel)
+		}
+	}
+
+	if res := g.AddComposed(ctx, orderType.ID(), graph.FormatKey("o1"), "INVOICE", instancetest.VI(
+		"Invoice",
+		instancetest.TypeID(mustTypeID(t, s, "Invoice")),
+		instancetest.PK("inv2"),
+		instancetest.Props(map[string]any{"invoice_id": "inv2", "amount": "20"}),
+	)); res.OK() {
+		t.Error("a second occupant of the (one) INVOICE slot was accepted")
+	}
+}

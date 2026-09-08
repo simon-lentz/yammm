@@ -1,0 +1,165 @@
+{
+  "name": "\"one_test\"",
+  "span": {
+    "s": 0,
+    "e": 17
+  },
+  "types": [
+    {
+      "name": "Invoice",
+      "name_span": {
+        "s": 24,
+        "e": 31
+      },
+      "props": [
+        {
+          "name": "invoice_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 49,
+              "e": 55
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 38,
+            "e": 63
+          }
+        },
+        {
+          "name": "customer",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 79,
+              "e": 85
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 68,
+            "e": 94
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "BILL_TO",
+          "name_span": {
+            "s": 104,
+            "e": 111
+          },
+          "target": {
+            "name": "Address",
+            "span": {
+              "s": 118,
+              "e": 125
+            }
+          },
+          "span": {
+            "s": 100,
+            "e": 125
+          }
+        },
+        {
+          "kind": "comp",
+          "name": "SUMMARY",
+          "name_span": {
+            "s": 134,
+            "e": 141
+          },
+          "target": {
+            "name": "Summary",
+            "span": {
+              "s": 148,
+              "e": 155
+            }
+          },
+          "span": {
+            "s": 130,
+            "e": 155
+          }
+        }
+      ],
+      "span": {
+        "s": 19,
+        "e": 157
+      }
+    },
+    {
+      "name": "Address",
+      "name_span": {
+        "s": 169,
+        "e": 176
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "address_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 194,
+              "e": 200
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 183,
+            "e": 208
+          }
+        },
+        {
+          "name": "line1",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 224,
+              "e": 230
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 213,
+            "e": 239
+          }
+        }
+      ],
+      "span": {
+        "s": 159,
+        "e": 241
+      }
+    },
+    {
+      "name": "Summary",
+      "name_span": {
+        "s": 253,
+        "e": 260
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 272,
+              "e": 278
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 267,
+            "e": 287
+          }
+        }
+      ],
+      "span": {
+        "s": 243,
+        "e": 289
+      }
+    }
+  ]
+}

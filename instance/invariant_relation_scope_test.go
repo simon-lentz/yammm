@@ -54,8 +54,8 @@ func populatedOrder() map[string]any {
 }
 
 // An invariant may name a relation, and it reads the relation's real value.
-// buildStaticScope has always admitted relation field names, so such an
-// invariant loaded clean — but invariants were evaluated before edges and
+// The schema completer's membersOf index has always admitted relation field
+// names, so such an invariant loaded clean — but invariants were evaluated before edges and
 // compositions were computed, against a scope holding node properties only. A
 // relation therefore read nil, and an invariant over one REJECTED EVERY
 // CONFORMING INSTANCE.

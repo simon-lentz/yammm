@@ -100,6 +100,7 @@ func TestAdd_BypassGuard_UnknownCompositionName(t *testing.T) {
 	wheel := instancetest.VI(
 		"Wheel",
 		instancetest.TypeID(mustTypeID(t, s, "Wheel")),
+		instancetest.NoKey(),
 		instancetest.Props(map[string]any{"position": "left"}),
 	)
 	car := instancetest.VI(
@@ -502,6 +503,7 @@ func TestComposedChild_WrongType_RefusesOnTheInlinePath(t *testing.T) {
 	foreign := instancetest.VI(
 		"Wheel",
 		instancetest.TypeID(mustTypeID(t, s, "Wheel")),
+		instancetest.NoKey(),
 		instancetest.Props(map[string]any{"position": "left"}),
 	)
 
@@ -532,6 +534,7 @@ part type Wheel {
 	stranger := instancetest.VI(
 		"Wheel",
 		instancetest.TypeID(mustTypeID(t, other, "Wheel")),
+		instancetest.NoKey(),
 		instancetest.Props(map[string]any{"position": "left"}),
 	)
 	strandedCar := instancetest.VI(
@@ -694,6 +697,7 @@ part type Wheel {
 		child := instancetest.VI(
 			"Wheel",
 			instancetest.TypeID(mustTypeID(t, sm, "Wheel")),
+			instancetest.NoKey(),
 			instancetest.Props(map[string]any{"position": position}),
 		)
 		if r := g.AddComposed(ctx, mustTypeID(t, sm, "Car"), `["v1"]`, "WHEELS", child); !r.OK() {

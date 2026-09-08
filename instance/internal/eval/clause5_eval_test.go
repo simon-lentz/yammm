@@ -61,17 +61,18 @@ func TestListPositionsReadTheStoredForm(t *testing.T) {
 			t.Errorf("CoerceValue(immutable.Slice) = %#v, %v; want [1.5 2.5]", got, err)
 		}
 	})
-	t.Run("an array is a list", func(t *testing.T) {
+	t.Run("an array is not a list", func(t *testing.T) {
 		t.Parallel()
-		got, err := eval.CoerceValue([2]string{"a", "b"}, lc)
-		if err != nil || !reflect.DeepEqual(got, []any{"a", "b"}) {
-			t.Errorf("CoerceValue([2]string) = %#v, %v; want [a b]", got, err)
+		// A fixed-size array is a scalar carrier's spelling (uuid.UUID is
+		// [16]byte); no decoder produces one for a list position.
+		if _, err := eval.CoerceValue([2]string{"a", "b"}, lc); err == nil {
+			t.Error("CoerceValue([2]string) under List accepted an array as a list")
 		}
 	})
 	t.Run("Flatten unwraps a stored nested list", func(t *testing.T) {
 		t.Parallel()
 		matrix := stored(t, stored(t, int64(1), int64(2)), stored(t, int64(3)))
-		got, err := eval.NewEvaluator().Evaluate(makeBuiltinCall(lit(matrix), "Flatten", nil, nil, nil), eval.EmptyScope())
+		got, err := eval.NewEvaluator().Evaluate(t.Context(), makeBuiltinCall(lit(matrix), "Flatten", nil, nil, nil), eval.EmptyScope())
 		if err != nil || !reflect.DeepEqual(got, []any{int64(1), int64(2), int64(3)}) {
 			t.Errorf("Flatten(stored [[1 2] [3]]) = %#v, %v; want [1 2 3]", got, err)
 		}
@@ -101,7 +102,7 @@ func TestSum_SumsInTheKindItReturns(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := eval.NewEvaluator().Evaluate(makeBuiltinCall(lit(tc.in), "Sum", nil, nil, nil), eval.EmptyScope())
+			got, err := eval.NewEvaluator().Evaluate(t.Context(), makeBuiltinCall(lit(tc.in), "Sum", nil, nil, nil), eval.EmptyScope())
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("got %v, %v; want an error containing %q", got, err, tc.wantErr)
@@ -123,11 +124,11 @@ func TestArithmeticBuiltins_KeepAnIntegerCarrierInteger(t *testing.T) {
 	for _, name := range []string{"Abs", "Floor", "Ceil", "Round"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got, err := eval.NewEvaluator().Evaluate(makeBuiltinCall(lit(json.Number("5")), name, nil, nil, nil), eval.EmptyScope())
+			got, err := eval.NewEvaluator().Evaluate(t.Context(), makeBuiltinCall(lit(json.Number("5")), name, nil, nil, nil), eval.EmptyScope())
 			if err != nil || got != int64(5) {
 				t.Errorf("%s(json.Number(\"5\")) = %v (%T), %v; want int64(5)", name, got, got, err)
 			}
-			got, err = eval.NewEvaluator().Evaluate(makeBuiltinCall(lit(json.Number("2.5")), name, nil, nil, nil), eval.EmptyScope())
+			got, err = eval.NewEvaluator().Evaluate(t.Context(), makeBuiltinCall(lit(json.Number("2.5")), name, nil, nil, nil), eval.EmptyScope())
 			if _, isFloat := got.(float64); err != nil || !isFloat {
 				t.Errorf("%s(json.Number(\"2.5\")) = %v (%T), %v; want a float64", name, got, got, err)
 			}
@@ -206,7 +207,7 @@ func TestEvaluate_EndsTheTraceOpWithThePanic(t *testing.T) {
 	var recovered any
 	func() {
 		defer func() { recovered = recover() }()
-		_, _ = ev.Evaluate(sx("p", lit("x")), panicScope{})
+		_, _ = ev.Evaluate(t.Context(), sx("p", lit("x")), panicScope{})
 	}()
 	if recovered == nil {
 		t.Fatal("the panic did not propagate")
@@ -226,7 +227,7 @@ func (panicScope) WithVar(string, any) eval.Scope            { panic("scope boom
 // refuses an invariant without one, so nothing downstream tolerates it.
 func TestEvaluate_NilExpressionIsAnError(t *testing.T) {
 	t.Parallel()
-	if got, err := eval.NewEvaluator().Evaluate(nil, eval.EmptyScope()); err == nil {
+	if got, err := eval.NewEvaluator().Evaluate(t.Context(), nil, eval.EmptyScope()); err == nil {
 		t.Errorf("Evaluate(nil) = %v, nil; want an error", got)
 	}
 }
@@ -237,13 +238,13 @@ func TestEvaluate_NilExpressionIsAnError(t *testing.T) {
 func TestEvaluator_DirectBuiltinCallShortForm(t *testing.T) {
 	t.Parallel()
 	ev := eval.NewEvaluator()
-	if got, err := ev.Evaluate(sx("len", lit("hello")), eval.EmptyScope()); err != nil || got != int64(5) {
+	if got, err := ev.Evaluate(t.Context(), sx("len", lit("hello")), eval.EmptyScope()); err != nil || got != int64(5) {
 		t.Errorf("(len \"hello\") = %v, %v; want 5", got, err)
 	}
-	if got, err := ev.Evaluate(sx("abs", lit(int64(-42))), eval.EmptyScope()); err != nil || got != int64(42) {
+	if got, err := ev.Evaluate(t.Context(), sx("abs", lit(int64(-42))), eval.EmptyScope()); err != nil || got != int64(42) {
 		t.Errorf("(abs -42) = %v, %v; want 42", got, err)
 	}
-	if got, err := ev.Evaluate(sx("compare", lit(int64(5)), lit([]expr.Expression{lit(int64(10))})), eval.EmptyScope()); err != nil || got != int64(-1) {
+	if got, err := ev.Evaluate(t.Context(), sx("compare", lit(int64(5)), lit([]expr.Expression{lit(int64(10))})), eval.EmptyScope()); err != nil || got != int64(-1) {
 		t.Errorf("(compare 5 (args 10)) = %v, %v; want -1", got, err)
 	}
 }
@@ -253,7 +254,7 @@ func TestEvaluator_DirectBuiltinCallShortForm(t *testing.T) {
 func TestMinMax_WithArgumentRefuseAStoredListReceiver(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"Min", "Max"} {
-		got, err := eval.NewEvaluator().Evaluate(makeBuiltinCall(lit(stored(t, "a", "b")), name, []expr.Expression{lit("z")}, nil, nil), eval.EmptyScope())
+		got, err := eval.NewEvaluator().Evaluate(t.Context(), makeBuiltinCall(lit(stored(t, "a", "b")), name, []expr.Expression{lit("z")}, nil, nil), eval.EmptyScope())
 		if err == nil {
 			t.Errorf("%s(stored list, \"z\") = %#v, want an error", name, got)
 		}
@@ -294,7 +295,7 @@ func TestCheckAndCoerce_NamedNumericCarriers(t *testing.T) {
 // the guard is the only thing between the call and a slice-bounds crash.
 func TestSubstring_StartPastTheLengthIsEmpty(t *testing.T) {
 	t.Parallel()
-	got, err := eval.NewEvaluator().Evaluate(makeBuiltinCall(lit("north"), "Substring", []expr.Expression{lit(int64(7)), lit(int64(9))}, nil, nil), eval.EmptyScope())
+	got, err := eval.NewEvaluator().Evaluate(t.Context(), makeBuiltinCall(lit("north"), "Substring", []expr.Expression{lit(int64(7)), lit(int64(9))}, nil, nil), eval.EmptyScope())
 	if err != nil || got != "" {
 		t.Errorf("Substring(7, 9) on a five-rune value = %#v, %v; want \"\"", got, err)
 	}

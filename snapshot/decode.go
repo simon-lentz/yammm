@@ -39,6 +39,12 @@ type streamDecoder struct {
 	tableTags []string         // rendered tag per table row; nil when schema is nil
 	collector *diag.Collector  // accumulates diagnostics
 
+	// keyPositions is the canonicalizing primary-key positions per table row,
+	// built once on first use. Every address the reader resolves went through
+	// TypeByID and a PrimaryKeys walk per call — the same work graph's
+	// canonicalizer memoizes per schema, left per-call one layer down.
+	keyPositions [][]wireKeyPosition
+
 	// loadCfg holds deserialization options (e.g., skip integrity check).
 	loadCfg loadConfig
 
@@ -401,7 +407,10 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 	sd.checkProvenancePath(inst, row)
 	sd.checkValueConformance(inst, row)
 
-	keyStr := formatWireKey(inst.Key)
+	// Every address in the index is the CANONICAL key — the spelling the
+	// rebuilt instance will carry — so two roots that spell one instant two
+	// ways are one address here, as they are in the graph.
+	keyStr := sd.canonicalWireKey(row, inst.Key)
 	if depth == 0 {
 		// Two roots at one address is not data the wire can carry: the format
 		// has a diagnostics section for a rejected duplicate, and the graph
@@ -435,13 +444,14 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 					sourceRow: row,
 					sourceKey: keyStr,
 					targetRow: targetRow,
-					targetKey: formatWireKey(e.TargetKey),
+					targetKey: sd.canonicalWireKey(targetRow, e.TargetKey),
 				})
 			}
 		}
 	}
 
 	for relName, children := range inst.Composed {
+		sd.checkComposedCardinality(row, relName, len(children))
 		for _, child := range children {
 			// The writer emits a row at every non-root position, so an absent
 			// one is malformed rather than a value to recover from context.
@@ -462,6 +472,31 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 	if depth == 0 {
 		sd.revalidateRoot(ctx, row, inst)
 	}
+}
+
+// checkComposedCardinality refuses a non-many composition slot carrying more
+// than one occupant. The (one) composed key segment carries no discriminating
+// element because such a slot holds exactly one child; without this the reader
+// admits two and the adapter mints one byte-identical _composed_key for both.
+// A schema-less read makes no claim, as every other schema-derived check here.
+func (sd *streamDecoder) checkComposedCardinality(row int, relation string, occupants int) {
+	if occupants < 2 || sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok {
+		return
+	}
+	rel, ok := t.Relation(relation)
+	if !ok || rel.Kind() != schema.RelationComposition || rel.IsMany() {
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+		fmt.Sprintf("composition %q under %s: (one) cardinality violated, got %d children",
+			relation, sd.refAt(row), occupants)).
+		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+		WithDetail(diag.DetailKeyRelationName, relation).
+		WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
 }
 
 // revalidateRoot reconstructs one root's raw form — properties, edges as
@@ -787,7 +822,18 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 		// Marshal rewrites the record's key from the instance it carries, so a
 		// disagreement is an address the next write would silently discard.
-		if instKey := formatWireKey(dup.Instance.Key); instKey != keyStr {
+		// Compared canonically where the row resolved, as every other address in
+		// this function is: two spellings of one instant are one address, not a
+		// disagreement. An unresolved row canonicalizes under nothing — binding
+		// it to row 0 is what requireRow refuses to do — so the raw forms decide
+		// and the record's own type error stands beside this one. The message
+		// keeps the document's own spelling either way.
+		instKey := formatWireKey(dup.Instance.Key)
+		stated, carried := keyStr, instKey
+		if rowOK {
+			stated, carried = sd.canonicalWireKey(row, dup.Key), sd.canonicalWireKey(row, dup.Instance.Key)
+		}
+		if stated != carried {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states key %s but its instance carries %s",
 					di, keyStr, instKey)).Build())
@@ -833,7 +879,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if !conflictOK {
 			continue
 		}
-		conflictKey := formatWireKey(dup.Conflict.Key)
+		conflictKey := sd.canonicalWireKey(conflictRow, dup.Conflict.Key)
 
 		if dup.Relation == "" {
 			// Parent coordinates address a slot, and a root duplicate has none.
@@ -863,7 +909,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if !ok {
 			continue
 		}
-		parentKey := formatWireKey(dup.ParentKey)
+		parentKey := sd.canonicalWireKey(parentRow, dup.ParentKey)
 		if !idx.rootExists(parentRow, parentKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("duplicate parent %s[%s] does not resolve to a root instance",
@@ -890,7 +936,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			return fmt.Sprintf("unresolved record %d source", ui)
 		})
 		if ok {
-			sourceKey := formatWireKey(u.SourceKey)
+			sourceKey := sd.canonicalWireKey(sourceRow, u.SourceKey)
 			if !idx.rootExists(sourceRow, sourceKey) {
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 					fmt.Sprintf("unresolved edge source %s[%s] references non-existent instance",
@@ -1273,6 +1319,63 @@ func formatWireKey(key []any) string {
 	}
 	k := immutable.WrapKey(normalizeSlice(key))
 	return k.String()
+}
+
+// canonicalWireKey renders a wire key as the address the rebuilt instance
+// will carry: each component under a Timestamp, Date or UUID primary-key
+// constraint of the row's type is rewritten to its canonical text, as
+// graph.RebuildSnapshot rewrites it. A component the constraint cannot render,
+// a row that resolves to no type, or a schema-less read leave the key as
+// written. Every position that addresses an instance goes through it, so the
+// document's index and the graph's agree on what one key is.
+func (sd *streamDecoder) canonicalWireKey(row int, key []any) string {
+	if key == nil {
+		return "[]"
+	}
+	components := normalizeSlice(key)
+	for _, pos := range sd.rowKeyPositions(row) {
+		if pos.index >= len(components) {
+			break
+		}
+		if canonical, err := value.Canonical(components[pos.index], pos.constraint); err == nil {
+			components[pos.index] = canonical
+		}
+	}
+	return immutable.WrapKey(components).String()
+}
+
+// wireKeyPosition names one primary-key component whose kind canonicalizes: its
+// index in the key and the constraint deciding its canonical form. It mirrors
+// graph's keyPosition, which the same range memoized on that side.
+type wireKeyPosition struct {
+	index      int
+	constraint schema.Constraint
+}
+
+// rowKeyPositions returns the canonicalizing key positions of a table row,
+// building the whole table on first use. A schema-less read and a row that
+// resolves to no type have none, which leaves every key as written.
+func (sd *streamDecoder) rowKeyPositions(row int) []wireKeyPosition {
+	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+		return nil
+	}
+	if sd.keyPositions == nil {
+		sd.keyPositions = make([][]wireKeyPosition, len(sd.tableIDs))
+		for r, id := range sd.tableIDs {
+			t, ok := sd.schema.TypeByID(id)
+			if !ok {
+				continue
+			}
+			i := 0
+			for pk := range t.PrimaryKeys() {
+				if value.Canonicalizes(pk.Constraint()) {
+					sd.keyPositions[r] = append(sd.keyPositions[r], wireKeyPosition{index: i, constraint: pk.Constraint()})
+				}
+				i++
+			}
+		}
+	}
+	return sd.keyPositions[row]
 }
 
 // normalizeSlice applies NormalizeValue to each element in a slice.

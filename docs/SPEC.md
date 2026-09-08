@@ -196,6 +196,8 @@ includes    abstract    one    many    import
 
 Six spellings cannot be used as property names. The keywords `as`, `part`, and `in` would create parsing ambiguity in import declarations (`as`), type modifiers (`part`), and membership expressions (`in`) respectively. The literals `true`, `false`, and `nil` are also barred. The rule table is keywordless, so all six lex as ordinary words; what rejects them is a negative lookahead on the property-name production. All six are rejected where the property is declared, not where it is used.
 
+A seventh spelling, `self`, is grammatical and is refused at schema load rather than by the grammar (`E_INVALID_NAME`, at the declaration): `self` is bound to the instance in every invariant, at load and at evaluation alike, so a property so named could never be read. The rule is the schema layer's, and it applies to the parse front door and to the Go `Builder` alike.
+
 ### Operators and Punctuation
 
 The following character sequences represent operators and punctuation:
@@ -600,7 +602,7 @@ Property     = [ DOC_COMMENT ] PropertyName DataTypeRef [ "primary" | "required"
 PropertyName = LC_WORD .   // except as, part, in, nil, true, false
 ```
 
-Property names must start with a lower-case letter.
+Property names must start with a lower-case letter. A property may not be named `self`; see Lexical Structure.
 
 ### Property Modifiers
 
@@ -1048,7 +1050,7 @@ type Car {
 
 Composition data is embedded inline in instance documents rather than using reference objects, and is **always an array**, `(one)` included. Anything else draws `E_EDGE_SHAPE_MISMATCH`. This differs from associations, where `(one)` takes a single object.
 
-A part instance is identified through its parent composition, not by a global key. The library mints no address for one. An exporter that must give each part node an identity of its own — the Neo4j adapter's `_composed_key` property is the only one that does — derives it from the **owning root**, not from the immediate parent: the root's identity in that store, the root's key, then one segment per composition hop, each naming the relation and either the child's key or, for a **keyless** part, its array position. Rooting the address at the owning root is what keeps it correct below depth one, and carrying the root's identity is what stops two root types that share a key value and a relation name from naming one part node. A positional segment is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
+A part instance is identified through its parent composition, not by a global key. The library mints no address for one. An exporter that must give each part node an identity of its own — the Neo4j adapter's `_composed_key` property is the only one that does — derives it from the **owning root**, not from the immediate parent: the root's identity in that store, the root's key, then one segment per composition hop — for a `(one)` composition the relation name alone, since the slot holds exactly one child; for a `many` composition the relation name and either the child's key or, for a **keyless** part, its array position. Rooting the address at the owning root is what keeps it correct below depth one, and carrying the root's identity is what stops two root types that share a key value and a relation name from naming one part node. A positional segment is **not stable across writes**; it is safe only under replace semantics, where a parent write deletes and recreates its composed subtree.
 
 ### Multiplicity
 
@@ -1457,7 +1459,9 @@ name               // implicit property reference
 $item.price        // lambda parameter property
 ```
 
-Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage, so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. It rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters or arguments. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
+Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage, so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. A builtin's result is typed by its subkind — `Len`, `Sum`, `Count`, `Compare` and the numeric functions yield a number; `Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring` and `TypeOf` a string; `Split` and `Match` a list of strings; the predicates and `IsNil` a boolean; `Min` and `Max` with an argument the receiver or the argument, ranked by the total order — so the stage after it is judged: `name -> Len -> Upper` is refused, as `age -> Upper` is. It rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters or arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where a number is — because an invariant that fails on every instance is a defect in the schema, not in the data.
+
+**The nil guards are typed by one rule.** `Default`, `Coalesce` and `Lest` evaluate to one of their alternatives — the receiver, or the fallback that stands in for it when the receiver is nil — and `Then` to its body, or nil for an absent receiver. The checker types each as what every alternative agrees on, so the stage after the guard is typed by a value it predicted. Alternatives of different kinds — a string beside a number, a list beside a scalar, an instance beside either — are refused at load (`E_INVALID_INVARIANT`): `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` are refused as `(name -> Default(1)) -> Upper` is, and `note -> Lest { true }` is refused because with `note` present the invariant evaluates to a string. The nil literal stands in for any receiver and the empty list literal for any list. Two instance types agree on the members both declare, whatever their ancestry: after `(A_SLOT -> Default(B_SLOT))` a member declared on `A` and on `B` reads, and a member declared on one of them alone is `E_UNKNOWN_PROPERTY`, since the evaluator would read nil there on the input that selects the other. A conditional and a list literal join their branches the same way, and admit alternatives of different kinds as a value of unknown kind. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
 
 **Relations are in scope**, under the relation's field name — the UPPER_SNAKE
 name in lower case — so `WORKS_AT` and `works_at` read one entry. What a
@@ -1505,7 +1509,7 @@ type Order {
 
 **Numeric variables** (`$0`, `$1`, ...) are evaluator-local and default to `nil` when unset.
 
-**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body.
+**Named variables** are resolved through the evaluator's parent chain — lambda parameters first, then the instance's own members, so `$age` reads the property `age` when no parameter shadows it. A name bound by neither is rejected at schema load (`E_INVALID_INVARIANT`). Variable names are matched exactly: `$myVar` and `$myvar` are two names, where property names are matched case-insensitively. A lambda parameter may be named `$self`, and then shadows the instance for the body. A property may not be named `self`: the binding would leave it unreadable, so it is refused at load (`E_INVALID_NAME`).
 
 **`$self`** is bound when evaluating invariants against property maps and is inherited by child evaluators unless explicitly overridden.
 
@@ -1590,8 +1594,8 @@ Results on an empty collection are a mixed family:
 
 | Function | Description |
 | -------- | ----------- |
-| `Then` | Execute body when non-nil: `value -> Then \|$v\| { $v.prop }` |
-| `Lest` | Execute body when nil: `value -> Lest { default }` |
+| `Then` | Execute body when non-nil: `value -> Then \|$v\| { $v.prop }`; typed as the body |
+| `Lest` | Execute body when nil: `value -> Lest { default }`; typed as the join of receiver and body |
 | `With` | Bind params and execute: `value -> With \|$v\| { $v.prop }` |
 
 #### Pattern Matching
@@ -1606,8 +1610,8 @@ Results on an empty collection are a mixed family:
 | -------- | ----------- |
 | `TypeOf` | DSL type name as string: `value -> TypeOf` yields `"nil"`, `"boolean"`, `"integer"`, `"float"`, `"string"`, `"list"`, `"map"`, or `"pattern"`; any value outside that vocabulary yields `"unknown"`. The name comes from the value, not from the declared property type, so a `Timestamp`, `Date` or `UUID` property yields `"string"` — validation stores all three as text, whichever Go representation the caller submitted |
 | `IsNil` | Check if nil: `value -> IsNil` |
-| `Default` | Return default if nil: `value -> Default(fallback)` |
-| `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)` |
+| `Default` | Return default if nil: `value -> Default(fallback)`; typed as the join of receiver and fallback |
+| `Coalesce` | Return first non-nil: `a -> Coalesce(b, c)`; typed as the join of receiver and every argument |
 
 ### Example Invariants
 

@@ -375,7 +375,7 @@ validator := instance.NewValidator(schema, opts...)
 | `WithStrictPropertyNames` | Require exact case matching (default: false) |
 | `WithAllowUnknownFields` | Silently ignore unknown fields (default: false) |
 | `WithIssueLimit` | Cap the issues one instance stores; the rest are counted and reported as dropped, on the batch result too (default: 100; 0 is unlimited) |
-| `WithLogger` | Receive a debug record when a property name is normalized, and — at Debug — the evaluator's per-node trace of every invariant it evaluates |
+| `WithLogger` | Receive a debug record when a property name is normalized, and — at Debug — the evaluator's per-node trace of every invariant it evaluates, each record logged with the context passed to `Validate`, so a request id on it is on every record |
 
 The `RecommendedOptions()` function returns a curated set of defaults (`WithStrictPropertyNames(true)`, `WithAllowUnknownFields(false)`) as a starting point for common use cases.
 
@@ -641,7 +641,7 @@ The `Snapshot` type provides read-only access to graph state:
 | `Types()` | All type identities (`[]schema.TypeID`, sorted by TypeID) |
 | `InstancesOf(typeID)` | Instances of a type (sorted by primary key) |
 | `AllInstances()` | Iterator over all **root** instances in deterministic order. Composed children are not yielded — walk `Instance.ComposedRelations` and `Instance.Composed` for the subtree |
-| `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key |
+| `InstanceByKey(typeID, key)` | O(1) lookup by type identity and primary key. The key is a `FormatKey` string in any spelling the type's key constraints accept: a Timestamp, Date or UUID component is canonicalized before the lookup |
 | `Edges()` | All resolved edges (sorted) |
 | `EdgesFrom(inst)` | Outgoing edges for a specific instance |
 | `Duplicates()` | Duplicate primary key records (sorted) |
@@ -667,7 +667,7 @@ Types are identified by `schema.TypeID`, never by name. A name is a rendering of
 
 ### Key Formatting and Parsing
 
-A primary key is carried as a canonical JSON array string — the form `Snapshot.InstanceByKey` takes and `immutable.Key.String` produces.
+A primary key is carried as a canonical JSON array string — the form `immutable.Key.String` produces and `Snapshot.InstanceByKey` takes. An address handed to the graph may spell a Timestamp, Date or UUID component any way its constraint accepts: every received address is canonicalized under the type's key constraints before the lookup, so `FormatKey` over the value as the caller holds it is an address.
 
 | Function | Description |
 | -------- | ----------- |
@@ -1310,7 +1310,7 @@ Both return query structs (`BatchNodeQuery`, `BatchEdgeQuery`) with `Statement` 
 
 `BatchNodeQueries` returns a phased, ordered slice; each query carries a `Kind` (`NodeMerge`, `CompositionReplace`, `CompositionCreate`). Every node merge precedes every composition replace, which precedes every composition create (parent-first by depth) — executing the slice in order is correct, and the ordering is a documented guarantee (v0.15.0).
 
-Composed children are written under ownership semantics: a parent write replaces its composed subtree. The replace phase deletes every part reachable from each written root through the schema's composition closure — whether or not the snapshot carries children — and the create phase rebuilds the tree fresh (`SET c = …`, never `+=`). Part nodes carry their identity in the `_composed_key` property, which this adapter mints: a flat JSON array of the owning root's **label**, the root's key values, then one segment per composition hop — `["shop__Order",["o1"],["SECTIONS",["s1"]],["NOTES",0]]`. It is rooted at the owning root rather than the immediate parent, and carries no source path. For a keyless `(many)` part the segment is positional and not a stable identity across writes, which replace semantics make safe. Part DDL pairs with this: `UNIQUE` + `NOT NULL` on `_composed_key`, and no `UNIQUE`/`NODE KEY` on a part's declared primary key.
+Composed children are written under ownership semantics: a parent write replaces its composed subtree. The replace phase deletes every part reachable from each written root through the schema's composition closure — whether or not the snapshot carries children — and the create phase rebuilds the tree fresh (`SET c = …`, never `+=`). Part nodes carry their identity in the `_composed_key` property, which this adapter mints: a flat JSON array of the owning root's **label**, the root's key values, then one segment per composition hop — `["shop__Order",["o1"],["SECTIONS",["s1"]],["NOTES",0]]`, with a `(one)` hop as the relation name alone, `["INVOICE"]`. It is rooted at the owning root rather than the immediate parent, and carries no source path. For a keyless `(many)` part the segment is positional and not a stable identity across writes, which replace semantics make safe. Part DDL pairs with this: `UNIQUE` + `NOT NULL` on `_composed_key`, and no `UNIQUE`/`NODE KEY` on a part's declared primary key.
 
 `BuildBatchRelationshipMergeQuery` returns the UNWIND-batched relationship MERGE template those edge queries use internally. It is exported for a consumer resolving edges the adapter write path cannot see — one whose edges cross datasets, for instance — that wants the template without the surrounding param-and-chunk plumbing. It is a pure function: no execution, no driver dependency, no side effects.
 

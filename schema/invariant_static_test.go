@@ -38,6 +38,37 @@ type Region {
     zone String primary
 }
 
+abstract type Named {
+    label String
+}
+
+abstract type Stamped {
+    at String
+}
+
+part type Alt extends Named, Stamped {
+    id String primary
+    extra String
+}
+
+part type Other extends Named, Stamped {
+    id String primary
+    other String
+}
+
+// StringTagged and NumberTagged share "label" from Named at one kind and
+// declare "tag" at DISJOINT kinds; Alt and Other take every shared member from
+// the same two bases, so no pair among them can express the disagreement.
+part type StringTagged extends Named {
+    id String primary
+    tag String
+}
+
+part type NumberTagged extends Named {
+    id String primary
+    tag Integer
+}
+
 type Order {
     id String primary
     name String
@@ -45,8 +76,15 @@ type Order {
     f2 Boolean
     tags List<String>
     matrix List<List<Integer>>
+    note String
+    extras List<String>
+    vec Vector[4]
     *-> LINES (one:many) Line
     *-> MAIN_LINE (one) Line
+    *-> ALT (_) Alt
+    *-> OTHER (_) Other
+    *-> STAG (_) StringTagged
+    *-> NTAG (_) NumberTagged
     --> PLACED_BY (one) Customer
     --> CUSTOMERS (one:many) Customer
     --> REGION (one) Region
@@ -63,6 +101,29 @@ func TestStaticInvariant_Table(t *testing.T) {
 	t.Parallel()
 
 	accept := []string{
+		// the argument rule admits the right kinds, a property among them
+		`name -> TrimPrefix("n") != ""`,
+		`name -> Substring(1) != ""`,
+		`name -> Substring(1, 3) != ""`,
+		`name -> Match(/n.*/) -> Len > 0`,
+		`name -> Replace("n", "N") != ""`,
+		`name -> Split(name) -> Len > 0`,
+		`name -> Compare("m") > 0`,
+		`name -> Min("z") != ""`,
+		`tags -> Contains(MAIN_LINE) == false`,
+		`name -> Default(MAIN_LINE.id) != ""`,
+		// the nil literal passes where the catalogue states no kind, and only there
+		`name -> Coalesce(nil) != ""`,
+		`name -> Default(nil) != ""`,
+		`tags -> Contains(nil) == false`,
+		// a union reads a member its alternatives declare at one kind
+		`(STAG -> Default(NTAG)).label != ""`,
+		`STAG.tag -> Upper != ""`,
+		`NTAG.tag -> Abs > 0`,
+		// Min and Max with an argument are typed by the total order, so the
+		// stage that takes the ranked type loads
+		`(name -> Min(1)) -> Abs > 0`,
+		`(name -> Max(1)) -> Upper != ""`,
 		// compositions: children are instances
 		`LINES -> All |$l| { $l.qty > 0 }`,
 		`LINES -> All { $0.qty > 0 }`,
@@ -82,7 +143,9 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`LINES -> All |$name| { name.qty > 0 }`,
 		`LINES -> All |$self| { $self.qty > 0 }`,
 		// Lest binds nothing; its body reads the caller's scope
-		`name -> Lest { true }`,
+		`(note -> Lest { name }) != ""`,
+		// self is a bound variable, so a bare self reads the owner's members
+		`self.name -> Len > 0`,
 		// member then pipeline, member then index
 		`$self.name -> Len > 0`,
 		`$self.tags[0] != ""`,
@@ -121,6 +184,9 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`[LINES[0], LINES[0]] -> Unique -> Len == 1`,
 		`LINES -> Contains(LINES[0])`,
 		`LINES[0] in LINES`,
+		// a Vector's element is a number, as a List<Float>'s is
+		`(vec -> Sum) > 0.0`,
+		`vec -> All |$x| { $x > 0.0 }`,
 		// a nested list's element is a list, and its element a number
 		`matrix -> All |$r| { $r -> Sum > 0 }`,
 		`matrix[0][0] > 0`,
@@ -152,6 +218,42 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// Compare ranks any two values the total order ranks: a list above a string
 		`LINES -> Compare("a") > 0`,
 		`REGION -> Compare("a") > 0`,
+		// the nil-guard family types by one rule, the join of every value it can
+		// yield: Coalesce and Lest as Default does, Then as its body
+		`(note -> Coalesce("x")) -> Upper == "X"`,
+		`(name -> Coalesce(nil, "x")) -> Upper == "X"`,
+		`(extras -> Coalesce([]) -> Len) == 0`,
+		`(note -> Lest { "x" }) -> Upper == "X"`,
+		`(MAIN_LINE -> Then |$l| { $l.qty }) -> Abs > 0`,
+		`(MAIN_LINE -> Then |$l| { $l.ITEM }).sku != ""`,
+		// two instances join to their union, whose members are those every
+		// alternative declares — through two shared bases, or declared on each
+		`(ALT -> Default(OTHER)).at != ""`,
+		`(ALT -> Default(OTHER)).label != ""`,
+		`(ALT -> Default(OTHER)).id != ""`,
+		`(OTHER -> Default(ALT)).at != ""`,
+		`(OTHER -> Lest { ALT }).label != ""`,
+		`(OTHER -> Coalesce(nil, ALT)).id != ""`,
+		`MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil`,
+		`(MAIN_LINE -> Default(MAIN_LINE.ITEM)).id != ""`,
+		// a conditional and a list literal join the same way, and the nil
+		// literal is the bottom of the lattice in every position
+		`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).id != ""`,
+		`[MAIN_LINE, MAIN_LINE.ITEM] -> All |$x| { $x.id -> Len < 5 }`,
+		`(f1 ? { nil : name }) -> Default("x") -> Upper == "X"`,
+		// a builtin's result is typed by its subkind — a number, a string, a
+		// boolean — so the stage after it is judged; Min and Max with an
+		// argument yield one of the two
+		`(name -> Len) -> Abs == 5`,
+		`(name -> Upper) -> Len == 5`,
+		`(name -> StartsWith("n")) == true`,
+		`(tags -> Count |$t| { true }) -> Abs == 2`,
+		`(name -> TypeOf) -> Upper == "STRING"`,
+		`(MAIN_LINE.qty -> Compare(1)) -> Abs == 1`,
+		`(name -> Substring(1)) -> Upper == "ORTH"`,
+		`(name -> Min("z")) -> Upper == "NORTH"`,
+		`(name -> Min(1)) == 1`,
+		`(tags -> Join(",")) -> Len > 0`,
 	}
 	for _, inv := range accept {
 		t.Run("accepts "+inv, func(t *testing.T) {
@@ -199,6 +301,29 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`LINES -> Len |$l| { $l.qty } > 0`, diag.E_INVALID_INVARIANT, "lambda"},
 		{`LINES -> All > 0`, diag.E_INVALID_INVARIANT, "lambda"},
 		{`name -> Substring(1, 2, 3) != ""`, diag.E_INVALID_INVARIANT, "argument"},
+		// the argument rule: a literal the builtin refuses on every input
+		{`name -> TrimPrefix(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> TrimSuffix(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> StartsWith(1)`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> EndsWith(true)`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Split(1) -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`tags -> Join(1) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Replace(1, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Replace("a", 1) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Substring("a") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Substring(1, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Match("nor") -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		// the nil literal is refused wherever the catalogue states a kind
+		{`name -> TrimPrefix(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> TrimSuffix(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Substring(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Substring(1, nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Match(nil) -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`tags -> Join(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Replace(nil, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Compare(MAIN_LINE) > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Min(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Max(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
 		{`name -> Lest |$x| { true }`, diag.E_INVALID_INVARIANT, "lambda parameter"},
 		// the receiver rule: a list builtin on a scalar or a key, a scalar
 		// builtin on a list, an ordering builtin on instances
@@ -209,7 +334,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// the bracket takes one index, and a number cannot be indexed
 		{`tags[] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
 		{`tags[0, 1] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
-		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
+		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "a number cannot be indexed"},
 		// a receiver the builtin refuses on every input: a number into a string
 		// builtin, a string into a numeric one, a number into Len, Min or Max
 		{`MAIN_LINE.qty -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
@@ -225,7 +350,9 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`(name != "" ? { MAIN_LINE.qty : MAIN_LINE.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
 		{`(name != "" ? { name : name }) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		// a boolean result cannot be indexed
-		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
+		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "a boolean cannot be indexed"},
+		// a pattern is the third scalar the arm names, and each draws its own
+		{`/re/[0] != nil`, diag.E_INVALID_INVARIANT, "a pattern cannot be indexed"},
 		// Default's fallback of another kind reaches the next stage unpredicted
 		{`(tags -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default"},
 		{`(name -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default"},
@@ -252,9 +379,54 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// the nil literal under + is an error on every input
 		{`nil + 1 > 0`, diag.E_INVALID_INVARIANT, "+ takes"},
 		{`(name + nil) != ""`, diag.E_INVALID_INVARIANT, "+ takes"},
+		// and under the other arithmetic operators, and unary minus
+		{`(-nil) > 0`, diag.E_INVALID_INVARIANT, "unary - takes a number"},
+		{`nil - 1 > 0`, diag.E_INVALID_INVARIANT, "- takes two numbers"},
+		{`nil * 1 > 0`, diag.E_INVALID_INVARIANT, "* takes two numbers"},
+		{`nil / 1 > 0`, diag.E_INVALID_INVARIANT, "/ takes two numbers"},
+		{`nil % 1 > 0`, diag.E_INVALID_INVARIANT, "% takes two numbers"},
 		// every refuse arm of Default and the receiver kinds has its row
 		{`PLACED_BY -> Default(0) -> Abs > 0`, diag.E_INVALID_INVARIANT, "Default"},
-		{`MAIN_LINE -> Default(MAIN_LINE.ITEM) != nil`, diag.E_INVALID_INVARIANT, "Default"},
+		// the nil-guard family refuses alternatives of disjoint kinds, and a
+		// member read through a union of instances must be declared on every one
+		{`(name -> Coalesce(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		{`(name -> Coalesce(nil, 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		// a disjoint alternative is refused wherever it stands, so a
+		// subkind-less alternative between the two cannot mask it
+		{`(note -> Coalesce((f1 ? { note : MAIN_LINE.qty }), 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		{`(note -> Coalesce(1, (f1 ? { note : MAIN_LINE.qty }))) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		// a member the union's alternatives declare at disjoint kinds
+		{`(STAG -> Default(NTAG)).tag -> Upper != ""`, diag.E_INVALID_INVARIANT, "disjoint kinds"},
+		{`(NTAG -> Default(STAG)).tag != nil`, diag.E_INVALID_INVARIANT, "disjoint kinds"},
+		// Min and Max rank receiver against argument, so the mixed pair is one
+		// type exactly and the stage that refuses THAT type refuses it
+		{`(name -> Min(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`(name -> Max(1)) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(note -> Lest { 1 }) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Lest"},
+		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest"},
+		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		// a string receiver beside a boolean body: with the receiver present the
+		// invariant evaluates to the string, which is an evaluation error
+		{`name -> Lest { true }`, diag.E_INVALID_INVARIANT, "Lest"},
+		{`(MAIN_LINE -> Lest { LINES[0].ITEM }).sku != ""`, diag.E_UNKNOWN_PROPERTY, "sku"},
+		{`(MAIN_LINE -> Coalesce(MAIN_LINE.ITEM)).qty > 0`, diag.E_UNKNOWN_PROPERTY, "qty"},
+		{`(MAIN_LINE -> Default(MAIN_LINE.ITEM)).sku != ""`, diag.E_UNKNOWN_PROPERTY, "sku"},
+		{`(ALT -> Default(OTHER)).extra != ""`, diag.E_UNKNOWN_PROPERTY, "extra"},
+		{`(OTHER -> Default(ALT)).other != ""`, diag.E_UNKNOWN_PROPERTY, "other"},
+		{`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).qty > 0`, diag.E_UNKNOWN_PROPERTY, "qty"},
+		{`(LINES -> Default([MAIN_LINE.ITEM]) -> First).qty > 0`, diag.E_UNKNOWN_PROPERTY, "qty"},
+		// a non-empty scalar list is not the empty-list wildcard
+		{`LINES -> Default(["a", 1]) -> Len > 0`, diag.E_INVALID_INVARIANT, "Default"},
+		// a builtin's result of one subkind into a builtin that refuses it
+		{`name -> Len -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`name -> Upper -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(name -> StartsWith("n")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(name -> TypeOf) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(tags -> Contains("a")) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`(MAIN_LINE.qty -> Compare(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`(name -> Min("z")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(tags -> Join(",")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
+		{`(name -> IsNil) -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map"},
 		{`MAIN_LINE -> Compare("a") > 0`, diag.E_INVALID_INVARIANT, "total order"},
 		{`LINES -> Min != nil`, diag.E_INVALID_INVARIANT, "list of scalars"},
 		{`MAIN_LINE -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
@@ -383,4 +555,84 @@ func TestStaticInvariant_OneMistakeOneDiagnostic(t *testing.T) {
 	if n != 1 {
 		t.Errorf("%d E_INVALID_INVARIANT diagnostics, want 1: %v", n, res.Err())
 	}
+}
+
+// A type reached through an import completed in its own schema, where its
+// supertypes resolved. Judging it by whether its own inheritance refs resolve
+// against the importing schema makes every such type look incomplete, and the
+// member check on it is then skipped — so a typo'd member read through an
+// imported type loads clean.
+func TestStaticInvariant_MemberOnImportedTypeIsChecked(t *testing.T) {
+	t.Parallel()
+	sources := map[string][]byte{
+		"entry.yammm": []byte(`schema "entry"
+
+import "base.yammm" as base
+
+type T {
+	tid String primary
+	*-> PART (one) base.Mid
+	! "m" PART.nonexistent > 0
+}
+`),
+		"base.yammm": []byte(`schema "base"
+
+abstract type Ancestor {
+	note String
+}
+
+part type Mid extends Ancestor {
+	id String primary
+}
+`),
+	}
+	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	if res.Err() == nil {
+		t.Fatal("a typo'd member read through an imported type loaded clean")
+	}
+	if _, ok := issueWithCode(res, diag.E_UNKNOWN_PROPERTY); !ok {
+		t.Errorf("want E_UNKNOWN_PROPERTY; got %v", res.Err())
+	}
+}
+
+// A member the imported type really declares, inherited from its own
+// schema's ancestor, still resolves — the guard admits the type rather than
+// skipping the check.
+func TestStaticInvariant_InheritedMemberOnImportedTypeResolves(t *testing.T) {
+	t.Parallel()
+	sources := map[string][]byte{
+		"entry.yammm": []byte(`schema "entry"
+
+import "base.yammm" as base
+
+type T {
+	tid String primary
+	*-> PART (one) base.Mid
+	! "m" PART.note != ""
+}
+`),
+		"base.yammm": []byte(`schema "base"
+
+abstract type Ancestor {
+	note String
+}
+
+part type Mid extends Ancestor {
+	id String primary
+}
+`),
+	}
+	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	if res.Err() != nil {
+		t.Errorf("a member inherited inside the imported schema was refused: %v", res.Err())
+	}
+}
+
+func issueWithCode(res diag.Result, code diag.Code) (diag.Issue, bool) {
+	for is := range res.Issues() {
+		if is.Code() == code {
+			return is, true
+		}
+	}
+	return diag.Issue{}, false
 }

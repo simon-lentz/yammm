@@ -49,9 +49,11 @@
 //	adapter/csv       ──imports──▶  instance, diag, location, graph, immutable, schema
 //	adapter/gogen     ──imports──▶  schema, location, internal/ident
 //	adapter/jschema   ──imports──▶  schema
-//	adapter/json      ──imports──▶  instance, diag, location, location/path, graph, immutable, schema
+//	adapter/json      ──imports──▶  instance, diag, location, graph, immutable, schema,
+//	                                adapter/json/internal/typetag, github.com/tidwall/jsonc
 //	adapter/markdown  ──imports──▶  schema
-//	adapter/neo4j     ──imports──▶  schema, graph, instance, immutable, diag
+//	adapter/neo4j     ──imports──▶  schema, graph, immutable, diag, location,
+//	                                github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 //
 // # Layering Discipline
 //

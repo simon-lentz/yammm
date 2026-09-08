@@ -134,8 +134,8 @@
 // # Composed Children
 //
 // A composed child is checked exactly as a root is — its edge names and
-// multiplicities, its own key, and its own composition tree — but **its
-// association edges are never installed.** A part type that declares or
+// multiplicities, its own key, and its own composition tree — but its
+// association edges are never installed. A part type that declares or
 // inherits an association therefore produces no [Edge], no
 // [UnresolvedEdge], and no effect on [Attestation]'s Associations dimension.
 // The check still runs, so data filed under a name the part type does not
@@ -180,7 +180,7 @@
 // # Type Identity and Type Names
 //
 // A type is identified by [github.com/simon-lentz/yammm/schema.TypeID] — its
-// declaring schema path plus its name. A type *name* is a rendering of that
+// declaring schema path plus its name. A type NAME is a rendering of that
 // identity, in canonical instance tag form:
 //
 //   - Local types: unqualified name (e.g., "Person")
@@ -217,7 +217,10 @@
 //	graph.FormatKey("ABC123")       // ["ABC123"]
 //	graph.FormatKey("us", 12345)    // ["us",12345]
 //
-// Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey].
+// Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey]. A
+// Timestamp, Date or UUID component may be spelled any way its constraint
+// accepts: every address the graph receives is canonicalized under the type's
+// key constraints before the lookup, as the key was at entry.
 //
 // Composed children have no key of their own. A part instance is identified
 // through its parent composition, so this package mints no address for one; a
@@ -237,8 +240,7 @@
 // [Graph.Add] emits:
 //
 //   - E_GRAPH_TYPE_NOT_FOUND: a root's type is not declared by this graph's
-//     schema or a direct import, or a composed child's type is not in the
-//     import closure at all
+//     schema or a direct import
 //   - E_GRAPH_MISSING_PK: the type declares no primary key
 //   - E_GRAPH_INVALID_COMPOSITION: a part type was added directly, or a
 //     composed child is not an instance of its relation's target type
@@ -269,6 +271,12 @@
 //
 // It does NOT emit E_GRAPH_MISSING_PK, E_GRAPH_ABSTRACT_TYPE or
 // E_DUPLICATE_PK; those three belong to a root.
+//
+// A composed child whose identity is not in the import closure is an
+// invariant guard on both paths, Fatal E_INTERNAL: the child must already
+// equal its relation's target, which the schema resolved at load, and a
+// child from outside the closure stops at the schema guard before either
+// arm. No public constructor reaches it.
 //
 // [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
 //
