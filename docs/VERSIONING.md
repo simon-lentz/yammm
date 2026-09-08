@@ -1523,6 +1523,7 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 #### Breaking — the structural hash
 
 - **`schema.StructuralHashVersion` is 4** (was 3). A relation target hashes as its owning schema's name beside its type name, so two closure members' same-named types no longer produce one digest; `-0.0` hashes as `0.0`, as `FloatConstraint.Equal` compares. **Every `.ys` regenerates and every gogen `SchemaHash` moves.** This is the hash algorithm's counter, distinct from the `.ys` wire's `version: 4` of `v0.19.0`; both now read 4.
+- **What a document written before this release does, stated as `v0.17.0`'s algorithm bump stated it.** **Every persisted `.ys` draws `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` until it is re-marshalled** — at `Error` on a body read (`Load`, `Verify`), which fails the load, and at `Warning` on a header-only read (`Info`, `HeaderOnly`, `HeaderOnlyRead`), where `HeaderInfo.SchemaHashMatches` reports false and the document classifies as stale. **`E_SNAPSHOT_INCOMPATIBLE_SCHEMA` does NOT fire on such a document**: an algorithm mismatch skips the hash comparison entirely, so a consumer routing on the stale-schema code sees nothing and one routing on the unsupported-algorithm code sees every document. Neither code is new and neither moves a declaration, so no declaration-level tool reports this. **A consumer regenerates its fleet**; the release runbook's PVC-purge clause is the shape for a volume.
 
 #### Breaking — Go API
 
