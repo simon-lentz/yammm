@@ -851,7 +851,7 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 ## Unreleased
 
-*Three blocks: the condition-1 tier-1 round's fix pass — over the second fix passes of units 1–5, landing one commit per decision group on `review`, written per group as each lands — then unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass committed as `e70a383`, the clause-5 round's second fix pass committed as `ebdeb6a`, the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105, 2026-09-04) — and unit 4's, merged as `fabed40`. Each says which.*
+*Four blocks: the condition-1 tier-1 round's fix pass — over the second fix passes of units 1–5, thirteen commits, one per decision group on `review` — then that pass's RESIDUE fix pass, seven commits, carrying the forty-one repairs the round's A-323 read returned; then unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass committed as `e70a383`, the clause-5 round's second fix pass committed as `ebdeb6a`, the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105, 2026-09-04) — and unit 4's, merged as `fabed40`. Each says which.*
 
 ### Condition-1 tier-1 round — the fix pass over units 1–5's second fix passes, one commit per group on `review`: group 1 `2b13068`, group 2 `1a3dd57`, group 3 `5d2b711`, group 4 `5025d6f`, group 5 `db467f5`, group 6 `ef94124`, group 7 `32ad09f`, group 8 `05f152b`, group 9 `de704d3`, group 10 `679b463`, group 11 `c97d194`, group 13 `5e4b27c` (landed before group 12), group 12 `b73eca5` (A-300…A-353, A-355, A-358)
 
