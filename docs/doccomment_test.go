@@ -7,9 +7,9 @@ import (
 )
 
 // TestModuleDocCommentsRender points the doc-comment checker at the module.
-// Both shapes it reads are silent: a detached comment still looks attached in
-// source, and asterisk-pair emphasis still reads as emphasis. One option's whole
-// documentation was invisible to go doc for three trees on the first.
+// Every shape it reads is silent in source: a detached comment still looks
+// attached, a stacked one still looks like documentation, and markup go/doc has
+// no syntax for still reads as markup.
 func TestModuleDocCommentsRender(t *testing.T) {
 	t.Parallel()
 	checked := doclint.AssertDocCommentsRender(t, "..")

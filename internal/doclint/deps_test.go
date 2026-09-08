@@ -31,8 +31,8 @@ func TestAssertDependencyLines_AgreeingLinesAreSilent(t *testing.T) {
 	}
 }
 
-// A line naming a package the directory does not import is the shape that had
-// been wrong at three consecutive trees.
+// A row naming an import the directory does not have is the shape the gate
+// exists to refuse.
 func TestAssertDependencyLines_ReportsANameTheDirectoryDoesNotImport(t *testing.T) {
 	t.Parallel()
 	r, _ := runDepGate(t)

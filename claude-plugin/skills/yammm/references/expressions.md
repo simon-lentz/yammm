@@ -276,7 +276,7 @@ All built-in functions are invoked via the pipeline operator. The left-hand side
 | Function | Signature | Description |
 | -------- | --------- | ----------- |
 | `Then` | `val -> Then \|$v\| { expr }` | Execute body when val is non-nil; returns nil otherwise. Typed as the body |
-| `Lest` | `val -> Lest { expr }` | Execute body when val is nil; returns val otherwise. Accepts but ignores a lambda parameter. Typed as the join of receiver and body |
+| `Lest` | `val -> Lest { expr }` | Execute body when val is nil; returns val otherwise. A lambda parameter is refused at load. Typed as the join of receiver and body |
 | `With` | `val -> With \|$v\| { expr }` | Bind value to parameter and execute body |
 | `Default` | `val -> Default(fallback)` | Return fallback if val is nil. Typed as the join of receiver and fallback |
 | `Coalesce` | `a -> Coalesce(b, c, ...)` | Return first non-nil value. Typed as the join of receiver and every argument |

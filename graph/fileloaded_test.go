@@ -206,9 +206,34 @@ func TestFileLoadedSchema_OneCompositionShapes(t *testing.T) {
 	if len(roots) != 1 {
 		t.Fatalf("got %d Order instances; want 1", len(roots))
 	}
+
+	// The SHAPE, not just the count: one child in a slot is what a (_:many)
+	// slot holds too, so counting alone stays green if the schema's (one)
+	// becomes (_:many). Assert the cardinality the fixture declares, and that
+	// the slot refuses a second occupant.
+	orderType, ok := s.Type("Order")
+	if !ok {
+		t.Fatal("Order is not in the schema")
+	}
 	for _, rel := range []string{"INVOICE", "STAMP"} {
 		if n := roots[0].ComposedCount(rel); n != 1 {
 			t.Errorf("%s holds %d composed children; want 1", rel, n)
 		}
+		r, ok := orderType.Relation(rel)
+		if !ok {
+			t.Fatalf("%s is not a relation on Order", rel)
+		}
+		if r.IsMany() {
+			t.Errorf("%s is declared (many); the fixture's whole point is a (one) slot", rel)
+		}
+	}
+
+	if res := g.AddComposed(ctx, orderType.ID(), graph.FormatKey("o1"), "INVOICE", instancetest.VI(
+		"Invoice",
+		instancetest.TypeID(mustTypeID(t, s, "Invoice")),
+		instancetest.PK("inv2"),
+		instancetest.Props(map[string]any{"invoice_id": "inv2", "amount": "20"}),
+	)); res.OK() {
+		t.Error("a second occupant of the (one) INVOICE slot was accepted")
 	}
 }

@@ -9,8 +9,7 @@ import (
 // TestModuleDependencyLines points the dependency-line checker at the module.
 // It lives here rather than in internal/doclint because it reads the whole
 // module; that package's own tests prove the checker reports what it should.
-// The class had been wrong at three consecutive trees, each error beside a
-// paragraph asserting the opposite, because no gate read the claim.
+// A dependency line is a claim no other gate reads.
 func TestModuleDependencyLines(t *testing.T) {
 	t.Parallel()
 	checked, headings := doclint.AssertDependencyLines(t, "..")

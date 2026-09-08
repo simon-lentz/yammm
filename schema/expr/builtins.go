@@ -22,8 +22,8 @@ const (
 	ResultElement
 	// ResultBodyList is a list whose element is the body's type (Map).
 	ResultBodyList
-	// ResultBody is the body's type (With; Then, whose nil for an absent
-	// receiver any type absorbs).
+	// ResultBody is the body's type (With, Then). Then yields nil for an absent
+	// receiver, and the stage after it receives that nil.
 	ResultBody
 	// ResultFlattened is the receiver with one level of nesting removed; a
 	// list whose elements are not lists is unchanged.
@@ -98,9 +98,9 @@ const (
 	RecvSized
 	// RecvListOrArg: a list when the call has no argument, when the builtin
 	// ranks the list's elements; a scalar when it has one, when the builtin
-	// ranks receiver against argument and promises a scalar. An instance is
-	// refused either way, a list with an argument. The receiver's mirror of
-	// [ResultElementOrArg].
+	// ranks receiver against argument. An instance is refused either way, a
+	// list with an argument. What the call RESULTS in is [ResultElementOrArg]'s
+	// question, not this one's.
 	RecvListOrArg
 	// RecvStringList: a list of strings. A list of numbers or instances is
 	// refused.

@@ -73,7 +73,7 @@ func TestAssertDocCommentsRender_IgnoresUnexportedDeclarations(t *testing.T) {
 }
 
 // Nothing in a test file reaches go doc, and a block above a test function is
-// ordinary style. Reading them buried the one real defect under seventy-six.
+// ordinary style.
 func TestAssertDocCommentsRender_SkipsTestFiles(t *testing.T) {
 	t.Parallel()
 	r, _ := runCommentGate(t)

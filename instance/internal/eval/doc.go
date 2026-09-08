@@ -14,7 +14,7 @@
 //	    "name": "Alice",
 //	    "age":  30,
 //	})
-//	result, err := evaluator.Evaluate(expr, scope)
+//	result, err := evaluator.Evaluate(ctx, expr, scope)
 //
 // # Evaluator
 //

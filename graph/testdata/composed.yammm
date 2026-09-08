@@ -29,3 +29,28 @@ part type Invoice {
 part type Stamp {
     mark String required
 }
+
+// A Timestamp-keyed root composing a (_:many) part, which composes a (one)
+// part, which composes keyless (_:many) parts: the depth-two and depth-three
+// composed-key shapes, under a root key that canonicalizes.
+type Run {
+    at Timestamp primary
+
+    *-> STEPS (_:many) Step
+}
+
+part type Step {
+    step_id String primary
+
+    *-> SUMMARY (one) StepSummary
+}
+
+part type StepSummary {
+    label String required
+
+    *-> MARKS (_:many) Mark
+}
+
+part type Mark {
+    mark String required
+}

@@ -112,8 +112,8 @@ type BatchAssembler struct {
 	// a second call returns without a second Check pass. finalizeSnap holds
 	// the snapshot from the first call that took one, whatever that call's
 	// outcome: once finalized the graph cannot change, so a retry after a
-	// cancelled Check reuses it rather than cloning the graph again. All
-	// three guarded by lifecycleMu's write lock.
+	// cancelled Check reuses it rather than cloning the graph again. All FOUR
+	// guarded by lifecycleMu's write lock.
 	finalizeDone bool
 	finalizeRes  FinalizeResult
 	finalizeErr  error
