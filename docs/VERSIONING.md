@@ -1044,18 +1044,19 @@ Found by a state analysis rather than by a pass: the GitHub CI workflow's pre-co
 
 - **`scripts/gomodtidy.sh` takes `go mod tidy -diff`'s exit code as its verdict** (A-358) and shows stderr only when the command fails. It had treated any output as a change, and on a cold module cache stderr carries download progress with exit 0 and an empty stdout, so the gate was red in CI and green locally for thirteen pushes. Proved in three directions: a planted `require` in a fixture module fails with the diff, the clean tree passes, an empty module cache passes.
 
-### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `<commit owed at Simon's commit>` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
+### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
 
 *Written per group, in the session that lands it (A-227, A-346). The A-323 read of the fix pass above ran as four passes over its thirteen groups and produced **forty-one repairs R1…R41**, planned into seven groups. **The declaration delta is measured at each commit**; evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_<commit>.txt` for each.*
 
-#### Group 1 — the instruments (A-385, A-399, A-366, A-376)
+#### Group 1 — the instruments (A-385, A-399, A-366, A-376; `d2cf794`)
 
 **No shipped surface moves.** Every change is a test instrument, and the whole
 group exists because the passes above measured each of these assertions unable
 to fail for the property it names. Recorded here because the group is a commit
 in the release's range, not because it changes anything a consumer can observe:
-`gorelease -base=v0.20.0` is byte-identical to the run at `b73eca5`, and no
-`.go` file outside a `_test.go` moves.
+`gorelease -base=v0.20.0` at `d2cf794` is byte-identical to the run at
+`b73eca5` — twelve incompatible, fifty-five additive, suggested `v0.21.0` — and
+no `.go` file outside a `_test.go` moves.
 
 ##### Instruments repaired, each measured against the mutation that reverts it
 
