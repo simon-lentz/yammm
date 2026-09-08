@@ -205,7 +205,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 
 	// An empty key installs under the literal "[]", and a key disagreeing with
 	// a present key property is a forged address.
-	if err := checkInstanceKey(typ, inst); err != nil {
+	if err := checkInstanceKey(typ, inst, g.canon); err != nil {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
 			fmt.Sprintf("instance of type %q: %s", inst.TypeName(), err)).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).
@@ -413,10 +413,13 @@ func (g *Graph) AddComposed(
 
 	parentName := g.instanceTagForm(parentType)
 
-	// The address is canonicalized as Add canonicalized the key it installed,
-	// so the caller's spelling never decides the lookup. A string ParseKey
-	// refuses addresses nothing, and misses under its own spelling.
-	parentInst := g.findInstance(parentType, g.canon.address(parentType, parentKey))
+	// Tried as spelled, then canonicalized as Add canonicalized the key it
+	// installed, so the caller's spelling never decides the lookup. A string
+	// ParseKey refuses addresses nothing, and misses under its own spelling.
+	parentInst := g.findInstance(parentType, parentKey)
+	if parentInst == nil {
+		parentInst = g.findInstance(parentType, g.canon.address(parentType, parentKey))
+	}
 	if parentInst == nil {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_PARENT_NOT_FOUND,
 			fmt.Sprintf("parent instance %s[%s] not found", parentName, parentKey)).
@@ -458,7 +461,7 @@ func (g *Graph) AddComposed(
 	// and the builder applies to an inline child, and the tree it returns is
 	// what attaches on success.
 	if childTyp.HasPrimaryKey() {
-		if err := checkInstanceKey(childTyp, child); err != nil {
+		if err := checkInstanceKey(childTyp, child, g.canon); err != nil {
 			return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
 				fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
 				WithDetail(diag.DetailKeyTypeName, child.TypeName()).
@@ -860,7 +863,7 @@ func (g *Graph) iterEdges(inst *instance.ValidInstance) map[string]*instance.Val
 // checkInstanceKey rejects an empty key, a key whose arity disagrees with the
 // type's declared primary keys, and a component that disagrees with the
 // instance's own present key property. An absent property is not a mismatch.
-func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance) error {
+func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance, canon *canonicalizer) error {
 	key := inst.PrimaryKey()
 	if key.Len() == 0 {
 		return errors.New("primary key is empty")
@@ -875,7 +878,7 @@ func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance) error {
 	i := 0
 	for pk := range typ.PrimaryKeys() {
 		val, ok := inst.Property(pk.Name())
-		if ok && !keyComponentAgrees(key.Get(i), val) {
+		if ok && !keyComponentAgrees(key.Get(i), val, pk.Constraint(), canon) {
 			return fmt.Errorf("primary key component %d disagrees with property %q (%s vs %s)",
 				i, pk.Name(), renderKeyComponent(key.Get(i)), renderKeyComponent(val))
 		}
@@ -889,8 +892,12 @@ func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance) error {
 // what keeps the check affordable once per composed child rather than once per
 // root; anything else falls back to the canonical rendering, the form that
 // decides key equality on the wire.
-func keyComponentAgrees(component, property immutable.Value) bool {
-	x, y := component.Unwrap(), property.Unwrap()
+//
+// Both sides are first put in the form the constraint stores, so two spellings
+// of one Timestamp agree: the graph holds one spelling per value, and refusing
+// the pair here would refuse a record the rebuild path accepts.
+func keyComponentAgrees(component, property immutable.Value, c schema.Constraint, canon *canonicalizer) bool {
+	x, y := canon.canonicalOrRaw(component, c), canon.canonicalOrRaw(property, c)
 	switch xv := x.(type) {
 	case string:
 		if yv, ok := y.(string); ok {
@@ -909,12 +916,18 @@ func keyComponentAgrees(component, property immutable.Value) bool {
 	// canonical rendering on both: -0.0 == 0.0 while WrapKey renders [-0] and
 	// [0], and a typed nil is not == to an untyped one while both render
 	// [null]. The rendering decides key identity, so it decides here.
-	return renderKeyComponent(component) == renderKeyComponent(property)
+	return renderKeyValue(x) == renderKeyValue(y)
 }
 
-// renderKeyComponent renders one value in the canonical key form.
+// renderKeyComponent renders one value in the canonical key form. Diagnostics
+// name the spelling the caller wrote, so they render the value as it arrived.
 func renderKeyComponent(v immutable.Value) string {
-	return immutable.WrapKey([]any{v.Unwrap()}).String()
+	return renderKeyValue(v.Unwrap())
+}
+
+// renderKeyValue renders one unwrapped value in the canonical key form.
+func renderKeyValue(v any) string {
+	return immutable.WrapKey([]any{v}).String()
 }
 
 // reject records issue in the per-call collector and in the graph's cumulative

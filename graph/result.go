@@ -174,11 +174,13 @@ func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
 // InstanceByKey looks up a single instance by type identity and primary key.
 //
 // The key is a [FormatKey]-form address. Any spelling of a component its
-// constraint accepts addresses the instance: a Timestamp, Date or UUID
-// component is canonicalized under the type's key constraints before the
-// lookup, as [Graph.AddComposed] canonicalizes the parent address it receives.
-// [Instance.PrimaryKey]'s String is the address the instance carries; a string
-// [ParseKey] refuses addresses nothing. Returns (nil, false) on a miss.
+// constraint accepts addresses the instance: the address is tried as spelled,
+// then canonicalized under the type's key constraints and tried again, as
+// [Graph.AddComposed] resolves the parent address it receives. The exact
+// spelling is the common case and costs one map read, so a Timestamp, Date or
+// UUID key is parsed only on a miss. [Instance.PrimaryKey]'s String is the
+// address the instance carries; a string [ParseKey] refuses addresses nothing.
+// Returns (nil, false) on a miss.
 func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool) {
 	if r == nil || r.instanceIndex == nil {
 		return nil, false
@@ -186,6 +188,9 @@ func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool)
 	typeIndex := r.instanceIndex[id]
 	if typeIndex == nil {
 		return nil, false
+	}
+	if inst, ok := typeIndex[key]; ok {
+		return inst, true
 	}
 	inst, ok := typeIndex[r.canon.address(id, key)]
 	return inst, ok

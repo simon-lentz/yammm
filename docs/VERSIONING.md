@@ -1044,7 +1044,7 @@ Found by a state analysis rather than by a pass: the GitHub CI workflow's pre-co
 
 - **`scripts/gomodtidy.sh` takes `go mod tidy -diff`'s exit code as its verdict** (A-358) and shows stderr only when the command fails. It had treated any output as a change, and on a cold module cache stderr carries download progress with exit 0 and an empty stdout, so the gate was red in CI and green locally for thirteen pushes. Proved in three directions: a planted `require` in a fixture module fails with the diff, the clean tree passes, an empty module cache passes.
 
-### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `<pending>` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
+### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `49b1be6`, group 3 `<pending>` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
 
 *Written per group, in the session that lands it (A-227, A-346). The A-323 read of the fix pass above ran as four passes over its thirteen groups and produced **forty-one repairs R1…R41**, planned into seven groups. **The declaration delta is measured at each commit**; evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_<commit>.txt` for each.*
 
@@ -1071,13 +1071,13 @@ no `.go` file outside a `_test.go` moves.
 - **Every contract refuse row states what the evaluator does** (A-366). The table gained the verdicts beside the error fragments, and asserting them **corrected six rows**: three produce an evaluator error the table did not record, and three hold vacuously where the row implied a failure.
 - **Three instrument pins** (A-376): the loader's deleted working-directory read is pinned by a test that places a real file at the import's own relative path and requires the refusal; the index-refusal rows name the kind refused, with a pattern row added to both tables (measured: collapsing the three scalar names to one turns six rows red); and the scope memo's ratio test becomes a linearity assertion over three depths — the deltas are 544 then 552 with the memo and **1,090 then 1,458 without it**, where the ratio test passed either way.
 
-#### Group 2 — the checker's lattice (A-392, A-394, A-393, A-379, A-383, A-390; `<pending>`)
+#### Group 2 — the checker's lattice (A-392, A-394, A-393, A-379, A-383, A-390; `49b1be6`)
 
 **Three of these are LOAD-BREAKING.** A schema shipping any of the three shapes
 below loads today and is refused after this group. Each was measured to load
 clean and then fail on every instance that reaches it — the class the static
 checker exists to refuse — and each is measured at **zero cost to rdata**,
-whose six schemas ship none of the three shapes.
+whose six schemas ship none of the three shapes — every one validated clean under this checker, and rdata's suite showing no delta beyond unit 4's hash re-key. `gorelease -base=v0.20.0` at `49b1be6` is byte-identical to `d2cf794`'s (twelve incompatible, fifty-five additive), so no declaration moves: a declaration-level tool cannot see a load-time refusal, which is why the consumer run is the instrument of record here.
 
 ##### Breaking — the static invariant checker, `schema`
 
@@ -1097,6 +1097,32 @@ whose six schemas ship none of the three shapes.
 
 - **The stacked doc block on `checkArgs` and `checkReceiver` is split** (A-383). `checkArgs` had been inserted between `checkReceiver`'s doc comment and `checkReceiver`, so one block opening "checkReceiver refuses a receiver…" documented `checkArgs` and `checkReceiver` had no doc at all. This is the class's second site in one fix pass, and the gate rule that catches it lands with A-372.
 - **`ResultElementOrArg`'s godoc states the ranked typing** (A-393), and group 8's entry above is amended rather than left to contradict it.
+
+
+#### Group 3 — the graph's addresses (A-401, A-402, A-388, A-380; `<pending>`)
+
+**One silent-corruption fix and one new refusal.** Together these make
+`graph/doc.go`'s claim — *"every address the graph receives is canonicalized"* —
+true for the first time, and they assert the premise the `(one)` composed key
+rests on. Every item is measured at **zero cost to rdata**, whose six schemas
+declare **no composition and no Timestamp, Date or UUID primary key** —
+re-counted in its tree at `09e5e970`, not inherited from the decisions.
+
+##### Fixed — silent corruption, `graph`
+
+- **An imported snapshot is re-keyed under the importing schema** (A-401). `NewFromSnapshot` installed each cloned instance under the address the snapshot carried while every lookup canonicalized. Replay a document persisted before a key's constraint changed — a `String` key migrated to `Timestamp` — and the imported instance was addressable by **nothing**: not by `FormatKey` of the raw text, not by `FormatKey` of the canonical text, **not even by its own carried key** — and a re-`Add` installed a second copy with no `E_DUPLICATE_PK`. Reachable from `cmd/yammm` and from the documented resume path `graph.NewBatchAssemblerFromSnapshot`. The instance itself is re-keyed, not the map entry: `Graph.Snapshot` builds its index from the instance's own key, so re-keying the map alone is defeated one layer up. The pending unresolved target key and every edge's own properties move with it. **A no-op on the common path**, where a same-schema import's addresses are already canonical.
+
+##### Breaking — a document the reader used to accept
+
+- **A `(one)` composition slot carrying more than one occupant is refused** (A-380), at `graph.RebuildSnapshot` and at `snapshot.Load`, with `E_DUPLICATE_COMPOSED_PK` — the code `Graph.Add` and `Graph.AddComposed` already raise for the same shape. The `(one)` hop's `_composed_key` segment carries no discriminating element on the ground that such a slot holds exactly one child, and **no layer enforced that**: both public entry points accepted two occupants with no diagnostic, and the adapter then minted **one byte-identical `_composed_key` for both**. With the part DDL deployed, the second `CREATE` violates the `UNIQUE` constraint and the whole batch fails at the server. The premise is enforced rather than the address reverted, which would move a persisted format a second time.
+
+##### Fixed — one value, one spelling, at the three layers that disagreed
+
+- **An identity comparison is decided on the canonical address** (A-388), at three sites. `Graph.Add`'s `checkInstanceKey` compared a key component against its key property in their raw forms, so Add **refused with `E_GRAPH_INVALID_PK` a record `RebuildSnapshot` accepts and stores** — the write path contradicting the model the same range installed. The reader's duplicate-record key equality compared the document's raw text where every other address in that function had moved to the canonical form. And the Add path passed an association edge's **own properties** through raw while canonicalizing the target key beside them. A key that names a genuinely different value is still refused.
+
+##### Changed — lookup cost, `graph`
+
+- **A lookup tries the address as spelled before it canonicalizes** (A-402). `Snapshot.InstanceByKey` and `Graph.AddComposed` read the index directly and fall back to the canonical form only on a miss. Strictly semantics-preserving: every address that resolved before resolves now. `docs/API.md` advertises `InstanceByKey` as an O(1) lookup while every call on a Timestamp, Date or UUID key ran a parse, a re-render and a marshal, and `AddComposed` paid it once per composed child under the graph's lock held exclusively.
 
 
 ### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the clause-5 second fix pass committed as `ebdeb6a`; the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105)

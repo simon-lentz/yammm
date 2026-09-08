@@ -120,7 +120,7 @@ func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, 
 				targetType:     rel.TargetID(),
 				targetTypeName: targetName,
 				targetKey:      b.g.canon.key(rel.TargetID(), target.TargetKey()).String(),
-				properties:     target.Properties(),
+				properties:     b.g.canon.edgeProperties(inst.TypeID(), relationName, target.Properties()),
 				isRequired:     isRequired,
 			})
 		}
@@ -266,7 +266,7 @@ func (b *instanceBuilder) child(
 	// read one value, so two spellings of one key cannot pass as two children.
 	key := b.g.canon.key(child.TypeID(), child.PrimaryKey())
 	if childTyp.HasPrimaryKey() {
-		if err := checkInstanceKey(childTyp, child); err != nil {
+		if err := checkInstanceKey(childTyp, child, b.g.canon); err != nil {
 			b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
 				fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
 				WithDetail(diag.DetailKeyTypeName, child.TypeName()).

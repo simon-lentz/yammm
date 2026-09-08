@@ -166,6 +166,21 @@ func (c *canonicalizer) address(id schema.TypeID, key string) string {
 	return c.key(id, immutable.WrapKey(components)).String()
 }
 
+// canonicalOrRaw is v in the form c stores, or v as it arrived where c has no
+// canonical form, where c cannot render it, or where nothing canonicalizes at
+// all. It compares two values that must agree; it never decides an address.
+func (c *canonicalizer) canonicalOrRaw(v immutable.Value, con schema.Constraint) any {
+	raw := v.Unwrap()
+	if c.inactive || !value.Canonicalizes(con) {
+		return raw
+	}
+	canonical, err := value.Canonical(raw, con)
+	if err != nil {
+		return raw
+	}
+	return canonical
+}
+
 // properties rewrites an instance's properties under the declared constraints
 // of id. The Add path and the rebuild path both reach it, so the two cannot
 // store one value two ways.
@@ -231,13 +246,40 @@ func (c *canonicalizer) instance(ip InstanceParts) InstanceParts {
 	return ip
 }
 
+// reinstance rewrites a freshly cloned Instance and its composed children in
+// place, as instance rewrites InstanceParts. The clone is not yet reachable
+// from the graph, so writing it is safe; key is idempotent, so an already
+// canonical instance is unchanged.
+func (c *canonicalizer) reinstance(inst *Instance) {
+	if c.inactive || inst == nil {
+		return
+	}
+	inst.primaryKey = c.key(inst.typeID, inst.primaryKey)
+	inst.properties = c.properties(inst.typeID, inst.properties)
+	for _, children := range inst.composed {
+		for _, child := range children {
+			c.reinstance(child)
+		}
+	}
+}
+
+// edgeProperties rewrites an edge's own properties under the constraints the
+// source type's relation declares. Every path that installs an edge reaches
+// it, so the Add path and the rebuild path cannot store one value two ways.
+func (c *canonicalizer) edgeProperties(source schema.TypeID, relation string, props immutable.Properties) immutable.Properties {
+	if c.inactive {
+		return props
+	}
+	return apply(props, c.edgeProps(source, relation))
+}
+
 // edge rewrites an edge's own properties, whose constraints hang off the
 // source type's relation rather than off either endpoint type.
 func (c *canonicalizer) edge(ep EdgeParts) EdgeParts {
 	if c.inactive {
 		return ep
 	}
-	ep.Properties = apply(ep.Properties, c.edgeProps(ep.SourceType, ep.Relation))
+	ep.Properties = c.edgeProperties(ep.SourceType, ep.Relation, ep.Properties)
 	// Both endpoints move with the instances they address, or the edge stops
 	// resolving against an index whose keys this same pass rewrote.
 	ep.SourceKey = c.key(ep.SourceType, ep.SourceKey)
@@ -267,7 +309,7 @@ func (c *canonicalizer) unresolved(up UnresolvedParts) UnresolvedParts {
 	if c.inactive {
 		return up
 	}
-	up.Properties = apply(up.Properties, c.edgeProps(up.SourceType, up.Relation))
+	up.Properties = c.edgeProperties(up.SourceType, up.Relation, up.Properties)
 	up.SourceKey = c.key(up.SourceType, up.SourceKey)
 	up.TargetKey = c.key(up.TargetType, up.TargetKey)
 	return up

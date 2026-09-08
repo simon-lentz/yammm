@@ -445,6 +445,7 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 	}
 
 	for relName, children := range inst.Composed {
+		sd.checkComposedCardinality(row, relName, len(children))
 		for _, child := range children {
 			// The writer emits a row at every non-root position, so an absent
 			// one is malformed rather than a value to recover from context.
@@ -465,6 +466,31 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 	if depth == 0 {
 		sd.revalidateRoot(ctx, row, inst)
 	}
+}
+
+// checkComposedCardinality refuses a non-many composition slot carrying more
+// than one occupant. The (one) composed key segment carries no discriminating
+// element because such a slot holds exactly one child; without this the reader
+// admits two and the adapter mints one byte-identical _composed_key for both.
+// A schema-less read makes no claim, as every other schema-derived check here.
+func (sd *streamDecoder) checkComposedCardinality(row int, relation string, occupants int) {
+	if occupants < 2 || sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok {
+		return
+	}
+	rel, ok := t.Relation(relation)
+	if !ok || rel.Kind() != schema.RelationComposition || rel.IsMany() {
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+		fmt.Sprintf("composition %q under %s: (one) cardinality violated, got %d children",
+			relation, sd.refAt(row), occupants)).
+		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+		WithDetail(diag.DetailKeyRelationName, relation).
+		WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
 }
 
 // revalidateRoot reconstructs one root's raw form — properties, edges as
@@ -790,7 +816,18 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 		// Marshal rewrites the record's key from the instance it carries, so a
 		// disagreement is an address the next write would silently discard.
-		if instKey := formatWireKey(dup.Instance.Key); instKey != keyStr {
+		// Compared canonically where the row resolved, as every other address in
+		// this function is: two spellings of one instant are one address, not a
+		// disagreement. An unresolved row canonicalizes under nothing — binding
+		// it to row 0 is what requireRow refuses to do — so the raw forms decide
+		// and the record's own type error stands beside this one. The message
+		// keeps the document's own spelling either way.
+		instKey := formatWireKey(dup.Instance.Key)
+		stated, carried := keyStr, instKey
+		if rowOK {
+			stated, carried = sd.canonicalWireKey(row, dup.Key), sd.canonicalWireKey(row, dup.Instance.Key)
+		}
+		if stated != carried {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states key %s but its instance carries %s",
 					di, keyStr, instKey)).Build())

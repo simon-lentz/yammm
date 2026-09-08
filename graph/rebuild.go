@@ -135,6 +135,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 
 	validatePartsIdentity(parts, collector)
 	validatePartsRootTypes(s, parts, collector)
+	validatePartsCardinality(s, parts, collector)
 	if collector.HasErrors() {
 		return nil, collector.Result()
 	}
@@ -284,6 +285,44 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 // type has no instances, a part instance is addressed through its parent, and
 // a type with no primary key has no address at all. A store cannot hold any
 // of the three as a node.
+// validatePartsCardinality refuses a non-many composition slot carrying more
+// than one occupant. The (one) composed key segment carries no discriminating
+// element because such a slot holds exactly one child, and this is the entry
+// point where that premise is asserted: without it two occupants are accepted
+// with no diagnostic and the adapter mints one byte-identical _composed_key
+// for both.
+func validatePartsCardinality(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
+	if s == nil {
+		return
+	}
+	var walk func(ip InstanceParts)
+	walk = func(ip InstanceParts) {
+		t, known := s.TypeByID(ip.TypeID)
+		for relName, children := range ip.Composed {
+			if known && len(children) > 1 {
+				if rel, ok := t.Relation(relName); ok && rel.Kind() == schema.RelationComposition && !rel.IsMany() {
+					collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+						fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", relName, len(children))).
+						WithDetail(diag.DetailKeyTypeName, ip.TypeName).
+						WithDetail(diag.DetailKeyRelationName, relName).
+						WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
+				}
+			}
+			for _, child := range children {
+				walk(child)
+			}
+		}
+	}
+	for _, instParts := range parts.Instances {
+		for _, ip := range instParts {
+			walk(ip)
+		}
+	}
+	for _, dp := range parts.Duplicates {
+		walk(dp.Instance)
+	}
+}
+
 func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
 	if s == nil {
 		return
