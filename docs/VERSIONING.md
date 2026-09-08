@@ -849,15 +849,85 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 - **`Marshal` returns Fatal `E_INTERNAL` and no bytes for a target key `graph.ParseKey` cannot read** (A-191), where v0.19.0 wrote the document with the address dropped and a `W_SNAPSHOT_VALUE_DROPPED` Warning. `UnresolvedEdge.TargetKey` is written from `immutable.Key.String()` on every library path, `graph.ParseKey` is its pinned inverse, and no consumer path supplies the string — so the branch guarded an event the module's own invariant excludes, and a broken invariant is an internal failure rather than a sampled warning. The one reachable input is caller-assembled `RebuildSnapshot` parts whose key holds a non-scalar component, which `Marshal`'s contract already assigns to Fatal `E_INTERNAL`. The two `W_SNAPSHOT_VALUE_DROPPED` arms for a target key or edge properties under an `absent`/`empty` reason are unchanged, and the code's own description is narrowed to them. Consumer cost is zero by absence: every key the consumer writes is a `String` primary key rendered by the library.
 
-## Unreleased
+## v0.21.0 under this policy
 
-*Four blocks: the condition-1 tier-1 round's fix pass — over the second fix passes of units 1–5, thirteen commits, one per decision group on `review` — then that pass's RESIDUE fix pass, seven commits, carrying the forty-one repairs the round's A-323 read returned; then unit 5's — pass A's fix pass merged to `main` as `1dfec2d` (PR #104, 2026-09-04), pass B's fix pass committed as `2b28aab`, the clause-3/4 fix pass committed as `e70a383`, the clause-5 round's second fix pass committed as `ebdeb6a`, the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105, 2026-09-04) — and unit 4's, merged as `fabed40`. Each says which.*
+Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:
+
+| Stream | Where it landed |
+| :-- | :-- |
+| The tier-1 round's **fix pass**, over units 1–5's second fix passes | thirteen commits on `review`, `2b13068`…`b73eca5` |
+| That fix pass's **residue fix pass**, over the round's own read of it | seven commits on `review`, `d2cf794`…`e989131` |
+| **Condition-1 unit 5** — `instance/` and `internal/value/` | four passes; closed by decision (A-297) and merged to `main` as `f049740` (PR #105) |
+| **Condition-1 unit 4** — `schema/` | merged to `main` as `fabed40` (PR #102) |
+
+Units 1, 2 and 3's fixes shipped in `v0.19.0` and the consumer cross-read's fixes in `v0.20.0`; neither is repeated here.
+
+**The declaration delta is measured, not written from memory.** `gorelease -base=v0.20.0` on the release candidate reports **twelve incompatible changes and fifty-six additions**, and suggests `v0.21.0`. The measured tree is `e989131`, the last commit that moves a Go file; every commit above it changes this document alone, and the run at the tip is byte-identical to the run at `e989131`. **Each stream below carries its own intermediate counts, measured at its own commits and true there**; the release's numbers are the twelve and fifty-six enumerated here.
+
+### Every incompatible change — the enumeration clause (c) asks for
+
+**Twelve, and they are the twelve `gorelease` reports at the candidate.** Each is described in the stream named beside it.
+
+| Package | Change | Described in |
+| :-- | :-- | :-- |
+| `diag` | `E_MISSING_PRIMARY_KEY` — removed | unit 5, the clause-5 second fix pass |
+| `diag` | `E_RELATION_NORMALIZATION_COLLISION` — removed | unit 4, "Breaking — Go API" |
+| `instance` | `ErrCorruptedSchema` — removed | unit 5, the clause-3/4 pass |
+| `instance` | `ErrMissingPrimaryKey` — removed | unit 5, the clause-5 second fix pass |
+| `instance` | `ErrNilValidator` — removed | unit 5, the clause-3/4 pass |
+| `instance` | `KindCorruptedSchema` — removed | unit 5, the clause-3/4 pass |
+| `instance` | `KindNilValidator` — removed | unit 5, the clause-3/4 pass |
+| `instance` | `KindConstraintPanic` — value changed from 3 to 1 | unit 5, the clause-3/4 pass |
+| `instance` | `KindInvariantPanic` — value changed from 2 to 0 | unit 5, the clause-3/4 pass |
+| `schema` | `(*Type).CanonicalPropertyMap` — removed | unit 4, "Breaking — Go API" |
+| `schema` | `StructuralHashVersion` — value changed from 3 to 4 | unit 4, "Breaking — the structural hash" |
+| `schema/expr` | `IsNilLiteral` — removed | unit 5, pass B |
+
+### Every additive declaration
+
+**Fifty-six, and they are the fifty-six `gorelease` reports at the candidate.** Listed here so the enumeration is one list rather than a search across four streams.
+
+- **`diag`** (6) — `(*Collector).MergeFunc`, `E_COMPOSITION_DEPTH_EXCEEDED`, `E_DUPLICATE_INVARIANT`, `E_DUPLICATE_SCHEMA`, `E_INVARIANT_CONFLICT`, `E_LOAD_SOURCE_CHANGED`.
+- **`immutable`** (1) — `PropertiesOf`.
+- **`instance`** (4) — `ErrCompositionDepthExceeded`, `MaxComposedDepth`, `WithIssueLimit`, `WithLogger`.
+- **`schema`** (4) — `(*Relation).PropertyFold`, `(*Schema).ResolveTypeName`, `(*Type).CanonicalPropertyName`, `(*Type).RelationByField`.
+- **`schema/expr`** (41) — the builtin catalogue and the constant it binds `self` under. `BuiltinSpec`, `Builtins`, `LookupBuiltin`, `IsDatatypeCheck` and `SelfVariable`; `ArgKind` with `ArgAny`, `ArgNumber`, `ArgOrdered`, `ArgPattern` and `ArgString`; `ParamBinding` with `BindNone`, `BindElement`, `BindReceiver` and `BindAccumulatorElement`; `ReceiverKind` with `RecvAny`, `RecvList`, `RecvListOrArg`, `RecvNumeric`, `RecvNumericList`, `RecvOrdered`, `RecvScalarList`, `RecvSized`, `RecvString` and `RecvStringList`; `BuiltinResult` with `ResultBody`, `ResultBodyList`, `ResultBoolean`, `ResultElement`, `ResultElementOrArg`, `ResultFlattened`, `ResultList`, `ResultNumber`, `ResultReceiver`, `ResultReceiverOrArg`, `ResultReceiverOrBody`, `ResultString` and `ResultUnknown`.
+
+`BuiltinSpec`'s `Args` field and its `ArgAt` method are additive too. `gorelease` counts them under `BuiltinSpec`, which is itself new since the base, so they carry no row of their own.
+
+### What no declaration-level tool reports
+
+**Five changes move no declaration, so `gorelease` is silent on every one.** Four refuse at load what loaded before; the fifth repairs a silent corruption. They are this release's real risk surface, and each is measured at zero cost to the single external consumer.
+
+| Change | What it refuses, and where | Described in |
+| :-- | :-- | :-- |
+| The nil literal at a typed argument position | `name -> Substring(nil)` draws `E_INVALID_INVARIANT` at **schema load**, where it loaded and then failed on every conforming instance. An `ArgAny` position still accepts it — `Coalesce(nil)`, `Default(nil)`, `Contains(nil)` | the residue fix pass, group 2 |
+| A nil guard's disjoint alternatives, in either written order | `note -> Coalesce((f1 ? { note : qty }), 1)` draws `E_INVALID_INVARIANT` at **schema load**. The same two alternatives were refused in one order and accepted in the other | the residue fix pass, group 2 |
+| A union's member read whose alternatives disagree | a member two alternatives declare with disjoint kinds is refused at **schema load**, where it typed as a scalar of unknown subkind and drew `E_EVAL_ERROR` on every instance selecting the disagreeing alternative | the residue fix pass, group 2 |
+| A `(one)` composition slot holding more than one occupant | `graph.RebuildSnapshot` and `snapshot.Load` draw `E_DUPLICATE_COMPOSED_PK` — the code the `Graph.Add` path already raised for the same shape. **A document that loaded before can now be refused** | the residue fix pass, group 3 |
+| An imported snapshot's addresses | **a fix, not a refusal.** `graph.NewFromSnapshot` re-keys each cloned instance under the importing schema's canonicalizer. Before it, an instance imported under a changed key constraint was addressable by nothing — not even by its own carried key — and a re-add installed a second copy with no `E_DUPLICATE_PK` | the residue fix pass, group 3 |
+
+### Rule (a), measured against the single external consumer
+
+**rdata at `09e5e970`, pin `v0.20.0` read from its own `go.mod`.** Its suite ran against a `git archive` export of the candidate, with an explicit `go get github.com/simon-lentz/yammm@v0.20.0` baseline rather than an inference from the pin equalling the tag. Build and vet are green on both sides, and the baseline suite is green.
+
+**The delta is four tests in one cause, and it is exhausted by that cause.** `TestGeneratedPackagesMatchSchemas`, `TestSchemaIdentityIsEmbedded`, `TestWireGolden_DateShape` and `TestWireGolden_TimestampShapes` fail, and all four are the structural-hash re-key. Regeneration moves **exactly one line in each generated package**, and it is always `const SchemaHash`: no type, field, method, tag or import. Updating the wire goldens moves **exactly three header lines in each of the six `.ys` goldens** — `schema_hash`, `schema_hash_algorithm` 3 → 4, and the `integrity_hash` that follows — and **no instance byte moves**, across the whole-second, half-second, nanosecond, named-zone, bare-offset and date shapes. With only that applied the candidate suite is `30 ok, 0 FAIL`, exactly the baseline.
+
+**All six of the consumer's schemas validate clean under the candidate** — exit 0, no output — so the four load-time refusals above are measured to reach nothing rather than inferred from a green suite.
+
+**So the whole consumer-visible cargo of this release, for that consumer, is the structural-hash re-key: five generated constants and six `.ys` goldens.**
+
+### What a consumer does at the pin move
+
+1. **Regenerate and update wire goldens in the same commit that moves the pin.** `schema.StructuralHashVersion` is 4, so every generated `SchemaHash` constant and every `.ys` document moves. Doing it in a second commit leaves the tree red in between.
+2. **Read the four load-time refusals above against your own schemas.** A schema that loaded under `v0.20.0` can be refused here, and a `.ys` document that loaded under `v0.20.0` can be refused here.
+3. **Re-key nothing else.** The `.ys` wire stays at `version: 4`, unchanged since `v0.19.0`. The hash algorithm's counter and the wire's version are distinct and both now read 4.
 
 ### Condition-1 tier-1 round — the fix pass over units 1–5's second fix passes, one commit per group on `review`: group 1 `2b13068`, group 2 `1a3dd57`, group 3 `5d2b711`, group 4 `5025d6f`, group 5 `db467f5`, group 6 `ef94124`, group 7 `32ad09f`, group 8 `05f152b`, group 9 `de704d3`, group 10 `679b463`, group 11 `c97d194`, group 13 `5e4b27c` (landed before group 12), group 12 `b73eca5` (A-300…A-353, A-355, A-358)
 
-*Written per group, in the session that lands it (A-227, A-346). The round read the five second fix passes enumerated below and the `v0.20.0` fix as diffs; its 42 confirmed gate findings resolve to thirty-eight repairs, plus T39 (A-347, its join amended by A-349) from the fix pass's own finding, A-348 amending A-335, and A-350…A-353 from the verification pass over the audit's open items, plus A-355 and A-358, landing in THIRTEEN groups. **The declaration delta is measured at each commit: `gorelease -base=v0.20.0` at `2b13068`, `1a3dd57`, `5d2b711`, `5025d6f` and `db467f5` is byte-identical to the run at `ebdeb6a` — twelve incompatible, forty-six additive, suggested `v0.21.0` — so groups 1 to 5 move no declaration; at `ef94124` it reads twelve incompatible, FIFTY-TWO additive, the six additions being group 6's `schema/expr.ArgKind` and its five constants** (`BuiltinSpec.Args` and `BuiltinSpec.ArgAt` ride `BuiltinSpec`'s own row, the type being new since the base); **at `32ad09f` twelve / FIFTY-THREE, the one addition being group 7's `schema/expr.ResultReceiverOrBody`; at `05f152b` twelve / FIFTY-FIVE — group 8's `ResultNumber`, `ResultString` and `ResultBoolean` added and `ResultScalar` gone from the additions, since it was added after the base and never shipped, so its removal is not a break against `v0.20.0`; at `de704d3`, `679b463` and `c97d194` byte-identical to `05f152b`'s, groups 9 to 11 moving no declaration — and at `5e4b27c` and `b73eca5` byte-identical again, groups 13 and 12 moving none either — so the fix pass's candidate `b73eca5` reads twelve incompatible / fifty-five additive against `v0.20.0`**. Evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_<commit>.txt` for each of the thirteen.*
+*Written per group, in the session that lands it (A-227, A-346). The round read the five second fix passes enumerated below and the `v0.20.0` fix as diffs; its 42 confirmed gate findings resolve to thirty-eight repairs, plus T39 (A-347, its join amended by A-349) from the fix pass's own finding, A-348 amending A-335, and A-350…A-353 from the verification pass over the audit's open items, plus A-355 and A-358, landing in THIRTEEN groups. **The declaration delta is measured at each commit: `gorelease -base=v0.20.0` at `2b13068`, `1a3dd57`, `5d2b711`, `5025d6f` and `db467f5` is byte-identical to the run at `ebdeb6a` — twelve incompatible, forty-six additive, suggested `v0.21.0` — so groups 1 to 5 move no declaration; at `ef94124` it reads twelve incompatible, FIFTY-TWO additive, the six additions being group 6's `schema/expr.ArgKind` and its five constants** (`BuiltinSpec.Args` and `BuiltinSpec.ArgAt` ride `BuiltinSpec`'s own row, the type being new since the base); **at `32ad09f` twelve / FIFTY-THREE, the one addition being group 7's `schema/expr.ResultReceiverOrBody`; at `05f152b` twelve / FIFTY-FIVE — group 8's `ResultNumber`, `ResultString` and `ResultBoolean` added and `ResultScalar` gone from the additions, since it was added after the base and never shipped, so its removal is not a break against `v0.20.0`; at `de704d3`, `679b463` and `c97d194` byte-identical to `05f152b`'s, groups 9 to 11 moving no declaration — and at `5e4b27c` and `b73eca5` byte-identical again, groups 13 and 12 moving none either — so the fix pass's candidate `b73eca5` reads twelve incompatible / fifty-five additive against `v0.20.0`**. A `gorelease` run is persisted with the release record for each of the thirteen.*
 
-**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0`: every repair was measured zero-cost in its tree at the round's fix-shape reads (it declares no `Vector`, no composition, no `extends` across schemas, no property named `self`, no builtin with an argument, and imports with a module root in play). **Its unit-lane suite against `1a3dd57`, `5d2b711`, `5025d6f`, `db467f5`, `ef94124`, `32ad09f`, `05f152b`, `de704d3`, `679b463` and `c97d194` — the last being the fix pass's candidate — with the same suite at the pin as the control, fails exactly the four tests unit 4's hash re-key fails and nothing else — the delta is EMPTY at every group so far** (`.claude/plans/2026-09/evidence/rdata_tier1_group<n>_consumer_run_summary.txt`); the run is repeated at every later group that moves behaviour and at the final candidate.
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0`: every repair was measured zero-cost in its tree at the round's fix-shape reads (it declares no `Vector`, no composition, no `extends` across schemas, no property named `self`, no builtin with an argument, and imports with a module root in play). **Its unit-lane suite against `1a3dd57`, `5d2b711`, `5025d6f`, `db467f5`, `ef94124`, `32ad09f`, `05f152b`, `de704d3`, `679b463` and `c97d194` — the last being the fix pass's candidate — with the same suite at the pin as the control, fails exactly the four tests unit 4's hash re-key fails and nothing else — the delta is EMPTY at every group so far**; the run is repeated at every later group that moves behaviour and at the final candidate.
 
 #### Group 1 — the corpus and the instruments (`2b13068`)
 
@@ -1046,7 +1116,7 @@ Found by a state analysis rather than by a pass: the GitHub CI workflow's pre-co
 
 ### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `49b1be6`, group 3 `1718ca2`, group 4 `df28cac`, group 5 `af50494`, group 6 `9efcac1`, group 7 `e989131` — THE LAST (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
 
-*Written per group, in the session that lands it (A-227, A-346). The A-323 read of the fix pass above ran as four passes over its thirteen groups and produced **forty-one repairs R1…R41**, planned into seven groups — **all seven landed**. **The declaration delta is measured at each commit**: `gorelease -base=v0.20.0` reads twelve incompatible / fifty-five additive at `d2cf794`, `49b1be6` and `1718ca2`, and twelve / **fifty-six** from `df28cac` on, the one addition being `schema/expr.SelfVariable` — the only declaration the whole residue pass moves. Byte-identical thereafter at `af50494`, `9efcac1` and `e989131`. **A-186 is EMPTY beyond unit 4's hash re-key at every group**, and the full three-image server matrix ran at groups 3, 4, 6 and 7. Evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_<commit>.txt` for each.*
+*Written per group, in the session that lands it (A-227, A-346). The A-323 read of the fix pass above ran as four passes over its thirteen groups and produced **forty-one repairs R1…R41**, planned into seven groups — **all seven landed**. **The declaration delta is measured at each commit**: `gorelease -base=v0.20.0` reads twelve incompatible / fifty-five additive at `d2cf794`, `49b1be6` and `1718ca2`, and twelve / **fifty-six** from `df28cac` on, the one addition being `schema/expr.SelfVariable` — the only declaration the whole residue pass moves. Byte-identical thereafter at `af50494`, `9efcac1` and `e989131`. **A-186 is EMPTY beyond unit 4's hash re-key at every group**, and the full three-image server matrix ran at groups 3, 4, 6 and 7. A `gorelease` run is persisted with the release record for each.*
 
 #### Group 1 — the instruments (A-385, A-399, A-366, A-376; `d2cf794`)
 
@@ -1332,7 +1402,7 @@ Sixty-six fixes from the 130 acknowledge- and corpus-lane findings of both readi
 
 Twenty-eight repairs from the unit's fix-diff round, read in two passes and ratified in two sittings, delivered under TDD as one pass. Every clause-5 finding — 33 in pass 1, 41 in pass 2 — is retired by one of them; none is deferred, none wontfix but A4 (A-265). The static checker's lattice is the largest change: an association now reads as its target's primary key and the checker distinguishes what the evaluator distinguishes.
 
-**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0` — its unit-lane suite against this working tree fails **exactly the four top-level tests unit 4's hash re-key fails** (`TestGeneratedPackagesMatchSchemas`, `TestSchemaIdentityIsEmbedded`, `TestWireGolden_DateShape`, `TestWireGolden_TimestampShapes`), and the suite at the pin is green; **the delta is empty**, the two load-time tightenings (an empty invariant message, an edge-property collision) included. Every rdata type has one primary key and no invariant reads a relation field, so the lattice change reaches nothing there. **Measured, not written from the diff: `gorelease -base=v0.20.0` at the commit `ebdeb6a` reports twelve incompatible changes and forty-six additions across units 4 and 5, suggested `v0.21.0`** — two removals more than the clause-3/4 commit (`E_MISSING_PRIMARY_KEY`, `instance.ErrMissingPrimaryKey`), the additions unchanged in count (`RecvScalar`, added and renamed inside the unreleased range, leaves no trace; `RecvOrdered` is the addition). Evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_ebdeb6a.txt`.
+**Rule (a), measured against the single external consumer** — rdata at `09e5e970`, pin `v0.20.0` — its unit-lane suite against this working tree fails **exactly the four top-level tests unit 4's hash re-key fails** (`TestGeneratedPackagesMatchSchemas`, `TestSchemaIdentityIsEmbedded`, `TestWireGolden_DateShape`, `TestWireGolden_TimestampShapes`), and the suite at the pin is green; **the delta is empty**, the two load-time tightenings (an empty invariant message, an edge-property collision) included. Every rdata type has one primary key and no invariant reads a relation field, so the lattice change reaches nothing there. **Measured, not written from the diff: `gorelease -base=v0.20.0` at the commit `ebdeb6a` reports twelve incompatible changes and forty-six additions across units 4 and 5, suggested `v0.21.0`** — two removals more than the clause-3/4 commit (`E_MISSING_PRIMARY_KEY`, `instance.ErrMissingPrimaryKey`), the additions unchanged in count (`RecvScalar`, added and renamed inside the unreleased range, leaves no trace; `RecvOrdered` is the addition).
 
 ##### Breaking — behaviour, `instance`
 
@@ -1387,11 +1457,13 @@ Twenty-eight repairs from the unit's fix-diff round, read in two passes and rati
 
 - `docs/SPEC.md`: an association reads as its target's primary key (the static-check section); `+`'s refusal list names a boolean and the nil literal and accepts a String key; an invariant's message must not be empty; `Compare` ranks any ordered value; the `E_MISSING_PRIMARY_KEY` row deleted. `docs/API.md`: the batch contract (a nil slice when the batch did not run; one `instance_index` per row's diagnostic, none on a batch-wide one; one stamped cancellation); `WithLogger` states the evaluator trace. `instance/doc.go`: the Dependencies line lists the six packages `go list` reports (`internal/value` is `eval`'s import, not this package's); `WithLogger`'s bullet. `ValidEdgeData.TargetsIter`'s example calls `target.TargetKey()`. `internal/value/doc.go`: `json.Number` among the supported types; the transitivity paragraph states the rule. `wrapPanicValue`'s and `coerceValueWithRecovery`'s comments state what the code does. The plugin's `diagnostics.md` drops the deleted code. *This section's own earlier line "two of seven" (unit 5's imports) is corrected above to one of six.*
 
+#### Pass A — the unit's first reading round (A-237…A-250)
+
 Minor tier, under the pre-1.0 subtractive rules. Fourteen repairs from the unit's round (A-237…A-250), every one a model change: one member index and one fold rule for every input key, one path rule, one type-identity rendering, one meaning per diagnostic code, one stored-form rule, and one composed-nesting bound shared with the wire.
 
 **Rule (a), measured against the single external consumer** — rdata at `09e5e970`, which pins `v0.20.0` — by running its unit-lane suite three ways: at the pin (green), against `main` at `6264040` with unit 4 merged and this unit absent, and against this tree. **The last two fail identically** — five generated `SchemaHash` constants, five embedded-identity pins and seven `.ys` wire goldens, all moved by unit 4's hash re-key above — **so this unit adds no failure the consumer's suite can see.** rdata builds every production validator with `RecommendedOptions()` (strict names, so the fold path below is never entered), validates by bare type names, and declares no composition; what does reach it is the FK-field rule, and its suite is green under it.
 
-### Breaking — behaviour, `instance`
+##### Breaking — behaviour, `instance`
 
 - **A `_target_`-prefixed key that is not one of the target's foreign-key fields is `E_UNKNOWN_EDGE_FIELD`** where it was skipped silently (the scan skipped the prefix rather than the expected names) — the one change that can surface in a consumer's data, as a typo it never saw.
 - **Foreign-key fields and edge properties fold like every other input key**: exact match first, then under the default mode an ASCII case-fold; an exact match never collides; two keys folding to one member is one `E_CASE_FOLD_COLLISION` at the object, and the colliding keys are not also reported unknown. `_target_ID` now matches `_target_id` under the default mode, where it drew `E_MISSING_FK_TARGET`; the strict mode is unchanged. A key carrying a non-ASCII letter matches nothing.
@@ -1409,29 +1481,31 @@ Minor tier, under the pre-1.0 subtractive rules. Fourteen repairs from the unit'
 - **`SchemaBuilder.Build`'s cardinality error names the relation whose `EdgeTo` call first violated it**, every run; it named one of them by map order.
 - **`yammm data`'s `--type` resolves by the validator's rule** (A-233): an alias-qualified type name now drives CSV coercion, where `LoadAndParseCSV` resolved local-only, discarded the miss, and handed the adapter a nil type that kept every value a string for the validator to refuse; **an unknown `--type` is an error naming the type** rather than a parse that fails row by row downstream. A type-column value resolves the same way.
 
-### Breaking — the static invariant checker, `schema`
+##### Breaking — the static invariant checker, `schema`
 
 - **A `$name` variable is matched against a type's members by its exact spelling**, as `docs/SPEC.md` "Expressions and Invariants" states and the evaluator already did. A schema whose `$startdate` named a `startDate` property loaded clean and failed every instance with `E_EVAL_ERROR`; it is refused at load with `E_INVALID_INVARIANT`. rdata's 30 invariants use no `$` member reference. `instance/invariant_contract_test.go` judges the rows.
 
-### Breaking — Go API
+##### Breaking — Go API
 
 - **`schema.Type.CanonicalPropertyMap` is removed.** Its one caller cloned the whole map once per validated instance; `CanonicalPropertyName` answers the lookup with no allocation.
 
-### Additive — Go API
+##### Additive — Go API
 
 - `instance.WithIssueLimit(int)` — the per-instance cap, restored to match `schema.WithIssueLimit` and `snapshot.WithIssueLimit` (default 100, 0 unlimited); `instance.WithLogger(*slog.Logger)` — restored beside `schema.WithLogger` and `graph.WithLogger`; `instance.MaxComposedDepth`; `instance.ErrCompositionDepthExceeded` and `diag.E_COMPOSITION_DEPTH_EXCEEDED` (`CategoryInstance`).
 - `schema.Type.RelationByField` — the exact lookup on a relation's field name, beside `Relation` on the DSL name; `schema.Relation.PropertyFold` — the case-folded lookup on an edge-property block.
 - `schema.Schema.ResolveTypeName` — the one entry-relative by-name resolve (a bare name for a declared type, `alias.Name` for a directly imported one), which the validator, `instance.BuilderFor` and the CLI now share (A-233).
 - `diag.Collector.MergeFunc` — `Merge` with a transform on each stored issue, carrying the source's severity counts and truncation facts.
 
-### Removed — dead machinery
+##### Removed — dead machinery
 
 - `validatorConfig.valueRegistry`, `eval.NewChecker`, `eval.Checker.registry`, `value.Registry` and `value.ClassifyWithRegistry` (A-243): one func field with no setter since v0.12.0, no consumer, and a reflection fallback that already classifies named basic types. `eval.DefaultChecker` is the one checker; the "a Validator's custom value registry is not consulted" sentences are deleted as true by construction.
 - `edgeState.excessCallerPC` and `SchemaBuilder.relByFieldName`: retired by the call-time cardinality check and `Type.RelationByField`.
 
-### Prose
+##### Prose
 
 - `docs/API.md` "Instance Validation": the options table gains `WithIssueLimit` and `WithLogger`; "Validation" states the relation-argument rule, the `instance_index` and truncation contract, the path rule and the depth bound; "Input Format" states the one fold rule; "Value Functions" describes `CanonicalValue` as the stored-form rule and drops the registry sentences. `docs/SPEC.md` lists `E_COMPOSITION_DEPTH_EXCEEDED` under Instance and `E_DUPLICATE_COMPOSED_PK` under Instance and Graph with the note `E_DUPLICATE_PK` carries. `instance/doc.go`'s `WithStrictPropertyNames` sentence described `WithAllowUnknownFields`; its Dependencies line ~~omitted two of seven imports~~ *(struck 2026-09-04: `instance` imports six packages, and the line had listed a seventh that is `eval`'s — corrected in the clause-5 round's second fix pass, F9)*; `ValidEdgeData.TargetsIter`'s example ~~called a method that does not exist~~ *(struck 2026-09-04: it still called `target.Key()` after this pass — found by the clause-5 round (G13) and corrected to `target.TargetKey()` by its second fix pass)*. **§v0.12.0 below said `RawInstance.Provenance` is "populated by the parsing adapters"; no adapter has since `adapter/json`'s location tracking was removed in the same release** (A-232) — the field is a caller-supplied input.
+
+### Condition-1 unit 4 — `schema/`, merged to `main` as `fabed40` (PR #102)
 
 *Condition-1 unit 4's fixes (`schema/`), merged to `main` as `fabed40` (PR #102) on 2026-09-03 and not yet released. Written in the fix pass that landed the behaviour, not at the tag (A-227). The declaration count below is measured at `9007281`, whose Go tree is `main`'s; the tag-time run re-confirms it.*
 
@@ -1439,35 +1513,35 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 
 **Rule (a), measured against the single external consumer** — rdata at `09e5e970`, which pins `v0.20.0`: its six schemas validate clean under this tree's checker; its 19 relation names are all UPPER_SNAKE and none carries a digit; it declares no lambda parameter; its 30 invariants use no affected shape. The unit-lane suite runs at the merge (A-186), where the hash re-key alone moves five generated `SchemaHash` constants and six `.ys` goldens.
 
-### Breaking — the DSL
+#### Breaking — the DSL
 
 - **Relation names are UPPER_SNAKE** — `upper_letter { upper_letter | decimal_digit | "_" }` — and a relation's field name is that name in lower case, by construction. `--> worksAt` draws `E_INVALID_NAME` where it loaded. The Builder applies the same production. Consumer cost zero, measured.
 - **The three postfix operators `[]`, `->` and `.` bind at one left-associative level**, and the name after `.` is one word. `$self.name -> Len` pipes the property where it evaluated `Len($self)`; `$self.tags[0]` indexes the property where it read a member named `@`. The member-position builtin call is gone: `LINES.Len` is a member read, and the pipeline is the only call form. A design-era rule, not a regression, pinned by no test until now.
 - **The member position after `.` takes any word, keywords included** — `$self.type` reads a property named `type`, `$self.in` a relation named `IN`. The grammar defines `Name = LC_WORD | UC_WORD` for it. `v0.20.0` refused `in` there; `c41c79e` refused eleven legal names.
 - **An empty schema name is refused at its declaration** (`E_INVALID_NAME`). `v0.20.0` reported it as a span-less `E_DUPLICATE_TYPE`.
 
-### Breaking — the structural hash
+#### Breaking — the structural hash
 
 - **`schema.StructuralHashVersion` is 4** (was 3). A relation target hashes as its owning schema's name beside its type name, so two closure members' same-named types no longer produce one digest; `-0.0` hashes as `0.0`, as `FloatConstraint.Equal` compares. **Every `.ys` regenerates and every gogen `SchemaHash` moves.** This is the hash algorithm's counter, distinct from the `.ys` wire's `version: 4` of `v0.19.0`; both now read 4.
 
-### Breaking — Go API
+#### Breaking — Go API
 
 - **`diag.E_RELATION_NORMALIZATION_COLLISION` is removed.** Two UPPER_SNAKE names cannot lower to one field, so the code could never fire; the one remaining shape, an association and a composition under one name, reports as `E_RELATION_COLLISION`, whose meaning widens to both. rdata matches neither.
 - **`expr.StringLiteral` is strict**: it returns a string for a `*Literal` holding one and false for every other node, as its godoc always said. It had returned an S-expression's operator name, which is how a non-literal member dispatched as a method call.
 
-### Additive API surface
+#### Additive API surface
 
 - `diag.E_DUPLICATE_SCHEMA`, `diag.E_DUPLICATE_INVARIANT`, `diag.E_INVARIANT_CONFLICT`, `diag.E_LOAD_SOURCE_CHANGED`.
 - **The builtin catalogue in `schema/expr`**: `BuiltinSpec`, `LookupBuiltin`, `Builtins`; `BuiltinResult` with all THIRTEEN constants `gorelease` reports at the candidate — `ResultNumber`, `ResultReceiver`, `ResultElement`, `ResultBodyList`, `ResultBody`, `ResultFlattened`, `ResultList`, `ResultElementOrArg`, `ResultReceiverOrArg`, `ResultUnknown`, `ResultReceiverOrBody`, `ResultString` and `ResultBoolean`; `ArgKind` with `ArgAny`, `ArgString`, `ArgNumber`, `ArgPattern` and `ArgOrdered`, and the `Args` field and `ArgAt` method on `BuiltinSpec`; `ParamBinding` with `BindNone`, `BindElement`, `BindReceiver`, `BindAccumulatorElement`; `ReceiverKind` with `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList` and `RecvNumericList`, and the `Receiver` field on `BuiltinSpec`. The evaluator registers its implementations against this one table and enforces its arity fields; the static checker reads all of it. *(`ResultScalar`, added by this unit, was replaced by `ResultNumber`, `ResultString` and `ResultBoolean` in the tier-1 round's group 8 before the tag, so it is not in the release's surface — the enumeration is what `gorelease` reports at the candidate.)*
 - `(*schema.Type).CanonicalPropertyName`.
 
-### Behaviour changes — `schema`, the static invariant checker
+#### Behaviour changes — `schema`, the static invariant checker
 
 - **The checker is a typed walk** and refuses at load what the evaluator refuses on every input: a member reached through an association key, a scalar or a list; an undefined named variable; an unknown function; a call shape the builtin refuses; a property named inside a builtin's arguments; a list builtin on a scalar, an instance or a key; a scalar builtin on a list or an instance; an ordering builtin on a list of instances; a bracket with other than one index; a number or boolean indexed. **Consumer-visible in both directions**: a schema `v0.20.0` accepted may now be refused where the evaluator failed it on every input, and a legal schema `v0.20.0` refused now loads — a lambda parameter sharing a property's name, a parameter named `$self`, an inherited composition binding through a shadowing type, a `Map` that changes the element type. rdata: zero, measured.
 - **Name resolution follows the evaluator**: a lambda parameter first, then the owner's members, for bare names and `$` variables alike; **variable names match exactly** where property names fold, so `$myVar` and `$myvar` are two names and the second is refused as undefined.
 - One mistake in one invariant is one diagnostic: an unknown function's lambda is walked with its parameters bound, a refused body is not typed, a repeated bad name reports once, and a member reached through a composition whose target has an unresolved supertype is not reported over the unresolved reference.
 
-### Behaviour changes — `schema`, completion and the registry
+#### Behaviour changes — `schema`, completion and the registry
 
 - Own relation targets resolve before inheritance merges (phase 3c), so an own relation shadowing an inherited one bound to a different type draws `E_RELATION_COLLISION` where it loaded clean, `Relation.Equal` compares identities and is never true for an unresolved side, and **a schema carrying both an inheritance cycle and an unresolved target draws both codes** where the cycle alone was reported.
 - **An invariant's message is its identity**: one type declaring a message twice draws `E_DUPLICATE_INVARIANT`; two inherited definitions with different expressions draw `E_INVARIANT_CONFLICT`, once per name and naming every rival; expressions compare structurally, so `n > 1` and `n > 1.0` differ.
@@ -1477,14 +1551,14 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **The field name of a digit-bearing relation changes**: `HTTP2SERVER` keys instance data as `http2server` where the retired derivation gave `http_2_server`. Consumer cost zero, measured on 19 names.
 - The Builder refuses an expression literal of a Go type the language does not define (`E_INVALID_INVARIANT`) instead of panicking under the hash that completion now runs over invariants; the synthetic root is NFC-normalised as its keys are; `schema/cross_cycle.go` is deleted as unreachable.
 
-### Behaviour changes — `instance`, the evaluator
+#### Behaviour changes — `instance`, the evaluator
 
 - **A composition that is not `many` evaluates to the single child**, not a one-element list, and **a child in scope is an instance with its own relations**, so nested compositions are reachable: `LINES -> Map |$l| { $l.ITEM } -> All |$x| { $x.sku != "" }` reads real values where it was vacuous. As `docs/SPEC.md` stated at `v0.20.0`. **One consequence, enumerated 2026-09-06 (A-314): piped into `Len`, such a composition counts the child's members** — `Len` counts a map, as `v0.12.0` shipped it — **where it counted the one-element list**; a presence test is written `X != nil`. `instance/invariant_contract_test.go` pins `MAIN_LINE -> Len` as the member count.
 - **Variable names match exactly**; the bare-name fallback into variables no longer folds.
 - **Equality with `nil` is decided by nil-ness for every value kind**, so `MAIN_LINE != nil` holds on a present composition where it drew an evaluation error.
 - A lambda's shape errors name the body before the parameters, as the checker does; an unknown function reads "unknown function"; member access takes exactly two operands and the three-operand method form is gone.
 
-### Documentation
+#### Documentation
 
 `docs/SPEC.md`: the precedence table and the `Expr "." Name` production with `Name` defined; `RelationName`; the static-check paragraph and the variables section; invariant merging and the part-type rule; the code list. `docs/API.md`: the Schema Identity exclusion paragraph, the registry's idempotence and one-object rules. The plugin's references follow.
 
