@@ -984,7 +984,7 @@ Found by group 7, whose `Then` body could not be pinned through `Len`, and probe
 
 ##### Additive — Go API, `schema/expr`
 
-- **Three result subkinds replace the unshipped `ResultScalar`** (A-350): `ResultNumber` (`Count`, `Len`, `Sum`, `Abs`, `Floor`, `Ceil`, `Round`, `Compare`), `ResultString` (`Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring`, `TypeOf`) and `ResultBoolean` (`All`, `Any`, `AllOrNone`, `Contains`, `StartsWith`, `EndsWith`, `IsNil`), each read from the implementation's returns; `ResultNumber` takes the removed constant's position so no other constant's value moves. `ResultElementOrArg` with an argument (`Min`, `Max`) is typed as the join of receiver and argument. rdata does not import `schema/expr`.
+- **Three result subkinds replace the unshipped `ResultScalar`** (A-350): `ResultNumber` (`Count`, `Len`, `Sum`, `Abs`, `Floor`, `Ceil`, `Round`, `Compare`), `ResultString` (`Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring`, `TypeOf`) and `ResultBoolean` (`All`, `Any`, `AllOrNone`, `Contains`, `StartsWith`, `EndsWith`, `IsNil`), each read from the implementation's returns; `ResultNumber` takes the removed constant's position so no other constant's value moves. ~~`ResultElementOrArg` with an argument (`Min`, `Max`) is typed as the join of receiver and argument.~~ *(Amended by A-393 in the residue pass's group 2 below: the two are ranked by the total order, which is deterministic, so the result is typed as one of them exactly. The justification by analogy to a conditional's branches is withdrawn — a conditional's branch is input-dependent and this pair is not.)* rdata does not import `schema/expr`.
 
 ##### Breaking — the static invariant checker, `schema`
 
@@ -1044,7 +1044,7 @@ Found by a state analysis rather than by a pass: the GitHub CI workflow's pre-co
 
 - **`scripts/gomodtidy.sh` takes `go mod tidy -diff`'s exit code as its verdict** (A-358) and shows stderr only when the command fails. It had treated any output as a change, and on a cold module cache stderr carries download progress with exit 0 and an empty stdout, so the gate was red in CI and green locally for thirteen pushes. Proved in three directions: a planted `require` in a fixture module fails with the diff, the clean tree passes, an empty module cache passes.
 
-### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
+### Condition-1 tier-1 round — the RESIDUE fix pass over the A-323 read of the fix pass above, one commit per group on `review`: group 1 `d2cf794`, group 2 `<pending>` (A-359…A-366, A-368…A-376, A-379…A-390, A-392…A-403)
 
 *Written per group, in the session that lands it (A-227, A-346). The A-323 read of the fix pass above ran as four passes over its thirteen groups and produced **forty-one repairs R1…R41**, planned into seven groups. **The declaration delta is measured at each commit**; evidence `.claude/plans/2026-09/evidence/gorelease_v020_base_<commit>.txt` for each.*
 
@@ -1070,6 +1070,34 @@ no `.go` file outside a `_test.go` moves.
 - **`TestInstanceByKey_RefusedAddressMisses`' second arm reaches the code it names** (A-399). It addressed a PART type, which no snapshot index holds, so the arm returned at `InstanceByKey`'s `typeIndex == nil` guard; it now addresses a root and the test fails if that stops being true.
 - **Every contract refuse row states what the evaluator does** (A-366). The table gained the verdicts beside the error fragments, and asserting them **corrected six rows**: three produce an evaluator error the table did not record, and three hold vacuously where the row implied a failure.
 - **Three instrument pins** (A-376): the loader's deleted working-directory read is pinned by a test that places a real file at the import's own relative path and requires the refusal; the index-refusal rows name the kind refused, with a pattern row added to both tables (measured: collapsing the three scalar names to one turns six rows red); and the scope memo's ratio test becomes a linearity assertion over three depths — the deltas are 544 then 552 with the memo and **1,090 then 1,458 without it**, where the ratio test passed either way.
+
+#### Group 2 — the checker's lattice (A-392, A-394, A-393, A-379, A-383, A-390; `<pending>`)
+
+**Three of these are LOAD-BREAKING.** A schema shipping any of the three shapes
+below loads today and is refused after this group. Each was measured to load
+clean and then fail on every instance that reaches it — the class the static
+checker exists to refuse — and each is measured at **zero cost to rdata**,
+whose six schemas ship none of the three shapes.
+
+##### Breaking — the static invariant checker, `schema`
+
+- **A nil guard refuses two alternatives of disjoint kinds wherever they stand** (A-392). `typeGuard` folded each alternative into a widening accumulator, so an alternative the checker could not narrow — a conditional whose branches disagree, for instance — masked a genuinely disjoint one written after it. The same two alternatives were therefore refused in one order and accepted in the other: `note -> Coalesce((f1 ? { note : qty }), 1)` loaded clean and failed on every selecting instance, while `note -> Coalesce(1, (f1 ? { note : qty }))` was refused. Every pair is now compared, so the order the alternatives are written in does not decide the verdict.
+- **A union's member read refuses a member its alternatives declare with disjoint kinds** (A-394). The read merged the alternatives' member types and discarded the one bit the join computes to answer this, so the member typed as a scalar of unknown subkind and every later stage admitted it. A schema whose `Alt` takes `label String` from an abstract base while `Other` declares `label Integer` loaded clean and returned `E_EVAL_ERROR` on every instance selecting the disagreeing alternative.
+- **The nil literal is refused at an argument position the catalogue types** (A-379). `checkArgs` admitted it everywhere, so `name -> Substring(nil)` loaded clean and returned `E_EVAL_ERROR: Substring() expects integer start index, got <nil>` on every conforming instance. It is still admitted at an `ArgAny` position — `Coalesce(nil)`, `Default(nil)`, `Contains(nil)` — and the receiver rule is unchanged.
+
+##### Changed typing — the static invariant checker, `schema`
+
+- **`Min` and `Max` with an argument are typed by the total order, not by the join** (A-393). The evaluator ranks receiver against argument through a total order — nil, then boolean, then number, then string — so `Min(string, number)` is always the number and `Max(string, number)` always the string. The result is decidable, and typing it as a scalar of unknown subkind admitted `(name -> Min(1)) -> Upper` and `(name -> Max(1)) -> Abs`, each of which fails at evaluation on every instance. Not listed as breaking on its own: it refuses only shapes that were already an evaluation error on every input.
+
+##### Additive — Go API, `schema/expr`
+
+- **The builtin catalogue is not mutable through its own accessor** (A-390). `LookupBuiltin` and `Builtins` returned specs whose `Args` slice aliased the package-level table, so a caller writing through one corrupted the catalogue for the rest of the process — measured, two lookups of one builtin shared a backing array. Both now return a clone. `Args` and `ArgAt` are additive and unreleased in `v0.21.0`, so no consumer holds the aliasing behaviour.
+
+##### Documentation
+
+- **The stacked doc block on `checkArgs` and `checkReceiver` is split** (A-383). `checkArgs` had been inserted between `checkReceiver`'s doc comment and `checkReceiver`, so one block opening "checkReceiver refuses a receiver…" documented `checkArgs` and `checkReceiver` had no doc at all. This is the class's second site in one fix pass, and the gate rule that catches it lands with A-372.
+- **`ResultElementOrArg`'s godoc states the ranked typing** (A-393), and group 8's entry above is amended rather than left to contradict it.
+
 
 ### Condition-1 unit 5 — `instance/` and `internal/value/`, pass A's fix pass merged to `main` as `1dfec2d` (PR #104); pass B's fix pass committed as `2b28aab`; the clause-3/4 fix pass committed as `e70a383`; the clause-5 second fix pass committed as `ebdeb6a`; the unit closed by decision (A-297) and merged to `main` as `f049740` (PR #105)
 

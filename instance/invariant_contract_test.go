@@ -92,6 +92,9 @@ type Order {
     *-> OTHER (_) Other
     *-> STAG (_) StringTagged
     *-> NTAG (_) NumberTagged
+    // ABSENT_STAG is the slot goodOrder leaves empty, so a guard over it takes
+    // the fallback and the conforming instance selects the OTHER alternative.
+    *-> ABSENT_STAG (_) StringTagged
     --> PLACED_BY (one) Customer
     --> CUSTOMERS (one:many) Customer
     --> REGION (one) Region
@@ -235,6 +238,8 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		{`(STAG -> Default(NTAG)).label -> Len > 0`, nil},
 		{`STAG.tag -> Len > 0`, nil},
 		{`NTAG.tag > 0`, nil},
+		{`STAG.tag -> Upper == "T"`, nil},
+		{`NTAG.tag -> Abs == 7`, nil},
 		// indexing a string yields a string
 		{`name[0] == "n"`, setName("south")},
 		// Min and Max yield an element without an argument and a scalar with one
@@ -330,6 +335,14 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		{`(name -> Substring(1)) -> Upper == "ORTH"`, setName("x")},
 		{`(name -> Min("z")) -> Upper == "NORTH"`, setName("zz")},
 		{`(name -> Min(1)) == 1`, dropName},
+		// Min and Max with an argument are one type exactly, ranked by the total
+		// order, so the stage that takes the ranked type loads and holds
+		{`(name -> Min(MAIN_LINE.qty)) -> Abs == 9`, setMainQty(1)},
+		{`(name -> Max(1)) -> Upper == "NORTH"`, setName("x")},
+		// the nil literal passes where the catalogue states no argument kind
+		{`(name -> Coalesce(nil)) -> Upper == "NORTH"`, setName("x")},
+		{`(name -> Default(nil)) -> Upper == "NORTH"`, setName("x")},
+		{`tags -> Contains(nil) == false`, nil},
 		{`(tags -> Join(",")) -> Len == 10`, setTags("a")},
 		// in with the nil literal on its right is false, not an error
 		{`!(1 in nil)`, nil},
@@ -463,6 +476,13 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`name -> Substring("a") != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects integer start index", evalErrors},
 		{`name -> Substring(1, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects integer end index", evalErrors},
 		{`name -> Match("nor") -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument", "expects regexp argument", evalErrors},
+		// the nil literal at a position the catalogue types: refused at load, and
+		// an evaluation error on every instance when it is not
+		{`name -> TrimPrefix(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects string argument", evalErrors},
+		{`name -> Substring(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects integer start index", evalErrors},
+		{`name -> Substring(1, nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects integer end index", evalErrors},
+		{`name -> Match(nil) -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument", "expects regexp argument", evalErrors},
+		{`tags -> Join(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "expects string separator", evalErrors},
 		{`name -> Compare(MAIN_LINE) > 0`, diag.E_INVALID_INVARIANT, "as its argument", "comparison", evalErrors},
 		{`name -> Min(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "comparison", evalErrors},
 		{`name -> Max(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument", "comparison", evalErrors},
@@ -503,6 +523,10 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		// absent receiver so the fallback is what the evaluator refuses
 		{`(note -> Coalesce(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce", "expects string argument", evalErrors},
 		{`(note -> Coalesce(nil, 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce", "expects string argument", evalErrors},
+		// a disjoint alternative is refused wherever it stands: the same two
+		// alternatives, in both orders, with a subkind-less one between them
+		{`(note -> Coalesce((f1 ? { note : MAIN_LINE.qty }), 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce", "expects string argument", evalErrors},
+		{`(note -> Coalesce(1, (f1 ? { note : MAIN_LINE.qty }))) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce", "expects string argument", evalErrors},
 		{`(note -> Lest { 1 }) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Lest", "expects string argument", evalErrors},
 		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest", "expects slice or array input", evalErrors},
 		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument", evalErrors},
@@ -517,6 +541,9 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`(MAIN_LINE -> Coalesce(MAIN_LINE.ITEM)).qty == nil`, diag.E_UNKNOWN_PROPERTY, "qty", "", evalAnswersFalse},
 		{`(MAIN_LINE -> Default(MAIN_LINE.ITEM)).sku -> Len > 0`, diag.E_UNKNOWN_PROPERTY, "sku", "", evalAnswersFalse},
 		{`(ALT -> Default(OTHER)).extra == nil`, diag.E_UNKNOWN_PROPERTY, "extra", "", evalAnswersFalse},
+		// a member every alternative declares, at kinds that disagree: the
+		// instance selecting the other alternative is what the evaluator refuses
+		{`(ABSENT_STAG -> Default(NTAG)).tag -> Upper != ""`, diag.E_INVALID_INVARIANT, "disjoint kinds", "expects string argument", evalErrors},
 		{`(OTHER -> Default(ALT)).other -> Len > 0`, diag.E_UNKNOWN_PROPERTY, "other", "", evalAnswersFalse},
 		{`(f1 ? { MAIN_LINE : MAIN_LINE.ITEM }).qty == nil`, diag.E_UNKNOWN_PROPERTY, "qty", "", evalAnswersFalse},
 		{`(LINES -> Default([MAIN_LINE.ITEM]) -> First).qty == nil`, diag.E_UNKNOWN_PROPERTY, "qty", "", evalAnswersFalse},
@@ -530,6 +557,10 @@ func TestInvariantContract_RefuseRows(t *testing.T) {
 		{`(tags -> Contains("a")) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument", evalErrors},
 		{`(MAIN_LINE.qty -> Compare(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument", evalErrors},
 		{`(name -> Min("z")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument", evalErrors},
+		// Min ranks a string above a number, so the mixed pair is the number and
+		// a string stage refuses it; Max is the string and a numeric stage does
+		{`(name -> Min(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string", "expects string argument", evalErrors},
+		{`(name -> Max(1)) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument", evalErrors},
 		{`(tags -> Join(",")) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number", "expects numeric argument", evalErrors},
 		{`(name -> IsNil) -> Len > 0`, diag.E_INVALID_INVARIANT, "takes a string, a list or a map", "unsupported for type bool", evalErrors},
 		{`tags -> Max("z") != ""`, diag.E_INVALID_INVARIANT, "argument", "ranks its receiver", evalErrors},

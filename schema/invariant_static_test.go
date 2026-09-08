@@ -56,6 +56,19 @@ part type Other extends Named, Stamped {
     other String
 }
 
+// StringTagged and NumberTagged share "label" from Named at one kind and
+// declare "tag" at DISJOINT kinds; Alt and Other take every shared member from
+// the same two bases, so no pair among them can express the disagreement.
+part type StringTagged extends Named {
+    id String primary
+    tag String
+}
+
+part type NumberTagged extends Named {
+    id String primary
+    tag Integer
+}
+
 type Order {
     id String primary
     name String
@@ -70,6 +83,8 @@ type Order {
     *-> MAIN_LINE (one) Line
     *-> ALT (_) Alt
     *-> OTHER (_) Other
+    *-> STAG (_) StringTagged
+    *-> NTAG (_) NumberTagged
     --> PLACED_BY (one) Customer
     --> CUSTOMERS (one:many) Customer
     --> REGION (one) Region
@@ -97,6 +112,18 @@ func TestStaticInvariant_Table(t *testing.T) {
 		`name -> Min("z") != ""`,
 		`tags -> Contains(MAIN_LINE) == false`,
 		`name -> Default(MAIN_LINE.id) != ""`,
+		// the nil literal passes where the catalogue states no kind, and only there
+		`name -> Coalesce(nil) != ""`,
+		`name -> Default(nil) != ""`,
+		`tags -> Contains(nil) == false`,
+		// a union reads a member its alternatives declare at one kind
+		`(STAG -> Default(NTAG)).label != ""`,
+		`STAG.tag -> Upper != ""`,
+		`NTAG.tag -> Abs > 0`,
+		// Min and Max with an argument are typed by the total order, so the
+		// stage that takes the ranked type loads
+		`(name -> Min(1)) -> Abs > 0`,
+		`(name -> Max(1)) -> Upper != ""`,
 		// compositions: children are instances
 		`LINES -> All |$l| { $l.qty > 0 }`,
 		`LINES -> All { $0.qty > 0 }`,
@@ -286,6 +313,14 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`name -> Substring("a") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
 		{`name -> Substring(1, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
 		{`name -> Match("nor") -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		// the nil literal is refused wherever the catalogue states a kind
+		{`name -> TrimPrefix(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> TrimSuffix(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Substring(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Substring(1, nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Match(nil) -> Len > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`tags -> Join(nil) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
+		{`name -> Replace(nil, "b") != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
 		{`name -> Compare(MAIN_LINE) > 0`, diag.E_INVALID_INVARIANT, "as its argument"},
 		{`name -> Min(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
 		{`name -> Max(MAIN_LINE) != ""`, diag.E_INVALID_INVARIANT, "as its argument"},
@@ -356,6 +391,17 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// member read through a union of instances must be declared on every one
 		{`(name -> Coalesce(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
 		{`(name -> Coalesce(nil, 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		// a disjoint alternative is refused wherever it stands, so a
+		// subkind-less alternative between the two cannot mask it
+		{`(note -> Coalesce((f1 ? { note : MAIN_LINE.qty }), 1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		{`(note -> Coalesce(1, (f1 ? { note : MAIN_LINE.qty }))) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Coalesce"},
+		// a member the union's alternatives declare at disjoint kinds
+		{`(STAG -> Default(NTAG)).tag -> Upper != ""`, diag.E_INVALID_INVARIANT, "disjoint kinds"},
+		{`(NTAG -> Default(STAG)).tag != nil`, diag.E_INVALID_INVARIANT, "disjoint kinds"},
+		// Min and Max rank receiver against argument, so the mixed pair is one
+		// type exactly and the stage that refuses THAT type refuses it
+		{`(name -> Min(1)) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
+		{`(name -> Max(1)) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		{`(note -> Lest { 1 }) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Lest"},
 		{`(extras -> Lest { "x" }) -> First == "x"`, diag.E_INVALID_INVARIANT, "Lest"},
 		{`(MAIN_LINE -> Then |$l| { $l.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},

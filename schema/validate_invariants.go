@@ -686,6 +686,7 @@ func (c *completer) typeInstanceMember(recv staticType, name string, owner *Type
 		}
 	}
 	member := nilType
+	declared := make([]staticType, 0, len(recv.typs))
 	for _, ty := range recv.typs {
 		t, found := c.membersOf(ty)[strings.ToLower(name)]
 		if !found {
@@ -700,7 +701,18 @@ func (c *completer) typeInstanceMember(recv staticType, name string, owner *Type
 			}
 			return unknownType
 		}
+		declared = append(declared, t)
 		member = mergeType(member, t)
+	}
+	for i, a := range declared {
+		for _, b := range declared[i+1:] {
+			if _, disjoint := join(a, b); disjoint {
+				c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+					"the types the value may be (%s) declare %q with disjoint kinds in invariant %q on type %q",
+					recv.typeName(), name, inv.Name(), owner.Name())
+				return unknownType
+			}
+		}
 	}
 	return member
 }
@@ -846,10 +858,7 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 		if len(args) == 0 {
 			return recv.element()
 		}
-		// The receiver or the argument, whichever the order ranks: their join,
-		// admitting a mixed pair as a scalar of unknown subkind, as a
-		// conditional admits its branches.
-		return mergeType(recv, argTypes[0])
+		return rankedResult(spec, recv, argTypes[0])
 	case expr.ResultReceiverOrArg:
 		if len(argTypes) == 0 {
 			return unknownType
@@ -866,22 +875,68 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 }
 
 // typeGuard types a nil guard — Default, Coalesce, Lest — as the join of every
-// value it can yield, and refuses alternatives of disjoint kinds: the stage
-// after the guard would meet, on the input that selects one of them, a value
-// it cannot take. A kind the checker does not know is admitted, and the nil
-// literal stands in for any receiver. An association key is a string at
-// evaluation time, so a string fallback matches it.
+// value it can yield, and refuses any two alternatives join reports disjoint:
+// the stage after would meet a value it cannot take. Every pair is compared, so
+// the order the alternatives are written in does not decide the verdict.
 func (c *completer) typeGuard(spec expr.BuiltinSpec, what string, alts []staticType, owner *Type, inv *Invariant) staticType {
-	t := alts[0]
-	for _, alt := range alts[1:] {
-		var disjoint bool
-		if t, disjoint = join(t, alt); disjoint {
-			c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
-				"%s takes %s of its receiver's kind in invariant %q on type %q", spec.Name, what, inv.Name(), owner.Name())
-			return unknownType
+	for i, a := range alts {
+		for _, b := range alts[i+1:] {
+			if _, disjoint := join(a, b); disjoint {
+				c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
+					"%s takes %s of its receiver's kind in invariant %q on type %q", spec.Name, what, inv.Name(), owner.Name())
+				return unknownType
+			}
 		}
 	}
+	t := alts[0]
+	for _, alt := range alts[1:] {
+		t, _ = join(t, alt)
+	}
 	return t
+}
+
+// scalarRank places a scalar subkind in the total order internal/value.Order
+// implements: boolean below number below string. A pattern, a subkind the
+// checker has not narrowed, and any kind that is not a scalar report false.
+func scalarRank(t staticType) (int, bool) {
+	if t.kind != kindScalar {
+		return 0, false
+	}
+	switch t.scalar {
+	case scalarBoolean:
+		return 1, true
+	case scalarNumber:
+		return 2, true
+	case scalarString:
+		return 3, true
+	case scalarAny, scalarOther:
+	}
+	return 0, false
+}
+
+// rankedGuards names the builtins whose one-argument form yields the LOWER of
+// receiver and argument. The catalogue states no direction, so it is named
+// here; a ranking builtin added without a row yields the higher.
+var rankedGuards = map[string]bool{"min": true}
+
+// rankedResult types Min or Max with an argument. The evaluator ranks the two
+// through a total order, so the result is the receiver or the argument exactly
+// rather than a claim about both; a pair the order does not separate statically
+// falls back to their join.
+func rankedResult(spec expr.BuiltinSpec, recv, arg staticType) staticType {
+	recvRank, recvOK := scalarRank(recv)
+	argRank, argOK := scalarRank(arg)
+	if !recvOK || !argOK || recvRank == argRank {
+		return mergeType(recv, arg)
+	}
+	lower, higher := recv, arg
+	if recvRank > argRank {
+		lower, higher = arg, recv
+	}
+	if rankedGuards[strings.ToLower(spec.Name)] {
+		return lower
+	}
+	return higher
 }
 
 // paramOr returns the i-th declared parameter name, or the implicit numeric
@@ -893,21 +948,17 @@ func paramOr(params []string, i int, implicit string) string {
 	return implicit
 }
 
-// checkReceiver refuses a receiver the builtin refuses on every input, by the
-// catalogue's [expr.ReceiverKind]. A receiver of unknown kind, or a scalar of
-// unknown subkind, is admitted: the checker refuses only what it knows.
 // checkArgs refuses an argument of a kind the builtin refuses on every input,
-// as checkReceiver refuses such a receiver: the catalogue states each
-// position's kind and the same admission applies — a value the checker cannot
-// type, and the nil literal, pass.
+// by the catalogue's [expr.ArgKind]. A value the checker cannot type passes, as
+// it does at a receiver; the nil literal does not, because a position stating a
+// kind fails on nil for every instance.
 func (c *completer) checkArgs(spec expr.BuiltinSpec, argTypes []staticType, owner *Type, inv *Invariant) {
 	for i, at := range argTypes {
 		kind, ok := spec.ArgAt(i)
 		if !ok {
 			return
 		}
-		open := at.kind == kindUnknown || at.kind == kindNil ||
-			(at.kind == kindScalar && at.scalar == scalarAny)
+		open := at.kind == kindUnknown || (at.kind == kindScalar && at.scalar == scalarAny)
 		admitted := true
 		switch kind {
 		case expr.ArgAny:
@@ -928,6 +979,9 @@ func (c *completer) checkArgs(spec expr.BuiltinSpec, argTypes []staticType, owne
 	}
 }
 
+// checkReceiver refuses a receiver the builtin refuses on every input, by the
+// catalogue's [expr.ReceiverKind]. A receiver of unknown kind, or a scalar of
+// unknown subkind, is admitted: the checker refuses only what it knows.
 func (c *completer) checkReceiver(spec expr.BuiltinSpec, recv staticType, nargs int, owner *Type, inv *Invariant) {
 	refuse := func(what string) {
 		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,

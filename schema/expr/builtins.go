@@ -30,9 +30,9 @@ const (
 	ResultFlattened
 	// ResultList is a list of scalars (Split, Match).
 	ResultList
-	// ResultElementOrArg is one element of a list receiver when the call has
-	// no argument, and the receiver or the argument when it has one (Min,
-	// Max), typed as their join.
+	// ResultElementOrArg is one element of a list receiver when the call has no
+	// argument, and the receiver or the argument when it has one (Min, Max),
+	// typed as whichever end of the total order the builtin yields.
 	ResultElementOrArg
 	// ResultReceiverOrArg is the receiver's type when the receiver holds a
 	// value and the first non-nil argument's when it is nil (Default,
@@ -249,6 +249,9 @@ func init() {
 // case-insensitively as the pipeline resolves names.
 func LookupBuiltin(name string) (BuiltinSpec, bool) {
 	s, ok := builtinSpecs[strings.ToLower(name)]
+	// Args is the value type's only reference-typed field; unaliased, a caller
+	// writing through it cannot corrupt the catalogue.
+	s.Args = slices.Clone(s.Args)
 	return s, ok
 }
 
@@ -256,6 +259,7 @@ func LookupBuiltin(name string) (BuiltinSpec, bool) {
 func Builtins() []BuiltinSpec {
 	out := make([]BuiltinSpec, 0, len(builtinSpecs))
 	for _, s := range builtinSpecs {
+		s.Args = slices.Clone(s.Args)
 		out = append(out, s)
 	}
 	slices.SortFunc(out, func(a, b BuiltinSpec) int { return strings.Compare(a.Name, b.Name) })
