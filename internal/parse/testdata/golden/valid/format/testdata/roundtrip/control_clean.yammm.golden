@@ -1,0 +1,184 @@
+{
+  "name": "\"control\"",
+  "span": {
+    "s": 0,
+    "e": 16
+  },
+  "types": [
+    {
+      "name": "Order",
+      "name_span": {
+        "s": 253,
+        "e": 258
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 269,
+              "e": 275
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 262,
+            "e": 283
+          }
+        },
+        {
+          "name": "label",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 292,
+              "e": 298
+            }
+          },
+          "span": {
+            "s": 285,
+            "e": 298
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"pending_review\"",
+              "\"approved\"",
+              "\"rejected\"",
+              "\"needs_revision\"",
+              "\"escalated\"",
+              "\"archived\""
+            ],
+            "span": {
+              "s": 347,
+              "e": 436
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 340,
+            "e": 445
+          }
+        },
+        {
+          "name": "note",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 454,
+              "e": 460
+            }
+          },
+          "span": {
+            "s": 447,
+            "e": 460
+          }
+        },
+        {
+          "name": "amount",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 469,
+              "e": 476
+            }
+          },
+          "span": {
+            "s": 462,
+            "e": 476
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"amount must be positive\"",
+          "expr": "(\u003e (. ($ \"self\") \"amount\") 0)",
+          "expr_span": {
+            "s": 507,
+            "e": 523
+          },
+          "span": {
+            "s": 479,
+            "e": 523
+          }
+        }
+      ],
+      "span": {
+        "s": 248,
+        "e": 525
+      }
+    },
+    {
+      "name": "Shipment",
+      "name_span": {
+        "s": 532,
+        "e": 540
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 550,
+              "e": 556
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 544,
+            "e": 564
+          }
+        },
+        {
+          "name": "kind",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"記録\"",
+              "\"配送\""
+            ],
+            "span": {
+              "s": 572,
+              "e": 596
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 566,
+            "e": 605
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "ORDER",
+          "name_span": {
+            "s": 611,
+            "e": 616
+          },
+          "target": {
+            "name": "Order",
+            "span": {
+              "s": 623,
+              "e": 628
+            }
+          },
+          "span": {
+            "s": 607,
+            "e": 628
+          }
+        }
+      ],
+      "span": {
+        "s": 527,
+        "e": 630
+      }
+    }
+  ]
+}

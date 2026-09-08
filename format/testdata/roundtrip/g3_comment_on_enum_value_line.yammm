@@ -1,0 +1,11 @@
+schema "g3"
+
+// G3: an inline comment on a value line of a multiline enum. Joining the
+// construct puts the following values and the "]" behind the comment.
+type T {
+	id     String primary
+	status Enum[
+		"alpha", // the first
+		"beta",
+	] required
+}

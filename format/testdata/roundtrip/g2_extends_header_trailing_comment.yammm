@@ -1,0 +1,17 @@
+schema "g2"
+
+type A {
+	id String primary
+}
+
+type B {
+	id String primary
+}
+
+// G2: a trailing comment on an extends header whose parents follow on the
+// next lines. The join folds both parents into the comment and drops the "{".
+type C extends // why
+	A,
+	B {
+	id String primary
+}

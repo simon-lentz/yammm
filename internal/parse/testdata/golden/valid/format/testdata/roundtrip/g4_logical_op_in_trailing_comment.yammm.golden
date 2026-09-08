@@ -1,0 +1,79 @@
+{
+  "name": "\"g4\"",
+  "span": {
+    "s": 0,
+    "e": 11
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 219,
+        "e": 220
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 230,
+              "e": 236
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 224,
+            "e": 244
+          }
+        },
+        {
+          "name": "left",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 252,
+              "e": 259
+            }
+          },
+          "span": {
+            "s": 246,
+            "e": 259
+          }
+        },
+        {
+          "name": "right",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 267,
+              "e": 274
+            }
+          },
+          "span": {
+            "s": 261,
+            "e": 274
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"left and right must both be positive and bounded\"",
+          "expr": "(\u0026\u0026 (\u0026\u0026 (\u003e (. ($ \"self\") \"left\") 0) (\u003e (. ($ \"self\") \"right\") 0)) (\u003c (. ($ \"self\") \"left\") 1000))",
+          "expr_span": {
+            "s": 330,
+            "e": 384
+          },
+          "span": {
+            "s": 277,
+            "e": 384
+          }
+        }
+      ],
+      "span": {
+        "s": 214,
+        "e": 401
+      }
+    }
+  ]
+}

@@ -141,6 +141,13 @@ format/testdata/no_blank_before_close_brace.yammm
 format/testdata/preserves_blank_lines.yammm
 format/testdata/preserves_indentation.yammm
 format/testdata/qualified_references.yammm
+format/testdata/roundtrip/control_clean.yammm
+format/testdata/roundtrip/g11_annotated_enum_that_wraps.yammm
+format/testdata/roundtrip/g1_single_quoted_value_with_comma.yammm
+format/testdata/roundtrip/g2_extends_header_trailing_comment.yammm
+format/testdata/roundtrip/g3_comment_on_enum_value_line.yammm
+format/testdata/roundtrip/g4_logical_op_in_trailing_comment.yammm
+format/testdata/roundtrip/g5_bracket_in_string_on_closing_line.yammm
 format/testdata/trailing_comma_in_constraints.yammm
 format/testdata/wrap_and_align_interaction.yammm
 format/testdata/wrap_long_enum.yammm

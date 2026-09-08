@@ -1,0 +1,10 @@
+schema "g5"
+
+// G5: a "]" inside a string literal on the closing line of a multiline enum.
+// The output still parses and loads, and the enum value has gained a space.
+type T {
+	id     String primary
+	status Enum[
+		"alpha",
+		"c]d"] required
+}
