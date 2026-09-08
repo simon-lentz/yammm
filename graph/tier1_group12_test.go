@@ -5,6 +5,7 @@ import (
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -69,15 +70,39 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 	t.Parallel()
 	s := group10Schema(t)
 	runID := mustTypeID(t, s, "Run")
-	stepID := mustTypeID(t, s, "Step")
+	// Tag is a ROOT with a plain String key. Step is a PART: no instance of
+	// it reaches the snapshot's index, so an arm written on Step returns at
+	// InstanceByKey's typeIndex == nil guard and never reaches the address
+	// path this test names.
+	tagID := mustTypeID(t, s, "Tag")
 	g := graph.New(s)
 	if r := g.Add(t.Context(), runInstance(t, s, rawInstant, "")); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
+	tag := instance.NewValidInstance("Tag", tagID, immutable.WrapKey([]any{"t1"}),
+		immutable.WrapProperties(map[string]any{"name": "t1"}), nil, nil, nil)
+	if r := g.Add(t.Context(), tag); !r.OK() {
+		t.Fatalf("add tag: %s", r)
+	}
 	snap := g.Snapshot()
-	for _, id := range []schema.TypeID{runID, stepID} {
+	for _, id := range []schema.TypeID{runID, tagID} {
+		// The arm is only meaningful past the typeIndex guard.
+		if _, ok := snap.InstanceByKey(id, snapshotSomeKeyOf(t, snap, id)); !ok {
+			t.Fatalf("type %s has no indexed instance; the unparseable arm would return at the typeIndex guard", id)
+		}
 		if inst, ok := snap.InstanceByKey(id, "not an address"); ok || inst != nil {
 			t.Errorf("InstanceByKey(%s, unparseable) = %v, %v; want nil, false", id, inst, ok)
 		}
 	}
+}
+
+// snapshotSomeKeyOf returns the rendered key of one indexed instance of id,
+// which a lookup must find. It fails the test when the type has none.
+func snapshotSomeKeyOf(t *testing.T, snap *graph.Snapshot, id schema.TypeID) string {
+	t.Helper()
+	insts := snap.InstancesOf(id)
+	if len(insts) == 0 {
+		t.Fatalf("type %s holds no instance", id)
+	}
+	return insts[0].PrimaryKey().String()
 }

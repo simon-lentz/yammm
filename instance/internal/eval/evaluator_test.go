@@ -764,3 +764,45 @@ func TestEvaluate_TraceCarriesTheCallersContext(t *testing.T) {
 		}
 	}
 }
+
+// TestEvaluate_EveryArmCarriesTheCallersContext runs the context assertion
+// over the evaluator's special forms and its builtin arms rather than over
+// one shape. One shape reaches only the nodes it walks, so a context dropped
+// on an arm it never enters is invisible; these shapes between them enter
+// the member, index, list, ternary, boolean, comparison, guard, lambda and
+// nested-call arms, and each asserts every record it produced.
+func TestEvaluate_EveryArmCarriesTheCallersContext(t *testing.T) {
+	nums := func() expr.SExpr { return list(int64(1), int64(2), int64(3)) }
+	shapes := map[string]expr.Expression{
+		"list body":     makeBuiltinCall(nums(), "all", nil, nil, sx(">", sx("$", lit("0")), lit(int64(0)))),
+		"lambda param":  makeBuiltinCall(nums(), "all", nil, []string{"n"}, sx(">", sx("$", lit("n")), lit(int64(0)))),
+		"nested calls":  sx(">", makeBuiltinCall(makeBuiltinCall(nums(), "map", nil, nil, sx("+", sx("$", lit("0")), lit(int64(1)))), "sum", nil, nil, nil), lit(int64(0))),
+		"index":         sx(">", sx("@", nums(), lit(int64(0))), lit(int64(0))),
+		"ternary":       sx("?", sx(">", lit(int64(2)), lit(int64(1))), lit(true), lit(false)),
+		"and":           sx("&&", sx(">", lit(int64(2)), lit(int64(1))), sx("<", lit(int64(1)), lit(int64(2)))),
+		"or":            sx("||", sx("<", lit(int64(2)), lit(int64(1))), sx(">", lit(int64(2)), lit(int64(1)))),
+		"not":           sx("!", sx("<", lit(int64(2)), lit(int64(1)))),
+		"guard":         sx(">", makeBuiltinCall(lit(nil), "default", []expr.Expression{lit(int64(5))}, nil, nil), lit(int64(0))),
+		"arithmetic":    sx(">", sx("-", sx("*", lit(int64(3)), lit(int64(4))), lit(int64(2))), lit(int64(0))),
+		"membership":    sx("in", lit(int64(2)), nums()),
+		"argument call": sx(">", makeBuiltinCall(lit("north"), "compare", []expr.Expression{lit("a")}, nil, nil), lit(int64(0))),
+	}
+	for name, e := range shapes {
+		t.Run(name, func(t *testing.T) {
+			h := &ctxRecorder{}
+			ev := eval.NewEvaluator(eval.WithLogger(slog.New(h)))
+			ctx := trace.WithRequestID(t.Context(), "req-"+name)
+			if _, err := ev.EvaluateBool(ctx, e, eval.EmptyScope()); err != nil {
+				t.Fatalf("EvaluateBool: %v", err)
+			}
+			if len(h.ctxs) < 3 {
+				t.Fatalf("expected a per-node trace, got %d records", len(h.ctxs))
+			}
+			for i, c := range h.ctxs {
+				if id, ok := trace.RequestIDFrom(c); !ok || id != "req-"+name {
+					t.Errorf("record %d (%q) was logged without the caller's context", i, h.recs[i].Message)
+				}
+			}
+		})
+	}
+}

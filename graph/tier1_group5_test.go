@@ -2,6 +2,9 @@ package graph_test
 
 import (
 	"context"
+	"fmt"
+	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -90,15 +93,24 @@ func TestAddComposed_OneOverflow_RebuiltKeylessOccupantReportsNoStandIn(t *testi
 }
 
 // canonGroup5Schema declares a canonicalizing kind at every position the Add
-// path fills: a root property, a composed child's key and a child property.
+// path fills: a root property, a composed child's key and a child property,
+// and an association whose TARGET KEY canonicalizes, so the agreement test
+// reaches an edge position as well as an instance one.
 func canonGroup5Schema(t *testing.T) *schema.Schema {
 	t.Helper()
 	const src = `schema "canon_add_path"
+
+type Site {
+	established_at Timestamp primary
+}
 
 type Sensor {
 	id String primary
 	created_at Timestamp
 	*-> READINGS (_:many) Reading
+	--> SITE (_) Site {
+		label String
+	}
 }
 
 part type Reading {
@@ -130,24 +142,42 @@ func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
+	siteID := mustTypeID(t, s, "Site")
+
 	reading := instance.NewValidInstance("Reading", readingID,
 		immutable.WrapKey([]any{spelled}),
 		immutable.WrapProperties(map[string]any{"taken_at": spelled, "logged_at": parsed}),
 		nil, nil, nil)
+	site := instance.NewValidInstance("Site", siteID,
+		immutable.WrapKey([]any{spelled}),
+		immutable.WrapProperties(map[string]any{"established_at": spelled}),
+		nil, nil, nil)
+	// The edge names its target by the RAW spelling: both paths canonicalize
+	// an edge address, so the position must agree whichever spelling is used.
 	sensor := instance.NewValidInstance("Sensor", sensorID,
 		immutable.WrapKey([]any{"s1"}),
 		immutable.WrapProperties(map[string]any{"id": "s1", "created_at": parsed}),
-		nil, map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading})}, nil)
+		edgeData("SITE", map[string]any{"label": "north"}, []any{spelled}),
+		map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading})}, nil)
 
 	g := graph.New(s)
+	if r := g.Add(t.Context(), site); !r.OK() {
+		t.Fatalf("add site: %s", r)
+	}
 	if r := g.Add(t.Context(), sensor); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
 	added := g.Snapshot()
 
 	rebuilt, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{sensorID},
+		Types: []schema.TypeID{sensorID, siteID},
 		Instances: map[schema.TypeID][]graph.InstanceParts{
+			siteID: {{
+				TypeName:   "Site",
+				TypeID:     siteID,
+				PrimaryKey: immutable.WrapKey([]any{spelled}),
+				Properties: immutable.WrapProperties(map[string]any{"established_at": spelled}),
+			}},
 			sensorID: {{
 				TypeName:   "Sensor",
 				TypeID:     sensorID,
@@ -163,6 +193,14 @@ func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 				},
 			}},
 		},
+		Edges: []graph.EdgeParts{{
+			Relation:   "SITE",
+			SourceType: sensorID,
+			SourceKey:  immutable.WrapKey([]any{"s1"}),
+			TargetType: siteID,
+			TargetKey:  immutable.WrapKey([]any{spelled}),
+			Properties: immutable.WrapProperties(map[string]any{"label": "north"}),
+		}},
 	})
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)
@@ -172,25 +210,92 @@ func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 	b := rebuilt.InstancesOf(sensorID)[0]
 	assertSameInstance(t, "Sensor", a, b)
 	assertSameInstance(t, "Reading", a.Composed("READINGS")[0], b.Composed("READINGS")[0])
+	assertSameInstance(t, "Site", added.InstancesOf(siteID)[0], rebuilt.InstancesOf(siteID)[0])
+	assertSameEdges(t, added, rebuilt)
+}
+
+// assertSameProperties compares two property sets over the UNION of their
+// names, so a name present on either side alone is reported. Iterating one
+// side's names cannot see the other side dropping a property.
+func assertSameProperties(t *testing.T, what string, a, b immutable.Properties) {
+	t.Helper()
+	names := map[string]bool{}
+	for name := range a.Keys() {
+		names[name] = true
+	}
+	for name := range b.Keys() {
+		names[name] = true
+	}
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		got, inAdd := a.Get(name)
+		want, inRebuild := b.Get(name)
+		switch {
+		case !inAdd:
+			t.Errorf("%s property %q: absent on the Add path", what, name)
+		case !inRebuild:
+			t.Errorf("%s property %q: absent on the RebuildSnapshot path", what, name)
+		case got.Unwrap() != want.Unwrap():
+			t.Errorf("%s property %q: Add %v (%T), RebuildSnapshot %v (%T)",
+				what, name, got.Unwrap(), got.Unwrap(), want.Unwrap(), want.Unwrap())
+		}
+	}
 }
 
 // assertSameInstance compares the key and every property of two instances by
-// the rendered form the wire carries.
+// the rendered form the wire carries, over both sides' name sets.
 func assertSameInstance(t *testing.T, what string, a, b *graph.Instance) {
 	t.Helper()
 	if a.PrimaryKey().String() != b.PrimaryKey().String() {
 		t.Errorf("%s key: Add %s, RebuildSnapshot %s", what, a.PrimaryKey(), b.PrimaryKey())
 	}
-	for name := range b.Properties().SortedKeys() {
-		want, _ := b.Properties().Get(name)
-		got, ok := a.Properties().Get(name)
-		if !ok {
-			t.Errorf("%s property %q: absent on the Add path", what, name)
-			continue
+	assertSameProperties(t, what, a.Properties(), b.Properties())
+}
+
+// edgePosition renders the address an edge occupies: its relation and both
+// endpoints as the graph holds them. Two edges agree on position when this
+// string is equal, and the properties at that position are then comparable.
+func edgePosition(e *graph.Edge) string {
+	return fmt.Sprintf("%s: %s%s -> %s%s",
+		e.Relation(),
+		e.Source().TypeName(), e.Source().PrimaryKey(),
+		e.Target().TypeName(), e.Target().PrimaryKey())
+}
+
+// assertSameEdges compares every edge position of two snapshots and the
+// properties at each. An instance-only comparison cannot see an edge address
+// or an edge property diverging between the two paths, which is the half of
+// the agreement contract [assertSameInstance] does not reach.
+func assertSameEdges(t *testing.T, added, rebuilt *graph.Snapshot) {
+	t.Helper()
+	index := func(snap *graph.Snapshot) map[string]*graph.Edge {
+		out := map[string]*graph.Edge{}
+		for _, e := range snap.Edges() {
+			pos := edgePosition(e)
+			if _, dup := out[pos]; dup {
+				t.Errorf("two edges share the position %s; the comparison cannot pair them", pos)
+			}
+			out[pos] = e
 		}
-		if got.Unwrap() != want.Unwrap() {
-			t.Errorf("%s property %q: Add %v (%T), RebuildSnapshot %v (%T)",
-				what, name, got.Unwrap(), got.Unwrap(), want.Unwrap(), want.Unwrap())
+		return out
+	}
+	a, b := index(added), index(rebuilt)
+	positions := map[string]bool{}
+	for pos := range a {
+		positions[pos] = true
+	}
+	for pos := range b {
+		positions[pos] = true
+	}
+	for _, pos := range slices.Sorted(maps.Keys(positions)) {
+		ae, inAdd := a[pos]
+		be, inRebuild := b[pos]
+		switch {
+		case !inAdd:
+			t.Errorf("edge position %s: absent on the Add path", pos)
+		case !inRebuild:
+			t.Errorf("edge position %s: absent on the RebuildSnapshot path", pos)
+		default:
+			assertSameProperties(t, "edge "+pos, ae.Properties(), be.Properties())
 		}
 	}
 }

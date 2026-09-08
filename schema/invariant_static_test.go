@@ -299,7 +299,7 @@ func TestStaticInvariant_Table(t *testing.T) {
 		// the bracket takes one index, and a number cannot be indexed
 		{`tags[] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
 		{`tags[0, 1] -> IsNil`, diag.E_INVALID_INVARIANT, "exactly one index"},
-		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
+		{`LINES[0].qty[0] > 0`, diag.E_INVALID_INVARIANT, "a number cannot be indexed"},
 		// a receiver the builtin refuses on every input: a number into a string
 		// builtin, a string into a numeric one, a number into Len, Min or Max
 		{`MAIN_LINE.qty -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
@@ -315,7 +315,9 @@ func TestStaticInvariant_Table(t *testing.T) {
 		{`(name != "" ? { MAIN_LINE.qty : MAIN_LINE.qty }) -> Upper != ""`, diag.E_INVALID_INVARIANT, "takes a string"},
 		{`(name != "" ? { name : name }) -> Abs > 0`, diag.E_INVALID_INVARIANT, "takes a number"},
 		// a boolean result cannot be indexed
-		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "cannot be indexed"},
+		{`(name == "n")[0] != nil`, diag.E_INVALID_INVARIANT, "a boolean cannot be indexed"},
+		// a pattern is the third scalar the arm names, and each draws its own
+		{`/re/[0] != nil`, diag.E_INVALID_INVARIANT, "a pattern cannot be indexed"},
 		// Default's fallback of another kind reaches the next stage unpredicted
 		{`(tags -> Default("none") -> First) == nil`, diag.E_INVALID_INVARIANT, "Default"},
 		{`(name -> Default(1)) -> Upper == "A"`, diag.E_INVALID_INVARIANT, "Default"},

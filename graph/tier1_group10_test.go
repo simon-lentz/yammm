@@ -33,6 +33,10 @@ type Run {
 part type Step {
 	n String primary
 }
+
+type Tag {
+	name String primary
+}
 `
 	s, res := schema.LoadString(t.Context(), src, "group10.yammm")
 	if res.HasErrors() {

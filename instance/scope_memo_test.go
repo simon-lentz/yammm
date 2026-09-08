@@ -26,9 +26,21 @@ func TestScope_IsMemoisedAndLinearInDepth(t *testing.T) {
 			_, _ = v.ValidateOne(t.Context(), "L0", RawInstance{Properties: raw})
 		})
 	}
-	a, b := allocs(n), allocs(2*n)
-	if ratio := b / a; ratio > 3 {
-		t.Errorf("allocations at depth %d are %.0f, at depth %d %.0f: ratio %.2f, want linear (about 2)", n, a, 2*n, b, ratio)
+	// Linear growth means each equal step of depth costs the same: the DELTA
+	// between depths is constant, not merely bounded. A ratio of totals
+	// cannot say this — a memo-less validator rebuilding every ancestor's
+	// scope at every level grows quadratically and still doubles its total
+	// from depth 6 to 12, which a ratio bound admits.
+	a, b, c := allocs(n), allocs(2*n), allocs(3*n)
+	first, second := b-a, c-b
+	if first <= 0 {
+		t.Fatalf("allocations did not grow with depth: %.0f, %.0f, %.0f", a, b, c)
+	}
+	// Measured: 544 then 552 with the memo (1.5% apart), 1,090 then 1,458
+	// without it (34% apart).
+	if growth := second / first; growth > 1.15 {
+		t.Errorf("allocations at depths %d, %d, %d are %.0f, %.0f, %.0f: deltas %.0f then %.0f (%.2fx), want equal deltas",
+			n, 2*n, 3*n, a, b, c, first, second, growth)
 	}
 }
 
