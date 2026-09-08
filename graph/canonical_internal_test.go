@@ -130,6 +130,9 @@ func TestCompareDuplicates_LoadedRecordsOrderBySourceName(t *testing.T) {
 	id := schema.NewTypeID(location.MustNewSourceID("test://dup.yammm"), "T")
 	key := immutable.WrapKey([]any{"k"})
 	conflict := newInstance("T", id, key, immutable.WrapProperties(nil), nil, false)
+	// The shape the decoder produces, built here because graph cannot import
+	// snapshot. That a LOADED instance actually has this shape is pinned on the
+	// snapshot side, by TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne.
 	loaded := func(source string) *Duplicate {
 		prov := location.NewProvenance(source, path.Root(), location.Span{})
 		inst := newInstance("T", id, key, immutable.WrapProperties(nil), prov, false)

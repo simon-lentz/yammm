@@ -87,7 +87,6 @@ func (e *Evaluator) evaluate(ctx context.Context, expression expr.Expression, sc
 	}
 }
 
-// evalSExpr evaluates an S-expression.
 // operatorOps are the operators evalSExpr dispatches after evaluating every
 // child; a special form or a builtin is handled before this set is consulted.
 var operatorOps = map[string]bool{
@@ -96,6 +95,7 @@ var operatorOps = map[string]bool{
 	"=~": true, "!~": true, "in": true, "!": true, "^": true,
 }
 
+// evalSExpr evaluates an S-expression.
 func (e *Evaluator) evalSExpr(ctx context.Context, sexpr expr.SExpr, scope Scope) (any, error) {
 	op := sexpr.Op()
 	children := sexpr.Children()
@@ -864,9 +864,6 @@ func isNumericVar(name string) bool {
 	return true
 }
 
-// datatypeChecker returns the TypeChecker for a datatype name, by the set
-// [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
-// any other name at load.
 // datatypeCheckers maps each datatype check expr.IsDatatypeCheck admits to
 // its kind's checker. A name absent here is an error, never another kind's
 // check by default.
@@ -875,6 +872,9 @@ var datatypeCheckers = map[string]func() TypeChecker{
 	"uuid": IsUUID, "timestamp": IsTimestamp, "date": IsDate,
 }
 
+// datatypeChecker returns the TypeChecker for a datatype name, by the set
+// [expr.IsDatatypeCheck] defines for both layers; the static checker refuses
+// any other name at load.
 func (e *Evaluator) datatypeChecker(name string) (TypeChecker, error) {
 	mk, ok := datatypeCheckers[strings.ToLower(name)]
 	if !ok || !expr.IsDatatypeCheck(name) {

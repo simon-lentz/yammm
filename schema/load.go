@@ -1323,7 +1323,7 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 	// Under WithSourcesOnly the in-memory set is the whole universe:
 	// a miss is an error, never a filesystem read.
 	if l.cfg.sourcesOnly {
-		return nil, location.SourceID{}, fmt.Errorf("import file %q not found in pre-registered sources", relativePath)
+		return nil, location.SourceID{}, errors.New("not among the pre-registered sources")
 	}
 
 	// Use rootLoader for sandboxed file access
@@ -1335,8 +1335,8 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 		// No module root is in play, so there is no sandbox to read through and
 		// no tier of the resolution ladder left: the import misses the
 		// in-memory set and has nowhere else to resolve.
-		return nil, location.SourceID{}, fmt.Errorf(
-			"import %q is not among the pre-registered sources and no module root is in play", relativePath)
+		return nil, location.SourceID{}, errors.New(
+			"not among the pre-registered sources, and no module root is in play")
 	}
 
 	// Try each candidate with rootLoader.

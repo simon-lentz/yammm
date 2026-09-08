@@ -39,6 +39,12 @@ type streamDecoder struct {
 	tableTags []string         // rendered tag per table row; nil when schema is nil
 	collector *diag.Collector  // accumulates diagnostics
 
+	// keyPositions is the canonicalizing primary-key positions per table row,
+	// built once on first use. Every address the reader resolves went through
+	// TypeByID and a PrimaryKeys walk per call — the same work graph's
+	// canonicalizer memoizes per schema, left per-call one layer down.
+	keyPositions [][]wireKeyPosition
+
 	// loadCfg holds deserialization options (e.g., skip integrity check).
 	loadCfg loadConfig
 
@@ -1327,23 +1333,49 @@ func (sd *streamDecoder) canonicalWireKey(row int, key []any) string {
 		return "[]"
 	}
 	components := normalizeSlice(key)
-	if sd.schema != nil && row >= 0 && row < len(sd.tableIDs) {
-		if t, ok := sd.schema.TypeByID(sd.tableIDs[row]); ok {
+	for _, pos := range sd.rowKeyPositions(row) {
+		if pos.index >= len(components) {
+			break
+		}
+		if canonical, err := value.Canonical(components[pos.index], pos.constraint); err == nil {
+			components[pos.index] = canonical
+		}
+	}
+	return immutable.WrapKey(components).String()
+}
+
+// wireKeyPosition names one primary-key component whose kind canonicalizes: its
+// index in the key and the constraint deciding its canonical form. It mirrors
+// graph's keyPosition, which the same range memoized on that side.
+type wireKeyPosition struct {
+	index      int
+	constraint schema.Constraint
+}
+
+// rowKeyPositions returns the canonicalizing key positions of a table row,
+// building the whole table on first use. A schema-less read and a row that
+// resolves to no type have none, which leaves every key as written.
+func (sd *streamDecoder) rowKeyPositions(row int) []wireKeyPosition {
+	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+		return nil
+	}
+	if sd.keyPositions == nil {
+		sd.keyPositions = make([][]wireKeyPosition, len(sd.tableIDs))
+		for r, id := range sd.tableIDs {
+			t, ok := sd.schema.TypeByID(id)
+			if !ok {
+				continue
+			}
 			i := 0
 			for pk := range t.PrimaryKeys() {
-				if i >= len(components) {
-					break
-				}
 				if value.Canonicalizes(pk.Constraint()) {
-					if canonical, err := value.Canonical(components[i], pk.Constraint()); err == nil {
-						components[i] = canonical
-					}
+					sd.keyPositions[r] = append(sd.keyPositions[r], wireKeyPosition{index: i, constraint: pk.Constraint()})
 				}
 				i++
 			}
 		}
 	}
-	return immutable.WrapKey(components).String()
+	return sd.keyPositions[row]
 }
 
 // normalizeSlice applies NormalizeValue to each element in a slice.

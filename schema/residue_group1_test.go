@@ -47,7 +47,9 @@ type Main {
 	if res.Err() == nil {
 		t.Fatal("the import resolved with no module root in play: the working directory was read")
 	}
-	if got := res.Err().Error(); !strings.Contains(got, "is not among the pre-registered sources and no module root is in play") {
+	// The message names the CONDITION; the caller's wrapper names the import,
+	// once (A-375).
+	if got := res.Err().Error(); !strings.Contains(got, "not among the pre-registered sources, and no module root is in play") {
 		t.Errorf("want readImportFile's no-module-root refusal; got %v", got)
 	}
 }

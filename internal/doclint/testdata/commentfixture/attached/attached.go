@@ -10,3 +10,7 @@ func Kept() {}
 // AlsoKept has its own block, so the note above documents nothing and is not
 // this gate's business.
 func AlsoKept() {}
+
+// Elsewhere names a symbol this file does not declare, which is a reference
+// rather than a stack, and the gate leaves it.
+func Reference() {}

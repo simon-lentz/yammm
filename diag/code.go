@@ -448,10 +448,17 @@ var (
 	E_SNAPSHOT_INVALID_COMPOSED = NewCode("E_SNAPSHOT_INVALID_COMPOSED", CategorySnapshot)
 
 	// W_SNAPSHOT_VALUE_DROPPED (Warning) indicates a write path held a value
-	// the wire cannot carry at that position and did not write it. Every
-	// write path that discards a stated value marks it with this code, so the
-	// document produced is well-formed and the warning names what is missing
-	// from it.
+	// the wire cannot carry at that position and did not write it, so the
+	// document produced is well-formed and the warning names what is missing.
+	//
+	// It marks THREE sites, all of them an unresolved record under a reason the
+	// wire admits neither field for: its target key and its edge properties at
+	// marshal, and its target key again on the metadata-update fallback.
+	//
+	// Two drops are DELIBERATE and are NOT marked: a duplicate record's
+	// Diagnostic, which the wire has no field for, and an instance provenance's
+	// SPAN, which the reader rebuilds as zero. A consumer cannot gate loss
+	// detection on this code alone and be right.
 	W_SNAPSHOT_VALUE_DROPPED = NewCode("W_SNAPSHOT_VALUE_DROPPED", CategorySnapshot)
 
 	// E_SNAPSHOT_INVALID_ROOT indicates an instances-section group names a type

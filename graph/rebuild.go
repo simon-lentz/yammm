@@ -285,44 +285,6 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 // type has no instances, a part instance is addressed through its parent, and
 // a type with no primary key has no address at all. A store cannot hold any
 // of the three as a node.
-// validatePartsCardinality refuses a non-many composition slot carrying more
-// than one occupant. The (one) composed key segment carries no discriminating
-// element because such a slot holds exactly one child, and this is the entry
-// point where that premise is asserted: without it two occupants are accepted
-// with no diagnostic and the adapter mints one byte-identical _composed_key
-// for both.
-func validatePartsCardinality(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
-	if s == nil {
-		return
-	}
-	var walk func(ip InstanceParts)
-	walk = func(ip InstanceParts) {
-		t, known := s.TypeByID(ip.TypeID)
-		for relName, children := range ip.Composed {
-			if known && len(children) > 1 {
-				if rel, ok := t.Relation(relName); ok && rel.Kind() == schema.RelationComposition && !rel.IsMany() {
-					collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
-						fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", relName, len(children))).
-						WithDetail(diag.DetailKeyTypeName, ip.TypeName).
-						WithDetail(diag.DetailKeyRelationName, relName).
-						WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
-				}
-			}
-			for _, child := range children {
-				walk(child)
-			}
-		}
-	}
-	for _, instParts := range parts.Instances {
-		for _, ip := range instParts {
-			walk(ip)
-		}
-	}
-	for _, dp := range parts.Duplicates {
-		walk(dp.Instance)
-	}
-}
-
 func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
 	if s == nil {
 		return
@@ -366,6 +328,44 @@ func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *di
 				fmt.Sprintf("RebuildSnapshot: duplicate record %d is a root duplicate of type %s, which %s",
 					i, dp.Type, rule)).Build())
 		}
+	}
+}
+
+// validatePartsCardinality refuses a non-many composition slot carrying more
+// than one occupant. The (one) composed key segment carries no discriminating
+// element because such a slot holds exactly one child, and this is the entry
+// point where that premise is asserted: without it two occupants are accepted
+// with no diagnostic and the adapter mints one byte-identical _composed_key
+// for both.
+func validatePartsCardinality(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
+	if s == nil {
+		return
+	}
+	var walk func(ip InstanceParts)
+	walk = func(ip InstanceParts) {
+		t, known := s.TypeByID(ip.TypeID)
+		for relName, children := range ip.Composed {
+			if known && len(children) > 1 {
+				if rel, ok := t.Relation(relName); ok && rel.Kind() == schema.RelationComposition && !rel.IsMany() {
+					collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+						fmt.Sprintf("composition %q: (one) cardinality violated, got %d children", relName, len(children))).
+						WithDetail(diag.DetailKeyTypeName, ip.TypeName).
+						WithDetail(diag.DetailKeyRelationName, relName).
+						WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
+				}
+			}
+			for _, child := range children {
+				walk(child)
+			}
+		}
+	}
+	for _, instParts := range parts.Instances {
+		for _, ip := range instParts {
+			walk(ip)
+		}
+	}
+	for _, dp := range parts.Duplicates {
+		walk(dp.Instance)
 	}
 }
 
@@ -631,11 +631,14 @@ func compareDuplicates(a, b *Duplicate) int {
 	return cmp.Compare(provenanceKeyOf(a.Instance), provenanceKeyOf(b.Instance))
 }
 
-// provenanceKeyOf renders an instance's source position for ordering. A loaded
-// instance carries a provenance with its source name and a zero span (the
-// decoder builds one), so within one source name every loaded record ties at
-// 0:0 and across source names the arm orders by name — a stable order, kept.
-// An instance with no provenance at all renders empty and ties.
+// provenanceKeyOf renders an instance's source position for ordering.
+//
+// A loaded instance carries a provenance only when the document's instance did:
+// the decoder guards on a present provenance and the writer emits none for an
+// instance without one. Where it does, the span is zero because the decoder
+// builds it that way, so within one source name every loaded record ties at 0:0
+// and across source names the arm orders by name — a stable order, kept. An
+// instance with no provenance renders empty and ties.
 func provenanceKeyOf(i *Instance) string {
 	prov := i.Provenance()
 	if prov == nil {

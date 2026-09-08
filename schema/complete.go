@@ -1157,13 +1157,6 @@ func isPrimaryKeyAllowed(constraint Constraint) bool {
 	}
 }
 
-// validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
-// declares or inherits at least one primary key. A node needs identity to be added to
-// a graph (see Graph.Add / E_GRAPH_MISSING_PK) or referenced by an association;
-// enforcing it at load fails fast for every consumer (gogen, the neo4j adapter, the
-// LSP), not only graph construction. Abstract types (not instantiable) and part types
-// (embedded, no independent identity — PK-less parts are a supported composition
-// feature) are exempt. Errors are collected; the caller's final error gate aborts.
 // validatePropertyNames refuses an own property named self, at its declaration:
 // self is bound to the instance in every invariant, at load and at evaluation
 // alike, so the property could never be read. Own properties only — an
@@ -1199,6 +1192,13 @@ func (c *completer) validatePropertyNames() {
 // iterRelationSeq is the shape both relation iterators share.
 type iterRelationSeq = iter.Seq[*Relation]
 
+// validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
+// declares or inherits at least one primary key. A node needs identity to be added to
+// a graph (see Graph.Add / E_GRAPH_MISSING_PK) or referenced by an association;
+// enforcing it at load fails fast for every consumer (gogen, the neo4j adapter, the
+// LSP), not only graph construction. Abstract types (not instantiable) and part types
+// (embedded, no independent identity — PK-less parts are a supported composition
+// feature) are exempt. Errors are collected; the caller's final error gate aborts.
 func (c *completer) validatePrimaryKeys() {
 	for _, t := range c.schema.types {
 		if t.IsAbstract() || t.IsPart() || t.HasPrimaryKey() {

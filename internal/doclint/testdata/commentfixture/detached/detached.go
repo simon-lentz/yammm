@@ -33,3 +33,19 @@ type Holder struct {
 
 // Noted has its own block.
 func Noted() {}
+
+// Stacked is documented by this paragraph, which sits above Carrier instead:
+// the block abuts a declaration, so nothing is detached and go doc shows it
+// under the wrong name.
+func Carrier() {}
+
+// Stacked is the declaration the paragraph above belongs to.
+func Stacked() {}
+
+// unexportedStacked names a declaration go doc -u renders, so a paragraph
+// stacked onto its neighbour costs documentation there too.
+func unexportedCarrier() {}
+
+func unexportedStacked() {}
+
+var _ = []any{Carrier, Stacked, unexportedCarrier, unexportedStacked}

@@ -124,9 +124,6 @@ func shapeMismatch(rel *schema.Relation, message, expected, got string, prov *lo
 	return issue.Build()
 }
 
-// coercionIssue builds the diagnostic a failed coercion owes, classifying it the
-// way the node-property path does: a recovered panic is Fatal E_INTERNAL
-// carrying its stack, anything else an ordinary E_TYPE_MISMATCH.
 // checkIssue classifies a check error the way every check site must: a
 // recovered panic is Fatal E_INTERNAL with its stack, a constraint failure is
 // E_CONSTRAINT_FAIL, anything else E_TYPE_MISMATCH. Two edge sites once
@@ -156,6 +153,9 @@ func isAbsent(v any) bool {
 	return rv.Kind() == reflect.Pointer && rv.IsNil()
 }
 
+// coercionIssue builds the diagnostic a failed coercion owes, classifying it the
+// way the node-property path does: a recovered panic is Fatal E_INTERNAL
+// carrying its stack, anything else an ordinary E_TYPE_MISMATCH.
 func coercionIssue(err error, message string) *diag.IssueBuilder {
 	if internalErr, ok := errors.AsType[*InternalError](err); ok {
 		return diag.NewIssue(diag.Fatal, diag.E_INTERNAL, internalErr.Error()).

@@ -110,8 +110,13 @@ type ConstraintDrift struct {
 // order matters. Constraint names are absent under [WithNamedConstraints](false),
 // in which case every pairing falls through to identity.
 //
-// Unlike [Adapter.DiffIndexes], property order is NOT significant: a
-// constraint's members are a set, so the identity sorts them.
+// Property order is not significant for PAIRING: a constraint's members are a
+// set, so desiredSemanticKey and remoteSemanticKey sort them, where
+// [Adapter.DiffIndexes] compares an index's properties as a sequence. It IS
+// significant for BLOCKING: the server backs a constraint only with an index in
+// the same property order, so constraintDefinitionKey does not sort and an
+// alsoBlocking index is matched in DECLARED order. `yammm neo4j diff` passes
+// every introspected index as alsoBlocking, so that path runs on every diff.
 func (a *Adapter) DiffConstraints(
 	desired []Constraint,
 	actual []RemoteConstraint,

@@ -5,6 +5,7 @@ import (
 	"go/doc/comment"
 	"go/token"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -44,6 +45,10 @@ func AssertDocCommentsRender(t TB, root string) (checked int) {
 			for _, d := range detachedDocs(p.fset, f) {
 				t.Errorf("%s: a blank line separates this comment block from %s, so go/doc shows no documentation for it",
 					p.fset.Position(d.comment.Pos()), d.name)
+			}
+			for _, sd := range stackedDocs(f) {
+				t.Errorf("%s: this doc comment opens by naming %s, not %s, so it documents the wrong declaration",
+					p.fset.Position(sd.doc.Pos()), sd.names, sd.attachedTo)
 			}
 		}
 	}
@@ -142,6 +147,70 @@ func docGroups(f *ast.File) []*ast.CommentGroup {
 		return true
 	})
 	return out
+}
+
+// stacked is a doc comment attached to one declaration and opening with the
+// name of another in the same file.
+type stacked struct {
+	doc        *ast.CommentGroup
+	names      string // the declaration the text names
+	attachedTo string // the declaration the parser attached it to
+}
+
+// stackedDocs returns every doc comment whose leading identifier names another
+// declaration of the same file. Nothing is detached in this shape — the block
+// abuts a declaration — so the detached rule cannot see it, and go doc shows
+// the paragraph under a name its author did not mean.
+//
+// Every declaration is read, exported or not: go doc -u renders both, and an
+// unexported doc comment anchors a regression test by name in this module.
+// A doc naming a symbol the file does not declare is a reference, not a stack.
+func stackedDocs(f *ast.File) []stacked {
+	declared := make(map[string]bool)
+	for _, d := range f.Decls {
+		for _, n := range declaredNames(d) {
+			declared[n] = true
+		}
+	}
+	var out []stacked
+	for _, d := range f.Decls {
+		doc := declDoc(d)
+		text := docText(doc)
+		if text == "" {
+			continue
+		}
+		names := declaredNames(d)
+		first, _, _ := strings.Cut(text, " ")
+		if first == "" || slices.Contains(names, first) || !declared[first] {
+			continue
+		}
+		out = append(out, stacked{doc: doc, names: first, attachedTo: strings.Join(names, ", ")})
+	}
+	return out
+}
+
+// declaredNames returns every name a declaration publishes, exported or not,
+// a method's own name included: a paragraph stacked onto its neighbour names a
+// method as readily as a function, and this module's sharpest instance did.
+func declaredNames(d ast.Decl) []string {
+	switch d := d.(type) {
+	case *ast.FuncDecl:
+		return []string{d.Name.Name}
+	case *ast.GenDecl:
+		var out []string
+		for _, s := range d.Specs {
+			switch s := s.(type) {
+			case *ast.TypeSpec:
+				out = append(out, s.Name.Name)
+			case *ast.ValueSpec:
+				for _, n := range s.Names {
+					out = append(out, n.Name)
+				}
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 // detached is a comment block that reads as documentation for a declaration the
