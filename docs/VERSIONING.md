@@ -908,6 +908,15 @@ whether a line is a comment — is true for the first time.
   interchangeable. The line stays over the width threshold, which is the lesser
   harm.
 
+**Prose.** `docs/API.md` §Formatting and `format/doc.go` are rewritten against
+the tree as it now stands. The standing claim that one line classification is
+*"computed once between phases 1 and 2"* was false and is replaced by what the
+code does: phase 1 records the class, the trailing comment's offset and every
+literal's extent as it emits each line, and phases 2 to 4 read that record. Two
+further claims were corrected on measurement: the exported helpers are not
+consumer-less (the documentation gate pins their signatures), and the threshold
+is counted in display cells rather than columns.
+
 **Consumer reach: none measured.** rdata runs `go tool yammm fmt --write` in
 pre-commit, so it runs the formatter — but through a binary pinned by its own
 `go.mod`, which is `v0.20.0`. `format/` is byte-identical between `v0.20.0` and

@@ -1784,13 +1784,14 @@ The `format` package provides canonical formatting for `.yammm` schema files:
 ```go
 func TokenStream(text string) (string, error)
 
-// Two pipeline phases (3 and 4) and two phase-1 helpers, exported and consumer-less today
+// Two pipeline phases (3 and 4) and two measurement helpers. Nothing outside
+// this package calls them, apart from the gate that pins these signatures.
 func WrapLongLines(text string) string
 func AlignColumns(text string) string
 func NormalizeIndentation(line string) string
 func DisplayWidth(line string) int
 
-const LineWidthThreshold = 100 // columns; a tab counts as 4
+const LineWidthThreshold = 100 // display cells: a tab counts as 4, an East Asian wide rune as 2
 ```
 
 ```go
@@ -1805,10 +1806,20 @@ The formatter then applies a five-phase pipeline:
 
 1. **Token-stream rewriting:** canonical spacing between tokens and indentation normalization — **except inside invariant expressions**, whose regions keep the author's own spacing between tokens (a continuation line's leading indentation is still normalized)
 2. **Blank line collapsing:** removes excess blank lines while preserving section breaks, and *inserts* one after the schema header and after the last import when the following line is not already blank
-3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at `LineWidthThreshold`, and collapses an existing multiline enum, extends clause or datatype-alias enum back onto one line when the joined form fits. A multiline invariant is never collapsed
-4. **Column alignment:** pads the member-name column so the column after it lines up — the type for a property, the multiplicity for a relationship, the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases — broken by a kind change or by any line that is not alignable — a blank line, a comment-only line, a type head or closing brace, an `extends` clause, the first line of a multiline construct. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
+3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at `LineWidthThreshold`, and collapses an existing multiline enum, extends clause or datatype-alias enum back onto one line when the joined form fits. A construct is not collapsed when any of its lines carries a comment, because the comment would then stand in front of everything after it. A property whose suffix carries an annotation is not wrapped at all: the annotation would land on the closing `]` line, where it attaches to nothing and the schema no longer loads. A modifier on that line is legal. A multiline invariant is never collapsed
+4. **Column alignment:** pads the member-name column, measured in display cells, so the column after it lines up — the type for a property, the multiplicity for a relationship, the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases — broken by a kind change or by any line that is not alignable — a blank line, a comment-only line, a type head or closing brace, an `extends` clause, the first line of a multiline construct. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
 5. **Text finalization:** trims trailing whitespace from each line, removes trailing blank lines, and ensures the file ends with a newline
 
-Phases 2–4 read one line classification — blank, comment, or content — computed once between phases 1 and 2. No phase decides on its own whether a line is a comment, so a comment line is never wrapped, aligned, or read as an enum value or a type name, whatever its text looks like; a comment inside a multiline enum or `extends` list keeps its place and the construct is re-indented rather than collapsed.
+Phase 1 records the lexer's view of each line as it emits that line. The record holds three facts:
+
+- the class of the line — blank, comment, or content
+- the offset where a trailing comment starts, when the line has one
+- the extent of every string and regex literal
+
+Phases 2 to 4 read this record. No phase derives these facts again from the text, and phase 1 pays no second lex to produce them, because it already holds the token stream.
+
+Three consequences follow. A comma inside a string literal is not a value separator. A bracket inside a comment does not open or close a construct. A comment line is never wrapped, aligned, or read as an enum value or a type name, whatever its text looks like. A comment inside a multiline enum or `extends` list keeps its place, and the formatter re-indents the construct instead of collapsing it.
+
+`WrapLongLines` and `AlignColumns` lex the text you give them. A caller that enters at one of these phases has no record to inherit.
 
 Output is deterministic and idempotent. The formatter is used by the LSP server for `textDocument/formatting` and by the CLI for the `yammm fmt` command.

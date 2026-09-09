@@ -6,9 +6,10 @@
 // and idempotent (formatting an already-formatted file produces the same
 // output).
 //
-// It reads the source twice, because neither view alone carries what phase 1
-// needs: the token stream holds the whitespace and comments to preserve, and
-// the node tree holds the invariant expression extents and the syntax verdict.
+// It needs two views of one source, and parse.LexAndParse returns both from a
+// single lex: the token stream holds the whitespace and comments to preserve,
+// and the node tree holds the invariant expression extents and the syntax
+// verdict.
 //
 // # Entry Point
 //
@@ -29,15 +30,22 @@
 //  2. Blank line collapsing: removes excess blank lines while preserving
 //     intentional section breaks.
 //  3. Line wrapping: wraps long lines (enums, extends clauses, invariants)
-//     at the [LineWidthThreshold] (100 columns).
+//     at the [LineWidthThreshold] (100 display cells).
 //  4. Column alignment: aligns property types and modifiers within type blocks.
 //  5. Text finalization: trims trailing whitespace from each line, removes
 //     trailing blank lines, and ensures the file ends with a newline.
 //
-// Phases 2 to 4 read one line classification — blank, comment, or content —
-// computed once between phases 1 and 2. No phase decides on its own whether a
-// line is a comment, so a comment line is never wrapped, aligned, or read as
-// a value or type name, whatever its text looks like.
+// Phase 1 records the lexer's view of each line as it emits that line: the
+// line's class — blank, comment, or content — the offset where a trailing
+// comment starts, and the extent of every string and regex literal. Phases 2 to
+// 4 read this record and never derive it again from the text.
+//
+// A comma inside a string literal is therefore not a value separator, a bracket
+// inside a comment does not open a construct, and a comment line is never
+// wrapped, aligned, or read as a value or type name.
+//
+// [WrapLongLines] and [AlignColumns] lex the text they are given. A caller that
+// enters at one of these phases has no record to inherit.
 //
 // # Annotation Spacing
 //
@@ -53,17 +61,18 @@
 //
 // Annotations are not aligned into a column of their own: each trails the
 // property it decorates by a single space, whatever the width of the
-// surrounding declarations.
+// surrounding declarations. A property that carries an annotation is never
+// wrapped, because the annotation has no legal place on a continuation line.
 //
 // # Additional Functions
 //
-// Two pipeline phases and two helpers are exported, and none of them has a
-// consumer outside this package today:
+// Two pipeline phases and two helpers are exported. Nothing outside this
+// package calls them, apart from the gate that pins these signatures:
 //
 //   - [WrapLongLines]: phase 3, wrap lines exceeding [LineWidthThreshold]
 //   - [AlignColumns]: phase 4, align property types and modifiers within type blocks
 //   - [NormalizeIndentation]: a phase-1 helper over one line, convert spaces to tabs
-//   - [DisplayWidth]: compute visual width of a line (tab-aware)
+//   - [DisplayWidth]: the one width function, counting display cells
 //
 // [TokenStream] is what the LSP server calls for textDocument/formatting, and
 // what the CLI calls for the "yammm fmt" command.
