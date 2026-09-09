@@ -924,6 +924,52 @@ pre-commit, so it runs the formatter — but through a binary pinned by its own
 these repairs reaches it until it moves its pin. Its six schemas were measured
 already canonical, so `--write` rewrites nothing there.
 
+### Unit 6, pass B — the CLI's error model, writes, diagnostics and streams
+
+**Two exported declarations are ADDED and nothing is removed or changed**;
+`gorelease -base=v0.21.0` reports two compatible changes and no incompatible
+ones:
+
+- `diag.W_SNAPSHOT_PATH_EXTENSION` — a snapshot was written to a path that does
+  not end in `.ys`. The write succeeded; a reader that discovers snapshots by
+  extension will not find it.
+- `neo4j.W_NEO4J_INDEXES_UNREADABLE` — a comparison could not read the
+  database's indexes, so the half needing them did not run.
+
+Both replace prose the CLI wrote to a stream, which no `--format json` consumer
+could see in any form. A consumer matching on code strings gains two; one
+matching on message text sees the same wording move from a prose line into the
+diagnostic array.
+
+**Behaviour changes that move no declaration:**
+
+- **One invocation renders one diagnostic result, on every path it can return
+  by.** Eleven early returns discarded the schema load's diagnostics entirely,
+  and three severity gates dropped a warnings-only result — so `snapshot info`
+  reported a document whose schema identity could not be checked, exited `0`,
+  and wrote nothing at all to stderr. Under `--format json` those paths now
+  write one document where they wrote none.
+- **A status summary is suppressed under `--format json` and goes to stderr
+  otherwise.** `loaded N instances`, `wrote N CSV files`, `saved snapshot: …`
+  and `updated metadata on …` sat beside the JSON document and stopped it
+  parsing. `snapshot update-metadata`'s summary moves from **stdout to
+  stderr**, where every other command already reported progress — a caller
+  redirecting the two apart previously got that one command's summary in the
+  payload channel.
+- **`snapshot info --dir` marks a warning-only entry `warn`** and counts it
+  apart from `ok`. It read `ok` before, in the one place a dispatch-style scan
+  looks.
+- **Every command's exit code is derived from every phase that diagnosed**,
+  not from its last one. No exit code moves as a result; the derivation is what
+  changed.
+- **`yammm-lsp` prints one usage block for a bad flag**, not two, and writes it
+  to an injected writer.
+
+**Consumer reach: not yet measured against a moved pin.** rdata pins `v0.20.0`
+and moves after its own re-key window. Nothing here changes an exit code or a
+`.ys` byte; what a consumer would notice is stderr under `--format json`
+becoming parseable where it was not.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -86,7 +85,7 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 	}
 
 	// Parse, validate, and build graph
-	graphResult, g, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
+	graphResult, g, err := loadGraph(cmd, sink, s, dataPath, fromFormat, typeName, typeColumn)
 	if err != nil {
 		return err
 	}
@@ -97,7 +96,7 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
-	return writeExport(cmd, g.Snapshot(), s, target, outputPath, outputDir)
+	return writeExport(cmd, sink, g.Snapshot(), s, target, outputPath, outputDir)
 }
 
 // validateExportFlags refuses a contradictory or inapplicable flag set before
@@ -125,12 +124,12 @@ func validateExportFlags(raw, target, outputPath, outputDir string) error {
 
 // writeExport routes a snapshot to the adapter for target, which
 // [validateExportFlags] has already admitted.
-func writeExport(cmd *cobra.Command, snap *graph.Snapshot, s *schema.Schema, target, outputPath, outputDir string) error {
+func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap *graph.Snapshot, s *schema.Schema, target, outputPath, outputDir string) error {
 	switch target {
 	case "json":
 		return exportJSON(cmd, snap, outputPath)
 	case "csv":
-		return exportCSV(cmd, snap, s, outputPath, outputDir)
+		return exportCSV(cmd, sink, snap, s, outputPath, outputDir)
 	default:
 		return exportCypher(cmd, snap, s, outputPath)
 	}
@@ -149,14 +148,14 @@ func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string)
 	return nil
 }
 
-func exportCSV(cmd *cobra.Command, snapshot *graph.Snapshot, _ *schema.Schema, outputPath, outputDir string) error {
+func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Snapshot, _ *schema.Schema, outputPath, outputDir string) error {
 	adapter := csv.New()
 
 	types := snapshot.Types()
 
 	// If --output-dir specified, always use directory output
 	if outputDir != "" {
-		return exportCSVToDir(cmd, adapter, snapshot, types, outputDir)
+		return exportCSVToDir(cmd, sink, adapter, snapshot, types, outputDir)
 	}
 
 	// One destination holds one type. --output does not change that: the
@@ -182,7 +181,7 @@ func exportCSV(cmd *cobra.Command, snapshot *graph.Snapshot, _ *schema.Schema, o
 	return nil
 }
 
-func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Snapshot, types []schema.TypeID, outputDir string) error {
+func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.Adapter, snapshot *graph.Snapshot, types []schema.TypeID, outputDir string) error {
 	staged, err := cli.NewStagedFiles(outputDir)
 	if err != nil {
 		return cli.Runtimef("%v", err)
@@ -200,7 +199,7 @@ func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Sn
 		return cli.Runtimef("write csv snapshot: %v", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "wrote %d CSV files to %s\n", len(types), outputDir)
+	sink.Statusf("wrote %d CSV files to %s\n", len(types), outputDir)
 	return nil
 }
 
@@ -274,5 +273,5 @@ func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
-	return writeExport(cmd, snap, s, target, outputPath, outputDir)
+	return writeExport(cmd, sink, snap, s, target, outputPath, outputDir)
 }

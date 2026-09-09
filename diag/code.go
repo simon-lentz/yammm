@@ -559,6 +559,14 @@ var (
 	// record stays data (the snapshot's unresolved records) rather than a
 	// diagnostic.
 	W_SNAPSHOT_UNRESOLVED_REQUIRED = NewCode("W_SNAPSHOT_UNRESOLVED_REQUIRED", CategorySnapshot)
+
+	// W_SNAPSHOT_PATH_EXTENSION indicates a snapshot was written to a path
+	// that does not end in .ys. The document is correct and the write
+	// succeeded; the warning exists because every reader that discovers
+	// snapshots by extension — a directory scan among them — will not find
+	// this one. Warning severity: the caller named the path deliberately, and
+	// refusing it would make a documented workflow fail rather than work.
+	W_SNAPSHOT_PATH_EXTENSION = NewCode("W_SNAPSHOT_PATH_EXTENSION", CategorySnapshot)
 )
 
 // AllCodes returns all registered diagnostic codes in registration order.

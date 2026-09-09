@@ -1817,6 +1817,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `W_SNAPSHOT_VALUE_NONCONFORMING` (Warning) — under `WithValueConformance`, a stored `Timestamp`, `Date` or `UUID` does not conform to its declared constraint
 - `W_SNAPSHOT_VALUE_DROPPED` (Warning) — the writer held a value the wire cannot carry at that position and did not write it. The document is well-formed; the warning names what is missing from it
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record for a required association
+- `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
 **Adapter** — format-specific errors. These are registered by the adapter packages, so they appear in `diag.AllCodes()` only once the package is linked:
 
@@ -1829,6 +1830,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_NEO4J_INVALID_INDEX_TARGET` — an index annotation targets an ineligible property
 - `W_NEO4J_NODE_KEY_UNSUPPORTED` (Warning) — NODE KEY is unavailable on this edition
 - `W_NEO4J_EDITION_CONSTRAINT_OMITTED` (Warning) — a constraint was omitted because the edition does not support it
+- `W_NEO4J_INDEXES_UNREADABLE` (Warning) — a comparison could not read the database's indexes, so the half needing them did not run. The constraint half is complete; a declaration whose name an index already holds reads as a create that will not take effect
 
 ## File Extension and Conventions
 

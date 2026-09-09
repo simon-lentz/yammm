@@ -50,7 +50,7 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 	}
 
 	// Parse, validate, and build graph
-	graphResult, _, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
+	graphResult, _, err := loadGraph(cmd, sink, s, dataPath, fromFormat, typeName, typeColumn)
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -104,7 +104,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	}
 	defer driver.Close(ctx)
 
-	state, err := fetchRemoteState(ctx, cli.DriverQueries(driver), database, os.Stderr)
+	state, err := fetchRemoteState(ctx, cli.DriverQueries(driver), database, sink)
 	if err != nil {
 		return err
 	}
@@ -148,6 +148,17 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	return nil
 }
 
+// indexesUnreadable reports a degraded index read as the diagnostic it is.
+//
+// Prose on a stream reached no --format json consumer in any form, and this is
+// the one message in the command that changes what its output means.
+func indexesUnreadable(cause error) diag.Result {
+	c := diag.NewCollectorUnlimited()
+	c.Collect(diag.NewIssue(diag.Warning, adaptern4j.W_NEO4J_INDEXES_UNREADABLE,
+		fmt.Sprintf("indexes could NOT be read (%v); a constraint whose name an index holds is reported as a create that will not take effect", cause)).Build())
+	return c.Result()
+}
+
 // remoteState is the database side of a diff: the constraints it reported, the
 // indexes it could report, and whether the index read failed.
 type remoteState struct {
@@ -156,14 +167,13 @@ type remoteState struct {
 	indexFailed bool
 }
 
-// fetchRemoteState reads both halves of the database side through run, writing
-// a degraded index read's warning to warn.
+// fetchRemoteState reads both halves of the database side through run,
+// reporting a degraded index read to sink.
 //
-// It takes the runner and the writer rather than a driver and os.Stderr so both
-// queries, both parsers, the projection check and the degraded path are
-// reachable without a server — the absence that left this whole command
-// unasserted past its --uri guard.
-func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string, warn io.Writer) (remoteState, error) {
+// It takes the runner rather than a driver so both queries, both parsers, the
+// projection check and the degraded path are reachable without a server — the
+// absence that left this whole command unasserted past its --uri guard.
+func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string, sink *cli.DiagnosticSink) (remoteState, error) {
 	records, err := run(ctx, database, adaptern4j.IntrospectConstraintsQuery(), nil)
 	if err != nil {
 		return remoteState{}, cli.Runtimef("fetch constraints: %v", err)
@@ -190,12 +200,12 @@ func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string,
 	indexRecords, indexErr := run(ctx, database, adaptern4j.IntrospectIndexesQuery(), nil)
 	switch {
 	case indexErr != nil:
-		fmt.Fprintf(warn, "warning: indexes could NOT be read (%v); a constraint whose name an index holds is reported as a create that will not take effect\n", indexErr)
+		sink.Add(indexesUnreadable(indexErr))
 		state.indexFailed = true
 	default:
 		parsed, parseErr := adaptern4j.ParseRemoteIndexes(indexRecords)
 		if parseErr != nil {
-			fmt.Fprintf(warn, "warning: indexes could NOT be read (parse indexes: %v); a constraint whose name an index holds is reported as a create that will not take effect\n", parseErr)
+			sink.Add(indexesUnreadable(fmt.Errorf("parse indexes: %w", parseErr)))
 			state.indexFailed = true
 			break
 		}

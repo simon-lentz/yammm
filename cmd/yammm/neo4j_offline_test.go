@@ -203,22 +203,20 @@ func TestIntrospectSchema_FailuresAreRuntime(t *testing.T) {
 	}
 }
 
-// TestFetchRemoteState_DegradesOnAnUnreadableIndexRead is the seam's other
-// half, and the one group 4 needs: a server that cannot report indexes must
-// leave the constraint reading intact and say the index half did not happen.
-//
-// The warning's destination is deliberately not asserted — it is prose on a
-// writer today and a diagnostic after A-426. What must hold either way is the
-// classification.
+// TestFetchRemoteState_DegradesOnAnUnreadableIndexRead: a server that cannot
+// report indexes must leave the constraint reading intact, say the index half
+// did not happen, and tell the operator so under a code a machine consumer can
+// match.
 func TestFetchRemoteState_DegradesOnAnUnreadableIndexRead(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name  string
 		index queryReply
+		cause string
 	}{
-		{"the index query fails", queryReply{err: errors.New("unsupported in this edition")}},
-		{"an index record has no name", queryReply{records: []map[string]any{{"type": "RANGE"}}}},
+		{"the index query fails", queryReply{err: errors.New("unsupported in this edition")}, "unsupported in this edition"},
+		{"an index record has no name", queryReply{records: []map[string]any{{"type": "RANGE"}}}, "parse indexes"},
 	}
 
 	for _, tt := range tests {
@@ -226,8 +224,9 @@ func TestFetchRemoteState_DegradesOnAnUnreadableIndexRead(t *testing.T) {
 			t.Parallel()
 			log := &queryLog{replies: []queryReply{{records: recordedConstraints()}, tt.index}}
 
-			var warn bytes.Buffer
-			state, err := fetchRemoteState(t.Context(), log.run, "neo4j", &warn)
+			var out bytes.Buffer
+			sink := cli.NewDiagnosticSink(&out, cli.FormatText, true, false)
+			state, err := fetchRemoteState(t.Context(), log.run, "neo4j", sink)
 			if err != nil {
 				t.Fatalf("a degraded index read must not fail the diff: %v", err)
 			}
@@ -238,8 +237,17 @@ func TestFetchRemoteState_DegradesOnAnUnreadableIndexRead(t *testing.T) {
 				t.Errorf("kept %d constraints, want %d — the constraint diff must survive",
 					len(state.constraints), len(recordedConstraints()))
 			}
-			if warn.Len() == 0 {
-				t.Error("a degraded read must tell the operator something")
+			if !sink.Result().HasCode(adaptern4j.W_NEO4J_INDEXES_UNREADABLE) {
+				t.Errorf("a degraded read must report %s; got: %s",
+					adaptern4j.W_NEO4J_INDEXES_UNREADABLE, sink.Result())
+			}
+			if sink.Result().HasErrors() {
+				t.Error("a degraded read is a warning, not a failure")
+			}
+			// The cause is the whole diagnostic value: an operator acts on
+			// "unsupported in this edition" and cannot act on "could not read".
+			if !strings.Contains(sink.Result().String(), tt.cause) {
+				t.Errorf("the warning does not name the cause %q; got: %s", tt.cause, sink.Result())
 			}
 		})
 	}
@@ -275,7 +283,8 @@ func TestFetchRemoteState_RefusesAnUnreadableProjection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			log := &queryLog{replies: tt.replies}
-			_, err := fetchRemoteState(t.Context(), log.run, "neo4j", &bytes.Buffer{})
+			sink := cli.NewDiagnosticSink(&bytes.Buffer{}, cli.FormatText, true, false)
+			_, err := fetchRemoteState(t.Context(), log.run, "neo4j", sink)
 			if err == nil {
 				t.Fatal("an unreadable type column must not be reported as a clean comparison")
 			}
@@ -302,8 +311,9 @@ func TestFetchRemoteState_ReadsBothHalvesWhenTheServerAnswers(t *testing.T) {
 	}
 	log := &queryLog{replies: []queryReply{{records: recordedConstraints()}, {records: indexes}}}
 
-	var warn bytes.Buffer
-	state, err := fetchRemoteState(t.Context(), log.run, "neo4j", &warn)
+	var out bytes.Buffer
+	sink := cli.NewDiagnosticSink(&out, cli.FormatText, true, false)
+	state, err := fetchRemoteState(t.Context(), log.run, "neo4j", sink)
 	if err != nil {
 		t.Fatalf("fetchRemoteState: %v", err)
 	}
@@ -314,8 +324,8 @@ func TestFetchRemoteState_ReadsBothHalvesWhenTheServerAnswers(t *testing.T) {
 		t.Errorf("read %d constraints and %d indexes, want %d and 1",
 			len(state.constraints), len(state.indexes), len(recordedConstraints()))
 	}
-	if warn.Len() != 0 {
-		t.Errorf("a clean read wrote a warning: %q", warn.String())
+	if sink.Result().Len() != 0 {
+		t.Errorf("a clean read reported %s", sink.Result())
 	}
 	if log.calls[1].query != adaptern4j.IntrospectIndexesQuery() {
 		t.Errorf("second query = %q, want the indexes projection", log.calls[1].query)

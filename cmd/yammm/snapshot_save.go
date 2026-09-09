@@ -148,10 +148,14 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// discarded exactly the facts those diagnostics exist to surface.
 	sink.Add(marshalResult)
 
-	// Warn on non-.ys extension.
-	w := cmd.ErrOrStderr()
+	// A path a reader that discovers snapshots by extension will not find is a
+	// fact about the artefact, so it travels as a diagnostic — prose here
+	// reached no --format json consumer in any form.
 	if !strings.HasSuffix(outputPath, ".ys") {
-		fmt.Fprintf(w, "warning: output path %q does not use the .ys extension\n", outputPath)
+		c := diag.NewCollectorUnlimited()
+		c.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_EXTENSION,
+			fmt.Sprintf("output path %q does not use the .ys extension", outputPath)).Build())
+		sink.Add(c.Result())
 	}
 
 	// Write file. One primitive whether or not --into named the same file: the
@@ -161,12 +165,14 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return cli.Runtimef("write output: %v", err)
 	}
 
-	// Print summary.
 	instanceCount := 0
 	for _, raws := range allParsed {
 		instanceCount += len(raws)
 	}
-	fmt.Fprintf(w, "saved snapshot: %d instances of %d types\n", instanceCount, len(allParsed))
+	// Every diagnostic this invocation can produce is in the sink by now, so
+	// rendering here keeps them above the line that says the work finished.
+	sink.Render()
+	sink.Statusf("saved snapshot: %d instances of %d types\n", instanceCount, len(allParsed))
 
 	return nil
 }

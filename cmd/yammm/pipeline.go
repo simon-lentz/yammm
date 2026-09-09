@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -16,7 +15,7 @@ import (
 
 // loadGraph runs the full pipeline: detect format, parse, validate, build graph.
 // Returns the merged diagnostic result, the graph (may be nil on error), and any I/O error.
-func loadGraph(cmd *cobra.Command, s *schema.Schema, dataPath, fromFormat, typeName, typeColumn string) (diag.Result, *graph.Graph, error) {
+func loadGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, dataPath, fromFormat, typeName, typeColumn string) (diag.Result, *graph.Graph, error) {
 	// Detect format
 	if fromFormat == "" {
 		var err error
@@ -55,14 +54,13 @@ func loadGraph(cmd *cobra.Command, s *schema.Schema, dataPath, fromFormat, typeN
 	// Merge all results
 	result := cli.MergeResults(parseResult, validateResult, graphResult)
 
-	// Print summary to stderr
 	if !result.HasErrors() {
 		typeCount := len(parsed)
 		instanceCount := 0
 		for _, raws := range parsed {
 			instanceCount += len(raws)
 		}
-		fmt.Fprintf(os.Stderr, "loaded %d instances of %d types\n", instanceCount, typeCount)
+		sink.Statusf("loaded %d instances of %d types\n", instanceCount, typeCount)
 	}
 
 	return result, g, nil

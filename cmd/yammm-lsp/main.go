@@ -48,13 +48,13 @@ func isCleanShutdown(err error) bool {
 }
 
 func main() {
-	if err := run(os.Stdout, os.Args[1:]); err != nil {
+	if err := run(os.Stdout, os.Stderr, os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "yammm-lsp: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(stdout io.Writer, args []string) error {
+func run(stdout, stderr io.Writer, args []string) error {
 	fs := flag.NewFlagSet("yammm-lsp", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // Suppress default output; we print usage ourselves
 
@@ -68,22 +68,25 @@ func run(stdout io.Writer, args []string) error {
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: yammm-lsp [options]\n\n")
-		fmt.Fprintf(os.Stderr, "YAMMM Language Server Protocol implementation.\n\n")
-		fmt.Fprintf(os.Stderr, "Options:\n")
-		// Temporarily set output to stderr for PrintDefaults, then restore.
-		// The flagset output is set to Discard above to suppress default flag
-		// error messages, but we want usage/help to be visible when explicitly requested.
-		fs.SetOutput(os.Stderr)
+		fmt.Fprintf(stderr, "Usage: yammm-lsp [options]\n\n")
+		fmt.Fprintf(stderr, "YAMMM Language Server Protocol implementation.\n\n")
+		fmt.Fprintf(stderr, "Options:\n")
+		// The flagset's own output is Discard so its error messages stay
+		// suppressed; PrintDefaults is the one thing that must be visible, so
+		// it borrows the writer and gives it back.
+		fs.SetOutput(stderr)
 		fs.PrintDefaults()
 		fs.SetOutput(io.Discard)
 	}
 
+	// flag calls Usage itself on both paths — ErrHelp and a parse failure — so
+	// calling it again here printed the whole option list twice for a bad flag
+	// and once for -help, the two disagreeing about what a usage error looks
+	// like.
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return nil // -help was requested, usage already printed
+			return nil
 		}
-		fs.Usage()
 		return fmt.Errorf("parse flags: %w", err)
 	}
 

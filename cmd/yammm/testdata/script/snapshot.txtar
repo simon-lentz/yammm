@@ -118,7 +118,10 @@ stderr 'E_SNAPSHOT_INCOMPATIBLE_SCHEMA'
 # --- update-metadata ---
 exec yammm snapshot save valid.yammm data.json -o um.ys -m phase=extract
 exec yammm snapshot update-metadata -s phase=link um.ys
-stdout 'updated metadata'
+# The summary is progress, so it goes to stderr where every other command's
+# does; stdout carries payloads and nothing else.
+stderr 'updated metadata'
+! stdout 'updated metadata'
 grep '"phase":"link"' um.ys
 
 exec yammm snapshot update-metadata -s phase=transform -s pipeline_completed=true um.ys

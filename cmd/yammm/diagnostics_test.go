@@ -287,6 +287,15 @@ func TestDiagnosticsPrecedeThePayload(t *testing.T) {
 			payload: `"Person"`,
 		},
 		{
+			name: "snapshot save, whose payload is its status line",
+			args: []string{
+				"snapshot", "save", "-o", filepath.Join(t.TempDir(), "made.snap"),
+				shadowedSchema, "testdata/annotation_shadowed_good.json",
+			},
+			first:   "W_SNAPSHOT_PATH_EXTENSION",
+			payload: "saved snapshot:",
+		},
+		{
 			name:    "gen",
 			args:    []string{"gen", "--to", "md", shadowedSchema},
 			first:   "W_ANNOTATION_SHADOWED",
@@ -393,6 +402,96 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 			_, _, stderr := executeCmdOutput(t, args...)
 			assertAtMostOneJSONDocument(t, stderr)
 		})
+	}
+}
+
+// TestStderrIsOneJSONDocumentOnSuccess is the invariant's other half, and the
+// one the command-writer harness cannot see: a status summary written straight
+// to the process stream sits beside the document and stops it parsing.
+//
+// It drives run(), so what it reads is the byte stream a shell redirect would
+// capture. Success paths only — a failure adds run()'s own "error: " line,
+// which is prose beside a document for a different reason and a different row.
+func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	snap := filepath.Join(dir, "made.ys")
+	notYS := filepath.Join(dir, "made.snap")
+	meta := filepath.Join(dir, "meta.ys")
+	copyFile(t, "testdata/valid_snapshot.ys", meta)
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"load, whose pipeline reports a count", []string{
+			"load", "--format", "json", shadowedSchema, "testdata/annotation_shadowed_good.json",
+		}},
+		{"snapshot save, whose summary follows the document", []string{
+			"snapshot", "save", "--format", "json", "-o", snap,
+			shadowedSchema, "testdata/annotation_shadowed_good.json",
+		}},
+		{"snapshot save onto a path that is not .ys", []string{
+			"snapshot", "save", "--format", "json", "-o", notYS,
+			shadowedSchema, "testdata/annotation_shadowed_good.json",
+		}},
+		{"export --output-dir, which reports a file count", []string{
+			"export", "--format", "json", "--to", "csv", "--output-dir", dir,
+			shadowedSchema, "testdata/annotation_shadowed_good.json",
+		}},
+		{"snapshot update-metadata, whose summary is a status line", []string{
+			"snapshot", "update-metadata", "--format", "json", "-s", "a=b", meta,
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, _, stderr := runCLI(t, tt.args...)
+			if code != cli.ExitOK {
+				t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
+			}
+			assertAtMostOneJSONDocument(t, stderr)
+		})
+	}
+}
+
+// TestStatusSummariesShareOneStream pins B51: update-metadata reported its
+// result on stdout where every other command reports progress on stderr, so a
+// caller redirecting the two apart got one command's summary in the payload
+// channel.
+func TestStatusSummariesShareOneStream(t *testing.T) {
+	dir := t.TempDir()
+	meta := filepath.Join(dir, "meta.ys")
+	copyFile(t, "testdata/valid_snapshot.ys", meta)
+
+	code, stdout, stderr := runCLI(t, "snapshot", "update-metadata", "-s", "env=prod", meta)
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "updated metadata") {
+		t.Errorf("the summary must reach stderr, where every other command reports progress; stderr:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "updated metadata") {
+		t.Errorf("stdout is the payload channel and carries no summary; stdout:\n%s", stdout)
+	}
+}
+
+// TestNonYSExtensionIsADiagnostic pins B23's warning half: a path that is not
+// .ys is a fact about the artefact, so it reaches a machine consumer as a coded
+// diagnostic rather than as prose no JSON reader can see.
+func TestNonYSExtensionIsADiagnostic(t *testing.T) {
+	t.Parallel()
+
+	out := filepath.Join(t.TempDir(), "made.snap")
+	code, _, stderr := executeCmdOutput(t, "snapshot", "save", "-o", out,
+		shadowedSchema, "testdata/annotation_shadowed_good.json")
+	if code != cli.ExitOK {
+		t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "W_SNAPSHOT_PATH_EXTENSION") {
+		t.Errorf("the extension warning must carry a code; stderr:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "warning[W_SNAPSHOT_PATH_EXTENSION]") {
+		t.Errorf("the path was named deliberately and the write succeeded, so this is a warning; stderr:\n%s", stderr)
 	}
 }
 

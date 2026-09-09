@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"maps"
 	"os"
 
@@ -102,6 +101,6 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 	}
 
 	sink.Render()
-	fmt.Fprintf(cmd.OutOrStdout(), "updated metadata on %s (%d keys)\n", path, len(newMeta))
+	sink.Statusf("updated metadata on %s (%d keys)\n", path, len(newMeta))
 	return nil
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -55,6 +56,20 @@ func (s *DiagnosticSink) Add(results ...diag.Result) {
 // result, so the code answers for every phase that diagnosed.
 func (s *DiagnosticSink) Result() diag.Result {
 	return MergeResults(s.results...)
+}
+
+// Statusf writes a progress line to the command's error stream, and nothing at
+// all under [FormatJSON].
+//
+// A status line reports progress rather than a fact about the artefact, so a
+// machine consumer is owed none of it — and one reaching stderr under
+// FormatJSON would sit beside the document and stop it parsing. A fact about
+// the artefact is a diagnostic instead, and goes through [DiagnosticSink.Add].
+func (s *DiagnosticSink) Statusf(format string, args ...any) {
+	if s.format == FormatJSON {
+		return
+	}
+	fmt.Fprintf(s.w, format, args...)
 }
 
 // Render writes this invocation's diagnostics, once. A second call writes
