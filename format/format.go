@@ -26,6 +26,7 @@ const (
 	kindSLComment   = "SL_COMMENT"
 	kindDocComment  = "DOC_COMMENT"
 	kindSTRING      = "STRING"
+	kindREGEXP      = "REGEXP"
 	kindLBRACE      = "LBRACE"
 	kindRBRACE      = "RBRACE"
 	kindLBRACK      = "LBRACK"
@@ -67,6 +68,23 @@ var lineEndingReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 // the node tree carries the extents and the syntax verdict but elides the
 // whitespace. LexAndParse returns both from a single lex.
 func TokenStream(text string) (string, error) {
+	ls, err := lexicalLines(text)
+	if err != nil {
+		return "", err
+	}
+	// The classification travels with the lines through every phase. Nothing
+	// downstream re-derives it, which is what makes the package doc's claim
+	// about one classification true.
+	ls = collapseBlankLines(ls)
+	ls = wrapLongLines(ls)
+	ls = alignColumns(ls)
+	return finalizeFormattedText(joinLines(ls)), nil
+}
+
+// lexicalLines runs phase 1 and returns its output as classified lines, each
+// carrying the lexer's own view of it. Recording during emission is what keeps
+// the later phases free of a second lex.
+func lexicalLines(text string) ([]line, error) {
 	normalized := lineEndingReplacer.Replace(text)
 
 	// Fail on syntax alone: a source that is semantically invalid but parses,
@@ -74,15 +92,14 @@ func TokenStream(text string) (string, error) {
 	file, allTokens, issues := parse.LexAndParse(normalized, location.SourceID{})
 	for _, iss := range issues {
 		if iss.Code().Category() == diag.CategorySyntax {
-			return "", fmt.Errorf("parse failed: %s", iss.Message())
+			return nil, fmt.Errorf("parse failed: %s", iss.Message())
 		}
 	}
 
 	ranges := invariantExpressionRanges(file)
 
-	var out strings.Builder
+	e := newEmitter()
 	var pendingWS strings.Builder
-	lineStart := true
 	indentLevel := 0
 	var prev *parse.Token
 	prevInExpr := false
@@ -100,10 +117,10 @@ func TokenStream(text string) (string, error) {
 		if tok.Kind == kindWS {
 			if inExpr {
 				if pendingWS.Len() > 0 {
-					writeExprWhitespace(&out, pendingWS.String(), &lineStart)
+					e.writeExprWhitespace(pendingWS.String())
 					pendingWS.Reset()
 				}
-				writeExprWhitespace(&out, tok.Value, &lineStart)
+				e.writeExprWhitespace(tok.Value)
 			} else {
 				pendingWS.WriteString(tok.Value)
 			}
@@ -121,21 +138,21 @@ func TokenStream(text string) (string, error) {
 					// Preserve the original whitespace so that the indent level
 					// (which only tracks brace depth) doesn't flatten it.
 					if strings.Contains(pendingStr, "\n") {
-						writeExprWhitespace(&out, pendingStr, &lineStart)
+						e.writeExprWhitespace(pendingStr)
 					} else {
 						sep := declarationSeparator(prev, tok, pendingStr, indentLevel, true)
-						writeText(&out, sep, &lineStart)
+						e.write(sep, chunkPlain)
 					}
 				} else {
-					writeExprWhitespace(&out, pendingStr, &lineStart)
+					e.writeExprWhitespace(pendingStr)
 				}
 				pendingWS.Reset()
 			} else if prev != nil && !prevInExpr {
 				sep := declarationSeparator(prev, tok, "", indentLevel, true)
-				writeText(&out, sep, &lineStart)
+				e.write(sep, chunkPlain)
 			}
 
-			writeTokenText(&out, tok, &lineStart)
+			e.writeToken(tok)
 			prev = tok
 			prevInExpr = true
 			continue
@@ -150,8 +167,8 @@ func TokenStream(text string) (string, error) {
 			sep = ""
 		}
 		pendingWS.Reset()
-		writeText(&out, sep, &lineStart)
-		writeTokenText(&out, tok, &lineStart)
+		e.write(sep, chunkPlain)
+		e.writeToken(tok)
 
 		if tok.Kind == kindLBRACE {
 			indentLevel++
@@ -168,10 +185,10 @@ func TokenStream(text string) (string, error) {
 	}
 
 	if pendingWS.Len() > 0 {
-		writeText(&out, pendingWS.String(), &lineStart)
+		e.write(pendingWS.String(), chunkPlain)
 	}
 
-	return finalizeFormattedText(AlignColumns(WrapLongLines(joinLines(collapseBlankLines(classifyText(out.String())))))), nil
+	return e.lines(), nil
 }
 
 // invariantExpressionRanges returns the byte extent of every invariant
@@ -405,17 +422,17 @@ func normalizeDocComment(text string) string {
 	return strings.Join(lines, "\n")
 }
 
-func writeExprWhitespace(out *strings.Builder, ws string, lineStart *bool) {
+// writeExprWhitespace preserves an expression's own spacing, normalizing only
+// the indentation that starts a line.
+func (e *emitter) writeExprWhitespace(ws string) {
 	if ws == "" {
 		return
 	}
 
-	var b strings.Builder
 	i := 0
 	for i < len(ws) {
 		if ws[i] == '\n' {
-			b.WriteByte('\n')
-			*lineStart = true
+			e.write("\n", chunkPlain)
 			i++
 			continue
 		}
@@ -425,31 +442,29 @@ func writeExprWhitespace(out *strings.Builder, ws string, lineStart *bool) {
 			j++
 		}
 		seg := ws[i:j]
-		if *lineStart {
-			b.WriteString(NormalizeIndentation(seg))
-		} else {
-			b.WriteString(seg)
+		if e.lineStart {
+			seg = NormalizeIndentation(seg)
 		}
+		e.write(seg, chunkPlain)
 		i = j
 	}
-
-	writeText(out, b.String(), lineStart)
 }
 
-func writeTokenText(out *strings.Builder, tok *parse.Token, lineStart *bool) {
+// writeToken emits one token, telling the emitter what kind it is so the line's
+// lexical record is built rather than guessed.
+func (e *emitter) writeToken(tok *parse.Token) {
 	text := tok.Value
-	if tok.Kind == kindDocComment {
+	kind := chunkPlain
+	switch tok.Kind {
+	case kindDocComment:
 		text = normalizeDocComment(text)
+		kind = chunkComment
+	case kindSLComment:
+		kind = chunkComment
+	case kindSTRING, kindREGEXP:
+		kind = chunkLiteral
 	}
-	writeText(out, text, lineStart)
-}
-
-func writeText(out *strings.Builder, text string, lineStart *bool) {
-	if text == "" {
-		return
-	}
-	out.WriteString(text)
-	*lineStart = updateLineStart(*lineStart, text)
+	e.write(text, kind)
 }
 
 func updateLineStart(lineStart bool, text string) bool {

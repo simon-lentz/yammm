@@ -14,12 +14,7 @@ import (
 // today. Every entry is asserted to still hold, so a repair turns this test red
 // and the entry moves rather than lapsing unnoticed.
 var knownBroken = map[string]roundTripDamage{
-	"g1_single_quoted_value_with_comma.yammm":    {kind: damageRefused, want: "formatting a single-quoted value must not split it at an interior comma"},
-	"g2_extends_header_trailing_comment.yammm":   {kind: damageRefused, want: "a trailing comment on an extends header must not absorb the parent list"},
-	"g3_comment_on_enum_value_line.yammm":        {kind: damageRefused, want: "a comment on an enum value line must not absorb the values after it"},
-	"g4_logical_op_in_trailing_comment.yammm":    {kind: damageRefused, want: "a wrap point must not be chosen inside a trailing comment"},
-	"g5_bracket_in_string_on_closing_line.yammm": {kind: damageAltered, want: "a bracket inside a string literal must not be read as the construct's terminator"},
-	"g11_annotated_enum_that_wraps.yammm":        {kind: damageRefused, want: "a wrapped property must not leave its annotation attached to nothing"},
+	"g11_annotated_enum_that_wraps.yammm": {kind: damageRefused, want: "a wrapped property must not leave its annotation attached to nothing"},
 }
 
 type damageKind int

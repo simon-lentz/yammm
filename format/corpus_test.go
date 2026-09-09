@@ -26,16 +26,20 @@ var unpairedByDesign = map[string]string{
 	"testdata/golden/unformatted.yammm": "irregular pair name; driven by TestTokenStream_GoldenFile",
 }
 
-// discoverPairs returns every input under testdata with a golden beside it.
+// discoverPairs returns every corpus input that owes a golden — which is every
+// input that is neither a round-trip fixture nor recorded in unpairedByDesign.
+// Membership does not depend on the golden existing, so a new fixture is run
+// (and, under -update, given its golden) rather than skipped for lacking one.
 // It fails on an empty result: a walk that matches nothing reports success
 // having formatted no fixture.
 func discoverPairs(t *testing.T) []string {
 	t.Helper()
 	var pairs []string
 	for _, in := range discoverInputs(t) {
-		if _, err := os.Stat(in + goldenSuffix); err == nil {
-			pairs = append(pairs, in)
+		if strings.HasPrefix(in, roundTripDir+"/") || unpairedByDesign[in] != "" {
+			continue
 		}
+		pairs = append(pairs, in)
 	}
 	if len(pairs) == 0 {
 		t.Fatalf("no golden pairs discovered under %s; the corpus walk is not reaching the fixtures", corpusRoot)
@@ -104,27 +108,12 @@ func TestTokenStream_CorpusPairs(t *testing.T) {
 	}
 }
 
-// TestCorpusIsFullyReached fails on a fixture no driver claims and on a golden
-// whose input is gone. Either one reads as coverage and asserts nothing.
+// TestCorpusIsFullyReached fails on a golden whose input is gone, which reads
+// as coverage and asserts nothing. The other direction — an input no driver
+// claims — cannot arise: discoverPairs claims everything that is not a
+// round-trip fixture or recorded unpaired.
 func TestCorpusIsFullyReached(t *testing.T) {
 	t.Parallel()
-
-	var orphans []string
-	for _, in := range discoverInputs(t) {
-		switch {
-		case strings.HasPrefix(in, roundTripDir+"/"):
-		case unpairedByDesign[in] != "":
-		default:
-			if _, err := os.Stat(in + goldenSuffix); err != nil {
-				orphans = append(orphans, in)
-			}
-		}
-	}
-	if len(orphans) > 0 {
-		t.Errorf("%d corpus input(s) reached by no driver — add a golden, move the file under %s, "+
-			"or record it in unpairedByDesign with the test that runs it:\n  %s",
-			len(orphans), roundTripDir, strings.Join(orphans, "\n  "))
-	}
 
 	for _, g := range discoverGoldens(t) {
 		// formatted.yammm.golden is unformatted.yammm's golden under an

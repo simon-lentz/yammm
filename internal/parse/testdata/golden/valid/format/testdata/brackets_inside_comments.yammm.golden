@@ -1,0 +1,98 @@
+{
+  "name": "\"g678\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 20,
+        "e": 21
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 31,
+              "e": 37
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 25,
+            "e": 45
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"a\"",
+              "\"b\""
+            ],
+            "span": {
+              "s": 53,
+              "e": 67
+            }
+          },
+          "span": {
+            "s": 47,
+            "e": 67
+          }
+        },
+        {
+          "name": "other",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 94,
+              "e": 100
+            }
+          },
+          "span": {
+            "s": 88,
+            "e": 100
+          }
+        },
+        {
+          "name": "third",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 134,
+              "e": 140
+            }
+          },
+          "span": {
+            "s": 128,
+            "e": 140
+          }
+        },
+        {
+          "name": "name",
+          "doc": "note\n\tcontinued",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 170,
+              "e": 176
+            }
+          },
+          "span": {
+            "s": 141,
+            "e": 176
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 178
+      }
+    }
+  ]
+}

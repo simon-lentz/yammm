@@ -1,0 +1,10 @@
+schema "g678"
+
+type T {
+	id    String primary
+	state Enum["a", "b"] // list[ of things
+	other String // see Enum["a" elsewhere
+	third String /* note
+	continued */
+	name  String
+}

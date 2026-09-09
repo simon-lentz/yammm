@@ -1,0 +1,9 @@
+schema "g12"
+
+type T {
+	id    String primary
+	left  Integer
+	right Integer
+
+	! 'a single-quoted invariant message that is long enough to need wrapping' $self.left > 0 && $self.right > 0 && $self.left < 1000
+}

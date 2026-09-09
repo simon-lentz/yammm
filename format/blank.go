@@ -57,14 +57,17 @@ func resultEndsWithBlank(result []line) bool {
 	return len(result) > 0 && result[len(result)-1].class == lineBlank
 }
 
-// prevNonBlankEndsWithBrace returns true if the previous non-blank result line
-// ends with '{'.
+// prevNonBlankEndsWithBrace reports whether the previous non-blank line's CODE
+// ends with '{'. Reading the code rather than the text is the whole rule: a
+// comment ending in a brace is not an opening brace. Skipping comment lines
+// outright would answer from the declaration above them instead, which deletes
+// a deliberate blank after a comment — the same harm, in a different shape.
 func prevNonBlankEndsWithBrace(result []line) bool {
 	for _, ln := range slices.Backward(result) {
 		if ln.class == lineBlank {
 			continue
 		}
-		return strings.HasSuffix(strings.TrimSpace(ln.text), "{")
+		return strings.HasSuffix(ln.trimmedCode(), "{")
 	}
 	return false
 }
@@ -76,7 +79,7 @@ func nextNonBlankStartsWithCloseBrace(ls []line, startIdx int) bool {
 		if ln.class == lineBlank {
 			continue
 		}
-		return strings.HasPrefix(strings.TrimSpace(ln.text), "}")
+		return strings.HasPrefix(ln.trimmedCode(), "}")
 	}
 	return false
 }
@@ -88,7 +91,7 @@ func ensureBlankAfterSchema(ls []line) []line {
 		if ln.class != lineContent {
 			continue
 		}
-		if !strings.HasPrefix(strings.TrimSpace(ln.text), "schema ") {
+		if !ln.declaresWith("schema") {
 			continue
 		}
 		if i+1 < len(ls) && ls[i+1].class != lineBlank {
@@ -107,7 +110,7 @@ func ensureBlankAfterLastImport(ls []line) []line {
 		if ln.class != lineContent {
 			continue
 		}
-		if strings.HasPrefix(strings.TrimSpace(ln.text), "import ") {
+		if ln.declaresWith("import") {
 			lastImportIdx = i
 		}
 	}

@@ -1,0 +1,15 @@
+schema "a413"
+
+type T {
+	id       String primary
+	import   String
+	type     String
+	extends  String
+	abstract String
+
+	// a grouping comment {
+
+	name String // this comment ends in a brace {
+
+	tail String
+}

@@ -1,0 +1,11 @@
+schema "p"
+
+type T {
+	id String primary
+
+	/*
+
+	} not a closing brace
+	*/
+	name String
+}

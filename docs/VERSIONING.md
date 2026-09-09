@@ -849,6 +849,58 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 - **`Marshal` returns Fatal `E_INTERNAL` and no bytes for a target key `graph.ParseKey` cannot read** (A-191), where v0.19.0 wrote the document with the address dropped and a `W_SNAPSHOT_VALUE_DROPPED` Warning. `UnresolvedEdge.TargetKey` is written from `immutable.Key.String()` on every library path, `graph.ParseKey` is its pinned inverse, and no consumer path supplies the string — so the branch guarded an event the module's own invariant excludes, and a broken invariant is an internal failure rather than a sampled warning. The one reachable input is caller-assembled `RebuildSnapshot` parts whose key holds a non-scalar component, which `Marshal`'s contract already assigns to Fatal `E_INTERNAL`. The two `W_SNAPSHOT_VALUE_DROPPED` arms for a target key or edge properties under an `absent`/`empty` reason are unchanged, and the code's own description is narrowed to them. Consumer cost is zero by absence: every key the consumer writes is a `String` primary key rendered by the library.
 
+## Unreleased — merged to `main`
+
+Condition-1 **unit 6** (the CLI and the formatter), pass A's fix pass. Written by
+the pass that lands the behaviour, not at the tag (A-227, A-346). **No exported
+declaration moves**, so `gorelease` reports nothing here; `format/` is excluded
+from the v1.0 Go-API compatibility promise in any case (see Scope). What moves is
+formatter *output*, and every item below was reproduced first-hand before the
+repair and is pinned by a fixture after it.
+
+**The formatter now computes its lexical view once, from the token stream, and
+every phase reads it.** Phases 2 to 4 had each re-derived comment and string
+boundaries from the emitted text with five separate hand-rolled scanners; those
+are retired and `format/scan.go` is deleted. The package doc's standing claim —
+that one line classification is computed once and no phase decides for itself
+whether a line is a comment — is true for the first time.
+
+**Behaviour changes, none of which moves a declaration:**
+
+- A single-quoted value is no longer split at a comma inside it. The lexer's
+  `STRING` rule admits both quote characters; the retired scanner tracked one.
+  Formatting such a schema produced output that did not parse.
+- A trailing comment on an `extends` header no longer absorbs the parent list.
+  The parents and the opening brace were folded into the comment and the output
+  did not parse; the parent list was unrecoverable from it.
+- A comment on an enum value line no longer absorbs the values after it. Such a
+  construct is now re-indented rather than folded onto one line.
+- A wrap point is no longer chosen inside a trailing comment, so a `&&` written
+  in prose no longer breaks the line there.
+- A `]` inside a string literal is no longer read as the enum's terminator. This
+  was the only silent one: the output parsed, loaded, and had a space injected
+  **inside an enum value**.
+- Brackets inside comments no longer count toward construct depth, so a `[` in a
+  comment no longer drags the rest of a type body into the construct and
+  re-indents it.
+- An invariant whose message is single-quoted is now visible to the wrapper; it
+  was skipped entirely by a literal `! "` prefix test.
+- A property legally named `import` no longer causes a blank line to be inserted
+  inside a type body. A declaration is told from a property by the string
+  literal that follows the keyword, not by a text prefix.
+- A comment that merely ends in `{` no longer deletes a deliberate blank line
+  after it, and a `}` inside a block comment no longer deletes one before it.
+- `type`, `schema`, `extends` and `abstract` are legal property names and no
+  longer break an alignment group into unpadded singletons. Only `as` and
+  `part`, which a type body actually refuses, stay denied.
+
+**Consumer reach: none measured.** rdata runs `go tool yammm fmt --write` in
+pre-commit, so it runs the formatter — but through a binary pinned by its own
+`go.mod`, which is `v0.20.0`. `format/` is byte-identical between `v0.20.0` and
+`v0.21.0`, so every defect above is live for that consumer today and none of
+these repairs reaches it until it moves its pin. Its six schemas were measured
+already canonical, so `--write` rewrites nothing there.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

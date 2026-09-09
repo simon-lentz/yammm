@@ -1,0 +1,121 @@
+{
+  "name": "\"a413\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 20,
+        "e": 21
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 28,
+              "e": 34
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 25,
+            "e": 42
+          }
+        },
+        {
+          "name": "import",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 51,
+              "e": 57
+            }
+          },
+          "span": {
+            "s": 44,
+            "e": 57
+          }
+        },
+        {
+          "name": "type",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 64,
+              "e": 70
+            }
+          },
+          "span": {
+            "s": 59,
+            "e": 70
+          }
+        },
+        {
+          "name": "extends",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 80,
+              "e": 86
+            }
+          },
+          "span": {
+            "s": 72,
+            "e": 86
+          }
+        },
+        {
+          "name": "abstract",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 97,
+              "e": 103
+            }
+          },
+          "span": {
+            "s": 88,
+            "e": 103
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 137,
+              "e": 143
+            }
+          },
+          "span": {
+            "s": 132,
+            "e": 143
+          }
+        },
+        {
+          "name": "tail",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 185,
+              "e": 191
+            }
+          },
+          "span": {
+            "s": 180,
+            "e": 191
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 193
+      }
+    }
+  ]
+}
