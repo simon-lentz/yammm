@@ -50,3 +50,24 @@ func TestSnapshotUpdateMetadata_MalformedInput(t *testing.T) {
 	code := executeCmd(t, "snapshot", "update-metadata", "-s", "k=v", tmp)
 	assert.Equal(t, cli.ExitValidation, code)
 }
+
+// TestSnapshotUpdateMetadata_SummaryCountsTheKeys pins B58. The summary's key
+// count was asserted nowhere, so it could report any number: the operator's one
+// confirmation that a --set landed and an --unset removed said nothing.
+func TestSnapshotUpdateMetadata_SummaryCountsTheKeys(t *testing.T) {
+	t.Parallel()
+
+	ysPath := createYSFixtureWithMetadata(t, t.TempDir())
+
+	// The fixture carries one key; --set adds two more.
+	code, _, errOut := executeCmdOutput(t, "snapshot", "update-metadata",
+		"-s", "env=prod", "-s", "owner=simon", ysPath)
+	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
+	assert.Contains(t, errOut, "(3 keys)", "the summary counts what the header now holds")
+
+	// Removing two leaves one, so a hard-coded count cannot satisfy both.
+	code, _, errOut = executeCmdOutput(t, "snapshot", "update-metadata",
+		"--unset", "env", "--unset", "owner", ysPath)
+	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
+	assert.Contains(t, errOut, "(1 keys)", "the summary counts what remains after an unset")
+}

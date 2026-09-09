@@ -21,9 +21,11 @@ Global flags:
               document per stream and suppresses its status summary.
   --no-color  Disable ANSI color in diagnostic output.
 
-Data commands (check, load, export) also accept:
-  --from    Data input format override: "json" or "csv".
-            Auto-detected from file extension when not specified.`,
+Data commands (check, load, export, snapshot save) also accept:
+  --from         Data input format override: "json" or "csv".
+                 Auto-detected from the file extension when not specified.
+  --type         Type name for single-type CSV data.
+  --type-column  Column naming each row's type, for multi-type CSV.`,
 		Version:       version,
 		SilenceErrors: true,
 		SilenceUsage:  true,

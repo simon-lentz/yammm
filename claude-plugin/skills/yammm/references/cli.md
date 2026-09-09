@@ -159,7 +159,7 @@ yammm snapshot update-metadata --set env=prod --set version=3 output.ys
 yammm snapshot update-metadata --unset env output.ys
 ```
 
-Rewrites metadata on an existing `.ys` file. Uses a fast path that reuses the snapshot body when possible; when it cannot, it falls back to a full load + re-marshal and reports `W_UPDATE_METADATA_FALLBACK`.
+Rewrites metadata on an existing `.ys` file. It reuses the snapshot body verbatim and recomputes only the integrity hash. There is no fallback: the command calls the strict primitive, so a document the fast path cannot rewrite is reported and the command exits non-zero rather than re-serializing. `created_at` is preserved byte for byte.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -316,8 +316,14 @@ Infers a `.yammm` schema from a live Neo4j database by reading constraints and r
 ```bash
 yammm neo4j constraints schema.yammm > constraints.cypher
 yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
-yammm export --to cypher schema.yammm data.json | cypher-shell -u neo4j
+yammm export --to cypher schema.yammm data.json --output load.cypher
 ```
+
+The `--to cypher` output is parameterized — `UNWIND`/`MERGE` with `$key_id`,
+`$props` and `$rows` placeholders — so it is written for inspection and for
+integration into application or migration code. It is **not** directly
+executable in `cypher-shell` or Neo4j Browser; running it there fails on the
+unbound parameters.
 
 ---
 

@@ -32,7 +32,7 @@ Use --timestamp to include a creation timestamp.`,
 		RunE: withDiagnostics(runSnapshotSave),
 	}
 
-	cmd.Flags().StringP("output", "o", "", "output path for the .ys file (required)")
+	cmd.Flags().StringP("output", "o", "", "output path for the .ys file (required unless --into is given, which defaults it to the merged file)")
 	cmd.Flags().String("from", "", "input format override: json or csv (auto-detected if not set)")
 	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
 	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
