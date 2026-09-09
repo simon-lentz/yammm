@@ -19,33 +19,30 @@ type tokenRange struct {
 
 // The token kinds the pair rules below name. They are the rule names the
 // parser's lexer table spells, matched by value because that table is
-// keywordless — a keyword arrives as an ordinary word and is told apart by its
-// text, exactly as isKeywordWithRequiredSpaceAfter does.
+// keywordless: a keyword arrives as an ordinary word and is told apart by its
+// text.
 const (
-	kindWS          = "WS"
-	kindSLComment   = "SL_COMMENT"
-	kindDocComment  = "DOC_COMMENT"
-	kindSTRING      = "STRING"
-	kindREGEXP      = "REGEXP"
-	kindLBRACE      = "LBRACE"
-	kindRBRACE      = "RBRACE"
-	kindLBRACK      = "LBRACK"
-	kindRBRACK      = "RBRACK"
-	kindLPAR        = "LPAR"
-	kindRPAR        = "RPAR"
-	kindAT          = "AT"
-	kindATAT        = "ATAT"
-	kindASSOC       = "ASSOC"
-	kindCOMP        = "COMP"
-	kindEXCLAMATION = "EXCLAMATION"
-	kindSLASH       = "SLASH"
-	kindEQUALS      = "EQUALS"
-	kindPERIOD      = "PERIOD"
-	kindCOMMA       = "COMMA"
-	kindMINUS       = "MINUS"
-	kindCOLON       = "COLON"
-	kindLT          = "LT"
-	kindGT          = "GT"
+	kindWS         = "WS"
+	kindSLComment  = "SL_COMMENT"
+	kindDocComment = "DOC_COMMENT"
+	kindSTRING     = "STRING"
+	kindREGEXP     = "REGEXP"
+	kindLBRACE     = "LBRACE"
+	kindRBRACE     = "RBRACE"
+	kindLBRACK     = "LBRACK"
+	kindRBRACK     = "RBRACK"
+	kindLPAR       = "LPAR"
+	kindRPAR       = "RPAR"
+	kindAT         = "AT"
+	kindATAT       = "ATAT"
+	kindSLASH      = "SLASH"
+	kindEQUALS     = "EQUALS"
+	kindPERIOD     = "PERIOD"
+	kindCOMMA      = "COMMA"
+	kindMINUS      = "MINUS"
+	kindCOLON      = "COLON"
+	kindLT         = "LT"
+	kindGT         = "GT"
 )
 
 type spacingAction int
@@ -321,13 +318,6 @@ func declarationSpacingAction(prev *parse.Token, curr *parse.Token) spacingActio
 		return spacingNone
 	}
 
-	// Specific pair rules.
-	if prevType == kindEXCLAMATION && currType == kindSTRING {
-		return spacingSpace
-	}
-	if prevType == kindASSOC || prevType == kindCOMP {
-		return spacingSpace
-	}
 	if currType == kindLBRACE {
 		return spacingSpace
 	}
@@ -378,20 +368,7 @@ func declarationSpacingAction(prev *parse.Token, curr *parse.Token) spacingActio
 		}
 		return spacingSpace
 	}
-	if isKeywordWithRequiredSpaceAfter(prev.Value) {
-		return spacingSpace
-	}
-
 	return spacingSpace
-}
-
-func isKeywordWithRequiredSpaceAfter(text string) bool {
-	switch text {
-	case "type", "schema", "import", "as", "extends", "abstract", "part":
-		return true
-	default:
-		return false
-	}
 }
 
 func isConstraintBracketLeft(text string) bool {

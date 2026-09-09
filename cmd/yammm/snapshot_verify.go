@@ -16,8 +16,10 @@ func newSnapshotVerifyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "verify <schema.yammm> <snapshot.ys>",
 		Short: "Validate a snapshot file against a schema",
-		Long: `Validate a .ys file without loading the full snapshot into memory.
+		Long: `Validate a .ys file without materialising the snapshot.
 Checks schema compatibility, structural integrity, and edge references.
+No snapshot and no instance objects are built. The file is read whole, so
+peak memory scales with the document's size.
 
 Exit code 0 if valid. Exit code 1 if errors are found.
 Warnings are rendered to stderr.`,

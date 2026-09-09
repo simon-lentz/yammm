@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -442,17 +443,18 @@ func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, 
 			continue
 		}
 		// Surface the first error code and message.
-		var code, msg string
+		var code diag.Code
+		var msg string
 		for iss := range entry.Result.Errors() {
-			code = iss.Code().String()
+			code = iss.Code()
 			msg = iss.Message()
 			break
 		}
 		switch code {
-		case "E_SNAPSHOT_MALFORMED":
+		case diag.E_SNAPSHOT_MALFORMED:
 			malformedCount++
 			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", entry.Name, "malformed", code, msg)
-		case "E_SNAPSHOT_IO":
+		case diag.E_SNAPSHOT_IO:
 			ioCount++
 			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", entry.Name, "io-error", code, msg)
 		default:

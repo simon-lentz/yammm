@@ -866,3 +866,24 @@ func TestWrapLongLines_ExactlyAtThreshold(t *testing.T) {
 	result := WrapLongLines(line)
 	assert.Equal(t, line, result, "line at exactly 100 chars should NOT be wrapped")
 }
+
+// TestTokenStream_SpacingAfterExclamationAndRelationArrows pins the spacing the
+// "specific pair rules" used to state as branches that returned the same value
+// as the function's default. The behaviour is what matters, and a branch that
+// cannot change an outcome does not state it — this test does.
+func TestTokenStream_SpacingAfterExclamationAndRelationArrows(t *testing.T) {
+	t.Parallel()
+
+	src := "schema \"test\"\n\ntype T {\n\tid String primary\n\t! \"id must be set\" id != \"\"\n\t--> OWNS (one) T\n\t*-> HAS (many) T\n}\n"
+
+	out, err := TokenStream(src)
+	if err != nil {
+		t.Fatalf("TokenStream: %v", err)
+	}
+
+	for _, want := range []string{`! "id must be set"`, "--> OWNS", "*-> HAS"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("spacing lost for %q:\n%s", want, out)
+		}
+	}
+}

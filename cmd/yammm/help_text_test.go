@@ -80,3 +80,22 @@ func TestSnapshotSaveHelp_MatchesTheCommandsOwnCheck(t *testing.T) {
 		t.Errorf("with neither --output nor --into the exit code = %d, want %d", code, cli.ExitUsage)
 	}
 }
+
+// TestSnapshotVerifyHelp_DoesNotPromiseMemoryTheLibraryDisclaims pins the
+// verify command's Long text against [snapshot.Verify]'s own contract. The
+// help promised validation "without loading the full snapshot into memory"
+// while the library's godoc states it decodes the instances section first, so
+// peak memory scales with the document's size — a claim the operator would
+// size a machine against.
+func TestSnapshotVerifyHelp_DoesNotPromiseMemoryTheLibraryDisclaims(t *testing.T) {
+	t.Parallel()
+
+	out := helpText(t, "snapshot", "verify")
+
+	if strings.Contains(out, "without loading the full snapshot into memory") {
+		t.Errorf("the help promises a memory property snapshot.Verify's godoc disclaims:\n%s", out)
+	}
+	if !strings.Contains(out, "without materialising the snapshot") {
+		t.Errorf("the help no longer states what verify actually avoids building:\n%s", out)
+	}
+}

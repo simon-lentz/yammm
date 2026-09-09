@@ -135,7 +135,7 @@ func allContent(ls []line) bool {
 }
 
 // reindentConstruct re-emits a multiline bracket or extends construct that
-// holds a comment line in its canonical shape: the first line as it is,
+// holds a comment or blank line in its canonical shape: the first line as it is,
 // interior lines one level deeper than it, and a closing "]" or "{" line
 // at its indentation. Comment lines keep their text and take their place.
 func reindentConstruct(ls []line) []line {
@@ -300,12 +300,12 @@ func buildWrappedEnum(indent, prefix string, values []string, suffix string) []s
 
 // buildSingleLineEnum emits a single-line Enum. No trailing comma in single-line form.
 func buildSingleLineEnum(prefix string, values []string, suffix string) string {
-	line := prefix + strings.Join(values, ", ") + "]"
+	single := prefix + strings.Join(values, ", ") + "]"
 	suffix = strings.TrimSpace(suffix)
 	if suffix != "" {
-		line += " " + suffix
+		single += " " + suffix
 	}
-	return line
+	return single
 }
 
 // tryWrapSingleLineEnum attempts to wrap a long single-line Enum property.
@@ -372,8 +372,9 @@ func tryCollapseEnum(collectedLines []line) []line {
 	firstLine := collected[0]
 	indent := extractIndent(firstLine)
 
-	// Find Enum[ in first line
-	enumIdx := strings.Index(firstLine, "Enum[")
+	// The Enum[ is the one in the code. An "Enum[" inside a literal or a
+	// comment is data, and slicing the prefix at it truncates the line.
+	enumIdx := enumBracketIndex(collectedLines[0])
 	if enumIdx < 0 {
 		return collectedLines
 	}
@@ -465,11 +466,7 @@ func isMultilineExtendsStart(ln line) bool {
 		return false
 	}
 	// Must NOT contain `{` — that's the multiline indicator
-	if strings.Contains(trimmed, "{") {
-		return false
-	}
-	// Must end with either the extends keyword or a type list (no `{`)
-	return true
+	return !strings.Contains(trimmed, "{")
 }
 
 // extractExtendsInfo parses a single-line extends declaration into components.
@@ -672,13 +669,13 @@ func isMultilineInvariantStart(ls []line, idx int) bool {
 	if idx >= len(ls) {
 		return false
 	}
-	line := ls[idx].text
-	trimmed := strings.TrimSpace(line)
+	text := ls[idx].text
+	trimmed := strings.TrimSpace(text)
 	msgEnd, ok := invariantMessageEnd(ls[idx])
 	if !ok {
 		return false
 	}
-	rel := msgEnd - (len(line) - len(strings.TrimLeft(line, "\t ")))
+	rel := msgEnd - (len(text) - len(strings.TrimLeft(text, "\t ")))
 	if rel < 0 || rel > len(trimmed) {
 		return false
 	}
@@ -696,7 +693,7 @@ func isMultilineInvariantStart(ls []line, idx int) bool {
 		return false
 	}
 
-	currentIndent := len(extractIndent(line))
+	currentIndent := len(extractIndent(text))
 	nextLine := ls[idx+1].text
 	nextTrimmed := strings.TrimSpace(nextLine)
 	nextIndent := len(extractIndent(nextLine))
