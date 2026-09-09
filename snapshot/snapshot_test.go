@@ -579,6 +579,51 @@ func TestHeaderOnly_WithCreatedAt(t *testing.T) {
 	assert.Equal(t, "2026-04-16T14:30:00Z", header.CreatedAt, "CreatedAt should round-trip as RFC 3339")
 }
 
+// TestWithCreatedAtFrom_CarriesBytesVerbatim pins why the option takes a
+// header rather than a time: a foreign created_at carrying a sub-second part
+// and an offset does not survive a parse-and-reformat, and rewriting it is not
+// this package's to do.
+func TestWithCreatedAtFrom_CarriesBytesVerbatim(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	const foreign = "2026-01-01T12:00:00.123456+02:00"
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap,
+		snapshot.WithCreatedAtFrom(&snapshot.HeaderInfo{CreatedAt: foreign}))
+
+	header, result := snapshot.HeaderOnly(ctx, data)
+	require.NoError(t, result.Err())
+	assert.Equal(t, foreign, header.CreatedAt, "the header's bytes are carried, not reformatted")
+
+	// The comparison that makes the point: the parsed route loses both.
+	parsed, err := time.Parse(time.RFC3339, foreign)
+	require.NoError(t, err)
+	viaParse, _ := snapshot.Marshal(ctx, snap, snapshot.WithCreatedAt(parsed))
+	lossy, result := snapshot.HeaderOnly(ctx, viaParse)
+	require.NoError(t, result.Err())
+	assert.NotEqual(t, foreign, lossy.CreatedAt, "WithCreatedAt is the lossy route this option exists to avoid")
+}
+
+// TestWithCreatedAtFrom_NilHeaderSetsNothing pins the documented nil contract:
+// it sets nothing, rather than clearing what an earlier option set.
+func TestWithCreatedAtFrom_NilHeaderSetsNothing(t *testing.T) {
+	s := testSchema(t)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"}))
+
+	const kept = "2026-01-01T12:00:00.123456+02:00"
+	ctx := context.Background()
+	data, _ := snapshot.Marshal(ctx, snap,
+		snapshot.WithCreatedAtFrom(&snapshot.HeaderInfo{CreatedAt: kept}),
+		snapshot.WithCreatedAtFrom(nil))
+
+	header, result := snapshot.HeaderOnly(ctx, data)
+	require.NoError(t, result.Err())
+	assert.Equal(t, kept, header.CreatedAt, "a nil header sets nothing; it does not clear")
+}
+
 func TestHeaderOnly_CreatedAtOmitted(t *testing.T) {
 	s := testSchema(t)
 	snap := buildSnapshot(t, s,

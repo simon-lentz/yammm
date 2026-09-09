@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"time"
@@ -91,8 +92,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// verified, and it reaches the operator whether or not this command gets as
 	// far as writing anything.
 	var g *graph.Graph
+	var imported *snapshot.HeaderInfo
 	if intoPath != "" {
-		snap, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
+		snap, header, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
 		if loadErr != nil {
 			return cli.Runtimef("%v", loadErr)
 		}
@@ -101,6 +103,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 		g = graph.NewFromSnapshot(s, snap)
+		imported = header
 	}
 
 	// Parse all data files.
@@ -129,14 +132,19 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	snap := g.Snapshot()
 
 	var opts []snapshot.Option
-	if timestamp {
+	switch {
+	case timestamp:
 		opts = append(opts, snapshot.WithCreatedAt(time.Now()))
+	case imported != nil:
+		// Exclusive, not additive: WithCreatedAtFrom wins over WithCreatedAt,
+		// so appending both would make --timestamp silently do nothing.
+		opts = append(opts, snapshot.WithCreatedAtFrom(imported))
 	}
 	if indent {
 		opts = append(opts, snapshot.WithIndent("\t"))
 	}
-	if len(metadata) > 0 {
-		opts = append(opts, snapshot.WithMetadata(metadata))
+	if merged := mergeMetadata(imported, metadata); len(merged) > 0 {
+		opts = append(opts, snapshot.WithMetadata(merged))
 	}
 
 	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
@@ -165,16 +173,36 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return cli.Runtimef("write output: %v", err)
 	}
 
-	instanceCount := 0
-	for _, raws := range allParsed {
-		instanceCount += len(raws)
-	}
 	// Every diagnostic this invocation can produce is in the sink by now, so
 	// rendering here keeps them above the line that says the work finished.
 	sink.Render()
-	sink.Statusf("saved snapshot: %d instances of %d types\n", instanceCount, len(allParsed))
+	instanceCount, typeCount := countSnapshot(snap)
+	sink.Statusf("saved snapshot: %d instances of %d types\n", instanceCount, typeCount)
 
 	return nil
+}
+
+// countSnapshot counts what the written document holds. Counting the parsed
+// input instead described a merge by the files it read, so `--into` reported a
+// number no reader of the result could reproduce.
+func countSnapshot(snap *graph.Snapshot) (instances, types int) {
+	ids := snap.Types()
+	for _, id := range ids {
+		instances += len(snap.InstancesOf(id))
+	}
+	return instances, len(ids)
+}
+
+// mergeMetadata overlays flag pairs onto the imported header's. The header's
+// annotations survive a merge that does not name them, and a flag wins on a
+// key that appears in both.
+func mergeMetadata(imported *snapshot.HeaderInfo, flags map[string]string) map[string]string {
+	merged := make(map[string]string, len(flags))
+	if imported != nil {
+		maps.Copy(merged, imported.Metadata)
+	}
+	maps.Copy(merged, flags)
+	return merged
 }
 
 // addInstancesToGraph adds validated instances to an existing graph and runs

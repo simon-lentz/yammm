@@ -262,7 +262,7 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 // operator must read it before the export lands, which is why the render is
 // explicit rather than left to the wrapper.
 func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, dataPath, target, outputPath, outputDir string) error {
-	snap, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
+	snap, _, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
 	if err != nil {
 		return cli.Runtimef("%v", err)
 	}

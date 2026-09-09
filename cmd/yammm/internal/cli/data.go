@@ -176,15 +176,22 @@ func IsSnapshotFile(path string) (bool, error) {
 	return key == "yammm_snapshot", nil
 }
 
-// LoadSnapshotFile reads a .ys file and loads it into a [*graph.Snapshot].
+// LoadSnapshotFile reads a .ys file and loads it into a [*graph.Snapshot],
+// beside the header that document carries.
 //
-// Returns (T, diag.Result, error) following the CLI helper convention:
-// error captures I/O failures, diag.Result captures semantic issues.
-func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, diag.Result, error) {
+// The header comes back because [graph.Snapshot] exposes no metadata or
+// created_at accessor, so a caller re-marshaling what it read has no other
+// route to it; it is nil when the header cannot be parsed. Returns
+// (T, diag.Result, error) following the CLI helper convention: error captures
+// I/O failures, diag.Result captures semantic issues.
+func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, *snapshot.HeaderInfo, diag.Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
+		return nil, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
 	}
 	snap, result := snapshot.Load(ctx, data, s, opts...)
-	return snap, result, nil
+	// Load reports everything this read can, so its diagnostics are dropped
+	// rather than merged: returning both reports one document's issues twice.
+	header, _ := snapshot.HeaderOnly(ctx, data)
+	return snap, header, result, nil
 }

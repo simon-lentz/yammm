@@ -1002,6 +1002,38 @@ its tree — its only mention names the command as human tooling.
   so the same directory reported `1` as text and `0` as JSON — and the machine
   consumer `--format json` exists for read the silent code.
 
+**One exported declaration is ADDED: `snapshot.WithCreatedAtFrom(*HeaderInfo)`.**
+`gorelease -base=v0.21.0` reports three compatible changes and no incompatible
+ones — this one and the two diagnostic codes above.
+
+- It writes the header's `created_at` into the new document byte for byte, for a
+  caller re-marshaling a document it has read. `WithCreatedAt` takes a
+  `time.Time` and cannot express a value it cannot parse and re-render:
+  `HeaderInfo.CreatedAtTime`'s own documentation warns that a time passed back
+  through `WithCreatedAt` does not round-trip its sub-second part, and an offset
+  is normalised to UTC. Measured: `2026-01-01T12:00:00.123456+02:00` becomes
+  `2026-01-01T10:00:00Z`.
+- It takes a parsed header rather than a string because an `Option` cannot
+  report an error, so a bad value would surface only as a `Marshal` diagnostic
+  far from the call site.
+- A header yammm itself wrote is unaffected either way — `Marshal` writes
+  `created_at` at second precision in UTC — so this matters only for a document
+  another writer produced.
+
+**`yammm snapshot save --into` carries the imported header forward.** A merge
+discarded the header's `metadata` and `created_at` and wrote a document with
+neither, which for `--into` with `-o` defaulted — an in-place edit — silently
+erased both. Now the header's `created_at` is carried byte for byte through the
+option above, `--timestamp` replaces it, `--metadata` overlays the header's
+annotations key by key, and a key the flags do not name survives. The
+attestation was never discarded and is untouched: `Graph.Snapshot` derives that
+claim rather than reading it from the header.
+
+**The `snapshot save` summary counts the document it wrote**, not the data files
+it read. A merge reported `saved snapshot: 1 instances of 1 types` over a file
+holding four, so the number described the input and no reader of the result
+could reproduce it.
+
 **Behaviour changes to the text output:**
 
 - **Metadata renders in key order** in both `snapshot info` and
