@@ -24,7 +24,7 @@ Use --set key=value to set or override a metadata key (repeatable).
 Use --unset key to remove a metadata key (repeatable).
 At least one --set or --unset is required.
 
-The write is atomic via snapshot.WriteFile (tmp+fsync+rename).
+The write is atomic (tmp+fsync+rename) and preserves the file's mode.
 
 This command uses the strict fast path and surfaces an
 E_UPDATE_METADATA_BODY_OFFSET diagnostic if the input does not match a
@@ -104,7 +104,7 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string) error {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
-	if err := snapshot.WriteFile(path, out); err != nil {
+	if err := cli.WriteFile(path, out); err != nil {
 		return cli.Runtimef("write %q: %v", path, err)
 	}
 

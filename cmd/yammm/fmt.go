@@ -84,12 +84,7 @@ func fmtPath(cmd *cobra.Command, path string, write, check bool) error {
 			return nil // already formatted
 		}
 
-		info, err := os.Stat(path)
-		if err != nil {
-			return err
-		}
-
-		if err := os.WriteFile(path, []byte(formatted), info.Mode().Perm()); err != nil {
+		if err := cli.WriteFile(path, []byte(formatted)); err != nil {
 			return err
 		}
 		return nil

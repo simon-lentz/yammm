@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -182,47 +183,31 @@ func exportCSV(cmd *cobra.Command, snapshot *graph.Snapshot, _ *schema.Schema, o
 		return cli.Runtimef("marshal csv: %v", err)
 	}
 
-	w := cmd.OutOrStdout()
-	if outputPath != "" {
-		f, err := os.Create(outputPath)
-		if err != nil {
-			return cli.Runtimef("create output file: %v", err)
-		}
-		defer f.Close()
-		w = f
-	}
-
+	var out []byte
 	for _, typeData := range data {
-		if _, err := w.Write(typeData); err != nil {
-			return cli.Runtimef("write csv: %v", err)
-		}
+		out = append(out, typeData...)
+	}
+	if err := cli.WriteTo(out, outputPath, cmd.OutOrStdout()); err != nil {
+		return cli.Runtimef("write csv: %v", err)
 	}
 	return nil
 }
 
 func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Snapshot, types []schema.TypeID, outputDir string) error {
-	if err := os.MkdirAll(outputDir, 0o750); err != nil {
-		return cli.Runtimef("create output directory: %v", err)
+	staged, err := cli.NewStagedFiles(outputDir)
+	if err != nil {
+		return cli.Runtimef("%v", err)
 	}
-
-	var files []*os.File
-	defer func() {
-		for _, f := range files {
-			_ = f.Close()
-		}
-	}()
+	defer staged.Rollback()
 
 	writerFor := func(typeName string) (io.Writer, error) {
-		path := filepath.Join(outputDir, typeName+".csv")
-		f, err := os.Create(path)
-		if err != nil {
-			return nil, err
-		}
-		files = append(files, f)
-		return f, nil
+		return staged.Create(typeName + ".csv")
 	}
 
 	if err := adapter.WriteSnapshot(cmd.Context(), writerFor, snapshot); err != nil {
+		return cli.Runtimef("write csv snapshot: %v", err)
+	}
+	if err := staged.Commit(); err != nil {
 		return cli.Runtimef("write csv snapshot: %v", err)
 	}
 
@@ -253,34 +238,32 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 		return cli.Runtimef("generate edge queries: %v", err)
 	}
 
-	w := cmd.OutOrStdout()
-	if outputPath != "" {
-		f, err := os.Create(outputPath)
-		if err != nil {
-			return cli.Runtimef("create output file: %v", err)
-		}
-		defer f.Close()
-		w = f
-	}
+	// Rendered whole before anything is written: the queries are already in
+	// memory, so buffering costs nothing and makes the write one checked
+	// operation rather than a run of unchecked Fprintf calls.
+	var buf bytes.Buffer
 
 	// Write node queries, a phase marker at each Kind boundary.
 	lastKind := adaptern4j.NodeQueryKind(-1)
 	for _, nq := range nodeQueries {
 		if nq.Kind != lastKind {
-			fmt.Fprintf(w, "// -- %s --\n", nq.Kind)
+			fmt.Fprintf(&buf, "// -- %s --\n", nq.Kind)
 			lastKind = nq.Kind
 		}
-		fmt.Fprintln(w, nq.Statement)
-		fmt.Fprintln(w)
+		fmt.Fprintln(&buf, nq.Statement)
+		fmt.Fprintln(&buf)
 	}
 
 	// Write edge queries
 	for _, eq := range edgeQueries {
-		fmt.Fprintf(w, "// %s\n", eq.RelationType)
-		fmt.Fprintln(w, eq.Statement)
-		fmt.Fprintln(w)
+		fmt.Fprintf(&buf, "// %s\n", eq.RelationType)
+		fmt.Fprintln(&buf, eq.Statement)
+		fmt.Fprintln(&buf)
 	}
 
+	if err := cli.WriteTo(buf.Bytes(), outputPath, cmd.OutOrStdout()); err != nil {
+		return cli.Runtimef("write output: %v", err)
+	}
 	return nil
 }
 

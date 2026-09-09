@@ -133,7 +133,7 @@ func MergeResults(results ...diag.Result) diag.Result {
 // WriteTo writes data to the specified path, or to w if path is empty.
 func WriteTo(data []byte, path string, w io.Writer) error {
 	if path != "" {
-		return os.WriteFile(path, data, 0o600)
+		return WriteFile(path, data)
 	}
 	_, err := w.Write(data)
 	return err

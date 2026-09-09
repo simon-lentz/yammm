@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -169,8 +168,10 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(w, "warning: output path %q does not use the .ys extension\n", outputPath)
 	}
 
-	// Write file.
-	if err := writeOutput(data, outputPath, intoPath); err != nil {
+	// Write file. One primitive whether or not --into named the same file: the
+	// old string-equality guard chose the atomic path only when the two flags
+	// spelled the path identically.
+	if err := cli.WriteFile(outputPath, data); err != nil {
 		return cli.Runtimef("write output: %v", err)
 	}
 
@@ -195,43 +196,6 @@ func addInstancesToGraph(ctx context.Context, g *graph.Graph, valids []*instance
 	checkResult := g.Check(ctx)
 	collector.Merge(checkResult)
 	return collector.Result()
-}
-
-// writeOutput writes data to outputPath. When --into and --output point to the
-// same file, uses atomic write (temp file + rename) to prevent data loss.
-func writeOutput(data []byte, outputPath, intoPath string) error {
-	if intoPath != "" && outputPath == intoPath {
-		return atomicWrite(data, outputPath)
-	}
-	return os.WriteFile(outputPath, data, 0o600)
-}
-
-// atomicWrite writes data to a temp file in the same directory, then renames
-// it to the target path. This prevents data loss if the process crashes.
-func atomicWrite(data []byte, path string) (retErr error) {
-	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".yammm-save-*.ys")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		if retErr != nil {
-			_ = tmpFile.Close()
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename temp file: %w", err)
-	}
-	return nil
 }
 
 // parseDataFiles parses multiple data files into a merged instance map.
