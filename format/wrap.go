@@ -306,6 +306,15 @@ func tryWrapSingleLineEnum(ln line) ([]string, bool) {
 
 	indent := extractIndent(ln.text)
 
+	// A modifier on the closing "]" line is legal; an ANNOTATION there is not —
+	// it parses and then fails to load, because it attaches to nothing. There is
+	// no legal multiline placement for it, so the only correct answer is to
+	// leave the line long. Declining costs a wide line; wrapping costs a schema
+	// that no longer loads.
+	if ln.hasAnnotationFrom(len(ln.text) - len(afterBracket)) {
+		return nil, false
+	}
+
 	// The record says where the comment starts; afterBracket is the tail of the
 	// line, so the offset rebases by the length of everything before it.
 	comment := ""
@@ -606,6 +615,9 @@ func tryWrapDatatypeAliasEnum(ln line) ([]string, bool) {
 
 	indent := extractIndent(ln.text)
 
+	// No refusal is needed here: an annotated datatype alias is a syntax error
+	// (measured at both @ and @@), and the formatter only ever sees input that
+	// parsed, so the shape cannot reach this function.
 	// Aliases carry no modifier, but may carry a comment.
 	comment := ""
 	rest := strings.TrimSpace(afterBracket)

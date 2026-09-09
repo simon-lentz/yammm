@@ -893,6 +893,12 @@ whether a line is a comment — is true for the first time.
 - `type`, `schema`, `extends` and `abstract` are legal property names and no
   longer break an alignment group into unpadded singletons. Only `as` and
   `part`, which a type body actually refuses, stay denied.
+- A long enum property carrying an **annotation** is no longer wrapped. Wrapping
+  moved the annotation onto the closing `]` line, where it attaches to nothing:
+  the output parsed and then failed to load with `E_INVALID_ANNOTATION`. A
+  **modifier** on that line is legal and still wraps, so the two are not
+  interchangeable. The line stays over the width threshold, which is the lesser
+  harm.
 
 **Consumer reach: none measured.** rdata runs `go tool yammm fmt --write` in
 pre-commit, so it runs the formatter — but through a binary pinned by its own

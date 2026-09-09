@@ -10,36 +10,12 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// knownBroken maps a round-trip fixture to the damage the formatter does to it
-// today. Every entry is asserted to still hold, so a repair turns this test red
-// and the entry moves rather than lapsing unnoticed.
-var knownBroken = map[string]roundTripDamage{
-	"g11_annotated_enum_that_wraps.yammm": {kind: damageRefused, want: "a wrapped property must not leave its annotation attached to nothing"},
-}
-
-type damageKind int
-
-const (
-	// damageRefused: the formatted text no longer parses or no longer loads.
-	damageRefused damageKind = iota
-	// damageAltered: the formatted text loads and means something else.
-	damageAltered
-)
-
-type roundTripDamage struct {
-	kind damageKind
-	want string
-}
-
-func (d damageKind) String() string {
-	if d == damageAltered {
-		return "loads but the structural hash moved"
-	}
-	return "no longer loads"
-}
-
 // TestTokenStream_CorpusRoundTrip pins what formatting does to a schema that
-// loads clean. A golden is the wrong instrument here: it records whatever the
+// loads clean: the output must load, mean the same thing, and be a fixed point.
+// Every fixture here is a schema the formatter once corrupted, kept as a
+// regression pin.
+//
+// A golden is the wrong instrument for these — it records whatever the
 // formatter emits, so it passes on corrupt output and locks the corruption in.
 // The oracle is the structural hash, which catches a value the formatter
 // changed without breaking the parse.
@@ -47,11 +23,10 @@ func TestTokenStream_CorpusRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	fixtures := discoverRoundTrip(t)
-	t.Logf("discovered %d round-trip fixtures, %d recorded broken", len(fixtures), len(knownBroken))
+	t.Logf("discovered %d round-trip fixtures", len(fixtures))
 
 	for _, path := range fixtures {
-		name := strings.TrimPrefix(path, roundTripDir+"/")
-		t.Run(name, func(t *testing.T) {
+		t.Run(strings.TrimPrefix(path, roundTripDir+"/"), func(t *testing.T) {
 			t.Parallel()
 
 			src, err := os.ReadFile(path)
@@ -68,49 +43,21 @@ func TestTokenStream_CorpusRoundTrip(t *testing.T) {
 				t.Fatalf("TokenStream returned an error: %v", err)
 			}
 			after, loaded := loadHash(t, out)
+			if !loaded {
+				t.Fatalf("formatting turned a loading schema into one that does not load:\n%s", out)
+			}
+			if after != before {
+				t.Errorf("formatting changed the schema's meaning: hash %s -> %s\n%s", before, after, out)
+			}
 
-			damage, recorded := knownBroken[name]
-			switch {
-			case !recorded:
-				if !loaded {
-					t.Errorf("formatting turned a loading schema into one that does not load:\n%s", out)
-					return
-				}
-				if after != before {
-					t.Errorf("formatting changed the schema's meaning: hash %s -> %s\n%s", before, after, out)
-				}
-			case damage.kind == damageRefused:
-				if loaded {
-					t.Errorf("recorded as %q but the output loads now — remove the knownBroken entry; the repair is %s",
-						damage.kind, damage.want)
-				}
-			case damage.kind == damageAltered:
-				if !loaded {
-					t.Errorf("recorded as %q but the output no longer loads at all", damage.kind)
-					return
-				}
-				if after == before {
-					t.Errorf("recorded as %q but the hash is unchanged now — remove the knownBroken entry; the repair is %s",
-						damage.kind, damage.want)
-				}
+			second, err := format.TokenStream(out)
+			if err != nil {
+				t.Fatalf("TokenStream returned an error on its own output: %v", err)
+			}
+			if second != out {
+				t.Errorf("formatting is not idempotent")
 			}
 		})
-	}
-}
-
-// TestKnownBrokenNamesLiveFixtures fails on an entry naming no fixture, which
-// would silently assert nothing about anything.
-func TestKnownBrokenNamesLiveFixtures(t *testing.T) {
-	t.Parallel()
-
-	live := make(map[string]bool, len(knownBroken))
-	for _, p := range discoverRoundTrip(t) {
-		live[strings.TrimPrefix(p, roundTripDir+"/")] = true
-	}
-	for name := range knownBroken {
-		if !live[name] {
-			t.Errorf("knownBroken names %q, which is not a fixture under %s", name, roundTripDir)
-		}
 	}
 }
 

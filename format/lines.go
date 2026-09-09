@@ -108,6 +108,12 @@ func (ln line) trimmedCode() string {
 	return strings.TrimSpace(m[:min(ln.codeEnd(), len(m))])
 }
 
+// hasAnnotationFrom reports an annotation sigil in the line's code at or after
+// off. It reads the mask, so an "@" inside a string or a comment is not one.
+func (ln line) hasAnnotationFrom(off int) bool {
+	return strings.ContainsRune(ln.maskedSub(off, len(ln.text)), '@')
+}
+
 // maskedSub returns the mask of ln[start:end], for a rule that scans one region
 // of a line and then slices the real text at the offsets it found.
 func (ln line) maskedSub(start, end int) string {
