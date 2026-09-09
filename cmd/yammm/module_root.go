@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -23,8 +21,8 @@ func registerModuleRootFlag(cmd *cobra.Command) {
 // moduleRootOptions reads --module-root back as the absolute root and the
 // load option carrying it. An unset flag yields "" and no option, so the
 // loader discovers the root: the nearest ancestor holding a yammm.mod, else
-// the schema's directory. It reports a usage error for a root that cannot be
-// made absolute, having already written the message.
+// the schema's directory. It returns a usage error for a root that cannot be
+// made absolute.
 func moduleRootOptions(cmd *cobra.Command) (string, []schema.LoadOption, error) {
 	root, _ := cmd.Flags().GetString("module-root")
 	if root == "" {
@@ -32,8 +30,7 @@ func moduleRootOptions(cmd *cobra.Command) (string, []schema.LoadOption, error) 
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve module root %q: %v\n", root, err)
-		return "", nil, &cli.ExitError{Code: cli.ExitUsage}
+		return "", nil, cli.Usagef("resolve module root %q: %v", root, err)
 	}
 	return abs, []schema.LoadOption{schema.WithModuleRoot(abs)}, nil
 }

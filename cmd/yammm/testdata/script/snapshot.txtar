@@ -100,8 +100,10 @@ stdout '"name"'
 stdout '"header"'
 stdout '"mod_time": "[0-9]{4}-[0-9]{2}-[0-9]{2}T'
 
+# A corrupt entry fails the scan, as the same file named on its own does, and
+# the summary still reports every entry.
 cp corrupt.txt snaps/corrupt.ys
-exec yammm snapshot info --dir snaps
+! exec yammm snapshot info --dir snaps
 stdout 'corrupt\.ys'
 stdout 'malformed'
 stdout 'Summary: 2 ok, 1 malformed'

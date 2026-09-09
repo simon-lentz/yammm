@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -47,8 +45,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", schemaPath, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", schemaPath, err)
 	}
 
 	// Load schema
@@ -57,17 +54,16 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
+	if loadErr != nil {
+		return loadErr
 	}
 
 	// Detect format
 	if fromFormat == "" {
 		fromFormat, err = cli.DetectFormat(dataPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return &cli.ExitError{Code: cli.ExitUsage}
+			return err
 		}
 	}
 
@@ -80,18 +76,15 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		parsed, parseResult, err = cli.LoadAndParseJSON(cmd.Context(), dataPath)
 	case "csv":
 		if typeName == "" && typeColumn == "" {
-			fmt.Fprintf(os.Stderr, "error: CSV data requires --type or --type-column flag\n")
-			return &cli.ExitError{Code: cli.ExitUsage}
+			return cli.Usagef("CSV data requires --type or --type-column flag")
 		}
 		parsed, parseResult, err = cli.LoadAndParseCSV(cmd.Context(), dataPath, typeName, typeColumn, s)
 	default:
-		fmt.Fprintf(os.Stderr, "error: unsupported format %q\n", fromFormat)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("unsupported format %q", fromFormat)
 	}
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return err
 	}
 
 	// Validate instances

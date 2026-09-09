@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -79,8 +77,7 @@ func rejectInapplicableFlags(cmd *cobra.Command, target string) error {
 	}
 	for _, pf := range perTarget {
 		if pf.target != target && cmd.Flags().Changed(pf.flag) {
-			fmt.Fprintf(os.Stderr, "error: flag --%s applies only to --to %s\n", pf.flag, pf.target)
-			return &cli.ExitError{Code: cli.ExitUsage}
+			return cli.Usagef("flag --%s applies only to --to %s", pf.flag, pf.target)
 		}
 	}
 	return nil
@@ -102,8 +99,7 @@ func runGen(cmd *cobra.Command, args []string) error {
 		target = "md"
 	}
 	if target != "go" && target != "jsonschema" && target != "md" {
-		fmt.Fprintf(os.Stderr, "error: unsupported gen target %q: must be go, jsonschema, or md\n", toFormat)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("unsupported gen target %q: must be go, jsonschema, or md", toFormat)
 	}
 	if err := rejectInapplicableFlags(cmd, target); err != nil {
 		return err
@@ -111,8 +107,7 @@ func runGen(cmd *cobra.Command, args []string) error {
 
 	absSchemaPath, err := filepath.Abs(args[0])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", args[0], err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", args[0], err)
 	}
 
 	moduleRootAbs, loadOpts, err := moduleRootOptions(cmd)
@@ -120,9 +115,9 @@ func runGen(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRootAbs, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRootAbs, absSchemaPath, schemaResult)
+	if loadErr != nil {
+		return loadErr
 	}
 	// The load's residual warnings are this command's only diagnostics — nothing
 	// downstream reports through diag — so they render here, once.
@@ -156,13 +151,11 @@ func runGen(cmd *cobra.Command, args []string) error {
 			markdown.WithClassMembers(!noMembers))
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: generate %s: %v\n", target, err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("generate %s: %v", target, err)
 	}
 
 	if err := cli.WriteTo(data, outputPath, cmd.OutOrStdout()); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write output: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("write output: %v", err)
 	}
 	return nil
 }

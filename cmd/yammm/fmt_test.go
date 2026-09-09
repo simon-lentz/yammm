@@ -109,7 +109,7 @@ func TestFmt_MultiplePathsConcatenateToStdout(t *testing.T) {
 
 // TestFmtCheck_UnreadablePathDoesNotStopTheList pins both halves of the list
 // contract: an unreadable path does not suppress the offenders after it, and
-// its usage code outranks the validation code they produce.
+// its I/O code outranks the validation code they produce.
 func TestFmtCheck_UnreadablePathDoesNotStopTheList(t *testing.T) {
 	t.Parallel()
 
@@ -121,8 +121,8 @@ func TestFmtCheck_UnreadablePathDoesNotStopTheList(t *testing.T) {
 	}
 
 	code, out, _ := executeCmdOutput(t, "fmt", "--check", missing, dirty)
-	if code != cli.ExitUsage {
-		t.Errorf("exit code = %d, want %d (usage outranks validation)", code, cli.ExitUsage)
+	if code != cli.ExitRuntime {
+		t.Errorf("exit code = %d, want %d (an I/O failure outranks validation)", code, cli.ExitRuntime)
 	}
 	if out != dirty+"\n" {
 		t.Errorf("output = %q, want the readable offender after the unreadable path", out)

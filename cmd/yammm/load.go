@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -45,8 +44,7 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	dataPath := args[1]
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", schemaPath, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", schemaPath, err)
 	}
 
 	// Load schema
@@ -55,16 +53,15 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
+	if loadErr != nil {
+		return loadErr
 	}
 
 	// Parse, validate, and build graph
 	graphResult, _, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return err
 	}
 
 	// Render diagnostics — the load's residual warnings folded in, so one
@@ -95,7 +92,8 @@ func renderDiagnostics(cmd *cobra.Command, outputFormat cli.OutputFormat, noColo
 }
 
 // reportSchemaLoad reports whether a schema load failed, rendering its
-// diagnostics when it did.
+// diagnostics when it did and returning the exit code they earn — an
+// unreadable schema file is an I/O failure, not a validation one.
 //
 // On success it renders NOTHING and returns the load's residual diagnostics for
 // the caller to fold into the one result it renders (via [cli.MergeResults]).
@@ -119,12 +117,12 @@ func reportSchemaLoad(
 	s *schema.Schema,
 	explicitRoot, absSchemaPath string,
 	result diag.Result,
-) (pending diag.Result, failed bool) {
+) (pending diag.Result, err error) {
 	if result.HasErrors() {
 		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, explicitRoot, absSchemaPath), result)
-		return diag.OK(), true
+		return diag.OK(), &cli.ExitError{Code: cli.ExitForResult(result)}
 	}
-	return result, false
+	return result, nil
 }
 
 // diagRootFor selects the root that rendered diagnostic locations are

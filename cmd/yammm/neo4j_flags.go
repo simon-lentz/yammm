@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -49,8 +47,7 @@ func labelOptions(cmd *cobra.Command) []neo4j.Option {
 }
 
 // constraintOptions reads the label AND constraint-shape flags back into
-// adapter options. It reports a usage error for an unrecognised edition, having
-// already written the message.
+// adapter options. It returns a usage error for an unrecognised edition.
 func constraintOptions(cmd *cobra.Command) ([]neo4j.Option, error) {
 	named, _ := cmd.Flags().GetBool("named")
 	edition, _ := cmd.Flags().GetString("edition")
@@ -73,8 +70,7 @@ func constraintOptions(cmd *cobra.Command) ([]neo4j.Option, error) {
 	case "community":
 		opts = append(opts, neo4j.WithEdition(neo4j.Community))
 	default:
-		fmt.Fprintf(os.Stderr, "error: invalid edition %q: must be \"enterprise\" or \"community\"\n", edition)
-		return nil, &cli.ExitError{Code: cli.ExitUsage}
+		return nil, cli.Usagef("invalid edition %q: must be %q or %q", edition, "enterprise", "community")
 	}
 	return opts, nil
 }

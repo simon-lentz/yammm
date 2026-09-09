@@ -1,9 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
@@ -33,9 +30,16 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string) error {
 	schemaFilter, _ := cmd.Flags().GetString("schema")
 	outputPath, _ := cmd.Flags().GetString("output")
 
+	// The flag set is validated before the connection guard. With the guard
+	// first, an invalid --format exited 2 for the wrong reason, which reads as
+	// this command validating a flag it never looks at.
+	formatStr, _ := cmd.Flags().GetString("format")
+	if _, err := cli.ParseOutputFormat(formatStr); err != nil {
+		return err
+	}
+
 	if uri == "" {
-		fmt.Fprintf(os.Stderr, "error: --uri is required (or set YAMMM_NEO4J_URI)\n")
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")
 	}
 
 	ctx := cmd.Context()
@@ -43,22 +47,19 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string) error {
 	// Connect to database
 	driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("%v", err)
 	}
 	defer driver.Close(ctx)
 
 	// Fetch constraints
 	constraintRecords, err := cli.RunQuery(ctx, driver, database, adaptern4j.IntrospectConstraintsQuery(), nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: fetch constraints: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("fetch constraints: %v", err)
 	}
 
 	constraints, err := adaptern4j.ParseRemoteConstraints(constraintRecords)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: parse constraints: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("parse constraints: %v", err)
 	}
 
 	// Fetch relationships
@@ -66,14 +67,12 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string) error {
 	relQuery, relParams := adapter.IntrospectRelationshipsQueryFor(schemaFilter)
 	relRecords, err := cli.RunQuery(ctx, driver, database, relQuery, relParams)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: fetch relationships: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("fetch relationships: %v", err)
 	}
 
 	relationships, err := adaptern4j.ParseRemoteRelationships(relRecords)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: parse relationships: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("parse relationships: %v", err)
 	}
 
 	// A starting point for a human to edit, not a schema expected to load:
@@ -84,8 +83,7 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string) error {
 
 	// Write output
 	if err := cli.WriteTo([]byte(dsl), outputPath, cmd.OutOrStdout()); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write output: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("write output: %v", err)
 	}
 
 	return nil

@@ -165,19 +165,6 @@ func TestRenderResult_JSON_SurfacesTruncationOnOKResult(t *testing.T) {
 	assert.Contains(t, buf.String(), `"droppedCount":2`)
 }
 
-func TestExitError(t *testing.T) {
-	t.Parallel()
-
-	e := &ExitError{Code: ExitValidation}
-	assert.Equal(t, "validation errors found", e.Error())
-
-	e2 := &ExitError{Code: ExitUsage}
-	assert.Equal(t, "usage error", e2.Error())
-
-	e3 := &ExitError{Code: ExitRuntime}
-	assert.Equal(t, "runtime error", e3.Error())
-}
-
 // A warnings-only result renders. A load warning exists because the loader chose
 // not to reject, so gating rendering on error severity would make every warning
 // unreachable from the CLI — including the only signal that an inherited

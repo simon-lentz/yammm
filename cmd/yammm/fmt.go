@@ -29,78 +29,73 @@ func newFmtCmd() *cobra.Command {
 
 // runFmt formats every path in argument order. A failure on one path does not
 // stop the list, so one invocation reports every offender — what a pre-commit
-// hook over a file list needs. The exit code is the most severe one any path
-// produced, with a usage failure outranking a validation failure, so it does not
-// depend on the order the paths were given in.
+// hook over a file list needs — and the exit code is the most severe any path
+// produced rather than the last or the numerically largest.
 func runFmt(cmd *cobra.Command, args []string) error {
 	write, _ := cmd.Flags().GetBool("write")
 	check, _ := cmd.Flags().GetBool("check")
+
+	// The whole flag set is validated before any path is opened, so a
+	// misconfigured invocation fails without having half-formatted a list.
+	formatStr, _ := cmd.Flags().GetString("format")
+	if _, err := cli.ParseOutputFormat(formatStr); err != nil {
+		return err
+	}
 
 	// Hand-rolled rather than cobra's MarkFlagsMutuallyExclusive: the root sets
 	// SilenceErrors and SilenceUsage, so cobra's own flag validation exits 2
 	// printing nothing at all, and a hook misconfigured with both flags would
 	// fail with no diagnosis.
 	if check && write {
-		fmt.Fprintln(os.Stderr, "error: --check and --write are mutually exclusive")
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("--check and --write are mutually exclusive")
 	}
 
-	worst := cli.ExitOK
+	errs := make([]error, 0, len(args))
 	for _, path := range args {
-		if code := fmtPath(cmd, path, write, check); code > worst {
-			// ExitUsage (2) outranks ExitValidation (1) by value, which is the
-			// precedence this needs.
-			worst = code
-		}
+		errs = append(errs, fmtPath(cmd, path, write, check))
 	}
-	if worst != cli.ExitOK {
-		return &cli.ExitError{Code: worst}
-	}
-	return nil
+	return cli.JoinExitErrors(errs...)
 }
 
-// fmtPath formats one path and returns the exit code it contributes.
-func fmtPath(cmd *cobra.Command, path string, write, check bool) int {
+// fmtPath formats one path and reports what went wrong with it, or nil.
+func fmtPath(cmd *cobra.Command, path string, write, check bool) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return cli.ExitUsage
+		return err
 	}
 
 	formatted, err := format.TokenStream(string(content))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s: %v\n", path, err)
-		return cli.ExitValidation
+		return cli.Validationf("%s: %v", path, err)
 	}
 
 	switch {
 	case check:
 		if formatted == string(content) {
-			return cli.ExitOK
+			return nil
 		}
-		// gofmt -l: the path alone, nothing else.
+		// gofmt -l: the path alone, nothing else — so the failure carries the
+		// code and no message.
 		fmt.Fprintln(cmd.OutOrStdout(), path)
-		return cli.ExitValidation
+		return &cli.ExitError{Code: cli.ExitValidation}
 
 	case write:
 		if formatted == string(content) {
-			return cli.ExitOK // already formatted
+			return nil // already formatted
 		}
 
 		info, err := os.Stat(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: stat %s: %v\n", path, err)
-			return cli.ExitUsage
+			return err
 		}
 
 		if err := os.WriteFile(path, []byte(formatted), info.Mode().Perm()); err != nil {
-			fmt.Fprintf(os.Stderr, "error: write %s: %v\n", path, err)
-			return cli.ExitValidation
+			return err
 		}
-		return cli.ExitOK
+		return nil
 
 	default:
 		fmt.Fprint(cmd.OutOrStdout(), formatted)
-		return cli.ExitOK
+		return nil
 	}
 }

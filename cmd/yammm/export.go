@@ -60,12 +60,16 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	target := strings.ToLower(toFormat)
+	if err := validateExportFlags(toFormat, target, outputPath, outputDir); err != nil {
+		return err
+	}
+
 	schemaPath := args[0]
 	dataPath := args[1]
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", schemaPath, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", schemaPath, err)
 	}
 
 	// Load schema
@@ -74,27 +78,25 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
+	if loadErr != nil {
+		return loadErr
 	}
 
 	// Check if the data file is a persisted snapshot.
 	isSnapshot, err := cli.IsSnapshotFile(dataPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: read data file: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("read data file: %v", err)
 	}
 
 	if isSnapshot {
-		return exportFromSnapshot(cmd, s, pending, dataPath, outputFormat, noColor, moduleRoot, absSchemaPath, toFormat, outputPath, outputDir)
+		return exportFromSnapshot(cmd, s, pending, dataPath, outputFormat, noColor, moduleRoot, absSchemaPath, target, outputPath, outputDir)
 	}
 
 	// Parse, validate, and build graph
 	graphResult, g, err := loadGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return err
 	}
 
 	// One invocation writes one result: the load's residual warnings fold into
@@ -105,33 +107,54 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
-	snapshot := g.Snapshot()
+	return writeExport(cmd, g.Snapshot(), s, target, outputPath, outputDir)
+}
 
-	// Export
-	switch strings.ToLower(toFormat) {
-	case "json":
-		return exportJSON(cmd, snapshot, outputPath)
-	case "csv":
-		return exportCSV(cmd, snapshot, s, outputPath, outputDir)
-	case "cypher":
-		return exportCypher(cmd, snapshot, s, outputPath)
+// validateExportFlags refuses a contradictory or inapplicable flag set before
+// any work runs.
+//
+// Every one of these was previously discovered after the schema had loaded, the
+// data had parsed and validated, the graph had been built and diagnostics had
+// rendered — so an operator read a page of progress and then a usage error, or
+// read no error at all because the flag was silently ignored and the output
+// went somewhere else.
+func validateExportFlags(raw, target, outputPath, outputDir string) error {
+	switch target {
+	case "json", "csv", "cypher":
 	default:
-		fmt.Fprintf(os.Stderr, "error: unsupported export format %q: must be json, csv, or cypher\n", toFormat)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("unsupported export format %q: must be json, csv, or cypher", raw)
+	}
+	if outputPath != "" && outputDir != "" {
+		return cli.Usagef("--output and --output-dir are mutually exclusive")
+	}
+	if outputDir != "" && target != "csv" {
+		return cli.Usagef("--output-dir applies only to --to csv")
+	}
+	return nil
+}
+
+// writeExport routes a snapshot to the adapter for target, which
+// [validateExportFlags] has already admitted.
+func writeExport(cmd *cobra.Command, snap *graph.Snapshot, s *schema.Schema, target, outputPath, outputDir string) error {
+	switch target {
+	case "json":
+		return exportJSON(cmd, snap, outputPath)
+	case "csv":
+		return exportCSV(cmd, snap, s, outputPath, outputDir)
+	default:
+		return exportCypher(cmd, snap, s, outputPath)
 	}
 }
 
 func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string) error {
 	data, err := adapterjson.New().MarshalObject(cmd.Context(), snapshot, adapterjson.WithIndent("\t"))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("marshal json: %v", err)
 	}
 	data = append(data, '\n')
 
 	if err := cli.WriteTo(data, outputPath, cmd.OutOrStdout()); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write output: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("write output: %v", err)
 	}
 	return nil
 }
@@ -146,44 +169,40 @@ func exportCSV(cmd *cobra.Command, snapshot *graph.Snapshot, _ *schema.Schema, o
 		return exportCSVToDir(cmd, adapter, snapshot, types, outputDir)
 	}
 
-	// Single type or --output: write to one destination
-	if len(types) <= 1 || outputPath != "" {
-		data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: marshal csv: %v\n", err)
-			return &cli.ExitError{Code: cli.ExitRuntime}
-		}
-
-		// If only one type, write it
-		w := cmd.OutOrStdout()
-		if outputPath != "" {
-			f, err := os.Create(outputPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: create output file: %v\n", err)
-				return &cli.ExitError{Code: cli.ExitRuntime}
-			}
-			defer f.Close()
-			w = f
-		}
-
-		for _, typeData := range data {
-			if _, err := w.Write(typeData); err != nil {
-				fmt.Fprintf(os.Stderr, "error: write csv: %v\n", err)
-				return &cli.ExitError{Code: cli.ExitRuntime}
-			}
-		}
-		return nil
+	// One destination holds one type. --output does not change that: the
+	// adapter emits a header row per type, so several types written to one file
+	// interleave into a document no CSV reader can read back, in an order that
+	// varies between runs.
+	if len(types) > 1 {
+		return cli.Usagef("CSV export with multiple types requires --output-dir")
 	}
 
-	// Multi-type without --output-dir
-	fmt.Fprintf(os.Stderr, "error: CSV export with multiple types requires --output-dir\n")
-	return &cli.ExitError{Code: cli.ExitUsage}
+	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
+	if err != nil {
+		return cli.Runtimef("marshal csv: %v", err)
+	}
+
+	w := cmd.OutOrStdout()
+	if outputPath != "" {
+		f, err := os.Create(outputPath)
+		if err != nil {
+			return cli.Runtimef("create output file: %v", err)
+		}
+		defer f.Close()
+		w = f
+	}
+
+	for _, typeData := range data {
+		if _, err := w.Write(typeData); err != nil {
+			return cli.Runtimef("write csv: %v", err)
+		}
+	}
+	return nil
 }
 
 func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Snapshot, types []schema.TypeID, outputDir string) error {
 	if err := os.MkdirAll(outputDir, 0o750); err != nil {
-		fmt.Fprintf(os.Stderr, "error: create output directory: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("create output directory: %v", err)
 	}
 
 	var files []*os.File
@@ -204,8 +223,7 @@ func exportCSVToDir(cmd *cobra.Command, adapter *csv.Adapter, snapshot *graph.Sn
 	}
 
 	if err := adapter.WriteSnapshot(cmd.Context(), writerFor, snapshot); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write csv snapshot: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("write csv snapshot: %v", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "wrote %d CSV files to %s\n", len(types), outputDir)
@@ -222,28 +240,24 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 	// Generate shape for the schema
 	shapes, result := adapter.ShapeForSchema(cmd.Context(), s)
 	if result.HasErrors() {
-		fmt.Fprintf(os.Stderr, "error: generate neo4j shape: %v\n", result.Err())
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return cli.Validationf("generate neo4j shape: %v", result.Err())
 	}
 
 	nodeQueries, err := adapter.BatchNodeQueries(cmd.Context(), snapshot, shapes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: generate node queries: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("generate node queries: %v", err)
 	}
 
 	edgeQueries, err := adapter.BatchEdgeQueries(cmd.Context(), snapshot, shapes)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: generate edge queries: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("generate edge queries: %v", err)
 	}
 
 	w := cmd.OutOrStdout()
 	if outputPath != "" {
 		f, err := os.Create(outputPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: create output file: %v\n", err)
-			return &cli.ExitError{Code: cli.ExitRuntime}
+			return cli.Runtimef("create output file: %v", err)
 		}
 		defer f.Close()
 		w = f
@@ -273,11 +287,10 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 // exportFromSnapshot exports a persisted .ys snapshot. pending carries the
 // schema load's residual diagnostics so they render with the snapshot's rather
 // than as a second document.
-func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, pending diag.Result, dataPath string, outputFormat cli.OutputFormat, noColor bool, moduleRoot, absSchemaPath, toFormat, outputPath, outputDir string) error {
+func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, pending diag.Result, dataPath string, outputFormat cli.OutputFormat, noColor bool, moduleRoot, absSchemaPath, target, outputPath, outputDir string) error {
 	snap, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("%v", err)
 	}
 
 	// Render unconditionally. A warning here — an unsupported snapshot hash
@@ -291,16 +304,5 @@ func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, pending diag.Resul
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
-	// Route to adapter — same as raw data path.
-	switch strings.ToLower(toFormat) {
-	case "json":
-		return exportJSON(cmd, snap, outputPath)
-	case "csv":
-		return exportCSV(cmd, snap, s, outputPath, outputDir)
-	case "cypher":
-		return exportCypher(cmd, snap, s, outputPath)
-	default:
-		fmt.Fprintf(os.Stderr, "error: unsupported export format %q: must be json, csv, or cypher\n", toFormat)
-		return &cli.ExitError{Code: cli.ExitUsage}
-	}
+	return writeExport(cmd, snap, s, target, outputPath, outputDir)
 }

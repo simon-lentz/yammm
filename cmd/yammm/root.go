@@ -1,6 +1,10 @@
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+)
 
 func newRootCmd(version string) *cobra.Command {
 	cmd := &cobra.Command{
@@ -36,4 +40,13 @@ Data commands (check, load, export) also accept:
 	)
 
 	return cmd
+}
+
+// requireSubcommand is the RunE of a command that only groups others.
+//
+// A grouping command with no RunE is run by cobra as a success: it prints help
+// and exits 0, so `yammm snapshot` in a script reports that the snapshot was
+// taken. --help is handled before RunE and still prints help.
+func requireSubcommand(cmd *cobra.Command, _ []string) error {
+	return cli.Usagef("%q requires a subcommand; run %q to list them", cmd.CommandPath(), cmd.CommandPath()+" --help")
 }

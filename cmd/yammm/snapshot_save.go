@@ -64,8 +64,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 
 	// Validate output destination: either --output or --into must be set.
 	if outputPath == "" && intoPath == "" {
-		fmt.Fprintf(os.Stderr, "error: either --output or --into is required\n")
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("either --output or --into is required")
 	}
 	if outputPath == "" {
 		outputPath = intoPath // default: overwrite the --into file
@@ -74,8 +73,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	// Parse metadata key=value pairs.
 	metadata, err := parseMetadata(metadataRaw)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("%v", err)
 	}
 
 	schemaPath := args[0]
@@ -83,8 +81,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", schemaPath, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", schemaPath, err)
 	}
 
 	// Load schema.
@@ -93,9 +90,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
+	if loadErr != nil {
+		return loadErr
 	}
 
 	// Load existing snapshot if --into is set. Its diagnostics join the pending
@@ -107,8 +104,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	if intoPath != "" {
 		snap, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
 		if loadErr != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", loadErr)
-			return &cli.ExitError{Code: cli.ExitRuntime}
+			return cli.Runtimef("%v", loadErr)
 		}
 		pending = cli.MergeResults(pending, loadResult)
 		if loadResult.HasErrors() {
@@ -121,8 +117,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	// Parse all data files.
 	allParsed, parseResult, err := parseDataFiles(cmd, s, dataPaths, fromFormat, typeName, typeColumn)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return err
 	}
 
 	// Validate instances.
@@ -161,8 +156,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 
 	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
 	if err := marshalResult.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: marshal snapshot: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("marshal snapshot: %v", err)
 	}
 	// Marshal reports values it could not put on the wire as Warnings, and
 	// Err() is nil for a warnings-only result — so checking the error alone
@@ -177,8 +171,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 
 	// Write file.
 	if err := writeOutput(data, outputPath, intoPath); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write output: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("write output: %v", err)
 	}
 
 	// Print summary.

@@ -49,8 +49,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	indexesEnabled, _ := cmd.Flags().GetBool("indexes")
 
 	if uri == "" {
-		fmt.Fprintf(os.Stderr, "error: --uri is required (or set YAMMM_NEO4J_URI)\n")
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")
 	}
 
 	outputFormat, err := cli.ParseOutputFormat(formatStr)
@@ -61,8 +60,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	schemaPath := args[0]
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", schemaPath, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", schemaPath, err)
 	}
 
 	// Load schema
@@ -71,9 +69,9 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
+	if loadErr != nil {
+		return loadErr
 	}
 
 	// Configure the adapter to match the target graph's generation settings.
@@ -113,26 +111,22 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("%v", err)
 	}
 	defer driver.Close(ctx)
 
 	// Fetch actual constraints
 	records, err := cli.RunQuery(ctx, driver, database, adaptern4j.IntrospectConstraintsQuery(), nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: fetch constraints: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("fetch constraints: %v", err)
 	}
 
 	actual, err := adaptern4j.ParseRemoteConstraints(records)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: parse constraints: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("parse constraints: %v", err)
 	}
 	if n := untypedRemoteObjects(len(actual), func(i int) string { return actual[i].Type }); n > 0 {
-		reportUnreadableProjection(os.Stderr, n, len(actual), "constraint", "SHOW CONSTRAINTS")
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return unreadableProjection(n, len(actual), "constraint", "SHOW CONSTRAINTS")
 	}
 
 	// Fetch actual indexes BEFORE diffing constraints, and do it whatever
@@ -160,8 +154,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 			break
 		}
 		if n := untypedRemoteObjects(len(parsed), func(i int) string { return parsed[i].Type }); n > 0 {
-			reportUnreadableProjection(os.Stderr, n, len(parsed), "index", "SHOW INDEXES")
-			return &cli.ExitError{Code: cli.ExitRuntime}
+			return unreadableProjection(n, len(parsed), "index", "SHOW INDEXES")
 		}
 		actualIndexes = parsed
 	}
@@ -234,19 +227,20 @@ func untypedRemoteObjects(n int, typeAt func(int) string) int {
 	return untyped
 }
 
-// reportUnreadableProjection explains an unreadable type column and what it
-// costs, on stderr. The caller exits ExitRuntime: every such object is
-// unclassifiable, so the comparison silently shrinks to the ones that did parse
-// and would otherwise print a confident plan built from a partial reading —
-// the same "a comparison that never ran must not report success" rule the
-// unverified and failed-introspection paths already follow.
-func reportUnreadableProjection(w io.Writer, untyped, total int, object, query string) {
-	fmt.Fprintf(w,
-		"error: %d of %d %s record(s) came back with no type; the %s projection this command issues did not return a readable 'type' column\n",
-		untyped, total, object, query)
-	fmt.Fprintf(w,
-		"       every such %s is unclassifiable, so no comparison is reported rather than one built from a partial reading; this usually means the server is newer than this yammm build\n",
-		object)
+// unreadableProjection explains an unreadable type column and what it costs.
+//
+// It is ExitRuntime because every such object is unclassifiable: the comparison
+// silently shrinks to the ones that did parse and would otherwise print a
+// confident plan built from a partial reading — the same "a comparison that
+// never ran must not report success" rule the unverified and
+// failed-introspection paths already follow.
+//
+// The message is two lines, each printed with its own "error: " prefix.
+func unreadableProjection(untyped, total int, object, query string) error {
+	return cli.Runtimef(
+		"%d of %d %s record(s) came back with no type; the %s projection this command issues did not return a readable 'type' column\n"+
+			"every such %s is unclassifiable, so no comparison is reported rather than one built from a partial reading; this usually means the server is newer than this yammm build",
+		untyped, total, object, query, object)
 }
 
 // indexDiffOutcome records what the index half of a diff produced, so the exit

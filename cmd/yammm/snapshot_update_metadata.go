@@ -52,21 +52,27 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(setRaw) == 0 && len(unsetKeys) == 0 {
-		fmt.Fprintln(os.Stderr, "error: at least one --set or --unset is required")
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("at least one --set or --unset is required")
 	}
 
 	setPairs, err := parseMetadata(setRaw)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("%v", err)
+	}
+
+	// Applying --set then --unset on one key deleted it, exited 0, and reported
+	// the count as if nothing had been asked. Documenting a precedence would
+	// turn a silent contradiction into a documented one, so it is refused.
+	for _, k := range unsetKeys {
+		if _, both := setPairs[k]; both {
+			return cli.Usagef("--set and --unset both name %q; pass one or the other", k)
+		}
 	}
 
 	path := args[0]
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: read %q: %v\n", path, err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("read %q: %v", path, err)
 	}
 
 	ctx := cmd.Context()
@@ -99,8 +105,7 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := snapshot.WriteFile(path, out); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write %q: %v\n", path, err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("write %q: %v", path, err)
 	}
 
 	fmt.Fprintf(cmd.OutOrStdout(), "updated metadata on %s (%d keys)\n", path, len(newMeta))

@@ -42,21 +42,18 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 
 	if dirPath, _ := cmd.Flags().GetString("dir"); dirPath != "" {
 		if len(args) > 0 {
-			fmt.Fprintln(os.Stderr, "error: --dir is mutually exclusive with a positional file argument")
-			return &cli.ExitError{Code: cli.ExitUsage}
+			return cli.Usagef("--dir is mutually exclusive with a positional file argument")
 		}
 		return runSnapshotInfoDir(cmd, dirPath, outputFormat)
 	}
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "error: either --dir or a positional .ys file is required")
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("either --dir or a positional .ys file is required")
 	}
 
 	if headerOnly, _ := cmd.Flags().GetBool("header-only"); headerOnly {
 		f, err := os.Open(args[0])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: open file: %v\n", err)
-			return &cli.ExitError{Code: cli.ExitRuntime}
+			return cli.Runtimef("open file: %v", err)
 		}
 		defer f.Close()
 
@@ -71,8 +68,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 		if outputFormat == cli.FormatJSON {
 			enc, err := json.MarshalIndent(header, "", "  ")
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: encode JSON: %v\n", err)
-				return &cli.ExitError{Code: cli.ExitRuntime}
+				return cli.Runtimef("encode JSON: %v", err)
 			}
 			fmt.Fprintln(w, string(enc))
 			return nil
@@ -83,8 +79,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 
 	data, err := os.ReadFile(args[0])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: read file: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("read file: %v", err)
 	}
 
 	info, result := snapshot.Info(cmd.Context(), data)
@@ -99,8 +94,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 	if outputFormat == cli.FormatJSON {
 		enc, err := json.MarshalIndent(info, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: encode JSON: %v\n", err)
-			return &cli.ExitError{Code: cli.ExitRuntime}
+			return cli.Runtimef("encode JSON: %v", err)
 		}
 		fmt.Fprintln(w, string(enc))
 		return nil
@@ -242,15 +236,36 @@ func runSnapshotInfoDir(cmd *cobra.Command, dirPath string, outputFormat cli.Out
 		}
 		enc, err := json.MarshalIndent(dtos, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: encode JSON: %v\n", err)
-			return &cli.ExitError{Code: cli.ExitRuntime}
+			return cli.Runtimef("encode JSON: %v", err)
 		}
 		fmt.Fprintln(w, string(enc))
 		return nil
 	}
 
 	printDirEntries(w, dirPath, entries)
-	return nil
+	return dirEntriesExit(entries)
+}
+
+// dirEntriesExit reports the failure a scanned directory earns.
+//
+// ScanDirSlice's own result covers reading the directory, not reading the files
+// in it, so gating on that alone exits 0 over a directory whose every entry is
+// malformed — while the same file named on its own exits 1. The entry's own
+// result decides, so an I/O failure and a malformed file keep the codes they
+// have everywhere else.
+func dirEntriesExit(entries []snapshot.ScanEntry) error {
+	worst := cli.ExitOK
+	for _, entry := range entries {
+		if code := cli.ExitForResult(entry.Result); code != cli.ExitOK {
+			if worst == cli.ExitOK || code == cli.ExitRuntime {
+				worst = code
+			}
+		}
+	}
+	if worst == cli.ExitOK {
+		return nil
+	}
+	return &cli.ExitError{Code: worst}
 }
 
 func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {

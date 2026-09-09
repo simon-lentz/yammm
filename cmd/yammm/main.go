@@ -2,7 +2,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
@@ -18,13 +17,14 @@ func main() {
 	os.Exit(run())
 }
 
+// run executes the CLI and is the one place a failure is printed.
+//
+// Commands return their errors rather than writing them, so this is the single
+// write site for every message the CLI emits on a failure path — which is what
+// lets an in-process test drive run() and assert the text an operator sees.
 func run() int {
 	rootCmd := newRootCmd(buildversion.Resolve(version))
-	if err := rootCmd.Execute(); err != nil {
-		if exitErr, ok := errors.AsType[*cli.ExitError](err); ok {
-			return exitErr.Code
-		}
-		return cli.ExitUsage
-	}
-	return cli.ExitOK
+	err := rootCmd.Execute()
+	cli.ReportError(rootCmd.ErrOrStderr(), err)
+	return cli.ExitForError(err)
 }

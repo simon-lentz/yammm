@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -34,8 +32,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	path := args[0]
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", path, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", path, err)
 	}
 
 	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
