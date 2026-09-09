@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -150,6 +151,17 @@ func NewStagedFiles(dir string) (*StagedFiles, error) {
 // writer for its contents. The file appears at its real name only at [StagedFiles.Commit].
 func (s *StagedFiles) Create(name string) (io.Writer, error) {
 	target := filepath.Join(s.dir, name)
+	// Two names that differ only in case are one file on a case-insensitive
+	// filesystem: the second rename replaces the first's contents while the
+	// directory keeps the first's spelling, so the set ends one file short and
+	// the survivor carries one member's name over another's data. Refused on
+	// every filesystem, because the directory is a portable artefact and the
+	// caller cannot know where it will be read.
+	for _, st := range s.staged {
+		if existing := filepath.Base(st.target); strings.EqualFold(existing, name) && existing != name {
+			return nil, fmt.Errorf("%s and %s differ only in case and cannot share one directory", existing, name)
+		}
+	}
 	mode := NewFileMode
 	if info, err := os.Stat(target); err == nil {
 		mode = info.Mode().Perm()

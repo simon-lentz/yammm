@@ -292,3 +292,43 @@ func assertNoDebris(t *testing.T, dir string, expected ...string) {
 		}
 	}
 }
+
+// TestStagedFiles_RefusesNamesDifferingOnlyInCase pins the refusal that keeps a
+// staged set whole on a case-insensitive filesystem. There, "Item.csv" and
+// "ITEM.csv" are one file: the second rename replaces the first's contents
+// while the directory keeps the first's spelling, so the set ends one file
+// short and the survivor carries one member's name over another's data —
+// reported as a complete export at exit 0.
+//
+// The refusal is unconditional, and deliberately so. The directory is a
+// portable artefact, and this suite runs on a case-sensitive filesystem, so a
+// refusal gated on the filesystem's behaviour would be untestable here.
+func TestStagedFiles_RefusesNamesDifferingOnlyInCase(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "out")
+	staged, err := NewStagedFiles(dir)
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	defer staged.Rollback()
+
+	if _, err := staged.Create("Item.csv"); err != nil {
+		t.Fatalf("create Item.csv: %v", err)
+	}
+
+	_, err = staged.Create("ITEM.csv")
+	if err == nil {
+		t.Fatal("two names differing only in case were staged into one directory")
+	}
+	for _, want := range []string{"Item.csv", "ITEM.csv"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %s", err, want)
+		}
+	}
+
+	// A name that differs by more than case is unaffected.
+	if _, err := staged.Create("Other.csv"); err != nil {
+		t.Errorf("a distinct name was refused: %v", err)
+	}
+}

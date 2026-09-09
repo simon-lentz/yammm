@@ -37,6 +37,7 @@ $props, $rows) and is not directly executable in Neo4j Browser or cypher-shell.`
 	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
 	cmd.Flags().String("output-dir", "", "output directory for CSV multi-type export (one file per type)")
+	registerLabelFlags(cmd)
 
 	_ = cmd.MarkFlagRequired("to")
 
@@ -53,7 +54,7 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 	outputDir, _ := cmd.Flags().GetString("output-dir")
 
 	target := strings.ToLower(toFormat)
-	if err := validateExportFlags(toFormat, target, outputPath, outputDir); err != nil {
+	if err := validateExportFlags(cmd, toFormat, target, outputPath, outputDir); err != nil {
 		return err
 	}
 
@@ -107,7 +108,7 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 // rendered — so an operator read a page of progress and then a usage error, or
 // read no error at all because the flag was silently ignored and the output
 // went somewhere else.
-func validateExportFlags(raw, target, outputPath, outputDir string) error {
+func validateExportFlags(cmd *cobra.Command, raw, target, outputPath, outputDir string) error {
 	switch target {
 	case "json", "csv", "cypher":
 	default:
@@ -118,6 +119,12 @@ func validateExportFlags(raw, target, outputPath, outputDir string) error {
 	}
 	if outputDir != "" && target != "csv" {
 		return cli.Usagef("--output-dir applies only to --to csv")
+	}
+	// The label flags shape Neo4j labels, which only the cypher target emits.
+	for _, flag := range []string{"separator", "prefix"} {
+		if target != "cypher" && cmd.Flags().Changed(flag) {
+			return cli.Usagef("--%s applies only to --to cypher", flag)
+		}
 	}
 	return nil
 }
@@ -208,7 +215,10 @@ func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.A
 // the output serves as a readable reference for integration, not as directly
 // executable Cypher. Use the Go adapter API for programmatic execution with parameters.
 func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema, outputPath string) error {
-	adapter := adaptern4j.New()
+	// The statements name labels, and a label composed differently from the one
+	// the target graph carries writes data no constraint guards. The sibling
+	// neo4j commands take these flags for the same reason.
+	adapter := adaptern4j.New(labelOptions(cmd)...)
 
 	// Generate shape for the schema
 	shapes, result := adapter.ShapeForSchema(cmd.Context(), s)

@@ -74,3 +74,46 @@ func TestExport_CSVMultiTypeRequiresOutputDir(t *testing.T) {
 		assert.NoFileExists(t, out, "a refused export writes nothing")
 	})
 }
+
+// TestExport_CypherCarriesTheLabelFlags pins that `--to cypher` composes its
+// labels from the same flags its sibling `neo4j` commands take. The plugin's
+// CLI reference documents the three as one workflow; emitting data on
+// `catalog__Book` while `neo4j constraints --prefix app_` guards
+// `app_catalog__Book` writes rows no constraint covers, and nothing says so.
+func TestExport_CypherCarriesTheLabelFlags(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "catalog.yammm")
+	dataPath := filepath.Join(dir, "data.json")
+	require.NoError(t, os.WriteFile(schemaPath,
+		[]byte("schema \"catalog\"\n\ntype Book {\n\tisbn String primary\n}\n"), 0o600))
+	require.NoError(t, os.WriteFile(dataPath,
+		[]byte(`{"Book":[{"isbn":"1"}]}`), 0o600))
+
+	code, out, errOut := executeCmdOutput(t,
+		"export", "--to", "cypher", "--prefix", "app_", "--separator", "_",
+		schemaPath, dataPath)
+	require.Equal(t, cli.ExitOK, code, "stderr:\n%s", errOut)
+	assert.Contains(t, out, "app_catalog_Book",
+		"the label flags did not reach the adapter that composes the label")
+	assert.NotContains(t, out, "catalog__Book",
+		"the default label survived beside the configured one")
+}
+
+// TestExport_LabelFlagsApplyOnlyToCypher pins the per-target refusal beside the
+// one --output-dir already carries: json and csv compose no Neo4j label, so a
+// label flag on either is a flag that would do nothing.
+func TestExport_LabelFlagsApplyOnlyToCypher(t *testing.T) {
+	t.Parallel()
+
+	schemaPath, dataPath := multiTypeFixture(t)
+
+	for _, flag := range []string{"--prefix", "--separator"} {
+		t.Run(flag, func(t *testing.T) {
+			t.Parallel()
+			code := executeCmd(t, "export", "--to", "json", flag, "x", schemaPath, dataPath)
+			assert.Equal(t, cli.ExitUsage, code)
+		})
+	}
+}

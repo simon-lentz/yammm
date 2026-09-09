@@ -18,6 +18,7 @@ func newNeo4jIntrospectCmd() *cobra.Command {
 		RunE:  withDiagnostics(runNeo4jIntrospect),
 	}
 
+	registerLabelFlags(cmd)
 	cmd.Flags().String("schema", "", "filter inference to a specific schema name prefix")
 	cmd.Flags().String("output", "", "output file path (default: stdout)")
 
@@ -45,7 +46,7 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string, _ *cli.DiagnosticSink) e
 	}
 	defer driver.Close(ctx)
 
-	dsl, err := introspectSchema(ctx, cli.DriverQueries(driver), database, schemaFilter)
+	dsl, err := introspectSchema(ctx, cli.DriverQueries(driver), database, schemaFilter, labelOptions(cmd)...)
 	if err != nil {
 		return err
 	}
@@ -65,7 +66,12 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string, _ *cli.DiagnosticSink) e
 // pure: the two queries' shapes, both parsers and the emitter are exercisable
 // against recorded records, and nothing past the command's --uri guard was
 // reachable by any test before this seam existed.
-func introspectSchema(ctx context.Context, run cli.QueryRunner, database, schemaFilter string) (string, error) {
+func introspectSchema(
+	ctx context.Context,
+	run cli.QueryRunner,
+	database, schemaFilter string,
+	opts ...adaptern4j.Option,
+) (string, error) {
 	constraintRecords, err := run(ctx, database, adaptern4j.IntrospectConstraintsQuery(), nil)
 	if err != nil {
 		return "", cli.Runtimef("fetch constraints: %v", err)
@@ -75,8 +81,16 @@ func introspectSchema(ctx context.Context, run cli.QueryRunner, database, schema
 	if err != nil {
 		return "", cli.Runtimef("parse constraints: %v", err)
 	}
+	// The same projection `neo4j diff` guards, guarded for the same reason:
+	// this command issued the full SHOW CONSTRAINTS projection, so a parsed
+	// constraint carrying a name and no type means the type column did not
+	// arrive. Inferring from it scaffolds a schema with no primary keys, which
+	// reads as a database that has none.
+	if n := untypedRemoteObjects(len(constraints), func(i int) string { return constraints[i].Type }); n > 0 {
+		return "", unreadableProjection(n, len(constraints), "constraint", "SHOW CONSTRAINTS")
+	}
 
-	adapter := adaptern4j.New()
+	adapter := adaptern4j.New(opts...)
 	relQuery, relParams := adapter.IntrospectRelationshipsQueryFor(schemaFilter)
 	relRecords, err := run(ctx, database, relQuery, relParams)
 	if err != nil {

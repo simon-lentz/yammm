@@ -1045,6 +1045,38 @@ could reproduce it.
   while it also shapes `snapshot info`'s stdout payload and suppresses status
   summaries.
 
+### Unit 6, the lane pass — three asymmetries between sibling commands
+
+**No exported declaration moves.** What moves is the CLI's flag surface and two
+refusals, each reproduced first-hand before the repair.
+
+- **`yammm neo4j introspect` takes `--separator` and `--prefix`**, additively and
+  with the same defaults as its sibling commands. It was the only `neo4j`
+  subcommand that did not, while building its adapter from defaults. Against a
+  graph written with a non-default separator or a label prefix, the relationship
+  scan's `STARTS WITH` filter matched nothing and every constraint was skipped by
+  the schema-name comparison — a scaffold with no relationships and no primary
+  keys, at exit 0.
+- **`yammm neo4j introspect` refuses an unreadable constraint projection**, the
+  guard `neo4j diff` already applied to the identical `SHOW CONSTRAINTS`
+  projection. A parsed constraint carrying a name and no type means the type
+  column did not arrive; inferring from it produced a scaffold with no primary
+  keys, which reads as a database that declares none. It now exits with a runtime
+  error naming the projection.
+- **`yammm export --to cypher` takes `--separator` and `--prefix`**, additively
+  and with the same defaults as the `neo4j` subcommands. It was the last command
+  composing Neo4j labels from defaults with no way to configure them, while the
+  documented Neo4j workflow runs it beside `neo4j constraints` and `neo4j diff`,
+  which both take the flags. An operator provisioning with a label prefix got
+  data statements targeting a label no constraint guarded. The flags are refused
+  on `--to json` and `--to csv`, which compose no label.
+- **CSV export refuses two output names that differ only in case.** On a
+  case-insensitive filesystem they are one file: the set arrived one file short,
+  and the survivor carried one type's name over another type's rows, reported as
+  a complete export at exit 0. The refusal is unconditional, because the exported
+  directory is a portable artefact and the writer cannot know where it will be
+  read.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

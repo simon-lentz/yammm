@@ -331,3 +331,57 @@ func TestFetchRemoteState_ReadsBothHalvesWhenTheServerAnswers(t *testing.T) {
 		t.Errorf("second query = %q, want the indexes projection", log.calls[1].query)
 	}
 }
+
+// TestIntrospectSchema_CarriesTheLabelOptionsIntoTheRelationshipScan pins that
+// the command's label flags reach the adapter. The relationship scan filters on
+// a prefix the adapter composes from labelPrefix, the schema name and
+// labelSeparator; built from defaults against a graph written with a prefix, it
+// matches nothing and the scaffold silently carries no relationships at all.
+func TestIntrospectSchema_CarriesTheLabelOptionsIntoTheRelationshipScan(t *testing.T) {
+	t.Parallel()
+
+	log := &queryLog{replies: []queryReply{
+		{records: recordedConstraints()},
+		{records: recordedRelationships()},
+	}}
+
+	_, err := introspectSchema(
+		t.Context(), log.run, "books", "book_catalog",
+		adaptern4j.WithLabelPrefix("app_"),
+		adaptern4j.WithLabelSeparator("::"),
+	)
+	if err != nil {
+		t.Fatalf("introspectSchema: %v", err)
+	}
+
+	if len(log.calls) != 2 {
+		t.Fatalf("issued %d queries, want 2", len(log.calls))
+	}
+	got, _ := log.calls[1].params["prefix"].(string)
+	if want := "app_book_catalog::"; got != want {
+		t.Errorf("relationship scan prefix = %q, want %q — the label flags did not reach the adapter", got, want)
+	}
+}
+
+// TestIntrospectSchema_RefusesAnUnreadableProjection mirrors the guard
+// `neo4j diff` applies to the identical SHOW CONSTRAINTS projection. Without
+// it, a missing type column infers a scaffold with no primary keys at exit 0,
+// which reads as a database that declares none.
+func TestIntrospectSchema_RefusesAnUnreadableProjection(t *testing.T) {
+	t.Parallel()
+
+	log := &queryLog{replies: []queryReply{
+		{records: []map[string]any{{"name": "c1", "labelsOrTypes": []any{"A"}}}},
+	}}
+
+	_, err := introspectSchema(t.Context(), log.run, "neo4j", "book_catalog")
+	if err == nil {
+		t.Fatal("an unreadable type column must not scaffold a schema at exit 0")
+	}
+	if code := cli.ExitForError(err); code != cli.ExitRuntime {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitRuntime)
+	}
+	if !strings.Contains(err.Error(), "SHOW CONSTRAINTS") {
+		t.Errorf("error %q does not name the projection", err)
+	}
+}
