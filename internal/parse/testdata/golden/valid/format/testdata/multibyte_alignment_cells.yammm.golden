@@ -1,0 +1,105 @@
+{
+  "name": "\"cells\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 21,
+        "e": 22
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 29,
+              "e": 35
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 26,
+            "e": 43
+          }
+        },
+        {
+          "name": "one",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"aaa\"",
+              "\"bbb\""
+            ],
+            "span": {
+              "s": 49,
+              "e": 67
+            }
+          },
+          "span": {
+            "s": 45,
+            "e": 67
+          }
+        },
+        {
+          "name": "two",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"記録記録\"",
+              "\"bbb\""
+            ],
+            "span": {
+              "s": 80,
+              "e": 107
+            }
+          },
+          "span": {
+            "s": 76,
+            "e": 107
+          }
+        },
+        {
+          "name": "three",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"ccc\"",
+              "\"ddd\""
+            ],
+            "span": {
+              "s": 122,
+              "e": 140
+            }
+          },
+          "span": {
+            "s": 116,
+            "e": 140
+          }
+        },
+        {
+          "name": "four",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 156,
+              "e": 162
+            }
+          },
+          "span": {
+            "s": 151,
+            "e": 162
+          }
+        }
+      ],
+      "span": {
+        "s": 16,
+        "e": 172
+      }
+    }
+  ]
+}

@@ -74,5 +74,6 @@
 //
 // # Dependencies
 //
-//	format  ──imports──▶  (stdlib + diag + location + internal/parse)
+//	format  ──imports──▶  (stdlib + diag + location + internal/parse),
+//	                      golang.org/x/text/width
 package format

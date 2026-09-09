@@ -1,0 +1,56 @@
+{
+  "name": "\"wrapcells\"",
+  "span": {
+    "s": 0,
+    "e": 18
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 25,
+        "e": 26
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 33,
+              "e": 39
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 30,
+            "e": 47
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録\"",
+              "\"b\""
+            ],
+            "span": {
+              "s": 55,
+              "e": 248
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 49,
+            "e": 257
+          }
+        }
+      ],
+      "span": {
+        "s": 20,
+        "e": 259
+      }
+    }
+  ]
+}

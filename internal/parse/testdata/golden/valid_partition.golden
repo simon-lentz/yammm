@@ -138,8 +138,10 @@ format/testdata/import_grouping_preserved.yammm
 format/testdata/import_spacing.yammm
 format/testdata/keyword_named_properties.yammm
 format/testdata/mixed_indent_normalized.yammm
+format/testdata/multibyte_alignment_cells.yammm
 format/testdata/multibyte_cjk.yammm
 format/testdata/multibyte_mixed_content.yammm
+format/testdata/multibyte_wrap_threshold.yammm
 format/testdata/no_blank_after_open_brace.yammm
 format/testdata/no_blank_before_close_brace.yammm
 format/testdata/preserves_blank_lines.yammm

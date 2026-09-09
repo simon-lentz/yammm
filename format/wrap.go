@@ -1,26 +1,46 @@
 package format
 
-import "strings"
+import (
+	"strings"
+
+	"golang.org/x/text/width"
+)
 
 const LineWidthThreshold = 100
 
-// DisplayWidth counts the display width of a line: tabs count as 4 characters,
-// all other runes count as 1.
+// DisplayWidth counts the display width of a line in terminal cells: a tab
+// counts as 4, an East Asian Wide or Fullwidth rune as 2, every other rune as 1.
 //
-// Note: CJK ideographs and most emoji actually occupy 2 terminal columns, but
-// are counted as 1 here. This is acceptable because yammm schema identifiers
-// are ASCII-only; CJK/emoji only appear in string literals and comments where
-// precise column measurement is not critical for formatting decisions.
+// It is the single width function. The wrap threshold and the alignment columns
+// both measure through it, because they are measuring one quantity: how wide the
+// line is on screen. Identifiers are ASCII, but enum values and comments are not,
+// and a value counted in runes or bytes puts the columns somewhere the reader
+// does not see them.
 func DisplayWidth(line string) int {
 	w := 0
 	for _, r := range line {
-		if r == '\t' {
+		switch {
+		case r == '\t':
 			w += 4
-		} else {
+		case isWideRune(r):
+			w += 2
+		default:
 			w++
 		}
 	}
 	return w
+}
+
+// isWideRune reports whether r occupies two terminal cells. East Asian
+// Ambiguous is deliberately not wide: it is one cell in the locales this
+// formatter's output is read in.
+func isWideRune(r rune) bool {
+	switch width.LookupRune(r).Kind() {
+	case width.EastAsianWide, width.EastAsianFullwidth:
+		return true
+	default:
+		return false
+	}
 }
 
 // WrapLongLines processes lines sequentially, wrapping long lines and collapsing

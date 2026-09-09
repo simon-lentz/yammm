@@ -893,6 +893,14 @@ whether a line is a comment — is true for the first time.
 - `type`, `schema`, `extends` and `abstract` are legal property names and no
   longer break an alignment group into unpadded singletons. Only `as` and
   `part`, which a type body actually refuses, stay denied.
+- **Width is measured in terminal cells, by one function.** The wrap threshold
+  counted runes, the alignment columns counted bytes, and the quantity being
+  measured was always cells: `DisplayWidth` now counts an East Asian Wide or
+  Fullwidth rune (emoji included) as 2, and phase 4's name and content columns
+  measure through it. A 60-rune CJK enum value measured 92 against a threshold
+  of 100 while occupying 152 cells, so it was never wrapped; an aligned group
+  whose content carried CJK came out with a ragged comment column. `format` now
+  imports `golang.org/x/text/width`, already a direct module requirement.
 - A long enum property carrying an **annotation** is no longer wrapped. Wrapping
   moved the annotation onto the closing `]` line, where it attaches to nothing:
   the output parsed and then failed to load with `E_INVALID_ANNOTATION`. A

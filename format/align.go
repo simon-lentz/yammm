@@ -196,8 +196,8 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 
 	maxNameWidth := 0
 	for _, al := range group {
-		if len(al.name) > maxNameWidth {
-			maxNameWidth = len(al.name)
+		if w := DisplayWidth(al.name); w > maxNameWidth {
+			maxNameWidth = w
 		}
 	}
 
@@ -216,7 +216,7 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 		switch al.kind {
 		case memberProperty:
 			b.WriteString(al.name)
-			b.WriteString(strings.Repeat(" ", maxNameWidth-len(al.name)))
+			b.WriteString(strings.Repeat(" ", maxNameWidth-DisplayWidth(al.name)))
 			b.WriteByte(' ')
 			b.WriteString(al.rest)
 
@@ -224,14 +224,14 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 			b.WriteString(al.arrow)
 			b.WriteByte(' ')
 			b.WriteString(al.name)
-			b.WriteString(strings.Repeat(" ", maxNameWidth-len(al.name)))
+			b.WriteString(strings.Repeat(" ", maxNameWidth-DisplayWidth(al.name)))
 			b.WriteByte(' ')
 			b.WriteString(al.rest)
 
 		case memberAlias:
 			b.WriteString("type ")
 			b.WriteString(al.name)
-			b.WriteString(strings.Repeat(" ", maxNameWidth-len(al.name)))
+			b.WriteString(strings.Repeat(" ", maxNameWidth-DisplayWidth(al.name)))
 			b.WriteByte(' ')
 			b.WriteString(al.rest)
 		}
@@ -241,14 +241,14 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 		if al.comment != "" {
 			hasComments = true
 		}
-		if len(content) > maxContentWidth {
-			maxContentWidth = len(content)
+		if w := DisplayWidth(content); w > maxContentWidth {
+			maxContentWidth = w
 		}
 	}
 
 	for _, rl := range rebuilt {
 		if hasComments && rl.comment != "" {
-			padding := max(maxContentWidth-len(rl.content)+1, 1)
+			padding := max(maxContentWidth-DisplayWidth(rl.content)+1, 1)
 			result = append(result, contentLine(rl.content+strings.Repeat(" ", padding)+rl.comment))
 		} else {
 			result = append(result, contentLine(rl.content))
