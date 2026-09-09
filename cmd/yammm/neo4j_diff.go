@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -103,52 +104,13 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	}
 	defer driver.Close(ctx)
 
-	// Fetch actual constraints
-	records, err := cli.RunQuery(ctx, driver, database, adaptern4j.IntrospectConstraintsQuery(), nil)
+	state, err := fetchRemoteState(ctx, cli.DriverQueries(driver), database, os.Stderr)
 	if err != nil {
-		return cli.Runtimef("fetch constraints: %v", err)
+		return err
 	}
+	actual, actualIndexes := state.constraints, state.indexes
 
-	actual, err := adaptern4j.ParseRemoteConstraints(records)
-	if err != nil {
-		return cli.Runtimef("parse constraints: %v", err)
-	}
-	if n := untypedRemoteObjects(len(actual), func(i int) string { return actual[i].Type }); n > 0 {
-		return unreadableProjection(n, len(actual), "constraint", "SHOW CONSTRAINTS")
-	}
-
-	// Fetch actual indexes BEFORE diffing constraints, and do it whatever
-	// --indexes says: index and constraint names share one namespace, so the
-	// CONSTRAINT diff needs the index names to know whether a CREATE CONSTRAINT
-	// would silently no-op. --indexes=false opts out of comparing indexes, not
-	// out of classifying constraints accurately — reading it as the latter makes
-	// the same declaration print as an unfixable Create under one flag and
-	// actionable drift under the other. On a server that cannot report indexes
-	// the diff degrades rather than discarding the constraint diff, but it says
-	// so, and does not exit 0 when indexes were asked for.
-	indexes := indexDiffSkipped
-	var actualIndexes []adaptern4j.RemoteIndex
-	indexFetchFailed := false
-	indexRecords, indexErr := cli.RunQuery(ctx, driver, database, adaptern4j.IntrospectIndexesQuery(), nil)
-	switch {
-	case indexErr != nil:
-		fmt.Fprintf(os.Stderr, "warning: indexes could NOT be read (%v); a constraint whose name an index holds is reported as a create that will not take effect\n", indexErr)
-		indexFetchFailed = true
-	default:
-		parsed, parseErr := adaptern4j.ParseRemoteIndexes(indexRecords)
-		if parseErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: indexes could NOT be read (parse indexes: %v); a constraint whose name an index holds is reported as a create that will not take effect\n", parseErr)
-			indexFetchFailed = true
-			break
-		}
-		if n := untypedRemoteObjects(len(parsed), func(i int) string { return parsed[i].Type }); n > 0 {
-			return unreadableProjection(n, len(parsed), "index", "SHOW INDEXES")
-		}
-		actualIndexes = parsed
-	}
-	if indexesEnabled && indexFetchFailed {
-		indexes = indexDiffUnavailable
-	}
+	indexes := indexOutcomeBeforeDiff(indexesEnabled, state.indexFailed)
 
 	// Diff constraints
 	// The label set is computed once from the schema and scopes both halves of
@@ -184,6 +146,65 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		return &cli.ExitError{Code: code}
 	}
 	return nil
+}
+
+// remoteState is the database side of a diff: the constraints it reported, the
+// indexes it could report, and whether the index read failed.
+type remoteState struct {
+	constraints []adaptern4j.RemoteConstraint
+	indexes     []adaptern4j.RemoteIndex
+	indexFailed bool
+}
+
+// fetchRemoteState reads both halves of the database side through run, writing
+// a degraded index read's warning to warn.
+//
+// It takes the runner and the writer rather than a driver and os.Stderr so both
+// queries, both parsers, the projection check and the degraded path are
+// reachable without a server — the absence that left this whole command
+// unasserted past its --uri guard.
+func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string, warn io.Writer) (remoteState, error) {
+	records, err := run(ctx, database, adaptern4j.IntrospectConstraintsQuery(), nil)
+	if err != nil {
+		return remoteState{}, cli.Runtimef("fetch constraints: %v", err)
+	}
+
+	constraints, err := adaptern4j.ParseRemoteConstraints(records)
+	if err != nil {
+		return remoteState{}, cli.Runtimef("parse constraints: %v", err)
+	}
+	if n := untypedRemoteObjects(len(constraints), func(i int) string { return constraints[i].Type }); n > 0 {
+		return remoteState{}, unreadableProjection(n, len(constraints), "constraint", "SHOW CONSTRAINTS")
+	}
+	state := remoteState{constraints: constraints}
+
+	// Fetch actual indexes BEFORE diffing constraints, and do it whatever
+	// --indexes says: index and constraint names share one namespace, so the
+	// CONSTRAINT diff needs the index names to know whether a CREATE CONSTRAINT
+	// would silently no-op. --indexes=false opts out of comparing indexes, not
+	// out of classifying constraints accurately — reading it as the latter makes
+	// the same declaration print as an unfixable Create under one flag and
+	// actionable drift under the other. On a server that cannot report indexes
+	// the diff degrades rather than discarding the constraint diff, but it says
+	// so, and does not exit 0 when indexes were asked for.
+	indexRecords, indexErr := run(ctx, database, adaptern4j.IntrospectIndexesQuery(), nil)
+	switch {
+	case indexErr != nil:
+		fmt.Fprintf(warn, "warning: indexes could NOT be read (%v); a constraint whose name an index holds is reported as a create that will not take effect\n", indexErr)
+		state.indexFailed = true
+	default:
+		parsed, parseErr := adaptern4j.ParseRemoteIndexes(indexRecords)
+		if parseErr != nil {
+			fmt.Fprintf(warn, "warning: indexes could NOT be read (parse indexes: %v); a constraint whose name an index holds is reported as a create that will not take effect\n", parseErr)
+			state.indexFailed = true
+			break
+		}
+		if n := untypedRemoteObjects(len(parsed), func(i int) string { return parsed[i].Type }); n > 0 {
+			return remoteState{}, unreadableProjection(n, len(parsed), "index", "SHOW INDEXES")
+		}
+		state.indexes = parsed
+	}
+	return state, nil
 }
 
 // untypedRemoteObjects counts parsed remote objects that carry a name but no
@@ -242,6 +263,20 @@ const (
 	indexDiffUnverified                          // compared, but an index's definition could not be checked
 	indexDiffUnavailable                         // requested, but index introspection failed
 )
+
+// indexOutcomeBeforeDiff classifies the index half from the read alone, before
+// any comparison runs.
+//
+// A read that was asked for and failed is unavailable; everything else is
+// skipped, the enabled-and-healthy case included, because the comparison that
+// follows is what classifies it. Opting out with --indexes=false is not a
+// failure even when the server could not have answered: nothing was asked for.
+func indexOutcomeBeforeDiff(enabled, readFailed bool) indexDiffOutcome {
+	if enabled && readFailed {
+		return indexDiffUnavailable
+	}
+	return indexDiffSkipped
+}
 
 // neo4jDiffExit maps the two halves of the diff onto an exit code.
 //

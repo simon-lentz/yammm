@@ -22,8 +22,23 @@ func ConnectNeo4j(ctx context.Context, uri, username, password string) (neo4j.Dr
 	return driver, nil
 }
 
-// RunQuery executes a read transaction and returns all records as maps.
-func RunQuery(ctx context.Context, driver neo4j.Driver, database, query string, params map[string]any) ([]map[string]any, error) {
+// QueryRunner executes one read query and returns its records.
+//
+// It is the seam the neo4j commands read through. Everything after the queries
+// is pure — the parsers, the inference and the diff — so a runner returning
+// recorded records exercises a whole command without a server, which nothing in
+// this module could do before. [DriverQueries] is the production implementation.
+type QueryRunner func(ctx context.Context, database, query string, params map[string]any) ([]map[string]any, error)
+
+// DriverQueries returns the [QueryRunner] that reads from driver.
+func DriverQueries(driver neo4j.Driver) QueryRunner {
+	return func(ctx context.Context, database, query string, params map[string]any) ([]map[string]any, error) {
+		return runQuery(ctx, driver, database, query, params)
+	}
+}
+
+// runQuery executes a read transaction and returns all records as maps.
+func runQuery(ctx context.Context, driver neo4j.Driver, database, query string, params map[string]any) ([]map[string]any, error) {
 	session := driver.NewSession(ctx, neo4j.SessionConfig{
 		DatabaseName: database,
 		AccessMode:   neo4j.AccessModeRead,

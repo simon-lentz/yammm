@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/spf13/cobra"
 
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
@@ -43,35 +45,10 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string, _ *cli.DiagnosticSink) e
 	}
 	defer driver.Close(ctx)
 
-	// Fetch constraints
-	constraintRecords, err := cli.RunQuery(ctx, driver, database, adaptern4j.IntrospectConstraintsQuery(), nil)
+	dsl, err := introspectSchema(ctx, cli.DriverQueries(driver), database, schemaFilter)
 	if err != nil {
-		return cli.Runtimef("fetch constraints: %v", err)
+		return err
 	}
-
-	constraints, err := adaptern4j.ParseRemoteConstraints(constraintRecords)
-	if err != nil {
-		return cli.Runtimef("parse constraints: %v", err)
-	}
-
-	// Fetch relationships
-	adapter := adaptern4j.New()
-	relQuery, relParams := adapter.IntrospectRelationshipsQueryFor(schemaFilter)
-	relRecords, err := cli.RunQuery(ctx, driver, database, relQuery, relParams)
-	if err != nil {
-		return cli.Runtimef("fetch relationships: %v", err)
-	}
-
-	relationships, err := adaptern4j.ParseRemoteRelationships(relRecords)
-	if err != nil {
-		return cli.Runtimef("parse relationships: %v", err)
-	}
-
-	// A starting point for a human to edit, not a schema expected to load:
-	// a database does not record type identity, association-versus-composition
-	// or import structure, so every place the command guessed is a TODO in the
-	// output rather than a failure here.
-	dsl := adapter.InferSchema(constraints, relationships, schemaFilter)
 
 	// Write output
 	if err := cli.WriteTo([]byte(dsl), outputPath, cmd.OutOrStdout()); err != nil {
@@ -79,4 +56,41 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string, _ *cli.DiagnosticSink) e
 	}
 
 	return nil
+}
+
+// introspectSchema reads a database's constraints and relationships through run
+// and returns the .yammm scaffold they infer.
+//
+// It takes the runner rather than a driver because everything from here on is
+// pure: the two queries' shapes, both parsers and the emitter are exercisable
+// against recorded records, and nothing past the command's --uri guard was
+// reachable by any test before this seam existed.
+func introspectSchema(ctx context.Context, run cli.QueryRunner, database, schemaFilter string) (string, error) {
+	constraintRecords, err := run(ctx, database, adaptern4j.IntrospectConstraintsQuery(), nil)
+	if err != nil {
+		return "", cli.Runtimef("fetch constraints: %v", err)
+	}
+
+	constraints, err := adaptern4j.ParseRemoteConstraints(constraintRecords)
+	if err != nil {
+		return "", cli.Runtimef("parse constraints: %v", err)
+	}
+
+	adapter := adaptern4j.New()
+	relQuery, relParams := adapter.IntrospectRelationshipsQueryFor(schemaFilter)
+	relRecords, err := run(ctx, database, relQuery, relParams)
+	if err != nil {
+		return "", cli.Runtimef("fetch relationships: %v", err)
+	}
+
+	relationships, err := adaptern4j.ParseRemoteRelationships(relRecords)
+	if err != nil {
+		return "", cli.Runtimef("parse relationships: %v", err)
+	}
+
+	// A starting point for a human to edit, not a schema expected to load:
+	// a database does not record type identity, association-versus-composition
+	// or import structure, so every place the command guessed is a TODO in the
+	// output rather than a failure here.
+	return adapter.InferSchema(constraints, relationships, schemaFilter), nil
 }
