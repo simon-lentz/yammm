@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
@@ -40,6 +42,26 @@ Data commands (check, load, export) also accept:
 	)
 
 	return cmd
+}
+
+// withDiagnostics adapts a command that diagnoses to cobra's RunE. It admits
+// the output-shaping flags before the command runs and renders the sink after
+// it returns, so no command works under a format the CLI does not know and no
+// return path leaves a diagnostic unrendered.
+func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		formatStr, _ := cmd.Flags().GetString("format")
+		format, err := cli.ParseOutputFormat(formatStr)
+		if err != nil {
+			return err
+		}
+		noColor, _ := cmd.Flags().GetBool("no-color")
+		// The terminal test reads the process stream while the writer is
+		// cobra's, as it was when every render built its own renderer.
+		sink := cli.NewDiagnosticSink(cmd.ErrOrStderr(), format, noColor, cli.IsTTY(os.Stderr.Fd()))
+		defer sink.Render()
+		return run(cmd, args, sink)
+	}
 }
 
 // requireSubcommand is the RunE of a command that only groups others.

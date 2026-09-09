@@ -22,7 +22,7 @@ Checks schema compatibility, structural integrity, and edge references.
 Exit code 0 if valid. Exit code 1 if errors are found.
 Warnings are rendered to stderr.`,
 		Args: cobra.ExactArgs(2),
-		RunE: runSnapshotVerify,
+		RunE: withDiagnostics(runSnapshotVerify),
 	}
 
 	cmd.Flags().Bool("skip-integrity-check", false, "skip integrity hash verification (for hand-edited files)")
@@ -33,17 +33,10 @@ Warnings are rendered to stderr.`,
 	return cmd
 }
 
-func runSnapshotVerify(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	skipIntegrity, _ := cmd.Flags().GetBool("skip-integrity-check")
 	valueConformance, _ := cmd.Flags().GetBool("value-conformance")
 	revalidate, _ := cmd.Flags().GetBool("revalidate")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
 
 	schemaPath := args[0]
 	snapshotPath := args[1]
@@ -59,9 +52,8 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if loadErr != nil {
-		return loadErr
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
 	// Read snapshot file.
@@ -80,14 +72,9 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	// Verify.
-	verifyResult := snapshot.Verify(cmd.Context(), data, s, opts...)
+	sink.Add(snapshot.Verify(cmd.Context(), data, s, opts...))
 
-	// Render diagnostics — the load's residual warnings folded in, so one
-	// invocation writes one result (and in JSON, one document).
-	result := cli.MergeResults(pending, verifyResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-
-	exitCode := cli.ExitForResult(result)
+	exitCode := cli.ExitForResult(sink.Result())
 	if exitCode != cli.ExitOK {
 		return &cli.ExitError{Code: exitCode}
 	}

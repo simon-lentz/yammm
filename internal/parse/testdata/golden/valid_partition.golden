@@ -101,8 +101,10 @@ adapter/neo4j/testdata/write_basic.yammm
 adapter/neo4j/testdata/writeonce.yammm
 adapter/neo4j/testdata/writeonce_shadow.yammm
 cmd/yammm/testdata/annotation_shadowed.yammm
+cmd/yammm/testdata/annotation_shadowed_indexed.yammm
 cmd/yammm/testdata/county.yammm
 cmd/yammm/testdata/invalid.yammm
+cmd/yammm/testdata/reserved_index.yammm
 cmd/yammm/testdata/valid.yammm
 format/testdata/all_constraint_bracket_types.yammm
 format/testdata/blank_line_collapsing_idempotent.yammm

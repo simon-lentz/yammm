@@ -24,7 +24,7 @@ func newSnapshotInfoCmd() *cobra.Command {
 			"Pass --dir <path> to iterate every .ys file in a directory (header-only; " +
 			"mutually exclusive with the positional file argument).",
 		Args: cobra.MaximumNArgs(1),
-		RunE: runSnapshotInfo,
+		RunE: withDiagnostics(runSnapshotInfo),
 	}
 	cmd.Flags().Bool("header-only", false,
 		"read header only (skip instance body and integrity check; cost is O(header) ~ < 1 KiB per file)")
@@ -33,18 +33,12 @@ func newSnapshotInfoCmd() *cobra.Command {
 	return cmd
 }
 
-func runSnapshotInfo(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
-
+func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	if dirPath, _ := cmd.Flags().GetString("dir"); dirPath != "" {
 		if len(args) > 0 {
 			return cli.Usagef("--dir is mutually exclusive with a positional file argument")
 		}
-		return runSnapshotInfoDir(cmd, dirPath, outputFormat)
+		return runSnapshotInfoDir(cmd, sink, dirPath)
 	}
 	if len(args) == 0 {
 		return cli.Usagef("either --dir or a positional .ys file is required")
@@ -58,14 +52,14 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 		defer f.Close()
 
 		header, result := snapshot.HeaderOnlyRead(cmd.Context(), f)
+		sink.Add(result)
 		if result.HasErrors() {
-			noColor, _ := cmd.Flags().GetBool("no-color")
-			renderDiagnostics(cmd, outputFormat, noColor, nil, "", result)
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 
+		sink.Render()
 		w := cmd.OutOrStdout()
-		if outputFormat == cli.FormatJSON {
+		if sink.Format() == cli.FormatJSON {
 			enc, err := json.MarshalIndent(header, "", "  ")
 			if err != nil {
 				return cli.Runtimef("encode JSON: %v", err)
@@ -83,15 +77,15 @@ func runSnapshotInfo(cmd *cobra.Command, args []string) error {
 	}
 
 	info, result := snapshot.Info(cmd.Context(), data)
+	sink.Add(result)
 	if result.HasErrors() {
-		noColor, _ := cmd.Flags().GetBool("no-color")
-		renderDiagnostics(cmd, outputFormat, noColor, nil, "", result)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
+	sink.Render()
 	w := cmd.OutOrStdout()
 
-	if outputFormat == cli.FormatJSON {
+	if sink.Format() == cli.FormatJSON {
 		enc, err := json.MarshalIndent(info, "", "  ")
 		if err != nil {
 			return cli.Runtimef("encode JSON: %v", err)
@@ -220,16 +214,16 @@ type dirIssueDTO struct {
 	Message  string `json:"message"`
 }
 
-func runSnapshotInfoDir(cmd *cobra.Command, dirPath string, outputFormat cli.OutputFormat) error {
+func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath string) error {
 	entries, result := snapshot.ScanDirSlice(cmd.Context(), dirPath)
+	sink.Add(result)
 	if result.HasErrors() {
-		noColor, _ := cmd.Flags().GetBool("no-color")
-		renderDiagnostics(cmd, outputFormat, noColor, nil, "", result)
 		return &cli.ExitError{Code: cli.ExitRuntime}
 	}
 
+	sink.Render()
 	w := cmd.OutOrStdout()
-	if outputFormat == cli.FormatJSON {
+	if sink.Format() == cli.FormatJSON {
 		dtos := make([]dirEntryDTO, 0, len(entries))
 		for _, entry := range entries {
 			dtos = append(dtos, scanEntryToDTO(entry))
@@ -289,22 +283,32 @@ func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {
 }
 
 // printDirEntries writes a tabular directory-scan summary.
+//
+// An entry carrying warnings alone reads "warn" rather than "ok": the header
+// parsed, so the row prints the same fields, but a scan that calls a file whose
+// schema identity could not be checked healthy is the one place a dispatch
+// workload would never look again.
 func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, entries []snapshot.ScanEntry) {
 	fmt.Fprintf(w, "Directory: %s\n", dirPath)
 	if len(entries) == 0 {
 		fmt.Fprintf(w, "  (no .ys files)\n")
 		return
 	}
-	var okCount, malformedCount, ioCount, otherCount int
+	var okCount, warnCount, malformedCount, ioCount, otherCount int
 	for _, entry := range entries {
 		if !entry.Result.HasErrors() {
-			okCount++
+			status := "ok"
+			if entry.Result.HasWarnings() {
+				status, warnCount = "warn", warnCount+1
+			} else {
+				okCount++
+			}
 			created := entry.Header.CreatedAt
 			if created == "" {
 				created = "not set"
 			}
-			fmt.Fprintf(w, "  %-40s  ok          schema=%s  v%d  created=%s\n",
-				entry.Name, entry.Header.SchemaName, entry.Header.Version, created)
+			fmt.Fprintf(w, "  %-40s  %-12sschema=%s  v%d  created=%s\n",
+				entry.Name, status, entry.Header.SchemaName, entry.Header.Version, created)
 			continue
 		}
 		// Surface the first error code and message.
@@ -317,16 +321,19 @@ func printDirEntries(w interface{ Write([]byte) (int, error) }, dirPath string, 
 		switch code {
 		case "E_SNAPSHOT_MALFORMED":
 			malformedCount++
-			fmt.Fprintf(w, "  %-40s  malformed   %s: %s\n", entry.Name, code, msg)
+			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", entry.Name, "malformed", code, msg)
 		case "E_SNAPSHOT_IO":
 			ioCount++
-			fmt.Fprintf(w, "  %-40s  io-error    %s: %s\n", entry.Name, code, msg)
+			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", entry.Name, "io-error", code, msg)
 		default:
 			otherCount++
-			fmt.Fprintf(w, "  %-40s  error       %s: %s\n", entry.Name, code, msg)
+			fmt.Fprintf(w, "  %-40s  %-12s%s: %s\n", entry.Name, "error", code, msg)
 		}
 	}
 	fmt.Fprintf(w, "\nSummary: %d ok", okCount)
+	if warnCount > 0 {
+		fmt.Fprintf(w, ", %d warn", warnCount)
+	}
 	if malformedCount > 0 {
 		fmt.Fprintf(w, ", %d malformed", malformedCount)
 	}

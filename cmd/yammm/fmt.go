@@ -16,7 +16,7 @@ func newFmtCmd() *cobra.Command {
 		Short: "Format schema files",
 		Long:  "Format .yammm schema files using canonical formatting (like gofmt).",
 		Args:  cobra.MinimumNArgs(1),
-		RunE:  runFmt,
+		RunE:  withDiagnostics(runFmt),
 	}
 
 	cmd.Flags().BoolP("write", "w", false, "write result to source file instead of stdout")
@@ -31,16 +31,9 @@ func newFmtCmd() *cobra.Command {
 // stop the list, so one invocation reports every offender — what a pre-commit
 // hook over a file list needs — and the exit code is the most severe any path
 // produced rather than the last or the numerically largest.
-func runFmt(cmd *cobra.Command, args []string) error {
+func runFmt(cmd *cobra.Command, args []string, _ *cli.DiagnosticSink) error {
 	write, _ := cmd.Flags().GetBool("write")
 	check, _ := cmd.Flags().GetBool("check")
-
-	// The whole flag set is validated before any path is opened, so a
-	// misconfigured invocation fails without having half-formatted a list.
-	formatStr, _ := cmd.Flags().GetString("format")
-	if _, err := cli.ParseOutputFormat(formatStr); err != nil {
-		return err
-	}
 
 	// Hand-rolled rather than cobra's MarkFlagsMutuallyExclusive: the root sets
 	// SilenceErrors and SilenceUsage, so cobra's own flag validation exits 2

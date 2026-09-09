@@ -24,7 +24,7 @@ func newNeo4jDiffCmd() *cobra.Command {
 			"An index in the database that the schema does not declare counts as drift — declare it with @index/@@index/@vector/@fulltext/@@fulltext, " +
 			"or pass --indexes=false for a constraints-only diff.",
 		Args: cobra.ExactArgs(1),
-		RunE: runNeo4jDiff,
+		RunE: withDiagnostics(runNeo4jDiff),
 	}
 
 	// The desired side of the diff is exactly what `yammm neo4j constraints` and
@@ -39,9 +39,7 @@ func newNeo4jDiffCmd() *cobra.Command {
 	return cmd
 }
 
-func runNeo4jDiff(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	uri, _ := cmd.Flags().GetString("uri")
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
@@ -50,11 +48,6 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 
 	if uri == "" {
 		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")
-	}
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
 	}
 
 	schemaPath := args[0]
@@ -69,9 +62,8 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if loadErr != nil {
-		return loadErr
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
 	// Configure the adapter to match the target graph's generation settings.
@@ -80,13 +72,10 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Generate desired constraints. The load's residual warnings fold into
-	// whichever result this command renders, so one invocation writes one.
 	adapter := adaptern4j.New(opts...)
 	desired, constraintResult := adapter.ConstraintsStructured(cmd.Context(), s)
 	if constraintResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath),
-			cli.MergeResults(pending, constraintResult))
+		sink.Add(constraintResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -96,8 +85,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	if indexesEnabled {
 		di, indexResult := adapter.IndexesStructured(cmd.Context(), s)
 		if indexResult.HasErrors() {
-			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath),
-				cli.MergeResults(pending, indexResult))
+			sink.Add(indexResult)
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 		desiredIndexes = di
@@ -105,7 +93,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 
 	// Nothing downstream reports through diag, so the load's residuals render
 	// here — before the diff output, and exactly once.
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), pending)
+	sink.Render()
 
 	// Connect to database
 	ctx := cmd.Context()

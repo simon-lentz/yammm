@@ -16,7 +16,7 @@ func newNeo4jConstraintsCmd() *cobra.Command {
 		Use:   "constraints <schema.yammm>",
 		Short: "Generate Neo4j constraint Cypher statements from a schema",
 		Args:  cobra.ExactArgs(1),
-		RunE:  runNeo4jConstraints,
+		RunE:  withDiagnostics(runNeo4jConstraints),
 	}
 
 	// Shared with `yammm neo4j diff`, whose desired side is this command's
@@ -28,15 +28,7 @@ func newNeo4jConstraintsCmd() *cobra.Command {
 	return cmd
 }
 
-func runNeo4jConstraints(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
-
+func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	schemaPath := args[0]
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
@@ -49,9 +41,8 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if loadErr != nil {
-		return loadErr
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
 	// Configure adapter
@@ -61,12 +52,10 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string) error {
 	}
 	adapter := neo4j.New(opts...)
 
-	// Generate constraints. The load's residual warnings fold in so one
-	// invocation writes one result on either path.
 	statements, constraintResult := adapter.ConstraintsForSchema(cmd.Context(), s)
-	result := cli.MergeResults(pending, constraintResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-	if result.HasErrors() {
+	sink.Add(constraintResult)
+	sink.Render()
+	if sink.Result().HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 

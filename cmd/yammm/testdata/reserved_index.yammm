@@ -1,0 +1,9 @@
+schema "test"
+
+type Thing {
+	id    String primary
+	where String
+	extra String
+
+	@@index(where, extra)
+}

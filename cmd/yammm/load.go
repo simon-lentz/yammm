@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -17,7 +16,7 @@ func newLoadCmd() *cobra.Command {
 		Short: "Load data into an in-memory graph and validate",
 		Long:  "Load JSON or CSV data into a schema-validated graph. Reports diagnostics and a summary. Useful for validation-only workflows.",
 		Args:  cobra.ExactArgs(2),
-		RunE:  runLoad,
+		RunE:  withDiagnostics(runLoad),
 	}
 
 	cmd.Flags().String("from", "", "input format override: json or csv")
@@ -28,17 +27,10 @@ func newLoadCmd() *cobra.Command {
 	return cmd
 }
 
-func runLoad(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	fromFormat, _ := cmd.Flags().GetString("from")
 	typeName, _ := cmd.Flags().GetString("type")
 	typeColumn, _ := cmd.Flags().GetString("type-column")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
 
 	schemaPath := args[0]
 	dataPath := args[1]
@@ -53,9 +45,8 @@ func runLoad(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if loadErr != nil {
-		return loadErr
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
 	// Parse, validate, and build graph
@@ -63,66 +54,51 @@ func runLoad(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	sink.Add(graphResult)
 
-	// Render diagnostics — the load's residual warnings folded in, so one
-	// invocation writes one result (and in JSON, one document).
-	result := cli.MergeResults(pending, graphResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-
-	exitCode := cli.ExitForResult(result)
-	if exitCode != cli.ExitOK {
+	if exitCode := cli.ExitForResult(sink.Result()); exitCode != cli.ExitOK {
 		return &cli.ExitError{Code: exitCode}
 	}
 	return nil
 }
 
-// renderDiagnostics renders a diagnostic result to cobra's error writer.
-// Derive moduleRoot via [diagRootFor] for schema-sourced diagnostics, or
-// pass "" for diagnostics without source locations (e.g., constraint
-// generation errors).
-func renderDiagnostics(cmd *cobra.Command, outputFormat cli.OutputFormat, noColor bool, s *schema.Schema, moduleRoot string, result diag.Result) {
-	w := cmd.ErrOrStderr()
-	isTTY := cli.IsTTY(os.Stderr.Fd())
+// bindSchemaSource points the sink at a loaded schema, so every diagnostic the
+// invocation renders resolves excerpts and relativizes paths the way the loader
+// itself would.
+//
+// It is called as soon as the load returns rather than at the render, because a
+// command that fails in a later phase renders through the wrapper's deferred
+// call and never reaches its own code again.
+//
+// explicitRoot is the command's module-root flag where it has one, and "" where
+// it does not; it selects the root together with the schema path (see
+// [diagRootFor]).
+func bindSchemaSource(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, absSchemaPath string) {
 	var provider diag.SourceProvider
 	if s != nil && s.HasSourceProvider() {
 		provider = s.Sources()
 	}
-	renderer := cli.NewRenderer(outputFormat, isTTY, noColor, provider, moduleRoot)
-	_ = cli.RenderResult(w, renderer, outputFormat, result)
+	sink.SetSource(provider, diagRootFor(s, explicitRoot, absSchemaPath))
 }
 
-// reportSchemaLoad reports whether a schema load failed, rendering its
-// diagnostics when it did and returning the exit code they earn — an
-// unreadable schema file is an I/O failure, not a validation one.
+// reportSchemaLoad hands a schema load's diagnostics to the sink and reports
+// whether the load failed — an unreadable schema file is an I/O failure, not a
+// validation one.
 //
-// On success it renders NOTHING and returns the load's residual diagnostics for
-// the caller to fold into the one result it renders (via [cli.MergeResults]).
-// Those residuals matter — a load warning exists precisely because the loader
-// chose not to reject, and W_ANNOTATION_SHADOWED is the only signal that a
-// subtype silently dropped an inherited annotation — but they must not be
-// rendered separately: in --format json every render writes one complete JSON
-// document, and two documents concatenated on stderr are not parseable by any
-// JSON reader. One invocation renders one result.
-//
-// The name and signature differ from the render-immediately helper this replaced
-// so that no call site can keep the old two-render shape by accident.
-//
-// explicitRoot is the command's module-root flag where it has one, and "" where
-// it does not; it selects the root diagnostics relativize against together with
-// the schema path (see [diagRootFor]).
-func reportSchemaLoad(
-	cmd *cobra.Command,
-	outputFormat cli.OutputFormat,
-	noColor bool,
-	s *schema.Schema,
-	explicitRoot, absSchemaPath string,
-	result diag.Result,
-) (pending diag.Result, err error) {
+// It returns no residual result. A successful load's warnings are already the
+// sink's, and handing them back invited a caller to render them beside its own,
+// which is the two-document shape this replaces. A load warning matters — it
+// exists because the loader chose not to reject, and W_ANNOTATION_SHADOWED is
+// the only signal that a subtype silently dropped an inherited annotation — and
+// it now reaches the operator on every path, including the ones that return
+// before the command's own phase runs.
+func reportSchemaLoad(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, absSchemaPath string, result diag.Result) error {
+	bindSchemaSource(sink, s, explicitRoot, absSchemaPath)
+	sink.Add(result)
 	if result.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, explicitRoot, absSchemaPath), result)
-		return diag.OK(), &cli.ExitError{Code: cli.ExitForResult(result)}
+		return &cli.ExitError{Code: cli.ExitForResult(result)}
 	}
-	return result, nil
+	return nil
 }
 
 // diagRootFor selects the root that rendered diagnostic locations are

@@ -1,0 +1,93 @@
+{
+  "name": "\"test\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "types": [
+    {
+      "name": "Thing",
+      "name_span": {
+        "s": 20,
+        "e": 25
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 35,
+              "e": 41
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 29,
+            "e": 49
+          }
+        },
+        {
+          "name": "where",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 57,
+              "e": 63
+            }
+          },
+          "span": {
+            "s": 51,
+            "e": 63
+          }
+        },
+        {
+          "name": "extra",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 71,
+              "e": 77
+            }
+          },
+          "span": {
+            "s": 65,
+            "e": 77
+          }
+        }
+      ],
+      "type_anns": [
+        {
+          "name": "index",
+          "args": [
+            {
+              "kind": "ident",
+              "text": "where",
+              "span": {
+                "s": 88,
+                "e": 93
+              }
+            },
+            {
+              "kind": "ident",
+              "text": "extra",
+              "span": {
+                "s": 95,
+                "e": 100
+              }
+            }
+          ],
+          "has_parens": true,
+          "span": {
+            "s": 80,
+            "e": 101
+          }
+        }
+      ],
+      "span": {
+        "s": 15,
+        "e": 103
+      }
+    }
+  ]
+}

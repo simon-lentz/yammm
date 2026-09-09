@@ -48,7 +48,7 @@ Use --module-root to resolve module-style imports against a root directory other
 than the schema's own (e.g. a repository root); for the go target the embedded
 source keys are relative to that root.`,
 		Args: cobra.ExactArgs(1),
-		RunE: runGen,
+		RunE: withDiagnostics(runGen),
 	}
 	cmd.Flags().String("to", "", "target: go, jsonschema, or md (required)")
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
@@ -83,16 +83,9 @@ func rejectInapplicableFlags(cmd *cobra.Command, target string) error {
 	return nil
 }
 
-func runGen(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	toFormat, _ := cmd.Flags().GetString("to")
 	outputPath, _ := cmd.Flags().GetString("output")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
 
 	target := strings.ToLower(toFormat)
 	if target == "markdown" {
@@ -115,13 +108,12 @@ func runGen(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRootAbs, absSchemaPath, schemaResult)
-	if loadErr != nil {
-		return loadErr
+	if err := reportSchemaLoad(sink, s, moduleRootAbs, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
-	// The load's residual warnings are this command's only diagnostics — nothing
-	// downstream reports through diag — so they render here, once.
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRootAbs, absSchemaPath), pending)
+	// Nothing downstream reports through diag, so the load's residual warnings
+	// are all this command has and they precede the generated artifact.
+	sink.Render()
 
 	var data []byte
 	switch target {

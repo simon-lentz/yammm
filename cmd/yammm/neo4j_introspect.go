@@ -13,7 +13,7 @@ func newNeo4jIntrospectCmd() *cobra.Command {
 		Short: "Infer a .yammm schema from a live Neo4j database",
 		Long:  "Connects to a Neo4j database, discovers constraints and relationships, and generates a .yammm schema scaffold.",
 		Args:  cobra.NoArgs,
-		RunE:  runNeo4jIntrospect,
+		RunE:  withDiagnostics(runNeo4jIntrospect),
 	}
 
 	cmd.Flags().String("schema", "", "filter inference to a specific schema name prefix")
@@ -22,21 +22,13 @@ func newNeo4jIntrospectCmd() *cobra.Command {
 	return cmd
 }
 
-func runNeo4jIntrospect(cmd *cobra.Command, _ []string) error {
+func runNeo4jIntrospect(cmd *cobra.Command, _ []string, _ *cli.DiagnosticSink) error {
 	uri, _ := cmd.Flags().GetString("uri")
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
 	database, _ := cmd.Flags().GetString("database")
 	schemaFilter, _ := cmd.Flags().GetString("schema")
 	outputPath, _ := cmd.Flags().GetString("output")
-
-	// The flag set is validated before the connection guard. With the guard
-	// first, an invalid --format exited 2 for the wrong reason, which reads as
-	// this command validating a flag it never looks at.
-	formatStr, _ := cmd.Flags().GetString("format")
-	if _, err := cli.ParseOutputFormat(formatStr); err != nil {
-		return err
-	}
 
 	if uri == "" {
 		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")

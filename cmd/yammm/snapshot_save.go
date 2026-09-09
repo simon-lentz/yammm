@@ -28,7 +28,7 @@ persisted snapshot. Accepts multiple data files accumulated into a single graph.
 Output is byte-level deterministic by default (no created_at timestamp).
 Use --timestamp to include a creation timestamp.`,
 		Args: cobra.MinimumNArgs(2),
-		RunE: runSnapshotSave,
+		RunE: withDiagnostics(runSnapshotSave),
 	}
 
 	cmd.Flags().StringP("output", "o", "", "output path for the .ys file (required)")
@@ -44,9 +44,7 @@ Use --timestamp to include a creation timestamp.`,
 	return cmd
 }
 
-func runSnapshotSave(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	outputPath, _ := cmd.Flags().GetString("output")
 	fromFormat, _ := cmd.Flags().GetString("from")
 	typeName, _ := cmd.Flags().GetString("type")
@@ -55,11 +53,6 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	timestamp, _ := cmd.Flags().GetBool("timestamp")
 	indent, _ := cmd.Flags().GetBool("indent")
 	intoPath, _ := cmd.Flags().GetString("into")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
 
 	// Validate output destination: either --output or --into must be set.
 	if outputPath == "" && intoPath == "" {
@@ -89,25 +82,22 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if loadErr != nil {
-		return loadErr
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
-	// Load existing snapshot if --into is set. Its diagnostics join the pending
-	// set rather than rendering on their own: a warning here (an unsupported
+	// Load existing snapshot if --into is set. A warning here (an unsupported
 	// hash algorithm, say) means the imported snapshot's integrity was not fully
-	// verified, and it must reach the operator without turning one invocation
-	// into two rendered results.
+	// verified, and it reaches the operator whether or not this command gets as
+	// far as writing anything.
 	var g *graph.Graph
 	if intoPath != "" {
 		snap, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
 		if loadErr != nil {
 			return cli.Runtimef("%v", loadErr)
 		}
-		pending = cli.MergeResults(pending, loadResult)
+		sink.Add(loadResult)
 		if loadResult.HasErrors() {
-			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), pending)
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 		g = graph.NewFromSnapshot(s, snap)
@@ -130,12 +120,8 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		g, graphResult = cli.BuildGraph(cmd.Context(), s, valids)
 	}
 
-	// Merge all diagnostics and render once, whatever their severity: the
-	// pending set carries load and imported-snapshot warnings that are only
-	// reachable here.
-	result := cli.MergeResults(pending, parseResult, validateResult, graphResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-	if result.HasErrors() {
+	sink.Add(parseResult, validateResult, graphResult)
+	if sink.Result().HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -160,7 +146,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	// Marshal reports values it could not put on the wire as Warnings, and
 	// Err() is nil for a warnings-only result — so checking the error alone
 	// discarded exactly the facts those diagnostics exist to surface.
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), marshalResult)
+	sink.Add(marshalResult)
 
 	// Warn on non-.ys extension.
 	w := cmd.ErrOrStderr()

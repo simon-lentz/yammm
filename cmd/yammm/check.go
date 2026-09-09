@@ -17,7 +17,7 @@ func newCheckCmd() *cobra.Command {
 		Short: "Validate data against a schema",
 		Long:  "Validate JSON or CSV data against a yammm schema. Input format is auto-detected from file extension.",
 		Args:  cobra.ExactArgs(2),
-		RunE:  runCheck,
+		RunE:  withDiagnostics(runCheck),
 	}
 
 	cmd.Flags().String("from", "", "input format override: json or csv")
@@ -28,17 +28,10 @@ func newCheckCmd() *cobra.Command {
 	return cmd
 }
 
-func runCheck(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	fromFormat, _ := cmd.Flags().GetString("from")
 	typeName, _ := cmd.Flags().GetString("type")
 	typeColumn, _ := cmd.Flags().GetString("type-column")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
 
 	schemaPath := args[0]
 	dataPath := args[1]
@@ -54,9 +47,8 @@ func runCheck(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if loadErr != nil {
-		return loadErr
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
 	// Detect format
@@ -89,15 +81,9 @@ func runCheck(cmd *cobra.Command, args []string) error {
 
 	// Validate instances
 	_, validateResult := cli.ValidateInstances(cmd.Context(), s, parsed)
+	sink.Add(parseResult, validateResult)
 
-	// Merge results — the schema load's residual warnings included, so one
-	// invocation writes one result (and in JSON, one document).
-	result := cli.MergeResults(pending, parseResult, validateResult)
-
-	// Render
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-
-	exitCode := cli.ExitForResult(result)
+	exitCode := cli.ExitForResult(sink.Result())
 	if exitCode != cli.ExitOK {
 		return &cli.ExitError{Code: exitCode}
 	}

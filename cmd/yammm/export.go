@@ -14,7 +14,6 @@ import (
 	adapterjson "github.com/simon-lentz/yammm/adapter/json"
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
-	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -30,7 +29,7 @@ inspection and integration into application code or migration tooling.
 The output contains UNWIND/MERGE patterns with parameter placeholders ($key_id,
 $props, $rows) and is not directly executable in Neo4j Browser or cypher-shell.`,
 		Args: cobra.ExactArgs(2),
-		RunE: runExport,
+		RunE: withDiagnostics(runExport),
 	}
 
 	cmd.Flags().String("to", "", "output format: json, csv, or cypher (required)")
@@ -46,20 +45,13 @@ $props, $rows) and is not directly executable in Neo4j Browser or cypher-shell.`
 	return cmd
 }
 
-func runExport(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	toFormat, _ := cmd.Flags().GetString("to")
 	fromFormat, _ := cmd.Flags().GetString("from")
 	typeName, _ := cmd.Flags().GetString("type")
 	typeColumn, _ := cmd.Flags().GetString("type-column")
 	outputPath, _ := cmd.Flags().GetString("output")
 	outputDir, _ := cmd.Flags().GetString("output-dir")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
 
 	target := strings.ToLower(toFormat)
 	if err := validateExportFlags(toFormat, target, outputPath, outputDir); err != nil {
@@ -79,9 +71,8 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, loadErr := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if loadErr != nil {
-		return loadErr
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
 	// Check if the data file is a persisted snapshot.
@@ -91,7 +82,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 	}
 
 	if isSnapshot {
-		return exportFromSnapshot(cmd, s, pending, dataPath, outputFormat, noColor, moduleRoot, absSchemaPath, target, outputPath, outputDir)
+		return exportFromSnapshot(cmd, sink, s, dataPath, target, outputPath, outputDir)
 	}
 
 	// Parse, validate, and build graph
@@ -100,11 +91,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// One invocation writes one result: the load's residual warnings fold into
-	// the data phase's diagnostics rather than rendering separately.
-	result := cli.MergeResults(pending, graphResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-	if result.HasErrors() {
+	sink.Add(graphResult)
+	sink.Render()
+	if sink.Result().HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -267,23 +256,21 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 	return nil
 }
 
-// exportFromSnapshot exports a persisted .ys snapshot. pending carries the
-// schema load's residual diagnostics so they render with the snapshot's rather
-// than as a second document.
-func exportFromSnapshot(cmd *cobra.Command, s *schema.Schema, pending diag.Result, dataPath string, outputFormat cli.OutputFormat, noColor bool, moduleRoot, absSchemaPath, target, outputPath, outputDir string) error {
+// exportFromSnapshot exports a persisted .ys snapshot.
+//
+// A warning here — an unsupported snapshot hash algorithm, a provenance path
+// that would not parse — means integrity was NOT fully verified, and the
+// operator must read it before the export lands, which is why the render is
+// explicit rather than left to the wrapper.
+func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, dataPath, target, outputPath, outputDir string) error {
 	snap, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
 	if err != nil {
 		return cli.Runtimef("%v", err)
 	}
 
-	// Render unconditionally. A warning here — an unsupported snapshot hash
-	// algorithm, a provenance path that would not parse — means integrity was
-	// NOT fully verified, and gating on error severity left the operator
-	// shipping an export believing it had been. RenderResult writes nothing for
-	// an empty result, so no gate is needed.
-	result := cli.MergeResults(pending, snapResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-	if result.HasErrors() {
+	sink.Add(snapResult)
+	sink.Render()
+	if sink.Result().HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
