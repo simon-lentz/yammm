@@ -15,8 +15,10 @@ func newRootCmd(version string) *cobra.Command {
 		Long: `yammm is a schema validation DSL for graph-based data infrastructure.
 
 Global flags:
-  --format    Diagnostic output format: "text" (default) or "json".
-              Applies to all commands that produce diagnostics.
+  --format    Output format: "text" (default) or "json". It shapes the
+              diagnostics every command writes, and the stdout payload of
+              "snapshot info". Under "json" a command writes one JSON
+              document per stream and suppresses its status summary.
   --no-color  Disable ANSI color in diagnostic output.
 
 Data commands (check, load, export) also accept:
@@ -27,7 +29,7 @@ Data commands (check, load, export) also accept:
 		SilenceUsage:  true,
 	}
 
-	cmd.PersistentFlags().String("format", "text", "output format: text or json")
+	cmd.PersistentFlags().String("format", "text", "output format for diagnostics and for snapshot info's payload: text or json")
 	cmd.PersistentFlags().Bool("no-color", false, "disable ANSI color output")
 
 	cmd.AddCommand(

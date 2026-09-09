@@ -970,6 +970,49 @@ and moves after its own re-key window. Nothing here changes an exit code or a
 `.ys` byte; what a consumer would notice is stderr under `--format json`
 becoming parseable where it was not.
 
+**`yammm snapshot info --format json` is a BREAKING change to a payload no
+declaration describes.** `gorelease -base=v0.21.0` reports the same two
+compatible changes as the item above and no incompatible ones, because the
+command's JSON shape is not a Go declaration. The CLI now owns that shape
+instead of marshalling `snapshot.HeaderInfo` and `snapshot.SnapshotInfo`
+directly, which had published Go field names as a wire contract. Any consumer
+reading this payload must be updated; **rdata does not read it**, measured at
+its tree — its only mention names the command as human tooling.
+
+- **Every key is snake_case, in all three modes.** The single-file and
+  header-only modes emitted Go field names (`SchemaName`, `TotalInstances`,
+  `IntegrityStatus`); the `--dir` mode wrapped a PascalCase `header` in
+  snake_case entry keys, so one document spoke two conventions. `attestation`'s
+  nested `values` and `associations` follow the same rule. Each type identity
+  still renders as the `schema#name` string `TypeRef` has always written.
+- **`--header-only --format json` reports a real `file_size`.** It published
+  `0` — `HeaderOnlyRead` cannot know a size from an `io.Reader` — while the
+  command held the open handle it could stat. A stat failure keeps the zero and
+  raises no diagnostic, matching what a directory scan does.
+- **`issues` is always present on a `--dir` entry**, an empty array where it was
+  absent. Its sibling `header` is an explicit `null`, so one entry answered
+  "nothing to report" two ways and a consumer had to handle both.
+- **`mod_time` renders at fixed width with nine fractional digits.** RFC 3339
+  Nano trims trailing zeros, so a whole-second stamp rendered shorter than one
+  recorded microseconds later and sorted **above** it — any chronological
+  ordering built on the key as text was wrong. It stays RFC 3339 in UTC, and
+  empty when the file could not be stat'd.
+- **`snapshot info --dir --format json` exits on a malformed entry**, as the
+  text mode already did. The exit derivation was wired to the text return only,
+  so the same directory reported `1` as text and `0` as JSON — and the machine
+  consumer `--format json` exists for read the silent code.
+
+**Behaviour changes to the text output:**
+
+- **Metadata renders in key order** in both `snapshot info` and
+  `snapshot info --header-only`. Both walked the map directly, so one file
+  reported its annotations in a different order on consecutive runs and no diff
+  of two reports meant anything.
+- **The root's `--format` help states what the flag does.** It was described as
+  the "diagnostic output format" applying to commands that produce diagnostics,
+  while it also shapes `snapshot info`'s stdout payload and suppresses status
+  summaries.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

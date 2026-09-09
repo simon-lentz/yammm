@@ -68,9 +68,9 @@ stdout 'Total instances:'
 stdout 'ok'
 
 exec yammm snapshot info --format json out.ys
-stdout '"SchemaName"'
-stdout '"TotalInstances"'
-stdout '"IntegrityStatus"'
+stdout '"schema_name"'
+stdout '"total_instances"'
+stdout '"integrity_status"'
 
 # --header-only omits the computed sections.
 exec yammm snapshot info --header-only out.ys
@@ -80,10 +80,10 @@ stdout 'Integrity:'
 ! stdout 'Summary:'
 
 exec yammm snapshot info --header-only --format json out.ys
-stdout '"SchemaName"'
-stdout '"IntegrityHash"'
-! stdout '"TotalInstances"'
-! stdout '"IntegrityStatus"'
+stdout '"schema_name"'
+stdout '"integrity_hash"'
+! stdout '"total_instances"'
+! stdout '"integrity_status"'
 
 # --dir summarizes a directory, tolerating corrupt entries per-file.
 mkdir snaps

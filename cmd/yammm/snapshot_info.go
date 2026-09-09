@@ -3,9 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -60,7 +61,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		sink.Render()
 		w := cmd.OutOrStdout()
 		if sink.Format() == cli.FormatJSON {
-			enc, err := json.MarshalIndent(header, "", "  ")
+			enc, err := json.MarshalIndent(newHeaderInfoDTO(header, statSize(f, header.FileSize)), "", "  ")
 			if err != nil {
 				return cli.Runtimef("encode JSON: %v", err)
 			}
@@ -86,7 +87,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	w := cmd.OutOrStdout()
 
 	if sink.Format() == cli.FormatJSON {
-		enc, err := json.MarshalIndent(info, "", "  ")
+		enc, err := json.MarshalIndent(newSnapshotInfoDTO(info), "", "  ")
 		if err != nil {
 			return cli.Runtimef("encode JSON: %v", err)
 		}
@@ -96,6 +97,17 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 
 	printSnapshotInfo(w, info)
 	return nil
+}
+
+// statSize reports the open file's size, keeping fallback when the handle
+// cannot be stat'd. HeaderOnlyRead answers zero because a size is not knowable
+// from an io.Reader, and this command holds the handle it opened.
+func statSize(f *os.File, fallback int64) int64 {
+	stat, err := f.Stat()
+	if err != nil {
+		return fallback
+	}
+	return stat.Size()
 }
 
 func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshot.SnapshotInfo) {
@@ -119,11 +131,7 @@ func printSnapshotInfo(w interface{ Write([]byte) (int, error) }, info *snapshot
 	}
 
 	if len(info.Metadata) > 0 {
-		pairs := make([]string, 0, len(info.Metadata))
-		for k, v := range info.Metadata {
-			pairs = append(pairs, k+"="+v)
-		}
-		fmt.Fprintf(w, "  Metadata:   %s\n", strings.Join(pairs, ", "))
+		fmt.Fprintf(w, "  Metadata:   %s\n", formatMetadata(info.Metadata))
 	} else {
 		fmt.Fprintf(w, "  Metadata:   none\n")
 	}
@@ -165,11 +173,7 @@ func printHeaderInfo(w interface{ Write([]byte) (int, error) }, header *snapshot
 	}
 
 	if len(header.Metadata) > 0 {
-		pairs := make([]string, 0, len(header.Metadata))
-		for k, v := range header.Metadata {
-			pairs = append(pairs, k+"="+v)
-		}
-		fmt.Fprintf(w, "  Metadata:   %s\n", strings.Join(pairs, ", "))
+		fmt.Fprintf(w, "  Metadata:   %s\n", formatMetadata(header.Metadata))
 	} else {
 		fmt.Fprintf(w, "  Metadata:   none\n")
 	}
@@ -192,6 +196,123 @@ func printAttestation(w interface{ Write([]byte) (int, error) }, att *graph.Atte
 	fmt.Fprintf(w, "  Attested:   values=%t associations=%t\n", att.Values, att.Associations)
 }
 
+// modTimeLayout renders a modification time at fixed width, so the key sorts
+// as text in the order the times sort. RFC 3339 Nano trims trailing zeros,
+// which puts a whole-second stamp above one recorded microseconds later.
+const modTimeLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
+// formatMetadata renders annotation pairs in key order. Map iteration is
+// randomized, so an unsorted walk reports one file two ways on consecutive
+// runs and no diff of two reports means anything.
+func formatMetadata(metadata map[string]string) string {
+	pairs := make([]string, 0, len(metadata))
+	for _, k := range slices.Sorted(maps.Keys(metadata)) {
+		pairs = append(pairs, k+"="+metadata[k])
+	}
+	return strings.Join(pairs, ", ")
+}
+
+// The CLI owns the JSON shape of every `snapshot info` mode: the library's
+// HeaderInfo and SnapshotInfo carry no json tags, so marshalling them directly
+// published Go field names as a wire contract. These types are the only thing
+// marshalled, and they keep one snake_case convention across all three modes.
+type attestationDTO struct {
+	Values       bool `json:"values"`
+	Associations bool `json:"associations"`
+}
+
+type headerInfoDTO struct {
+	Version             int                `json:"version"`
+	Features            []string           `json:"features"`
+	SchemaName          string             `json:"schema_name"`
+	SchemaSource        string             `json:"schema_source"`
+	SchemaHash          string             `json:"schema_hash"`
+	SchemaHashAlgorithm int                `json:"schema_hash_algorithm"`
+	IntegrityHash       string             `json:"integrity_hash"`
+	CreatedAt           string             `json:"created_at"`
+	Metadata            map[string]string  `json:"metadata"`
+	Types               []snapshot.TypeRef `json:"types"`
+	Attestation         *attestationDTO    `json:"attestation"`
+	FileSize            int64              `json:"file_size"`
+}
+
+type snapshotInfoDTO struct {
+	Version             int                      `json:"version"`
+	Features            []string                 `json:"features"`
+	SchemaName          string                   `json:"schema_name"`
+	SchemaSource        string                   `json:"schema_source"`
+	SchemaHash          string                   `json:"schema_hash"`
+	SchemaHashAlgorithm int                      `json:"schema_hash_algorithm"`
+	IntegrityHash       string                   `json:"integrity_hash"`
+	CreatedAt           string                   `json:"created_at"`
+	Metadata            map[string]string        `json:"metadata"`
+	Types               []snapshot.TypeRef       `json:"types"`
+	InstanceCounts      map[snapshot.TypeRef]int `json:"instance_counts"`
+	TotalInstances      int                      `json:"total_instances"`
+	TotalEdges          int                      `json:"total_edges"`
+	DuplicateCount      int                      `json:"duplicate_count"`
+	UnresolvedCount     int                      `json:"unresolved_count"`
+	Attestation         *attestationDTO          `json:"attestation"`
+	FileSize            int64                    `json:"file_size"`
+	IntegrityStatus     string                   `json:"integrity_status"`
+}
+
+func newAttestationDTO(att *graph.Attestation) *attestationDTO {
+	if att == nil {
+		return nil
+	}
+	return &attestationDTO{Values: att.Values, Associations: att.Associations}
+}
+
+// newHeaderInfoDTO takes the size explicitly: the three producers of a
+// HeaderInfo know it to different degrees, and only the caller knows which
+// one it read.
+func newHeaderInfoDTO(header *snapshot.HeaderInfo, fileSize int64) *headerInfoDTO {
+	if header == nil {
+		return nil
+	}
+	return &headerInfoDTO{
+		Version:             header.Version,
+		Features:            header.Features,
+		SchemaName:          header.SchemaName,
+		SchemaSource:        header.SchemaSource,
+		SchemaHash:          header.SchemaHash,
+		SchemaHashAlgorithm: header.SchemaHashAlgorithm,
+		IntegrityHash:       header.IntegrityHash,
+		CreatedAt:           header.CreatedAt,
+		Metadata:            header.Metadata,
+		Types:               header.Types,
+		Attestation:         newAttestationDTO(header.Attestation),
+		FileSize:            fileSize,
+	}
+}
+
+func newSnapshotInfoDTO(info *snapshot.SnapshotInfo) *snapshotInfoDTO {
+	if info == nil {
+		return nil
+	}
+	return &snapshotInfoDTO{
+		Version:             info.Version,
+		Features:            info.Features,
+		SchemaName:          info.SchemaName,
+		SchemaSource:        info.SchemaSource,
+		SchemaHash:          info.SchemaHash,
+		SchemaHashAlgorithm: info.SchemaHashAlgorithm,
+		IntegrityHash:       info.IntegrityHash,
+		CreatedAt:           info.CreatedAt,
+		Metadata:            info.Metadata,
+		Types:               info.Types,
+		InstanceCounts:      info.InstanceCounts,
+		TotalInstances:      info.TotalInstances,
+		TotalEdges:          info.TotalEdges,
+		DuplicateCount:      info.DuplicateCount,
+		UnresolvedCount:     info.UnresolvedCount,
+		Attestation:         newAttestationDTO(info.Attestation),
+		FileSize:            info.FileSize,
+		IntegrityStatus:     info.IntegrityStatus,
+	}
+}
+
 // dirEntryDTO mirrors ScanEntry for JSON output. The shape exposes the
 // per-file basename, header (nil on failure), and a compact list of
 // diagnostic codes + messages for any issues on the entry's Result.
@@ -201,11 +322,13 @@ type dirEntryDTO struct {
 	// FileSize repeats the header's when the header parsed, and carries the
 	// size alone when it did not — a corrupt file still occupies disk.
 	FileSize int64 `json:"file_size"`
-	// ModTime is RFC 3339 in UTC, empty when the file could not be stat'd —
-	// empty rather than a zero time, which sorts first and corrupts orderings.
-	ModTime string               `json:"mod_time"`
-	Header  *snapshot.HeaderInfo `json:"header"`
-	Issues  []dirIssueDTO        `json:"issues,omitempty"`
+	// ModTime is RFC 3339 in UTC at fixed width, empty when the file could not
+	// be stat'd — a zero time would sort first and corrupt orderings.
+	ModTime string         `json:"mod_time"`
+	Header  *headerInfoDTO `json:"header"`
+	// Issues is always present, never absent: header is an explicit null, so
+	// one entry must not answer "nothing to report" two ways.
+	Issues []dirIssueDTO `json:"issues"`
 }
 
 type dirIssueDTO struct {
@@ -233,7 +356,7 @@ func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath st
 			return cli.Runtimef("encode JSON: %v", err)
 		}
 		fmt.Fprintln(w, string(enc))
-		return nil
+		return dirEntriesExit(entries)
 	}
 
 	printDirEntries(w, dirPath, entries)
@@ -263,14 +386,21 @@ func dirEntriesExit(entries []snapshot.ScanEntry) error {
 }
 
 func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {
+	// ScanDir already stat'd the entry, so the header's own size is the one to
+	// carry; Header is nil by contract on an error-severity result.
+	var headerSize int64
+	if entry.Header != nil {
+		headerSize = entry.Header.FileSize
+	}
 	dto := dirEntryDTO{
 		Name:     entry.Name,
 		Path:     entry.Path,
 		FileSize: entry.FileSize,
-		Header:   entry.Header,
+		Header:   newHeaderInfoDTO(entry.Header, headerSize),
+		Issues:   []dirIssueDTO{},
 	}
 	if !entry.ModTime.IsZero() {
-		dto.ModTime = entry.ModTime.UTC().Format(time.RFC3339Nano)
+		dto.ModTime = entry.ModTime.UTC().Format(modTimeLayout)
 	}
 	for iss := range entry.Result.Issues() {
 		dto.Issues = append(dto.Issues, dirIssueDTO{
