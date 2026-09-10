@@ -849,11 +849,52 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 - **`Marshal` returns Fatal `E_INTERNAL` and no bytes for a target key `graph.ParseKey` cannot read** (A-191), where v0.19.0 wrote the document with the address dropped and a `W_SNAPSHOT_VALUE_DROPPED` Warning. `UnresolvedEdge.TargetKey` is written from `immutable.Key.String()` on every library path, `graph.ParseKey` is its pinned inverse, and no consumer path supplies the string — so the branch guarded an event the module's own invariant excludes, and a broken invariant is an internal failure rather than a sampled warning. The one reachable input is caller-assembled `RebuildSnapshot` parts whose key holds a non-scalar component, which `Marshal`'s contract already assigns to Fatal `E_INTERNAL`. The two `W_SNAPSHOT_VALUE_DROPPED` arms for a target key or edge properties under an `absent`/`empty` reason are unchanged, and the code's own description is narrowed to them. Consumer cost is zero by absence: every key the consumer writes is a `String` primary key rendered by the library.
 
-## Unreleased — merged to `main`
+## Unreleased — condition-1 unit 6, on `review` until the unit closes
 
-Condition-1 **unit 6** (the CLI and the formatter), pass A's fix pass. Written by
-the pass that lands the behaviour, not at the tag (A-227, A-346). **No exported
-declaration moves**, so `gorelease` reports nothing here; `format/` is excluded
+Condition-1 **unit 6** (the CLI and the formatter). Its commits sit on the
+`review` branch and merge to `main` when the unit closes (A-417); nothing below
+is released or merged. Each block was written by the pass or group that landed
+its behaviour, not at the tag (A-227, A-346). **Six exported declarations are
+ADDED and nothing is removed or changed:** `gorelease -base=v0.21.0` on the
+candidate reports `diag.E_COMMAND_FAILED`, `diag.W_SNAPSHOT_PATH_EXTENSION`,
+`neo4j.W_NEO4J_INDEXES_UNREADABLE`, `snapshot.WithCreatedAtFrom`,
+`format.ErrNotPreserved` and `format.SyntaxError` as compatible changes, and
+suggests `v0.22.0`. `snapshot info --format json`'s payload breaks in a way no
+declaration describes (below).
+
+### Unit 6 — every exit code that moves against `v0.21.0`
+
+Measured through binaries built from `v0.21.0`'s tree and from the candidate,
+one probe per row.
+
+| Invocation | `v0.21.0` | Now | What it reports now |
+| :-- | :-: | :-: | :-- |
+| `export --to csv` of several types into one `--output` | 0, one file with a header row per type | 2 | `CSV export with multiple types requires --output-dir` |
+| `export --to json --output-dir …` | 0 | 2 | `--output-dir applies only to --to csv` |
+| `export --output … --output-dir …` | 0 | 2 | `--output and --output-dir are mutually exclusive` |
+| `yammm snapshot` or `yammm neo4j` with no subcommand | 0, help | 2 | the parent requires a subcommand |
+| `yammm snapshot <unknown>` | 0, help | 2 | `unknown command "…" for "yammm snapshot"` |
+| `fmt --format bogus` | 0, the flag ignored | 2 | `invalid output format "bogus"` |
+| a missing schema path on `validate`, `check`, `load`, `snapshot save`, `neo4j constraints` or `neo4j indexes` | 1 | 3 | an input that cannot be read is a runtime failure, not an invalid document |
+| a missing path on `fmt`, or a missing data file on `check` | 2 | 3 | the same |
+| CSV export of two types whose file names differ only in case | 0, one file short | 3 | the two names cannot share one directory |
+| `--output` naming a writable file in a read-only directory | 0, written in place | 3 | the write cannot be staged beside its target |
+| `neo4j constraints` or `indexes` with an empty `--separator` | 0 | 2 | refused before any work |
+| the same with a `--prefix` or `--separator` that composes no Neo4j identifier | 1 | 2 | refused before any work |
+| `neo4j diff` with an empty `--separator` | 3 | 2 | refused before the connection |
+
+Unchanged, measured the same way: an unknown top-level command (2); `snapshot
+info` on a missing file (3); a read-only target, through `--output` or
+`--output-dir` (3); a looping symlink (3); a symlink, `/dev/stdout`, a FIFO and
+a 250-byte name as targets (0); `fmt --check` over an unformatted file (1, and
+nothing on stderr); `fmt` on a file that does not parse (1); a validation
+failure (1); the label flags on `neo4j introspect` and `export --to cypher`,
+and `neo4j constraints --edition bogus` (2); a failed write under `--format
+json` (3).
+
+### Unit 6, pass A — the formatter
+
+Pass A's fix pass. **No exported declaration moves**, so `gorelease` reports nothing here; `format/` is excluded
 from the v1.0 Go-API compatibility promise in any case (see Scope). What moves is
 formatter *output*, and every item below was reproduced first-hand before the
 repair and is pinned by a fixture after it.
@@ -939,7 +980,9 @@ ones:
   database's indexes, so the half needing them did not run.
 
 Both replace prose the CLI wrote to a stream, which no `--format json` consumer
-could see in any form. A consumer matching on code strings gains two; one
+could see in any form. `W_NEO4J_INDEXES_UNREADABLE` reaches the stream through
+the process-contract block below: as text above `neo4j diff`'s report, and in
+the document under `--format json`. A consumer matching on code strings gains two; one
 matching on message text sees the same wording move from a prose line into the
 diagnostic array.
 
@@ -950,7 +993,10 @@ diagnostic array.
   and three severity gates dropped a warnings-only result — so `snapshot info`
   reported a document whose schema identity could not be checked, exited `0`,
   and wrote nothing at all to stderr. Under `--format json` those paths now
-  write one document where they wrote none.
+  write one document where they wrote none. A failure that is not a diagnostic
+  joins that document as `E_COMMAND_FAILED`, and `fmt` and `export --to cypher`
+  report through it too: the process-contract block below made this item true
+  for them.
 - **A status summary is suppressed under `--format json` and goes to stderr
   otherwise.** `loaded N instances`, `wrote N CSV files`, `saved snapshot: …`
   and `updated metadata on …` sat beside the JSON document and stopped it
@@ -962,15 +1008,16 @@ diagnostic array.
   apart from `ok`. It read `ok` before, in the one place a dispatch-style scan
   looks.
 - **Every command's exit code is derived from every phase that diagnosed**,
-  not from its last one. No exit code moves as a result; the derivation is what
-  changed.
+  not from its last one. The exit codes this unit moves are in the table at
+  the top of this section.
 - **`yammm-lsp` prints one usage block for a bad flag**, not two, and writes it
   to an injected writer.
 
 **Consumer reach: not yet measured against a moved pin.** rdata pins `v0.20.0`
-and moves after its own re-key window. Nothing here changes an exit code or a
-`.ys` byte; what a consumer would notice is stderr under `--format json`
-becoming parseable where it was not.
+and moves after its own re-key window. No `.ys` byte moves; the exit codes
+that move are in the table at the top of this section, and what a consumer
+would notice besides is stderr under `--format json` becoming parseable where
+it was not.
 
 **`yammm snapshot info --format json` is a BREAKING change to a payload no
 declaration describes.** `gorelease -base=v0.21.0` reports the same two
@@ -993,7 +1040,8 @@ its tree — its only mention names the command as human tooling.
   raises no diagnostic, matching what a directory scan does.
 - **`issues` is always present on a `--dir` entry**, an empty array where it was
   absent. Its sibling `header` is an explicit `null`, so one entry answered
-  "nothing to report" two ways and a consumer had to handle both.
+  "nothing to report" two ways and a consumer had to handle both. The
+  `snapshot info` block below renames it `diagnostics.issues`.
 - **`mod_time` renders at fixed width with nine fractional digits.** RFC 3339
   Nano trims trailing zeros, so a whole-second stamp rendered shorter than one
   recorded microseconds later and sorted **above** it — any chronological
@@ -1230,6 +1278,9 @@ then:
 - **The staging name has a fixed length**, `.yammm-<random>.tmp`, so a basename
   near the filesystem's name limit is written again; the earlier fix pass
   refused a 245-byte name at exit 3.
+- **A file `export --output-dir` creates is owner-only (0600)**, as a file
+  `--output` creates already was at `v0.21.0`, which created per-type CSV files
+  0644. An existing file keeps its mode.
 
 **Measured against `v0.21.0`, every target kind behaves as it did, with one
 deliberate exception: a writable file in a read-only directory is refused at
@@ -2102,3 +2153,4 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **2026-09-03** — **Added the "Unreleased — merged to `main`" section for condition-1 unit 4 (`schema/`), written in the fix pass that landed the behaviour rather than at the tag (A-227).** It enumerates the two incompatible and twenty-eight additive declarations `gorelease -base=v0.20.0` reports at `9007281`, and every behaviour change that moves no declaration — the UPPER_SNAKE relation names, one postfix level, the typed static checker and the evaluator conforming to one scope contract, byte-decided registry idempotence, the 16 MiB bound and the non-blocking open at every read, the hash at version 4 — each marked consumer-visible where rdata's tree measured it so. The enumeration of record had carried none of this half when the unit's fix-diff round read it.
 - **2026-09-04 (late)** — Corrected the Unreleased section's preamble and the condition-1 unit-5 heading, which still said the unit was not closed after A-297 closed it and `f049740` (PR #105) merged it. Prose only; no enumeration changed.
 - **2026-09-06** — **Corrected the unit-4 "Additive API surface" enumeration of `ReceiverKind`.** It named `RecvScalar`, which no declaration in the module carries, and listed four constants where `gorelease -base=v0.20.0` reports ten. The line now names all ten as declared: `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList`, `RecvNumericList`. `RecvScalar` was added and renamed inside the unreleased range, so it leaves no trace for a consumer; the enumeration had kept its old spelling. Prose only; no behaviour changed.
+- **2026-09-10** — **Corrected condition-1 unit 6's Unreleased section against the candidate (A-456).** Retitled it, since unit 6 sits unmerged on `review` (A-417), and gave pass A its own heading; stated the section's whole declaration delta, six compatible additions; added an exit-code table measured against `v0.21.0`, replacing two sentences that said no exit code moves; stated how `W_NEO4J_INDEXES_UNREADABLE` and the one-result rule reach the stream; recorded the 0600 mode of the files `--output-dir` creates; and pointed pass B's `issues` item at its rename.

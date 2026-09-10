@@ -239,8 +239,8 @@ current type declares.
 ### Schema Inference (from Live Database)
 
 ```go
-schema, err := adapter.InferSchema(constraints, relationships, "inventory")
-// Returns .yammm source code inferred from Neo4j metadata
+source := adapter.InferSchema(constraints, relationships, "inventory")
+// Returns .yammm source code inferred from Neo4j metadata; there is no error
 ```
 
 ---
