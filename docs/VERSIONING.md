@@ -1098,10 +1098,10 @@ Scope).
   file unchanged, the stdout mode prints nothing, and `--check` does not list
   the path. Two inputs in this repository's own fixtures reached it, and both
   exited 0 before: an enum whose first value shares the `Enum[` line lost that
-  value and still loaded, and a block comment lost its blank lines. The second
-  is repaired by the record model below; the formatter refuses the first until
-  its repair lands. A pre-commit hook running `fmt --write` now blocks the
-  commit rather than committing the rewrite.
+  value and still loaded, and a block comment lost its blank lines. Both are
+  now repaired, below; the refusal stays as the guard for any defect not yet
+  found. A pre-commit hook running `fmt --write` then blocks the commit rather
+  than committing the rewrite.
 - **The language server returns no edits for a refusal and logs it as a
   warning**, where it applied the rewritten text.
 - **Measured reach:** across the 241 tracked schemas of this repository and the
@@ -1123,6 +1123,31 @@ trailing comment carried `[` or `{` was not a fixed point, so format-on-save
 oscillated. No exported declaration moves. A rewrite costs about 8% more on the
 corpus benchmark — one lex of phase 3's output, only when phase 3 changed it —
 and an already-formatted file costs nothing.
+
+**Offsets, folding and the opening line (A-447).** Every offset a phase computes
+on a line indexes the line's text, one rule decides whether a multiline construct
+can be joined, and the `extends` readers read code rather than raw text. No
+exported declaration moves.
+
+- **X1, shipped in `v0.20.0` and `v0.21.0`, is repaired.** A multiline enum with
+  a value on its `Enum[` line was collapsed without that value, at exit 0, and
+  the output loaded: the schema's meaning changed silently. `status
+  Enum["active",` … now collapses to `Enum["active", "inactive", "pending"]`.
+- **X2, shipped in `v0.21.0`, is repaired.** A long single-line `extends` whose
+  trailing comment ends in `{` was wrapped with the comment split into the
+  parent list; the output did not load and was not a fixed point. The comment
+  now stays on the brace line.
+- **A comment on a construct's closing line no longer blocks a fold, as in
+  `v0.21.0`.** The joined line keeps it at its end. The same rule now folds a
+  multiline `extends` list whose `{` line carries a comment; `v0.21.0` passed
+  that list through with its parents unindented.
+- **Two defects this unit's earlier fix pass introduced, never released, are
+  repaired:** an invariant written without spaces around `&&` or `||` was cut
+  one byte late when wrapped, severing a variable, and a `schema` or `import`
+  line carrying a trailing comment lost the blank line required after it.
+
+Across the 241 tracked schemas of both repositories, no schema outside
+`format/testdata` formats differently from `v0.21.0`.
 
 ## v0.21.0 under this policy
 

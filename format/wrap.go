@@ -124,16 +124,6 @@ func wrapLongLines(ls []line) []line {
 	return result
 }
 
-// allContent reports whether every line is a content line.
-func allContent(ls []line) bool {
-	for _, ln := range ls {
-		if ln.class != lineContent {
-			return false
-		}
-	}
-	return true
-}
-
 // reindentConstruct re-emits a multiline bracket or extends construct that
 // holds a comment or blank line in its canonical shape: the first line as it is,
 // interior lines one level deeper than it, and a closing "]" or "{" line
@@ -232,10 +222,10 @@ func hasUnbalancedBrackets(ln line) bool {
 // extractEnumBracketContent finds the Enum[...] in a line and splits it into:
 // beforeBracket (everything including "Enum["), content (inside brackets), afterBracket (after "]").
 // Returns ok=false if the line doesn't contain a complete single-line Enum[...].
-func extractEnumBracketContent(ln line) (beforeBracket, content, afterBracket string, ok bool) {
+func extractEnumBracketContent(ln line) (beforeBracket, content, afterBracket string, closeAt int, ok bool) {
 	enumStart := enumBracketIndex(ln)
 	if enumStart < 0 {
-		return "", "", "", false
+		return "", "", "", 0, false
 	}
 	bracketStart := enumStart + 5 // position after "Enum["
 
@@ -248,11 +238,11 @@ func extractEnumBracketContent(ln line) (beforeBracket, content, afterBracket st
 		case ']':
 			depth--
 			if depth == 0 {
-				return ln.text[:bracketStart], ln.text[bracketStart:i], ln.text[i+1:], true
+				return ln.text[:bracketStart], ln.text[bracketStart:i], ln.text[i+1:], i, true
 			}
 		}
 	}
-	return "", "", "", false // unbalanced — multiline
+	return "", "", "", 0, false // unbalanced — multiline
 }
 
 // splitEnumValues splits bracket content at the commas that are code. masked is
@@ -314,12 +304,12 @@ func tryWrapSingleLineEnum(ln line) ([]string, bool) {
 		return nil, false
 	}
 
-	beforeBracket, content, afterBracket, ok := extractEnumBracketContent(ln)
+	beforeBracket, content, afterBracket, closeAt, ok := extractEnumBracketContent(ln)
 	if !ok {
 		return nil, false
 	}
 
-	values := splitEnumValues(content, ln.maskedSub(len(beforeBracket), len(beforeBracket)+len(content)))
+	values := splitEnumValues(content, ln.maskedSub(len(beforeBracket), closeAt))
 	if len(values) == 0 {
 		return nil, false
 	}
@@ -331,15 +321,15 @@ func tryWrapSingleLineEnum(ln line) ([]string, bool) {
 	// no legal multiline placement for it, so the only correct answer is to
 	// leave the line long. Declining costs a wide line; wrapping costs a schema
 	// that no longer loads.
-	if ln.hasAnnotationFrom(len(ln.text) - len(afterBracket)) {
+	if ln.hasAnnotationFrom(closeAt + 1) {
 		return nil, false
 	}
 
-	// The record says where the comment starts; afterBracket is the tail of the
-	// line, so the offset rebases by the length of everything before it.
+	// afterBracket starts one past the closing bracket, so the record's comment
+	// offset lands in it at commentAt - (closeAt + 1).
 	comment := ""
 	modifier := strings.TrimSpace(afterBracket)
-	if idx := ln.lex.commentAt - (len(ln.text) - len(afterBracket)); ln.hasComment() && idx >= 0 && idx <= len(afterBracket) {
+	if idx := ln.lex.commentAt - (closeAt + 1); ln.hasComment() && idx >= 0 && idx <= len(afterBracket) {
 		comment = strings.TrimSpace(afterBracket[idx:])
 		modifier = strings.TrimSpace(afterBracket[:idx])
 	}
@@ -364,7 +354,7 @@ func tryCollapseEnum(collectedLines []line) []line {
 	if len(collectedLines) < 2 {
 		return collectedLines
 	}
-	if !allContent(collectedLines) || anyTrailingComment(collectedLines) {
+	if !foldsLosslessly(collectedLines) {
 		return reindentConstruct(collectedLines)
 	}
 	collected := textsOf(collectedLines)
@@ -380,9 +370,13 @@ func tryCollapseEnum(collectedLines []line) []line {
 	}
 	prefix := firstLine[:enumIdx+5] // up to and including "Enum["
 
-	// Extract all values from the value lines (lines between first and last)
-	// and the suffix from the closing line
+	// The values start on the opening line, after "Enum[", when one shares it,
+	// then run through the value lines; the closing line carries the suffix.
 	var values []string
+	first := collectedLines[0]
+	if openEnd := enumIdx + 5; strings.TrimSpace(first.text[openEnd:first.codeEnd()]) != "" {
+		values = splitEnumValues(first.text[openEnd:first.codeEnd()], first.maskedSub(openEnd, first.codeEnd()))
+	}
 	suffix := ""
 	lastLine := collected[len(collected)-1]
 
@@ -426,16 +420,20 @@ func tryCollapseEnum(collectedLines []line) []line {
 	return contentLines(buildWrappedEnum(indent, prefix, values, suffix))
 }
 
-// anyTrailingComment reports whether any line in the construct carries a
-// trailing comment. Folding such a construct onto one line would put the
-// comment in front of everything that followed it.
-func anyTrailingComment(ls []line) bool {
-	for _, ln := range ls {
-		if ln.hasComment() {
-			return true
+// foldsLosslessly reports whether a multiline construct can be joined onto one
+// line without moving a comment: every line is code, and only the closing line
+// carries a trailing comment, which the joined line keeps at its end. Folding a
+// comment from any earlier line would put it in front of everything after it.
+func foldsLosslessly(ls []line) bool {
+	for i, ln := range ls {
+		if ln.class != lineContent {
+			return false
+		}
+		if ln.hasComment() && i < len(ls)-1 {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // closingBracketIndex returns the offset of the first "]" in the line's code.
@@ -470,22 +468,26 @@ func isMultilineExtendsStart(ln line) bool {
 }
 
 // extractExtendsInfo parses a single-line extends declaration into components.
-// Returns indent, header ("type Name extends"), types list, and ok.
-func extractExtendsInfo(ln line) (indent, header string, types []string, ok bool) {
+// Returns indent, header ("type Name extends"), types list, the trailing
+// comment (empty when there is none), and ok. It reads the line's code: a
+// comment that ends in "{" is not the body's brace.
+func extractExtendsInfo(ln line) (indent, header string, types []string, comment string, ok bool) {
 	indent = extractIndent(ln.text)
-	trimmed := strings.TrimSpace(ln.text)
+	trimmed := strings.TrimSpace(ln.text[:ln.codeEnd()])
+	if ln.hasComment() {
+		comment = strings.TrimSpace(ln.text[ln.lex.commentAt:])
+	}
 
 	// Strip trailing " {"
-	if !strings.HasSuffix(trimmed, " {") && !strings.HasSuffix(trimmed, "{") {
-		return "", "", nil, false
+	if !strings.HasSuffix(trimmed, "{") {
+		return "", "", nil, "", false
 	}
-	withoutBrace := strings.TrimSuffix(trimmed, "{")
-	withoutBrace = strings.TrimRight(withoutBrace, " ")
+	withoutBrace := strings.TrimRight(strings.TrimSuffix(trimmed, "{"), " ")
 
 	// Find "extends " keyword
 	extendsIdx := strings.Index(withoutBrace, " extends ")
 	if extendsIdx < 0 {
-		return "", "", nil, false
+		return "", "", nil, "", false
 	}
 
 	header = withoutBrace[:extendsIdx+len(" extends")]
@@ -500,20 +502,23 @@ func extractExtendsInfo(ln line) (indent, header string, types []string, ok bool
 	}
 
 	if len(types) < 2 {
-		return "", "", nil, false
+		return "", "", nil, "", false
 	}
 
-	return indent, header, types, true
+	return indent, header, types, comment, true
 }
 
 // tryWrapSingleLineExtends attempts to wrap a long single-line extends declaration.
 func tryWrapSingleLineExtends(ln line) ([]string, bool) {
-	indent, header, types, ok := extractExtendsInfo(ln)
+	indent, header, types, comment, ok := extractExtendsInfo(ln)
 	if !ok {
 		return nil, false
 	}
-
-	return buildWrappedExtends(indent, header, types), true
+	wrapped := buildWrappedExtends(indent, header, types)
+	if comment != "" {
+		wrapped[len(wrapped)-1] += " " + comment
+	}
+	return wrapped, true
 }
 
 // buildWrappedExtends emits a multiline extends declaration.
@@ -560,58 +565,50 @@ func collapseMultilineExtends(ls []line, startIdx int) ([]line, int) {
 		}
 	}
 
-	// Collect subsequent lines until we find `{`. A comment line inside the
-	// list is not a type name: the construct is re-indented, not collapsed.
+	// Collect lines until one's code ends in "{". A comment or blank line in
+	// the list is not a type name, and neither is a trailing comment.
 	i := startIdx + 1
 	braceFound := false
-	sawComment := first.hasComment()
 	for i < len(ls) {
-		if ls[i].class != lineContent {
-			sawComment = true
-			i++
+		ln := ls[i]
+		i++
+		if ln.class != lineContent {
 			continue
 		}
-		lt := strings.TrimSpace(ls[i].text)
-		if lt == "{" {
+		code := strings.TrimSpace(ln.text[:ln.codeEnd()])
+		typePart, hasBrace := strings.CutSuffix(code, "{")
+		if name := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(typePart), ",")); name != "" {
+			types = append(types, name)
+		}
+		if hasBrace {
 			braceFound = true
-			i++
 			break
 		}
-		// Line might be a type name with trailing comma, or type + "{"
-		if typePart, hasBrace := strings.CutSuffix(lt, "{"); hasBrace {
-			typePart = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(typePart), ","))
-			if typePart != "" {
-				types = append(types, typePart)
-			}
-			braceFound = true
-			i++
-			break
-		}
-		// Regular type name line
-		typeName := strings.TrimRight(lt, ",")
-		typeName = strings.TrimSpace(typeName)
-		if typeName != "" {
-			types = append(types, typeName)
-		}
-		i++
 	}
 
+	construct := ls[startIdx:i]
 	if !braceFound || len(types) == 0 {
 		// Can't parse, pass through
-		return ls[startIdx:i], i
+		return construct, i
 	}
-	if sawComment {
-		return reindentConstruct(ls[startIdx:i]), i
+	if !foldsLosslessly(construct) {
+		return reindentConstruct(construct), i
+	}
+	comment := ""
+	if closing := construct[len(construct)-1]; closing.hasComment() {
+		comment = " " + strings.TrimSpace(closing.text[closing.lex.commentAt:])
 	}
 
 	// Try single-line form
-	singleLine := buildSingleLineExtends(indent, header, types)
+	singleLine := buildSingleLineExtends(indent, header, types) + comment
 	if DisplayWidth(singleLine) <= LineWidthThreshold {
 		return []line{contentLine(singleLine)}, i
 	}
 
 	// Re-emit canonical multiline
-	return contentLines(buildWrappedExtends(indent, header, types)), i
+	wrapped := buildWrappedExtends(indent, header, types)
+	wrapped[len(wrapped)-1] += comment
+	return contentLines(wrapped), i
 }
 
 // tryWrapDatatypeAliasEnum attempts to wrap a long single-line datatype alias Enum.
@@ -620,12 +617,12 @@ func tryWrapDatatypeAliasEnum(ln line) ([]string, bool) {
 		return nil, false
 	}
 
-	beforeBracket, content, afterBracket, ok := extractEnumBracketContent(ln)
+	beforeBracket, content, afterBracket, closeAt, ok := extractEnumBracketContent(ln)
 	if !ok {
 		return nil, false
 	}
 
-	values := splitEnumValues(content, ln.maskedSub(len(beforeBracket), len(beforeBracket)+len(content)))
+	values := splitEnumValues(content, ln.maskedSub(len(beforeBracket), closeAt))
 	if len(values) == 0 {
 		return nil, false
 	}
@@ -638,7 +635,7 @@ func tryWrapDatatypeAliasEnum(ln line) ([]string, bool) {
 	// Aliases carry no modifier, but may carry a comment.
 	comment := ""
 	rest := strings.TrimSpace(afterBracket)
-	if idx := ln.lex.commentAt - (len(ln.text) - len(afterBracket)); ln.hasComment() && idx >= 0 && idx <= len(afterBracket) {
+	if idx := ln.lex.commentAt - (closeAt + 1); ln.hasComment() && idx >= 0 && idx <= len(afterBracket) {
 		comment = strings.TrimSpace(afterBracket[idx:])
 		rest = strings.TrimSpace(afterBracket[:idx])
 	}
@@ -670,20 +667,13 @@ func isMultilineInvariantStart(ls []line, idx int) bool {
 		return false
 	}
 	text := ls[idx].text
-	trimmed := strings.TrimSpace(text)
 	msgEnd, ok := invariantMessageEnd(ls[idx])
 	if !ok {
 		return false
 	}
-	rel := msgEnd - (len(text) - len(strings.TrimLeft(text, "\t ")))
-	if rel < 0 || rel > len(trimmed) {
-		return false
-	}
-
-	afterMsg := strings.TrimSpace(trimmed[rel:])
 
 	// Case 1: nothing after message (expression entirely on next lines)
-	if afterMsg == "" {
+	if strings.TrimSpace(text[msgEnd:]) == "" {
 		return idx+1 < len(ls)
 	}
 
@@ -764,26 +754,20 @@ func tryWrapInvariant(ln line) ([]string, bool) {
 		return nil, false
 	}
 	indent := extractIndent(ln.text)
-	trimmed := strings.TrimSpace(ln.text)
-	rel := msgEnd - len(indent)
-	if rel < 0 || rel > len(trimmed) {
-		return nil, false
-	}
-
-	afterMsg := strings.TrimSpace(trimmed[rel:])
-	if afterMsg == "" {
+	exprStart := ln.skipSpace(msgEnd)
+	expr := strings.TrimRight(ln.text[exprStart:], " \t")
+	if expr == "" {
 		return nil, false // no expression — not wrappable
 	}
 
 	// The operators must be found in the expression's CODE: a && inside a
 	// trailing comment is prose, and breaking there destroys the comment.
-	exprStart := len(ln.text) - len(afterMsg) - (len(trimmed) - rel - len(afterMsg))
-	ops := findTopLevelLogicalOps(afterMsg, ln.maskedSub(exprStart, exprStart+len(afterMsg)))
+	ops := findTopLevelLogicalOps(expr, ln.maskedSub(exprStart, exprStart+len(expr)))
 	if len(ops) == 0 {
 		return nil, false // no operators -> leave as-is
 	}
 
-	return wrapInvariantAtOps(indent, indent+trimmed[:rel], afterMsg, ops), true
+	return wrapInvariantAtOps(indent, ln.text[:msgEnd], expr, ops), true
 }
 
 // invariantMessageEnd returns the offset just past an invariant's message

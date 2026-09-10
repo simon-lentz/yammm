@@ -88,17 +88,29 @@ func (ln line) mask() string {
 // the declaration takes a literal there.
 func (ln line) declaresWith(kw string) bool {
 	m := ln.mask()
-	code := strings.TrimLeft(m[:min(ln.codeEnd(), len(m))], "\t ")
-	if !strings.HasPrefix(code, kw) {
+	start := min(ln.skipSpace(0), ln.codeEnd())
+	if !strings.HasPrefix(m[start:ln.codeEnd()], kw) {
 		return false
 	}
-	after := len(m) - len(code) + len(kw)
+	after := start + len(kw)
 	for _, lit := range ln.lex.literals {
 		if lit.start >= after && strings.TrimSpace(m[after:lit.start]) == "" {
 			return true
 		}
 	}
 	return false
+}
+
+// skipSpace returns the offset of the first byte at or after off that is not a
+// space or a tab. Every offset a phase computes on a line indexes the line's
+// text; one derived from the lengths of trimmed substrings drifts by whatever
+// the trim removed.
+func (ln line) skipSpace(off int) int {
+	off = max(off, 0)
+	for off < len(ln.text) && (ln.text[off] == ' ' || ln.text[off] == '\t') {
+		off++
+	}
+	return off
 }
 
 // trimmedCode returns the line's code with surrounding whitespace removed, so a
