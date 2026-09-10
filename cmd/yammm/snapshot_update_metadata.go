@@ -100,7 +100,7 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 		return cli.Runtimef("write %q: %v", path, err)
 	}
 
-	sink.Render()
+	sink.Flush()
 	sink.Statusf("updated metadata on %s (%d keys)\n", path, len(newMeta))
 	return nil
 }

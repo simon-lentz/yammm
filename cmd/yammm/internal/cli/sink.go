@@ -7,14 +7,13 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 )
 
-// DiagnosticSink collects everything one invocation diagnoses and renders it
-// once.
+// DiagnosticSink collects everything one invocation diagnoses, and writes it so
+// that nothing added is lost and a JSON consumer reads one document.
 //
-// Under [FormatJSON] a render writes one complete JSON document, so a second
-// render produces a stream no JSON reader accepts, and a skipped render drops
-// the warnings a loader emitted because it chose not to reject. A command adds
-// results where it produces them and renders none itself, which leaves no
-// return path able to skip the render and no way to write a second document.
+// Text is written incrementally: [DiagnosticSink.Flush] writes what has arrived
+// so it reads above a payload, and [DiagnosticSink.Close] writes the rest. JSON
+// is written once, at Close, with the command's failure folded in; the document
+// is on stderr and a payload on stdout, so writing it last reorders nothing.
 type DiagnosticSink struct {
 	w        io.Writer
 	format   OutputFormat
@@ -23,7 +22,8 @@ type DiagnosticSink struct {
 	provider diag.SourceProvider
 	root     string
 	results  []diag.Result
-	rendered bool
+	flushed  int
+	closed   bool
 }
 
 // NewDiagnosticSink returns a sink that renders to w.
@@ -45,8 +45,12 @@ func (s *DiagnosticSink) SetSource(provider diag.SourceProvider, root string) {
 	s.provider, s.root = provider, root
 }
 
-// Add records results for this invocation's one render.
+// Add records results for this invocation. It panics after
+// [DiagnosticSink.Close], because a result added then could reach no stream.
 func (s *DiagnosticSink) Add(results ...diag.Result) {
+	if s.closed {
+		panic("cli: DiagnosticSink.Add after Close")
+	}
 	s.results = append(s.results, results...)
 }
 
@@ -72,17 +76,45 @@ func (s *DiagnosticSink) Statusf(format string, args ...any) {
 	fmt.Fprintf(s.w, format, args...)
 }
 
-// Render writes this invocation's diagnostics, once. A second call writes
-// nothing.
-//
-// A command that emits a stdout payload calls it before the payload, so an
-// operator reads the diagnostics first. Every other path renders through the
-// deferred call the RunE wrapper makes, including every early return.
-func (s *DiagnosticSink) Render() {
-	if s.rendered {
+// Flush writes, under [FormatText], every result added since the last flush. A
+// command that emits a payload calls it first, so an operator reads the
+// diagnostics above the payload. Under [FormatJSON] it writes nothing.
+func (s *DiagnosticSink) Flush() {
+	if s.format == FormatJSON || s.closed {
 		return
 	}
-	s.rendered = true
+	s.renderFrom(s.flushed)
+}
+
+// Close writes everything not yet written and returns the error the process
+// reports. The RunE wrapper calls it once, last.
+//
+// Under [FormatJSON] a failure that carries a message joins the document as
+// [diag.E_COMMAND_FAILED], and Close returns that failure's bare exit signal,
+// so nothing is printed beside the document. A second call writes nothing and
+// returns err unchanged.
+func (s *DiagnosticSink) Close(err error) error {
+	if s.closed {
+		return err
+	}
+	if s.format == FormatJSON {
+		if failure, ok := FailureResult(err); ok {
+			s.results = append(s.results, failure)
+			err = &ExitError{Code: ExitForError(err)}
+		}
+	}
+	s.renderFrom(s.flushed)
+	s.closed = true
+	return err
+}
+
+// renderFrom writes the results from index i on, as one result, and marks them
+// written.
+func (s *DiagnosticSink) renderFrom(i int) {
+	s.flushed = len(s.results)
+	if i >= len(s.results) {
+		return
+	}
 	renderer := NewRenderer(s.format, s.isTTY, s.noColor, s.provider, s.root)
-	_ = RenderResult(s.w, renderer, s.format, s.Result())
+	_ = RenderResult(s.w, renderer, s.format, MergeResults(s.results[i:]...))
 }

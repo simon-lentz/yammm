@@ -54,7 +54,7 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.Diagnostic
 
 	statements, constraintResult := adapter.ConstraintsForSchema(cmd.Context(), s)
 	sink.Add(constraintResult)
-	sink.Render()
+	sink.Flush()
 	if sink.Result().HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}

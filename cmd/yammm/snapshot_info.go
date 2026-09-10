@@ -59,7 +59,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 
-		sink.Render()
+		sink.Flush()
 		w := cmd.OutOrStdout()
 		if sink.Format() == cli.FormatJSON {
 			enc, err := json.MarshalIndent(newHeaderInfoDTO(header, statSize(f, header.FileSize)), "", "  ")
@@ -84,7 +84,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
-	sink.Render()
+	sink.Flush()
 	w := cmd.OutOrStdout()
 
 	if sink.Format() == cli.FormatJSON {
@@ -345,7 +345,7 @@ func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath st
 		return &cli.ExitError{Code: cli.ExitRuntime}
 	}
 
-	sink.Render()
+	sink.Flush()
 	w := cmd.OutOrStdout()
 	if sink.Format() == cli.FormatJSON {
 		dtos := make([]dirEntryDTO, 0, len(entries))

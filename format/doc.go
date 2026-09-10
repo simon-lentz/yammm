@@ -21,6 +21,9 @@
 //	    // the input does not parse, or the output would not preserve it
 //	}
 //
+// A source that does not parse returns a [*SyntaxError] carrying the parser's
+// positioned diagnostic.
+//
 // # Preservation
 //
 // Whitespace, and a trailing comma before "]" or "{", are the only things the

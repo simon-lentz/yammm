@@ -35,7 +35,7 @@ func TestDiagnosticSink_RendersEveryAddedResult(t *testing.T) {
 	sink := NewDiagnosticSink(&out, FormatText, true, false)
 	sink.Add(warningResult("first"))
 	sink.Add(errorResult("second"), warningResult("third"))
-	sink.Render()
+	_ = sink.Close(nil)
 
 	for _, want := range []string{"first", "second", "third"} {
 		if !strings.Contains(out.String(), want) {
@@ -44,24 +44,22 @@ func TestDiagnosticSink_RendersEveryAddedResult(t *testing.T) {
 	}
 }
 
-// TestDiagnosticSink_RenderIsIdempotent pins the half of the invariant a
-// deferred render cannot supply on its own: a command that renders before its
-// payload is rendered again by the wrapper, and the second call must add
-// nothing to the stream.
-func TestDiagnosticSink_RenderIsIdempotent(t *testing.T) {
+// TestDiagnosticSink_CloseIsIdempotent pins that a second Close adds nothing
+// to the stream, so no path can write a second document.
+func TestDiagnosticSink_CloseIsIdempotent(t *testing.T) {
 	t.Parallel()
 
 	var out strings.Builder
 	sink := NewDiagnosticSink(&out, FormatJSON, true, false)
 	sink.Add(errorResult("only once"))
 
-	sink.Render()
+	_ = sink.Close(nil)
 	first := out.String()
-	sink.Render()
-	sink.Render()
+	_ = sink.Close(nil)
+	_ = sink.Close(nil)
 
 	if out.String() != first {
-		t.Errorf("a second Render wrote more:\nfirst:\n%s\nafter:\n%s", first, out.String())
+		t.Errorf("a second Close wrote more:\nfirst:\n%s\nafter:\n%s", first, out.String())
 	}
 	assertOneJSONDocument(t, first)
 }
@@ -77,7 +75,7 @@ func TestDiagnosticSink_RendersOneJSONDocument(t *testing.T) {
 	sink := NewDiagnosticSink(&out, FormatJSON, true, false)
 	sink.Add(warningResult("load phase"))
 	sink.Add(errorResult("data phase"))
-	sink.Render()
+	_ = sink.Close(nil)
 
 	doc := assertOneJSONDocument(t, out.String())
 	for _, want := range []string{"load phase", "data phase"} {
@@ -98,7 +96,7 @@ func TestDiagnosticSink_EmptyRendersNothing(t *testing.T) {
 			var out strings.Builder
 			sink := NewDiagnosticSink(&out, format, true, false)
 			sink.Add(diag.OK())
-			sink.Render()
+			_ = sink.Close(nil)
 			if out.String() != "" {
 				t.Errorf("an empty sink wrote %q", out.String())
 			}
@@ -131,6 +129,155 @@ func TestDiagnosticSink_ResultMergesEveryPhase(t *testing.T) {
 	}
 }
 
+// TestDiagnosticSink_TextFlushWritesEachResultOnce pins the incremental text
+// write: a flush writes what has arrived, and Close writes only what arrived
+// after it, in the order added.
+func TestDiagnosticSink_TextFlushWritesEachResultOnce(t *testing.T) {
+	t.Parallel()
+
+	var out strings.Builder
+	sink := NewDiagnosticSink(&out, FormatText, true, false)
+	sink.Add(warningResult("before the payload"))
+	sink.Flush()
+	if !strings.Contains(out.String(), "before the payload") {
+		t.Fatalf("Flush wrote nothing under text; got %q", out.String())
+	}
+	sink.Flush()
+	sink.Add(warningResult("after the payload"))
+	_ = sink.Close(nil)
+
+	got := out.String()
+	for _, want := range []string{"before the payload", "after the payload"} {
+		if n := strings.Count(got, want); n != 1 {
+			t.Errorf("%q written %d times, want once; got:\n%s", want, n, got)
+		}
+	}
+	if strings.Index(got, "before the payload") > strings.Index(got, "after the payload") {
+		t.Errorf("results written out of order:\n%s", got)
+	}
+}
+
+// TestDiagnosticSink_LateResultReachesTheStream pins the invariant a
+// write-once render broke: a result added after a flush reaches the stream,
+// and under JSON the one document holds every result however the command
+// flushed.
+func TestDiagnosticSink_LateResultReachesTheStream(t *testing.T) {
+	t.Parallel()
+
+	for _, format := range []OutputFormat{FormatText, FormatJSON} {
+		t.Run(string(format), func(t *testing.T) {
+			t.Parallel()
+			var out strings.Builder
+			sink := NewDiagnosticSink(&out, format, true, false)
+			sink.Add(warningResult("early"))
+			sink.Flush()
+			sink.Add(warningResult("late"))
+			_ = sink.Close(nil)
+			for _, want := range []string{"early", "late"} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("%q reached no stream; got:\n%s", want, out.String())
+				}
+			}
+			if format == FormatJSON {
+				assertOneJSONDocument(t, out.String())
+			}
+		})
+	}
+}
+
+// TestDiagnosticSink_JSONFlushWritesNothing keeps the document whole: under
+// JSON a flush before a payload must not write a document of its own.
+func TestDiagnosticSink_JSONFlushWritesNothing(t *testing.T) {
+	t.Parallel()
+
+	var out strings.Builder
+	sink := NewDiagnosticSink(&out, FormatJSON, true, false)
+	sink.Add(warningResult("held for Close"))
+	sink.Flush()
+	if out.Len() != 0 {
+		t.Errorf("Flush wrote under JSON: %q", out.String())
+	}
+}
+
+// TestDiagnosticSink_CloseFoldsAFailureIntoTheDocument pins what a JSON
+// consumer receives from a failed command: the failure as an E_COMMAND_FAILED
+// issue in the one document, beside every result the command added, and a
+// bare exit signal so nothing is printed beside the document.
+func TestDiagnosticSink_CloseFoldsAFailureIntoTheDocument(t *testing.T) {
+	t.Parallel()
+
+	var out strings.Builder
+	sink := NewDiagnosticSink(&out, FormatJSON, true, false)
+	sink.Add(warningResult("a load warning"))
+	err := sink.Close(Usagef("--to xml is not a target"))
+
+	if got := ExitForError(err); got != ExitUsage {
+		t.Errorf("exit code = %d, want %d", got, ExitUsage)
+	}
+	var reported strings.Builder
+	ReportError(&reported, err)
+	if reported.Len() != 0 {
+		t.Errorf("Close returned a failure that still prints beside the document: %q", reported.String())
+	}
+	var doc struct {
+		Issues []struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Details []struct {
+				Key   string `json:"key"`
+				Value string `json:"value"`
+			} `json:"details"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal([]byte(assertOneJSONDocument(t, out.String())), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var sawWarning, sawFailure bool
+	for _, iss := range doc.Issues {
+		switch iss.Code {
+		case diag.W_ANNOTATION_SHADOWED.String():
+			sawWarning = true
+		case diag.E_COMMAND_FAILED.String():
+			sawFailure = strings.Contains(iss.Message, "--to xml") &&
+				len(iss.Details) == 1 && iss.Details[0].Key == "exit_code" && iss.Details[0].Value == "2"
+		}
+	}
+	if !sawWarning || !sawFailure {
+		t.Errorf("the document lacks the warning (%v) or the failure with its exit code (%v):\n%s", sawWarning, sawFailure, out.String())
+	}
+}
+
+// TestDiagnosticSink_TextCloseLeavesTheFailureToRun pins the text half: the
+// failure is returned unchanged for run() to print, and not rendered twice.
+func TestDiagnosticSink_TextCloseLeavesTheFailureToRun(t *testing.T) {
+	t.Parallel()
+
+	var out strings.Builder
+	sink := NewDiagnosticSink(&out, FormatText, true, false)
+	failure := Runtimef("open data.json: no such file")
+	if err := sink.Close(failure); !errors.Is(err, failure) {
+		t.Errorf("Close changed the failure under text: %v", err)
+	}
+	if strings.Contains(out.String(), "data.json") {
+		t.Errorf("Close rendered the failure under text: %q", out.String())
+	}
+}
+
+// TestDiagnosticSink_AddAfterCloseIsAProgrammerError pins the guard: a result
+// added after Close could reach no stream, so the sink refuses it loudly.
+func TestDiagnosticSink_AddAfterCloseIsAProgrammerError(t *testing.T) {
+	t.Parallel()
+
+	sink := NewDiagnosticSink(io.Discard, FormatJSON, true, false)
+	_ = sink.Close(nil)
+	defer func() {
+		if recover() == nil {
+			t.Error("Add after Close did not panic")
+		}
+	}()
+	sink.Add(warningResult("too late"))
+}
+
 // fixedSource answers every span with one file's content.
 type fixedSource struct{ content []byte }
 
@@ -155,7 +302,7 @@ func TestDiagnosticSink_SourceReachesTheRenderer(t *testing.T) {
 	sink := NewDiagnosticSink(&out, FormatText, true, true)
 	sink.SetSource(fixedSource{content: []byte("schema \"a\"\ntype Thing {\n")}, "")
 	sink.Add(c.Result())
-	sink.Render()
+	_ = sink.Close(nil)
 
 	if !strings.Contains(out.String(), "type Thing {") {
 		t.Errorf("the excerpt the provider supplies is missing; got:\n%s", out.String())
@@ -182,7 +329,7 @@ func TestDiagnosticSink_NoColorReachesTheRenderer(t *testing.T) {
 			var out strings.Builder
 			sink := NewDiagnosticSink(&out, FormatText, tc.noColor, true)
 			sink.Add(errorResult("coloured"))
-			sink.Render()
+			_ = sink.Close(nil)
 			if got := strings.Contains(out.String(), escape); got != tc.want {
 				t.Errorf("ANSI escapes present = %v, want %v; got:\n%q", got, tc.want, out.String())
 			}

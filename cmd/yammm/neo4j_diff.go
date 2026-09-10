@@ -92,10 +92,6 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		desiredIndexes = di
 	}
 
-	// Nothing downstream reports through diag, so the load's residuals render
-	// here — before the diff output, and exactly once.
-	sink.Render()
-
 	// Connect to database
 	ctx := cmd.Context()
 	driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
@@ -109,6 +105,9 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		return err
 	}
 	actual, actualIndexes := state.constraints, state.indexes
+	// The index read is the last phase that diagnoses, so everything the
+	// command has to say is in the sink and precedes the diff report.
+	sink.Flush()
 
 	indexes := indexOutcomeBeforeDiff(indexesEnabled, state.indexFailed)
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -112,26 +113,59 @@ func Validationf(format string, args ...any) error {
 	return &ExitError{Code: ExitValidation, Err: fmt.Errorf(format, args...)}
 }
 
-// ReportError writes err to w as one "error: " line per message.
+// ReportError writes err to w as one "error: " line per line of each failure
+// it carries.
 //
 // A bare exit signal — an [ExitError] with no wrapped error — prints nothing:
-// the command has already rendered its diagnostics, and "validation errors
-// found" beneath them says the same thing twice. Everything else prints,
-// cobra's own errors included, which SilenceErrors would otherwise discard: a
-// command that exits 2 having written no bytes tells the operator nothing.
-//
-// Each line prints separately so a command reporting several paths — fmt over a
-// file list, joined with [errors.Join] — names every one of them.
+// its command has already rendered its diagnostics. Everything else prints,
+// cobra's own errors included, which SilenceErrors would otherwise discard. A
+// joined error prints each member carrying a message, so fmt names every
+// offender and a bare member adds no line.
 func ReportError(w io.Writer, err error) {
-	if err == nil {
-		return
+	for _, msg := range failureMessages(err) {
+		for line := range strings.SplitSeq(msg, "\n") {
+			fmt.Fprintf(w, "error: %s\n", line)
+		}
 	}
-	if exitErr, ok := errors.AsType[*ExitError](err); ok && exitErr.Err == nil {
-		return
+}
+
+// failureMessages returns the message of every failure err carries, skipping
+// bare exit signals and descending into a join. A trailing newline ends a
+// message; it does not start an empty one.
+func failureMessages(err error) []string {
+	switch e := err.(type) { //nolint:errorlint // the shape of err itself decides, not an error deeper in its chain
+	case nil:
+		return nil
+	case *ExitError:
+		return failureMessages(e.Err)
+	case interface{ Unwrap() []error }:
+		var msgs []string
+		for _, member := range e.Unwrap() {
+			msgs = append(msgs, failureMessages(member)...)
+		}
+		return msgs
+	default:
+		return []string{strings.TrimRight(err.Error(), "\n")}
 	}
-	for line := range strings.SplitSeq(err.Error(), "\n") {
-		fmt.Fprintf(w, "error: %s\n", line)
+}
+
+// FailureResult returns err's failures as one diagnostic result — one
+// [diag.E_COMMAND_FAILED] Error per message, each carrying the process exit
+// code as its exit_code detail — and false when err carries no message.
+//
+// It is how a failure reaches a --format json consumer: inside the one
+// document, as an issue matched by code, rather than as prose beside it.
+func FailureResult(err error) (diag.Result, bool) {
+	msgs := failureMessages(err)
+	if len(msgs) == 0 {
+		return diag.Result{}, false
 	}
+	code := strconv.Itoa(ExitForError(err))
+	c := diag.NewCollectorUnlimited()
+	for _, msg := range msgs {
+		c.Collect(diag.NewIssue(diag.Error, diag.E_COMMAND_FAILED, msg).WithDetail("exit_code", code).Build())
+	}
+	return c.Result(), true
 }
 
 // exitRank orders exit codes by severity for a command that reports several
@@ -159,12 +193,13 @@ func exitRank(code int) int {
 // It exists for the commands that take a list and must not stop at the first
 // bad entry: one invocation names every offender, and no entry's failure hides
 // another's in the exit code.
+//
+// A bare exit signal contributes its code and no message: its command has
+// already said what it had to, so a list of bare signals joins to a bare
+// signal.
 func JoinExitErrors(errs ...error) error {
-	joined := errors.Join(errs...)
-	if joined == nil {
-		return nil
-	}
 	worst := ExitOK
+	var messages []error
 	for _, err := range errs {
 		if err == nil {
 			continue
@@ -172,6 +207,12 @@ func JoinExitErrors(errs ...error) error {
 		if code := ExitForError(err); exitRank(code) > exitRank(worst) {
 			worst = code
 		}
+		if len(failureMessages(err)) > 0 {
+			messages = append(messages, err)
+		}
 	}
-	return &ExitError{Code: worst, Err: joined}
+	if worst == ExitOK {
+		return nil
+	}
+	return &ExitError{Code: worst, Err: errors.Join(messages...)}
 }

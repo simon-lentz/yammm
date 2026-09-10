@@ -123,6 +123,13 @@ var (
 	// Use for conditions that should never occur in correct code.
 	E_INTERNAL = NewCode("E_INTERNAL", CategorySentinel)
 
+	// E_COMMAND_FAILED carries a command-line failure that is not itself a
+	// diagnostic — a bad flag, an unreadable path, a lost connection — into a
+	// --format json document, so a machine consumer reads it by code rather
+	// than as prose beside the document. Its exit_code detail is the code the
+	// process exits with.
+	E_COMMAND_FAILED = NewCode("E_COMMAND_FAILED", CategorySentinel)
+
 	// E_CONTEXT_CANCELLED indicates the operation was cancelled via context.
 	// Used across all packages when ctx.Err() returns a non-nil error.
 	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED", CategorySentinel)

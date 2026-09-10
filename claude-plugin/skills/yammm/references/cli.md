@@ -60,7 +60,8 @@ modify files in place.
 line, and exits 1 when the list is not empty — the shape `gofmt -l` uses, so it
 drops into a pre-commit hook without a shell loop. Every path is checked, so one
 run reports every offender. `--check` and `--write` together are a usage error
-(exit 2).
+(exit 2). A file that does not parse is reported as the positioned `E_SYNTAX`
+diagnostic `validate` reports, naming the file, and exits 1.
 
 When formatting would change a schema's tokens or comments, `fmt` refuses. The
 defect is the formatter's, never the schema's: it writes nothing, leaves the
@@ -374,4 +375,6 @@ output.
 
 With `--format json`, each invocation writes exactly one JSON document to
 stderr, so a warnings-only run now produces a wire object where it previously
-produced nothing.
+produced nothing. A failure that is not itself a diagnostic — a bad flag, an
+unreadable path, a lost connection — is inside that document as an
+`E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code.

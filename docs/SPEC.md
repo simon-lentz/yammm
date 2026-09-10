@@ -1711,6 +1711,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 **Sentinel** — internal conditions:
 
 - `E_INTERNAL` — unexpected invariant failure (internal bug indicator)
+- `E_COMMAND_FAILED` — a command-line failure that is not itself a diagnostic, carried into a `--format json` document with the process exit code as its `exit_code` detail
 - `E_CONTEXT_CANCELLED` — operation cancelled via context
 
 **Schema** — schema compilation errors:

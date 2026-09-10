@@ -65,6 +65,16 @@ func TokenStream(text string) (string, error) {
 	return tokenStream(text, rewrite)
 }
 
+// SyntaxError is [TokenStream]'s error for a source that does not parse. Issue
+// is the parser's syntax diagnostic, positioned in the text TokenStream was
+// given and naming no source, so a caller that knows the file can render it
+// the way a load would.
+type SyntaxError struct {
+	Issue diag.Issue
+}
+
+func (e *SyntaxError) Error() string { return "parse failed: " + e.Issue.Message() }
+
 // rewrite runs phases 2 to 5 over phase 1's lines.
 func rewrite(ls []line) string {
 	ls = collapseBlankLines(ls)
@@ -113,7 +123,7 @@ func lexicalLines(text string) ([]line, []parse.Token, error) {
 	file, allTokens, issues := parse.LexAndParse(normalized, location.SourceID{})
 	for _, iss := range issues {
 		if iss.Code().Category() == diag.CategorySyntax {
-			return nil, nil, fmt.Errorf("parse failed: %s", iss.Message())
+			return nil, nil, &SyntaxError{Issue: iss}
 		}
 	}
 

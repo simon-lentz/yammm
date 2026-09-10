@@ -1149,6 +1149,57 @@ exported declaration moves.
 Across the 241 tracked schemas of both repositories, no schema outside
 `format/testdata` formats differently from `v0.21.0`.
 
+### Unit 6, clause 5's second fix pass — the process contract
+
+**Two exported declarations are ADDED:** `diag.E_COMMAND_FAILED` and
+`format.SyntaxError`. `gorelease -base=v0.21.0` reports both as compatible
+changes and nothing incompatible. `format/` is outside the v1.0 Go-API
+compatibility promise (see Scope).
+
+- **Under `--format json`, a failure is inside the one document.** A failure
+  that is not itself a diagnostic — a bad flag value, an unreadable path, an
+  unwritable output, a lost connection, or one cobra raises before any command
+  runs (a wrong argument count, an unknown flag or command, a missing
+  subcommand) — was printed as `error:` prose beside the document or instead of
+  it. It is now an `E_COMMAND_FAILED` Error in the document, whose `exit_code`
+  detail is the process exit code, and nothing else is written to stderr.
+  **No exit code moves:** measured over 34 failure cases in both formats
+  against the previous commit. Under text nothing changes: the failure prints
+  as `error:` lines. Under `--format json` the stderr document is written when
+  the command ends, after any stdout payload.
+- **A diagnostic a command adds after the diagnostics it writes above its
+  payload now reaches the stream.** `neo4j diff` added the warning for an index
+  read that failed after its one render, so the warning was written nowhere and
+  the command exited 3 saying nothing. It now precedes the diff report as text
+  and is in the document under JSON. This unit's earlier fix pass introduced
+  the defect; no release carried it.
+- **`yammm fmt` reports a syntax error as the positioned `E_SYNTAX` diagnostic
+  `validate` reports**, naming the file — `broken.yammm:4:1: error[E_SYNTAX]:
+  …` where it printed `error: broken.yammm: parse failed: …` — and inside the
+  document under `--format json`. The exit code stays 1. Of the 241 tracked
+  schemas of both repositories, the 51 that do not parse change their `fmt`
+  stderr in this way and nothing else.
+- **`yammm fmt --check` writes nothing to stderr again**: the path on stdout
+  and exit 1, the `gofmt -l` shape `v0.12.3` documented. This unit's earlier
+  fix pass added one `error: validation errors found` line per invocation; no
+  release carried it.
+- **A mistyped subcommand is named.** `yammm snapshot verfiy …` reports
+  `unknown command "verfiy" for "yammm snapshot"` at exit 2, where it reported a
+  missing subcommand; `v0.21.0` printed help and exited 0.
+- **`export --to cypher` reports the Neo4j shape's diagnostics as
+  diagnostics**, its warnings included, which it discarded. A shape error no
+  longer prints a diagnostic result's summary line, its indented issue lines
+  and a bare `error: ` line as a failure message. `snapshot save` reports a
+  failed marshal the same way, still at exit 3.
+- **`format.TokenStream`'s parse error is a `*format.SyntaxError`** carrying
+  the parser's positioned diagnostic. Its `Error()` text is unchanged.
+
+**Consumer reach, measured.** `yammm fmt`'s stdout and both exit codes are
+byte-identical to the previous commit on all 241 tracked schemas, and outside
+`format/testdata` to `v0.21.0`. rdata's suite fails the same four tests on both
+sides (the `v0.21.0` hash re-key), and its `fmt --check`, `fmt --write` and
+`validate` hook chain is green on both.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

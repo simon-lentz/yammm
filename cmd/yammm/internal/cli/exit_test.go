@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -182,6 +183,16 @@ func TestReportError(t *testing.T) {
 			errors.Join(errors.New("first"), errors.New("second")),
 			"error: first\nerror: second\n",
 		},
+		{
+			"a trailing newline ends a message and starts no empty one",
+			Usagef("one line\n"),
+			"error: one line\n",
+		},
+		{
+			"a bare exit signal inside a join adds no line",
+			errors.Join(&ExitError{Code: ExitValidation}, errors.New("b.yammm: unreadable")),
+			"error: b.yammm: unreadable\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -192,6 +203,40 @@ func TestReportError(t *testing.T) {
 				t.Errorf("ReportError wrote %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestFailureResult pins the one conversion from a failure to a diagnostic: one
+// E_COMMAND_FAILED issue per message, each carrying the process exit code, and
+// nothing for a failure that carries no message.
+func TestFailureResult(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{nil, &ExitError{Code: ExitValidation}, JoinExitErrors(&ExitError{Code: ExitRuntime})} {
+		if _, ok := FailureResult(err); ok {
+			t.Errorf("FailureResult(%v) reported a failure; a bare signal carries no message", err)
+		}
+	}
+
+	err := JoinExitErrors(Validationf("a.yammm: unformatted\n"), &ExitError{Code: ExitValidation}, Runtimef("open b.yammm: denied"))
+	result, ok := FailureResult(err)
+	if !ok {
+		t.Fatal("FailureResult of two messages reported none")
+	}
+	var got []string
+	for iss := range result.Issues() {
+		if iss.Code() != diag.E_COMMAND_FAILED || iss.Severity() != diag.Error {
+			t.Errorf("issue %s at %s, want E_COMMAND_FAILED at error", iss.Code(), iss.Severity())
+		}
+		details := iss.Details()
+		if len(details) != 1 || details[0].Key != "exit_code" || details[0].Value != "3" {
+			t.Errorf("details = %v, want exit_code 3", details)
+		}
+		got = append(got, iss.Message())
+	}
+	slices.Sort(got)
+	if want := []string{"a.yammm: unformatted", "open b.yammm: denied"}; !slices.Equal(got, want) {
+		t.Errorf("messages = %q, want %q", got, want)
 	}
 }
 
@@ -228,6 +273,22 @@ func TestJoinExitErrors(t *testing.T) {
 		err := JoinExitErrors(Runtimef("open a: denied"), Usagef("--check and --write are mutually exclusive"))
 		if got := ExitForError(err); got != ExitUsage {
 			t.Errorf("exit code = %d, want %d — usage outranks an I/O failure", got, ExitUsage)
+		}
+	})
+
+	t.Run("bare exit signals stay bare", func(t *testing.T) {
+		t.Parallel()
+		err := JoinExitErrors(&ExitError{Code: ExitValidation}, nil, &ExitError{Code: ExitValidation})
+		if got := ExitForError(err); got != ExitValidation {
+			t.Errorf("exit code = %d, want %d", got, ExitValidation)
+		}
+		if exitErr, ok := errors.AsType[*ExitError](err); !ok || exitErr.Err != nil {
+			t.Errorf("JoinExitErrors of bare signals = %#v, want a bare ExitError", err)
+		}
+		var buf bytes.Buffer
+		ReportError(&buf, err)
+		if buf.Len() != 0 {
+			t.Errorf("two bare signals reported %q; each command already rendered what it had", buf.String())
 		}
 	})
 

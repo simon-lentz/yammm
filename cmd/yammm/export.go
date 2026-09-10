@@ -92,7 +92,7 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 	}
 
 	sink.Add(graphResult)
-	sink.Render()
+	sink.Flush()
 	if sink.Result().HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
@@ -138,7 +138,7 @@ func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap *graph.Snaps
 	case "csv":
 		return exportCSV(cmd, sink, snap, s, outputPath, outputDir)
 	default:
-		return exportCypher(cmd, snap, s, outputPath)
+		return exportCypher(cmd, sink, snap, s, outputPath)
 	}
 }
 
@@ -214,17 +214,20 @@ func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.A
 // Only Statement fields are written; Params are intentionally omitted because
 // the output serves as a readable reference for integration, not as directly
 // executable Cypher. Use the Go adapter API for programmatic execution with parameters.
-func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema, outputPath string) error {
+func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Snapshot, s *schema.Schema, outputPath string) error {
 	// The statements name labels, and a label composed differently from the one
 	// the target graph carries writes data no constraint guards. The sibling
 	// neo4j commands take these flags for the same reason.
 	adapter := adaptern4j.New(labelOptions(cmd)...)
 
-	// Generate shape for the schema
+	// The shape's diagnostics are the command's own, so they reach the sink —
+	// and precede the statements — rather than being printed as an error.
 	shapes, result := adapter.ShapeForSchema(cmd.Context(), s)
+	sink.Add(result)
 	if result.HasErrors() {
-		return cli.Validationf("generate neo4j shape: %v", result.Err())
+		return &cli.ExitError{Code: cli.ExitValidation}
 	}
+	sink.Flush()
 
 	nodeQueries, err := adapter.BatchNodeQueries(cmd.Context(), snapshot, shapes)
 	if err != nil {
@@ -269,7 +272,7 @@ func exportCypher(cmd *cobra.Command, snapshot *graph.Snapshot, s *schema.Schema
 //
 // A warning here — an unsupported snapshot hash algorithm, a provenance path
 // that would not parse — means integrity was NOT fully verified, and the
-// operator must read it before the export lands, which is why the render is
+// operator must read it before the export lands, which is why the flush is
 // explicit rather than left to the wrapper.
 func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, dataPath, target, outputPath, outputDir string) error {
 	snap, _, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
@@ -278,7 +281,7 @@ func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.
 	}
 
 	sink.Add(snapResult)
-	sink.Render()
+	sink.Flush()
 	if sink.Result().HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}

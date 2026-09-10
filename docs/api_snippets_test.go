@@ -337,10 +337,12 @@ func TestDocumentedFormatSurface(t *testing.T) {
 		wrap, align, indent func(string) string
 		width               func(string) int
 		notPreserved        error
+		syntaxIssue         func(*format.SyntaxError) diag.Issue
 	)
 	wrap, align, indent, width = format.WrapLongLines, format.AlignColumns, format.NormalizeIndentation, format.DisplayWidth
 	notPreserved = format.ErrNotPreserved
-	_, _, _, _, _ = wrap, align, indent, width, notPreserved
+	syntaxIssue = func(e *format.SyntaxError) diag.Issue { return e.Issue }
+	_, _, _, _, _, _ = wrap, align, indent, width, notPreserved, syntaxIssue
 }
 
 // TestDocumentedModuleRootDiscovery pins the module-root discovery surface the

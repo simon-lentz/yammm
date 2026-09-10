@@ -147,14 +147,13 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		opts = append(opts, snapshot.WithMetadata(merged))
 	}
 
+	// Marshal reports a failure as an Error and a value it could not put on the
+	// wire as a Warning; both are diagnostics, so both reach the sink.
 	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
-	if err := marshalResult.Err(); err != nil {
-		return cli.Runtimef("marshal snapshot: %v", err)
-	}
-	// Marshal reports values it could not put on the wire as Warnings, and
-	// Err() is nil for a warnings-only result — so checking the error alone
-	// discarded exactly the facts those diagnostics exist to surface.
 	sink.Add(marshalResult)
+	if marshalResult.Err() != nil {
+		return &cli.ExitError{Code: cli.ExitRuntime}
+	}
 
 	// A path a reader that discovers snapshots by extension will not find is a
 	// fact about the artefact, so it travels as a diagnostic — prose here
@@ -174,8 +173,8 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	// Every diagnostic this invocation can produce is in the sink by now, so
-	// rendering here keeps them above the line that says the work finished.
-	sink.Render()
+	// flushing here keeps them above the line that says the work finished.
+	sink.Flush()
 	instanceCount, typeCount := countSnapshot(snap)
 	sink.Statusf("saved snapshot: %d instances of %d types\n", instanceCount, typeCount)
 

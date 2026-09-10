@@ -8,7 +8,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/format"
+	"github.com/simon-lentz/yammm/location"
 )
 
 func newFmtCmd() *cobra.Command {
@@ -32,7 +34,7 @@ func newFmtCmd() *cobra.Command {
 // stop the list, so one invocation reports every offender — what a pre-commit
 // hook over a file list needs — and the exit code is the most severe any path
 // produced rather than the last or the numerically largest.
-func runFmt(cmd *cobra.Command, args []string, _ *cli.DiagnosticSink) error {
+func runFmt(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	write, _ := cmd.Flags().GetBool("write")
 	check, _ := cmd.Flags().GetBool("check")
 
@@ -44,21 +46,33 @@ func runFmt(cmd *cobra.Command, args []string, _ *cli.DiagnosticSink) error {
 		return cli.Usagef("--check and --write are mutually exclusive")
 	}
 
+	// A syntax diagnostic names its file relative to where fmt was run.
+	if wd, err := os.Getwd(); err == nil {
+		sink.SetSource(nil, wd)
+	}
+
 	errs := make([]error, 0, len(args))
 	for _, path := range args {
-		errs = append(errs, fmtPath(cmd, path, write, check))
+		errs = append(errs, fmtPath(cmd, sink, path, write, check))
 	}
 	return cli.JoinExitErrors(errs...)
 }
 
-// fmtPath formats one path and reports what went wrong with it, or nil.
-func fmtPath(cmd *cobra.Command, path string, write, check bool) error {
+// fmtPath formats one path and reports what went wrong with it, or nil. A
+// syntax error is a diagnostic, added to sink, as validate reports it.
+func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, check bool) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
 	formatted, err := format.TokenStream(string(content))
+	if syntaxErr, ok := errors.AsType[*format.SyntaxError](err); ok {
+		if result, ok := syntaxResult(path, syntaxErr.Issue); ok {
+			sink.Add(result)
+			return &cli.ExitError{Code: cli.ExitValidation}
+		}
+	}
 	if err != nil {
 		return formatFailure(path, err)
 	}
@@ -87,6 +101,24 @@ func fmtPath(cmd *cobra.Command, path string, write, check bool) error {
 		fmt.Fprint(cmd.OutOrStdout(), formatted)
 		return nil
 	}
+}
+
+// syntaxResult places the formatter's syntax diagnostic in the file at path:
+// the formatter parses text, so its issue names no source. It reports false
+// when the issue has no position or the path names no source.
+func syntaxResult(path string, iss diag.Issue) (diag.Result, bool) {
+	if !iss.HasSpan() {
+		return diag.Result{}, false
+	}
+	source, err := location.SourceIDFromPath(path)
+	if err != nil {
+		return diag.Result{}, false
+	}
+	span := iss.Span()
+	span.Source = source
+	c := diag.NewCollectorUnlimited()
+	c.Collect(diag.FromIssue(iss).WithSpan(span).Build())
+	return c.Result(), true
 }
 
 // formatFailure maps a formatter error to the exit code it earns. A refusal is

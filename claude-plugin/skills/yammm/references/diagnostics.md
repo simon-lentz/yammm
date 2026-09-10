@@ -84,6 +84,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | Code | Meaning |
 | ---- | ------- |
 | `E_INTERNAL` | Unexpected internal failure (likely a bug) |
+| `E_COMMAND_FAILED` | A command-line failure that is not itself a diagnostic, carried into a `--format json` document; its `exit_code` detail is the process exit code |
 | `E_CONTEXT_CANCELLED` | Operation cancelled via context |
 
 ### Syntax

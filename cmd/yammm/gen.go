@@ -113,7 +113,7 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	}
 	// Nothing downstream reports through diag, so the load's residual warnings
 	// are all this command has and they precede the generated artifact.
-	sink.Render()
+	sink.Flush()
 
 	var data []byte
 	switch target {
