@@ -1077,6 +1077,38 @@ refusals, each reproduced first-hand before the repair.
   directory is a portable artefact and the writer cannot know where it will be
   read.
 
+### Unit 6, clause 5's second fix pass — the formatter fails closed
+
+**One exported declaration is ADDED:** `format.ErrNotPreserved`.
+`gorelease -base=v0.21.0` reports it as a compatible change and nothing
+incompatible. `format/` is outside the v1.0 Go-API compatibility promise (see
+Scope).
+
+- **`format.TokenStream` refuses output that does not preserve its source.**
+  When the formatted text differs from the input, the two token sequences are
+  compared — whitespace and a trailing comma before `]` or `{` set aside — and
+  every comment's text line by line. On a mismatch it returns an error wrapping
+  `format.ErrNotPreserved` and no output. Its error contract widens: it returned
+  an error only when the source did not parse, and a caller that reads every
+  error as a parse failure now also receives a refusal.
+  `errors.Is(err, format.ErrNotPreserved)` tells the two apart.
+- **`yammm fmt` exits 3 on a refusal and writes nothing.** `--write` leaves the
+  file unchanged, the stdout mode prints nothing, and `--check` does not list
+  the path. Two inputs in this repository's own fixtures reach it today, and
+  both exited 0 before: an enum whose first value shares the `Enum[` line lost
+  that value and still loaded, and a block comment lost its blank lines. The
+  formatter refuses both until the defects are repaired. A pre-commit hook
+  running `fmt --write` now blocks the commit rather than committing the
+  rewrite.
+- **The language server returns no edits for a refusal and logs it as a
+  warning**, where it applied the rewritten text.
+- **Measured reach:** across the 241 tracked schemas of this repository and the
+  consumer's, `fmt` output and both exit codes are byte-identical to the
+  previous build except those two fixtures. The comparison runs only when
+  formatting changed the text, so an already-formatted file costs nothing
+  extra; a rewrite costs one lex of the output — +37% on the corpus benchmark
+  and +75% on a 200-type synthetic schema.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

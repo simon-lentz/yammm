@@ -331,14 +331,16 @@ func TestDocumentedFormatSurface(t *testing.T) {
 	if err != nil || formatted == "" {
 		t.Fatalf("the documented TokenStream shape: %v", err)
 	}
-	// The four documented signatures, held as typed values so a shape change
-	// fails here rather than only in the prose.
+	// The documented signatures, held as typed values so a shape change fails
+	// here rather than only in the prose.
 	var (
 		wrap, align, indent func(string) string
 		width               func(string) int
+		notPreserved        error
 	)
 	wrap, align, indent, width = format.WrapLongLines, format.AlignColumns, format.NormalizeIndentation, format.DisplayWidth
-	_, _, _, _ = wrap, align, indent, width
+	notPreserved = format.ErrNotPreserved
+	_, _, _, _, _ = wrap, align, indent, width, notPreserved
 }
 
 // TestDocumentedModuleRootDiscovery pins the module-root discovery surface the

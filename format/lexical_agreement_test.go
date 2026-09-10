@@ -28,7 +28,7 @@ func TestLexicalRecordAgreesWithLexer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read fixture: %v", err)
 			}
-			emitted, err := lexicalLines(string(src))
+			emitted, _, err := lexicalLines(string(src))
 			if err != nil {
 				t.Skipf("fixture does not parse: %v", err)
 			}

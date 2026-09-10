@@ -1,87 +1,14 @@
 package format
 
 import (
-	"fmt"
+	"errors"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/parse"
 )
-
-// preserves is the formatter's postcondition: out carries in's non-trivia
-// tokens and comment texts, whitespace and a trailing comma before "]" or "{"
-// set aside. It lives beside the tests until TokenStream enforces it.
-func preserves(in, out string) error {
-	return preservesTokens(parse.Lex(lineEndingReplacer.Replace(in)), out)
-}
-
-// preservesTokens is preserves over a source already lexed.
-func preservesTokens(in []parse.Token, out string) error {
-	a := significant(in)
-	b := significant(parse.Lex(out))
-	n := min(len(a), len(b))
-	for i := range n {
-		if !sameToken(a[i], b[i]) {
-			return fmt.Errorf("token %d: source %s %q, output %s %q", i, a[i].Kind, a[i].Value, b[i].Kind, b[i].Value)
-		}
-	}
-	if len(a) != len(b) {
-		return fmt.Errorf("source has %d significant tokens, output %d", len(a), len(b))
-	}
-	return nil
-}
-
-// significant drops whitespace and every comma the formatter may add or remove.
-func significant(toks []parse.Token) []parse.Token {
-	out := make([]parse.Token, 0, len(toks))
-	for i, tok := range toks {
-		if tok.Kind == kindWS {
-			continue
-		}
-		if tok.Kind == kindCOMMA && closesList(toks[i+1:]) {
-			continue
-		}
-		out = append(out, tok)
-	}
-	return out
-}
-
-// closesList reports whether the next token that is not trivia closes a list.
-func closesList(rest []parse.Token) bool {
-	for _, tok := range rest {
-		switch tok.Kind {
-		case kindWS, kindSLComment, kindDocComment:
-			continue
-		case kindRBRACK, kindLBRACE:
-			return true
-		default:
-			return false
-		}
-	}
-	return false
-}
-
-func sameToken(a, b parse.Token) bool {
-	if a.Kind != b.Kind {
-		return false
-	}
-	switch a.Kind {
-	case kindSLComment:
-		return strings.TrimRight(a.Value, " \t") == strings.TrimRight(b.Value, " \t")
-	case kindDocComment:
-		return commentLines(a.Value) == commentLines(b.Value)
-	default:
-		return a.Value == b.Value
-	}
-}
-
-func commentLines(text string) string {
-	ls := strings.Split(text, "\n")
-	for i, l := range ls {
-		ls[i] = strings.TrimSpace(l)
-	}
-	return strings.Join(ls, "\n")
-}
 
 // TestPreserves_RefusesEachCorruptionClass pins the postcondition against one
 // instance of every corruption the formatter has produced, and against the
@@ -119,5 +46,76 @@ func TestPreserves_RefusesEachCorruptionClass(t *testing.T) {
 	owned := "schema \"s\"\n\n/*\n  a\n\n  b\n*/\ntype T {\n\tid   String primary   // note\n\tv Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t]\n\t! \"m\" $self.id != \"\"&&$self.v != \"a\"\n}\n"
 	if err := preserves(src, owned); err != nil {
 		t.Errorf("formatter-owned changes were refused: %v", err)
+	}
+}
+
+// preserveSrc is formatted already, so a rewrite that returns it unchanged is
+// the identity and any other rewrite changes the text.
+const preserveSrc = "schema \"s\"\n\ntype T {\n\tid String primary // note\n\tv  Enum[\"a\", \"b\"]\n}\n"
+
+// TestTokenStream_RefusesARewriteThatDoesNotPreserve drives the postcondition
+// through rewrites that break it, so it stays asserted once no live formatter
+// defect is left to trip it.
+func TestTokenStream_RefusesARewriteThatDoesNotPreserve(t *testing.T) {
+	t.Parallel()
+
+	for name, phases := range map[string]func([]line) string{
+		"a value dropped":   func(ls []line) string { return strings.Replace(joinLines(ls), `"a", `, "", 1) },
+		"a comment changed": func(ls []line) string { return strings.Replace(joinLines(ls), "// note", "// note,", 1) },
+		"a type appended":   func(ls []line) string { return joinLines(ls) + "\ntype U {\n\tid String primary\n}\n" },
+		"the body cut":      func(ls []line) string { return "schema \"s\"\n" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			out, err := tokenStream(preserveSrc, phases)
+			if !errors.Is(err, ErrNotPreserved) {
+				t.Fatalf("err = %v, want ErrNotPreserved", err)
+			}
+			if out != "" {
+				t.Errorf("a refusal returned output %q", out)
+			}
+		})
+	}
+}
+
+// TestTokenStream_AcceptsARewriteOfWhatItOwns pins the other direction: moving
+// whitespace and adding a trailing comma before "]" is what formatting is.
+func TestTokenStream_AcceptsARewriteOfWhatItOwns(t *testing.T) {
+	t.Parallel()
+
+	const owned = "schema \"s\"\n\ntype T {\n\tid String primary   // note\n\tv Enum[\n\t\t\"a\",\n\t\t\"b\",\n\t]\n}\n"
+	out, err := tokenStream(preserveSrc, func([]line) string { return owned })
+	if err != nil {
+		t.Fatalf("a rewrite of whitespace and an owned comma was refused: %v", err)
+	}
+	if out != owned {
+		t.Errorf("out = %q, want the rewrite unchanged", out)
+	}
+}
+
+// TestLexicalLines_TokensAreTheWholeSource pins that the tokens the
+// postcondition compares against are the whole source. A parse that stopped
+// early would let a dropped tail agree with itself.
+func TestLexicalLines_TokensAreTheWholeSource(t *testing.T) {
+	t.Parallel()
+
+	checked := 0
+	for _, path := range agreementCorpus(t) {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		normalized := lineEndingReplacer.Replace(string(src))
+		_, tokens, err := lexicalLines(normalized)
+		if err != nil {
+			continue
+		}
+		checked++
+		if !slices.Equal(tokens, parse.Lex(normalized)) {
+			t.Errorf("%s: the parse's tokens are not the source's", path)
+		}
+	}
+	if checked < 30 {
+		t.Fatalf("checked %d fixtures; the corpus walk is not reaching testdata", checked)
 	}
 }

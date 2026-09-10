@@ -57,31 +57,46 @@ const (
 // across calls — strings.Replacer is safe for concurrent use.
 var lineEndingReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
-// TokenStream applies parse-tree-assisted token-stream formatting.
-// Returns an error if lexing/parsing fails so callers can fall back.
-//
-// It needs two views of one source: the un-elided token stream carries the
-// whitespace and comments a formatter must preserve but no expression extents;
-// the node tree carries the extents and the syntax verdict but elides the
-// whitespace. LexAndParse returns both from a single lex.
+// TokenStream applies parse-tree-assisted token-stream formatting. It returns
+// an error, and no output, when the source does not parse or when the output
+// would not carry the source's tokens and comments. The second error wraps
+// [ErrNotPreserved] and is a defect in the formatter.
 func TokenStream(text string) (string, error) {
-	ls, err := lexicalLines(text)
-	if err != nil {
-		return "", err
-	}
-	// The classification travels with the lines through every phase. Nothing
-	// downstream re-derives it, which is what makes the package doc's claim
-	// about one classification true.
+	return tokenStream(text, rewrite)
+}
+
+// rewrite runs phases 2 to 5 over phase 1's lines.
+func rewrite(ls []line) string {
+	// The classification travels with the lines through every phase; nothing
+	// downstream re-derives it.
 	ls = collapseBlankLines(ls)
 	ls = wrapLongLines(ls)
 	ls = alignColumns(ls)
-	return finalizeFormattedText(joinLines(ls)), nil
+	return finalizeFormattedText(joinLines(ls))
+}
+
+// tokenStream is [TokenStream] with phases 2 to 5 as a parameter, so the
+// postcondition can be tested against a rewrite that breaks it.
+func tokenStream(text string, phases func([]line) string) (string, error) {
+	normalized := lineEndingReplacer.Replace(text)
+	ls, tokens, err := lexicalLines(normalized)
+	if err != nil {
+		return "", err
+	}
+	out := phases(ls)
+	// Unchanged text preserves itself, so a formatted file pays no second lex.
+	if out != normalized {
+		if err := preservesTokens(tokens, out); err != nil {
+			return "", fmt.Errorf("%w: %w", ErrNotPreserved, err)
+		}
+	}
+	return out, nil
 }
 
 // lexicalLines runs phase 1 and returns its output as classified lines, each
-// carrying the lexer's own view of it. Recording during emission is what keeps
-// the later phases free of a second lex.
-func lexicalLines(text string) ([]line, error) {
+// carrying the lexer's own view of it, and the source's tokens. The un-elided
+// tokens and the node tree both come from one LexAndParse.
+func lexicalLines(text string) ([]line, []parse.Token, error) {
 	normalized := lineEndingReplacer.Replace(text)
 
 	// Fail on syntax alone: a source that is semantically invalid but parses,
@@ -89,7 +104,7 @@ func lexicalLines(text string) ([]line, error) {
 	file, allTokens, issues := parse.LexAndParse(normalized, location.SourceID{})
 	for _, iss := range issues {
 		if iss.Code().Category() == diag.CategorySyntax {
-			return nil, fmt.Errorf("parse failed: %s", iss.Message())
+			return nil, nil, fmt.Errorf("parse failed: %s", iss.Message())
 		}
 	}
 
@@ -185,7 +200,7 @@ func lexicalLines(text string) ([]line, error) {
 		e.write(pendingWS.String(), chunkPlain)
 	}
 
-	return e.lines(), nil
+	return e.lines(), allTokens, nil
 }
 
 // invariantExpressionRanges returns the byte extent of every invariant

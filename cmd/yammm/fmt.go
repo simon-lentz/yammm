@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -59,7 +60,7 @@ func fmtPath(cmd *cobra.Command, path string, write, check bool) error {
 
 	formatted, err := format.TokenStream(string(content))
 	if err != nil {
-		return cli.Validationf("%s: %v", path, err)
+		return formatFailure(path, err)
 	}
 
 	switch {
@@ -86,4 +87,14 @@ func fmtPath(cmd *cobra.Command, path string, write, check bool) error {
 		fmt.Fprint(cmd.OutOrStdout(), formatted)
 		return nil
 	}
+}
+
+// formatFailure maps a formatter error to the exit code it earns. A refusal is
+// the formatter's defect, not the input's, so a hook blocks the commit on exit 3
+// rather than reporting the schema as bad.
+func formatFailure(path string, err error) error {
+	if errors.Is(err, format.ErrNotPreserved) {
+		return cli.Runtimef("%s: %v; the file is left unchanged", path, err)
+	}
+	return cli.Validationf("%s: %v", path, err)
 }

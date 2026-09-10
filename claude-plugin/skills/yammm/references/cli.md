@@ -62,6 +62,11 @@ drops into a pre-commit hook without a shell loop. Every path is checked, so one
 run reports every offender. `--check` and `--write` together are a usage error
 (exit 2).
 
+When formatting would change a schema's tokens or comments, `fmt` refuses. The
+defect is the formatter's, never the schema's: it writes nothing, leaves the
+file unchanged, names the file on stderr and exits 3. A pre-commit hook running
+`fmt --write` therefore blocks the commit rather than committing the rewrite.
+
 The check normalizes line endings before formatting, so a CRLF file is reported
 as unformatted even when nothing else differs. That is what `-w` already does to
 the same file.

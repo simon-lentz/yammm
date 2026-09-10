@@ -1784,6 +1784,9 @@ The `format` package provides canonical formatting for `.yammm` schema files:
 ```go
 func TokenStream(text string) (string, error)
 
+// Wrapped by TokenStream's error when its output would not preserve the source.
+var ErrNotPreserved error
+
 // Two pipeline phases (3 and 4) and two measurement helpers. Nothing outside
 // this package calls them, apart from the gate that pins these signatures.
 func WrapLongLines(text string) string
@@ -1798,7 +1801,12 @@ const LineWidthThreshold = 100 // display cells: a tab counts as 4, an East Asia
 formatted, err := format.TokenStream(input)
 ```
 
-`TokenStream` returns an error **only** when the source fails to parse — that is, when an issue's `Code().Category()` is `diag.CategorySyntax`. A source that parses but is semantically invalid (inverted bounds, say) formats successfully. The CLI maps the error to `ExitValidation`; the LSP swallows it and returns no edits.
+`TokenStream` returns an error, and no output, in two cases.
+
+- **The source fails to parse** — an issue's `Code().Category()` is `diag.CategorySyntax`. A source that parses but is semantically invalid (inverted bounds, say) formats successfully.
+- **The output would not preserve the source.** Whitespace, and a trailing comma before `]` or `{`, are the only things the formatter may change. After phase 5, when the output differs from the input, the two token sequences are compared with those set aside, and every comment's text line by line. On a mismatch the error wraps `format.ErrNotPreserved`: the defect is the formatter's, never the input's. An input already formatted is returned unchanged and costs no comparison.
+
+The CLI maps a parse failure to `ExitValidation` and a refusal to `ExitRuntime`, leaving the file unchanged. The LSP returns no edits for either, and logs a refusal as a warning.
 
 Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so a CRLF file always reports as unformatted under `yammm fmt --check`.
 

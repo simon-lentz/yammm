@@ -2,6 +2,7 @@ package format_test
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -133,6 +134,44 @@ func TestTokenStream_CorpusVariants(t *testing.T) {
 	if checked < 100 {
 		t.Fatalf("checked %d inputs; the corpus walk is not reaching the fixtures", checked)
 	}
+}
+
+// TestTokenStream_FailsClosedOnEveryVariant asserts, over every corpus input
+// and variant, that TokenStream returns output preserving the source or
+// refuses with ErrNotPreserved and returns nothing — whichever defects are live.
+func TestTokenStream_FailsClosedOnEveryVariant(t *testing.T) {
+	t.Parallel()
+
+	checked, refused := 0, 0
+	for _, path := range discoverInputs(t) {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for name, v := range variantsOf(string(src)) {
+			out, err := format.TokenStream(v)
+			switch {
+			case errors.Is(err, format.ErrNotPreserved):
+				refused++
+				if out != "" {
+					t.Errorf("%s#%s: a refusal returned output", path, name)
+				}
+			case err != nil:
+				if !strings.HasPrefix(err.Error(), "parse failed") {
+					t.Errorf("%s#%s: an error that is neither a refusal nor a parse failure: %v", path, name, err)
+				}
+			default:
+				checked++
+				if perr := format.Preserves(v, out); perr != nil {
+					t.Errorf("%s#%s: output that does not preserve the source: %v", path, name, perr)
+				}
+			}
+		}
+	}
+	if checked < 100 {
+		t.Fatalf("checked %d outputs; the corpus walk is not reaching the fixtures", checked)
+	}
+	t.Logf("%d outputs preserve their source; %d variants refused", checked, refused)
 }
 
 // FuzzTokenStream is the formatter's property under fuzzing: for any input

@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/format"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 const (
@@ -167,6 +172,118 @@ func TestFmtWrite_MultiplePaths(t *testing.T) {
 		if string(got) != fmtCanonical {
 			t.Errorf("%s = %q, want the canonical form", p, got)
 		}
+	}
+}
+
+// tightOperators removes the spaces around a logical operator.
+var tightOperators = regexp.MustCompile(`[ \t]*(&&|\|\|)[ \t]*`)
+
+// fmtHazards returns schemas the formatter has been measured to rewrite into
+// something else: one loses an enum value and still loads, one no longer loads.
+func fmtHazards(t *testing.T) map[string]string {
+	t.Helper()
+	read := func(name string) string {
+		b, err := os.ReadFile(filepath.Join("..", "..", "format", "testdata", "roundtrip", name))
+		if err != nil {
+			t.Fatalf("read hazard: %v", err)
+		}
+		return string(b)
+	}
+	return map[string]string{
+		"an enum value on the opening line": read("enum_value_on_opening_line.yammm"),
+		"an unspaced logical operator":      tightOperators.ReplaceAllString(read("g4_logical_op_in_trailing_comment.yammm"), "$1"),
+	}
+}
+
+// fmtSchemaHash loads src and returns its structural hash, reporting whether it
+// loaded.
+func fmtSchemaHash(src string) (string, bool) {
+	s, result := schema.LoadString(context.Background(), src, "hazard.yammm")
+	if result.Err() != nil || s == nil {
+		return "", false
+	}
+	return schema.StructuralHash(s), true
+}
+
+// TestFmt_NeverLeavesAChangedSchema asserts what an operator is left with, in
+// every mode: output that means what the source meant, or a refusal that exits
+// 3, writes nothing and leaves the file as it was.
+func TestFmt_NeverLeavesAChangedSchema(t *testing.T) {
+	t.Parallel()
+
+	for name, src := range fmtHazards(t) {
+		before, ok := fmtSchemaHash(src)
+		if !ok {
+			t.Fatalf("%s: the hazard does not load, so meaning cannot be compared", name)
+		}
+		for _, mode := range []string{"--write", "stdout", "--check"} {
+			t.Run(name+"/"+mode, func(t *testing.T) {
+				t.Parallel()
+
+				path := writeFmtFixture(t, "hazard.yammm", src)
+				args := []string{"fmt", mode, path}
+				if mode == "stdout" {
+					args = []string{"fmt", path}
+				}
+				code, out, _ := executeCmdOutput(t, args...)
+				got, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("read back: %v", err)
+				}
+
+				if code == cli.ExitRuntime {
+					if string(got) != src {
+						t.Error("a refusal rewrote the file")
+					}
+					if out != "" {
+						t.Errorf("a refusal wrote %q to stdout", out)
+					}
+					return
+				}
+				formatted := string(got)
+				switch mode {
+				case "--check":
+					if code != cli.ExitOK && code != cli.ExitValidation {
+						t.Fatalf("exit %d, want 0, 1 or 3", code)
+					}
+					return
+				case "stdout":
+					formatted = out
+				}
+				if code != cli.ExitOK {
+					t.Fatalf("exit %d, want 0 or 3", code)
+				}
+				after, ok := fmtSchemaHash(formatted)
+				if !ok {
+					t.Fatalf("exit 0 with a schema that does not load:\n%s", formatted)
+				}
+				if after != before {
+					t.Fatalf("exit 0 with a schema that means something else (%s -> %s):\n%s", before, after, formatted)
+				}
+			})
+		}
+	}
+}
+
+// TestFmtFailure_RefusalIsTheFormattersFault pins each formatter error's exit
+// code: a refusal exits 3 so a hook blocks the commit, a parse failure exits 1.
+func TestFmtFailure_RefusalIsTheFormattersFault(t *testing.T) {
+	t.Parallel()
+
+	refusal := formatFailure("a.yammm", fmt.Errorf("%w: token 3", format.ErrNotPreserved))
+	if code := cli.ExitForError(refusal); code != cli.ExitRuntime {
+		t.Errorf("refusal exit = %d, want %d", code, cli.ExitRuntime)
+	}
+	if msg := refusal.Error(); !strings.HasPrefix(msg, "a.yammm: ") || !strings.Contains(msg, "left unchanged") {
+		t.Errorf("refusal message = %q, want the path and that the file is left unchanged", msg)
+	}
+
+	_, parseErr := format.TokenStream("schema \"s\"\ntype T {\n")
+	if parseErr == nil {
+		t.Fatal("the unparseable input parsed")
+	}
+	if code := cli.ExitForError(formatFailure("b.yammm", parseErr)); code != cli.ExitValidation {
+		t.Errorf("parse failure exit = %d, want %d", code, cli.ExitValidation)
 	}
 }
 

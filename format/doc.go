@@ -18,8 +18,18 @@
 //
 //	formatted, err := format.TokenStream(input)
 //	if err != nil {
-//	    // input has parse errors; formatting cannot proceed
+//	    // the input does not parse, or the output would not preserve it
 //	}
+//
+// # Preservation
+//
+// Whitespace, and a trailing comma before "]" or "{", are the only things the
+// formatter may change. After phase 5, when the output differs from the input,
+// [TokenStream] compares the two token sequences with those set aside, and every
+// comment's text line by line. On a mismatch it returns an error wrapping
+// [ErrNotPreserved] and no output: the defect is the formatter's, never the
+// input's, so a caller writes nothing. An input already formatted is returned
+// unchanged and costs no comparison.
 //
 // # Formatting Pipeline
 //

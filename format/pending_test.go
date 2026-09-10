@@ -15,8 +15,8 @@ var pendingRepairs = map[string]string{
 	"testdata/golden/comprehensive.yammm#comment-ending-brace":                                 "formatting is not a fixed point once a trailing comment carries a bracket or a brace",
 	"testdata/golden/comprehensive.yammm#trailing-comment":                                     "formatting is not a fixed point once a trailing comment carries a bracket or a brace",
 	"testdata/golden/edge_cases.yammm#blank-in-block":                                          "a blank line inside a block comment is dropped",
-	"testdata/golden/wrapping.yammm#comment-ending-brace":                                      "a trailing comment is folded into the construct it followed",
-	"testdata/golden/wrapping.yammm#tight-operators":                                           "a comment ending in a brace is read as the extends body brace",
+	"testdata/golden/wrapping.yammm#comment-ending-brace":                                      "a comment ending in a brace is read as the extends body brace",
+	"testdata/golden/wrapping.yammm#tight-operators":                                           "an unspaced logical operator is cut one byte late and severs the next variable",
 	"testdata/golden/wrapping.yammm#trailing-comment":                                          "formatting is not a fixed point once a trailing comment carries a bracket or a brace",
 	"testdata/roundtrip/block_comment_blank_lines.yammm#blank-in-block":                        "a blank line inside a block comment is dropped",
 	"testdata/roundtrip/block_comment_blank_lines.yammm#comment-ending-brace":                  "a blank line inside a block comment is dropped",
@@ -41,6 +41,7 @@ var pendingRepairs = map[string]string{
 	"testdata/roundtrip/layout_alignment_bracket_in_enum_value.yammm#tight-operators":          "a property group loses its alignment after a construct or a wrapped line is rebuilt without its lexical record",
 	"testdata/roundtrip/layout_alignment_bracket_in_enum_value.yammm#trailing-comment":         "formatting is not a fixed point once a trailing comment carries a bracket or a brace",
 	"testdata/roundtrip/enum_value_on_opening_line.yammm":                                      "the value sharing the opening line with Enum[ is dropped",
+	"testdata/roundtrip/block_comment_blank_lines.yammm":                                       "a blank line inside a block comment is dropped",
 	"testdata/enum_closing_line_comment.yammm":                                                 "a comment on the closing bracket line refuses a collapse that loses nothing",
 }
 
