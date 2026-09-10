@@ -29,6 +29,24 @@ const (
 	shadowedSchema = "testdata/annotation_shadowed.yammm"
 )
 
+// TestNoColorReachesTheRenderer pins --no-color's wiring into the sink, whose
+// noColor and isTTY parameters are two adjacent bools. Swapped at the call
+// site, --no-color turns colour on whenever stderr is not a terminal, as here.
+func TestNoColorReachesTheRenderer(t *testing.T) {
+	t.Parallel()
+
+	code, _, stderr := executeCmdOutput(t, "--no-color", "validate", "testdata/invalid.yammm")
+	if code != cli.ExitValidation {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitValidation)
+	}
+	if !strings.Contains(stderr, "error") {
+		t.Fatalf("stderr carries no diagnostic:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "\x1b[") {
+		t.Fatalf("stderr is coloured under --no-color:\n%q", stderr)
+	}
+}
+
 // TestDiagnosticsSurviveEveryEarlyReturn pins B13, B14, B15 and B16: a command
 // that returns before its own phase completes discarded the schema load's
 // diagnostics entirely, because the render happened at the end of the happy
