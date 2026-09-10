@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -238,6 +239,43 @@ func TestWrite_ReplacesRatherThanTruncates(t *testing.T) {
 			}
 			if os.SameFile(before, after) {
 				t.Error("the file was written in place; a crash mid-write would leave it truncated")
+			}
+		})
+	}
+}
+
+// A symlink the operator named survives every write path, and the file it
+// names receives the bytes: the CLI replaces what the path resolves to, not
+// the link.
+func TestWrite_ASymlinkSurvivesAndItsFileIsWritten(t *testing.T) {
+	for _, tc := range writePaths() {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			out, args := tc.build(t, dir)
+			real := out + ".real"
+			if _, err := os.Stat(out); err == nil {
+				if err := os.Rename(out, real); err != nil {
+					t.Fatalf("move the fixture behind a link: %v", err)
+				}
+			} else if err := os.WriteFile(real, []byte("placeholder\n"), 0o600); err != nil {
+				t.Fatalf("seed the linked file: %v", err)
+			}
+			before, err := os.ReadFile(real)
+			if err != nil {
+				t.Fatalf("read the linked file: %v", err)
+			}
+			if err := os.Symlink(filepath.Base(real), out); err != nil {
+				t.Fatalf("link: %v", err)
+			}
+
+			if code, _, errOut := runCLI(t, args...); code != 0 {
+				t.Fatalf("exit %d: %s", code, errOut)
+			}
+			if info, err := os.Lstat(out); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+				t.Error("the link was replaced by a regular file")
+			}
+			if after, _ := os.ReadFile(real); bytes.Equal(before, after) {
+				t.Error("the file the link names was not written")
 			}
 		})
 	}

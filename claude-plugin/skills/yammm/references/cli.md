@@ -32,6 +32,21 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `--format` | `text` | Diagnostic output format: `text` or `json` |
 | `--no-color` | `false` | Disable ANSI color in output |
 
+### Writing files
+
+Every command that writes a file you name — `--output`, `--output-dir`, `-o`,
+`fmt -w`, `snapshot update-metadata` — writes it the same way. The path's
+symlinks are followed, so a link survives and the file it names is written. A
+regular file, or one that does not exist yet, is replaced atomically: the
+content is staged beside it and renamed over it, so an interrupted write leaves
+the previous file. A new file is created at `0600`; an existing one keeps its
+mode. A FIFO, a device or a path under `/dev/` — `--output /dev/stdout`, say —
+is written through, continuing its stream: behind `>> log` the bytes are
+appended and the log keeps its history. Anything else is refused at exit 3, naming the path: a
+read-only file, a directory, a looping link, or a file whose directory cannot
+hold the staging file, which `gofmt -w` refuses too. Omit `--output` to write
+to stdout.
+
 ---
 
 ## Schema Development Workflow

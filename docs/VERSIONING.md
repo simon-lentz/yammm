@@ -1196,7 +1196,49 @@ compatibility promise (see Scope).
 
 **Consumer reach, measured.** `yammm fmt`'s stdout and both exit codes are
 byte-identical to the previous commit on all 241 tracked schemas, and outside
-`format/testdata` to `v0.21.0`. rdata's suite fails the same four tests on both
+`format/testdata` to `v0.21.0`.
+
+### Unit 6, clause 5's second fix pass — the write model
+
+**No exported declaration moves.** Every file the CLI writes to a path the
+operator named — `--output`, `--output-dir`, `-o`, `fmt -w`, `snapshot
+update-metadata` — is written by one rule. The path's symlinks are followed, and
+then:
+
+- **A regular file, or one that does not exist yet, is replaced atomically,**
+  staged beside the file the path resolves to. A symlink survives and the file
+  it names is written, as `v0.21.0` wrote it; this unit's earlier fix pass
+  replaced the link with a regular file and left the file it named unchanged,
+  for every write command and for `--output-dir`. A dangling symlink creates the
+  file it names.
+- **A FIFO, a device or any path under `/dev/` is written through in place,
+  continuing its stream.** `--output /dev/stdout` works again, redirected to a
+  file or into a pipe, and a FIFO's reader receives the bytes. The earlier fix
+  pass exited 3 on `/dev/stdout` and `/dev/null`, and replaced a FIFO with a
+  regular file at exit 0 while its reader received nothing.
+- **On Linux, `--output /dev/stdout >> log` keeps the log's history.** Linux
+  reopens the file behind `/dev/stdout`, and `v0.21.0`'s `os.WriteFile`
+  truncated it, so the command erased every line already in the log — measured
+  in a Linux container. The bytes are now appended. darwin duplicates the
+  descriptor instead and never truncated.
+- **Anything else is refused, naming the path the operator gave:** a read-only
+  file — for `--output-dir` too, where the earlier fix pass overwrote a
+  read-only `Person.csv` at exit 0 — a directory, a looping symlink, which the
+  earlier fix pass replaced at exit 0, and a file whose directory cannot hold
+  the staging file. A failed write names the operator's path and its cause,
+  never the staging file.
+- **The staging name has a fixed length**, `.yammm-<random>.tmp`, so a basename
+  near the filesystem's name limit is written again; the earlier fix pass
+  refused a 245-byte name at exit 3.
+
+**Measured against `v0.21.0`, every target kind behaves as it did, with one
+deliberate exception: a writable file in a read-only directory is refused at
+exit 3, where `v0.21.0` wrote it in place.** A write that cannot be staged
+beside its target could only truncate the file in place, which an interrupted
+write or a full disk turns into a lost file; `gofmt -w` refuses the same
+target. Omit `--output` to write to stdout. The earlier fix pass's other three
+exit moves are withdrawn: `/dev/stdout` and a 245-byte basename went from 0 to
+3, and a looping symlink from 3 to 0. rdata's suite fails the same four tests on both
 sides (the `v0.21.0` hash re-key), and its `fmt --check`, `fmt --write` and
 `validate` hook chain is green on both.
 

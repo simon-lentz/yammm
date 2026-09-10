@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -18,32 +20,108 @@ import (
 // account on the host.
 const NewFileMode fs.FileMode = 0o600
 
-// WriteFile writes data to path durably, keeping the mode the file already has.
-//
-// The payload is staged on a unique sibling name, synced, given its mode and
-// only then renamed over path, so an interrupted write leaves the previous file
-// intact rather than a truncated one. A file that does not exist yet is created
-// at [NewFileMode]; an existing file keeps its own mode, whatever it is, because
-// the CLI is replacing content and not taking over the operator's policy.
-//
-// The chmod runs on the staging file BEFORE the rename. The cheaper order —
-// write, rename, then chmod the target — leaves a window in which the finished
-// content is readable at the wider mode, which is the case this exists for: an
-// export of restricted data onto a shared host. Do not simplify it back.
-//
-// It is deliberately not [snapshot.WriteFile], which is a library contract a
-// consumer depends on and documents the opposite policy: 0o666 subject to
-// umask, with callers told to chmod afterwards. That obligation is what this
-// discharges for every CLI write, in the one order that closes the window.
-func WriteFile(path string, data []byte) (retErr error) {
-	mode, err := targetMode(path)
-	if err != nil {
-		return err
-	}
+// stagingPattern is the [os.CreateTemp] pattern of every staging file. Its
+// length does not depend on the target's name, so a basename near the name
+// limit can still be replaced, and it ends in [snapshot.TmpSuffix], which
+// [snapshot.ScanDir] skips, so a staging file a crash leaves is never scanned.
+const stagingPattern = ".yammm-*" + snapshot.TmpSuffix
 
-	f, err := os.CreateTemp(filepath.Dir(path), stagingPattern(path))
+// maxLinkHops bounds how many symlinks a write follows — the kernel's own
+// bound — so a loop is refused rather than followed.
+const maxLinkHops = 40
+
+// errNotReplaceable refuses a target a set of files cannot rename into place.
+var errNotReplaceable = errors.New("not a regular file, so a set of files cannot replace it")
+
+// writeTarget is where a write to an operator-named path lands, and how.
+type writeTarget struct {
+	path    string      // the file a replacement lands on: the named path, its symlinks followed
+	mode    fs.FileMode // the mode a replacement carries
+	through bool        // written through the named path in place rather than replaced
+}
+
+// resolveWriteTarget follows path's symlinks and decides how a write to it
+// lands: an absent or regular file is replaced; a FIFO, a device or a path
+// under /dev/ is written through; anything else is refused. /dev/ is decided by
+// the path, because /dev/stdout stats as whatever its descriptor holds.
+func resolveWriteTarget(path string) (writeTarget, error) {
+	resolved := path
+	for hops := 0; ; hops++ {
+		if underDev(resolved) {
+			return writeTarget{path: path, through: true}, nil
+		}
+		info, err := os.Lstat(resolved)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return writeTarget{path: resolved, mode: NewFileMode}, nil
+		case err != nil:
+			return writeTarget{}, bare(err)
+		case info.Mode()&fs.ModeSymlink != 0:
+			if hops == maxLinkHops {
+				return writeTarget{}, syscall.ELOOP
+			}
+			dest, err := os.Readlink(resolved)
+			if err != nil {
+				return writeTarget{}, bare(err)
+			}
+			if !filepath.IsAbs(dest) {
+				dest = filepath.Join(filepath.Dir(resolved), dest)
+			}
+			resolved = dest
+		case info.IsDir():
+			return writeTarget{}, syscall.EISDIR
+		case !info.Mode().IsRegular():
+			// Opening a FIFO to test permission would block until a reader
+			// attaches, so the write itself is the test.
+			return writeTarget{path: path, through: true}, nil
+		default:
+			// A rename needs write permission on the directory and none on the
+			// file, so without this a read-only file would become replaceable.
+			f, err := os.OpenFile(resolved, os.O_WRONLY, 0)
+			if err != nil {
+				return writeTarget{}, bare(err)
+			}
+			f.Close() //nolint:gosec // opened only to test permission
+			return writeTarget{path: resolved, mode: info.Mode().Perm()}, nil
+		}
+	}
+}
+
+// underDev reports whether path names something under /dev/.
+func underDev(path string) bool {
+	abs, err := filepath.Abs(path)
+	return err == nil && strings.HasPrefix(abs, "/dev/")
+}
+
+// WriteFile writes data to path and never leaves a regular file half-written.
+//
+// It follows path's symlinks, so a link survives and the file it names is
+// written. A regular file, or one that does not exist yet, is replaced: the
+// payload is staged beside it, synced, given its mode and renamed over it. A
+// FIFO, a device or a path under /dev/ is written through, since no rename can
+// stand in for one. Anything else is refused, and every error names path.
+func WriteFile(path string, data []byte) error {
+	t, err := resolveWriteTarget(path)
+	if err == nil {
+		if t.through {
+			err = writeThrough(t.path, data)
+		} else {
+			err = replace(t, data)
+		}
+	}
 	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
+		return &fs.PathError{Op: "write", Path: path, Err: err}
+	}
+	return nil
+}
+
+// replace stages data beside t.path and renames it over t.path. A staging
+// failure is a refusal, never a cue to write in place: that would turn a full
+// disk into a truncated file.
+func replace(t writeTarget, data []byte) (retErr error) {
+	f, err := os.CreateTemp(filepath.Dir(t.path), stagingPattern)
+	if err != nil {
+		return fmt.Errorf("stage replacement: %w", bare(err))
 	}
 	tmp := f.Name()
 	defer func() {
@@ -51,67 +129,66 @@ func WriteFile(path string, data []byte) (retErr error) {
 			os.Remove(tmp) //nolint:gosec // best-effort cleanup on a failed write
 		}
 	}()
-
-	if err := writeSyncChmodClose(f, data, mode); err != nil {
+	if err := writeSyncChmodClose(f, data, t.mode); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("rename temp to final: %w", err)
+	if err := os.Rename(tmp, t.path); err != nil {
+		return fmt.Errorf("rename into place: %w", bare(err))
 	}
 	return nil
 }
 
-// targetMode returns the mode a write to path must produce, and refuses a
-// target this process may not write.
-//
-// The permission check is not redundant: renaming a staging file over a target
-// needs write permission on the DIRECTORY and none at all on the file, so
-// without it the CLI would quietly gain the ability to replace a file the
-// operator marked read-only — which every one of these paths refused while it
-// used os.WriteFile. Durability is the change being made here; the authority to
-// overwrite is not.
-func targetMode(path string) (fs.FileMode, error) {
-	info, err := os.Stat(path)
+// writeThrough continues the stream path holds, for a target no rename can
+// replace. It appends and never truncates: Linux reopens /dev/stdout's file, and
+// truncating it would erase a `>>` log. A FIFO's open blocks until a reader
+// attaches, as os.WriteFile's does.
+func writeThrough(path string, data []byte) (retErr error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
-		return NewFileMode, nil //nolint:nilerr // a target that does not exist yet is created
+		return bare(err)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
-	if err != nil {
-		return 0, err
-	}
-	f.Close() //nolint:gosec // opened only to test permission
-	return info.Mode().Perm(), nil
-}
-
-// stagingPattern returns the [os.CreateTemp] pattern for path's staging file.
-//
-// It ends in [snapshot.TmpSuffix] because that is the suffix
-// [snapshot.ScanDir] skips: a staging file an interrupted write leaves behind
-// must be invisible to a directory scan, and a name ending in ".ys" is instead
-// reported as a malformed snapshot.
-func stagingPattern(path string) string {
-	return filepath.Base(path) + ".*" + snapshot.TmpSuffix
-}
-
-// writeSyncChmodClose writes data to f, flushes it, sets its mode and closes it.
-//
-// The close error is reported rather than discarded: on a filesystem that
-// delays allocation, a write that cannot be satisfied is reported at close and
-// nowhere else, so dropping it turns a failed write into a silent success.
-func writeSyncChmodClose(f *os.File, data []byte, mode fs.FileMode) (retErr error) {
 	defer func() {
 		if err := f.Close(); err != nil && retErr == nil {
-			retErr = fmt.Errorf("close temp: %w", err)
+			retErr = bare(err)
 		}
 	}()
 	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("write temp: %w", err)
+		return bare(err)
+	}
+	return nil
+}
+
+// bare strips the path an [fs.PathError] or [os.LinkError] names, so a cause
+// met on a staging file or a resolved link is reported against the operator's
+// path instead.
+func bare(err error) error {
+	if pe, ok := errors.AsType[*fs.PathError](err); ok {
+		return pe.Err
+	}
+	if le, ok := errors.AsType[*os.LinkError](err); ok {
+		return le.Err
+	}
+	return err
+}
+
+// writeSyncChmodClose writes, flushes, chmods and closes f, keeping the close
+// error a delayed-allocation filesystem reports a failed write through. The
+// chmod precedes the rename: the other order leaves the content readable at
+// the wider mode for a moment.
+func writeSyncChmodClose(f *os.File, data []byte, mode fs.FileMode) (retErr error) {
+	defer func() {
+		if err := f.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("close: %w", bare(err))
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("write: %w", bare(err))
 	}
 	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync temp: %w", err)
+		return fmt.Errorf("sync: %w", bare(err))
 	}
 	if err := f.Chmod(mode); err != nil {
-		return fmt.Errorf("chmod temp: %w", err)
+		return fmt.Errorf("chmod: %w", bare(err))
 	}
 	return nil
 }
@@ -134,7 +211,8 @@ type StagedFiles struct {
 
 type stagedFile struct {
 	tmp    string
-	target string
+	name   string // the name the caller gave, which every error reports
+	target string // where the rename lands: the name's symlinks followed
 	mode   fs.FileMode
 	file   *os.File
 }
@@ -148,9 +226,10 @@ func NewStagedFiles(dir string) (*StagedFiles, error) {
 }
 
 // Create stages one file named name inside the set's directory and returns the
-// writer for its contents. The file appears at its real name only at [StagedFiles.Commit].
+// writer for its contents. The file appears at its real name only at
+// [StagedFiles.Commit]. It refuses, before anything is written, a target
+// [WriteFile] would refuse and a target only a write in place could reach.
 func (s *StagedFiles) Create(name string) (io.Writer, error) {
-	target := filepath.Join(s.dir, name)
 	// Two names that differ only in case are one file on a case-insensitive
 	// filesystem: the second rename replaces the first's contents while the
 	// directory keeps the first's spelling, so the set ends one file short and
@@ -158,19 +237,23 @@ func (s *StagedFiles) Create(name string) (io.Writer, error) {
 	// every filesystem, because the directory is a portable artefact and the
 	// caller cannot know where it will be read.
 	for _, st := range s.staged {
-		if existing := filepath.Base(st.target); strings.EqualFold(existing, name) && existing != name {
-			return nil, fmt.Errorf("%s and %s differ only in case and cannot share one directory", existing, name)
+		if strings.EqualFold(st.name, name) && st.name != name {
+			return nil, fmt.Errorf("%s and %s differ only in case and cannot share one directory", st.name, name)
 		}
 	}
-	mode := NewFileMode
-	if info, err := os.Stat(target); err == nil {
-		mode = info.Mode().Perm()
+	path := filepath.Join(s.dir, name)
+	t, err := resolveWriteTarget(path)
+	if err == nil && t.through {
+		err = errNotReplaceable
 	}
-	f, err := os.CreateTemp(s.dir, stagingPattern(target))
 	if err != nil {
-		return nil, fmt.Errorf("create temp for %s: %w", name, err)
+		return nil, &fs.PathError{Op: "write", Path: path, Err: err}
 	}
-	s.staged = append(s.staged, stagedFile{tmp: f.Name(), target: target, mode: mode, file: f})
+	f, err := os.CreateTemp(filepath.Dir(t.path), stagingPattern)
+	if err != nil {
+		return nil, &fs.PathError{Op: "write", Path: path, Err: fmt.Errorf("stage replacement: %w", bare(err))}
+	}
+	s.staged = append(s.staged, stagedFile{tmp: f.Name(), name: name, target: t.path, mode: t.mode, file: f})
 	return f, nil
 }
 
@@ -179,13 +262,13 @@ func (s *StagedFiles) Create(name string) (io.Writer, error) {
 // A rename that fails after earlier ones succeeded cannot be undone, so
 // everything that can fail happens first: the writes are flushed, chmod'd and
 // closed for every file, and every target is checked to be renameable, before
-// any rename runs. A directory standing where a file belongs is the reachable
-// case and is refused here rather than half-way through the set.
+// any rename runs. A directory that appeared where a file belongs since
+// [StagedFiles.Create] is refused here rather than half-way through the set.
 func (s *StagedFiles) Commit() error {
 	for i := range s.staged {
 		if info, err := os.Stat(s.staged[i].target); err == nil && info.IsDir() {
 			s.Rollback()
-			return fmt.Errorf("%s exists and is a directory", filepath.Base(s.staged[i].target))
+			return fmt.Errorf("%s exists and is a directory", s.staged[i].name)
 		}
 	}
 	for i := range s.staged {
@@ -195,14 +278,14 @@ func (s *StagedFiles) Commit() error {
 		sf.file = nil
 		if err != nil {
 			s.Rollback()
-			return fmt.Errorf("%s: %w", filepath.Base(sf.target), err)
+			return fmt.Errorf("%s: %w", sf.name, err)
 		}
 	}
 	for i := range s.staged {
 		sf := &s.staged[i]
 		if err := os.Rename(sf.tmp, sf.target); err != nil {
 			s.Rollback()
-			return fmt.Errorf("rename %s: %w", filepath.Base(sf.target), err)
+			return fmt.Errorf("rename %s: %w", sf.name, bare(err))
 		}
 		sf.tmp = ""
 	}
@@ -230,14 +313,14 @@ func (s *StagedFiles) Rollback() {
 func syncChmodClose(f *os.File, mode fs.FileMode) (retErr error) {
 	defer func() {
 		if err := f.Close(); err != nil && retErr == nil {
-			retErr = fmt.Errorf("close temp: %w", err)
+			retErr = fmt.Errorf("close: %w", bare(err))
 		}
 	}()
 	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync temp: %w", err)
+		return fmt.Errorf("sync: %w", bare(err))
 	}
 	if err := f.Chmod(mode); err != nil {
-		return fmt.Errorf("chmod temp: %w", err)
+		return fmt.Errorf("chmod: %w", bare(err))
 	}
 	return nil
 }

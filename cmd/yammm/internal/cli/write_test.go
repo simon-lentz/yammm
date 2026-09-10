@@ -53,9 +53,7 @@ func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "snap.ys")
-
-	staged, err := os.CreateTemp(dir, stagingPattern(target))
+	staged, err := os.CreateTemp(dir, stagingPattern)
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}
@@ -197,6 +195,40 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 		if err := os.Mkdir(blocker, 0o750); err != nil {
 			t.Fatalf("mkdir blocker: %v", err)
 		}
+		// The blocker is refused when its file is staged, or at Commit when it
+		// appears afterwards; either way nothing may be renamed into place.
+		refused := false
+		for _, name := range []string{"a.csv", "b.csv"} {
+			w, err := staged.Create(name)
+			if err != nil {
+				refused = true
+				break
+			}
+			if _, err := io.WriteString(w, name); err != nil {
+				t.Fatalf("write %s: %v", name, err)
+			}
+		}
+		if !refused {
+			if err := staged.Commit(); err == nil {
+				t.Fatal("a blocked target reported success")
+			}
+		}
+		staged.Rollback()
+		// a.csv must NOT have been renamed into place: a partial set reads as
+		// a complete export with one type quietly missing.
+		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
+			t.Error("a.csv was left behind; the set is partial and nothing says so")
+		}
+		assertNoDebris(t, dir, blocker)
+	})
+
+	t.Run("a directory that appears after Create is refused at Commit", func(t *testing.T) {
+		t.Parallel()
+		dir := filepath.Join(t.TempDir(), "out")
+		staged, err := NewStagedFiles(dir)
+		if err != nil {
+			t.Fatalf("stage: %v", err)
+		}
 		for _, name := range []string{"a.csv", "b.csv"} {
 			w, err := staged.Create(name)
 			if err != nil {
@@ -206,15 +238,55 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 				t.Fatalf("write %s: %v", name, err)
 			}
 		}
-		if err := staged.Commit(); err == nil {
-			t.Fatal("a blocked target reported success")
+		blocker := filepath.Join(dir, "b.csv")
+		if err := os.Mkdir(blocker, 0o750); err != nil {
+			t.Fatalf("mkdir blocker: %v", err)
 		}
-		// a.csv must NOT have been renamed into place: a partial set reads as
-		// a complete export with one type quietly missing.
+		err = staged.Commit()
+		if err == nil {
+			t.Fatal("a directory standing where b.csv belongs reported success")
+		}
+		if !strings.Contains(err.Error(), "b.csv") || strings.Contains(err.Error(), snapshot.TmpSuffix) {
+			t.Errorf("error %q must name b.csv and no staging file", err)
+		}
 		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
-			t.Error("a.csv was left behind; the set is partial and nothing says so")
+			t.Error("a.csv was renamed into place; the set is partial and nothing says so")
 		}
 		assertNoDebris(t, dir, blocker)
+	})
+
+	t.Run("a rename refused at Commit names the file, not its staging name", func(t *testing.T) {
+		t.Parallel()
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores the write bit")
+		}
+		base := unsealedTempDir(t)
+		dir := filepath.Join(base, "out")
+		staged, err := NewStagedFiles(dir)
+		if err != nil {
+			t.Fatalf("stage: %v", err)
+		}
+		w, err := staged.Create("a.csv")
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, err := io.WriteString(w, "a"); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		// Sealed after staging, so the rename itself is what fails.
+		if err := sealDir(dir); err != nil {
+			t.Fatalf("seal: %v", err)
+		}
+		err = staged.Commit()
+		if err == nil {
+			t.Fatal("a rename into a sealed directory reported success")
+		}
+		if !strings.Contains(err.Error(), "a.csv") || strings.Contains(err.Error(), snapshot.TmpSuffix) {
+			t.Errorf("error %q must name a.csv and no staging file", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
+			t.Error("a.csv was renamed into a directory the commit reported failing")
+		}
 	})
 
 	t.Run("rollback without commit leaves nothing", func(t *testing.T) {

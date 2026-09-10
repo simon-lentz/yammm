@@ -111,6 +111,94 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 		{
+			name: "a chain of two links resolves to the file",
+			setup: func(dir string) (string, error) {
+				if err := writeFixture(filepath.Join(dir, "real.txt"), 0o600); err != nil {
+					return "", err
+				}
+				if err := os.Symlink("real.txt", filepath.Join(dir, "middle.txt")); err != nil {
+					return "", err
+				}
+				link := filepath.Join(dir, "outer.txt")
+				return link, os.Symlink("middle.txt", link)
+			},
+			check: func(dir, target string, err error) string {
+				if err != nil {
+					return "write through a chain of links failed: " + err.Error()
+				}
+				if !isSymlink(target) || !isSymlink(filepath.Join(dir, "middle.txt")) {
+					return "a link in the chain was replaced by a regular file"
+				}
+				return expectPayload(filepath.Join(dir, "real.txt"))
+			},
+		},
+		{
+			name: "a relative link into another directory resolves from the link",
+			setup: func(dir string) (string, error) {
+				for _, sub := range []string{"a", "b"} {
+					if err := os.Mkdir(filepath.Join(dir, sub), 0o750); err != nil {
+						return "", err
+					}
+				}
+				if err := writeFixture(filepath.Join(dir, "b", "real.txt"), 0o600); err != nil {
+					return "", err
+				}
+				link := filepath.Join(dir, "a", "link.txt")
+				return link, os.Symlink(filepath.Join("..", "b", "real.txt"), link)
+			},
+			check: func(dir, target string, err error) string {
+				if err != nil {
+					return "write through a relative link failed: " + err.Error()
+				}
+				if !isSymlink(target) {
+					return "the link was replaced by a regular file"
+				}
+				return expectPayload(filepath.Join(dir, "b", "real.txt"))
+			},
+		},
+		{
+			name: "a link to a read-only file is refused and both are kept",
+			setup: func(dir string) (string, error) {
+				if err := writeFixture(filepath.Join(dir, "real.txt"), 0o400); err != nil {
+					return "", err
+				}
+				link := filepath.Join(dir, "link.txt")
+				return link, os.Symlink("real.txt", link)
+			},
+			check: func(dir, target string, err error) string {
+				if !isSymlink(target) {
+					return "the link was replaced"
+				}
+				return expectRefused(filepath.Join(dir, "real.txt"), err, fs.ErrPermission)
+			},
+		},
+		{
+			name:  "a path under /dev/ is written through",
+			setup: func(string) (string, error) { return os.DevNull, nil },
+			check: func(_, target string, err error) string {
+				if err != nil {
+					return "writing to " + target + " failed: " + err.Error()
+				}
+				return expectDevice(target)
+			},
+		},
+		{
+			name: "a link to a path under /dev/ is written through",
+			setup: func(dir string) (string, error) {
+				link := filepath.Join(dir, "null")
+				return link, os.Symlink(os.DevNull, link)
+			},
+			check: func(_, target string, err error) string {
+				if err != nil {
+					return "writing through a link to " + os.DevNull + " failed: " + err.Error()
+				}
+				if !isSymlink(target) {
+					return "the link was replaced by a regular file"
+				}
+				return expectDevice(os.DevNull)
+			},
+		},
+		{
 			name: "a directory is refused",
 			setup: func(dir string) (string, error) {
 				target := filepath.Join(dir, "adir")
@@ -119,6 +207,9 @@ func writeTargetCases() []writeTargetCase {
 			check: func(_, _ string, err error) string {
 				if err == nil {
 					return "a directory target was written"
+				}
+				if !strings.Contains(err.Error(), "is a directory") {
+					return fmt.Sprintf("error %q does not say the target is a directory", err)
 				}
 				return ""
 			},
@@ -216,8 +307,8 @@ func TestWriteFile_TargetKinds(t *testing.T) {
 }
 
 // TestStagedFiles_TargetKinds judges a one-file set by the same table. A set
-// refuses what no rename can replace, so the FIFO and dangling-link rows
-// expect a refusal.
+// is replaced by renames, so a target only written through — a FIFO, a device,
+// a path under /dev/ — is refused.
 func TestStagedFiles_TargetKinds(t *testing.T) {
 	t.Parallel()
 	if os.Geteuid() == 0 {
@@ -235,7 +326,9 @@ func TestStagedFiles_TargetKinds(t *testing.T) {
 			err = stageOne(target, targetPayload)
 			var failure string
 			switch tc.name {
-			case "a FIFO receives the bytes and stays a FIFO", "a dangling symlink is written through":
+			case "a FIFO receives the bytes and stays a FIFO",
+				"a path under /dev/ is written through",
+				"a link to a path under /dev/ is written through":
 				if err == nil {
 					failure = "a set staged a target no rename can replace"
 				}
@@ -282,6 +375,62 @@ func expectWritten(target string, mode fs.FileMode, err error) string {
 		return fmt.Sprintf("mode %v, want %v", info.Mode().Perm(), mode)
 	}
 	return ""
+}
+
+// expectPayload reports path not holding the payload.
+func expectPayload(path string) string {
+	if got, _ := os.ReadFile(path); string(got) != targetPayload {
+		return fmt.Sprintf("%s holds %q, want the payload", filepath.Base(path), got)
+	}
+	return ""
+}
+
+// expectDevice reports path no longer being a device.
+func expectDevice(path string) string {
+	if info, err := os.Stat(path); err != nil || info.Mode()&fs.ModeDevice == 0 {
+		return path + " is no longer a device"
+	}
+	return ""
+}
+
+// TestWriteFile_DescriptorPathContinuesItsStream pins the /dev/ rule where it
+// is needed: /dev/fd/N stats as whatever the descriptor holds — a regular file
+// here, as /dev/stdout does under a shell redirect — and the bytes must continue
+// that stream, in the file the descriptor holds, after what it already wrote.
+func TestWriteFile_DescriptorPathContinuesItsStream(t *testing.T) {
+	t.Parallel()
+
+	f, err := os.CreateTemp(t.TempDir(), "held-*.txt")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer f.Close()
+	const earlier = "earlier output\n"
+	if _, err := f.WriteString(earlier); err != nil {
+		t.Fatalf("write earlier output: %v", err)
+	}
+	path := fmt.Sprintf("/dev/fd/%d", f.Fd())
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("%s is not available here: %v", path, err)
+	}
+	before, err := os.Stat(f.Name())
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	if err := WriteFile(path, []byte(targetPayload)); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+	after, err := os.Stat(f.Name())
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if !os.SameFile(before, after) {
+		t.Error("the file the descriptor holds was replaced, so the descriptor now names a file no path reaches")
+	}
+	if got, _ := os.ReadFile(f.Name()); string(got) != earlier+targetPayload {
+		t.Errorf("the descriptor's file holds %q, want %q: the payload must continue the stream", got, earlier+targetPayload)
+	}
 }
 
 // expectRefused reports a write that did not fail with want, or one that
