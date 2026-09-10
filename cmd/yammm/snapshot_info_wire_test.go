@@ -136,11 +136,11 @@ func TestSnapshotInfo_HeaderOnlyReportsFileSize(t *testing.T) {
 	}
 }
 
-// TestSnapshotInfo_DirIssuesIsAlwaysAnArray pins B50. A clean entry omitted
-// issues entirely while its sibling header was an explicit null, so one DTO
-// answered "nothing to report" two different ways and a consumer had to
-// handle both.
-func TestSnapshotInfo_DirIssuesIsAlwaysAnArray(t *testing.T) {
+// TestSnapshotInfo_DirDiagnosticsIsAlwaysTheWire pins B50. A clean entry omitted
+// its issues entirely while its sibling header was an explicit null, so one DTO
+// answered "nothing to report" two different ways; every entry now carries the
+// diagnostic wire object, whose issues is an array even when empty.
+func TestSnapshotInfo_DirDiagnosticsIsAlwaysTheWire(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -165,13 +165,13 @@ func TestSnapshotInfo_DirIssuesIsAlwaysAnArray(t *testing.T) {
 
 	for _, entry := range entries {
 		name, _ := entry["name"].(string)
-		raw, present := entry["issues"]
-		if !present {
-			t.Errorf("%s: issues is absent; every entry states its issues", name)
+		wire, ok := entry["diagnostics"].(map[string]any)
+		if !ok {
+			t.Errorf("%s: diagnostics = %#v, want the diagnostic wire object", name, entry["diagnostics"])
 			continue
 		}
-		if _, ok := raw.([]any); !ok {
-			t.Errorf("%s: issues = %#v, want an array", name, raw)
+		if _, ok := wire["issues"].([]any); !ok {
+			t.Errorf("%s: diagnostics.issues = %#v, want an array", name, wire["issues"])
 		}
 	}
 }

@@ -1302,6 +1302,29 @@ sides (the `v0.21.0` hash re-key), and its `fmt --check`, `fmt --write` and
   cost.** The header was read by scanning the whole document again after the
   load had checked it. Output is byte-identical.
 
+### Unit 6, clause 5's second fix pass — `snapshot info`
+
+**No exported declaration moves. `snapshot info --dir --format json` renames a
+key `v0.21.0` shipped**, on top of the breaking payload change above. **rdata
+does not read this output**, measured at its tree.
+
+- **Each `--dir` entry carries its result under `diagnostics`, in the wire the
+  diagnostic stream uses:** `issues`, each carrying every field a diagnostic
+  has, plus `limit`, `limitReached` and `droppedCount` when the entry's issues
+  were truncated. `v0.21.0` carried an `issues` array of severity, code and
+  message on an entry that had issues and none on a clean one, and the entry
+  above made the array always present. A truncated entry listed 100 issues with
+  no sign that more were dropped. A consumer reading an entry's `issues` reads
+  `diagnostics.issues`.
+- **Absent `metadata` renders as `{}`** in both JSON modes, where it rendered
+  `null` beside `types: []`. `features` is always an array: every reader
+  refuses a header whose `features` is absent or null.
+- **`--header-only`'s text reports the file size** its JSON reports. The text
+  modes read the structure the JSON mode marshals, so a field one mode reports
+  the other reports too.
+- **A `warn` row in `--dir`'s text names its first warning**, code and message,
+  where it read `warn` alone.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:
