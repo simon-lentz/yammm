@@ -858,12 +858,12 @@ from the v1.0 Go-API compatibility promise in any case (see Scope). What moves i
 formatter *output*, and every item below was reproduced first-hand before the
 repair and is pinned by a fixture after it.
 
-**The formatter now computes its lexical view once, from the token stream, and
-every phase reads it.** Phases 2 to 4 had each re-derived comment and string
-boundaries from the emitted text with five separate hand-rolled scanners; those
-are retired and `format/scan.go` is deleted. The package doc's standing claim —
-that one line classification is computed once and no phase decides for itself
-whether a line is a comment — is true for the first time.
+**The formatter now takes its lexical view from the lexer, and every phase
+reads it.** Phases 2 to 4 had each re-derived comment and string boundaries from
+the emitted text with five separate hand-rolled scanners; those are retired and
+`format/scan.go` is deleted. Phase 1 records the view from the token stream as it
+emits each line, and phase 4 reads a record lexed from phase 3's text whenever
+phase 3 rebuilt a line. No phase decides for itself whether a line is a comment.
 
 **Behaviour changes, none of which moves a declaration:**
 
@@ -912,7 +912,9 @@ whether a line is a comment — is true for the first time.
 the tree as it now stands. The standing claim that one line classification is
 *"computed once between phases 1 and 2"* was false and is replaced by what the
 code does: phase 1 records the class, the trailing comment's offset and every
-literal's extent as it emits each line, and phases 2 to 4 read that record. Two
+literal's extent as it emits each line; phases 2 and 3 read that record, and
+phase 4 reads it or, where phase 3 rebuilt a line, a record lexed from phase 3's
+text. Two
 further claims were corrected on measurement: the exported helpers are not
 consumer-less (the documentation gate pins their signatures), and the threshold
 is counted in display cells rather than columns.
@@ -1077,7 +1079,7 @@ refusals, each reproduced first-hand before the repair.
   directory is a portable artefact and the writer cannot know where it will be
   read.
 
-### Unit 6, clause 5's second fix pass — the formatter fails closed
+### Unit 6, clause 5's second fix pass — the formatter
 
 **One exported declaration is ADDED:** `format.ErrNotPreserved`.
 `gorelease -base=v0.21.0` reports it as a compatible change and nothing
@@ -1094,20 +1096,33 @@ Scope).
   `errors.Is(err, format.ErrNotPreserved)` tells the two apart.
 - **`yammm fmt` exits 3 on a refusal and writes nothing.** `--write` leaves the
   file unchanged, the stdout mode prints nothing, and `--check` does not list
-  the path. Two inputs in this repository's own fixtures reach it today, and
-  both exited 0 before: an enum whose first value shares the `Enum[` line lost
-  that value and still loaded, and a block comment lost its blank lines. The
-  formatter refuses both until the defects are repaired. A pre-commit hook
-  running `fmt --write` now blocks the commit rather than committing the
-  rewrite.
+  the path. Two inputs in this repository's own fixtures reached it, and both
+  exited 0 before: an enum whose first value shares the `Enum[` line lost that
+  value and still loaded, and a block comment lost its blank lines. The second
+  is repaired by the record model below; the formatter refuses the first until
+  its repair lands. A pre-commit hook running `fmt --write` now blocks the
+  commit rather than committing the rewrite.
 - **The language server returns no edits for a refusal and logs it as a
   warning**, where it applied the rewritten text.
 - **Measured reach:** across the 241 tracked schemas of this repository and the
-  consumer's, `fmt` output and both exit codes are byte-identical to the
-  previous build except those two fixtures. The comparison runs only when
-  formatting changed the text, so an already-formatted file costs nothing
-  extra; a rewrite costs one lex of the output — +37% on the corpus benchmark
-  and +75% on a 200-type synthetic schema.
+  consumer's, every schema outside `format/testdata` formats byte for byte as
+  `v0.21.0` formats it, with the same exit codes; only fixtures written for a
+  defect differ. The comparison runs only when formatting changed the text, so
+  an already-formatted file costs nothing extra; a rewrite costs one lex of the
+  output — +37% on the corpus benchmark and +75% on a 200-type synthetic schema.
+
+**The record model (A-447).** Phase 1's record marks a blank line inside a block
+comment as comment text, and phase 2 inserts blank lines with an empty record.
+Phase 3 builds lines from pieces of others and carries no record for them, so
+when it changes the text, phase 4 reads a record lexed from phase 3's output;
+when it changes nothing, phase 4 reads phase 1's. This repairs three defects
+this unit's earlier fix pass introduced, none of which a release carried: blank
+lines inside a block comment were collapsed or deleted; a property group after a
+rebuilt construct lost its alignment, to the end of the file; and a file whose
+trailing comment carried `[` or `{` was not a fixed point, so format-on-save
+oscillated. No exported declaration moves. A rewrite costs about 8% more on the
+corpus benchmark — one lex of phase 3's output, only when phase 3 changed it —
+and an already-formatted file costs nothing.
 
 ## v0.21.0 under this policy
 

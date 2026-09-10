@@ -175,6 +175,10 @@ func markToken(lexes []lexical, starts []int, raw []string, start, end int, kind
 		from := max(start-lineStart, 0)
 		to := min(end-lineStart, len(raw[i]))
 		if to <= from {
+			// An empty line a block comment runs through is part of the comment.
+			if kind == chunkComment && raw[i] == "" && start < lineStart && end > lineEnd {
+				lexes[i].commentAt = 0
+			}
 			continue
 		}
 		if kind == chunkLiteral {
@@ -197,6 +201,12 @@ func joinLines(ls []line) string {
 		b.WriteString(ln.text)
 	}
 	return b.String()
+}
+
+// blankLine is a blank line with an empty record. The zero lexical value means
+// a comment at offset 0, so an inserted blank line must not be built bare.
+func blankLine() line {
+	return line{class: lineBlank, lex: lexical{commentAt: noComment}}
 }
 
 // contentLine wraps rewritten text a pass emits in place of declaration

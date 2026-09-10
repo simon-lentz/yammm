@@ -38,6 +38,10 @@ func (e *emitter) write(text string, kind chunkKind) {
 			break
 		}
 		e.append(text[:nl], kind)
+		// A blank line inside a block comment is comment text, not a section break.
+		if kind == chunkComment && e.curLex.commentAt == noComment {
+			e.curLex.commentAt = e.cur.Len()
+		}
 		e.closeLine()
 		text = text[nl+1:]
 	}
@@ -83,11 +87,11 @@ func (e *emitter) lines() []line {
 // line is a comment when its comment starts at or before its first non-space
 // byte, which no text test can settle for a value that merely looks like one.
 func classOf(text string, lex lexical) lineClass {
-	if strings.TrimSpace(text) == "" {
-		return lineBlank
-	}
 	if lex.commentAt >= 0 && strings.TrimSpace(text[:lex.commentAt]) == "" {
 		return lineComment
+	}
+	if strings.TrimSpace(text) == "" {
+		return lineBlank
 	}
 	return lineContent
 }

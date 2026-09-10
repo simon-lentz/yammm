@@ -47,8 +47,11 @@
 //
 // Phase 1 records the lexer's view of each line as it emits that line: the
 // line's class — blank, comment, or content — the offset where a trailing
-// comment starts, and the extent of every string and regex literal. Phases 2 to
-// 4 read this record and never derive it again from the text.
+// comment starts, and the extent of every string and regex literal. A blank
+// line inside a block comment is comment text. Phases 2 and 3 read this record.
+// Phase 3 builds lines from pieces of others, so when it changed the text,
+// phase 4 reads a record lexed from phase 3's text; when it did not, phase 4
+// reads phase 1's. No phase derives the record from the text by hand.
 //
 // A comma inside a string literal is therefore not a value separator, a bracket
 // inside a comment does not open a construct, and a comment line is never

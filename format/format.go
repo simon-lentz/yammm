@@ -67,12 +67,21 @@ func TokenStream(text string) (string, error) {
 
 // rewrite runs phases 2 to 5 over phase 1's lines.
 func rewrite(ls []line) string {
-	// The classification travels with the lines through every phase; nothing
-	// downstream re-derives it.
 	ls = collapseBlankLines(ls)
-	ls = wrapLongLines(ls)
+	ls = recordsAfterWrap(ls, wrapLongLines(ls))
 	ls = alignColumns(ls)
 	return finalizeFormattedText(joinLines(ls))
+}
+
+// recordsAfterWrap returns the lines phase 4 reads. Phase 3 builds lines from
+// pieces of others and has no record for them, so when it changed the text the
+// record is the lexer's; when it did not, the lines it was given keep theirs.
+func recordsAfterWrap(before, after []line) []line {
+	text := joinLines(after)
+	if text == joinLines(before) {
+		return before
+	}
+	return classifyLexed(text)
 }
 
 // tokenStream is [TokenStream] with phases 2 to 5 as a parameter, so the

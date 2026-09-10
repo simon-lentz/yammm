@@ -1824,7 +1824,7 @@ Phase 1 records the lexer's view of each line as it emits that line. The record 
 - the offset where a trailing comment starts, when the line has one
 - the extent of every string and regex literal
 
-Phases 2 to 4 read this record. No phase derives these facts again from the text, and phase 1 pays no second lex to produce them, because it already holds the token stream.
+A blank line inside a block comment is comment text, not a section break. Phases 2 and 3 read this record, which phase 1 builds from the token stream it already holds, at no second lex. Phase 3 builds lines from pieces of others and has no record for them. So whenever phase 3 changed the text, phase 4 reads a record lexed from phase 3's text; when it changed nothing, phase 4 reads phase 1's. No phase derives these facts from the text by hand.
 
 Three consequences follow. A comma inside a string literal is not a value separator. A bracket inside a comment does not open or close a construct. A comment line is never wrapped, aligned, or read as an enum value or a type name, whatever its text looks like. A comment inside a multiline enum or `extends` list keeps its place, and the formatter re-indents the construct instead of collapsing it.
 

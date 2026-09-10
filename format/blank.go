@@ -43,7 +43,7 @@ func collapseBlankLines(ls []line) []line {
 		}
 
 		// Otherwise: emit one blank line.
-		result = append(result, line{class: lineBlank})
+		result = append(result, blankLine())
 	}
 
 	// Pass 2: ensure required blank lines.
@@ -95,7 +95,7 @@ func ensureBlankAfterSchema(ls []line) []line {
 			continue
 		}
 		if i+1 < len(ls) && ls[i+1].class != lineBlank {
-			return slices.Insert(slices.Clone(ls), i+1, line{class: lineBlank})
+			return slices.Insert(slices.Clone(ls), i+1, blankLine())
 		}
 		break
 	}
@@ -118,7 +118,7 @@ func ensureBlankAfterLastImport(ls []line) []line {
 		return ls
 	}
 	if lastImportIdx+1 < len(ls) && ls[lastImportIdx+1].class != lineBlank {
-		return slices.Insert(slices.Clone(ls), lastImportIdx+1, line{class: lineBlank})
+		return slices.Insert(slices.Clone(ls), lastImportIdx+1, blankLine())
 	}
 	return ls
 }

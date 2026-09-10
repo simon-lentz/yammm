@@ -3,6 +3,7 @@ package format
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -41,6 +42,57 @@ func TestLexicalRecordAgreesWithLexer(t *testing.T) {
 				compareRecords(t, i, emitted[i], independent[i])
 			}
 		})
+	}
+}
+
+// TestPhaseRecordsAgreeWithLexer extends the agreement to the lines phases 3
+// and 4 read. Each source is formatted twice, because a second pass over
+// formatted text is where phase 3 rebuilds a construct without changing it.
+func TestPhaseRecordsAgreeWithLexer(t *testing.T) {
+	t.Parallel()
+
+	checked := 0
+	for _, path := range agreementCorpus(t) {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read fixture: %v", err)
+		}
+		ls, _, err := lexicalLines(string(src))
+		if err != nil {
+			continue
+		}
+		for pass, text := range []string{string(src), rewrite(ls)} {
+			checked++
+			t.Run(path+"#pass"+strconv.Itoa(pass+1), func(t *testing.T) {
+				t.Parallel()
+				lines, _, err := lexicalLines(text)
+				if err != nil {
+					t.Fatalf("formatted output does not parse: %v", err)
+				}
+				collapsed := collapseBlankLines(lines)
+				agreeWithLexer(t, "phase 3 reads", collapsed)
+				agreeWithLexer(t, "phase 4 reads", recordsAfterWrap(collapsed, wrapLongLines(collapsed)))
+			})
+		}
+	}
+	if checked < 60 {
+		t.Fatalf("checked %d sources; the corpus walk is not reaching testdata", checked)
+	}
+}
+
+// agreeWithLexer reports every line of ls whose record differs from a lex of
+// the lines' own text.
+func agreeWithLexer(t *testing.T, boundary string, ls []line) {
+	t.Helper()
+	independent := classifyLexed(joinLines(ls))
+	if len(ls) != len(independent) {
+		t.Fatalf("%s %d lines, the lexer sees %d", boundary, len(ls), len(independent))
+	}
+	for i := range ls {
+		if ls[i].class != independent[i].class || ls[i].lex.commentAt != independent[i].lex.commentAt {
+			t.Errorf("%s line %d %q: class %v commentAt %d, lexer says class %v commentAt %d",
+				boundary, i, ls[i].text, ls[i].class, ls[i].lex.commentAt, independent[i].class, independent[i].lex.commentAt)
+		}
 	}
 }
 
