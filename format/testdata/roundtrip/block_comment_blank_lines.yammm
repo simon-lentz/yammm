@@ -1,0 +1,11 @@
+schema "p"
+
+/*
+License para one.
+
+
+License para two.
+*/
+type T {
+	id String primary
+}

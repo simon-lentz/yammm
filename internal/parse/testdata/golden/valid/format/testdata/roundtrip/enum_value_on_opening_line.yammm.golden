@@ -1,0 +1,57 @@
+{
+  "name": "\"s\"",
+  "span": {
+    "s": 0,
+    "e": 10
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 17,
+        "e": 18
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 25,
+              "e": 31
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 22,
+            "e": 39
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"active\"",
+              "\"inactive\"",
+              "\"pending\""
+            ],
+            "span": {
+              "s": 48,
+              "e": 89
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 41,
+            "e": 98
+          }
+        }
+      ],
+      "span": {
+        "s": 12,
+        "e": 100
+      }
+    }
+  ]
+}

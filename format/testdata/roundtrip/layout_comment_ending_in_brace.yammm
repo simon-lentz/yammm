@@ -1,0 +1,7 @@
+schema "p"
+
+type T {
+	id String primary
+	name String // opens a brace {
+	longerName String
+}

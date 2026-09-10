@@ -1,0 +1,38 @@
+{
+  "name": "\"p\"",
+  "span": {
+    "s": 0,
+    "e": 10
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 61,
+        "e": 62
+      },
+      "doc": "License para one.\n\n\nLicense para two.",
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 69,
+              "e": 75
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 66,
+            "e": 83
+          }
+        }
+      ],
+      "span": {
+        "s": 12,
+        "e": 85
+      }
+    }
+  ]
+}

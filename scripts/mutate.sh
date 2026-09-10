@@ -47,6 +47,14 @@ fi
 
 # Restore from a byte copy rather than from git: the harness must put the file
 # back exactly as it found it without performing a git write.
+# The suite MUST be green before the mutation: a test that is already red
+# makes every mutant read as killed, which voided two sweeps in one fix pass.
+if ! go test "${pkgs[@]}" >/dev/null 2>&1; then
+	printf 'mutate: the UNMUTATED tree is already red in %s, so no verdict is possible\n' "${pkgs[*]}" >&2
+	exit 1
+fi
+printf 'mutate: baseline green\n'
+
 backup=$(mktemp)
 cp -- "${file}" "${backup}"
 trap 'cp -- "${backup}" "${file}"; rm -f -- "${backup}"' EXIT

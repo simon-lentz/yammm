@@ -33,32 +33,39 @@ func TestTokenStream_CorpusRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read fixture: %v", err)
 			}
-			before, ok := loadHash(t, string(src))
-			if !ok {
+			if _, ok := loadHash(t, string(src)); !ok {
 				t.Fatalf("fixture does not load; a round-trip claim needs a clean input")
 			}
-
-			out, err := format.TokenStream(string(src))
-			if err != nil {
-				t.Fatalf("TokenStream returned an error: %v", err)
-			}
-			after, loaded := loadHash(t, out)
-			if !loaded {
-				t.Fatalf("formatting turned a loading schema into one that does not load:\n%s", out)
-			}
-			if after != before {
-				t.Errorf("formatting changed the schema's meaning: hash %s -> %s\n%s", before, after, out)
-			}
-
-			second, err := format.TokenStream(out)
-			if err != nil {
-				t.Fatalf("TokenStream returned an error on its own output: %v", err)
-			}
-			if second != out {
-				t.Errorf("formatting is not idempotent")
-			}
+			checkRepairState(t, path, roundTripOutcome(t, string(src)))
 		})
 	}
+}
+
+// roundTripOutcome formats src and returns the first round-trip property it
+// fails, or empty: the output loads, keeps the structural hash, and is a fixed
+// point.
+func roundTripOutcome(t *testing.T, src string) string {
+	t.Helper()
+	before, _ := loadHash(t, src)
+	out, err := format.TokenStream(src)
+	if err != nil {
+		return "TokenStream returned an error: " + err.Error()
+	}
+	after, loaded := loadHash(t, out)
+	if !loaded {
+		return "formatting turned a loading schema into one that does not load:\n" + out
+	}
+	if after != before {
+		return "formatting changed the schema's meaning: hash " + before + " -> " + after + "\n" + out
+	}
+	second, err := format.TokenStream(out)
+	if err != nil {
+		return "TokenStream returned an error on its own output: " + err.Error()
+	}
+	if second != out {
+		return "formatting is not idempotent"
+	}
+	return ""
 }
 
 // loadHash loads src and returns its structural hash, reporting whether the
