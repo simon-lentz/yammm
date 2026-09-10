@@ -1,6 +1,7 @@
 package neo4j
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -23,7 +24,7 @@ func TestParseLabel(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			sn, tn := parseLabel(tc.label, tc.sep)
+			sn, tn, _ := New(WithLabelSeparator(tc.sep)).parseLabel(tc.label)
 			if sn != tc.wantSchema || tn != tc.wantType {
 				t.Errorf("parseLabel(%q, %q) = (%q, %q); want (%q, %q)",
 					tc.label, tc.sep, sn, tn, tc.wantSchema, tc.wantType)
@@ -161,5 +162,74 @@ func TestInferSchema_Golden(t *testing.T) {
 			output := New(tc.opts...).InferSchema(tc.constraints, tc.relationships, tc.schemaName)
 			yammmtest.Golden(t, "infer_"+tc.name, []byte(output))
 		})
+	}
+}
+
+// TestParseLabel_IsLabelsInverse is the second implementation of the label
+// contract: every label Label composes, under every prefix and separator the
+// CLI accepts, parses back to the components Label wrote.
+func TestParseLabel_IsLabelsInverse(t *testing.T) {
+	t.Parallel()
+	for _, prefix := range []string{"", "app_", "Tenant1_"} {
+		for _, sep := range []string{"__", "_x_", "Z"} {
+			a := New(WithLabelPrefix(prefix), WithLabelSeparator(sep))
+			for _, c := range []struct{ schema, typ string }{
+				{"book_catalog", "Publisher"},
+				{"book-catalog", "Book"},
+				{" geo ", "District"},
+			} {
+				label := a.Label(t.Context(), c.schema, c.typ)
+				sn, tn, ok := a.parseLabel(label)
+				if want := SanitizeIdentifier(c.schema); !ok || sn != want || tn != SanitizeIdentifier(c.typ) {
+					t.Errorf("prefix %q, separator %q: %q parsed to (%q, %q), want (%q, %q)",
+						prefix, sep, label, sn, tn, want, SanitizeIdentifier(c.typ))
+				}
+			}
+		}
+	}
+}
+
+// TestInferSchema_ReadsOnlyLabelsThisConfigurationWrites: a graph can hold
+// labels another configuration wrote. Their types are not this schema's, and
+// an edge to such a target is kept as a cross-schema guess rather than dropped.
+func TestInferSchema_ReadsOnlyLabelsThisConfigurationWrites(t *testing.T) {
+	t.Parallel()
+	a := New(WithLabelPrefix("app_"))
+	dsl := a.InferSchema(
+		[]RemoteConstraint{
+			{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"app_book__Book"}, Properties: []string{"isbn"}},
+			{Name: "c2", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"other__Stray"}, Properties: []string{"id"}},
+			{Name: "c3", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"app_book__"}, Properties: []string{"id"}},
+		},
+		[]RemoteRelationship{
+			{RelationType: "IN_REGION", SourceLabels: []string{"app_book__Book"}, TargetLabels: []string{"geo__Region"}},
+		},
+		"",
+	)
+	for _, want := range []string{`schema "book"`, "type Book {", "--> IN_REGION geo.Region"} {
+		if !strings.Contains(dsl, want) {
+			t.Errorf("the scaffold lacks %s:\n%s", want, dsl)
+		}
+	}
+	var declared []string
+	for line := range strings.Lines(dsl) {
+		if head, ok := strings.CutPrefix(line, "type "); ok {
+			declared = append(declared, strings.TrimSpace(head))
+		}
+	}
+	if len(declared) != 1 || declared[0] != "Book {" {
+		t.Errorf("declared types = %q, want only Book: a label this configuration did not write, or one with no type, is no type of this schema\n%s", declared, dsl)
+	}
+}
+
+// TestInferSchema_NamesThePaddedFilterTrimmed: the scaffold's schema is the
+// filter as Label reads it, trimmed.
+func TestInferSchema_NamesThePaddedFilterTrimmed(t *testing.T) {
+	t.Parallel()
+	dsl := New().InferSchema([]RemoteConstraint{
+		{Name: "c1", Type: "UNIQUENESS", EntityType: "NODE", LabelsOrTypes: []string{"test__Entity"}, Properties: []string{"id"}},
+	}, nil, " test ")
+	if !strings.Contains(dsl, `schema "test"`+"\n") || !strings.Contains(dsl, "type Entity {") {
+		t.Errorf("a padded filter did not scaffold schema %q:\n%s", "test", dsl)
 	}
 }

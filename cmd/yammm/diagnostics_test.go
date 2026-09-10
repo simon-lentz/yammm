@@ -54,9 +54,6 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 		{"snapshot save, undetectable data format", []string{
 			"snapshot", "save", "-o", filepath.Join(dir, "out.ys"), shadowedSchema, shadowedSchema,
 		}},
-		{"neo4j constraints, unrecognized edition", []string{
-			"neo4j", "constraints", "--edition", "bogus", shadowedSchema,
-		}},
 	}
 
 	for _, tt := range tests {
@@ -67,6 +64,21 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 				t.Errorf("the schema load's warning was discarded by an early return; stderr:\n%s", stderr)
 			}
 		})
+	}
+}
+
+// TestNeo4jConstraints_RefusesAnEditionBeforeWork: the whole flag set is
+// refused before any I/O, so an unrecognised --edition is a usage error that
+// loads no schema — its warning never appears — and writes nothing to stdout.
+func TestNeo4jConstraints_RefusesAnEditionBeforeWork(t *testing.T) {
+	t.Parallel()
+
+	code, stdout, stderr := executeCmdOutput(t, "neo4j", "constraints", "--edition", "bogus", shadowedSchema)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
+	}
+	if stdout != "" || strings.Contains(stderr, "W_ANNOTATION_SHADOWED") {
+		t.Errorf("work ran before the flag was refused; stdout %q, stderr:\n%s", stdout, stderr)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 
@@ -332,23 +333,42 @@ func TestFetchRemoteState_ReadsBothHalvesWhenTheServerAnswers(t *testing.T) {
 	}
 }
 
-// TestIntrospectSchema_CarriesTheLabelOptionsIntoTheRelationshipScan pins that
-// the command's label flags reach the adapter. The relationship scan filters on
-// a prefix the adapter composes from labelPrefix, the schema name and
-// labelSeparator; built from defaults against a graph written with a prefix, it
-// matches nothing and the scaffold silently carries no relationships at all.
-func TestIntrospectSchema_CarriesTheLabelOptionsIntoTheRelationshipScan(t *testing.T) {
+// TestIntrospectSchema_CarriesTheLabelOptionsIntoTheScaffold pins that the
+// command's label flags reach the adapter at both reads: the relationship scan
+// filters on the prefix the adapter composes, and the constraint reading strips
+// that prefix and splits at that separator, so a graph written with them
+// scaffolds its types and its relationships.
+func TestIntrospectSchema_CarriesTheLabelOptionsIntoTheScaffold(t *testing.T) {
 	t.Parallel()
 
+	relabel := func(recs []map[string]any) []map[string]any {
+		out := make([]map[string]any, len(recs))
+		for i, r := range recs {
+			c := maps.Clone(r)
+			if c["entityType"] != "RELATIONSHIP" {
+				for _, k := range []string{"labelsOrTypes", "srcLabels", "tgtLabels"} {
+					if ls, ok := c[k].([]any); ok {
+						n := make([]any, len(ls))
+						for j, l := range ls {
+							n[j] = "app_" + strings.Replace(l.(string), "__", "_x_", 1)
+						}
+						c[k] = n
+					}
+				}
+			}
+			out[i] = c
+		}
+		return out
+	}
 	log := &queryLog{replies: []queryReply{
-		{records: recordedConstraints()},
-		{records: recordedRelationships()},
+		{records: relabel(recordedConstraints())},
+		{records: relabel(recordedRelationships())},
 	}}
 
-	_, err := introspectSchema(
+	dsl, err := introspectSchema(
 		t.Context(), log.run, "books", "book_catalog",
 		adaptern4j.WithLabelPrefix("app_"),
-		adaptern4j.WithLabelSeparator("::"),
+		adaptern4j.WithLabelSeparator("_x_"),
 	)
 	if err != nil {
 		t.Fatalf("introspectSchema: %v", err)
@@ -358,8 +378,13 @@ func TestIntrospectSchema_CarriesTheLabelOptionsIntoTheRelationshipScan(t *testi
 		t.Fatalf("issued %d queries, want 2", len(log.calls))
 	}
 	got, _ := log.calls[1].params["prefix"].(string)
-	if want := "app_book_catalog::"; got != want {
+	if want := "app_book_catalog_x_"; got != want {
 		t.Errorf("relationship scan prefix = %q, want %q — the label flags did not reach the adapter", got, want)
+	}
+	for _, want := range []string{`schema "book_catalog"`, "type Book {", "type Publisher {", "--> PUBLISHED_BY Publisher"} {
+		if !strings.Contains(dsl, want) {
+			t.Errorf("the scaffold lacks %s:\n%s", want, dsl)
+		}
 	}
 }
 

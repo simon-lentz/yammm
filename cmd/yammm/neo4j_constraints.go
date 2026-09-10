@@ -29,6 +29,11 @@ func newNeo4jConstraintsCmd() *cobra.Command {
 }
 
 func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
+	opts, err := constraintOptions(cmd)
+	if err != nil {
+		return err
+	}
+
 	schemaPath := args[0]
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
@@ -45,11 +50,6 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.Diagnostic
 		return err
 	}
 
-	// Configure adapter
-	opts, err := constraintOptions(cmd)
-	if err != nil {
-		return err
-	}
 	adapter := neo4j.New(opts...)
 
 	statements, constraintResult := adapter.ConstraintsForSchema(cmd.Context(), s)

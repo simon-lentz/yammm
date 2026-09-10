@@ -1238,7 +1238,44 @@ beside its target could only truncate the file in place, which an interrupted
 write or a full disk turns into a lost file; `gofmt -w` refuses the same
 target. Omit `--output` to write to stdout. The earlier fix pass's other three
 exit moves are withdrawn: `/dev/stdout` and a 245-byte basename went from 0 to
-3, and a looping symlink from 3 to 0. rdata's suite fails the same four tests on both
+3, and a looping symlink from 3 to 0.
+
+### Unit 6, clause 5's second fix pass — Neo4j labels
+
+**No exported declaration moves.** `neo4j.Adapter.InferSchema` changes
+behaviour; its signature does not.
+
+- **`yammm neo4j introspect` reads a graph written with a label prefix.**
+  `InferSchema` parses each label as `Adapter.Label` writes it: it strips the
+  adapter's prefix, splits at its separator, and compares `--schema` as a label
+  writes it. With a `--prefix`, the prefix was folded into every label's schema
+  component, so `--schema book_catalog` matched nothing and scaffolded a schema
+  with no types at exit 0 — the failure the lane pass's `--prefix` entry
+  described as repaired. A `--schema` the label sanitizes, such as
+  `book-catalog`, matched nothing either; it now matches `book_catalog`'s
+  labels, and the scaffold names the schema as typed, trimmed.
+- **A filter that matches none of the constraints read says so.** The scaffold
+  carries a TODO line naming the schema, the prefix and the separator, and how
+  many node constraints were read, where it stood as an empty database's.
+- **Labels another configuration wrote are left out.** A scoped label without
+  this configuration's prefix is not read as a type of this schema, and an edge
+  to such a target is kept as a cross-schema guess.
+- **The label flags are refused before any work, at exit 2**, on `neo4j
+  constraints`, `indexes`, `diff`, `introspect` and `export --to cypher`: an
+  empty `--separator`, and a `--prefix` or `--separator` whose composed label
+  is not a Neo4j identifier. Against `v0.21.0`: an empty separator made
+  `constraints` and `indexes` compose labels that cannot be split back, at
+  exit 0; an invalid prefix or separator failed after the schema loaded, at
+  exit 1; and `diff` with an empty separator failed on the connection, at
+  exit 3. All three now exit 2 before any load or connection. `introspect` and
+  `export --to cypher` exited 2 at `v0.21.0`, which had no label flags on
+  either.
+- **`neo4j constraints --edition` is refused before the schema loads again**,
+  at exit 2, as `v0.21.0` refused it. This unit's earlier fix pass had moved the
+  refusal after the load; no release carried that.
+
+**Consumer reach:** rdata calls none of `neo4j.New`, the label options or
+`InferSchema`, measured in its tree. rdata's suite fails the same four tests on both
 sides (the `v0.21.0` hash re-key), and its `fmt --check`, `fmt --write` and
 `validate` hook chain is green on both.
 

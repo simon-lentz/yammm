@@ -31,6 +31,11 @@ func newNeo4jIndexesCmd() *cobra.Command {
 }
 
 func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
+	labelOpts, err := labelOptions(cmd)
+	if err != nil {
+		return err
+	}
+
 	schemaPath := args[0]
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
@@ -47,8 +52,7 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return err
 	}
 
-	// Configure adapter
-	adapter := neo4j.New(labelOptions(cmd)...)
+	adapter := neo4j.New(labelOpts...)
 
 	statements, indexResult := adapter.IndexesForSchema(cmd.Context(), s)
 	sink.Add(indexResult)

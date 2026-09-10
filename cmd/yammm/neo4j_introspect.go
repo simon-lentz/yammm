@@ -36,6 +36,10 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string, _ *cli.DiagnosticSink) e
 	if uri == "" {
 		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")
 	}
+	labelOpts, err := labelOptions(cmd)
+	if err != nil {
+		return err
+	}
 
 	ctx := cmd.Context()
 
@@ -46,7 +50,7 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string, _ *cli.DiagnosticSink) e
 	}
 	defer driver.Close(ctx)
 
-	dsl, err := introspectSchema(ctx, cli.DriverQueries(driver), database, schemaFilter, labelOptions(cmd)...)
+	dsl, err := introspectSchema(ctx, cli.DriverQueries(driver), database, schemaFilter, labelOpts...)
 	if err != nil {
 		return err
 	}

@@ -126,6 +126,11 @@ func validateExportFlags(cmd *cobra.Command, raw, target, outputPath, outputDir 
 			return cli.Usagef("--%s applies only to --to cypher", flag)
 		}
 	}
+	if target == "cypher" {
+		if _, err := labelOptions(cmd); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -218,7 +223,11 @@ func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.
 	// The statements name labels, and a label composed differently from the one
 	// the target graph carries writes data no constraint guards. The sibling
 	// neo4j commands take these flags for the same reason.
-	adapter := adaptern4j.New(labelOptions(cmd)...)
+	labelOpts, err := labelOptions(cmd)
+	if err != nil {
+		return err
+	}
+	adapter := adaptern4j.New(labelOpts...)
 
 	// The shape's diagnostics are the command's own, so they reach the sink —
 	// and precede the statements — rather than being printed as an error.

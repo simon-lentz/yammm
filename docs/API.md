@@ -1411,7 +1411,7 @@ The rendering counterpart — the string form the library stores for a `Timestam
 yammmSource := adapter.InferSchema(constraints, relationships, schemaFilter)
 ```
 
-`InferSchema` takes `[]RemoteConstraint` and `[]RemoteRelationship` values (obtained from introspection queries) and produces a `.yammm` source string. Helper functions `IntrospectConstraintsQuery`, `IntrospectRelationshipsQuery`, `ParseRemoteConstraints`, and `ParseRemoteRelationships` assist with gathering introspection data from a live database.
+`InferSchema` takes `[]RemoteConstraint` and `[]RemoteRelationship` values (obtained from introspection queries) and produces a `.yammm` source string. Each label is parsed as `Adapter.Label` writes it under the adapter's prefix and separator, so a label another configuration wrote is not read as this schema's type; `schemaFilter` is compared as a label writes it, and a filter that matches none of the constraints read leaves a TODO line saying so. Helper functions `IntrospectConstraintsQuery`, `IntrospectRelationshipsQuery`, `ParseRemoteConstraints`, and `ParseRemoteRelationships` assist with gathering introspection data from a live database.
 
 ### Constraint Diffing
 

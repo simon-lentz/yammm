@@ -50,6 +50,10 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	if uri == "" {
 		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")
 	}
+	opts, err := constraintOptions(cmd)
+	if err != nil {
+		return err
+	}
 
 	schemaPath := args[0]
 	absSchemaPath, err := filepath.Abs(schemaPath)
@@ -67,12 +71,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		return err
 	}
 
-	// Configure the adapter to match the target graph's generation settings.
-	opts, err := constraintOptions(cmd)
-	if err != nil {
-		return err
-	}
-
+	// The adapter matches the target graph's generation settings.
 	adapter := adaptern4j.New(opts...)
 	desired, constraintResult := adapter.ConstraintsStructured(cmd.Context(), s)
 	if constraintResult.HasErrors() {

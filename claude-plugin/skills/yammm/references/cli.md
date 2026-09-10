@@ -329,8 +329,20 @@ Infers a `.yammm` schema from a live Neo4j database by reading constraints and r
 
 | Flag | Description |
 | ---- | ----------- |
-| `--schema` | Filter to specific schema name prefix |
+| `--schema` | Infer only this schema's types; compared as a label writes it, so `book-catalog` matches `book_catalog`'s labels |
+| `--separator` | Label separator (schema__Type), as the graph was written |
+| `--prefix` | Global label prefix, if the graph was written with one |
 | `--output` | Output file (default: stdout) |
+
+Each label is read as the label flags compose it: the prefix is stripped and the
+separator splits schema from type, so a label another configuration wrote is not
+read as this schema's type. A `--schema` that matches none of the constraints
+read leaves a TODO line in the scaffold saying so.
+
+Every command that takes the label flags — the four `neo4j` commands and
+`export --to cypher` — refuses an empty `--separator`, and a `--prefix` or
+`--separator` whose composed label is not a Neo4j identifier, at exit 2 before
+it loads a schema or opens a connection.
 
 ### Typical Neo4j workflow
 

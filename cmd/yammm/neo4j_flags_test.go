@@ -11,14 +11,15 @@ import (
 // TestRun_LabelFlagsAreRefusedBeforeWork: a --prefix or --separator whose
 // composed label is not a Neo4j identifier, or an empty separator, is a usage
 // error every command taking the flags reports before it loads a schema or
-// opens a connection.
+// opens a connection. The schema carries a load warning, so a load that ran
+// before the refusal shows on stderr.
 func TestRun_LabelFlagsAreRefusedBeforeWork(t *testing.T) {
 	commands := map[string][]string{
-		"neo4j constraints":  {"neo4j", "constraints", "testdata/valid.yammm"},
-		"neo4j indexes":      {"neo4j", "indexes", "testdata/valid.yammm"},
-		"neo4j diff":         {"neo4j", "diff", "--uri", "bolt://127.0.0.1:1", "testdata/valid.yammm"},
+		"neo4j constraints":  {"neo4j", "constraints", shadowedSchema},
+		"neo4j indexes":      {"neo4j", "indexes", shadowedSchema},
+		"neo4j diff":         {"neo4j", "diff", "--uri", "bolt://127.0.0.1:1", shadowedSchema},
 		"neo4j introspect":   {"neo4j", "introspect", "--uri", "bolt://127.0.0.1:1"},
-		"export --to cypher": {"export", "--to", "cypher", "testdata/valid.yammm", "testdata/data.json"},
+		"export --to cypher": {"export", "--to", "cypher", shadowedSchema, "testdata/data.json"},
 	}
 	flags := map[string][]string{
 		"an empty separator":                      {"--separator", ""},
@@ -34,8 +35,8 @@ func TestRun_LabelFlagsAreRefusedBeforeWork(t *testing.T) {
 				switch {
 				case code != cli.ExitUsage:
 					failure = fmt.Sprintf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitUsage, stderr)
-				case stdout != "":
-					failure = "work was done before the flags were refused; stdout:\n" + stdout
+				case stdout != "" || strings.Contains(stderr, "W_ANNOTATION_SHADOWED"):
+					failure = "work was done before the flags were refused; stdout:\n" + stdout + "\nstderr:\n" + stderr
 				case !strings.Contains(stderr, "--"+flag[0][2:]):
 					failure = "the refusal does not name the flag; stderr:\n" + stderr
 				}
