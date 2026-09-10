@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -190,8 +191,8 @@ func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts .
 		return nil, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
 	}
 	snap, result := snapshot.Load(ctx, data, s, opts...)
-	// Load reports everything this read can, so its diagnostics are dropped
-	// rather than merged: returning both reports one document's issues twice.
-	header, _ := snapshot.HeaderOnly(ctx, data)
+	// Load has checked the whole document and reported its issues, so the header
+	// is read at header cost and its diagnostics are dropped, not reported twice.
+	header, _ := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
 	return snap, header, result, nil
 }

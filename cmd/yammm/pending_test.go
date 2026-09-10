@@ -6,15 +6,11 @@ import "testing"
 // and the defect it observes. A listed case must keep failing, so a repair
 // turns it red until its entry is deleted; an unlisted failure is a regression.
 var pendingRepairs = map[string]string{
-	"snapshot save: the summary's type count is the type table's":                      "the count is the types holding root instances, not the written type table",
-	"snapshot save: the Long text states what --into carries":                          "the Long text says no created_at is written by default",
 	"snapshot info: a directory entry carries the diagnostic wire":                     "the entry carries a three-field issue projection under issues, with no truncation state",
 	"snapshot info: a warned directory row names its warning":                          "the row is marked warn and names no code",
 	"snapshot info: absent metadata renders as an object, --format json":               "a nil map marshals as null",
 	"snapshot info: absent metadata renders as an object, --header-only --format json": "a nil map marshals as null",
 	"snapshot info: header-only text reports the file size":                            "the text renderer reads the library struct, which carries no file size",
-	"snapshot save: a failed write raises no extension warning":                        "the warning is raised before the write runs",
-	"snapshot save: the extension warning names the output path":                       "the warning carries no location and renders <unknown>",
 }
 
 // checkRepairState reports a case against pendingRepairs. failure is empty

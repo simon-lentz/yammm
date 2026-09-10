@@ -1279,6 +1279,29 @@ behaviour; its signature does not.
 sides (the `v0.21.0` hash re-key), and its `fmt --check`, `fmt --write` and
 `validate` hook chain is green on both.
 
+### Unit 6, clause 5's second fix pass — `snapshot save`
+
+**No exported declaration moves.**
+
+- **`W_SNAPSHOT_PATH_EXTENSION` is raised only once the snapshot is written,
+  and it names the file.** The code's registered meaning is that a snapshot was
+  written to a path that does not end in `.ys`. It was raised before the
+  write, so a write that failed at exit 3 still reported a snapshot as written.
+  It now carries the output path as its location, where the text form printed
+  `<unknown>`.
+- **The summary's type count is the written document's type table**, the
+  count `snapshot info` reports for the same file. It counted the types holding
+  root instances, so a composed child's type, which the table lists, was left
+  out, as at `v0.21.0`. The pass-B entry above says the summary counts the
+  document it wrote; that held for the instance count and not for the type
+  count.
+- **The help states when `created_at` is written:** through `--timestamp`, or
+  carried forward from the merged file by `--into`. It said none is written by
+  default, which `--into` contradicted.
+- **`snapshot save --into` and `export` from a `.ys` read its header at header
+  cost.** The header was read by scanning the whole document again after the
+  load had checked it. Output is byte-identical.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

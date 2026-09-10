@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,8 +27,9 @@ func newSnapshotSaveCmd() *cobra.Command {
 		Long: `Load schema, parse data files, validate, build graph, and save as a
 persisted snapshot. Accepts multiple data files accumulated into a single graph.
 
-Output is byte-level deterministic by default (no created_at timestamp).
-Use --timestamp to include a creation timestamp.`,
+Output is byte-level deterministic by default: no created_at timestamp is
+written unless --timestamp stamps the current time, or --into carries the
+merged file's own created_at forward.`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: withDiagnostics(runSnapshotSave),
 	}
@@ -155,41 +157,42 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return &cli.ExitError{Code: cli.ExitRuntime}
 	}
 
-	// A path a reader that discovers snapshots by extension will not find is a
-	// fact about the artefact, so it travels as a diagnostic — prose here
-	// reached no --format json consumer in any form.
+	// One primitive whether or not --into names the same file, so the write is
+	// atomic however the two flags spell the path.
+	if err := cli.WriteFile(outputPath, data); err != nil {
+		return cli.Runtimef("write output: %v", err)
+	}
+
+	// Raised only once the file exists: the code states that a snapshot was
+	// written where a reader that discovers snapshots by extension will not find it.
 	if !strings.HasSuffix(outputPath, ".ys") {
 		c := diag.NewCollectorUnlimited()
 		c.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_EXTENSION,
-			fmt.Sprintf("output path %q does not use the .ys extension", outputPath)).Build())
+			fmt.Sprintf("output path %q does not use the .ys extension", outputPath)).
+			WithPath(outputPath, "").Build())
 		sink.Add(c.Result())
-	}
-
-	// Write file. One primitive whether or not --into named the same file: the
-	// old string-equality guard chose the atomic path only when the two flags
-	// spelled the path identically.
-	if err := cli.WriteFile(outputPath, data); err != nil {
-		return cli.Runtimef("write output: %v", err)
 	}
 
 	// Every diagnostic this invocation can produce is in the sink by now, so
 	// flushing here keeps them above the line that says the work finished.
 	sink.Flush()
-	instanceCount, typeCount := countSnapshot(snap)
+	instanceCount, typeCount := countSnapshot(cmd.Context(), snap, data)
 	sink.Statusf("saved snapshot: %d instances of %d types\n", instanceCount, typeCount)
 
 	return nil
 }
 
-// countSnapshot counts what the written document holds. Counting the parsed
-// input instead described a merge by the files it read, so `--into` reported a
-// number no reader of the result could reproduce.
-func countSnapshot(snap *graph.Snapshot) (instances, types int) {
-	ids := snap.Types()
-	for _, id := range ids {
+// countSnapshot counts what the written document holds: its root instances
+// from the graph, and its types from the type table the bytes carry, which
+// lists a composed child's type and is the set `snapshot info` reports.
+func countSnapshot(ctx context.Context, snap *graph.Snapshot, data []byte) (instances, types int) {
+	for _, id := range snap.Types() {
 		instances += len(snap.InstancesOf(id))
 	}
-	return instances, len(ids)
+	if header, _ := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data)); header != nil {
+		types = len(header.Types)
+	}
+	return instances, types
 }
 
 // mergeMetadata overlays flag pairs onto the imported header's. The header's

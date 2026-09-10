@@ -147,9 +147,11 @@ Builds a graph snapshot from one or more data files and persists it as a `.ys` f
 | `--type` | Type name for single-type CSV |
 | `--type-column` | Column for multi-type CSV |
 | `-m, --metadata` | Key=value metadata pairs (repeatable) |
-| `--timestamp` | Include `created_at` timestamp (breaks determinism) |
+| `--timestamp` | Stamp the current time as `created_at` (breaks determinism) |
 | `--indent` | Produce indented output |
-| `--into` | Existing `.ys` file to merge new data into |
+| `--into` | Existing `.ys` file to merge new data into. Its `created_at` and metadata are carried forward: `--timestamp` replaces the first, and `-m` overlays the second key by key |
+
+Output is byte-for-byte deterministic unless a `created_at` is written, which happens only through `--timestamp` or `--into`. The summary line's type count is the written document's type table, the count `snapshot info` reports. `W_SNAPSHOT_PATH_EXTENSION` is raised only after the file is written, located at the output path.
 
 ### snapshot verify
 
