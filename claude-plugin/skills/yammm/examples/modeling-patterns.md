@@ -8,7 +8,7 @@ Complete mini-schemas demonstrating how to model different domain shapes in yamm
 
 Types, part types, compositions, associations, edge properties, type aliases, and collection invariants working together.
 
-```yammm
+```yammm-schema
 schema "ecommerce"
 
 type Money = Float[0.0, _]
@@ -70,7 +70,7 @@ type Order extends Auditable {
 
 Abstract types, multiple inheritance, required vs optional relationships, and conditional invariants.
 
-```yammm
+```yammm-schema
 schema "organization"
 
 abstract type Named {
@@ -129,7 +129,7 @@ Multi-schema design with imports, cross-schema relationships, part types, and Li
 
 ### `schemas/core.yammm`
 
-```yammm
+```yammm-schema
 schema "core"
 
 type Slug = Pattern["^[a-z0-9]+(-[a-z0-9]+)*$"]

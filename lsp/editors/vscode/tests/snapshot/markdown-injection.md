@@ -18,3 +18,25 @@ type Gadget {
     name String primary
 }
 ~~~
+
+Every fence tag the documentation gates is highlighted as yammm.
+
+```yammm-schema
+schema "complete"
+```
+
+```yammm-snippet
+type Part {
+    id UUID primary
+}
+```
+
+```yammm-invalid
+type Broken {
+```
+
+A tag outside the vocabulary is not.
+
+```yammm-other
+type NotYammm {
+```

@@ -849,11 +849,11 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 - **`Marshal` returns Fatal `E_INTERNAL` and no bytes for a target key `graph.ParseKey` cannot read** (A-191), where v0.19.0 wrote the document with the address dropped and a `W_SNAPSHOT_VALUE_DROPPED` Warning. `UnresolvedEdge.TargetKey` is written from `immutable.Key.String()` on every library path, `graph.ParseKey` is its pinned inverse, and no consumer path supplies the string — so the branch guarded an event the module's own invariant excludes, and a broken invariant is an internal failure rather than a sampled warning. The one reachable input is caller-assembled `RebuildSnapshot` parts whose key holds a non-scalar component, which `Marshal`'s contract already assigns to Fatal `E_INTERNAL`. The two `W_SNAPSHOT_VALUE_DROPPED` arms for a target key or edge properties under an `absent`/`empty` reason are unchanged, and the code's own description is narrowed to them. Consumer cost is zero by absence: every key the consumer writes is a `String` primary key rendered by the library.
 
-## Unreleased — condition-1 unit 6, on `review` until the unit closes
+## Unreleased — merged to `main`
 
-Condition-1 **unit 6** (the CLI and the formatter). Its commits sit on the
-`review` branch and merge to `main` when the unit closes (A-417); nothing below
-is released or merged. Each block was written by the pass or group that landed
+Condition-1 **unit 6** (the CLI and the formatter), closed by decision (A-461)
+and merged to `main` as `fb57e99` (PR #107); nothing below is released. Each
+block was written by the pass or group that landed
 its behaviour, not at the tag (A-227, A-346). **Six exported declarations are
 ADDED and nothing is removed or changed:** `gorelease -base=v0.21.0` on the
 candidate reports `diag.E_COMMAND_FAILED`, `diag.W_SNAPSHOT_PATH_EXTENSION`,
@@ -1375,6 +1375,22 @@ does not read this output**, measured at its tree.
   the other reports too.
 - **A `warn` row in `--dir`'s text names its first warning**, code and message,
   where it read `warn` alone.
+
+### After unit 6 — the documentation corpus's load gate (A-433)
+
+- **The plugin corpus's load gate checks something.** `TestCorpusLoadableExamples`
+  reads `README.md` and the Claude Code plugin's skills, and had load-checked
+  zero blocks since it was written: the corpus carried no `yammm-schema` fence.
+  The twelve complete examples that load clean are retagged `yammm-schema` —
+  one in `README.md`, three in `modeling-patterns.md`, eight in
+  `schema-improvements.md` — and the test now fails when it checks none. The two
+  complete examples that import a sibling schema stay `yammm`, because neither
+  can load on its own.
+- **The VS Code extension highlights every fence tag the documentation gates.**
+  A Markdown code block tagged `yammm-schema`, `yammm-snippet` or
+  `yammm-invalid` is highlighted as yammm, where only `yammm` was. A block with
+  an unbalanced brace — most `yammm-invalid` examples — no longer carries its
+  highlighting past the closing fence into the rest of the document.
 
 ## v0.21.0 under this policy
 
@@ -2154,3 +2170,4 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **2026-09-04 (late)** — Corrected the Unreleased section's preamble and the condition-1 unit-5 heading, which still said the unit was not closed after A-297 closed it and `f049740` (PR #105) merged it. Prose only; no enumeration changed.
 - **2026-09-06** — **Corrected the unit-4 "Additive API surface" enumeration of `ReceiverKind`.** It named `RecvScalar`, which no declaration in the module carries, and listed four constants where `gorelease -base=v0.20.0` reports ten. The line now names all ten as declared: `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList`, `RecvNumericList`. `RecvScalar` was added and renamed inside the unreleased range, so it leaves no trace for a consumer; the enumeration had kept its old spelling. Prose only; no behaviour changed.
 - **2026-09-10** — **Corrected condition-1 unit 6's Unreleased section against the candidate (A-456).** Retitled it, since unit 6 sits unmerged on `review` (A-417), and gave pass A its own heading; stated the section's whole declaration delta, six compatible additions; added an exit-code table measured against `v0.21.0`, replacing two sentences that said no exit code moves; stated how `W_NEO4J_INDEXES_UNREADABLE` and the one-result rule reach the stream; recorded the 0600 mode of the files `--output-dir` creates; and pointed pass B's `issues` item at its rename.
+- **2026-09-10 (night)** — **Corrected the Unreleased section's heading and preamble, which still said unit 6 sat unmerged on `review` after A-461 closed it and `fb57e99` (PR #107) merged it, and added the A-433 block**: the plugin corpus's load gate retagged and guarded, and the VS Code extension's Markdown injection widened to the whole fence vocabulary with its leak past an unbalanced brace closed.

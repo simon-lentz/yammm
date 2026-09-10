@@ -8,7 +8,7 @@ Before/after transformations showing common schema quality improvements. Each se
 
 ### Before
 
-```yammm
+```yammm-schema
 schema "contacts"
 
 type Contact {
@@ -23,7 +23,7 @@ type Contact {
 
 ### After
 
-```yammm
+```yammm-schema
 schema "contacts"
 
 type Email = Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
@@ -47,7 +47,7 @@ type Contact {
 
 ### Before
 
-```yammm
+```yammm-schema
 schema "events"
 
 type Event {
@@ -65,7 +65,7 @@ type Event {
 
 ### After
 
-```yammm
+```yammm-schema
 schema "events"
 
 type Event {
@@ -94,7 +94,7 @@ type Event {
 
 ### Before
 
-```yammm
+```yammm-schema
 schema "cms"
 
 type Article {
@@ -123,7 +123,7 @@ type Page {
 
 ### After
 
-```yammm
+```yammm-schema
 schema "cms"
 
 abstract type Auditable {
@@ -161,7 +161,7 @@ type Page extends Auditable, SoftDeletable {
 
 ### Before
 
-```yammm
+```yammm-schema
 schema "orders"
 
 type LineItem {
@@ -179,7 +179,7 @@ type Order {
 
 ### After
 
-```yammm
+```yammm-schema
 schema "orders"
 
 part type LineItem {

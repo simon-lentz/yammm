@@ -63,3 +63,60 @@
 >~~~
 #^^^ text.html.markdown punctuation.definition.markdown
 >
+>Every fence tag the documentation gates is highlighted as yammm.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ text.html.markdown meta.paragraph.markdown
+>
+>```yammm-schema
+#^^^ text.html.markdown punctuation.definition.markdown
+#   ^^^^^^^^^^^^ text.html.markdown fenced_code.block.language.markdown
+>schema "complete"
+#^^^^^^ text.html.markdown meta.embedded.block.yammm keyword.control.schema.yammm
+#      ^ text.html.markdown meta.embedded.block.yammm
+#       ^^^^^^^^^^ text.html.markdown meta.embedded.block.yammm string.quoted.yammm
+>```
+#^^^ text.html.markdown punctuation.definition.markdown
+>
+>```yammm-snippet
+#^^^ text.html.markdown punctuation.definition.markdown
+#   ^^^^^^^^^^^^^ text.html.markdown fenced_code.block.language.markdown
+>type Part {
+#^^^^ text.html.markdown meta.embedded.block.yammm keyword.declaration.type.yammm
+#    ^ text.html.markdown meta.embedded.block.yammm
+#     ^^^^ text.html.markdown meta.embedded.block.yammm entity.name.type.yammm
+#         ^ text.html.markdown meta.embedded.block.yammm
+#          ^ text.html.markdown meta.embedded.block.yammm punctuation.definition.block.begin.yammm
+>    id UUID primary
+#^^^^ text.html.markdown meta.embedded.block.yammm
+#    ^^ text.html.markdown meta.embedded.block.yammm variable.other.property.yammm
+#      ^ text.html.markdown meta.embedded.block.yammm
+#       ^^^^ text.html.markdown meta.embedded.block.yammm support.type.yammm
+#           ^ text.html.markdown meta.embedded.block.yammm
+#            ^^^^^^^ text.html.markdown meta.embedded.block.yammm storage.modifier.yammm
+>}
+#^ text.html.markdown meta.embedded.block.yammm punctuation.definition.block.end.yammm
+>```
+#^^^ text.html.markdown punctuation.definition.markdown
+>
+>```yammm-invalid
+#^^^ text.html.markdown punctuation.definition.markdown
+#   ^^^^^^^^^^^^^ text.html.markdown fenced_code.block.language.markdown
+>type Broken {
+#^^^^ text.html.markdown meta.embedded.block.yammm keyword.declaration.type.yammm
+#    ^ text.html.markdown meta.embedded.block.yammm
+#     ^^^^^^ text.html.markdown meta.embedded.block.yammm entity.name.type.yammm
+#           ^ text.html.markdown meta.embedded.block.yammm
+#            ^ text.html.markdown meta.embedded.block.yammm punctuation.definition.block.begin.yammm
+>```
+#^^^ text.html.markdown punctuation.definition.markdown
+>
+>A tag outside the vocabulary is not.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ text.html.markdown meta.paragraph.markdown
+>
+>```yammm-other
+#^^^ text.html.markdown markup.fenced_code.block.markdown punctuation.definition.markdown
+#   ^^^^^^^^^^^^ text.html.markdown markup.fenced_code.block.markdown fenced_code.block.language
+>type NotYammm {
+#^^^^^^^^^^^^^^^^ text.html.markdown markup.fenced_code.block.markdown
+>```
+#^^^ text.html.markdown markup.fenced_code.block.markdown punctuation.definition.markdown
+>

@@ -39,7 +39,7 @@ Requires Go 1.26 or later.
 
 Create a file `vehicles.yammm`:
 
-```yammm
+```yammm-schema
 schema "Vehicles"
 
 type Person {

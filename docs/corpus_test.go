@@ -77,7 +77,11 @@ func TestCorpusExamples(t *testing.T) {
 
 func TestCorpusLoadableExamples(t *testing.T) {
 	t.Parallel()
-	t.Logf("load-checked %d blocks", mdsnippet.AssertLoads(t, corpusBlocks(t)))
+	checked := mdsnippet.AssertLoads(t, corpusBlocks(t))
+	if checked == 0 {
+		t.Errorf("no ```%s blocks found; the load gate is asserting nothing", mdsnippet.TagSchema)
+	}
+	t.Logf("load-checked %d blocks", checked)
 }
 
 // TestCorpusInvalidExamples is the gate with no counterpart elsewhere: the
