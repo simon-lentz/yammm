@@ -1,0 +1,98 @@
+{
+  "name": "\"p\"",
+  "span": {
+    "s": 0,
+    "e": 10
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 17,
+        "e": 18
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 25,
+              "e": 31
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 22,
+            "e": 39
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"aaaaaaaaaaaaaaaaaaaaaaaaaa[\"",
+              "\"bbbbbbbbbbbbbbbbbbbbbbbbbbbb\"",
+              "\"cccccccccccccccccccccccc\""
+            ],
+            "span": {
+              "s": 47,
+              "e": 142
+            }
+          },
+          "span": {
+            "s": 41,
+            "e": 142
+          }
+        },
+        {
+          "name": "aaa",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 148,
+              "e": 154
+            }
+          },
+          "span": {
+            "s": 144,
+            "e": 154
+          }
+        },
+        {
+          "name": "b",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 158,
+              "e": 164
+            }
+          },
+          "span": {
+            "s": 156,
+            "e": 164
+          }
+        },
+        {
+          "name": "longerName",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 177,
+              "e": 183
+            }
+          },
+          "span": {
+            "s": 166,
+            "e": 183
+          }
+        }
+      ],
+      "span": {
+        "s": 12,
+        "e": 185
+      }
+    }
+  ]
+}

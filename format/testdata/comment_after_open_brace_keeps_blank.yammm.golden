@@ -1,0 +1,9 @@
+schema "p"
+
+type T {
+	// a comment right after the brace
+
+	id String primary
+
+	// and one before the close
+}

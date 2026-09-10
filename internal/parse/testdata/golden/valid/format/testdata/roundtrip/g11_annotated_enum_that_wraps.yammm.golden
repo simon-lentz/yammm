@@ -1,0 +1,68 @@
+{
+  "name": "\"g11\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 225,
+        "e": 226
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 236,
+              "e": 242
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 230,
+            "e": 250
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"pending_review\"",
+              "\"approved\"",
+              "\"rejected\"",
+              "\"needs_revision\"",
+              "\"escalated\"",
+              "\"archived\""
+            ],
+            "span": {
+              "s": 258,
+              "e": 347
+            }
+          },
+          "anns": [
+            {
+              "name": "index",
+              "span": {
+                "s": 348,
+                "e": 354
+              }
+            }
+          ],
+          "span": {
+            "s": 252,
+            "e": 354
+          }
+        }
+      ],
+      "span": {
+        "s": 220,
+        "e": 356
+      }
+    }
+  ]
+}

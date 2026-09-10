@@ -1,0 +1,7 @@
+schema "p"
+
+type T {
+	id     String primary
+	status Enum["A", "B"] required // the lifecycle state
+	name   String
+}

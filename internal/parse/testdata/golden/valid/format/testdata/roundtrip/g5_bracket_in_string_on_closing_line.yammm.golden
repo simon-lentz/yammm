@@ -1,0 +1,56 @@
+{
+  "name": "\"g5\"",
+  "span": {
+    "s": 0,
+    "e": 11
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 173,
+        "e": 174
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 185,
+              "e": 191
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 178,
+            "e": 199
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"alpha\"",
+              "\"c]d\""
+            ],
+            "span": {
+              "s": 208,
+              "e": 233
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 201,
+            "e": 242
+          }
+        }
+      ],
+      "span": {
+        "s": 168,
+        "e": 244
+      }
+    }
+  ]
+}

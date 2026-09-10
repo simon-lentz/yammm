@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The formatter decides line structure once, in classifyText, and every
+// The formatter decides line structure once, from the token stream, and every
 // text pass reads that decision. These tests pin the defects that existed
 // while each pass re-derived it: a doc-comment continuation line shaped
 // like a property joined an alignment group, set its column width, and a
@@ -160,9 +160,9 @@ func TestClassifyText(t *testing.T) {
 		lineContent, // id String // trailing
 		lineBlank,   // the empty tail after the final newline
 	}
-	got := classifyText(text)
+	got := classifyLexed(text)
 	if len(got) != len(want) {
-		t.Fatalf("classifyText returned %d lines, want %d", len(got), len(want))
+		t.Fatalf("classifyLexed returned %d lines, want %d", len(got), len(want))
 	}
 	for i, ln := range got {
 		if ln.class != want[i] {
@@ -170,6 +170,6 @@ func TestClassifyText(t *testing.T) {
 		}
 	}
 	if joined := joinLines(got); joined != text {
-		t.Errorf("joinLines(classifyText(text)) != text:\n got %q\nwant %q", joined, text)
+		t.Errorf("joinLines(classifyLexed(text)) != text:\n got %q\nwant %q", joined, text)
 	}
 }

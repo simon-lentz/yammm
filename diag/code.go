@@ -123,6 +123,13 @@ var (
 	// Use for conditions that should never occur in correct code.
 	E_INTERNAL = NewCode("E_INTERNAL", CategorySentinel)
 
+	// E_COMMAND_FAILED carries a command-line failure that is not itself a
+	// diagnostic — a bad flag, an unreadable path, a lost connection — into a
+	// --format json document, so a machine consumer reads it by code rather
+	// than as prose beside the document. Its exit_code detail is the code the
+	// process exits with.
+	E_COMMAND_FAILED = NewCode("E_COMMAND_FAILED", CategorySentinel)
+
 	// E_CONTEXT_CANCELLED indicates the operation was cancelled via context.
 	// Used across all packages when ctx.Err() returns a non-nil error.
 	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED", CategorySentinel)
@@ -559,6 +566,14 @@ var (
 	// record stays data (the snapshot's unresolved records) rather than a
 	// diagnostic.
 	W_SNAPSHOT_UNRESOLVED_REQUIRED = NewCode("W_SNAPSHOT_UNRESOLVED_REQUIRED", CategorySnapshot)
+
+	// W_SNAPSHOT_PATH_EXTENSION indicates a snapshot was written to a path
+	// that does not end in .ys. The document is correct and the write
+	// succeeded; the warning exists because every reader that discovers
+	// snapshots by extension — a directory scan among them — will not find
+	// this one. Warning severity: the caller named the path deliberately, and
+	// refusing it would make a documented workflow fail rather than work.
+	W_SNAPSHOT_PATH_EXTENSION = NewCode("W_SNAPSHOT_PATH_EXTENSION", CategorySnapshot)
 )
 
 // AllCodes returns all registered diagnostic codes in registration order.

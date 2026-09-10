@@ -20,9 +20,11 @@ cmp work.yammm formatted_golden.yammm
 exec yammm fmt --check formatted_golden.yammm
 ! stdout .
 
-# --check names the unformatted file and fails, gofmt -l style.
+# --check names the unformatted file and fails, gofmt -l style: the path on
+# stdout and nothing on stderr.
 ! exec yammm fmt --check unformatted.yammm
 stdout '^unformatted\.yammm$'
+! stderr .
 
 # One run over a list reports every offender and no formatted file.
 cp unformatted.yammm other.yammm
@@ -30,6 +32,7 @@ cp unformatted.yammm other.yammm
 stdout '^unformatted\.yammm$'
 stdout '^other\.yammm$'
 ! stdout 'formatted_golden'
+! stderr .
 
 # --check with --write is a usage error, and it says why. cobra's own
 # MarkFlagsMutuallyExclusive would exit 2 printing nothing under this root,
@@ -40,7 +43,7 @@ stderr 'mutually exclusive'
 # A parse failure is reported per file, on stderr, which the in-process cobra
 # buffers cannot see.
 ! exec yammm fmt --check broken.yammm
-stderr 'broken\.yammm'
+stderr '^broken\.yammm:4:1: error\[E_SYNTAX\]'
 
 -- broken.yammm --
 schema "test"

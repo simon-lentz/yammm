@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -17,13 +16,15 @@ func newSnapshotVerifyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "verify <schema.yammm> <snapshot.ys>",
 		Short: "Validate a snapshot file against a schema",
-		Long: `Validate a .ys file without loading the full snapshot into memory.
+		Long: `Validate a .ys file without materialising the snapshot.
 Checks schema compatibility, structural integrity, and edge references.
+No snapshot and no instance objects are built. The file is read whole, so
+peak memory scales with the document's size.
 
 Exit code 0 if valid. Exit code 1 if errors are found.
 Warnings are rendered to stderr.`,
 		Args: cobra.ExactArgs(2),
-		RunE: runSnapshotVerify,
+		RunE: withDiagnostics(runSnapshotVerify),
 	}
 
 	cmd.Flags().Bool("skip-integrity-check", false, "skip integrity hash verification (for hand-edited files)")
@@ -34,25 +35,17 @@ Warnings are rendered to stderr.`,
 	return cmd
 }
 
-func runSnapshotVerify(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	skipIntegrity, _ := cmd.Flags().GetBool("skip-integrity-check")
 	valueConformance, _ := cmd.Flags().GetBool("value-conformance")
 	revalidate, _ := cmd.Flags().GetBool("revalidate")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
 
 	schemaPath := args[0]
 	snapshotPath := args[1]
 
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", schemaPath, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", schemaPath, err)
 	}
 
 	// Load schema.
@@ -61,16 +54,14 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
 	// Read snapshot file.
 	data, err := os.ReadFile(snapshotPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: read snapshot file: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("read snapshot file: %v", err)
 	}
 
 	// Build options.
@@ -83,14 +74,9 @@ func runSnapshotVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	// Verify.
-	verifyResult := snapshot.Verify(cmd.Context(), data, s, opts...)
+	sink.Add(snapshot.Verify(cmd.Context(), data, s, opts...))
 
-	// Render diagnostics — the load's residual warnings folded in, so one
-	// invocation writes one result (and in JSON, one document).
-	result := cli.MergeResults(pending, verifyResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-
-	exitCode := cli.ExitForResult(result)
+	exitCode := cli.ExitForResult(sink.Result())
 	if exitCode != cli.ExitOK {
 		return &cli.ExitError{Code: exitCode}
 	}

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -16,26 +14,17 @@ func newValidateCmd() *cobra.Command {
 		Use:   "validate <schema.yammm>",
 		Short: "Validate a schema file and report diagnostics",
 		Args:  cobra.ExactArgs(1),
-		RunE:  runValidate,
+		RunE:  withDiagnostics(runValidate),
 	}
 	registerModuleRootFlag(cmd)
 	return cmd
 }
 
-func runValidate(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
-
+func runValidate(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	path := args[0]
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", path, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", path, err)
 	}
 
 	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
@@ -43,8 +32,8 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, result := schema.Load(cmd.Context(), absPath, loadOpts...)
-
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absPath), result)
+	bindSchemaSource(sink, s, moduleRoot, absPath)
+	sink.Add(result)
 
 	exitCode := cli.ExitForResult(result)
 	if exitCode != cli.ExitOK {

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
 // A remote object that parsed a name but no type means the introspection
@@ -64,16 +65,38 @@ func TestUntypedRemoteObjects_EmptyResultIsNotAFailure(t *testing.T) {
 }
 
 // The message has to name the query, because the fix is to look at what that
-// projection asks for against the server actually running.
-func TestReportUnreadableProjection_NamesTheQueryAndTheCost(t *testing.T) {
+// projection asks for against the server actually running. The exit code has to
+// be a runtime failure, because the comparison did not run.
+func TestUnreadableProjection_NamesTheQueryAndTheCost(t *testing.T) {
+	t.Parallel()
+
+	err := unreadableProjection(2, 5, "constraint", "SHOW CONSTRAINTS")
+
+	if got := cli.ExitForError(err); got != cli.ExitRuntime {
+		t.Errorf("exit code = %d; want %d — a comparison that never ran must not report success", got, cli.ExitRuntime)
+	}
+	for _, want := range []string{"2 of 5", "constraint", "SHOW CONSTRAINTS", "type", "unclassifiable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message does not mention %q:\n%s", want, err.Error())
+		}
+	}
+}
+
+// Each line of the message is reported on its own, so the explanation is not
+// indented under a prefix that belongs to the first line.
+func TestUnreadableProjection_ReportsEachLineSeparately(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
-	reportUnreadableProjection(&buf, 2, 5, "constraint", "SHOW CONSTRAINTS")
+	cli.ReportError(&buf, unreadableProjection(2, 5, "index", "SHOW INDEXES"))
 
-	for _, want := range []string{"2 of 5", "constraint", "SHOW CONSTRAINTS", "type", "unclassifiable"} {
-		if !strings.Contains(buf.String(), want) {
-			t.Errorf("stderr does not mention %q:\n%s", want, buf.String())
+	lines := strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d line(s), want 2:\n%s", len(lines), buf.String())
+	}
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "error: ") {
+			t.Errorf("line does not carry the error prefix: %q", line)
 		}
 	}
 }

@@ -1,0 +1,8 @@
+schema "s"
+
+type T {
+	id String primary
+	status Enum["active",
+		"inactive",
+		"pending"] required
+}

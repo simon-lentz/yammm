@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -133,7 +134,7 @@ func MergeResults(results ...diag.Result) diag.Result {
 // WriteTo writes data to the specified path, or to w if path is empty.
 func WriteTo(data []byte, path string, w io.Writer) error {
 	if path != "" {
-		return os.WriteFile(path, data, 0o600)
+		return WriteFile(path, data)
 	}
 	_, err := w.Write(data)
 	return err
@@ -176,15 +177,22 @@ func IsSnapshotFile(path string) (bool, error) {
 	return key == "yammm_snapshot", nil
 }
 
-// LoadSnapshotFile reads a .ys file and loads it into a [*graph.Snapshot].
+// LoadSnapshotFile reads a .ys file and loads it into a [*graph.Snapshot],
+// beside the header that document carries.
 //
-// Returns (T, diag.Result, error) following the CLI helper convention:
-// error captures I/O failures, diag.Result captures semantic issues.
-func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, diag.Result, error) {
+// The header comes back because [graph.Snapshot] exposes no metadata or
+// created_at accessor, so a caller re-marshaling what it read has no other
+// route to it; it is nil when the header cannot be parsed. Returns
+// (T, diag.Result, error) following the CLI helper convention: error captures
+// I/O failures, diag.Result captures semantic issues.
+func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, *snapshot.HeaderInfo, diag.Result, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
+		return nil, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
 	}
 	snap, result := snapshot.Load(ctx, data, s, opts...)
-	return snap, result, nil
+	// Load has checked the whole document and reported its issues, so the header
+	// is read at header cost and its diagnostics are dropped, not reported twice.
+	header, _ := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data))
+	return snap, header, result, nil
 }

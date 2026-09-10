@@ -15,6 +15,11 @@ grep '"Person"' out.json
 exec yammm export --to csv --output out.csv valid.yammm data.json
 grep 'alice' out.csv
 
+# --output /dev/stdout writes through the descriptor: here stdout is a pipe, and
+# no rename can stand in for one.
+exec yammm export --to json --output /dev/stdout valid.yammm data.json
+stdout '"alice"'
+
 # --output-dir writes one CSV per type.
 mkdir csvdir
 exec yammm export --to csv --output-dir csvdir valid.yammm data.json

@@ -13,9 +13,8 @@ type Option func(*config)
 type config struct {
 	indent    string
 	createdAt time.Time
-	// createdAtText is a header's created_at carried byte-for-byte, which
-	// the fallback in UpdateMetadataOrReMarshal needs and no caller does; it
-	// wins over createdAt when set.
+	// createdAtText is a header's created_at carried byte-for-byte, set by
+	// [WithCreatedAtFrom]; it wins over createdAt.
 	createdAtText string
 	metadata      map[string]string
 }
@@ -63,6 +62,23 @@ func WithCreatedAt(t time.Time) Option {
 func withCreatedAtText(text string) Option {
 	return func(c *config) {
 		c.createdAtText = text
+	}
+}
+
+// WithCreatedAtFrom carries header's created_at into the new document byte for
+// byte, for a caller re-marshaling a document it has read.
+//
+// Prefer it over [WithCreatedAt] whenever the timestamp comes from an existing
+// header: [HeaderInfo.CreatedAtTime] does not round-trip a foreign header's
+// sub-second part or offset. It takes a parsed header rather than a string
+// because an Option cannot report an error. A nil header, or one whose
+// created_at is empty, sets nothing; it wins over [WithCreatedAt].
+func WithCreatedAtFrom(header *HeaderInfo) Option {
+	return func(c *config) {
+		if header == nil {
+			return
+		}
+		c.createdAtText = header.CreatedAt
 	}
 }
 

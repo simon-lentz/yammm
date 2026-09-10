@@ -29,7 +29,7 @@ func AlignColumns(text string) string {
 	if text == "" {
 		return ""
 	}
-	return joinLines(alignColumns(classifyText(text)))
+	return joinLines(alignColumns(classifyLexed(text)))
 }
 
 // alignColumns is AlignColumns over classified lines. Only a content line
@@ -51,14 +51,14 @@ func alignColumns(ls []line) []line {
 			continue
 		}
 
-		if isMultilineStart(ln.text) {
+		if isMultilineStart(ln) {
 			result = flushAlignGroup(result, group)
 			group = nil
 			result, i = emitMultilineConstruct(result, ls, i)
 			continue
 		}
 
-		parsed, ok := parseAlignableLine(ln.text)
+		parsed, ok := parseAlignableLine(ln)
 		if !ok {
 			result = flushAlignGroup(result, group)
 			group = nil
@@ -78,21 +78,25 @@ func alignColumns(ls []line) []line {
 	return flushAlignGroup(result, group)
 }
 
-// parseAlignableLine classifies a content line and extracts the alignable name column.
-func parseAlignableLine(line string) (alignableLine, bool) {
-	trimmed := strings.TrimLeft(line, "\t ")
-	indent := line[:len(line)-len(trimmed)]
+// parseAlignableLine extracts the alignable name column, reading the trailing
+// comment's position from the record rather than searching the text for "//".
+func parseAlignableLine(ln line) (alignableLine, bool) {
+	raw := ln.text
+	trimmed := strings.TrimLeft(raw, "\t ")
+	indent := raw[:len(raw)-len(trimmed)]
 
 	if trimmed == "" {
 		return alignableLine{}, false
 	}
 
-	// Split off inline comment (bracket/quote-aware).
 	content := trimmed
 	comment := ""
-	if idx := findInlineComment(trimmed); idx >= 0 {
-		content = strings.TrimRight(trimmed[:idx], " ")
-		comment = trimmed[idx:]
+	if ln.hasComment() {
+		idx := ln.lex.commentAt - len(indent)
+		if idx >= 0 && idx <= len(trimmed) {
+			content = strings.TrimRight(trimmed[:idx], " ")
+			comment = trimmed[idx:]
+		}
 	}
 
 	// Relationship: starts with --> or *->
@@ -108,7 +112,7 @@ func parseAlignableLine(line string) (alignableLine, bool) {
 			return alignableLine{
 				indent: indent, kind: memberRelationship,
 				arrow: arrow, name: afterArrow, rest: "",
-				comment: comment, raw: line,
+				comment: comment, raw: raw,
 			}, true
 		}
 		restStart := spaceIdx + 1
@@ -118,7 +122,7 @@ func parseAlignableLine(line string) (alignableLine, bool) {
 		return alignableLine{
 			indent: indent, kind: memberRelationship,
 			arrow: arrow, name: afterArrow[:spaceIdx], rest: afterArrow[restStart:],
-			comment: comment, raw: line,
+			comment: comment, raw: raw,
 		}, true
 	}
 
@@ -136,7 +140,7 @@ func parseAlignableLine(line string) (alignableLine, bool) {
 		return alignableLine{
 			indent: indent, kind: memberAlias,
 			name: afterType[:spaceIdx], rest: afterType[restStart:],
-			comment: comment, raw: line,
+			comment: comment, raw: raw,
 		}, true
 	}
 
@@ -146,9 +150,21 @@ func parseAlignableLine(line string) (alignableLine, bool) {
 		if spaceIdx < 0 {
 			return alignableLine{}, false
 		}
+		// Deny by declaration SHAPE, not by first word. type, schema, extends
+		// and abstract are all legal property names, and denying the words
+		// split an aligned group into unpadded singletons; only as and part are
+		// refused in a type body. A declaration is told apart by what follows:
+		// schema and import take a string literal, and a type header ends in a
+		// brace, neither of which a property does.
 		firstWord := content[:spaceIdx]
 		switch firstWord {
-		case "schema", "import", "type", "abstract", "part", "extends":
+		case "as", "part":
+			return alignableLine{}, false
+		}
+		if ln.declaresWith("schema") || ln.declaresWith("import") {
+			return alignableLine{}, false
+		}
+		if strings.HasSuffix(ln.trimmedCode(), "{") {
 			return alignableLine{}, false
 		}
 		restStart := spaceIdx + 1
@@ -160,32 +176,12 @@ func parseAlignableLine(line string) (alignableLine, bool) {
 			return alignableLine{
 				indent: indent, kind: memberProperty,
 				name: firstWord, rest: rest,
-				comment: comment, raw: line,
+				comment: comment, raw: raw,
 			}, true
 		}
 	}
 
 	return alignableLine{}, false
-}
-
-// findInlineComment returns the byte index of "//" outside brackets and quotes, or -1.
-func findInlineComment(s string) int {
-	bracketDepth := 0
-	sc := newQuoteAwareScanner(s)
-	for i, ch := sc.next(); i >= 0; i, ch = sc.next() {
-		if ch == '[' {
-			bracketDepth++
-			continue
-		}
-		if ch == ']' {
-			bracketDepth--
-			continue
-		}
-		if ch == '/' && i+1 < len(s) && s[i+1] == '/' && bracketDepth == 0 {
-			return i
-		}
-	}
-	return -1
 }
 
 // flushAlignGroup pads names to a common width and rebuilds each line.
@@ -200,8 +196,8 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 
 	maxNameWidth := 0
 	for _, al := range group {
-		if len(al.name) > maxNameWidth {
-			maxNameWidth = len(al.name)
+		if w := DisplayWidth(al.name); w > maxNameWidth {
+			maxNameWidth = w
 		}
 	}
 
@@ -220,7 +216,7 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 		switch al.kind {
 		case memberProperty:
 			b.WriteString(al.name)
-			b.WriteString(strings.Repeat(" ", maxNameWidth-len(al.name)))
+			b.WriteString(strings.Repeat(" ", maxNameWidth-DisplayWidth(al.name)))
 			b.WriteByte(' ')
 			b.WriteString(al.rest)
 
@@ -228,14 +224,14 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 			b.WriteString(al.arrow)
 			b.WriteByte(' ')
 			b.WriteString(al.name)
-			b.WriteString(strings.Repeat(" ", maxNameWidth-len(al.name)))
+			b.WriteString(strings.Repeat(" ", maxNameWidth-DisplayWidth(al.name)))
 			b.WriteByte(' ')
 			b.WriteString(al.rest)
 
 		case memberAlias:
 			b.WriteString("type ")
 			b.WriteString(al.name)
-			b.WriteString(strings.Repeat(" ", maxNameWidth-len(al.name)))
+			b.WriteString(strings.Repeat(" ", maxNameWidth-DisplayWidth(al.name)))
 			b.WriteByte(' ')
 			b.WriteString(al.rest)
 		}
@@ -245,14 +241,14 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 		if al.comment != "" {
 			hasComments = true
 		}
-		if len(content) > maxContentWidth {
-			maxContentWidth = len(content)
+		if w := DisplayWidth(content); w > maxContentWidth {
+			maxContentWidth = w
 		}
 	}
 
 	for _, rl := range rebuilt {
 		if hasComments && rl.comment != "" {
-			padding := max(maxContentWidth-len(rl.content)+1, 1)
+			padding := max(maxContentWidth-DisplayWidth(rl.content)+1, 1)
 			result = append(result, contentLine(rl.content+strings.Repeat(" ", padding)+rl.comment))
 		} else {
 			result = append(result, contentLine(rl.content))
@@ -263,18 +259,8 @@ func flushAlignGroup(result []line, group []alignableLine) []line {
 }
 
 // isMultilineStart returns true if a content line has unbalanced [ brackets.
-func isMultilineStart(line string) bool {
-	depth := 0
-	sc := newQuoteAwareScanner(strings.TrimSpace(line))
-	for i, ch := sc.next(); i >= 0; i, ch = sc.next() {
-		if ch == '[' {
-			depth++
-		}
-		if ch == ']' {
-			depth--
-		}
-	}
-	return depth > 0
+func isMultilineStart(ln line) bool {
+	return bracketDelta(ln) > 0
 }
 
 // emitMultilineConstruct emits lines until bracket depth returns to zero.
@@ -286,7 +272,7 @@ func emitMultilineConstruct(result, ls []line, startIdx int) ([]line, int) {
 	for i < len(ls) {
 		result = append(result, ls[i])
 		if ls[i].class == lineContent {
-			depth += bracketDelta(ls[i].text)
+			depth += bracketDelta(ls[i])
 		}
 		i++
 		if depth <= 0 {
@@ -296,16 +282,15 @@ func emitMultilineConstruct(result, ls []line, startIdx int) ([]line, int) {
 	return result, i
 }
 
-// bracketDelta returns the number of [ minus the number of ] outside
-// string literals.
-func bracketDelta(text string) int {
+// bracketDelta returns the number of [ minus the number of ] in the line's
+// code. Brackets inside a literal or a comment are not code and do not count.
+func bracketDelta(ln line) int {
 	depth := 0
-	sc := newQuoteAwareScanner(text)
-	for i, ch := sc.next(); i >= 0; i, ch = sc.next() {
-		if ch == '[' {
+	for _, ch := range []byte(ln.mask()) {
+		switch ch {
+		case '[':
 			depth++
-		}
-		if ch == ']' {
+		case ']':
 			depth--
 		}
 	}

@@ -14,9 +14,10 @@ import (
 // difference between an association and a composition, or import structure, so
 // this cannot recover them and marks each place it guessed with a TODO instead.
 //
-// The adapter's label separator splits labels into schema and type components,
-// and schemaFilter limits inference to labels carrying that schema name (empty
-// infers from all labels).
+// Each label is parsed as [Adapter.Label] writes it under this adapter's prefix
+// and separator. schemaFilter, compared as a label writes it, limits inference
+// to that schema; empty infers from all labels. Constraints that carry no label
+// this configuration writes leave a TODO line saying so.
 //
 // It returns no error: every failure it can meet is a construct it cannot
 // recover, which is a TODO in the output rather than a refusal to produce one.
@@ -25,11 +26,14 @@ func (a *Adapter) InferSchema(
 	relationships []RemoteRelationship,
 	schemaFilter string,
 ) string {
-	separator := a.config.labelSeparator
+	// The filter is compared as Label writes a schema component, exactly as
+	// IntrospectRelationshipsQueryFor composes the scan's prefix.
+	filter := SanitizeIdentifier(schemaFilter)
 
 	// Group constraints by (schemaName, typeName).
 	types := make(map[string]*inferredType) // key: typeName
-	schemaName := schemaFilter
+	schemaName := strings.TrimSpace(schemaFilter)
+	nodeConstraints := 0
 
 	for _, rc := range constraints {
 		// EqualFold, matching [Adapter.DiffConstraints] and
@@ -42,8 +46,9 @@ func (a *Adapter) InferSchema(
 			continue
 		}
 
-		sn, tn := parseLabel(rc.LabelsOrTypes[0], separator)
-		if schemaFilter != "" && sn != schemaFilter {
+		nodeConstraints++
+		sn, tn, ok := a.parseLabel(rc.LabelsOrTypes[0])
+		if !ok || (filter != "" && sn != filter) {
 			continue
 		}
 		if schemaName == "" {
@@ -95,11 +100,15 @@ func (a *Adapter) InferSchema(
 			continue
 		}
 
-		srcSchema, srcType := parseLabel(rel.SourceLabels[0], separator)
-		tgtSchema, tgtType := parseLabel(rel.TargetLabels[0], separator)
-
-		if schemaFilter != "" && srcSchema != schemaFilter {
+		srcSchema, srcType, ok := a.parseLabel(rel.SourceLabels[0])
+		if !ok || (filter != "" && srcSchema != filter) {
 			continue
+		}
+		tgtSchema, tgtType, ok := a.parseLabel(rel.TargetLabels[0])
+		if !ok {
+			// A target this configuration did not write is kept as a
+			// cross-schema guess rather than dropped.
+			tgtSchema, tgtType, _ = strings.Cut(rel.TargetLabels[0], a.config.labelSeparator)
 		}
 
 		it, ok := types[srcType]
@@ -116,18 +125,30 @@ func (a *Adapter) InferSchema(
 		it.addRelation(rel.RelationType, target, crossSchema)
 	}
 
-	// Generate DSL.
-	return generateDSL(schemaName, types)
+	var unmatched string
+	if nodeConstraints > 0 && len(types) == 0 {
+		unmatched = fmt.Sprintf("// TODO: no constraint in the database carries a label this configuration writes for schema %q\n"+
+			"//       (prefix %q, separator %q); %d node constraints were read. Check --schema, --prefix and --separator.\n",
+			schemaName, a.config.labelPrefix, a.config.labelSeparator, nodeConstraints)
+	}
+
+	return generateDSL(schemaName, types, unmatched)
 }
 
-// parseLabel splits a Neo4j label into schema name and type name.
-// Returns ("", label) if the separator is not found.
-func parseLabel(label, separator string) (schemaName, typeName string) {
-	before, after, found := strings.Cut(label, separator)
-	if !found {
-		return "", label
+// parseLabel is the inverse of [Adapter.Label]: it strips the configured
+// prefix and splits at the configured separator. A label with no separator is
+// unscoped, which Label writes without the prefix. ok is false for a label this
+// configuration did not write, an empty type component included.
+func (a *Adapter) parseLabel(label string) (schemaName, typeName string, ok bool) {
+	if rest, found := strings.CutPrefix(label, a.config.labelPrefix); found {
+		if sn, tn, cut := strings.Cut(rest, a.config.labelSeparator); cut {
+			return sn, tn, tn != ""
+		}
 	}
-	return before, after
+	if !strings.Contains(label, a.config.labelSeparator) {
+		return "", label, true
+	}
+	return "", "", false
 }
 
 // reverseNeo4jType maps a Neo4j propertyType string back to a yammm type name.
@@ -234,7 +255,7 @@ func (it *inferredType) addRelation(relationType, target string, crossSchema boo
 
 // --- DSL generation ---
 
-func generateDSL(schemaName string, types map[string]*inferredType) string {
+func generateDSL(schemaName string, types map[string]*inferredType, unmatched string) string {
 	var b strings.Builder
 
 	if schemaName == "" {
@@ -284,6 +305,7 @@ func generateDSL(schemaName string, types map[string]*inferredType) string {
 	b.WriteString("// TODO: two labels from different schemas that render one type name are\n")
 	b.WriteString("//       merged here into one type.\n")
 	b.WriteString("// TODO: review relationship field names, and add invariants.\n")
+	b.WriteString(unmatched)
 
 	// Sort type names for deterministic output.
 	typeNames := make([]string, 0, len(types))

@@ -1,0 +1,18 @@
+schema "p"
+
+type T {
+	id String primary
+	state Enum[
+		// the live states
+		"a",
+		"b",
+	]
+	aaa String
+	longerName String
+}
+
+type U {
+	id String primary
+	x String
+	longName String
+}

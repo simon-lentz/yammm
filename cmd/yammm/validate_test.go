@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,10 +26,9 @@ func executeCmdStderr(t *testing.T, args ...string) (int, string) {
 // executeCmdOutput is executeCmdStderr plus the captured stdout, for commands
 // whose contract is what they print rather than what they diagnose.
 //
-// Both buffers see only writes routed through the command's own writers. A
-// command that writes to os.Stderr directly — the convention here — is
-// invisible to this harness; testdata/script/*.txtar is where those messages
-// are asserted (see the TestMain comment in script_test.go).
+// Both buffers see only writes routed through the command's own writers, and
+// the error a command returns is not printed here — run() is what prints it.
+// Use runCLI when the assertion is on the message an operator sees.
 func executeCmdOutput(t *testing.T, args ...string) (int, string, string) {
 	t.Helper()
 
@@ -51,14 +49,10 @@ func executeCmdOutput(t *testing.T, args ...string) (int, string, string) {
 		}
 	})
 
-	if err := cmd.Execute(); err != nil {
-		if exitErr, ok := errors.AsType[*cli.ExitError](err); ok {
-			return exitErr.Code, outBuf.String(), errBuf.String()
-		}
-		return cli.ExitUsage, outBuf.String(), errBuf.String()
-	}
-
-	return cli.ExitOK, outBuf.String(), errBuf.String()
+	// The same mapping run() uses, called rather than repeated: a second copy
+	// is a place for the harness and the binary to disagree about an exit code.
+	err := cmd.Execute()
+	return cli.ExitForError(err), outBuf.String(), errBuf.String()
 }
 
 // TestExitCodes pins the exact exit-code contract — usage(2) vs
@@ -75,9 +69,11 @@ func TestExitCodes(t *testing.T) {
 		want int
 	}{
 		{"validate invalid schema", []string{"validate", "testdata/invalid.yammm"}, cli.ExitValidation},
-		// schema.Load wraps file-not-found into diagnostics → validation.
-		{"validate missing file", []string{"validate", "testdata/nonexistent.yammm"}, cli.ExitValidation},
-		{"check missing data file", []string{"check", "testdata/valid.yammm", "testdata/nonexistent.json"}, cli.ExitUsage},
+		// schema.Load reports file-not-found as a diagnostic rather than an
+		// error return; ExitForResult keys on the I/O code so it does not
+		// become a validation failure on the way out.
+		{"validate missing file", []string{"validate", "testdata/nonexistent.yammm"}, cli.ExitRuntime},
+		{"check missing data file", []string{"check", "testdata/valid.yammm", "testdata/nonexistent.json"}, cli.ExitRuntime},
 		{"check csv without type", []string{"check", "testdata/valid.yammm", "testdata/data.csv"}, cli.ExitUsage},
 		{"gen unsupported target", []string{"gen", "--to", "rust", "testdata/county.yammm"}, cli.ExitUsage},
 		{"gen go-only flag with jsonschema target", []string{"gen", "--to", "jsonschema", "--package", "foo", "testdata/county.yammm"}, cli.ExitUsage},

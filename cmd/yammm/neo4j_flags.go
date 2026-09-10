@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -38,19 +36,28 @@ func registerConstraintFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("required-only-types", false, "restrict type constraints to required properties")
 }
 
-// labelOptions reads the label flags back into adapter options.
-func labelOptions(cmd *cobra.Command) []neo4j.Option {
+// labelOptions reads the label flags back into adapter options, refusing an
+// empty separator and a prefix or separator whose composed label is not a
+// Neo4j identifier. It refuses rather than sanitizes: a quietly repaired label
+// is one the operator did not ask for, and every command calls it before work.
+func labelOptions(cmd *cobra.Command) ([]neo4j.Option, error) {
 	separator, _ := cmd.Flags().GetString("separator")
 	prefix, _ := cmd.Flags().GetString("prefix")
-	return []neo4j.Option{
+	if separator == "" {
+		return nil, cli.Usagef("--separator must not be empty: a label composed without one cannot be split back into its schema and type")
+	}
+	opts := []neo4j.Option{
 		neo4j.WithLabelSeparator(separator),
 		neo4j.WithLabelPrefix(prefix),
 	}
+	if err := neo4j.ValidateIdentifier(neo4j.New(opts...).Label(cmd.Context(), "schema", "Type"), "label"); err != nil {
+		return nil, cli.Usagef("--prefix %q and --separator %q compose a label that is not a Neo4j identifier: %v", prefix, separator, err)
+	}
+	return opts, nil
 }
 
 // constraintOptions reads the label AND constraint-shape flags back into
-// adapter options. It reports a usage error for an unrecognised edition, having
-// already written the message.
+// adapter options. It returns a usage error for an unrecognised edition.
 func constraintOptions(cmd *cobra.Command) ([]neo4j.Option, error) {
 	named, _ := cmd.Flags().GetBool("named")
 	edition, _ := cmd.Flags().GetString("edition")
@@ -58,7 +65,10 @@ func constraintOptions(cmd *cobra.Command) ([]neo4j.Option, error) {
 	scalarTypes, _ := cmd.Flags().GetBool("scalar-types")
 	requiredOnly, _ := cmd.Flags().GetBool("required-only-types")
 
-	opts := labelOptions(cmd)
+	opts, err := labelOptions(cmd)
+	if err != nil {
+		return nil, err
+	}
 	opts = append(
 		opts,
 		neo4j.WithNamedConstraints(named),
@@ -73,8 +83,7 @@ func constraintOptions(cmd *cobra.Command) ([]neo4j.Option, error) {
 	case "community":
 		opts = append(opts, neo4j.WithEdition(neo4j.Community))
 	default:
-		fmt.Fprintf(os.Stderr, "error: invalid edition %q: must be \"enterprise\" or \"community\"\n", edition)
-		return nil, &cli.ExitError{Code: cli.ExitUsage}
+		return nil, cli.Usagef("invalid edition %q: must be %q or %q", edition, "enterprise", "community")
 	}
 	return opts, nil
 }

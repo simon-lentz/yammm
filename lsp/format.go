@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -18,6 +19,12 @@ import (
 // is canonical (like gofmt) — tabs for indentation, trailing whitespace trimmed,
 // final newline enforced. All style decisions are hardcoded.
 func handleFormatting(ws Resolver, logger *slog.Logger) jrpc2.Handler {
+	return formattingHandler(ws, logger, format.TokenStream)
+}
+
+// formattingHandler is [handleFormatting] with the formatter as a parameter, so
+// a refusal is testable without an input the formatter mishandles.
+func formattingHandler(ws Resolver, logger *slog.Logger, tokenStream func(string) (string, error)) jrpc2.Handler {
 	return handler.New(func(_ context.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
 		uri := params.TextDocument.URI
 
@@ -32,9 +39,14 @@ func handleFormatting(ws Resolver, logger *slog.Logger) jrpc2.Handler {
 			return nil, nil
 		}
 
-		formatted, formatErr := format.TokenStream(doc.Text)
+		formatted, formatErr := tokenStream(doc.Text)
 		if formatErr != nil {
-			logger.Debug("formatting skipped due to parse error", "uri", uri, "error", formatErr)
+			if errors.Is(formatErr, format.ErrNotPreserved) {
+				logger.Warn("formatting refused: the formatter would change the document's tokens or comments",
+					"uri", uri, "error", formatErr)
+			} else {
+				logger.Debug("formatting skipped due to parse error", "uri", uri, "error", formatErr)
+			}
 			return []protocol.TextEdit{}, nil
 		}
 

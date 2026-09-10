@@ -9,6 +9,12 @@ func newNeo4jCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "neo4j",
 		Short: "Neo4j database operations",
+		// Without a RunE cobra prints help and exits 0, so a script that drops
+		// the subcommand reports success having done nothing. --help still
+		// preempts this, being handled before RunE runs.
+		RunE: requireSubcommand,
+		// A mistyped subcommand is reported as unknown, by name.
+		Args: cobra.NoArgs,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			return bindNeo4jFlags(cmd)
 		},

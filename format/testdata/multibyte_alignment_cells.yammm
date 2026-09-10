@@ -1,0 +1,9 @@
+schema "cells"
+
+type T {
+	id String primary
+	one Enum["aaa", "bbb"] // one
+	two Enum["記録記録", "bbb"] // two
+	three Enum["ccc", "ddd"] // three
+	four String // four
+}

@@ -146,6 +146,34 @@ func TestNeo4jDiff_IndexesFlag(t *testing.T) {
 // server would not disclose). Both keep the printed constraint diff but must not
 // report success: a drift gate would otherwise read exit 0 as "no drift" from a
 // comparison that never ran.
+// TestIndexOutcomeBeforeDiff pins the step between the read and the exit table:
+// only a read that was ASKED FOR and failed is unavailable, so --indexes=false
+// over a server that cannot report indexes still exits 0.
+func TestIndexOutcomeBeforeDiff(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		enabled, failed bool
+		want            indexDiffOutcome
+	}{
+		{"asked for and read", true, false, indexDiffSkipped},
+		{"asked for and unreadable", true, true, indexDiffUnavailable},
+		{"opted out, read fine", false, false, indexDiffSkipped},
+		{"opted out, unreadable", false, true, indexDiffSkipped},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := indexOutcomeBeforeDiff(tt.enabled, tt.failed); got != tt.want {
+				t.Errorf("indexOutcomeBeforeDiff(%v, %v) = %v, want %v",
+					tt.enabled, tt.failed, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNeo4jDiffExit(t *testing.T) {
 	t.Parallel()
 

@@ -84,6 +84,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | Code | Meaning |
 | ---- | ------- |
 | `E_INTERNAL` | Unexpected internal failure (likely a bug) |
+| `E_COMMAND_FAILED` | A command-line failure that is not itself a diagnostic, carried into a `--format json` document; its `exit_code` detail is the process exit code |
 | `E_CONTEXT_CANCELLED` | Operation cancelled via context |
 
 ### Syntax
@@ -208,6 +209,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
 | `W_SNAPSHOT_VALUE_NONCONFORMING` | A stored `Timestamp`, `Date` or `UUID` value does not conform to its schema constraint; reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
 | `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record for a `Required` association; reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
+| `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 
 ### Adapter
 
@@ -222,3 +224,4 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_NEO4J_INVALID_INDEX_TARGET` | Neo4j | An index annotation names a property whose type cannot carry it (`@index` on a non-scalar, `@vector` on a non-Vector or a non-positive dimension, `@fulltext` on a non-text property) |
 | `W_NEO4J_NODE_KEY_UNSUPPORTED` | Neo4j | `WithNodeKeyConstraints(true)` combined with `WithEdition(Community)`; NODE KEY is Enterprise-only, so UNIQUE is emitted for primary keys instead (Warning, v0.9.1+) |
 | `W_NEO4J_EDITION_CONSTRAINT_OMITTED` | Neo4j | `WithEdition(Community)` dropped NOT NULL and PROPERTY_TYPE constraints the schema declares; reported once per call with a count per omitted kind (Warning, v0.14+) |
+| `W_NEO4J_INDEXES_UNREADABLE` | Neo4j | A comparison could not read the database's indexes, so the half needing them did not run; the constraint half is complete, but a declaration whose name an index already holds reads as a create that will not take effect (Warning) |

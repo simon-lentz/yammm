@@ -54,6 +54,16 @@ var (
 	// warning, not an error: the UNIQUE constraints that survive are correct
 	// output for the edition.
 	W_NEO4J_EDITION_CONSTRAINT_OMITTED = diag.NewCode("W_NEO4J_EDITION_CONSTRAINT_OMITTED", diag.CategoryAdapter)
+
+	// W_NEO4J_INDEXES_UNREADABLE indicates a comparison could not read the
+	// database's indexes, so the half of it that needed them did not run.
+	// Index and constraint names share one namespace, which is why it degrades
+	// the constraint reading too: a CREATE CONSTRAINT whose name an index
+	// already holds is silently ignored by the server, and without the index
+	// names that declaration is reported as a create that will not take
+	// effect. A warning, not an error: the constraint comparison that did run
+	// is complete and worth keeping.
+	W_NEO4J_INDEXES_UNREADABLE = diag.NewCode("W_NEO4J_INDEXES_UNREADABLE", diag.CategoryAdapter)
 )
 
 // Sentinel errors for validation failures.

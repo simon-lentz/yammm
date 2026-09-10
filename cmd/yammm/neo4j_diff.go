@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -11,6 +11,7 @@ import (
 
 	adaptern4j "github.com/simon-lentz/yammm/adapter/neo4j"
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -24,7 +25,7 @@ func newNeo4jDiffCmd() *cobra.Command {
 			"An index in the database that the schema does not declare counts as drift — declare it with @index/@@index/@vector/@fulltext/@@fulltext, " +
 			"or pass --indexes=false for a constraints-only diff.",
 		Args: cobra.ExactArgs(1),
-		RunE: runNeo4jDiff,
+		RunE: withDiagnostics(runNeo4jDiff),
 	}
 
 	// The desired side of the diff is exactly what `yammm neo4j constraints` and
@@ -39,9 +40,7 @@ func newNeo4jDiffCmd() *cobra.Command {
 	return cmd
 }
 
-func runNeo4jDiff(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	uri, _ := cmd.Flags().GetString("uri")
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
@@ -49,11 +48,9 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	indexesEnabled, _ := cmd.Flags().GetBool("indexes")
 
 	if uri == "" {
-		fmt.Fprintf(os.Stderr, "error: --uri is required (or set YAMMM_NEO4J_URI)\n")
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("--uri is required (or set YAMMM_NEO4J_URI)")
 	}
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
+	opts, err := constraintOptions(cmd)
 	if err != nil {
 		return err
 	}
@@ -61,8 +58,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	schemaPath := args[0]
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", schemaPath, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", schemaPath, err)
 	}
 
 	// Load schema
@@ -71,24 +67,15 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
-	}
-
-	// Configure the adapter to match the target graph's generation settings.
-	opts, err := constraintOptions(cmd)
-	if err != nil {
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
 		return err
 	}
 
-	// Generate desired constraints. The load's residual warnings fold into
-	// whichever result this command renders, so one invocation writes one.
+	// The adapter matches the target graph's generation settings.
 	adapter := adaptern4j.New(opts...)
 	desired, constraintResult := adapter.ConstraintsStructured(cmd.Context(), s)
 	if constraintResult.HasErrors() {
-		renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath),
-			cli.MergeResults(pending, constraintResult))
+		sink.Add(constraintResult)
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -98,76 +85,30 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	if indexesEnabled {
 		di, indexResult := adapter.IndexesStructured(cmd.Context(), s)
 		if indexResult.HasErrors() {
-			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath),
-				cli.MergeResults(pending, indexResult))
+			sink.Add(indexResult)
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 		desiredIndexes = di
 	}
 
-	// Nothing downstream reports through diag, so the load's residuals render
-	// here — before the diff output, and exactly once.
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), pending)
-
 	// Connect to database
 	ctx := cmd.Context()
 	driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("%v", err)
 	}
 	defer driver.Close(ctx)
 
-	// Fetch actual constraints
-	records, err := cli.RunQuery(ctx, driver, database, adaptern4j.IntrospectConstraintsQuery(), nil)
+	state, err := fetchRemoteState(ctx, cli.DriverQueries(driver), database, sink)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: fetch constraints: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return err
 	}
+	actual, actualIndexes := state.constraints, state.indexes
+	// The index read is the last phase that diagnoses, so everything the
+	// command has to say is in the sink and precedes the diff report.
+	sink.Flush()
 
-	actual, err := adaptern4j.ParseRemoteConstraints(records)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: parse constraints: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
-	}
-	if n := untypedRemoteObjects(len(actual), func(i int) string { return actual[i].Type }); n > 0 {
-		reportUnreadableProjection(os.Stderr, n, len(actual), "constraint", "SHOW CONSTRAINTS")
-		return &cli.ExitError{Code: cli.ExitRuntime}
-	}
-
-	// Fetch actual indexes BEFORE diffing constraints, and do it whatever
-	// --indexes says: index and constraint names share one namespace, so the
-	// CONSTRAINT diff needs the index names to know whether a CREATE CONSTRAINT
-	// would silently no-op. --indexes=false opts out of comparing indexes, not
-	// out of classifying constraints accurately — reading it as the latter makes
-	// the same declaration print as an unfixable Create under one flag and
-	// actionable drift under the other. On a server that cannot report indexes
-	// the diff degrades rather than discarding the constraint diff, but it says
-	// so, and does not exit 0 when indexes were asked for.
-	indexes := indexDiffSkipped
-	var actualIndexes []adaptern4j.RemoteIndex
-	indexFetchFailed := false
-	indexRecords, indexErr := cli.RunQuery(ctx, driver, database, adaptern4j.IntrospectIndexesQuery(), nil)
-	switch {
-	case indexErr != nil:
-		fmt.Fprintf(os.Stderr, "warning: indexes could NOT be read (%v); a constraint whose name an index holds is reported as a create that will not take effect\n", indexErr)
-		indexFetchFailed = true
-	default:
-		parsed, parseErr := adaptern4j.ParseRemoteIndexes(indexRecords)
-		if parseErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: indexes could NOT be read (parse indexes: %v); a constraint whose name an index holds is reported as a create that will not take effect\n", parseErr)
-			indexFetchFailed = true
-			break
-		}
-		if n := untypedRemoteObjects(len(parsed), func(i int) string { return parsed[i].Type }); n > 0 {
-			reportUnreadableProjection(os.Stderr, n, len(parsed), "index", "SHOW INDEXES")
-			return &cli.ExitError{Code: cli.ExitRuntime}
-		}
-		actualIndexes = parsed
-	}
-	if indexesEnabled && indexFetchFailed {
-		indexes = indexDiffUnavailable
-	}
+	indexes := indexOutcomeBeforeDiff(indexesEnabled, state.indexFailed)
 
 	// Diff constraints
 	// The label set is computed once from the schema and scopes both halves of
@@ -205,6 +146,75 @@ func runNeo4jDiff(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// indexesUnreadable reports a degraded index read as the diagnostic it is.
+//
+// Prose on a stream reached no --format json consumer in any form, and this is
+// the one message in the command that changes what its output means.
+func indexesUnreadable(cause error) diag.Result {
+	c := diag.NewCollectorUnlimited()
+	c.Collect(diag.NewIssue(diag.Warning, adaptern4j.W_NEO4J_INDEXES_UNREADABLE,
+		fmt.Sprintf("indexes could NOT be read (%v); a constraint whose name an index holds is reported as a create that will not take effect", cause)).Build())
+	return c.Result()
+}
+
+// remoteState is the database side of a diff: the constraints it reported, the
+// indexes it could report, and whether the index read failed.
+type remoteState struct {
+	constraints []adaptern4j.RemoteConstraint
+	indexes     []adaptern4j.RemoteIndex
+	indexFailed bool
+}
+
+// fetchRemoteState reads both halves of the database side through run,
+// reporting a degraded index read to sink.
+//
+// It takes the runner rather than a driver so both queries, both parsers, the
+// projection check and the degraded path are reachable without a server — the
+// absence that left this whole command unasserted past its --uri guard.
+func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string, sink *cli.DiagnosticSink) (remoteState, error) {
+	records, err := run(ctx, database, adaptern4j.IntrospectConstraintsQuery(), nil)
+	if err != nil {
+		return remoteState{}, cli.Runtimef("fetch constraints: %v", err)
+	}
+
+	constraints, err := adaptern4j.ParseRemoteConstraints(records)
+	if err != nil {
+		return remoteState{}, cli.Runtimef("parse constraints: %v", err)
+	}
+	if n := untypedRemoteObjects(len(constraints), func(i int) string { return constraints[i].Type }); n > 0 {
+		return remoteState{}, unreadableProjection(n, len(constraints), "constraint", "SHOW CONSTRAINTS")
+	}
+	state := remoteState{constraints: constraints}
+
+	// Fetch actual indexes BEFORE diffing constraints, and do it whatever
+	// --indexes says: index and constraint names share one namespace, so the
+	// CONSTRAINT diff needs the index names to know whether a CREATE CONSTRAINT
+	// would silently no-op. --indexes=false opts out of comparing indexes, not
+	// out of classifying constraints accurately — reading it as the latter makes
+	// the same declaration print as an unfixable Create under one flag and
+	// actionable drift under the other. On a server that cannot report indexes
+	// the diff degrades rather than discarding the constraint diff, but it says
+	// so, and does not exit 0 when indexes were asked for.
+	indexRecords, indexErr := run(ctx, database, adaptern4j.IntrospectIndexesQuery(), nil)
+	switch {
+	case indexErr != nil:
+		sink.Add(indexesUnreadable(indexErr))
+		state.indexFailed = true
+	default:
+		parsed, parseErr := adaptern4j.ParseRemoteIndexes(indexRecords)
+		if parseErr != nil {
+			sink.Add(indexesUnreadable(fmt.Errorf("parse indexes: %w", parseErr)))
+			state.indexFailed = true
+			break
+		}
+		if n := untypedRemoteObjects(len(parsed), func(i int) string { return parsed[i].Type }); n > 0 {
+			return remoteState{}, unreadableProjection(n, len(parsed), "index", "SHOW INDEXES")
+		}
+		state.indexes = parsed
+	}
+	return state, nil
+}
+
 // untypedRemoteObjects counts parsed remote objects that carry a name but no
 // type, reading each object's type through typeAt.
 //
@@ -234,19 +244,20 @@ func untypedRemoteObjects(n int, typeAt func(int) string) int {
 	return untyped
 }
 
-// reportUnreadableProjection explains an unreadable type column and what it
-// costs, on stderr. The caller exits ExitRuntime: every such object is
-// unclassifiable, so the comparison silently shrinks to the ones that did parse
-// and would otherwise print a confident plan built from a partial reading —
-// the same "a comparison that never ran must not report success" rule the
-// unverified and failed-introspection paths already follow.
-func reportUnreadableProjection(w io.Writer, untyped, total int, object, query string) {
-	fmt.Fprintf(w,
-		"error: %d of %d %s record(s) came back with no type; the %s projection this command issues did not return a readable 'type' column\n",
-		untyped, total, object, query)
-	fmt.Fprintf(w,
-		"       every such %s is unclassifiable, so no comparison is reported rather than one built from a partial reading; this usually means the server is newer than this yammm build\n",
-		object)
+// unreadableProjection explains an unreadable type column and what it costs.
+//
+// It is ExitRuntime because every such object is unclassifiable: the comparison
+// silently shrinks to the ones that did parse and would otherwise print a
+// confident plan built from a partial reading — the same "a comparison that
+// never ran must not report success" rule the unverified and
+// failed-introspection paths already follow.
+//
+// The message is two lines, each printed with its own "error: " prefix.
+func unreadableProjection(untyped, total int, object, query string) error {
+	return cli.Runtimef(
+		"%d of %d %s record(s) came back with no type; the %s projection this command issues did not return a readable 'type' column\n"+
+			"every such %s is unclassifiable, so no comparison is reported rather than one built from a partial reading; this usually means the server is newer than this yammm build",
+		untyped, total, object, query, object)
 }
 
 // indexDiffOutcome records what the index half of a diff produced, so the exit
@@ -260,6 +271,20 @@ const (
 	indexDiffUnverified                          // compared, but an index's definition could not be checked
 	indexDiffUnavailable                         // requested, but index introspection failed
 )
+
+// indexOutcomeBeforeDiff classifies the index half from the read alone, before
+// any comparison runs.
+//
+// A read that was asked for and failed is unavailable; everything else is
+// skipped, the enabled-and-healthy case included, because the comparison that
+// follows is what classifies it. Opting out with --indexes=false is not a
+// failure even when the server could not have answered: nothing was asked for.
+func indexOutcomeBeforeDiff(enabled, readFailed bool) indexDiffOutcome {
+	if enabled && readFailed {
+		return indexDiffUnavailable
+	}
+	return indexDiffSkipped
+}
 
 // neo4jDiffExit maps the two halves of the diff onto an exit code.
 //

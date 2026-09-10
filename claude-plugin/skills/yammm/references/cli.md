@@ -32,6 +32,21 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 | `--format` | `text` | Diagnostic output format: `text` or `json` |
 | `--no-color` | `false` | Disable ANSI color in output |
 
+### Writing files
+
+Every command that writes a file you name — `--output`, `--output-dir`, `-o`,
+`fmt -w`, `snapshot update-metadata` — writes it the same way. The path's
+symlinks are followed, so a link survives and the file it names is written. A
+regular file, or one that does not exist yet, is replaced atomically: the
+content is staged beside it and renamed over it, so an interrupted write leaves
+the previous file. A new file is created at `0600`; an existing one keeps its
+mode. A FIFO, a device or a path under `/dev/` — `--output /dev/stdout`, say —
+is written through, continuing its stream: behind `>> log` the bytes are
+appended and the log keeps its history. Anything else is refused at exit 3, naming the path: a
+read-only file, a directory, a looping link, or a file whose directory cannot
+hold the staging file, which `gofmt -w` refuses too. Omit `--output` to write
+to stdout.
+
 ---
 
 ## Schema Development Workflow
@@ -60,7 +75,13 @@ modify files in place.
 line, and exits 1 when the list is not empty — the shape `gofmt -l` uses, so it
 drops into a pre-commit hook without a shell loop. Every path is checked, so one
 run reports every offender. `--check` and `--write` together are a usage error
-(exit 2).
+(exit 2). A file that does not parse is reported as the positioned `E_SYNTAX`
+diagnostic `validate` reports, naming the file, and exits 1.
+
+When formatting would change a schema's tokens or comments, `fmt` refuses. The
+defect is the formatter's, never the schema's: it writes nothing, leaves the
+file unchanged, names the file on stderr and exits 3. A pre-commit hook running
+`fmt --write` therefore blocks the commit rather than committing the rewrite.
 
 The check normalizes line endings before formatting, so a CRLF file is reported
 as unformatted even when nothing else differs. That is what `-w` already does to
@@ -126,9 +147,11 @@ Builds a graph snapshot from one or more data files and persists it as a `.ys` f
 | `--type` | Type name for single-type CSV |
 | `--type-column` | Column for multi-type CSV |
 | `-m, --metadata` | Key=value metadata pairs (repeatable) |
-| `--timestamp` | Include `created_at` timestamp (breaks determinism) |
+| `--timestamp` | Stamp the current time as `created_at` (breaks determinism) |
 | `--indent` | Produce indented output |
-| `--into` | Existing `.ys` file to merge new data into |
+| `--into` | Existing `.ys` file to merge new data into. Its `created_at` and metadata are carried forward: `--timestamp` replaces the first, and `-m` overlays the second key by key |
+
+Output is byte-for-byte deterministic unless a `created_at` is written, which happens only through `--timestamp` or `--into`. The summary line's type count is the written document's type table, the count `snapshot info` reports. `W_SNAPSHOT_PATH_EXTENSION` is raised only after the file is written, located at the output path.
 
 ### snapshot verify
 
@@ -152,6 +175,8 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
+`--header-only` reads the header alone and reports the file's size. `--dir <path>` scans every `.ys` file in a directory, header-only. The text and `--format json` modes render one structure, so a field one reports the other reports too, and absent `metadata` renders as `{}`. Under `--format json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limit`, `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning.
+
 ### snapshot update-metadata
 
 ```bash
@@ -159,7 +184,7 @@ yammm snapshot update-metadata --set env=prod --set version=3 output.ys
 yammm snapshot update-metadata --unset env output.ys
 ```
 
-Rewrites metadata on an existing `.ys` file. Uses a fast path that reuses the snapshot body when possible; when it cannot, it falls back to a full load + re-marshal and reports `W_UPDATE_METADATA_FALLBACK`.
+Rewrites metadata on an existing `.ys` file. It reuses the snapshot body verbatim and recomputes only the integrity hash. There is no fallback: the command calls the strict primitive, so a document the fast path cannot rewrite is reported and the command exits non-zero rather than re-serializing. `created_at` is preserved byte for byte.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -308,16 +333,34 @@ Infers a `.yammm` schema from a live Neo4j database by reading constraints and r
 
 | Flag | Description |
 | ---- | ----------- |
-| `--schema` | Filter to specific schema name prefix |
+| `--schema` | Infer only this schema's types; compared as a label writes it, so `book-catalog` matches `book_catalog`'s labels |
+| `--separator` | Label separator (schema__Type), as the graph was written |
+| `--prefix` | Global label prefix, if the graph was written with one |
 | `--output` | Output file (default: stdout) |
+
+Each label is read as the label flags compose it: the prefix is stripped and the
+separator splits schema from type, so a label another configuration wrote is not
+read as this schema's type. A `--schema` that matches none of the constraints
+read leaves a TODO line in the scaffold saying so.
+
+Every command that takes the label flags — the four `neo4j` commands and
+`export --to cypher` — refuses an empty `--separator`, and a `--prefix` or
+`--separator` whose composed label is not a Neo4j identifier, at exit 2 before
+it loads a schema or opens a connection.
 
 ### Typical Neo4j workflow
 
 ```bash
 yammm neo4j constraints schema.yammm > constraints.cypher
 yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
-yammm export --to cypher schema.yammm data.json | cypher-shell -u neo4j
+yammm export --to cypher schema.yammm data.json --output load.cypher
 ```
+
+The `--to cypher` output is parameterized — `UNWIND`/`MERGE` with `$key_id`,
+`$props` and `$rows` placeholders — so it is written for inspection and for
+integration into application or migration code. It is **not** directly
+executable in `cypher-shell` or Neo4j Browser; running it there fails on the
+unbound parameters.
 
 ---
 
@@ -363,4 +406,6 @@ output.
 
 With `--format json`, each invocation writes exactly one JSON document to
 stderr, so a warnings-only run now produces a wire object where it previously
-produced nothing.
+produced nothing. A failure that is not itself a diagnostic — a bad flag, an
+unreadable path, a lost connection — is inside that document as an
+`E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code.

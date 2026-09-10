@@ -1,0 +1,20 @@
+schema "control"
+
+// The control: the same shapes the broken fixtures use — a wrapped enum, a
+// trailing comment, an invariant, a multibyte value — in spellings the
+// formatter handles correctly today. It fails if a repair breaks what works.
+type Order {
+	id     String primary
+	label  String // a trailing comment on a content line
+	status Enum["pending_review", "approved", "rejected", "needs_revision", "escalated", "archived"] required
+	note   String
+	amount Integer
+
+	! "amount must be positive" $self.amount > 0
+}
+
+type Shipment {
+	id    String primary
+	kind  Enum["記録", "配送"] required
+	--> ORDER (one) Order
+}

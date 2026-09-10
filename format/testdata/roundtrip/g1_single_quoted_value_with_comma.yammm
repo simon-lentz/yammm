@@ -1,0 +1,9 @@
+schema "g1"
+
+// G1: a single-quoted enum value containing a comma, on a line over the
+// hundred-column wrap threshold. quoteAwareScanner tracks only the double
+// quote, so the comma inside the literal is taken as a value separator.
+type T {
+	id     String primary
+	status Enum['alpha,one', "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota"] required
+}

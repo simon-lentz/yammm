@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -50,7 +48,7 @@ Use --module-root to resolve module-style imports against a root directory other
 than the schema's own (e.g. a repository root); for the go target the embedded
 source keys are relative to that root.`,
 		Args: cobra.ExactArgs(1),
-		RunE: runGen,
+		RunE: withDiagnostics(runGen),
 	}
 	cmd.Flags().String("to", "", "target: go, jsonschema, or md (required)")
 	cmd.Flags().String("package", "", "go target: generated package name (default: derived from schema name)")
@@ -79,31 +77,22 @@ func rejectInapplicableFlags(cmd *cobra.Command, target string) error {
 	}
 	for _, pf := range perTarget {
 		if pf.target != target && cmd.Flags().Changed(pf.flag) {
-			fmt.Fprintf(os.Stderr, "error: flag --%s applies only to --to %s\n", pf.flag, pf.target)
-			return &cli.ExitError{Code: cli.ExitUsage}
+			return cli.Usagef("flag --%s applies only to --to %s", pf.flag, pf.target)
 		}
 	}
 	return nil
 }
 
-func runGen(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	toFormat, _ := cmd.Flags().GetString("to")
 	outputPath, _ := cmd.Flags().GetString("output")
-
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
 
 	target := strings.ToLower(toFormat)
 	if target == "markdown" {
 		target = "md"
 	}
 	if target != "go" && target != "jsonschema" && target != "md" {
-		fmt.Fprintf(os.Stderr, "error: unsupported gen target %q: must be go, jsonschema, or md\n", toFormat)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("unsupported gen target %q: must be go, jsonschema, or md", toFormat)
 	}
 	if err := rejectInapplicableFlags(cmd, target); err != nil {
 		return err
@@ -111,8 +100,7 @@ func runGen(cmd *cobra.Command, args []string) error {
 
 	absSchemaPath, err := filepath.Abs(args[0])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", args[0], err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", args[0], err)
 	}
 
 	moduleRootAbs, loadOpts, err := moduleRootOptions(cmd)
@@ -120,13 +108,12 @@ func runGen(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRootAbs, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	if err := reportSchemaLoad(sink, s, moduleRootAbs, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
-	// The load's residual warnings are this command's only diagnostics — nothing
-	// downstream reports through diag — so they render here, once.
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRootAbs, absSchemaPath), pending)
+	// Nothing downstream reports through diag, so the load's residual warnings
+	// are all this command has and they precede the generated artifact.
+	sink.Flush()
 
 	var data []byte
 	switch target {
@@ -156,13 +143,11 @@ func runGen(cmd *cobra.Command, args []string) error {
 			markdown.WithClassMembers(!noMembers))
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: generate %s: %v\n", target, err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("generate %s: %v", target, err)
 	}
 
 	if err := cli.WriteTo(data, outputPath, cmd.OutOrStdout()); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write output: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return cli.Runtimef("write output: %v", err)
 	}
 	return nil
 }

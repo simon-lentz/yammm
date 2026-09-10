@@ -1,0 +1,79 @@
+{
+  "name": "\"g12\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 19,
+        "e": 20
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 30,
+              "e": 36
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 24,
+            "e": 44
+          }
+        },
+        {
+          "name": "left",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 52,
+              "e": 59
+            }
+          },
+          "span": {
+            "s": 46,
+            "e": 59
+          }
+        },
+        {
+          "name": "right",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 67,
+              "e": 74
+            }
+          },
+          "span": {
+            "s": 61,
+            "e": 74
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "'a single-quoted invariant message that is long enough to need wrapping'",
+          "expr": "(\u0026\u0026 (\u0026\u0026 (\u003e (. ($ \"self\") \"left\") 0) (\u003e (. ($ \"self\") \"right\") 0)) (\u003c (. ($ \"self\") \"left\") 1000))",
+          "expr_span": {
+            "s": 152,
+            "e": 206
+          },
+          "span": {
+            "s": 77,
+            "e": 206
+          }
+        }
+      ],
+      "span": {
+        "s": 14,
+        "e": 208
+      }
+    }
+  ]
+}

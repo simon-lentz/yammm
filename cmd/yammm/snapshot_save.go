@@ -1,10 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"maps"
 	"path/filepath"
 	"strings"
 	"time"
@@ -26,13 +27,14 @@ func newSnapshotSaveCmd() *cobra.Command {
 		Long: `Load schema, parse data files, validate, build graph, and save as a
 persisted snapshot. Accepts multiple data files accumulated into a single graph.
 
-Output is byte-level deterministic by default (no created_at timestamp).
-Use --timestamp to include a creation timestamp.`,
+Output is byte-level deterministic by default: no created_at timestamp is
+written unless --timestamp stamps the current time, or --into carries the
+merged file's own created_at forward.`,
 		Args: cobra.MinimumNArgs(2),
-		RunE: runSnapshotSave,
+		RunE: withDiagnostics(runSnapshotSave),
 	}
 
-	cmd.Flags().StringP("output", "o", "", "output path for the .ys file (required)")
+	cmd.Flags().StringP("output", "o", "", "output path for the .ys file (required unless --into is given, which defaults it to the merged file)")
 	cmd.Flags().String("from", "", "input format override: json or csv (auto-detected if not set)")
 	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
 	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
@@ -45,9 +47,7 @@ Use --timestamp to include a creation timestamp.`,
 	return cmd
 }
 
-func runSnapshotSave(cmd *cobra.Command, args []string) error {
-	formatStr, _ := cmd.Flags().GetString("format")
-	noColor, _ := cmd.Flags().GetBool("no-color")
+func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	outputPath, _ := cmd.Flags().GetString("output")
 	fromFormat, _ := cmd.Flags().GetString("from")
 	typeName, _ := cmd.Flags().GetString("type")
@@ -57,15 +57,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	indent, _ := cmd.Flags().GetBool("indent")
 	intoPath, _ := cmd.Flags().GetString("into")
 
-	outputFormat, err := cli.ParseOutputFormat(formatStr)
-	if err != nil {
-		return err
-	}
-
 	// Validate output destination: either --output or --into must be set.
 	if outputPath == "" && intoPath == "" {
-		fmt.Fprintf(os.Stderr, "error: either --output or --into is required\n")
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("either --output or --into is required")
 	}
 	if outputPath == "" {
 		outputPath = intoPath // default: overwrite the --into file
@@ -74,8 +68,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	// Parse metadata key=value pairs.
 	metadata, err := parseMetadata(metadataRaw)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("%v", err)
 	}
 
 	schemaPath := args[0]
@@ -83,8 +76,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: resolve path %q: %v\n", schemaPath, err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return cli.Usagef("resolve path %q: %v", schemaPath, err)
 	}
 
 	// Load schema.
@@ -93,36 +85,33 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	s, schemaResult := schema.Load(cmd.Context(), absSchemaPath, loadOpts...)
-	pending, failed := reportSchemaLoad(cmd, outputFormat, noColor, s, moduleRoot, absSchemaPath, schemaResult)
-	if failed {
-		return &cli.ExitError{Code: cli.ExitValidation}
+	if err := reportSchemaLoad(sink, s, moduleRoot, absSchemaPath, schemaResult); err != nil {
+		return err
 	}
 
-	// Load existing snapshot if --into is set. Its diagnostics join the pending
-	// set rather than rendering on their own: a warning here (an unsupported
+	// Load existing snapshot if --into is set. A warning here (an unsupported
 	// hash algorithm, say) means the imported snapshot's integrity was not fully
-	// verified, and it must reach the operator without turning one invocation
-	// into two rendered results.
+	// verified, and it reaches the operator whether or not this command gets as
+	// far as writing anything.
 	var g *graph.Graph
+	var imported *snapshot.HeaderInfo
 	if intoPath != "" {
-		snap, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
+		snap, header, loadResult, loadErr := cli.LoadSnapshotFile(cmd.Context(), intoPath, s)
 		if loadErr != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", loadErr)
-			return &cli.ExitError{Code: cli.ExitRuntime}
+			return cli.Runtimef("%v", loadErr)
 		}
-		pending = cli.MergeResults(pending, loadResult)
+		sink.Add(loadResult)
 		if loadResult.HasErrors() {
-			renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), pending)
 			return &cli.ExitError{Code: cli.ExitValidation}
 		}
 		g = graph.NewFromSnapshot(s, snap)
+		imported = header
 	}
 
 	// Parse all data files.
 	allParsed, parseResult, err := parseDataFiles(cmd, s, dataPaths, fromFormat, typeName, typeColumn)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitUsage}
+		return err
 	}
 
 	// Validate instances.
@@ -136,12 +125,8 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 		g, graphResult = cli.BuildGraph(cmd.Context(), s, valids)
 	}
 
-	// Merge all diagnostics and render once, whatever their severity: the
-	// pending set carries load and imported-snapshot warnings that are only
-	// reachable here.
-	result := cli.MergeResults(pending, parseResult, validateResult, graphResult)
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), result)
-	if result.HasErrors() {
+	sink.Add(parseResult, validateResult, graphResult)
+	if sink.Result().HasErrors() {
 		return &cli.ExitError{Code: cli.ExitValidation}
 	}
 
@@ -149,46 +134,77 @@ func runSnapshotSave(cmd *cobra.Command, args []string) error {
 	snap := g.Snapshot()
 
 	var opts []snapshot.Option
-	if timestamp {
+	switch {
+	case timestamp:
 		opts = append(opts, snapshot.WithCreatedAt(time.Now()))
+	case imported != nil:
+		// Exclusive, not additive: WithCreatedAtFrom wins over WithCreatedAt,
+		// so appending both would make --timestamp silently do nothing.
+		opts = append(opts, snapshot.WithCreatedAtFrom(imported))
 	}
 	if indent {
 		opts = append(opts, snapshot.WithIndent("\t"))
 	}
-	if len(metadata) > 0 {
-		opts = append(opts, snapshot.WithMetadata(metadata))
+	if merged := mergeMetadata(imported, metadata); len(merged) > 0 {
+		opts = append(opts, snapshot.WithMetadata(merged))
 	}
 
+	// Marshal reports a failure as an Error and a value it could not put on the
+	// wire as a Warning; both are diagnostics, so both reach the sink.
 	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
-	if err := marshalResult.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: marshal snapshot: %v\n", err)
+	sink.Add(marshalResult)
+	if marshalResult.Err() != nil {
 		return &cli.ExitError{Code: cli.ExitRuntime}
 	}
-	// Marshal reports values it could not put on the wire as Warnings, and
-	// Err() is nil for a warnings-only result — so checking the error alone
-	// discarded exactly the facts those diagnostics exist to surface.
-	renderDiagnostics(cmd, outputFormat, noColor, s, diagRootFor(s, moduleRoot, absSchemaPath), marshalResult)
 
-	// Warn on non-.ys extension.
-	w := cmd.ErrOrStderr()
+	// One primitive whether or not --into names the same file, so the write is
+	// atomic however the two flags spell the path.
+	if err := cli.WriteFile(outputPath, data); err != nil {
+		return cli.Runtimef("write output: %v", err)
+	}
+
+	// Raised only once the file exists: the code states that a snapshot was
+	// written where a reader that discovers snapshots by extension will not find it.
 	if !strings.HasSuffix(outputPath, ".ys") {
-		fmt.Fprintf(w, "warning: output path %q does not use the .ys extension\n", outputPath)
+		c := diag.NewCollectorUnlimited()
+		c.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_EXTENSION,
+			fmt.Sprintf("output path %q does not use the .ys extension", outputPath)).
+			WithPath(outputPath, "").Build())
+		sink.Add(c.Result())
 	}
 
-	// Write file.
-	if err := writeOutput(data, outputPath, intoPath); err != nil {
-		fmt.Fprintf(os.Stderr, "error: write output: %v\n", err)
-		return &cli.ExitError{Code: cli.ExitRuntime}
-	}
-
-	// Print summary.
-	instanceCount := 0
-	for _, raws := range allParsed {
-		instanceCount += len(raws)
-	}
-	fmt.Fprintf(w, "saved snapshot: %d instances of %d types\n", instanceCount, len(allParsed))
+	// Every diagnostic this invocation can produce is in the sink by now, so
+	// flushing here keeps them above the line that says the work finished.
+	sink.Flush()
+	instanceCount, typeCount := countSnapshot(cmd.Context(), snap, data)
+	sink.Statusf("saved snapshot: %d instances of %d types\n", instanceCount, typeCount)
 
 	return nil
+}
+
+// countSnapshot counts what the written document holds: its root instances
+// from the graph, and its types from the type table the bytes carry, which
+// lists a composed child's type and is the set `snapshot info` reports.
+func countSnapshot(ctx context.Context, snap *graph.Snapshot, data []byte) (instances, types int) {
+	for _, id := range snap.Types() {
+		instances += len(snap.InstancesOf(id))
+	}
+	if header, _ := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data)); header != nil {
+		types = len(header.Types)
+	}
+	return instances, types
+}
+
+// mergeMetadata overlays flag pairs onto the imported header's. The header's
+// annotations survive a merge that does not name them, and a flag wins on a
+// key that appears in both.
+func mergeMetadata(imported *snapshot.HeaderInfo, flags map[string]string) map[string]string {
+	merged := make(map[string]string, len(flags))
+	if imported != nil {
+		maps.Copy(merged, imported.Metadata)
+	}
+	maps.Copy(merged, flags)
+	return merged
 }
 
 // addInstancesToGraph adds validated instances to an existing graph and runs
@@ -202,43 +218,6 @@ func addInstancesToGraph(ctx context.Context, g *graph.Graph, valids []*instance
 	checkResult := g.Check(ctx)
 	collector.Merge(checkResult)
 	return collector.Result()
-}
-
-// writeOutput writes data to outputPath. When --into and --output point to the
-// same file, uses atomic write (temp file + rename) to prevent data loss.
-func writeOutput(data []byte, outputPath, intoPath string) error {
-	if intoPath != "" && outputPath == intoPath {
-		return atomicWrite(data, outputPath)
-	}
-	return os.WriteFile(outputPath, data, 0o600)
-}
-
-// atomicWrite writes data to a temp file in the same directory, then renames
-// it to the target path. This prevents data loss if the process crashes.
-func atomicWrite(data []byte, path string) (retErr error) {
-	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".yammm-save-*.ys")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer func() {
-		if retErr != nil {
-			_ = tmpFile.Close()
-			_ = os.Remove(tmpPath)
-		}
-	}()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close temp file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("rename temp file: %w", err)
-	}
-	return nil
 }
 
 // parseDataFiles parses multiple data files into a merged instance map.

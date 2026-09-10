@@ -1,0 +1,63 @@
+{
+  "name": "\"g1\"",
+  "span": {
+    "s": 0,
+    "e": 11
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 239,
+        "e": 240
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 251,
+              "e": 257
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 244,
+            "e": 265
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "'alpha,one'",
+              "\"beta\"",
+              "\"gamma\"",
+              "\"delta\"",
+              "\"epsilon\"",
+              "\"zeta\"",
+              "\"eta\"",
+              "\"theta\"",
+              "\"iota\""
+            ],
+            "span": {
+              "s": 274,
+              "e": 360
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 267,
+            "e": 369
+          }
+        }
+      ],
+      "span": {
+        "s": 234,
+        "e": 371
+      }
+    }
+  ]
+}

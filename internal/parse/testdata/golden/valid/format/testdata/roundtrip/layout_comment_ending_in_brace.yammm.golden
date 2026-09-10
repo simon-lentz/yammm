@@ -1,0 +1,65 @@
+{
+  "name": "\"p\"",
+  "span": {
+    "s": 0,
+    "e": 10
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 17,
+        "e": 18
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 25,
+              "e": 31
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 22,
+            "e": 39
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 46,
+              "e": 52
+            }
+          },
+          "span": {
+            "s": 41,
+            "e": 52
+          }
+        },
+        {
+          "name": "longerName",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 84,
+              "e": 90
+            }
+          },
+          "span": {
+            "s": 73,
+            "e": 90
+          }
+        }
+      ],
+      "span": {
+        "s": 12,
+        "e": 92
+      }
+    }
+  ]
+}

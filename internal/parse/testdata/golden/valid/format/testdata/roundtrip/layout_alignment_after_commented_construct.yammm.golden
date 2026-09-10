@@ -1,0 +1,139 @@
+{
+  "name": "\"p\"",
+  "span": {
+    "s": 0,
+    "e": 10
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 17,
+        "e": 18
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 25,
+              "e": 31
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 22,
+            "e": 39
+          }
+        },
+        {
+          "name": "state",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"a\"",
+              "\"b\""
+            ],
+            "span": {
+              "s": 47,
+              "e": 90
+            }
+          },
+          "span": {
+            "s": 41,
+            "e": 90
+          }
+        },
+        {
+          "name": "aaa",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 96,
+              "e": 102
+            }
+          },
+          "span": {
+            "s": 92,
+            "e": 102
+          }
+        },
+        {
+          "name": "longerName",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 115,
+              "e": 121
+            }
+          },
+          "span": {
+            "s": 104,
+            "e": 121
+          }
+        }
+      ],
+      "span": {
+        "s": 12,
+        "e": 123
+      }
+    },
+    {
+      "name": "U",
+      "name_span": {
+        "s": 130,
+        "e": 131
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 138,
+              "e": 144
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 135,
+            "e": 152
+          }
+        },
+        {
+          "name": "x",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 156,
+              "e": 162
+            }
+          },
+          "span": {
+            "s": 154,
+            "e": 162
+          }
+        },
+        {
+          "name": "longName",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 173,
+              "e": 179
+            }
+          },
+          "span": {
+            "s": 164,
+            "e": 179
+          }
+        }
+      ],
+      "span": {
+        "s": 125,
+        "e": 181
+      }
+    }
+  ]
+}

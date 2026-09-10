@@ -19,32 +19,30 @@ type tokenRange struct {
 
 // The token kinds the pair rules below name. They are the rule names the
 // parser's lexer table spells, matched by value because that table is
-// keywordless — a keyword arrives as an ordinary word and is told apart by its
-// text, exactly as isKeywordWithRequiredSpaceAfter does.
+// keywordless: a keyword arrives as an ordinary word and is told apart by its
+// text.
 const (
-	kindWS          = "WS"
-	kindSLComment   = "SL_COMMENT"
-	kindDocComment  = "DOC_COMMENT"
-	kindSTRING      = "STRING"
-	kindLBRACE      = "LBRACE"
-	kindRBRACE      = "RBRACE"
-	kindLBRACK      = "LBRACK"
-	kindRBRACK      = "RBRACK"
-	kindLPAR        = "LPAR"
-	kindRPAR        = "RPAR"
-	kindAT          = "AT"
-	kindATAT        = "ATAT"
-	kindASSOC       = "ASSOC"
-	kindCOMP        = "COMP"
-	kindEXCLAMATION = "EXCLAMATION"
-	kindSLASH       = "SLASH"
-	kindEQUALS      = "EQUALS"
-	kindPERIOD      = "PERIOD"
-	kindCOMMA       = "COMMA"
-	kindMINUS       = "MINUS"
-	kindCOLON       = "COLON"
-	kindLT          = "LT"
-	kindGT          = "GT"
+	kindWS         = "WS"
+	kindSLComment  = "SL_COMMENT"
+	kindDocComment = "DOC_COMMENT"
+	kindSTRING     = "STRING"
+	kindREGEXP     = "REGEXP"
+	kindLBRACE     = "LBRACE"
+	kindRBRACE     = "RBRACE"
+	kindLBRACK     = "LBRACK"
+	kindRBRACK     = "RBRACK"
+	kindLPAR       = "LPAR"
+	kindRPAR       = "RPAR"
+	kindAT         = "AT"
+	kindATAT       = "ATAT"
+	kindSLASH      = "SLASH"
+	kindEQUALS     = "EQUALS"
+	kindPERIOD     = "PERIOD"
+	kindCOMMA      = "COMMA"
+	kindMINUS      = "MINUS"
+	kindCOLON      = "COLON"
+	kindLT         = "LT"
+	kindGT         = "GT"
 )
 
 type spacingAction int
@@ -59,14 +57,65 @@ const (
 // across calls — strings.Replacer is safe for concurrent use.
 var lineEndingReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
-// TokenStream applies parse-tree-assisted token-stream formatting.
-// Returns an error if lexing/parsing fails so callers can fall back.
-//
-// It needs two views of one source: the un-elided token stream carries the
-// whitespace and comments a formatter must preserve but no expression extents;
-// the node tree carries the extents and the syntax verdict but elides the
-// whitespace. LexAndParse returns both from a single lex.
+// TokenStream applies parse-tree-assisted token-stream formatting. It returns
+// an error, and no output, when the source does not parse or when the output
+// would not carry the source's tokens and comments. The second error wraps
+// [ErrNotPreserved] and is a defect in the formatter.
 func TokenStream(text string) (string, error) {
+	return tokenStream(text, rewrite)
+}
+
+// SyntaxError is [TokenStream]'s error for a source that does not parse. Issue
+// is the parser's syntax diagnostic, positioned in the text TokenStream was
+// given and naming no source, so a caller that knows the file can render it
+// the way a load would.
+type SyntaxError struct {
+	Issue diag.Issue
+}
+
+func (e *SyntaxError) Error() string { return "parse failed: " + e.Issue.Message() }
+
+// rewrite runs phases 2 to 5 over phase 1's lines.
+func rewrite(ls []line) string {
+	ls = collapseBlankLines(ls)
+	ls = recordsAfterWrap(ls, wrapLongLines(ls))
+	ls = alignColumns(ls)
+	return finalizeFormattedText(joinLines(ls))
+}
+
+// recordsAfterWrap returns the lines phase 4 reads. Phase 3 builds lines from
+// pieces of others and has no record for them, so when it changed the text the
+// record is the lexer's; when it did not, the lines it was given keep theirs.
+func recordsAfterWrap(before, after []line) []line {
+	text := joinLines(after)
+	if text == joinLines(before) {
+		return before
+	}
+	return classifyLexed(text)
+}
+
+// tokenStream is [TokenStream] with phases 2 to 5 as a parameter, so the
+// postcondition can be tested against a rewrite that breaks it.
+func tokenStream(text string, phases func([]line) string) (string, error) {
+	normalized := lineEndingReplacer.Replace(text)
+	ls, tokens, err := lexicalLines(normalized)
+	if err != nil {
+		return "", err
+	}
+	out := phases(ls)
+	// Unchanged text preserves itself, so a formatted file pays no second lex.
+	if out != normalized {
+		if err := preservesTokens(tokens, out); err != nil {
+			return "", fmt.Errorf("%w: %w", ErrNotPreserved, err)
+		}
+	}
+	return out, nil
+}
+
+// lexicalLines runs phase 1 and returns its output as classified lines, each
+// carrying the lexer's own view of it, and the source's tokens. The un-elided
+// tokens and the node tree both come from one LexAndParse.
+func lexicalLines(text string) ([]line, []parse.Token, error) {
 	normalized := lineEndingReplacer.Replace(text)
 
 	// Fail on syntax alone: a source that is semantically invalid but parses,
@@ -74,15 +123,14 @@ func TokenStream(text string) (string, error) {
 	file, allTokens, issues := parse.LexAndParse(normalized, location.SourceID{})
 	for _, iss := range issues {
 		if iss.Code().Category() == diag.CategorySyntax {
-			return "", fmt.Errorf("parse failed: %s", iss.Message())
+			return nil, nil, &SyntaxError{Issue: iss}
 		}
 	}
 
 	ranges := invariantExpressionRanges(file)
 
-	var out strings.Builder
+	e := newEmitter()
 	var pendingWS strings.Builder
-	lineStart := true
 	indentLevel := 0
 	var prev *parse.Token
 	prevInExpr := false
@@ -100,10 +148,10 @@ func TokenStream(text string) (string, error) {
 		if tok.Kind == kindWS {
 			if inExpr {
 				if pendingWS.Len() > 0 {
-					writeExprWhitespace(&out, pendingWS.String(), &lineStart)
+					e.writeExprWhitespace(pendingWS.String())
 					pendingWS.Reset()
 				}
-				writeExprWhitespace(&out, tok.Value, &lineStart)
+				e.writeExprWhitespace(tok.Value)
 			} else {
 				pendingWS.WriteString(tok.Value)
 			}
@@ -121,21 +169,21 @@ func TokenStream(text string) (string, error) {
 					// Preserve the original whitespace so that the indent level
 					// (which only tracks brace depth) doesn't flatten it.
 					if strings.Contains(pendingStr, "\n") {
-						writeExprWhitespace(&out, pendingStr, &lineStart)
+						e.writeExprWhitespace(pendingStr)
 					} else {
 						sep := declarationSeparator(prev, tok, pendingStr, indentLevel, true)
-						writeText(&out, sep, &lineStart)
+						e.write(sep, chunkPlain)
 					}
 				} else {
-					writeExprWhitespace(&out, pendingStr, &lineStart)
+					e.writeExprWhitespace(pendingStr)
 				}
 				pendingWS.Reset()
 			} else if prev != nil && !prevInExpr {
 				sep := declarationSeparator(prev, tok, "", indentLevel, true)
-				writeText(&out, sep, &lineStart)
+				e.write(sep, chunkPlain)
 			}
 
-			writeTokenText(&out, tok, &lineStart)
+			e.writeToken(tok)
 			prev = tok
 			prevInExpr = true
 			continue
@@ -150,8 +198,8 @@ func TokenStream(text string) (string, error) {
 			sep = ""
 		}
 		pendingWS.Reset()
-		writeText(&out, sep, &lineStart)
-		writeTokenText(&out, tok, &lineStart)
+		e.write(sep, chunkPlain)
+		e.writeToken(tok)
 
 		if tok.Kind == kindLBRACE {
 			indentLevel++
@@ -168,10 +216,10 @@ func TokenStream(text string) (string, error) {
 	}
 
 	if pendingWS.Len() > 0 {
-		writeText(&out, pendingWS.String(), &lineStart)
+		e.write(pendingWS.String(), chunkPlain)
 	}
 
-	return finalizeFormattedText(AlignColumns(WrapLongLines(joinLines(collapseBlankLines(classifyText(out.String())))))), nil
+	return e.lines(), allTokens, nil
 }
 
 // invariantExpressionRanges returns the byte extent of every invariant
@@ -304,13 +352,6 @@ func declarationSpacingAction(prev *parse.Token, curr *parse.Token) spacingActio
 		return spacingNone
 	}
 
-	// Specific pair rules.
-	if prevType == kindEXCLAMATION && currType == kindSTRING {
-		return spacingSpace
-	}
-	if prevType == kindASSOC || prevType == kindCOMP {
-		return spacingSpace
-	}
 	if currType == kindLBRACE {
 		return spacingSpace
 	}
@@ -361,20 +402,7 @@ func declarationSpacingAction(prev *parse.Token, curr *parse.Token) spacingActio
 		}
 		return spacingSpace
 	}
-	if isKeywordWithRequiredSpaceAfter(prev.Value) {
-		return spacingSpace
-	}
-
 	return spacingSpace
-}
-
-func isKeywordWithRequiredSpaceAfter(text string) bool {
-	switch text {
-	case "type", "schema", "import", "as", "extends", "abstract", "part":
-		return true
-	default:
-		return false
-	}
 }
 
 func isConstraintBracketLeft(text string) bool {
@@ -405,17 +433,17 @@ func normalizeDocComment(text string) string {
 	return strings.Join(lines, "\n")
 }
 
-func writeExprWhitespace(out *strings.Builder, ws string, lineStart *bool) {
+// writeExprWhitespace preserves an expression's own spacing, normalizing only
+// the indentation that starts a line.
+func (e *emitter) writeExprWhitespace(ws string) {
 	if ws == "" {
 		return
 	}
 
-	var b strings.Builder
 	i := 0
 	for i < len(ws) {
 		if ws[i] == '\n' {
-			b.WriteByte('\n')
-			*lineStart = true
+			e.write("\n", chunkPlain)
 			i++
 			continue
 		}
@@ -425,31 +453,29 @@ func writeExprWhitespace(out *strings.Builder, ws string, lineStart *bool) {
 			j++
 		}
 		seg := ws[i:j]
-		if *lineStart {
-			b.WriteString(NormalizeIndentation(seg))
-		} else {
-			b.WriteString(seg)
+		if e.lineStart {
+			seg = NormalizeIndentation(seg)
 		}
+		e.write(seg, chunkPlain)
 		i = j
 	}
-
-	writeText(out, b.String(), lineStart)
 }
 
-func writeTokenText(out *strings.Builder, tok *parse.Token, lineStart *bool) {
+// writeToken emits one token, telling the emitter what kind it is so the line's
+// lexical record is built rather than guessed.
+func (e *emitter) writeToken(tok *parse.Token) {
 	text := tok.Value
-	if tok.Kind == kindDocComment {
+	kind := chunkPlain
+	switch tok.Kind {
+	case kindDocComment:
 		text = normalizeDocComment(text)
+		kind = chunkComment
+	case kindSLComment:
+		kind = chunkComment
+	case kindSTRING, kindREGEXP:
+		kind = chunkLiteral
 	}
-	writeText(out, text, lineStart)
-}
-
-func writeText(out *strings.Builder, text string, lineStart *bool) {
-	if text == "" {
-		return
-	}
-	out.WriteString(text)
-	*lineStart = updateLineStart(*lineStart, text)
+	e.write(text, kind)
 }
 
 func updateLineStart(lineStart bool, text string) bool {

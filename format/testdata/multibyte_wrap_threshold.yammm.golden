@@ -1,0 +1,9 @@
+schema "wrapcells"
+
+type T {
+	id String primary
+	state Enum[
+		"記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録記録",
+		"b",
+	] required
+}

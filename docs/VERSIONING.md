@@ -849,6 +849,533 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 
 - **`Marshal` returns Fatal `E_INTERNAL` and no bytes for a target key `graph.ParseKey` cannot read** (A-191), where v0.19.0 wrote the document with the address dropped and a `W_SNAPSHOT_VALUE_DROPPED` Warning. `UnresolvedEdge.TargetKey` is written from `immutable.Key.String()` on every library path, `graph.ParseKey` is its pinned inverse, and no consumer path supplies the string — so the branch guarded an event the module's own invariant excludes, and a broken invariant is an internal failure rather than a sampled warning. The one reachable input is caller-assembled `RebuildSnapshot` parts whose key holds a non-scalar component, which `Marshal`'s contract already assigns to Fatal `E_INTERNAL`. The two `W_SNAPSHOT_VALUE_DROPPED` arms for a target key or edge properties under an `absent`/`empty` reason are unchanged, and the code's own description is narrowed to them. Consumer cost is zero by absence: every key the consumer writes is a `String` primary key rendered by the library.
 
+## Unreleased — condition-1 unit 6, on `review` until the unit closes
+
+Condition-1 **unit 6** (the CLI and the formatter). Its commits sit on the
+`review` branch and merge to `main` when the unit closes (A-417); nothing below
+is released or merged. Each block was written by the pass or group that landed
+its behaviour, not at the tag (A-227, A-346). **Six exported declarations are
+ADDED and nothing is removed or changed:** `gorelease -base=v0.21.0` on the
+candidate reports `diag.E_COMMAND_FAILED`, `diag.W_SNAPSHOT_PATH_EXTENSION`,
+`neo4j.W_NEO4J_INDEXES_UNREADABLE`, `snapshot.WithCreatedAtFrom`,
+`format.ErrNotPreserved` and `format.SyntaxError` as compatible changes, and
+suggests `v0.22.0`. `snapshot info --format json`'s payload breaks in a way no
+declaration describes (below).
+
+### Unit 6 — every exit code that moves against `v0.21.0`
+
+Measured through binaries built from `v0.21.0`'s tree and from the candidate,
+one probe per row.
+
+| Invocation | `v0.21.0` | Now | What it reports now |
+| :-- | :-: | :-: | :-- |
+| `export --to csv` of several types into one `--output` | 0, one file with a header row per type | 2 | `CSV export with multiple types requires --output-dir` |
+| `export --to json --output-dir …` | 0 | 2 | `--output-dir applies only to --to csv` |
+| `export --output … --output-dir …` | 0 | 2 | `--output and --output-dir are mutually exclusive` |
+| `yammm snapshot` or `yammm neo4j` with no subcommand | 0, help | 2 | the parent requires a subcommand |
+| `yammm snapshot <unknown>` | 0, help | 2 | `unknown command "…" for "yammm snapshot"` |
+| `fmt --format bogus` | 0, the flag ignored | 2 | `invalid output format "bogus"` |
+| a missing schema path on `validate`, `check`, `load`, `snapshot save`, `neo4j constraints` or `neo4j indexes` | 1 | 3 | an input that cannot be read is a runtime failure, not an invalid document |
+| a missing path on `fmt`, or a missing data file on `check` | 2 | 3 | the same |
+| CSV export of two types whose file names differ only in case | 0, one file short | 3 | the two names cannot share one directory |
+| `--output` naming a writable file in a read-only directory | 0, written in place | 3 | the write cannot be staged beside its target |
+| `neo4j constraints` or `indexes` with an empty `--separator` | 0 | 2 | refused before any work |
+| the same with a `--prefix` or `--separator` that composes no Neo4j identifier | 1 | 2 | refused before any work |
+| `neo4j diff` with an empty `--separator` | 3 | 2 | refused before the connection |
+
+Unchanged, measured the same way: an unknown top-level command (2); `snapshot
+info` on a missing file (3); a read-only target, through `--output` or
+`--output-dir` (3); a looping symlink (3); a symlink, `/dev/stdout`, a FIFO and
+a 250-byte name as targets (0); `fmt --check` over an unformatted file (1, and
+nothing on stderr); `fmt` on a file that does not parse (1); a validation
+failure (1); the label flags on `neo4j introspect` and `export --to cypher`,
+and `neo4j constraints --edition bogus` (2); a failed write under `--format
+json` (3).
+
+### Unit 6, pass A — the formatter
+
+Pass A's fix pass. **No exported declaration moves**, so `gorelease` reports nothing here; `format/` is excluded
+from the v1.0 Go-API compatibility promise in any case (see Scope). What moves is
+formatter *output*, and every item below was reproduced first-hand before the
+repair and is pinned by a fixture after it.
+
+**The formatter now takes its lexical view from the lexer, and every phase
+reads it.** Phases 2 to 4 had each re-derived comment and string boundaries from
+the emitted text with five separate hand-rolled scanners; those are retired and
+`format/scan.go` is deleted. Phase 1 records the view from the token stream as it
+emits each line, and phase 4 reads a record lexed from phase 3's text whenever
+phase 3 rebuilt a line. No phase decides for itself whether a line is a comment.
+
+**Behaviour changes, none of which moves a declaration:**
+
+- A single-quoted value is no longer split at a comma inside it. The lexer's
+  `STRING` rule admits both quote characters; the retired scanner tracked one.
+  Formatting such a schema produced output that did not parse.
+- A trailing comment on an `extends` header no longer absorbs the parent list.
+  The parents and the opening brace were folded into the comment and the output
+  did not parse; the parent list was unrecoverable from it.
+- A comment on an enum value line no longer absorbs the values after it. Such a
+  construct is now re-indented rather than folded onto one line.
+- A wrap point is no longer chosen inside a trailing comment, so a `&&` written
+  in prose no longer breaks the line there.
+- A `]` inside a string literal is no longer read as the enum's terminator. This
+  was the only silent one: the output parsed, loaded, and had a space injected
+  **inside an enum value**.
+- Brackets inside comments no longer count toward construct depth, so a `[` in a
+  comment no longer drags the rest of a type body into the construct and
+  re-indents it.
+- An invariant whose message is single-quoted is now visible to the wrapper; it
+  was skipped entirely by a literal `! "` prefix test.
+- A property legally named `import` no longer causes a blank line to be inserted
+  inside a type body. A declaration is told from a property by the string
+  literal that follows the keyword, not by a text prefix.
+- A comment that merely ends in `{` no longer deletes a deliberate blank line
+  after it, and a `}` inside a block comment no longer deletes one before it.
+- `type`, `schema`, `extends` and `abstract` are legal property names and no
+  longer break an alignment group into unpadded singletons. Only `as` and
+  `part`, which a type body actually refuses, stay denied.
+- **Width is measured in terminal cells, by one function.** The wrap threshold
+  counted runes, the alignment columns counted bytes, and the quantity being
+  measured was always cells: `DisplayWidth` now counts an East Asian Wide or
+  Fullwidth rune (emoji included) as 2, and phase 4's name and content columns
+  measure through it. A 60-rune CJK enum value measured 92 against a threshold
+  of 100 while occupying 152 cells, so it was never wrapped; an aligned group
+  whose content carried CJK came out with a ragged comment column. `format` now
+  imports `golang.org/x/text/width`, already a direct module requirement.
+- A long enum property carrying an **annotation** is no longer wrapped. Wrapping
+  moved the annotation onto the closing `]` line, where it attaches to nothing:
+  the output parsed and then failed to load with `E_INVALID_ANNOTATION`. A
+  **modifier** on that line is legal and still wraps, so the two are not
+  interchangeable. The line stays over the width threshold, which is the lesser
+  harm.
+
+**Prose.** `docs/API.md` §Formatting and `format/doc.go` are rewritten against
+the tree as it now stands. The standing claim that one line classification is
+*"computed once between phases 1 and 2"* was false and is replaced by what the
+code does: phase 1 records the class, the trailing comment's offset and every
+literal's extent as it emits each line; phases 2 and 3 read that record, and
+phase 4 reads it or, where phase 3 rebuilt a line, a record lexed from phase 3's
+text. Two
+further claims were corrected on measurement: the exported helpers are not
+consumer-less (the documentation gate pins their signatures), and the threshold
+is counted in display cells rather than columns.
+
+**Consumer reach: none measured.** rdata runs `go tool yammm fmt --write` in
+pre-commit, so it runs the formatter — but through a binary pinned by its own
+`go.mod`, which is `v0.20.0`. `format/` is byte-identical between `v0.20.0` and
+`v0.21.0`, so every defect above is live for that consumer today and none of
+these repairs reaches it until it moves its pin. Its six schemas were measured
+already canonical, so `--write` rewrites nothing there.
+
+### Unit 6, pass B — the CLI's error model, writes, diagnostics and streams
+
+**Two exported declarations are ADDED and nothing is removed or changed**;
+`gorelease -base=v0.21.0` reports two compatible changes and no incompatible
+ones:
+
+- `diag.W_SNAPSHOT_PATH_EXTENSION` — a snapshot was written to a path that does
+  not end in `.ys`. The write succeeded; a reader that discovers snapshots by
+  extension will not find it.
+- `neo4j.W_NEO4J_INDEXES_UNREADABLE` — a comparison could not read the
+  database's indexes, so the half needing them did not run.
+
+Both replace prose the CLI wrote to a stream, which no `--format json` consumer
+could see in any form. `W_NEO4J_INDEXES_UNREADABLE` reaches the stream through
+the process-contract block below: as text above `neo4j diff`'s report, and in
+the document under `--format json`. A consumer matching on code strings gains two; one
+matching on message text sees the same wording move from a prose line into the
+diagnostic array.
+
+**Behaviour changes that move no declaration:**
+
+- **One invocation renders one diagnostic result, on every path it can return
+  by.** Eleven early returns discarded the schema load's diagnostics entirely,
+  and three severity gates dropped a warnings-only result — so `snapshot info`
+  reported a document whose schema identity could not be checked, exited `0`,
+  and wrote nothing at all to stderr. Under `--format json` those paths now
+  write one document where they wrote none. A failure that is not a diagnostic
+  joins that document as `E_COMMAND_FAILED`, and `fmt` and `export --to cypher`
+  report through it too: the process-contract block below made this item true
+  for them.
+- **A status summary is suppressed under `--format json` and goes to stderr
+  otherwise.** `loaded N instances`, `wrote N CSV files`, `saved snapshot: …`
+  and `updated metadata on …` sat beside the JSON document and stopped it
+  parsing. `snapshot update-metadata`'s summary moves from **stdout to
+  stderr**, where every other command already reported progress — a caller
+  redirecting the two apart previously got that one command's summary in the
+  payload channel.
+- **`snapshot info --dir` marks a warning-only entry `warn`** and counts it
+  apart from `ok`. It read `ok` before, in the one place a dispatch-style scan
+  looks.
+- **Every command's exit code is derived from every phase that diagnosed**,
+  not from its last one. The exit codes this unit moves are in the table at
+  the top of this section.
+- **`yammm-lsp` prints one usage block for a bad flag**, not two, and writes it
+  to an injected writer.
+
+**Consumer reach: not yet measured against a moved pin.** rdata pins `v0.20.0`
+and moves after its own re-key window. No `.ys` byte moves; the exit codes
+that move are in the table at the top of this section, and what a consumer
+would notice besides is stderr under `--format json` becoming parseable where
+it was not.
+
+**`yammm snapshot info --format json` is a BREAKING change to a payload no
+declaration describes.** `gorelease -base=v0.21.0` reports the same two
+compatible changes as the item above and no incompatible ones, because the
+command's JSON shape is not a Go declaration. The CLI now owns that shape
+instead of marshalling `snapshot.HeaderInfo` and `snapshot.SnapshotInfo`
+directly, which had published Go field names as a wire contract. Any consumer
+reading this payload must be updated; **rdata does not read it**, measured at
+its tree — its only mention names the command as human tooling.
+
+- **Every key is snake_case, in all three modes.** The single-file and
+  header-only modes emitted Go field names (`SchemaName`, `TotalInstances`,
+  `IntegrityStatus`); the `--dir` mode wrapped a PascalCase `header` in
+  snake_case entry keys, so one document spoke two conventions. `attestation`'s
+  nested `values` and `associations` follow the same rule. Each type identity
+  still renders as the `schema#name` string `TypeRef` has always written.
+- **`--header-only --format json` reports a real `file_size`.** It published
+  `0` — `HeaderOnlyRead` cannot know a size from an `io.Reader` — while the
+  command held the open handle it could stat. A stat failure keeps the zero and
+  raises no diagnostic, matching what a directory scan does.
+- **`issues` is always present on a `--dir` entry**, an empty array where it was
+  absent. Its sibling `header` is an explicit `null`, so one entry answered
+  "nothing to report" two ways and a consumer had to handle both. The
+  `snapshot info` block below renames it `diagnostics.issues`.
+- **`mod_time` renders at fixed width with nine fractional digits.** RFC 3339
+  Nano trims trailing zeros, so a whole-second stamp rendered shorter than one
+  recorded microseconds later and sorted **above** it — any chronological
+  ordering built on the key as text was wrong. It stays RFC 3339 in UTC, and
+  empty when the file could not be stat'd.
+- **`snapshot info --dir --format json` exits on a malformed entry**, as the
+  text mode already did. The exit derivation was wired to the text return only,
+  so the same directory reported `1` as text and `0` as JSON — and the machine
+  consumer `--format json` exists for read the silent code.
+
+**One exported declaration is ADDED: `snapshot.WithCreatedAtFrom(*HeaderInfo)`.**
+`gorelease -base=v0.21.0` reports three compatible changes and no incompatible
+ones — this one and the two diagnostic codes above.
+
+- It writes the header's `created_at` into the new document byte for byte, for a
+  caller re-marshaling a document it has read. `WithCreatedAt` takes a
+  `time.Time` and cannot express a value it cannot parse and re-render:
+  `HeaderInfo.CreatedAtTime`'s own documentation warns that a time passed back
+  through `WithCreatedAt` does not round-trip its sub-second part, and an offset
+  is normalised to UTC. Measured: `2026-01-01T12:00:00.123456+02:00` becomes
+  `2026-01-01T10:00:00Z`.
+- It takes a parsed header rather than a string because an `Option` cannot
+  report an error, so a bad value would surface only as a `Marshal` diagnostic
+  far from the call site.
+- A header yammm itself wrote is unaffected either way — `Marshal` writes
+  `created_at` at second precision in UTC — so this matters only for a document
+  another writer produced.
+
+**`yammm snapshot save --into` carries the imported header forward.** A merge
+discarded the header's `metadata` and `created_at` and wrote a document with
+neither, which for `--into` with `-o` defaulted — an in-place edit — silently
+erased both. Now the header's `created_at` is carried byte for byte through the
+option above, `--timestamp` replaces it, `--metadata` overlays the header's
+annotations key by key, and a key the flags do not name survives. The
+attestation was never discarded and is untouched: `Graph.Snapshot` derives that
+claim rather than reading it from the header.
+
+**The `snapshot save` summary counts the document it wrote**, not the data files
+it read. A merge reported `saved snapshot: 1 instances of 1 types` over a file
+holding four, so the number described the input and no reader of the result
+could reproduce it.
+
+**Behaviour changes to the text output:**
+
+- **Metadata renders in key order** in both `snapshot info` and
+  `snapshot info --header-only`. Both walked the map directly, so one file
+  reported its annotations in a different order on consecutive runs and no diff
+  of two reports meant anything.
+- **The root's `--format` help states what the flag does.** It was described as
+  the "diagnostic output format" applying to commands that produce diagnostics,
+  while it also shapes `snapshot info`'s stdout payload and suppresses status
+  summaries.
+
+### Unit 6, the lane pass — three asymmetries between sibling commands
+
+**No exported declaration moves.** What moves is the CLI's flag surface and two
+refusals, each reproduced first-hand before the repair.
+
+- **`yammm neo4j introspect` takes `--separator` and `--prefix`**, additively and
+  with the same defaults as its sibling commands. It was the only `neo4j`
+  subcommand that did not, while building its adapter from defaults. Against a
+  graph written with a non-default separator or a label prefix, the relationship
+  scan's `STARTS WITH` filter matched nothing and every constraint was skipped by
+  the schema-name comparison — a scaffold with no relationships and no primary
+  keys, at exit 0.
+- **`yammm neo4j introspect` refuses an unreadable constraint projection**, the
+  guard `neo4j diff` already applied to the identical `SHOW CONSTRAINTS`
+  projection. A parsed constraint carrying a name and no type means the type
+  column did not arrive; inferring from it produced a scaffold with no primary
+  keys, which reads as a database that declares none. It now exits with a runtime
+  error naming the projection.
+- **`yammm export --to cypher` takes `--separator` and `--prefix`**, additively
+  and with the same defaults as the `neo4j` subcommands. It was the last command
+  composing Neo4j labels from defaults with no way to configure them, while the
+  documented Neo4j workflow runs it beside `neo4j constraints` and `neo4j diff`,
+  which both take the flags. An operator provisioning with a label prefix got
+  data statements targeting a label no constraint guarded. The flags are refused
+  on `--to json` and `--to csv`, which compose no label.
+- **CSV export refuses two output names that differ only in case.** On a
+  case-insensitive filesystem they are one file: the set arrived one file short,
+  and the survivor carried one type's name over another type's rows, reported as
+  a complete export at exit 0. The refusal is unconditional, because the exported
+  directory is a portable artefact and the writer cannot know where it will be
+  read.
+
+### Unit 6, clause 5's second fix pass — the formatter
+
+**One exported declaration is ADDED:** `format.ErrNotPreserved`.
+`gorelease -base=v0.21.0` reports it as a compatible change and nothing
+incompatible. `format/` is outside the v1.0 Go-API compatibility promise (see
+Scope).
+
+- **`format.TokenStream` refuses output that does not preserve its source.**
+  When the formatted text differs from the input, the two token sequences are
+  compared — whitespace and a trailing comma before `]` or `{` set aside — and
+  every comment's text line by line. On a mismatch it returns an error wrapping
+  `format.ErrNotPreserved` and no output. Its error contract widens: it returned
+  an error only when the source did not parse, and a caller that reads every
+  error as a parse failure now also receives a refusal.
+  `errors.Is(err, format.ErrNotPreserved)` tells the two apart.
+- **`yammm fmt` exits 3 on a refusal and writes nothing.** `--write` leaves the
+  file unchanged, the stdout mode prints nothing, and `--check` does not list
+  the path. Two inputs in this repository's own fixtures reached it, and both
+  exited 0 before: an enum whose first value shares the `Enum[` line lost that
+  value and still loaded, and a block comment lost its blank lines. Both are
+  now repaired, below; the refusal stays as the guard for any defect not yet
+  found. A pre-commit hook running `fmt --write` then blocks the commit rather
+  than committing the rewrite.
+- **The language server returns no edits for a refusal and logs it as a
+  warning**, where it applied the rewritten text.
+- **Measured reach:** across the 241 tracked schemas of this repository and the
+  consumer's, every schema outside `format/testdata` formats byte for byte as
+  `v0.21.0` formats it, with the same exit codes; only fixtures written for a
+  defect differ. The comparison runs only when formatting changed the text, so
+  an already-formatted file costs nothing extra; a rewrite costs one lex of the
+  output — +37% on the corpus benchmark and +75% on a 200-type synthetic schema.
+
+**The record model (A-447).** Phase 1's record marks a blank line inside a block
+comment as comment text, and phase 2 inserts blank lines with an empty record.
+Phase 3 builds lines from pieces of others and carries no record for them, so
+when it changes the text, phase 4 reads a record lexed from phase 3's output;
+when it changes nothing, phase 4 reads phase 1's. This repairs three defects
+this unit's earlier fix pass introduced, none of which a release carried: blank
+lines inside a block comment were collapsed or deleted; a property group after a
+rebuilt construct lost its alignment, to the end of the file; and a file whose
+trailing comment carried `[` or `{` was not a fixed point, so format-on-save
+oscillated. No exported declaration moves. A rewrite costs about 8% more on the
+corpus benchmark — one lex of phase 3's output, only when phase 3 changed it —
+and an already-formatted file costs nothing.
+
+**Offsets, folding and the opening line (A-447).** Every offset a phase computes
+on a line indexes the line's text, one rule decides whether a multiline construct
+can be joined, and the `extends` readers read code rather than raw text. No
+exported declaration moves.
+
+- **X1, shipped in `v0.20.0` and `v0.21.0`, is repaired.** A multiline enum with
+  a value on its `Enum[` line was collapsed without that value, at exit 0, and
+  the output loaded: the schema's meaning changed silently. `status
+  Enum["active",` … now collapses to `Enum["active", "inactive", "pending"]`.
+- **X2, shipped in `v0.21.0`, is repaired.** A long single-line `extends` whose
+  trailing comment ends in `{` was wrapped with the comment split into the
+  parent list; the output did not load and was not a fixed point. The comment
+  now stays on the brace line.
+- **A comment on a construct's closing line no longer blocks a fold, as in
+  `v0.21.0`.** The joined line keeps it at its end. The same rule now folds a
+  multiline `extends` list whose `{` line carries a comment; `v0.21.0` passed
+  that list through with its parents unindented.
+- **Two defects this unit's earlier fix pass introduced, never released, are
+  repaired:** an invariant written without spaces around `&&` or `||` was cut
+  one byte late when wrapped, severing a variable, and a `schema` or `import`
+  line carrying a trailing comment lost the blank line required after it.
+
+Across the 241 tracked schemas of both repositories, no schema outside
+`format/testdata` formats differently from `v0.21.0`.
+
+### Unit 6, clause 5's second fix pass — the process contract
+
+**Two exported declarations are ADDED:** `diag.E_COMMAND_FAILED` and
+`format.SyntaxError`. `gorelease -base=v0.21.0` reports both as compatible
+changes and nothing incompatible. `format/` is outside the v1.0 Go-API
+compatibility promise (see Scope).
+
+- **Under `--format json`, a failure is inside the one document.** A failure
+  that is not itself a diagnostic — a bad flag value, an unreadable path, an
+  unwritable output, a lost connection, or one cobra raises before any command
+  runs (a wrong argument count, an unknown flag or command, a missing
+  subcommand) — was printed as `error:` prose beside the document or instead of
+  it. It is now an `E_COMMAND_FAILED` Error in the document, whose `exit_code`
+  detail is the process exit code, and nothing else is written to stderr.
+  **No exit code moves:** measured over 34 failure cases in both formats
+  against the previous commit. Under text nothing changes: the failure prints
+  as `error:` lines. Under `--format json` the stderr document is written when
+  the command ends, after any stdout payload.
+- **A diagnostic a command adds after the diagnostics it writes above its
+  payload now reaches the stream.** `neo4j diff` added the warning for an index
+  read that failed after its one render, so the warning was written nowhere and
+  the command exited 3 saying nothing. It now precedes the diff report as text
+  and is in the document under JSON. This unit's earlier fix pass introduced
+  the defect; no release carried it.
+- **`yammm fmt` reports a syntax error as the positioned `E_SYNTAX` diagnostic
+  `validate` reports**, naming the file — `broken.yammm:4:1: error[E_SYNTAX]:
+  …` where it printed `error: broken.yammm: parse failed: …` — and inside the
+  document under `--format json`. The exit code stays 1. Of the 241 tracked
+  schemas of both repositories, the 51 that do not parse change their `fmt`
+  stderr in this way and nothing else.
+- **`yammm fmt --check` writes nothing to stderr again**: the path on stdout
+  and exit 1, the `gofmt -l` shape `v0.12.3` documented. This unit's earlier
+  fix pass added one `error: validation errors found` line per invocation; no
+  release carried it.
+- **A mistyped subcommand is named.** `yammm snapshot verfiy …` reports
+  `unknown command "verfiy" for "yammm snapshot"` at exit 2, where it reported a
+  missing subcommand; `v0.21.0` printed help and exited 0.
+- **`export --to cypher` reports the Neo4j shape's diagnostics as
+  diagnostics**, its warnings included, which it discarded. A shape error no
+  longer prints a diagnostic result's summary line, its indented issue lines
+  and a bare `error: ` line as a failure message. `snapshot save` reports a
+  failed marshal the same way, still at exit 3.
+- **`format.TokenStream`'s parse error is a `*format.SyntaxError`** carrying
+  the parser's positioned diagnostic. Its `Error()` text is unchanged.
+
+**Consumer reach, measured.** `yammm fmt`'s stdout and both exit codes are
+byte-identical to the previous commit on all 241 tracked schemas, and outside
+`format/testdata` to `v0.21.0`.
+
+### Unit 6, clause 5's second fix pass — the write model
+
+**No exported declaration moves.** Every file the CLI writes to a path the
+operator named — `--output`, `--output-dir`, `-o`, `fmt -w`, `snapshot
+update-metadata` — is written by one rule. The path's symlinks are followed, and
+then:
+
+- **A regular file, or one that does not exist yet, is replaced atomically,**
+  staged beside the file the path resolves to. A symlink survives and the file
+  it names is written, as `v0.21.0` wrote it; this unit's earlier fix pass
+  replaced the link with a regular file and left the file it named unchanged,
+  for every write command and for `--output-dir`. A dangling symlink creates the
+  file it names.
+- **A FIFO, a device or any path under `/dev/` is written through in place,
+  continuing its stream.** `--output /dev/stdout` works again, redirected to a
+  file or into a pipe, and a FIFO's reader receives the bytes. The earlier fix
+  pass exited 3 on `/dev/stdout` and `/dev/null`, and replaced a FIFO with a
+  regular file at exit 0 while its reader received nothing.
+- **On Linux, `--output /dev/stdout >> log` keeps the log's history.** Linux
+  reopens the file behind `/dev/stdout`, and `v0.21.0`'s `os.WriteFile`
+  truncated it, so the command erased every line already in the log — measured
+  in a Linux container. The bytes are now appended. darwin duplicates the
+  descriptor instead and never truncated.
+- **Anything else is refused, naming the path the operator gave:** a read-only
+  file — for `--output-dir` too, where the earlier fix pass overwrote a
+  read-only `Person.csv` at exit 0 — a directory, a looping symlink, which the
+  earlier fix pass replaced at exit 0, and a file whose directory cannot hold
+  the staging file. A failed write names the operator's path and its cause,
+  never the staging file.
+- **The staging name has a fixed length**, `.yammm-<random>.tmp`, so a basename
+  near the filesystem's name limit is written again; the earlier fix pass
+  refused a 245-byte name at exit 3.
+- **A file `export --output-dir` creates is owner-only (0600)**, as a file
+  `--output` creates already was at `v0.21.0`, which created per-type CSV files
+  0644. An existing file keeps its mode.
+
+**Measured against `v0.21.0`, every target kind behaves as it did, with one
+deliberate exception: a writable file in a read-only directory is refused at
+exit 3, where `v0.21.0` wrote it in place.** A write that cannot be staged
+beside its target could only truncate the file in place, which an interrupted
+write or a full disk turns into a lost file; `gofmt -w` refuses the same
+target. Omit `--output` to write to stdout. The earlier fix pass's other three
+exit moves are withdrawn: `/dev/stdout` and a 245-byte basename went from 0 to
+3, and a looping symlink from 3 to 0.
+
+### Unit 6, clause 5's second fix pass — Neo4j labels
+
+**No exported declaration moves.** `neo4j.Adapter.InferSchema` changes
+behaviour; its signature does not.
+
+- **`yammm neo4j introspect` reads a graph written with a label prefix.**
+  `InferSchema` parses each label as `Adapter.Label` writes it: it strips the
+  adapter's prefix, splits at its separator, and compares `--schema` as a label
+  writes it. With a `--prefix`, the prefix was folded into every label's schema
+  component, so `--schema book_catalog` matched nothing and scaffolded a schema
+  with no types at exit 0 — the failure the lane pass's `--prefix` entry
+  described as repaired. A `--schema` the label sanitizes, such as
+  `book-catalog`, matched nothing either; it now matches `book_catalog`'s
+  labels, and the scaffold names the schema as typed, trimmed.
+- **A filter that matches none of the constraints read says so.** The scaffold
+  carries a TODO line naming the schema, the prefix and the separator, and how
+  many node constraints were read, where it stood as an empty database's.
+- **Labels another configuration wrote are left out.** A scoped label without
+  this configuration's prefix is not read as a type of this schema, and an edge
+  to such a target is kept as a cross-schema guess.
+- **The label flags are refused before any work, at exit 2**, on `neo4j
+  constraints`, `indexes`, `diff`, `introspect` and `export --to cypher`: an
+  empty `--separator`, and a `--prefix` or `--separator` whose composed label
+  is not a Neo4j identifier. Against `v0.21.0`: an empty separator made
+  `constraints` and `indexes` compose labels that cannot be split back, at
+  exit 0; an invalid prefix or separator failed after the schema loaded, at
+  exit 1; and `diff` with an empty separator failed on the connection, at
+  exit 3. All three now exit 2 before any load or connection. `introspect` and
+  `export --to cypher` exited 2 at `v0.21.0`, which had no label flags on
+  either.
+- **`neo4j constraints --edition` is refused before the schema loads again**,
+  at exit 2, as `v0.21.0` refused it. This unit's earlier fix pass had moved the
+  refusal after the load; no release carried that.
+
+**Consumer reach:** rdata calls none of `neo4j.New`, the label options or
+`InferSchema`, measured in its tree. rdata's suite fails the same four tests on both
+sides (the `v0.21.0` hash re-key), and its `fmt --check`, `fmt --write` and
+`validate` hook chain is green on both.
+
+### Unit 6, clause 5's second fix pass — `snapshot save`
+
+**No exported declaration moves.**
+
+- **`W_SNAPSHOT_PATH_EXTENSION` is raised only once the snapshot is written,
+  and it names the file.** The code's registered meaning is that a snapshot was
+  written to a path that does not end in `.ys`. It was raised before the
+  write, so a write that failed at exit 3 still reported a snapshot as written.
+  It now carries the output path as its location, where the text form printed
+  `<unknown>`.
+- **The summary's type count is the written document's type table**, the
+  count `snapshot info` reports for the same file. It counted the types holding
+  root instances, so a composed child's type, which the table lists, was left
+  out, as at `v0.21.0`. The pass-B entry above says the summary counts the
+  document it wrote; that held for the instance count and not for the type
+  count.
+- **The help states when `created_at` is written:** through `--timestamp`, or
+  carried forward from the merged file by `--into`. It said none is written by
+  default, which `--into` contradicted.
+- **`snapshot save --into` and `export` from a `.ys` read its header at header
+  cost.** The header was read by scanning the whole document again after the
+  load had checked it. Output is byte-identical.
+
+### Unit 6, clause 5's second fix pass — `snapshot info`
+
+**No exported declaration moves. `snapshot info --dir --format json` renames a
+key `v0.21.0` shipped**, on top of the breaking payload change above. **rdata
+does not read this output**, measured at its tree.
+
+- **Each `--dir` entry carries its result under `diagnostics`, in the wire the
+  diagnostic stream uses:** `issues`, each carrying every field a diagnostic
+  has, plus `limit`, `limitReached` and `droppedCount` when the entry's issues
+  were truncated. `v0.21.0` carried an `issues` array of severity, code and
+  message on an entry that had issues and none on a clean one, and the entry
+  above made the array always present. A truncated entry listed 100 issues with
+  no sign that more were dropped. A consumer reading an entry's `issues` reads
+  `diagnostics.issues`.
+- **Absent `metadata` renders as `{}`** in both JSON modes, where it rendered
+  `null` beside `types: []`. `features` is always an array: every reader
+  refuses a header whose `features` is absent or null.
+- **`--header-only`'s text reports the file size** its JSON reports. The text
+  modes read the structure the JSON mode marshals, so a field one mode reports
+  the other reports too.
+- **A `warn` row in `--dir`'s text names its first warning**, code and message,
+  where it read `warn` alone.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:
@@ -1626,3 +2153,4 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **2026-09-03** — **Added the "Unreleased — merged to `main`" section for condition-1 unit 4 (`schema/`), written in the fix pass that landed the behaviour rather than at the tag (A-227).** It enumerates the two incompatible and twenty-eight additive declarations `gorelease -base=v0.20.0` reports at `9007281`, and every behaviour change that moves no declaration — the UPPER_SNAKE relation names, one postfix level, the typed static checker and the evaluator conforming to one scope contract, byte-decided registry idempotence, the 16 MiB bound and the non-blocking open at every read, the hash at version 4 — each marked consumer-visible where rdata's tree measured it so. The enumeration of record had carried none of this half when the unit's fix-diff round read it.
 - **2026-09-04 (late)** — Corrected the Unreleased section's preamble and the condition-1 unit-5 heading, which still said the unit was not closed after A-297 closed it and `f049740` (PR #105) merged it. Prose only; no enumeration changed.
 - **2026-09-06** — **Corrected the unit-4 "Additive API surface" enumeration of `ReceiverKind`.** It named `RecvScalar`, which no declaration in the module carries, and listed four constants where `gorelease -base=v0.20.0` reports ten. The line now names all ten as declared: `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList`, `RecvNumericList`. `RecvScalar` was added and renamed inside the unreleased range, so it leaves no trace for a consumer; the enumeration had kept its old spelling. Prose only; no behaviour changed.
+- **2026-09-10** — **Corrected condition-1 unit 6's Unreleased section against the candidate (A-456).** Retitled it, since unit 6 sits unmerged on `review` (A-417), and gave pass A its own heading; stated the section's whole declaration delta, six compatible additions; added an exit-code table measured against `v0.21.0`, replacing two sentences that said no exit code moves; stated how `W_NEO4J_INDEXES_UNREADABLE` and the one-result rule reach the stream; recorded the 0600 mode of the files `--output-dir` creates; and pointed pass B's `issues` item at its rename.

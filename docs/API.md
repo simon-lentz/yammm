@@ -837,7 +837,7 @@ type SnapshotInfo struct {
 
 `snapshot.TypeRef{SchemaPath, Name string}` is the schema-less display surface: `Info`, `HeaderOnly` and `HeaderOnlyRead` run without an import closure to resolve against, so each type is reported as the identity the document states, and two same-named types in different schemas stay distinct — both in `Types` and as `InstanceCounts` keys. `TypeRef` is comparable, and its `String()` and `MarshalText()` render `path#name`. The `#` separator is deliberate beside `schema.TypeID.String()`'s `path:name` form: TypeID's rendering is byte-order-bearing (the wire's types-table sort rides it), so the display form stays visibly distinct rather than moving wire bytes to unify the two.
 
-`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `SnapshotInfo` and `HeaderInfo` serialize one way: `yammm snapshot info --format json` writes them, and nothing reads them back. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir` / `ScanDirSlice`, which hands back `HeaderInfo` values directly, and `path#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
+`TypeRef` renders and does not parse. It carries no `UnmarshalText`, so `SnapshotInfo` and `HeaderInfo` serialize one way, and nothing reads them back. `yammm snapshot info --format json` does not write these structs: it owns its wire shape and emits snake_case keys, carrying each `TypeRef` through as the same `schema#name` string. This is a decision, not a gap — the surfaces are a report projection, the in-process way to scan many documents is `ScanDir` / `ScanDirSlice`, which hands back `HeaderInfo` values directly, and `path#name` is injective over the values yammm produces but not over an arbitrary `TypeRef`. Adding `UnmarshalText` is additive and stays available if a consumer needs it.
 
 ### Header-Only Reads
 
@@ -1048,7 +1048,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 **Wire-format contracts.** The primitive depends on two contracts documented in `snapshot/wire.go`'s package Godoc: the field-order contract (top-level keys are `{yammm_snapshot, types, instances, diagnostics}` in that order) and the body-byte-range stability contract (the byte range from the `,` after the header value through the document's closing `}` is reused verbatim). Both are pinned by `TestWireFormat_TopLevelKeyOrder` and `TestWireFormat_BodySuffixContract` in `snapshot/wire_test.go`, so a future Marshal-side shape change that would silently break the primitive fails at the wire-format test level.
 
-**CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (1) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic via `snapshot.WriteFile`.
+**CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (1) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic (tmp+fsync+rename) and preserves the file's mode: the CLI follows the path's symlinks, stages every write it makes on a sibling of the file they resolve to, sets the mode before the rename rather than after it, and creates a file that did not exist at `0600`. A FIFO, a device or a path under `/dev/` is written through instead, and anything else — a read-only file, a directory, a looping link, a directory that cannot hold the staging file — is refused naming the path. It does not call `snapshot.WriteFile`, whose documented mode policy — `0o666` subject to umask, with callers told to chmod afterwards — is a library contract for consumers rather than the CLI's.
 
 ### Wire Format Versions
 
@@ -1411,7 +1411,7 @@ The rendering counterpart — the string form the library stores for a `Timestam
 yammmSource := adapter.InferSchema(constraints, relationships, schemaFilter)
 ```
 
-`InferSchema` takes `[]RemoteConstraint` and `[]RemoteRelationship` values (obtained from introspection queries) and produces a `.yammm` source string. Helper functions `IntrospectConstraintsQuery`, `IntrospectRelationshipsQuery`, `ParseRemoteConstraints`, and `ParseRemoteRelationships` assist with gathering introspection data from a live database.
+`InferSchema` takes `[]RemoteConstraint` and `[]RemoteRelationship` values (obtained from introspection queries) and produces a `.yammm` source string. Each label is parsed as `Adapter.Label` writes it under the adapter's prefix and separator, so a label another configuration wrote is not read as this schema's type; `schemaFilter` is compared as a label writes it, and a filter that matches none of the constraints read leaves a TODO line saying so. Helper functions `IntrospectConstraintsQuery`, `IntrospectRelationshipsQuery`, `ParseRemoteConstraints`, and `ParseRemoteRelationships` assist with gathering introspection data from a live database.
 
 ### Constraint Diffing
 
@@ -1784,20 +1784,35 @@ The `format` package provides canonical formatting for `.yammm` schema files:
 ```go
 func TokenStream(text string) (string, error)
 
-// Two pipeline phases (3 and 4) and two phase-1 helpers, exported and consumer-less today
+// Wrapped by TokenStream's error when its output would not preserve the source.
+var ErrNotPreserved error
+
+// TokenStream's error when the source does not parse. Issue is the parser's
+// diagnostic, positioned in the text and naming no source.
+type SyntaxError struct {
+    Issue diag.Issue
+}
+
+// Two pipeline phases (3 and 4) and two measurement helpers. Nothing outside
+// this package calls them, apart from the gate that pins these signatures.
 func WrapLongLines(text string) string
 func AlignColumns(text string) string
 func NormalizeIndentation(line string) string
 func DisplayWidth(line string) int
 
-const LineWidthThreshold = 100 // columns; a tab counts as 4
+const LineWidthThreshold = 100 // display cells: a tab counts as 4, an East Asian wide rune as 2
 ```
 
 ```go
 formatted, err := format.TokenStream(input)
 ```
 
-`TokenStream` returns an error **only** when the source fails to parse — that is, when an issue's `Code().Category()` is `diag.CategorySyntax`. A source that parses but is semantically invalid (inverted bounds, say) formats successfully. The CLI maps the error to `ExitValidation`; the LSP swallows it and returns no edits.
+`TokenStream` returns an error, and no output, in two cases.
+
+- **The source fails to parse** — an issue's `Code().Category()` is `diag.CategorySyntax`. The error is a `*format.SyntaxError` carrying that issue, and its `Error()` reads `parse failed: ` and the message. A source that parses but is semantically invalid (inverted bounds, say) formats successfully.
+- **The output would not preserve the source.** Whitespace, and a trailing comma before `]` or `{`, are the only things the formatter may change. After phase 5, when the output differs from the input, the two token sequences are compared with those set aside, and every comment's text line by line. On a mismatch the error wraps `format.ErrNotPreserved`: the defect is the formatter's, never the input's. An input already formatted is returned unchanged and costs no comparison.
+
+The CLI reports a parse failure as the positioned `E_SYNTAX` diagnostic, naming the file as `validate` does, and exits with `ExitValidation`; it maps a refusal to `ExitRuntime`, leaving the file unchanged. The LSP returns no edits for either, and logs a refusal as a warning.
 
 Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so a CRLF file always reports as unformatted under `yammm fmt --check`.
 
@@ -1805,10 +1820,20 @@ The formatter then applies a five-phase pipeline:
 
 1. **Token-stream rewriting:** canonical spacing between tokens and indentation normalization — **except inside invariant expressions**, whose regions keep the author's own spacing between tokens (a continuation line's leading indentation is still normalized)
 2. **Blank line collapsing:** removes excess blank lines while preserving section breaks, and *inserts* one after the schema header and after the last import when the following line is not already blank
-3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at `LineWidthThreshold`, and collapses an existing multiline enum, extends clause or datatype-alias enum back onto one line when the joined form fits. A multiline invariant is never collapsed
-4. **Column alignment:** pads the member-name column so the column after it lines up — the type for a property, the multiplicity for a relationship, the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases — broken by a kind change or by any line that is not alignable — a blank line, a comment-only line, a type head or closing brace, an `extends` clause, the first line of a multiline construct. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
+3. **Line wrapping:** wraps long lines (enums, extends clauses, invariants) at `LineWidthThreshold`, and collapses an existing multiline enum, extends clause or datatype-alias enum back onto one line when the joined form fits. A construct is not collapsed when any of its lines carries a comment, because the comment would then stand in front of everything after it. A property whose suffix carries an annotation is not wrapped at all: the annotation would land on the closing `]` line, where it attaches to nothing and the schema no longer loads. A modifier on that line is legal. A multiline invariant is never collapsed
+4. **Column alignment:** pads the member-name column, measured in display cells, so the column after it lines up — the type for a property, the multiplicity for a relationship, the `=` for a datatype alias — and aligns trailing inline comments. It runs over contiguous runs of one member kind — properties, relationships, and file-scope datatype aliases — broken by a kind change or by any line that is not alignable — a blank line, a comment-only line, a type head or closing brace, an `extends` clause, the first line of a multiline construct. A type-block boundary breaks a run because its brace lines are not alignable, not because blocks are tracked
 5. **Text finalization:** trims trailing whitespace from each line, removes trailing blank lines, and ensures the file ends with a newline
 
-Phases 2–4 read one line classification — blank, comment, or content — computed once between phases 1 and 2. No phase decides on its own whether a line is a comment, so a comment line is never wrapped, aligned, or read as an enum value or a type name, whatever its text looks like; a comment inside a multiline enum or `extends` list keeps its place and the construct is re-indented rather than collapsed.
+Phase 1 records the lexer's view of each line as it emits that line. The record holds three facts:
+
+- the class of the line — blank, comment, or content
+- the offset where a trailing comment starts, when the line has one
+- the extent of every string and regex literal
+
+A blank line inside a block comment is comment text, not a section break. Phases 2 and 3 read this record, which phase 1 builds from the token stream it already holds, at no second lex. Phase 3 builds lines from pieces of others and has no record for them. So whenever phase 3 changed the text, phase 4 reads a record lexed from phase 3's text; when it changed nothing, phase 4 reads phase 1's. No phase derives these facts from the text by hand.
+
+Three consequences follow. A comma inside a string literal is not a value separator. A bracket inside a comment does not open or close a construct. A comment line is never wrapped, aligned, or read as an enum value or a type name, whatever its text looks like. A comment inside a multiline enum or `extends` list keeps its place, and the formatter re-indents the construct instead of collapsing it.
+
+`WrapLongLines` and `AlignColumns` lex the text you give them. A caller that enters at one of these phases has no record to inherit.
 
 Output is deterministic and idempotent. The formatter is used by the LSP server for `textDocument/formatting` and by the CLI for the `yammm fmt` command.

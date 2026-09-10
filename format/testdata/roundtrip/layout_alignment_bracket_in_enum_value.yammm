@@ -1,0 +1,9 @@
+schema "p"
+
+type T {
+	id String primary
+	state Enum["aaaaaaaaaaaaaaaaaaaaaaaaaa[", "bbbbbbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccccccccccc"]
+	aaa String
+	b String
+	longerName String
+}
