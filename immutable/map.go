@@ -18,10 +18,8 @@ import (
 type Map[K comparable] struct {
 	entries map[K]Value
 
-	// folded memoises the sorted keys and the case-folded index a
-	// [Properties] view over these entries needs, so [PropertiesOf]
-	// computes them once per map rather than once per call. Nil on a zero
-	// Map; only read for string keys.
+	// folded memoises what [PropertiesOf] needs, once per map. Nil on a zero
+	// Map and for any key type but string, which nothing reads it for.
 	folded *foldedView
 }
 
@@ -62,7 +60,17 @@ func WrapMap[K comparable](m map[K]any, opts ...Option) Map[K] {
 	for k, v := range m {
 		entries[k] = Value{val: wrapValue(v, cfg.clone)}
 	}
-	return Map[K]{entries: entries, folded: &foldedView{}}
+	return Map[K]{entries: entries, folded: newFoldedView[K]()}
+}
+
+// newFoldedView allocates the memo only when K is string: PropertiesOf, its
+// only reader, takes a Map[string], so a view on any other key type is dead.
+func newFoldedView[K comparable]() *foldedView {
+	var k K
+	if _, ok := any(k).(string); ok {
+		return &foldedView{}
+	}
+	return nil
 }
 
 // Get returns the value for the given key and true if the key exists.

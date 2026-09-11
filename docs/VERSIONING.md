@@ -1431,6 +1431,13 @@ does not read this output**, measured at its tree.
   decomposed character changes. A snapshot's `schema_source` header records
   the schema's identity and is informational: it decides nothing on load.
 
+### Unit 7, pass A — `immutable.Map`'s folded view
+
+- **`WrapMap` allocates its case-folded view only for a string-keyed map.**
+  `PropertiesOf`, the view's one reader, takes a `Map[string]`, so the view a
+  `Map[int]` or a map keyed by a named string type carried was never read. A
+  string-keyed map keeps it, shared by every copy. No declaration moves.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:
