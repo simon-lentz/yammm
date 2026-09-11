@@ -1663,6 +1663,36 @@ existing declaration.
   from its run against `v0.21.0` by nothing, and no consumer names any of the
   three symbols.
 
+### Unit 7, the slate fix pass — `immutable` refuses a cycle and adopts a wrapper
+
+**No exported declaration moves**: `gorelease -base=v0.21.0` is byte-identical
+to the run before this group. Each item below changes behaviour behind an
+existing declaration.
+
+- **A value that refers to itself is refused with a panic**, which a caller can
+  recover from. It had exhausted the stack instead — a fatal runtime error that
+  no deferred recover can contain — through every door: `Wrap`, `WrapMap`,
+  `WrapProperties`, `WrapSlice`, `WrapKey`, and the `WithClone` path.
+  `WrapKey`'s godoc already promised a panic for a cyclic component, so the
+  promise is now true. The walk counts its depth and records the maps and
+  slices on its path only past the depth `encoding/json` uses, so an ordinary
+  value pays a counter and nothing more, and a value merely shared or deeply
+  nested still wraps.
+- **A constructor given one of this package's own wrappers adopts it.** A
+  `Value` contributes its content, so no `Value` holds a `Value`; a `Map`,
+  `Slice`, `Properties` or `Key` is stored as itself. **What this repairs:**
+  such a value was kept as an opaque struct, so `Value.IsNil` reported false
+  for a nil `Properties`, `Key` or non-string-keyed `Map`, a `Clone` returned
+  the wrapper rather than its data, and a `Key` holding one rendered `{}` in
+  place of its contents. Wrapping a `Value` again nested it, so every typed
+  accessor on the outer value reported false.
+- **An array is stored as it is**, and the package documentation now says so. An
+  array is how a scalar carrier is spelled here rather than a list —
+  `uuid.UUID` is `[16]byte` — so wrapping one as a `Slice` would turn a single
+  UUID into sixteen byte values. No behaviour changes.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

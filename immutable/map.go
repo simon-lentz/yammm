@@ -123,21 +123,17 @@ func cloneValue(v Value) any {
 	if v.val == nil {
 		return nil
 	}
-
-	switch inner := v.val.(type) {
-	case Map[string]:
-		return inner.Clone()
-	case Slice:
-		return inner.Clone()
-	default:
-		// Primitives and other types
-		rv := reflect.ValueOf(inner)
-		if rv.Kind() == reflect.Map {
-			return deepCloneMap(rv)
-		}
-		if rv.Kind() == reflect.Slice {
-			return deepCloneSlice(rv)
-		}
-		return inner
+	if w, ok := v.val.(wrapper); ok {
+		return w.cloneToAny()
 	}
+
+	rv := reflect.ValueOf(v.val)
+	var g cycleGuard
+	if rv.Kind() == reflect.Map {
+		return deepCloneMap(rv, &g)
+	}
+	if rv.Kind() == reflect.Slice {
+		return deepCloneSlice(rv, &g)
+	}
+	return v.val
 }

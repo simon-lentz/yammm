@@ -86,10 +86,35 @@
 // same scope). Use WithClone(true) when the value comes from external sources, is
 // shared, or when ownership cannot be verified.
 //
-// Note: cloning reaches only what is stored as-is. Struct values and pointer
-// values are stored as-is on every path and are never cloned. For full
-// isolation of struct-based data, do not mutate the original after Wrap, or
-// pass a map/slice representation of the data.
+// Note: cloning reaches only what is stored as-is. Struct values, pointer
+// values and arrays are stored as-is on every path and are never cloned. For
+// full isolation of struct-based data, do not mutate the original after Wrap,
+// or pass a map/slice representation of the data.
+//
+// # Arrays
+//
+// An array is stored as it is, not wrapped as a [Slice]. An array is how this
+// library spells a scalar carrier rather than a list — uuid.UUID is [16]byte —
+// so wrapping one as a Slice would turn a single UUID into sixteen byte values.
+// No decoder here produces an array for a list position.
+//
+// # Wrapping a wrapper
+//
+// A constructor given one of this package's own wrappers adopts it rather than
+// storing it as an opaque struct. A [Value] contributes its content, so no
+// Value ever holds a Value; a [Map], [Slice], [Properties] or [Key] is already
+// immutable and is stored as itself. What reads such a value — [Value.IsNil], a
+// Clone, a [Key]'s canonical string — reads the content rather than an empty
+// struct.
+//
+// # Cyclic values
+//
+// A value that refers to itself is refused with a panic, which a caller can
+// recover from. The walk counts its depth and, past the point where real data
+// stops nesting, records the maps and slices on its path — the shape
+// encoding/json uses, so an ordinary value pays a counter and nothing more.
+// Without it such a value exhausts the stack, and a fatal runtime error is not
+// something a caller can contain.
 //
 // # Nil Semantics
 //

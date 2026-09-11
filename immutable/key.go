@@ -30,7 +30,7 @@ type Key struct {
 //
 // WrapKey panics if any component cannot be JSON-marshaled. This includes:
 //   - Channels and functions
-//   - Cyclic data structures
+//   - Cyclic data structures, which the wrap itself refuses
 //   - NaN or Inf floating-point values
 //   - Maps with unsupported key types (e.g., struct keys; int keys are converted to strings)
 //
