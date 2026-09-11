@@ -4,9 +4,19 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	"unicode"
+
+	"golang.org/x/text/width"
 
 	"github.com/simon-lentz/yammm/location"
+)
+
+// An excerpt shows at most excerptCols runes of its source line. A longer line
+// is cut to a window that holds the span's start, and each cut end is marked
+// with excerptEllipsis.
+const (
+	excerptCols     = 120
+	excerptEllipsis = "..."
 )
 
 // SourceProvider provides source content for excerpt rendering.
@@ -21,13 +31,11 @@ type SourceProvider interface {
 
 // rendererConfig holds renderer configuration.
 type rendererConfig struct {
-	provider            SourceProvider
-	excerpts            bool
-	maxCols             int
-	moduleRoot          string
-	colorize            bool
-	distinguishFatal    bool
-	truncationIndicator string
+	provider         SourceProvider
+	excerpts         bool
+	moduleRoot       string
+	colorize         bool
+	distinguishFatal bool
 }
 
 // Option configures Renderer behavior.
@@ -86,34 +94,17 @@ func WithDistinguishFatal(distinguish bool) Option {
 //
 // Create with [NewRenderer] and configure with [Option] functions.
 type Renderer struct {
-	provider            SourceProvider
-	excerpts            bool
-	maxCols             int
-	root                location.CanonicalPath // the module root as an identity; zero when unset or unresolvable
-	colorize            bool
-	distinguishFatal    bool
-	truncationIndicator string
+	cfg  rendererConfig
+	root location.CanonicalPath // the module root as an identity; zero when unset or unresolvable
 }
 
 // NewRenderer creates a renderer with the given options.
 func NewRenderer(opts ...Option) *Renderer {
-	cfg := &rendererConfig{
-		maxCols:             120,
-		truncationIndicator: "...",
-	}
-
+	var cfg rendererConfig
 	for _, opt := range opts {
-		opt(cfg)
+		opt(&cfg)
 	}
-
-	r := &Renderer{
-		provider:            cfg.provider,
-		excerpts:            cfg.excerpts,
-		maxCols:             cfg.maxCols,
-		colorize:            cfg.colorize,
-		distinguishFatal:    cfg.distinguishFatal,
-		truncationIndicator: cfg.truncationIndicator,
-	}
+	r := &Renderer{cfg: cfg}
 	if cfg.moduleRoot != "" {
 		if root, err := location.NewCanonicalPath(cfg.moduleRoot); err == nil {
 			r.root = root
@@ -157,7 +148,7 @@ func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
 	}
 
 	// Source excerpt
-	if r.excerpts && r.provider != nil && issue.HasSpan() {
+	if r.cfg.excerpts && r.cfg.provider != nil && issue.HasSpan() {
 		r.writeExcerpt(sb, issue)
 	}
 
@@ -205,11 +196,11 @@ func (r *Renderer) writeSeverity(sb *strings.Builder, sev Severity) {
 	label := sev.String()
 
 	// Map Fatal to "error" unless distinguishFatal is set
-	if sev == Fatal && !r.distinguishFatal {
+	if sev == Fatal && !r.cfg.distinguishFatal {
 		label = "error"
 	}
 
-	if r.colorize {
+	if r.cfg.colorize {
 		//exhaustive:enforce
 		switch sev {
 		case Fatal, Error:
@@ -236,119 +227,117 @@ func (r *Renderer) writeSeverity(sb *strings.Builder, sev Severity) {
 	}
 }
 
+// writeExcerpt writes the span's first line under a gutter and marks the span
+// under it, in terminal columns (see [runeCols] and [blankUnder]). A span that
+// runs onto later lines is marked to the end of its first line.
 func (r *Renderer) writeExcerpt(sb *strings.Builder, issue Issue) {
 	span := issue.Span()
 	if !span.Start.IsKnown() {
 		return
 	}
-
-	content, ok := r.provider.Content(span)
+	content, ok := r.cfg.provider.Content(span)
 	if !ok {
 		return
 	}
-
-	// Find the line containing the start of the span
-	line := r.extractLine(content, span.Start.Line)
-	if line == "" {
+	text, ok := extractLine(content, span.Start.Line)
+	if !ok {
 		return
 	}
+	line := []rune(text)
 
-	// Truncate long lines
-	displayLine := line
-	if r.maxCols > 0 && utf8.RuneCountInString(line) > r.maxCols {
-		runes := []rune(line)
-		displayLine = string(runes[:r.maxCols]) + r.truncationIndicator
-	}
-
-	// Format the excerpt
-	lineNum := strconv.Itoa(span.Start.Line)
-	padding := strings.Repeat(" ", len(lineNum))
-
-	sb.WriteString("\n   ")
-	sb.WriteString(padding)
-	sb.WriteString("|\n")
-
-	sb.WriteString(lineNum)
-	sb.WriteString(" | ")
-	sb.WriteString(displayLine)
-	sb.WriteString("\n")
-
-	// Underline
-	sb.WriteString("   ")
-	sb.WriteString(padding)
-	sb.WriteString("| ")
-
-	// Calculate underline position (rune-based column)
-	startCol := max(span.Start.Column, 1)
-
-	// Calculate display width - use original line length for multi-line clamp,
-	// but cap underline to truncated display width.
-	lineRuneCount := utf8.RuneCountInString(line)
-	displayRuneCount := utf8.RuneCountInString(displayLine)
-
-	// Cap startCol to displayed width; if beyond display, skip underline
-	if startCol > displayRuneCount {
+	// Rune indexes. start may equal len(line): the column one past the last
+	// rune is where an end-of-line diagnostic points.
+	start := span.Start.Column - 1
+	if start > len(line) {
 		return
 	}
-
-	// Add spaces before the underline
-	sb.WriteString(strings.Repeat(" ", startCol-1))
-
-	// Calculate underline length, clamping to line boundaries
-	endCol := span.End.Column
-	if span.IsPoint() || endCol <= startCol {
-		endCol = startCol + 1
+	end := start + 1
+	switch {
+	case span.End.Line > span.Start.Line:
+		end = len(line)
+	case span.End.Line == span.Start.Line && span.End.Column-1 > start:
+		end = span.End.Column - 1
 	}
 
-	// Clamp endCol to line length for multi-line spans
-	if endCol > lineRuneCount+1 {
-		endCol = lineRuneCount + 1
+	lo, hi := 0, len(line)
+	if len(line) > excerptCols {
+		lo = min(max(0, start-excerptCols/4), len(line)-excerptCols)
+		hi = lo + excerptCols
 	}
 
-	// Clamp endCol to displayed width after truncation
-	if endCol > displayRuneCount+1 {
-		endCol = displayRuneCount + 1
+	var shown, marks strings.Builder
+	if lo > 0 {
+		shown.WriteString(excerptEllipsis)
+		marks.WriteString(strings.Repeat(" ", len(excerptEllipsis)))
 	}
+	shown.WriteString(string(line[lo:hi]))
+	if hi < len(line) {
+		shown.WriteString(excerptEllipsis)
+	}
+	for _, c := range line[lo:start] {
+		marks.WriteString(blankUnder(c))
+	}
+	carets := 0
+	for _, c := range line[start:max(start, min(end, hi))] {
+		carets += runeCols(c)
+	}
+	marks.WriteString(strings.Repeat("^", max(carets, 1)))
 
-	underlineLen := max(endCol-startCol, 1)
-	sb.WriteString(strings.Repeat("^", underlineLen))
+	num := strconv.Itoa(span.Start.Line)
+	gutter := strings.Repeat(" ", len(num))
+	sb.WriteString("\n" + gutter + " |\n")
+	sb.WriteString(num + " | " + shown.String() + "\n")
+	sb.WriteString(gutter + " | " + marks.String())
 }
 
-// extractLine extracts the nth line (1-based) from content.
-func (r *Renderer) extractLine(content []byte, lineNum int) string {
-	if lineNum < 1 {
-		return ""
+// blankUnder returns what sits under c in the mark row: the tab itself, so a
+// terminal expands both alike, or one space per column c takes.
+func blankUnder(c rune) string {
+	if c == '\t' {
+		return "\t"
 	}
+	return strings.Repeat(" ", runeCols(c))
+}
 
-	currentLine := 1
-	start := 0
+// runeCols returns the terminal columns c takes: none for a combining mark,
+// two for an East Asian wide or fullwidth rune, one otherwise.
+func runeCols(c rune) int {
+	if unicode.In(c, unicode.Mn, unicode.Me) {
+		return 0
+	}
+	switch width.LookupRune(c).Kind() {
+	case width.EastAsianWide, width.EastAsianFullwidth:
+		return 2
+	default:
+		return 1
+	}
+}
 
+// extractLine returns the nth line (1-based) of content without its line
+// ending, and whether content has that line. "\n", "\r\n" and "\r" each end a
+// line. The empty line after a final line ending exists, so a position at the
+// end of input has a line to show.
+func extractLine(content []byte, n int) (string, bool) {
+	if n < 1 {
+		return "", false
+	}
+	line, start := 1, 0
 	for i := 0; i < len(content); i++ {
-		if currentLine == lineNum {
-			// Found the start of the target line
-			end := i
-			for end < len(content) && content[end] != '\n' && content[end] != '\r' {
-				end++
-			}
-			return string(content[i:end])
+		c := content[i]
+		if c != '\n' && c != '\r' {
+			continue
 		}
-		switch content[i] {
-		case '\n':
-			currentLine++
-			start = i + 1
-		case '\r':
-			currentLine++
-			if i+1 < len(content) && content[i+1] == '\n' {
-				i++ // Skip \n after \r
-			}
-			start = i + 1
+		if line == n {
+			return string(content[start:i]), true
 		}
+		if c == '\r' && i+1 < len(content) && content[i+1] == '\n' {
+			i++
+		}
+		line++
+		start = i + 1
 	}
-
-	// Handle last line without newline
-	if currentLine == lineNum && start < len(content) {
-		return string(content[start:])
+	if line == n {
+		return string(content[start:]), true
 	}
-
-	return ""
+	return "", false
 }

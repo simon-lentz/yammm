@@ -1474,6 +1474,27 @@ does not read this output**, measured at its tree.
   synthetic root is written as given. rdata reads neither the key nor the
   clause.
 
+### Unit 7, pass B — the source excerpt under a text diagnostic
+
+- **An excerpt's marks sit under the text they mark.** Its three rows share
+  one gutter width. The two gutter rows were two columns wider than the
+  numbered row, so every mark sat two columns to the right of its text. The
+  mark row copies each tab of the line, gives an East Asian wide rune two
+  columns, and gives a combining mark none.
+- **Four excerpts render that rendered nothing.** A blank line and the line
+  after a final newline each show their line and a caret. A point one column
+  past the end of a line, where an end-of-input error points, takes a caret.
+  A span past column 120 of a long line is shown in a window of 120 runes
+  around its start, with `...` at each end the window cuts. It rendered the
+  line's first 120 runes and an empty mark row.
+- **A span that runs onto later lines is marked to the end of its first
+  line.** It was marked from its start column to its end column on the last
+  line, so it could mark one rune.
+- **Text output only, and no declaration moves.** JSON output carries no
+  excerpt. rdata renders excerpts in its pipeline runner's text output and
+  parses none of it. `diag` now imports `golang.org/x/text/width`, from a
+  module the library already requires.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

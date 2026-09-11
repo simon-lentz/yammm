@@ -46,23 +46,6 @@ func TestExcerpt_MarksSitUnderTheText(t *testing.T) {
 		}
 	}
 
-	const shifted = "the gutter rows are two columns wider than the number row, so every mark sits two columns right (B1)"
-	knownBroken := map[string]string{
-		"a range under plain text":                                                   shifted,
-		"a point is one caret":                                                       shifted,
-		"a tab is copied into the mark row":                                          "the mark row writes a space for each tab (B9); " + shifted,
-		"a wide rune before the span takes two columns":                              "the mark row counts runes, not columns; " + shifted,
-		"a wide rune under the span takes two carets":                                "the marks count runes, not columns; " + shifted,
-		"a combining mark takes no column":                                           "the mark row counts runes, not columns; " + shifted,
-		"the column one past the line's end takes a caret":                           "a start past the last rune writes an empty mark row (B10)",
-		"a span onto a later line is marked to the end of its first line":            "an end column at or before the start column marks one rune (B12)",
-		"a span onto a later line, ending past its start column, is marked the same": shifted,
-		"a blank line renders":                                                       "an empty line renders no excerpt (B13)",
-		"the line after a final newline renders":                                     "an empty line renders no excerpt (B13)",
-		"a CRLF line renders without its line ending":                                shifted,
-		"a two-digit line number widens every gutter row":                            shifted,
-	}
-
 	rows := []struct {
 		name    string
 		content string
@@ -84,27 +67,13 @@ func TestExcerpt_MarksSitUnderTheText(t *testing.T) {
 		{"a two-digit line number widens every gutter row", strings.Repeat("\n", 9) + "xyz\n", span(10, 1, 10, 4), wantExcerpt("10", "xyz", "^^^")},
 	}
 
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		names[row.name] = true
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			got := excerptBlock(row.content, row.span)
-			reason, broken := knownBroken[row.name]
-			switch ok := got == row.want; {
-			case broken && ok:
-				t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
-			case broken:
-				t.Logf("known broken: %s\n got %q\nwant %q", reason, got, row.want)
-			case !ok:
+			if got := excerptBlock(row.content, row.span); got != row.want {
 				t.Errorf("excerpt\n got %q\nwant %q", got, row.want)
 			}
 		})
-	}
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names no row: %q", name)
-		}
 	}
 }
 
@@ -116,14 +85,6 @@ func TestExcerpt_LongLineShowsTheSpan(t *testing.T) {
 	t.Parallel()
 
 	src := location.MustNewSourceID("test://long.yammm")
-	const shifted = "the gutter rows are two columns wider than the number row (B1)"
-	knownBroken := map[string]string{
-		"a span near the start of a long line":     shifted,
-		"a span past column 120":                   "a start past the cut writes an empty mark row (B11, P-G4); " + shifted,
-		"a span in the middle of a very long line": "a start past the cut writes an empty mark row (B11, P-G4); " + shifted,
-		"a span on the last rune of a long line":   "a start past the cut writes an empty mark row (B11, P-G4); " + shifted,
-	}
-
 	rows := []struct {
 		name        string
 		length, col int
@@ -134,28 +95,14 @@ func TestExcerpt_LongLineShowsTheSpan(t *testing.T) {
 		{"a span on the last rune of a long line", 200, 200},
 	}
 
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		names[row.name] = true
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			line := strings.Repeat("a", row.col-1) + "X" + strings.Repeat("b", row.length-row.col)
-			ok, detail := windowMarksTheSpan(line, excerptBlock(line+"\n", location.Point(src, 1, row.col)))
-			reason, broken := knownBroken[row.name]
-			switch {
-			case broken && ok:
-				t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
-			case broken:
-				t.Logf("known broken: %s\n%s", reason, detail)
-			case !ok:
+			if ok, detail := windowMarksTheSpan(line, excerptBlock(line+"\n", location.Point(src, 1, row.col))); !ok {
 				t.Error(detail)
 			}
 		})
-	}
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names no row: %q", name)
-		}
 	}
 }
 

@@ -2,7 +2,8 @@
 //
 // This package provides the single diagnostic infrastructure used across schema
 // loading, parsing, compilation, and instance validation. It depends only on
-// [github.com/simon-lentz/yammm/location] and the standard library.
+// [github.com/simon-lentz/yammm/location], golang.org/x/text/width and the
+// standard library.
 //
 // # Design Principles
 //
@@ -131,7 +132,7 @@
 //
 // # Dependencies
 //
-//	diag  ──imports──▶  location
+//	diag  ──imports──▶  location, golang.org/x/text/width
 //
 // It must not import schema, instance, graph, or adapter.
 //

@@ -282,88 +282,38 @@ func TestRenderer_FormatResult_Empty(t *testing.T) {
 	}
 }
 
+// TestRenderer_extractLine holds a line's text and whether it exists apart: a
+// blank line and the line after a final line ending exist and are empty.
 func TestRenderer_extractLine(t *testing.T) {
-	r := NewRenderer()
-
 	tests := []struct {
 		name    string
 		content string
 		lineNum int
 		want    string
+		wantOK  bool
 	}{
-		{
-			name:    "first line",
-			content: "line one\nline two\nline three",
-			lineNum: 1,
-			want:    "line one",
-		},
-		{
-			name:    "middle line",
-			content: "line one\nline two\nline three",
-			lineNum: 2,
-			want:    "line two",
-		},
-		{
-			name:    "last line with newline",
-			content: "line one\nline two\nline three\n",
-			lineNum: 3,
-			want:    "line three",
-		},
-		{
-			name:    "last line without newline",
-			content: "line one\nline two\nline three",
-			lineNum: 3,
-			want:    "line three",
-		},
-		{
-			name:    "CRLF line endings",
-			content: "line one\r\nline two\r\nline three",
-			lineNum: 2,
-			want:    "line two",
-		},
-		{
-			name:    "CR only line endings",
-			content: "line one\rline two\rline three",
-			lineNum: 2,
-			want:    "line two",
-		},
-		{
-			name:    "line out of range",
-			content: "line one\nline two",
-			lineNum: 5,
-			want:    "",
-		},
-		{
-			name:    "line zero",
-			content: "line one",
-			lineNum: 0,
-			want:    "",
-		},
-		{
-			name:    "negative line",
-			content: "line one",
-			lineNum: -1,
-			want:    "",
-		},
-		{
-			name:    "empty content",
-			content: "",
-			lineNum: 1,
-			want:    "",
-		},
-		{
-			name:    "single line no newline",
-			content: "only line",
-			lineNum: 1,
-			want:    "only line",
-		},
+		{"first line", "line one\nline two\nline three", 1, "line one", true},
+		{"middle line", "line one\nline two\nline three", 2, "line two", true},
+		{"last line with newline", "line one\nline two\nline three\n", 3, "line three", true},
+		{"last line without newline", "line one\nline two\nline three", 3, "line three", true},
+		{"CRLF line endings", "line one\r\nline two\r\nline three", 2, "line two", true},
+		{"CR only line endings", "line one\rline two\rline three", 2, "line two", true},
+		{"a blank line", "line one\n\nline three", 2, "", true},
+		{"the line after a final newline", "line one\n", 2, "", true},
+		{"the line after a final CRLF", "line one\r\n", 2, "", true},
+		{"empty content has one empty line", "", 1, "", true},
+		{"single line no newline", "only line", 1, "only line", true},
+		{"line out of range", "line one\nline two", 5, "", false},
+		{"two past a final newline", "line one\n", 3, "", false},
+		{"line zero", "line one", 0, "", false},
+		{"negative line", "line one", -1, "", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := r.extractLine([]byte(tt.content), tt.lineNum)
-			if got != tt.want {
-				t.Errorf("extractLine() = %q; want %q", got, tt.want)
+			got, ok := extractLine([]byte(tt.content), tt.lineNum)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("extractLine(%q, %d) = %q, %t; want %q, %t", tt.content, tt.lineNum, got, ok, tt.want, tt.wantOK)
 			}
 		})
 	}
@@ -379,16 +329,15 @@ func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 		WithExcerpts(true),
 	)
 
-	// Point span (start == end)
 	issue := NewIssue(Error, E_SYNTAX, "error").
 		WithSpan(location.Point(source, 1, 3)).
 		Build()
 
 	output := formatIssue(r, issue)
 
-	// Should have single caret for point
-	if !strings.Contains(output, "^") {
-		t.Error("point span should have underline")
+	// A point is one caret, under the column it names.
+	if want := "\n1 |   token here\n  |   ^"; !strings.HasSuffix(output, want) {
+		t.Errorf("point span excerpt\n got %q\nwant suffix %q", output, want)
 	}
 }
 
@@ -413,9 +362,9 @@ func TestRenderer_Excerpt_RangeSpan(t *testing.T) {
 
 	output := formatIssue(r, issue)
 
-	// Should have 5 carets (columns 3-7 inclusive)
-	if !strings.Contains(output, "^^^^^") {
-		t.Errorf("range span should have 5 carets, got: %s", output)
+	// Five carets, under columns 3 to 7; the end column is exclusive.
+	if want := "\n  |   ^^^^^"; !strings.HasSuffix(output, want) {
+		t.Errorf("range span excerpt\n got %q\nwant suffix %q", output, want)
 	}
 }
 
