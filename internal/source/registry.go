@@ -25,9 +25,9 @@ type sourceEntry struct {
 
 // Registry provides source content storage and position conversion.
 //
-// Registry is thread-safe for concurrent access. It implements:
-//   - [location.PositionRegistry] for byte offset → Position conversion
-//   - [diag.SourceProvider] for source content lookup (via Content)
+// Registry is thread-safe for concurrent access. It implements
+// [diag.SourceProvider] for source content lookup (via Content), and PositionAt
+// converts a byte offset to a Position.
 type Registry struct {
 	mu      sync.RWMutex
 	entries map[location.SourceID]*sourceEntry
@@ -127,8 +127,6 @@ func (r *Registry) Content(span location.Span) ([]byte, bool) {
 }
 
 // PositionAt converts a byte offset in the specified source to a Position.
-//
-// This method implements [location.PositionRegistry].
 //
 // Returns a zero Position (check with [location.Position.IsZero]) if:
 //   - The source is not registered

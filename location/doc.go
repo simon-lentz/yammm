@@ -76,13 +76,6 @@
 // Create via [NewProvenance]; use [Provenance.AtKey] to extend the path during
 // recursive parsing.
 //
-// # PositionRegistry
-//
-// PositionRegistry is an interface for byte-offset-to-position conversion,
-// bridging format adapters (JSON, CSV) and source content registries. The
-// concrete implementation is source.Registry (internal), surfaced via the
-// schema.SourceRegistry interface.
-//
 // # Dependencies
 //
 //	location  ──imports──▶  location/path, golang.org/x/text/unicode/norm

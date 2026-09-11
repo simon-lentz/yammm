@@ -864,8 +864,8 @@ declaration describes (below).
 
 Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
 are on the `review` branch and reach `main` at the unit's close. **Its pass-A
-fix pass removes one exported declaration, `location.ErrUNCPath`** (the path
-identity block below).
+fix pass removes two exported declarations, `location.ErrUNCPath` and
+`location.PositionRegistry`** (the blocks below).
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
@@ -1437,6 +1437,14 @@ does not read this output**, measured at its tree.
   `PropertiesOf`, the view's one reader, takes a `Map[string]`, so the view a
   `Map[int]` or a map keyed by a named string type carried was never read. A
   string-keyed map keeps it, shared by every copy. No declaration moves.
+
+### Unit 7, pass A — `location.PositionRegistry` removed
+
+- **Removed: `location.PositionRegistry`**, an interface nothing consumed. No
+  function accepts one, `schema.SourceRegistry` declares its own `PositionAt`
+  rather than embedding it, and its one implementation, `internal/source`'s
+  registry, keeps the method. A caller that named the type names the method
+  set it needs instead, or `schema.SourceRegistry`.
 
 ## v0.21.0 under this policy
 
