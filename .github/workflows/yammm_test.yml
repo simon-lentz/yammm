@@ -62,6 +62,27 @@ jobs:
         # etiquette; -shuffle=on surfaces inter-test order coupling, which
         # large-scale test dedup/merging is most likely to introduce.
         run: go test -v -race -shuffle=on ./...
+  # Every other job runs on Linux, where a backslash is a file-name character
+  # and no path has a UNC volume, so the Windows half of the path identity
+  # rules — and every runtime.GOOS == "windows" branch in location's tests —
+  # never ran. This job runs those tests on the host whose rules they state.
+  # bash, not the default pwsh, because pwsh reports only the last command's
+  # exit status and would hide a failing first run.
+  windows:
+    name: Test Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Path identity tests
+        shell: bash
+        run: |
+          go test -count=1 -v ./location/...
+          go test -count=1 -v -run '^TestHostPath_' ./schema/
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
