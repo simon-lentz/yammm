@@ -80,12 +80,11 @@ func pathEscapeIssue(root, origin string, imp *importDecl) diag.Issue {
 		fmt.Sprintf("import %q escapes module root", imp.Path), imp)
 }
 
-// importCycleIssue builds E_IMPORT_CYCLE: a cycle in the import graph. The
-// cycle is detected on the source being entered, not on a declaration, so
-// there is no import declaration to anchor it to.
-func importCycleIssue(root, origin string, sourceID fmt.Stringer) diag.Issue {
+// importCycleIssue builds E_IMPORT_CYCLE on imp, the declaration that closes a
+// cycle in the import graph.
+func importCycleIssue(root, origin string, imp *importDecl) diag.Issue {
 	return resolutionIssue(diag.E_IMPORT_CYCLE, root, origin,
-		fmt.Sprintf("import cycle detected involving %s", sourceID), nil)
+		fmt.Sprintf("import %q closes an import cycle", imp.Path), imp)
 }
 
 // loaderRoot returns the root a loader's import diagnostics report and where

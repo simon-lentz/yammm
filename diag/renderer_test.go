@@ -169,14 +169,14 @@ func TestRenderer_WithDistinguishFatal(t *testing.T) {
 	// Default: Fatal renders as "error"
 	r1 := NewRenderer()
 	output1 := formatIssue(r1, issue)
-	if !strings.Contains(output1, ": error[") {
+	if !strings.HasPrefix(output1, "error[") {
 		t.Errorf("Fatal should render as 'error' by default, got: %s", output1)
 	}
 
 	// With distinguish: Fatal renders as "fatal"
 	r2 := NewRenderer(WithDistinguishFatal(true))
 	output2 := formatIssue(r2, issue)
-	if !strings.Contains(output2, ": fatal[") {
+	if !strings.HasPrefix(output2, "fatal[") {
 		t.Errorf("Fatal should render as 'fatal' when distinguished, got: %s", output2)
 	}
 }
@@ -200,11 +200,6 @@ func TestRenderer_FormatIssue_Location(t *testing.T) {
 				WithPath("data.json", "$.items[0]").
 				Build(),
 			contains: "data.json", // path is shown, sourceName prefix comes first if present
-		},
-		{
-			name:     "unknown location",
-			issue:    NewIssue(Error, E_SYNTAX, "msg").Build(),
-			contains: "<unknown>",
 		},
 	}
 
@@ -451,7 +446,7 @@ func TestRenderer_CompleteOutput(t *testing.T) {
 }
 
 // TestRenderer_WriteLocation_SourceNameOnly verifies that issues with only
-// SourceName (no Span or Path) render the SourceName instead of "<unknown>".
+// SourceName (no Span or Path) render the SourceName as their location.
 func TestRenderer_WriteLocation_SourceNameOnly(t *testing.T) {
 	r := NewRenderer()
 
@@ -476,7 +471,7 @@ func TestRenderer_WriteLocation_SourceNameOnly(t *testing.T) {
 }
 
 // TestRenderer_WriteLocation_Precedence verifies location rendering precedence:
-// Span > Path > SourceName > "<unknown>"
+// Span > Path > SourceName > none
 func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 	r := NewRenderer()
 	source := location.MustNewSourceID("test://schema.yammm")
@@ -520,13 +515,13 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 			expected: "data.json:",
 		},
 		{
-			name: "unknown when nothing set",
+			name: "no location when nothing set",
 			issue: Issue{
 				severity: Error,
 				code:     E_SYNTAX,
 				message:  "test",
 			},
-			expected: "<unknown>:",
+			expected: "error[E_SYNTAX]: test",
 		},
 	}
 

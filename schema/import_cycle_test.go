@@ -66,12 +66,6 @@ func TestImportCycle_ReportedOnTheClosingImport(t *testing.T) {
 		spans = append(spans, issue.Span().String())
 	}
 
-	knownBroken := map[string]string{
-		"it is reported on the closing import":        "the cycle is detected on entering a.yammm, with no declaration in hand, so it has no span (B14)",
-		"its message names no source file":            "the message names the absolute path of a.yammm (B14)",
-		"the closing import draws no E_UPSTREAM_FAIL": "b.yammm's import of a.yammm also reports that a.yammm failed to compile (B14)",
-	}
-
 	rows := []struct {
 		name   string
 		ok     bool
@@ -88,25 +82,12 @@ func TestImportCycle_ReportedOnTheClosingImport(t *testing.T) {
 		{"the import of the schema the cycle failed still draws E_UPSTREAM_FAIL", on(upstream, aID), fmt.Sprintf("no E_UPSTREAM_FAIL on %s", aID)},
 	}
 
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		names[row.name] = true
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			reason, broken := knownBroken[row.name]
-			switch {
-			case broken && row.ok:
-				t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
-			case broken:
-				t.Logf("known broken: %s: %s", reason, row.detail)
-			case !row.ok:
+			if !row.ok {
 				t.Error(row.detail)
 			}
 		})
-	}
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names no row: %q", name)
-		}
 	}
 }

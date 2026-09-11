@@ -103,7 +103,7 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 		return cli.Usagef("resolve path %q: %v", args[0], err)
 	}
 
-	moduleRootAbs, loadOpts, err := moduleRootOptions(cmd)
+	moduleRootAbs, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}

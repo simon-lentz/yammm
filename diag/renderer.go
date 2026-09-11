@@ -128,11 +128,13 @@ func (r *Renderer) FormatResult(res Result) string {
 }
 
 func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
-	// Location prefix
-	r.writeLocation(sb, issue)
+	// Location prefix; an issue with no location has none, as in JSON.
+	if loc := r.location(issue); loc != "" {
+		sb.WriteString(loc)
+		sb.WriteString(": ")
+	}
 
 	// Severity and code
-	sb.WriteString(": ")
 	r.writeSeverity(sb, issue.Severity())
 	sb.WriteString("[")
 	sb.WriteString(issue.Code().String())
@@ -163,21 +165,18 @@ func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
 	}
 }
 
-func (r *Renderer) writeLocation(sb *strings.Builder, issue Issue) {
+// location renders where an issue is: its span, else its instance path after
+// its source name, else its source name, else nothing.
+func (r *Renderer) location(issue Issue) string {
 	switch {
 	case issue.HasSpan():
-		sb.WriteString(r.formatSpanLocation(issue.Span()))
+		return r.formatSpanLocation(issue.Span())
+	case issue.Path() != "" && issue.SourceName() != "":
+		return issue.SourceName() + " " + issue.Path()
 	case issue.Path() != "":
-		if issue.SourceName() != "" {
-			sb.WriteString(issue.SourceName())
-			sb.WriteString(" ")
-		}
-		sb.WriteString(issue.Path())
-	case issue.SourceName() != "":
-		// File-level provenance without specific path
-		sb.WriteString(issue.SourceName())
+		return issue.Path()
 	default:
-		sb.WriteString("<unknown>")
+		return issue.SourceName()
 	}
 }
 

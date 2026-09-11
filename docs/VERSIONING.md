@@ -865,9 +865,9 @@ declaration describes (below).
 Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
 are on the `review` branch and reach `main` at the unit's close. **Its pass-A
 fix pass removes two exported declarations, `location.ErrUNCPath` and
-`location.PositionRegistry`, and its pass-B fix pass adds one,
-`location.SourceID.RelativeTo`, and removes one, `diag.Result.Limit`** (the
-blocks below).
+`location.PositionRegistry`, and its pass-B fix pass adds two,
+`location.SourceID.RelativeTo` and `schema.CaptureSources`, and removes one,
+`diag.Result.Limit`** (the blocks below).
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
@@ -1520,6 +1520,29 @@ does not read this output**, measured at its tree.
   `Collector.Merge`. A dropped issue stays counted in `DroppedCount`,
   `SeverityCounts` and `CodeCounts`, where re-collecting the survivors lost
   it.
+
+### Unit 7, pass B — where a location goes
+
+- **Added: `schema.CaptureSources(dst **Sources)`**, a load option that
+  stores the load's source registry in `*dst` before the load reads anything.
+  A load that fails returns a nil `Schema`, and no `Sources` with it, so an
+  excerpt for the failure had no source to come from. The CLI captures the
+  sources on every load its ten schema-loading commands run. A failed load
+  on a terminal now shows its excerpt, as a load that only warns did.
+- **An import cycle is reported on the import that closes it.**
+  `E_IMPORT_CYCLE` carries that declaration's span, import path and alias, as
+  `E_IMPORT_RESOLVE` and `E_PATH_ESCAPE` do. Its message is `import "./a"
+  closes an import cycle`, then the module-root clause, and it names no
+  absolute path. That import draws no `E_UPSTREAM_FAIL`, because nothing
+  failed to compile. The code had no span, so its text form began
+  `<unknown>`. Its message named the absolute path of the schema it entered,
+  and the closing import also reported that schema as failing to compile.
+- **An issue with no location renders with no location prefix** in text:
+  `error[E_…]: …`, as its JSON carries no location. It rendered
+  `<unknown>: error[E_…]: …`.
+- **Unchanged by decision:** the module-root clause stays in the message of
+  every import-resolution code (A-187), because the LSP publishes an issue's
+  message and not its hint.
 
 ## v0.21.0 under this policy
 

@@ -154,10 +154,6 @@ func TestRenderContracts(t *testing.T) {
 		return !strings.HasSuffix(s, "\n"), fmt.Sprintf("%q", s)
 	}
 
-	knownBroken := map[string]string{
-		"an issue with no location renders no location": "the renderer writes \"<unknown>: \" (B42)",
-	}
-
 	rows := []struct {
 		name string
 		run  func(t *testing.T) (bool, string)
@@ -219,26 +215,12 @@ func TestRenderContracts(t *testing.T) {
 		},
 	}
 
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		names[row.name] = true
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			ok, detail := row.run(t)
-			reason, broken := knownBroken[row.name]
-			switch {
-			case broken && ok:
-				t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
-			case broken:
-				t.Logf("known broken: %s: %s", reason, detail)
-			case !ok:
+			if ok, detail := row.run(t); !ok {
 				t.Error(detail)
 			}
 		})
-	}
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names no row: %q", name)
-		}
 	}
 }

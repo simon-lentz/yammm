@@ -66,7 +66,7 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 	}
 
 	// Load schema
-	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}

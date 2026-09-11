@@ -42,7 +42,7 @@ func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error
 	}
 
 	// Load schema
-	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}

@@ -41,7 +41,7 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.Diagnostic
 	}
 
 	// Load schema
-	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}

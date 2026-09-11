@@ -43,7 +43,7 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	// Load schema
-	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}

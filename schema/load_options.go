@@ -19,6 +19,7 @@ type loadConfig struct {
 	logger          *slog.Logger
 	disallowImports bool
 	sourcesOnly     bool
+	sourcesOut      **Sources
 	// syntheticRootSet separates "WithSyntheticRoot not passed" from
 	// "WithSyntheticRoot passed an empty root", which is an error rather than
 	// a no-op.
@@ -203,5 +204,15 @@ func WithImportsAllowed(allowed bool) LoadOption {
 func WithLogger(logger *slog.Logger) LoadOption {
 	return func(c *loadConfig) {
 		c.logger = logger
+	}
+}
+
+// CaptureSources stores the load's source registry in *dst before the load
+// reads anything. A load that fails returns a nil Schema, and Schema.Sources
+// with it, so a caller that renders excerpts for a failed load takes the
+// sources from here. A nil dst captures nothing.
+func CaptureSources(dst **Sources) LoadOption {
+	return func(c *loadConfig) {
+		c.sourcesOut = dst
 	}
 }

@@ -527,6 +527,9 @@ func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot, rootOrigin string) *l
 	if sourceReg == nil {
 		sourceReg = source.NewRegistry()
 	}
+	if cfg.sourcesOut != nil {
+		*cfg.sourcesOut = NewSources(sourceReg)
+	}
 
 	// Use provided logger or create a discard logger (zero overhead when unused)
 	logger := cfg.logger
@@ -616,14 +619,6 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	if s, ok := l.loadedSchemas[sourceID]; ok {
 		l.mu.Unlock()
 		return s, l.collector.Result(), nil
-	}
-
-	// Check for cycle
-	if l.loadingSchemas[sourceID] {
-		l.mu.Unlock()
-		root, origin := l.loaderRoot()
-		l.collector.Collect(importCycleIssue(root, origin, sourceID))
-		return nil, l.collector.Result(), nil
 	}
 
 	l.loadingSchemas[sourceID] = true
@@ -1142,6 +1137,18 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 			return nil
 		}
 		l.sourceContent[importSourceID] = content
+	}
+
+	// Importing a schema still loading closes a cycle: report it here, with no
+	// E_UPSTREAM_FAIL, since nothing failed to compile.
+	l.mu.Lock()
+	cycle := l.loadingSchemas[importSourceID]
+	l.mu.Unlock()
+	if cycle {
+		root, origin := l.loaderRoot()
+		l.collector.Collect(importCycleIssue(root, origin, imp))
+		l.markImportFailed(imp)
+		return nil
 	}
 
 	// Recursively load the imported schema

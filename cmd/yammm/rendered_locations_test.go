@@ -57,30 +57,6 @@ func symlinkOrSkip(t *testing.T, target, link string) {
 	}
 }
 
-// checkKnownBroken reports a row's outcome against its knownBroken entry: a
-// listed row that passes fails, so the repair must remove its entry.
-func checkKnownBroken(t *testing.T, knownBroken map[string]string, name string, ok bool, detail string) {
-	t.Helper()
-	reason, broken := knownBroken[name]
-	switch {
-	case broken && ok:
-		t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
-	case broken:
-		t.Logf("known broken: %s\n%s", reason, detail)
-	case !ok:
-		t.Error(detail)
-	}
-}
-
-func checkEveryEntryNamesARow(t *testing.T, knownBroken map[string]string, names map[string]bool) {
-	t.Helper()
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names no row: %q", name)
-		}
-	}
-}
-
 // TestRenderedLocations_RelativeToTheRoot holds a failed load's text location
 // to the host's own path from the root the load used to the schema file, as
 // [hostRelative] computes it.
@@ -188,8 +164,9 @@ func runWithTerminalSink(t *testing.T, argv []string, run func(*cobra.Command, [
 }
 
 // TestRenderedLocations_FailedLoadShowsItsExcerpt runs every command that
-// loads a schema over one that fails to load, through a terminal sink. The
-// failure's excerpt must render, as a load that only warns renders one.
+// loads a schema over one that fails to load, through a terminal sink, with and
+// without --module-root. The failure's excerpt must render, as a load that only
+// warns renders one.
 func TestRenderedLocations_FailedLoadShowsItsExcerpt(t *testing.T) {
 	t.Parallel()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
@@ -211,26 +188,29 @@ func TestRenderedLocations_FailedLoadShowsItsExcerpt(t *testing.T) {
 		{"validate", func(s, _, _ string) []string { return []string{"validate", s} }, runValidate},
 	}
 
-	knownBroken := make(map[string]string, len(rows))
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		knownBroken[row.name] = "a failed load returns no schema, so the sink holds no source to excerpt (B2)"
-		names[row.name] = true
-	}
-
-	for _, row := range rows {
-		t.Run(row.name, func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			schemaPath := writeRenderedFile(t, filepath.Join(dir, "bad.yammm"), renderedBadSchema)
-			dataPath := writeRenderedFile(t, filepath.Join(dir, "data.json"), "{}")
-			out := runWithTerminalSink(t, row.args(schemaPath, dataPath, filepath.Join(dir, "out.ys")), row.run)
-			if !strings.Contains(out, "E_UNKNOWN_TYPE") {
-				t.Fatalf("the command did not report the failed load:\n%s", out)
+		for _, withRoot := range []bool{false, true} {
+			name := row.name
+			if withRoot {
+				name += ", with --module-root"
 			}
-			checkKnownBroken(t, knownBroken, row.name, strings.Contains(out, "\n5 | \tname Strin\n"),
-				"rendered:\n"+out)
-		})
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				schemaPath := writeRenderedFile(t, filepath.Join(dir, "bad.yammm"), renderedBadSchema)
+				dataPath := writeRenderedFile(t, filepath.Join(dir, "data.json"), "{}")
+				args := row.args(schemaPath, dataPath, filepath.Join(dir, "out.ys"))
+				if withRoot {
+					args = append(args, "--module-root", dir)
+				}
+				out := runWithTerminalSink(t, args, row.run)
+				if !strings.Contains(out, "E_UNKNOWN_TYPE") {
+					t.Fatalf("the command did not report the failed load:\n%s", out)
+				}
+				if !strings.Contains(out, "\n5 | \tname Strin\n") {
+					t.Errorf("the failed load's excerpt did not render:\n%s", out)
+				}
+			})
+		}
 	}
-	checkEveryEntryNamesARow(t, knownBroken, names)
 }

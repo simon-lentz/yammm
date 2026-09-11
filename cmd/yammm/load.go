@@ -40,7 +40,7 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 	}
 
 	// Load schema
-	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}
@@ -75,8 +75,11 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 // [diagRootFor]).
 func bindSchemaSource(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, absSchemaPath string) {
 	var provider diag.SourceProvider
-	if s != nil && s.HasSourceProvider() {
+	switch {
+	case s != nil && s.HasSourceProvider():
 		provider = s.Sources()
+	case sink.CapturedSources() != nil:
+		provider = sink.CapturedSources()
 	}
 	sink.SetSource(provider, diagRootFor(s, explicitRoot, absSchemaPath))
 }

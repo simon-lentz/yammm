@@ -18,19 +18,19 @@ func registerModuleRootFlag(cmd *cobra.Command) {
 	cmd.Flags().String("module-root", "", "root directory for module-style imports (default: the nearest ancestor holding yammm.mod, else the schema's directory)")
 }
 
-// moduleRootOptions reads --module-root back as the absolute root and the
-// load option carrying it. An unset flag yields "" and no option, so the
-// loader discovers the root: the nearest ancestor holding a yammm.mod, else
-// the schema's directory. It returns a usage error for a root that cannot be
-// made absolute.
-func moduleRootOptions(cmd *cobra.Command) (string, []schema.LoadOption, error) {
+// moduleRootOptions returns --module-root as an absolute root and the load
+// options for it, including the sink's source capture so a failed load renders
+// its excerpt. An unset flag yields "" and no root option, so the loader
+// discovers the root; a root that cannot be made absolute is a usage error.
+func moduleRootOptions(cmd *cobra.Command, sink *cli.DiagnosticSink) (string, []schema.LoadOption, error) {
 	root, _ := cmd.Flags().GetString("module-root")
+	capture := sink.CaptureSchemaSources()
 	if root == "" {
-		return "", nil, nil
+		return "", []schema.LoadOption{capture}, nil
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return "", nil, cli.Usagef("resolve module root %q: %v", root, err)
 	}
-	return abs, []schema.LoadOption{schema.WithModuleRoot(abs)}, nil
+	return abs, []schema.LoadOption{schema.WithModuleRoot(abs), capture}, nil
 }
