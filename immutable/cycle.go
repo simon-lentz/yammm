@@ -7,13 +7,6 @@ import "reflect"
 // an ordinary wrap pays a depth counter and nothing else.
 const startDetectingCyclesAfter = 1000
 
-// cycleGuard is one walk's state: how deep it is, and past
-// [startDetectingCyclesAfter] the maps and slices on the path it is walking.
-type cycleGuard struct {
-	depth int
-	seen  map[cyclePtr]struct{}
-}
-
 // cyclePtr identifies one map or slice by the memory it holds. Two slices can
 // share a backing array, so the length is part of the identity.
 type cyclePtr struct {
@@ -21,26 +14,30 @@ type cyclePtr struct {
 	len int
 }
 
-// push records rv on the walk's path and returns the state to restore when it
-// leaves. It panics when rv is already on the path: the value refers to itself,
-// and every walk here would otherwise recurse until the stack is gone — which
-// is a fatal runtime error a caller cannot recover from, where this panic is.
-func (g *cycleGuard) push(rv reflect.Value) func() {
-	g.depth++
-	if g.depth <= startDetectingCyclesAfter {
-		return func() { g.depth-- }
+// enterCycle records rv on the walk's path and returns the path to pass down.
+// It panics when rv is already on it: the value refers to itself, and the walk
+// would otherwise exhaust the stack, which no caller can recover from. Below
+// the threshold it allocates nothing.
+func enterCycle(rv reflect.Value, depth int, seen map[cyclePtr]struct{}) map[cyclePtr]struct{} {
+	if depth < startDetectingCyclesAfter {
+		return seen
 	}
-
 	p := cyclePtr{ptr: rv.Pointer(), len: rv.Len()}
-	if _, ok := g.seen[p]; ok {
+	if _, ok := seen[p]; ok {
 		panic("immutable: cycle detected: a value refers to itself")
 	}
-	if g.seen == nil {
-		g.seen = make(map[cyclePtr]struct{})
+	if seen == nil {
+		seen = make(map[cyclePtr]struct{}, 1)
 	}
-	g.seen[p] = struct{}{}
-	return func() {
-		g.depth--
-		delete(g.seen, p)
+	seen[p] = struct{}{}
+	return seen
+}
+
+// leaveCycle takes rv off the walk's path, so a value reached twice without a
+// cycle — a diamond — is wrapped rather than refused.
+func leaveCycle(rv reflect.Value, depth int, seen map[cyclePtr]struct{}) {
+	if depth < startDetectingCyclesAfter || seen == nil {
+		return
 	}
+	delete(seen, cyclePtr{ptr: rv.Pointer(), len: rv.Len()})
 }

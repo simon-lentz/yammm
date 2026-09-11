@@ -128,12 +128,11 @@ func cloneValue(v Value) any {
 	}
 
 	rv := reflect.ValueOf(v.val)
-	var g cycleGuard
 	if rv.Kind() == reflect.Map {
-		return deepCloneMap(rv, &g)
+		return deepCloneMap(rv, 0, nil)
 	}
 	if rv.Kind() == reflect.Slice {
-		return deepCloneSlice(rv, &g)
+		return deepCloneSlice(rv, 0, nil)
 	}
 	return v.val
 }
