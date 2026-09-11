@@ -40,7 +40,8 @@ func resolveConfig(opts []Option) wrapConfig {
 // Value is safe for concurrent read access.
 type Value struct {
 	// val holds the wrapped value. For primitives, this is the value itself.
-	// For maps and slices, this is a wrapped Map[string] or Slice.
+	// For a string-keyed map it is a Map[string], for a slice a Slice; any
+	// other map is stored as given.
 	val any
 }
 
@@ -138,35 +139,26 @@ func (v Value) Int() (int64, bool) {
 		}
 		return int64(n), true
 	case float64:
-		// JSON numbers are float64; check if it's a representable whole number.
-		// Guard before converting to avoid implementation-dependent behavior
-		// for NaN, Inf, and out-of-range values per Go spec.
-		if math.IsNaN(n) || math.IsInf(n, 0) {
-			return 0, false
-		}
-		if n < float64(math.MinInt64) || n > float64(math.MaxInt64) {
-			return 0, false
-		}
-		if n != math.Trunc(n) {
-			return 0, false // Not a whole number
-		}
-		return int64(n), true
+		return wholeFloatToInt64(n)
 	case float32:
-		// Handle float32 with same whole-number checks as float64.
-		n64 := float64(n)
-		if math.IsNaN(n64) || math.IsInf(n64, 0) {
-			return 0, false
-		}
-		if n64 < float64(math.MinInt64) || n64 > float64(math.MaxInt64) {
-			return 0, false
-		}
-		if n64 != math.Trunc(n64) {
-			return 0, false // Not a whole number
-		}
-		return int64(n64), true
+		return wholeFloatToInt64(float64(n))
 	default:
 		return 0, false
 	}
+}
+
+// wholeFloatToInt64 returns f as an int64 when f is a whole number int64 can
+// hold. float64(math.MaxInt64) rounds up to 2^63, one past the range, so the
+// upper bound is exclusive; converting an out-of-range float is
+// implementation-defined, so every guard runs before the conversion.
+func wholeFloatToInt64(f float64) (int64, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+		return 0, false
+	}
+	if f < math.MinInt64 || f >= 0x1p63 {
+		return 0, false
+	}
+	return int64(f), true
 }
 
 // Float returns the value as a float64 and true if the value is a numeric type.
@@ -277,7 +269,7 @@ func wrapMapValue(rv reflect.Value, clone bool) any {
 	// For non-string-keyed maps, store as-is (unusual case)
 	// This maintains the value but doesn't provide typed access
 	if rv.IsNil() {
-		return nil
+		return rv.Interface() // the typed nil, so the value keeps its type
 	}
 	if clone {
 		return deepCloneMap(rv)
@@ -322,7 +314,7 @@ func deepClone(v any) any {
 // Handles nil element values correctly using reflect.Zero for interface-typed maps.
 func deepCloneMap(rv reflect.Value) any {
 	if rv.IsNil() {
-		return nil
+		return rv.Interface() // the typed nil, which an untyped nil would lose
 	}
 
 	newMap := reflect.MakeMapWithSize(rv.Type(), rv.Len())
@@ -346,7 +338,7 @@ func deepCloneMap(rv reflect.Value) any {
 // Handles nil element values correctly using reflect.Zero for interface-typed slices.
 func deepCloneSlice(rv reflect.Value) any {
 	if rv.IsNil() {
-		return nil
+		return rv.Interface() // the typed nil, which an untyped nil would lose
 	}
 
 	newSlice := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())

@@ -56,7 +56,8 @@ func TestSources_PositionAt_NilReceiver(t *testing.T) {
 
 	pos := s.PositionAt(location.SourceID{}, 0)
 
-	assert.Equal(t, location.Position{}, pos)
+	// An unknown byte offset is -1; the zero Position claims offset 0.
+	assert.Equal(t, location.UnknownPosition(), pos)
 }
 
 func TestSources_LineStartByte_NilReceiver(t *testing.T) {

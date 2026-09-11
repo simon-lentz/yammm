@@ -534,9 +534,10 @@ func compareEdges(a, b *Edge) int {
 // tie.
 //
 // What this does not promise: two values of one type whose %v forms are equal
-// still tie. For the scalar types an edge property can hold, %v is injective;
-// for a composite it may not be, and that residue is stated rather than
-// claimed away.
+// still tie. For the scalar types an edge property can hold, %v is injective.
+// A composite renders by its content (see renderValue), so allocation never
+// decides; its %v form is still not injective (`[a b]` is one string or two),
+// and that residue is stated rather than claimed away.
 func compareProps(a, b immutable.Properties) int {
 	// The key order is precomputed at construction, so collecting it costs one
 	// allocation and no sort. An earlier rewrite walked two iter.Pull2
@@ -559,9 +560,16 @@ func compareProps(a, b immutable.Properties) int {
 
 // renderValue renders one property value with its type, so values of different
 // types never compare equal. A Go type name holds no '|', so the split is
-// unambiguous.
+// unambiguous. A wrapped map or slice renders its cloned content: the wrapper
+// holds a pointer, and %v of the wrapper would print the address.
 func renderValue(v immutable.Value) string {
 	u := v.Unwrap()
+	switch w := u.(type) {
+	case immutable.Map[string]:
+		u = w.Clone()
+	case immutable.Slice:
+		u = w.Clone()
+	}
 	return fmt.Sprintf("%T|%v", u, u)
 }
 

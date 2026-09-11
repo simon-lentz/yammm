@@ -55,8 +55,10 @@ func NormalizeNumber(n json.Number) any {
 
 // NormalizeValue recursively normalizes json.Number values within arbitrary
 // Go values. It walks map[string]any, []any, and scalar positions, applying
-// NormalizeNumber to each json.Number encountered. Non-json.Number values
-// are returned unchanged.
+// NormalizeNumber to each json.Number encountered. It rewrites each
+// map[string]any and []any in place and returns the same container, so a
+// caller must own what it passes. Non-json.Number scalars are returned
+// unchanged.
 //
 // NormalizeValue enforces a maximum recursion depth of 64 levels. If the
 // depth limit is exceeded, NormalizeValue returns the value unnormalized at

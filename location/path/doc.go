@@ -34,8 +34,12 @@
 //
 //	\\ for literal backslash
 //	\" for literal double quote
-//	\n \r \t for whitespace
-//	\uXXXX for unicode escapes
+//	\n \r \t \b \f for those control characters
+//	\uXXXX for any other control character
+//
+// Parse decodes a quoted string as RFC 8259 section 7 does: it also accepts
+// \/ and a \uXXXX surrogate pair, and it refuses an unpaired surrogate and a
+// raw control character. Invalid UTF-8 in a key is written as U+FFFD.
 //
 // # Builder Pattern
 //

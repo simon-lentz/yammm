@@ -1187,7 +1187,9 @@ func (sd *streamDecoder) instanceParts(row int, inst instWire) graph.InstancePar
 			parsedPath = path.Root()
 		}
 		prov := location.NewProvenance(inst.Provenance.SourceName, parsedPath, location.Span{})
-		if parseErr != nil {
+		// A path kept as stated, when it fails to parse or parses to another
+		// spelling, is what a marshal writes back: the document's own bytes.
+		if parseErr != nil || parsedPath.String() != inst.Provenance.Path {
 			prov = prov.WithRawPath(inst.Provenance.Path)
 		}
 		ip.Provenance = prov

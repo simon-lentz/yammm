@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -26,7 +25,7 @@ type writeTargetCase struct {
 // writeTargetCases is the outcome table both write primitives are judged by.
 // It asserts what a reader of the target sees, never how the bytes got there.
 func writeTargetCases() []writeTargetCase {
-	return []writeTargetCase{
+	cases := []writeTargetCase{
 		{
 			name:  "a file that does not exist yet",
 			setup: func(dir string) (string, error) { return filepath.Join(dir, "new.txt"), nil },
@@ -215,22 +214,6 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 		{
-			name: "a FIFO receives the bytes and stays a FIFO",
-			setup: func(dir string) (string, error) {
-				target := filepath.Join(dir, "pipe")
-				return target, syscall.Mkfifo(target, 0o600)
-			},
-			check: func(_, target string, err error) string {
-				if err != nil {
-					return "writing into a FIFO failed: " + err.Error()
-				}
-				if info, statErr := os.Lstat(target); statErr != nil || info.Mode()&fs.ModeNamedPipe == 0 {
-					return "the FIFO was replaced by a regular file"
-				}
-				return ""
-			},
-		},
-		{
 			name: "a writable file in a read-only directory is refused",
 			setup: func(dir string) (string, error) {
 				sub := filepath.Join(dir, "ro")
@@ -282,6 +265,7 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 	}
+	return append(cases, platformTargetCases()...)
 }
 
 // TestWriteFile_TargetKinds judges WriteFile by the outcome table.

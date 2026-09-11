@@ -135,6 +135,8 @@ func (s Span) IsGeometricallySafe() bool {
 //   - "<no location>" for zero spans
 //   - "source:line:column" for point spans
 //   - "source:startLine:startCol-endLine:endCol" for range spans
+//
+// An unknown position renders as "<unknown>", as [Position.String] writes it.
 func (s Span) String() string {
 	if s.IsZero() {
 		return "<no location>"
@@ -144,7 +146,7 @@ func (s Span) String() string {
 	if s.IsPoint() {
 		return fmt.Sprintf("%s:%s", src, s.Start.String())
 	}
-	return fmt.Sprintf("%s:%d:%d-%d:%d", src, s.Start.Line, s.Start.Column, s.End.Line, s.End.Column)
+	return fmt.Sprintf("%s:%s-%s", src, s.Start.String(), s.End.String())
 }
 
 // Contains reports whether position p is within this span.
@@ -185,6 +187,10 @@ func (s Span) Contains(p Position) bool {
 //  1. Source (string comparison via [SourceID.String])
 //  2. Start position (line, then column)
 //  3. End position (line, then column)
+//  4. Start, then End, byte offset, an unknown offset (-1) first
+//  5. A synthetic source before a file-backed one spelled alike
+//
+// It returns 0 exactly when a == b, so a sort by it ties nothing distinct.
 //
 // Source comparison uses string ordering of SourceID.String(). This means
 // synthetic IDs that resemble file paths (e.g., "/absolute/path") will be
@@ -204,7 +210,23 @@ func Compare(a, b Span) int {
 	if c := comparePositions(a.Start, b.Start); c != 0 {
 		return c
 	}
-	return comparePositions(a.End, b.End)
+	if c := comparePositions(a.End, b.End); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.Start.Byte, b.Start.Byte); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.End.Byte, b.End.Byte); c != 0 {
+		return c
+	}
+	switch af, bf := a.Source.IsFilePath(), b.Source.IsFilePath(); {
+	case af == bf:
+		return 0
+	case af:
+		return 1
+	default:
+		return -1
+	}
 }
 
 // comparePositions compares two positions for ordering.

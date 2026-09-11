@@ -1,6 +1,7 @@
 package location
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -209,6 +210,16 @@ func TestSpan_String(t *testing.T) {
 			span: Range(testSource, 10, 5, 10, 15),
 			want: "test://unit:10:5-10:15",
 		},
+		{
+			name: "range with an unknown end",
+			span: Span{Source: testSource, Start: Position{Line: 10, Column: 5, Byte: -1}},
+			want: "test://unit:10:5-<unknown>",
+		},
+		{
+			name: "range with an unknown start",
+			span: Span{Source: testSource, End: Position{Line: 10, Column: 15, Byte: -1}},
+			want: "test://unit:<unknown>-10:15",
+		},
 	}
 
 	for _, tt := range tests {
@@ -305,6 +316,45 @@ func TestSpan_Contains_WithBytes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := s.Contains(tt.pos); got != tt.want {
 				t.Errorf("Contains() = %v; want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCompare_ZeroOnlyForEqualSpans holds Compare to its contract: it returns
+// 0 exactly when the two spans are ==, so a sort by it ties nothing distinct.
+func TestCompare_ZeroOnlyForEqualSpans(t *testing.T) {
+	t.Parallel()
+
+	file, err := SourceIDFromAbsolutePath(filepath.Join(t.TempDir(), "a.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairs := []struct {
+		name string
+		a, b Span
+	}{
+		{"a known and an unknown start byte", Point(testSource, 1, 1), PointWithByte(testSource, 1, 1, 0)},
+		{"two known start bytes", PointWithByte(testSource, 1, 1, 0), PointWithByte(testSource, 1, 1, 4)},
+		{"two known end bytes", RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4), RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9)},
+		{"two known start bytes before one end byte", RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9), RangeWithBytes(testSource, 1, 1, 2, 1, 5, 9)},
+		{"a synthetic and a file-backed source spelled alike", Point(NewSourceID(file.String()), 1, 1), Point(file, 1, 1)},
+	}
+	for _, p := range pairs {
+		t.Run(p.name, func(t *testing.T) {
+			t.Parallel()
+			if p.a == p.b {
+				t.Fatalf("the fixture's spans are equal: %v", p.a)
+			}
+			c := Compare(p.a, p.b)
+			if c == 0 {
+				t.Errorf("Compare(%v, %v) = 0 for spans that differ", p.a, p.b)
+			}
+			if back := Compare(p.b, p.a); back != -c {
+				t.Errorf("Compare is not antisymmetric: %d one way, %d the other", c, back)
+			}
+			if self := Compare(p.a, p.a); self != 0 {
+				t.Errorf("Compare(a, a) = %d, want 0", self)
 			}
 		})
 	}

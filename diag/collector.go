@@ -50,7 +50,7 @@ type Collector struct {
 	// eviction actually happens.
 	storedCounts SeverityCounts
 
-	// Cached sorted result (invalidated on Collect)
+	// Cached sorted result, invalidated whenever the collector changes
 	cachedResult *Result
 }
 
@@ -307,7 +307,8 @@ func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
 // Result produces a sorted, immutable snapshot.
 //
 // The returned Result is independent of the Collector; subsequent Collect
-// calls do not affect it. Results are cached until the next Collect call.
+// calls do not affect it. Results are cached until the collector next changes,
+// through Collect, CollectAll, Merge or MergeFunc.
 //
 // Issues are sorted by source, position, and code for deterministic output.
 func (c *Collector) Result() Result {
@@ -339,7 +340,7 @@ func (c *Collector) Result() Result {
 
 // compareIssues compares two issues for deterministic sorting.
 //
-// Ordering rules (per architecture spec "Deterministic Ordering (Codes)"):
+// Ordering rules:
 //  1. Span-backed issues before path-only issues
 //  2. Span-backed: Source, Start position, End position
 //  3. Path-only: SourceName, Path

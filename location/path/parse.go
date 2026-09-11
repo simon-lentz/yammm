@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -71,32 +72,21 @@ func Parse(s string) (Builder, error) {
 				pos++
 				b = b.Key(str)
 			case isDigit(rune(s[pos])) || s[pos] == '-':
-				// Could be array index [0] or start of PK [id=123]
-				// Look ahead to see if there's an '=' sign
-				if containsBeforeClose(s[pos:], '=') {
-					// PK-based index
-					fields, newPos, err := parsePKFields(s, pos)
-					if err != nil {
-						return Builder{}, err
-					}
-					b = b.PK(fields...)
-					pos = newPos
-				} else {
-					// Array index
-					idx, newPos, err := parseInteger(s, pos)
-					if err != nil {
-						return Builder{}, err
-					}
-					if idx < 0 {
-						return Builder{}, fmt.Errorf("negative array index %d not allowed", idx)
-					}
-					pos = newPos
-					if pos >= len(s) || s[pos] != ']' {
-						return Builder{}, errors.New("expected ']' after array index")
-					}
-					pos++
-					b = b.Index(idx)
+				// Array index. A PK field name starts with a letter or '_', so a
+				// digit or '-' can start nothing else.
+				idx, newPos, err := parseInteger(s, pos)
+				if err != nil {
+					return Builder{}, err
 				}
+				if idx < 0 {
+					return Builder{}, fmt.Errorf("negative array index %d not allowed", idx)
+				}
+				pos = newPos
+				if pos >= len(s) || s[pos] != ']' {
+					return Builder{}, errors.New("expected ']' after array index")
+				}
+				pos++
+				b = b.Index(idx)
 			case isLetter(rune(s[pos])) || s[pos] == '_':
 				// PK-based index: [id=123] or [name="Alice"]
 				fields, newPos, err := parsePKFields(s, pos)
@@ -106,15 +96,22 @@ func Parse(s string) (Builder, error) {
 				b = b.PK(fields...)
 				pos = newPos
 			default:
-				return Builder{}, fmt.Errorf("unexpected character '%c' in bracket", s[pos])
+				return Builder{}, fmt.Errorf("unexpected character %q in bracket", runeAt(s, pos))
 			}
 
 		default:
-			return Builder{}, fmt.Errorf("unexpected character '%c' at position %d", s[pos], pos)
+			return Builder{}, fmt.Errorf("unexpected character %q at position %d", runeAt(s, pos), pos)
 		}
 	}
 
 	return b, nil
+}
+
+// runeAt returns the rune that starts at byte offset pos of s, for an error
+// message: s[pos] alone is one byte of a multi-byte rune.
+func runeAt(s string, pos int) rune {
+	r, _ := utf8.DecodeRuneInString(s[pos:])
+	return r
 }
 
 // parseIdentifier parses an identifier starting at pos.
@@ -140,7 +137,8 @@ func parseIdentifier(s string, pos int) (string, int, error) {
 	return s[start:pos], pos, nil
 }
 
-// parseQuotedString parses a quoted string starting at pos (which should be at the opening quote).
+// parseQuotedString parses a quoted string starting at pos (which should be at
+// the opening quote), decoding it as RFC 8259 section 7 decodes a JSON string.
 // Returns the unescaped string, the position after the closing quote, and any error.
 func parseQuotedString(s string, pos int) (string, int, error) {
 	if pos >= len(s) || s[pos] != '"' {
@@ -164,6 +162,8 @@ func parseQuotedString(s string, pos int) (string, int, error) {
 				sb.WriteByte('"')
 			case '\\':
 				sb.WriteByte('\\')
+			case '/':
+				sb.WriteByte('/')
 			case 'n':
 				sb.WriteByte('\n')
 			case 'r':
@@ -175,28 +175,65 @@ func parseQuotedString(s string, pos int) (string, int, error) {
 			case 'f':
 				sb.WriteByte('\f') // U+000C form feed
 			case 'u':
-				// Unicode escape: \uXXXX
-				if pos+4 >= len(s) {
-					return "", pos, errors.New("incomplete unicode escape")
-				}
-				hex := s[pos+1 : pos+5]
-				codepoint, err := strconv.ParseUint(hex, 16, 16)
+				r, last, err := parseUnicodeEscape(s, pos)
 				if err != nil {
-					return "", pos, fmt.Errorf("invalid unicode escape: %s", hex)
+					return "", pos, err
 				}
-				sb.WriteRune(rune(codepoint))
-				pos += 4
+				sb.WriteRune(r)
+				pos = last
 			default:
-				return "", pos, fmt.Errorf("unknown escape sequence: \\%c", s[pos])
+				return "", pos, fmt.Errorf("unknown escape sequence: \\%c", runeAt(s, pos))
 			}
 			pos++
 		} else {
+			if s[pos] < 0x20 {
+				return "", pos, fmt.Errorf("unescaped control character %q in string", rune(s[pos]))
+			}
 			r, size := utf8.DecodeRuneInString(s[pos:])
 			sb.WriteRune(r)
 			pos += size
 		}
 	}
 	return "", pos, errors.New("unterminated string")
+}
+
+// parseUnicodeEscape decodes the \uXXXX escape whose 'u' is at s[pos], with the
+// low surrogate a high one must be followed by. It returns the rune and the
+// offset of the last hex digit it read.
+func parseUnicodeEscape(s string, pos int) (rune, int, error) {
+	cp, err := hex4(s, pos)
+	if err != nil {
+		return 0, pos, err
+	}
+	last := pos + 4
+	if !utf16.IsSurrogate(cp) {
+		return cp, last, nil
+	}
+	if last+2 >= len(s) || s[last+1] != '\\' || s[last+2] != 'u' {
+		return 0, pos, fmt.Errorf("unpaired surrogate \\u%04x", cp)
+	}
+	lo, err := hex4(s, last+2)
+	if err != nil {
+		return 0, pos, err
+	}
+	r := utf16.DecodeRune(cp, lo)
+	if r == utf8.RuneError {
+		return 0, pos, fmt.Errorf("unpaired surrogate \\u%04x", cp)
+	}
+	return r, last + 6, nil
+}
+
+// hex4 reads the four hex digits after the 'u' at s[pos].
+func hex4(s string, pos int) (rune, error) {
+	if pos+4 >= len(s) {
+		return 0, errors.New("incomplete unicode escape")
+	}
+	digits := s[pos+1 : pos+5]
+	cp, err := strconv.ParseUint(digits, 16, 16)
+	if err != nil {
+		return 0, fmt.Errorf("invalid unicode escape: %s", digits)
+	}
+	return rune(cp), nil
 }
 
 // parseInteger parses an integer starting at pos.
@@ -261,7 +298,7 @@ func parsePKFields(s string, pos int) ([]PKField, int, error) {
 			// Boolean false
 			value = false
 			pos += 5
-		case isDigit(rune(s[pos])) || s[pos] == '-' || s[pos] == '.':
+		case isDigit(rune(s[pos])) || s[pos] == '-':
 			// Numeric value (could be int or float)
 			numStr, newPos, err := parseNumber(s, pos)
 			if err != nil {
@@ -277,14 +314,13 @@ func parsePKFields(s string, pos int) ([]PKField, int, error) {
 				}
 				value = f
 			} else {
-				i, err := strconv.ParseInt(numStr, 10, 64)
+				value, err = parsePKInteger(numStr)
 				if err != nil {
-					return nil, pos, fmt.Errorf("invalid integer: %w", err)
+					return nil, pos, err
 				}
-				value = i
 			}
 		default:
-			return nil, pos, fmt.Errorf("unexpected character '%c' in PK value", s[pos])
+			return nil, pos, fmt.Errorf("unexpected character %q in PK value", runeAt(s, pos))
 		}
 
 		fields = append(fields, PKField{Name: name, Value: value})
@@ -301,10 +337,25 @@ func parsePKFields(s string, pos int) ([]PKField, int, error) {
 			pos++
 			continue
 		}
-		return nil, pos, fmt.Errorf("expected ']' or ',' after PK value, got '%c'", s[pos])
+		return nil, pos, fmt.Errorf("expected ']' or ',' after PK value, got %q", runeAt(s, pos))
 	}
 
 	return fields, pos, nil
+}
+
+// parsePKInteger reads an integer PK value as an int64, or as a uint64 when it
+// is above int64's range, which is how Builder writes a uint64.
+func parsePKInteger(numStr string) (any, error) {
+	i, err := strconv.ParseInt(numStr, 10, 64)
+	if err == nil {
+		return i, nil
+	}
+	if !strings.HasPrefix(numStr, "-") {
+		if u, uerr := strconv.ParseUint(numStr, 10, 64); uerr == nil {
+			return u, nil
+		}
+	}
+	return nil, fmt.Errorf("invalid integer: %w", err)
 }
 
 // parseNumber parses a JSON number (integer or float) starting at pos.
@@ -354,23 +405,4 @@ func parseNumber(s string, pos int) (string, int, error) {
 	}
 
 	return s[start:pos], pos, nil
-}
-
-// containsBeforeClose checks if char appears before the first ']' in s.
-// Used to distinguish array indices [0] from PK indices [id=123].
-//
-// Note: PK syntax requires no whitespace around '='. Input like "[id = 123]"
-// will be parsed as an array index (and likely fail numeric parsing).
-// This is intentional: Builder.String() always emits canonical form without
-// spaces, and round-trip fidelity requires consistent syntax.
-func containsBeforeClose(s string, char byte) bool {
-	for i := range len(s) {
-		if s[i] == ']' {
-			return false
-		}
-		if s[i] == char {
-			return true
-		}
-	}
-	return false
 }

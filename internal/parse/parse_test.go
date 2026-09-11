@@ -796,7 +796,7 @@ func grammarTypeNames() []string {
 	var names []string
 	var walk func(reflect.Type)
 	walk = func(rt reflect.Type) {
-		for rt.Kind() == reflect.Ptr || rt.Kind() == reflect.Slice {
+		for rt.Kind() == reflect.Pointer || rt.Kind() == reflect.Slice {
 			rt = rt.Elem()
 		}
 		if seen[rt] {

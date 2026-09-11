@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -64,8 +65,10 @@ func (c CanonicalPath) Dir() CanonicalPath {
 
 // Join appends path elements to c by the host's path rules and returns the
 // cleaned result. It is lexical: symlinks in the result are not resolved. An
-// element that looks absolute returns [ErrAbsoluteJoinElement]. On Unix a
-// backslash in an element is part of a file name.
+// element that is not relative on the host returns [ErrAbsoluteJoinElement];
+// on Windows that includes a rooted `\x` and a drive-relative `C:x`. On Unix a
+// backslash in an element is part of a file name. For the zero value it returns
+// the zero value, as [CanonicalPath.Dir] does.
 func (c CanonicalPath) Join(elem ...string) (CanonicalPath, error) {
 	if c.IsZero() {
 		return CanonicalPath{}, nil
@@ -73,12 +76,22 @@ func (c CanonicalPath) Join(elem ...string) (CanonicalPath, error) {
 	parts := make([]string, 0, len(elem)+1)
 	parts = append(parts, filepath.FromSlash(c.path))
 	for _, e := range elem {
-		if looksLikeAbsolute(e) {
+		if looksLikeAbsolute(e) || hostRootsElement(e) {
 			return CanonicalPath{}, fmt.Errorf("%w: %s; use relative path or NewCanonicalPath for absolute paths", ErrAbsoluteJoinElement, e)
 		}
 		parts = append(parts, filepath.FromSlash(e))
 	}
 	return CanonicalPath{path: filepath.ToSlash(norm.NFC.String(filepath.Join(parts...)))}, nil
+}
+
+// hostRootsElement reports whether the host resolves e against something other
+// than the path it is joined to: on Windows a leading backslash roots e at the
+// current drive, and a volume name selects a drive. Unix has no such element.
+func hostRootsElement(e string) bool {
+	if filepath.Separator != '\\' {
+		return false
+	}
+	return strings.HasPrefix(e, `\`) || filepath.VolumeName(e) != ""
 }
 
 // looksLikeAbsolute reports whether s looks like an absolute filesystem

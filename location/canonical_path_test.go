@@ -159,6 +159,9 @@ func TestNewCanonicalPath_ErrorHandling(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	t.Run("permission denied returns error", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root traverses a directory whatever its permission bits")
+		}
 		// Create a directory with a file, then remove read permission
 		unreadableDir := filepath.Join(tmpDir, "unreadable")
 		if err := os.Mkdir(unreadableDir, 0o700); err != nil {
@@ -383,6 +386,20 @@ func TestCanonicalPath_Join_RejectsAbsoluteElements(t *testing.T) {
 		{"windows other volume", "D:/other"},
 		{"unc forward", "//server/share"},
 		{"unc back", "\\\\server\\share"},
+	}
+	if runtime.GOOS == "windows" {
+		// Windows roots a leading backslash at the current drive, and a volume
+		// with no separator names that drive's current directory.
+		tests = append(tests,
+			struct {
+				name    string
+				element string
+			}{"windows rooted", `\Windows`},
+			struct {
+				name    string
+				element string
+			}{"windows drive-relative", "C:Windows"},
+		)
 	}
 
 	for _, tt := range tests {

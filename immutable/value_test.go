@@ -395,6 +395,37 @@ func TestValue_FloatTypes(t *testing.T) {
 	}
 }
 
+// TestDeepClone_PreservesTypedNilElement holds a deep clone to the element
+// types it was given: a nil map or slice element stays that typed nil, where a
+// nil interface would lose its type.
+func TestDeepClone_PreservesTypedNilElement(t *testing.T) {
+	input := map[int]any{1: map[string]any(nil), 2: []any(nil)}
+	m, ok := Wrap(input, WithClone(true)).Unwrap().(map[int]any)
+	if !ok {
+		t.Fatalf("Unwrap is not a map[int]any")
+	}
+	if v, ok := m[1].(map[string]any); !ok || v != nil {
+		t.Errorf("element 1 = %#v, want the typed nil map[string]any", m[1])
+	}
+	if v, ok := m[2].([]any); !ok || v != nil {
+		t.Errorf("element 2 = %#v, want the typed nil []any", m[2])
+	}
+}
+
+// TestWrap_NilNonStringKeyedMapKeepsItsType holds a nil map with non-string
+// keys to the nil semantics the package doc states: it is nil, and it keeps
+// its type, where a literal nil has none.
+func TestWrap_NilNonStringKeyedMapKeepsItsType(t *testing.T) {
+	var m map[int]any
+	v := Wrap(m)
+	if u, ok := v.Unwrap().(map[int]any); !ok || u != nil {
+		t.Errorf("Unwrap = %#v, want the typed nil map[int]any", v.Unwrap())
+	}
+	if !v.IsNil() {
+		t.Error("IsNil = false for a nil map")
+	}
+}
+
 func TestDeepClone_NilInNonStringKeyedMap(t *testing.T) {
 	// Non-string-keyed maps trigger deepCloneMap path which must handle nil values
 	input := map[int]any{1: nil, 2: "value", 3: nil}
@@ -560,6 +591,8 @@ func TestValue_Int_FloatBoundary(t *testing.T) {
 		{"infinity", math.Inf(1), false},
 		{"negative infinity", math.Inf(-1), false},
 		{"NaN", math.NaN(), false},
+		{"2^63, one past the int64 range", 0x1p63, false},
+		{"-2^63, the int64 minimum", -0x1p63, true},
 	}
 
 	for _, tt := range tests {
@@ -791,6 +824,7 @@ func TestValue_Int_Float32(t *testing.T) {
 		{"NaN", float32(math.NaN()), 0, false},
 		{"positive infinity", float32(math.Inf(1)), 0, false},
 		{"negative infinity", float32(math.Inf(-1)), 0, false},
+		{"2^63, one past the int64 range", float32(0x1p63), 0, false},
 	}
 
 	for _, tt := range tests {

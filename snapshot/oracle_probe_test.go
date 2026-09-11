@@ -953,6 +953,49 @@ func TestWireProbe_UnparseableProvenancePath(t *testing.T) {
 	expectOutcome(t, "load[warning:E_SNAPSHOT_PATH_FALLBACK] verify[warning:E_SNAPSHOT_PATH_FALLBACK]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
+// TestWireProbe_NonCanonicalProvenancePathSurvives replaces an instance's null
+// provenance with a path that parses but is not spelled the way Builder spells
+// it. A load then a marshal must give the path back byte for byte, with no
+// warning: the spelling is valid, and rewriting it would change the document.
+func TestWireProbe_NonCanonicalProvenancePathSurvives(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s := loadIdentitySchema(t)
+	anchorID := mustTypeIDIn(t, s, "", "Anchor")
+
+	data := marshalParts(ctx, t, s, graph.SnapshotParts{
+		Types: []schema.TypeID{anchorID},
+		Instances: map[schema.TypeID][]graph.InstanceParts{
+			anchorID: {{
+				TypeName:   tagForm(s, anchorID),
+				TypeID:     anchorID,
+				PrimaryKey: immutable.WrapKey([]any{"a1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
+			}},
+		},
+	})
+
+	// Each is the JSON text of a path: a quoted key Builder writes in dot
+	// notation, and an index with leading zeros.
+	for _, stated := range []string{`$[\"zq\"]`, `$.a[007]`} {
+		t.Run(stated, func(t *testing.T) {
+			t.Parallel()
+			edited := spliceOnce(t, data, `"provenance":null`, `"provenance":{"source_name":"probe","path":"`+stated+`"}`)
+			snap, res := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+			if res.HasErrors() || res.HasWarnings() {
+				t.Fatalf("load: %v", res)
+			}
+			out, res := snapshot.Marshal(ctx, snap)
+			if err := res.Err(); err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if !bytes.Contains(out, []byte(`"path":"`+stated+`"`)) {
+				t.Errorf("the marshalled document does not carry the stated path %s:\n%s", stated, out)
+			}
+		})
+	}
+}
+
 // TestWireProbe_ComposedDuplicateSecondGeneration re-marshals a loaded
 // document carrying a composed-child duplicate: the parent coordinates and
 // the conflict must survive into the second generation, not only the first.

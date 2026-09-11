@@ -99,7 +99,9 @@ func (k Key) Clone() []any {
 // The invariant key.String() == graph.FormatKey(key.Clone()...) holds for every
 // key built from components. It does not hold for a key built from none:
 // [Key.Clone] returns nil there, and spreading a nil slice through a variadic
-// parameter renders `null`, while String reports `[]`.
+// parameter renders `null`, while String reports `[]`. A component whose type
+// has its own JSON encoding and a slice or map kind, such as []byte, is wrapped
+// by its kind, so String follows Clone and not that encoding.
 //
 // Examples:
 //
@@ -121,9 +123,11 @@ func computeKeyString(wrapped []Value) string {
 		return "[]"
 	}
 
+	// Marshal what Clone returns, so String equals FormatKey(Clone()...) by
+	// construction, nil maps and slices included.
 	raw := make([]any, len(wrapped))
 	for i, c := range wrapped {
-		raw[i] = unwrapForJSON(c)
+		raw[i] = cloneValue(c)
 	}
 
 	data, err := json.Marshal(raw)
@@ -131,24 +135,4 @@ func computeKeyString(wrapped []Value) string {
 		panic(fmt.Sprintf("immutable: key component is not JSON-marshalable: %v", err))
 	}
 	return string(data)
-}
-
-// unwrapForJSON recursively unwraps a Value for JSON marshaling.
-func unwrapForJSON(v Value) any {
-	switch inner := v.val.(type) {
-	case Map[string]:
-		result := make(map[string]any, inner.Len())
-		for k, val := range inner.Range() {
-			result[k] = unwrapForJSON(val)
-		}
-		return result
-	case Slice:
-		result := make([]any, inner.Len())
-		for i, val := range inner.elements {
-			result[i] = unwrapForJSON(val)
-		}
-		return result
-	default:
-		return inner
-	}
 }

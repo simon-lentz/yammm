@@ -150,8 +150,8 @@ func primaryErrorCode(r Result) (string, bool) {
 // The walk preserves tagged context when present and synthesizes a fallback tag
 // when the error chain carries only a bare [*ResultError]:
 //
-//   - If the chain carries a [*ContextualError], returns it with its tag
-//     preserved.
+//   - If the chain carries a [*ContextualError], returns that error itself,
+//     with its tag, not a copy: a change to its fields changes the original.
 //   - Otherwise, if the chain carries a bare [*ResultError], returns a new
 //     [*ContextualError] tagged with fallbackTag. This covers code paths that
 //     surface a diag result without calling [Result.WithContext] — consumers
@@ -160,7 +160,9 @@ func primaryErrorCode(r Result) (string, bool) {
 //
 // errors.As walks the chain transparently including through wrapped errors
 // (fmt.Errorf("...: %w", err), errors.Join, and any custom Unwrap chains), so
-// this helper recovers context from arbitrarily nested wrappings.
+// this helper recovers context from arbitrarily nested wrappings. It returns
+// the first match: through errors.Join, the other joined errors' results are
+// not returned.
 //
 // Nil-safe: AsContextualError(nil, tag) returns (nil, false) without consulting
 // fallbackTag.

@@ -1544,6 +1544,47 @@ does not read this output**, measured at its tree.
   every import-resolution code (A-187), because the LSP publishes an issue's
   message and not its hint.
 
+### Unit 7 — the lane pass
+
+**No exported declaration moves.** Each item below changes behaviour behind an
+existing declaration.
+
+- **`location.Compare` returns 0 exactly when two spans are equal.** It breaks
+  a tie on the start and end byte offsets, then puts a synthetic source before a
+  file-backed one spelled alike. Two diagnostics that differ only in a byte
+  offset therefore sort one way, not in collection order.
+- **`location.Span.String` writes an unknown start or end as `<unknown>`**,
+  where it wrote `0:0`.
+- **On Windows, `CanonicalPath.Join` refuses a rooted `\x` or a drive-relative
+  `C:x` element** with `ErrAbsoluteJoinElement`. It had joined each as a child.
+- **`schema.Sources.PositionAt` on a nil `Sources` returns
+  `location.UnknownPosition()`**, whose byte offset is -1, where it returned
+  the zero `Position`, which claims offset 0.
+- **A snapshot orders edge property values that hold a map by their content.**
+  It had compared the map's in-memory address, so two equal documents could
+  write their edges in different orders.
+- **`immutable`:**
+  - `Value.Int` refuses a float of exactly 2^63. It had reported it as the
+    largest or smallest int64, by platform.
+  - `Key.String` writes a nil map or slice component as `null`, as
+    `graph.FormatKey(key.Clone()...)` does; it wrote `{}` or `[]`. A primary key
+    holds no map or slice, so no graph key changes.
+  - A nil map with non-string keys keeps its type: `Unwrap` returns the typed
+    nil, where it returned a literal nil. A deep clone keeps a typed-nil map or
+    slice element.
+- **`location/path`:**
+  - `Parse` decodes a quoted string as RFC 8259 does. It accepts `\/` and a
+    `\u` surrogate pair, and refuses an unpaired surrogate and a raw control
+    character. It reads an integer PK value above the int64 range as a uint64,
+    and an error names the real character, not one byte of it.
+  - `Builder` writes invalid UTF-8 in a key as U+FFFD, the character `Parse`
+    reads it as. It escapes the text of a PK value of any other type.
+  - Every path yammm writes parses exactly as before.
+- **`snapshot.Load` keeps a provenance path spelled other than `Builder`
+  spells it**, so a marshal writes that path back byte for byte. A path holding
+  a raw control character or an unpaired surrogate now draws
+  `E_SNAPSHOT_PATH_FALLBACK` and is kept as stated.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

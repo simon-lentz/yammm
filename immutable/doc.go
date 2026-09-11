@@ -113,11 +113,16 @@
 //	v.IsNil()     // true (literal nil)
 //	v.Map()       // (zero Map, false) - NOT a map
 //
+// A nil map with non-string keys is stored as that typed nil: IsNil reports
+// true, [Value.Map] reports false, and [Value.Unwrap] returns the typed nil.
+//
 // # Thread Safety
 //
-// All immutable types are safe for concurrent read access. The underlying data
-// structures are never modified after construction. Multiple goroutines can
-// simultaneously call Get, Iter, Keys, Range, and other read methods.
+// All immutable types are safe for concurrent read access. Their entries never
+// change after construction. A string-keyed [Map] computes its sorted keys and
+// case-folded index once, on the first [PropertiesOf], under a sync.Once, so
+// concurrent first use is safe too. Multiple goroutines can simultaneously call
+// Get, Iter, Keys, Range, and other read methods.
 //
 // # Performance Characteristics
 //

@@ -272,10 +272,9 @@ func TestCodesByCategory_AllCategoriesCovered(t *testing.T) {
 	}
 }
 
-// TestContractValidationCodesExist verifies that all 19 contract validation
-// codes mentioned in the architecture doc are defined.
+// TestContractValidationCodesExist holds each core validation code to the
+// category it is registered under.
 func TestContractValidationCodesExist(t *testing.T) {
-	// These are codes specifically mentioned in the contracts/architecture
 	requiredCodes := []struct {
 		code     Code
 		category CodeCategory
@@ -306,9 +305,6 @@ func TestContractValidationCodesExist(t *testing.T) {
 
 	for _, tc := range requiredCodes {
 		t.Run(tc.code.String(), func(t *testing.T) {
-			if tc.code.IsZero() {
-				t.Errorf("code %s is zero", tc.code)
-			}
 			if tc.code.Category() != tc.category {
 				t.Errorf("code %s has category %s; want %s",
 					tc.code, tc.code.Category(), tc.category)

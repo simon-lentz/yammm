@@ -116,7 +116,9 @@ func (m Map[K]) Clone() map[K]any {
 	return result
 }
 
-// cloneValue recursively clones a Value back to its original type.
+// cloneValue returns a mutable deep copy of v's content: a map[string]any for a
+// Map[string], an []any for a Slice, a deep copy of a map stored as given, and
+// the value itself otherwise.
 func cloneValue(v Value) any {
 	if v.val == nil {
 		return nil

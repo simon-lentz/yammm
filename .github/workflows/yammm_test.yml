@@ -84,6 +84,11 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # Compiles every package's tests for Windows, the ones this job does not
+      # run included, so a Unix-only call in a test file fails here.
+      - name: Vet every package for Windows
+        shell: bash
+        run: go vet ./...
       - name: Path identity tests
         shell: bash
         run: |

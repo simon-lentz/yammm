@@ -126,6 +126,11 @@ func TestBuilder_Key(t *testing.T) {
 			key:      "my-key",
 			expected: `$["my-key"]`,
 		},
+		{
+			name:     "invalid UTF-8 is written as U+FFFD, as Parse reads it",
+			key:      "a\xffb",
+			expected: "$[\"a\uFFFDb\"]",
+		},
 	}
 
 	for _, tt := range tests {
@@ -219,6 +224,11 @@ func TestBuilder_PK(t *testing.T) {
 			name:     "empty fields",
 			fields:   []PKField{},
 			expected: "$.Person",
+		},
+		{
+			name:     "a value of another type is quoted and escaped",
+			fields:   []PKField{{Name: "tags", Value: []string{`a"b\c`}}},
+			expected: `$.Person[tags="[a\"b\\c]"]`,
 		},
 	}
 

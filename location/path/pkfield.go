@@ -8,7 +8,8 @@ package path
 //   - int, int64, or other integer types (formatted unquoted: [id=123])
 //   - bool (formatted unquoted: [active=true])
 //
-// Other types will be formatted using their default string representation.
+// Any other value is written as a quoted string of its fmt.Sprint form,
+// escaped, and parses back as a string.
 type PKField struct {
 	Name  string
 	Value any

@@ -62,6 +62,24 @@ func TestNormalizeNumber(t *testing.T) {
 	}
 }
 
+// TestNormalizeValue_RewritesInPlace pins what NormalizeValue's godoc states:
+// a map[string]any or []any is rewritten where it is, and returned.
+func TestNormalizeValue_RewritesInPlace(t *testing.T) {
+	inner := []any{json.Number("1.5")}
+	in := map[string]any{"n": json.Number("7"), "s": inner}
+	out, ok := NormalizeValue(in).(map[string]any)
+	if !ok {
+		t.Fatal("NormalizeValue did not return a map[string]any")
+	}
+	if in["n"] != int64(7) || inner[0] != 1.5 {
+		t.Errorf("the caller's containers were not rewritten: %#v, %#v", in, inner)
+	}
+	out["probe"] = true
+	if _, same := in["probe"]; !same {
+		t.Error("NormalizeValue returned a different map from the one it was given")
+	}
+}
+
 func TestNormalizeValue_Scalars(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -1,6 +1,7 @@
 package path
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -304,8 +305,13 @@ func TestParse_InvalidPaths(t *testing.T) {
 		},
 		{
 			name:   "incomplete unicode escape",
-			input:  `$["\u00"]`,
-			errMsg: "invalid unicode escape",
+			input:  `$["\u00`,
+			errMsg: "incomplete unicode escape",
+		},
+		{
+			name:   "a non-ASCII character names its rune",
+			input:  "$\u00e9",
+			errMsg: "'\u00e9'",
 		},
 		{
 			name:   "invalid unicode escape",
@@ -345,7 +351,7 @@ func TestParse_InvalidPaths(t *testing.T) {
 		{
 			name:   "decimal point without digits",
 			input:  "$[x=.]",
-			errMsg: "expected digit",
+			errMsg: "unexpected character '.' in PK value",
 		},
 		{
 			name:   "unexpected character after dollar",
@@ -399,6 +405,9 @@ func TestParse_RoundTrip(t *testing.T) {
 			PKField{Name: "studentId", Value: int64(12345)},
 		),
 		Root().Key("data").Key("users").Index(0).Key("profile"),
+		Root().Key("Person").PK(PKField{Name: "id", Value: uint64(math.MaxUint64)}),
+		Root().Key("Person").PK(PKField{Name: "tags", Value: []string{`a"b\c`}}),
+		Root().Key("a\xffb"),
 	}
 
 	for _, original := range paths {
@@ -532,6 +541,27 @@ func TestParseQuotedString(t *testing.T) {
 			pos:     0,
 			wantErr: true,
 		},
+		{
+			name:     "an escaped solidus",
+			input:    `"a\/b"`,
+			pos:      0,
+			expected: "a/b",
+			newPos:   6,
+		},
+		{
+			name:     "a surrogate pair",
+			input:    `"\ud83d\ude00"`,
+			pos:      0,
+			expected: "\U0001F600",
+			newPos:   14,
+		},
+		{name: "a lone high surrogate", input: `"\ud83d"`, pos: 0, wantErr: true},
+		{name: "a lone low surrogate", input: `"\ude00"`, pos: 0, wantErr: true},
+		{name: "a high surrogate before a non-surrogate", input: `"\ud83dA"`, pos: 0, wantErr: true},
+		{name: "a raw control character", input: "\"a\x01b\"", pos: 0, wantErr: true},
+		{name: "a raw newline", input: "\"a\nb\"", pos: 0, wantErr: true},
+		{name: "a lone low surrogate before an escape", input: `"\ude00\u0041"`, pos: 0, wantErr: true},
+		{name: "a high surrogate before an escaped non-surrogate", input: `"\ud83d\u0041"`, pos: 0, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -630,53 +660,6 @@ func TestParseNumber(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, num)
 			assert.Equal(t, tt.newPos, newPos)
-		})
-	}
-}
-
-func TestContainsBeforeClose(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		char     byte
-		expected bool
-	}{
-		{
-			name:     "found before close",
-			input:    "id=42]",
-			char:     '=',
-			expected: true,
-		},
-		{
-			name:     "not found before close",
-			input:    "42]",
-			char:     '=',
-			expected: false,
-		},
-		{
-			name:     "close first",
-			input:    "]id=42",
-			char:     '=',
-			expected: false,
-		},
-		{
-			name:     "no close bracket",
-			input:    "id=42",
-			char:     '=',
-			expected: true,
-		},
-		{
-			name:     "empty string",
-			input:    "",
-			char:     '=',
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := containsBeforeClose(tt.input, tt.char)
-			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

@@ -92,6 +92,44 @@ func TestCompareProps_EqualSetsCompareEqual(t *testing.T) {
 	}
 }
 
+// TestCompareProps_OrdersCompositeValuesByContent drives property values that
+// hold a map or a slice. Their order must follow their content: two equal
+// values built apart tie, and never compare by where they were allocated.
+func TestCompareProps_OrdersCompositeValuesByContent(t *testing.T) {
+	t.Parallel()
+	props := func(v any) immutable.Properties { return immutable.WrapProperties(map[string]any{"p": v}) }
+
+	// A slice holding a map is the case a slice's own %v form cannot settle.
+	equal := []struct {
+		name string
+		v    func() any
+	}{
+		{"a map holding a slice", func() any { return map[string]any{"x": int64(1), "y": []any{"a"}} }},
+		{"a slice holding a map", func() any { return []any{map[string]any{"k": int64(1)}} }},
+	}
+	for _, e := range equal {
+		for range 10 {
+			if c := compareProps(props(e.v()), props(e.v())); c != 0 {
+				t.Fatalf("%s: two equal values built apart compare %d, want 0", e.name, c)
+			}
+		}
+	}
+	ordered := []struct {
+		name   string
+		lo, hi any
+	}{
+		{"maps", map[string]any{"b": int64(1)}, map[string]any{"b": int64(2)}},
+		{"slices", []any{"a"}, []any{"b"}},
+		{"slices of maps", []any{map[string]any{"b": int64(1)}}, []any{map[string]any{"b": int64(2)}}},
+	}
+	for _, o := range ordered {
+		lo, hi := props(o.lo), props(o.hi)
+		if compareProps(lo, hi) >= 0 || compareProps(hi, lo) <= 0 {
+			t.Errorf("%s: %v and %v do not order by content", o.name, o.lo, o.hi)
+		}
+	}
+}
+
 // TestCompareDuplicates_ParentDiscriminates drives two composed-child
 // duplicates rejected from different parent slots. The wire carries the parent
 // coordinates, so they are different records; a comparator that ignores the

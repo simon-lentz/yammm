@@ -300,8 +300,8 @@ var (
 	// E_IMPORT_NOT_ALLOWED indicates imports are not allowed in this context.
 	E_IMPORT_NOT_ALLOWED = NewCode("E_IMPORT_NOT_ALLOWED", CategoryImport)
 
-	// E_DUPLICATE_IMPORT indicates the same schema is imported multiple times
-	// under different aliases.
+	// E_DUPLICATE_IMPORT indicates the same schema imported more than once, or
+	// two imports that share one alias.
 	E_DUPLICATE_IMPORT = NewCode("E_DUPLICATE_IMPORT", CategoryImport)
 
 	// E_IMPORT_ALIAS_COLLISION indicates an import alias collides with a local
@@ -385,7 +385,9 @@ var (
 	// snapshot.Load reads.
 	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
 
-	// E_DUPLICATE_COMPOSED_PK indicates a duplicate composed child primary key.
+	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a
+	// child: two children of one (many) slot share a primary key, or a (one)
+	// slot is given several. The validator and graph assembly both raise it.
 	E_DUPLICATE_COMPOSED_PK = NewCode("E_DUPLICATE_COMPOSED_PK", CategoryGraph)
 
 	// E_UNRESOLVED_REQUIRED indicates a required association is unresolved.
@@ -486,7 +488,8 @@ var (
 	// edges, violating the duplicate structural constraint.
 	E_SNAPSHOT_EDGES_ON_DUPLICATE = NewCode("E_SNAPSHOT_EDGES_ON_DUPLICATE", CategorySnapshot)
 
-	// E_SNAPSHOT_DEPTH_EXCEEDED indicates composed nesting exceeds the depth limit (32).
+	// E_SNAPSHOT_DEPTH_EXCEEDED indicates composed nesting deeper than
+	// [github.com/simon-lentz/yammm/instance.MaxComposedDepth].
 	E_SNAPSHOT_DEPTH_EXCEEDED = NewCode("E_SNAPSHOT_DEPTH_EXCEEDED", CategorySnapshot)
 
 	// E_SNAPSHOT_INTEGRITY_MISMATCH indicates the integrity hash does not match the
@@ -635,8 +638,9 @@ func IsImportDeclarationCode(code string) bool {
 // cycle, or a path that escapes the module root — the complement of
 // [IsImportDeclarationCode] within [CategoryImport].
 //
-// The two predicates partition the category, so a new import code belongs in
-// exactly one of them. This one is the enumeration a family-wide change keys
+// The two predicates partition the category's built-in codes, so a new built-in
+// import code belongs in exactly one of them; a code another package registers
+// under [CategoryImport] satisfies neither. This one is the enumeration a family-wide change keys
 // on: every issue in the resolution family carries the module root and its
 // origin as details, and every one is built by a single builder per code.
 func IsImportResolutionCode(code string) bool {

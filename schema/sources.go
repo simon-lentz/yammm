@@ -67,11 +67,12 @@ func (s *Sources) Content(span location.Span) ([]byte, bool) {
 	return s.registry.Content(span)
 }
 
-// PositionAt converts a byte offset to a Position.
-// Returns zero Position if the source is not found or offset is invalid.
+// PositionAt converts a byte offset to a Position. For a nil Sources it returns
+// [location.UnknownPosition], as the registry does for an unknown source or an
+// invalid offset.
 func (s *Sources) PositionAt(id location.SourceID, byteOffset int) location.Position {
 	if s == nil || s.registry == nil {
-		return location.Position{}
+		return location.UnknownPosition()
 	}
 	return s.registry.PositionAt(id, byteOffset)
 }

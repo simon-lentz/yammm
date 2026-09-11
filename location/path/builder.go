@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Builder constructs canonical instance paths for diagnostics.
@@ -152,8 +153,9 @@ func formatKey(key string) string {
 	return `["` + escapeString(key) + `"]`
 }
 
-// formatPKValue formats a primary key value for path output.
-// Strings are quoted, integers and booleans are unquoted.
+// formatPKValue formats a primary key value for path output. Strings are
+// quoted, integers and booleans are unquoted, and any other value is written as
+// the quoted, escaped text of its fmt.Sprint form, which Parse reads as a string.
 func formatPKValue(v any) string {
 	switch val := v.(type) {
 	case string:
@@ -196,8 +198,7 @@ func formatPKValue(v any) string {
 		}
 		return s
 	default:
-		// Fallback: quote as string
-		return fmt.Sprintf(`"%v"`, v)
+		return `"` + escapeString(fmt.Sprint(v)) + `"`
 	}
 }
 
@@ -237,17 +238,12 @@ func isDigit(r rune) bool {
 }
 
 // escapeString returns s with JSON escape sequences applied per RFC 8259.
-// Escapes: \\ \" \n \r \t \b \f and control characters.
+// Escapes: \\ \" \n \r \t \b \f and control characters. Invalid UTF-8 is
+// written as U+FFFD, the rune Parse reads it as.
 func escapeString(s string) string {
-	// Fast path: check if escaping is needed
-	needsEscape := false
-	for _, r := range s {
-		if r == '\\' || r == '"' || r == '\n' || r == '\r' || r == '\t' || r == '\b' || r == '\f' || r < 0x20 {
-			needsEscape = true
-			break
-		}
-	}
-	if !needsEscape {
+	if utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
+		return r == '\\' || r == '"' || r < 0x20
+	}) {
 		return s
 	}
 
