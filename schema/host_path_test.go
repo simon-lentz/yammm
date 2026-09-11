@@ -164,21 +164,12 @@ func loadOutcome(s *schema.Schema, res diag.Result) (bool, string) {
 func TestHostPath_ModuleRootDetailIsTheRootsIdentity(t *testing.T) {
 	t.Parallel()
 
-	knownBroken := map[string]string{
-		"a root directory with a decomposed name": "the detail and the message carry the root's host bytes, which are not its NFC identity (B19)",
-	}
-	if runtime.GOOS == "windows" {
-		knownBroken["a plain root directory"] = "the detail and the message carry the root's backslash-separated host path (B19)"
-	}
-
 	rows := []struct{ name, dir string }{
 		{"a plain root directory", "plain"},
 		{"a root directory with a decomposed name", "cafe\u0301"},
 	}
 
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		names[row.name] = true
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			root := filepath.Join(t.TempDir(), row.dir)
@@ -214,22 +205,58 @@ func TestHostPath_ModuleRootDetailIsTheRootsIdentity(t *testing.T) {
 				t.Fatalf("no E_IMPORT_RESOLVE in %v", issueCodes(res))
 			}
 
-			ok := detail == want && strings.Contains(message, want)
-			reason, broken := knownBroken[row.name]
-			switch {
-			case broken && ok:
-				t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
-			case broken:
-				t.Logf("known broken: %s\ndetail %q\nmessage %q\nwant %q", reason, detail, message, want)
-			case !ok:
+			if detail != want || !strings.Contains(message, want) {
 				t.Errorf("detail %q, message %q: want both to carry %q", detail, message, want)
 			}
 		})
 	}
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names no row: %q", name)
-		}
+}
+
+// TestHostPath_MalformedMarkerDetailIsTheRootsIdentity holds
+// E_LOAD_MODULE_ROOT_MALFORMED's module root to the same form: the marker
+// directory's identity.
+func TestHostPath_MalformedMarkerDetailIsTheRootsIdentity(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct{ name, dir string }{
+		{"a plain marker directory", "plain"},
+		{"a marker directory with a decomposed name", "cafe\u0301"},
+	}
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			root := filepath.Join(t.TempDir(), row.dir)
+			writeHostPathFile(t, filepath.Join(root, schema.ModuleRootMarker), "module example.com/thing\n")
+			entry := filepath.Join(root, "main.yammm")
+			writeHostPathFile(t, entry, "schema \"main\"\n\ntype T {\n\tid String primary\n}\n")
+
+			_, res := schema.Load(t.Context(), entry)
+			resolved, err := filepath.EvalSymlinks(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := location.SourceIDFromAbsolutePath(resolved)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			found := false
+			for issue := range res.Issues() {
+				if issue.Code() != diag.E_LOAD_MODULE_ROOT_MALFORMED {
+					continue
+				}
+				found = true
+				for _, d := range issue.Details() {
+					if d.Key == diag.DetailKeyModuleRoot && d.Value != id.String() {
+						t.Errorf("module_root detail %q, want the marker directory's identity %q", d.Value, id)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("no E_LOAD_MODULE_ROOT_MALFORMED in %v", issueCodes(res))
+			}
+		})
 	}
 }
 

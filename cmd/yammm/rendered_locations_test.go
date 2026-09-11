@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -89,15 +88,6 @@ func TestRenderedLocations_RelativeToTheRoot(t *testing.T) {
 	t.Parallel()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 
-	knownBroken := map[string]string{
-		"a schema reached through a symlinked file":                  "the root is the link's directory, which does not hold the resolved source (B4)",
-		"a directory with a decomposed name":                         "the root's host bytes are not the source's NFC identity (PB1)",
-		"a directory with a decomposed name, given as --module-root": "the root's host bytes are not the source's NFC identity (PB1)",
-	}
-	if runtime.GOOS == "windows" {
-		knownBroken["a plain directory"] = "a backslash-separated root never prefixes a /-separated identity (B3)"
-	}
-
 	rows := []struct {
 		name  string
 		setup func(t *testing.T, base string) (args []string, root, file string)
@@ -141,9 +131,7 @@ func TestRenderedLocations_RelativeToTheRoot(t *testing.T) {
 		},
 	}
 
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		names[row.name] = true
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			args, root, file := row.setup(t, t.TempDir())
@@ -151,23 +139,17 @@ func TestRenderedLocations_RelativeToTheRoot(t *testing.T) {
 			if code != cli.ExitValidation {
 				t.Fatalf("exit %d, want %d; stderr:\n%s", code, cli.ExitValidation, stderr)
 			}
-			want := hostRelative(t, root, file) + ":5:2: "
-			checkKnownBroken(t, knownBroken, row.name, strings.HasPrefix(stderr, want),
-				"stderr:\n"+stderr+"\nwant the prefix "+want)
+			if want := hostRelative(t, root, file) + ":5:2: "; !strings.HasPrefix(stderr, want) {
+				t.Errorf("stderr:\n%s\nwant the prefix %s", stderr, want)
+			}
 		})
 	}
-	checkEveryEntryNamesARow(t, knownBroken, names)
 }
 
 // TestRenderedLocations_FmtUnderASymlinkedDirectory runs fmt from a working
 // directory reached through a symlink. It changes the process's working
 // directory, so it cannot run in parallel.
 func TestRenderedLocations_FmtUnderASymlinkedDirectory(t *testing.T) {
-	const name = "fmt run from a symlinked working directory"
-	knownBroken := map[string]string{
-		name: "fmt's root is its unresolved working directory, which does not hold the resolved source (B6)",
-	}
-
 	base := t.TempDir()
 	real := filepath.Join(base, "real")
 	writeRenderedFile(t, filepath.Join(real, "fmtbad.yammm"), "schema \"f\"\n\ntype T {\n\tid String primary\n\tname String {\n}\n")
@@ -179,10 +161,9 @@ func TestRenderedLocations_FmtUnderASymlinkedDirectory(t *testing.T) {
 	if code != cli.ExitValidation {
 		t.Fatalf("exit %d, want %d; stderr:\n%s", code, cli.ExitValidation, stderr)
 	}
-	want := hostRelative(t, real, filepath.Join(real, "fmtbad.yammm")) + ":"
-	checkKnownBroken(t, knownBroken, name, strings.HasPrefix(stderr, want),
-		"stderr:\n"+stderr+"\nwant the prefix "+want)
-	checkEveryEntryNamesARow(t, knownBroken, map[string]bool{name: true})
+	if want := hostRelative(t, real, filepath.Join(real, "fmtbad.yammm")) + ":"; !strings.HasPrefix(stderr, want) {
+		t.Errorf("stderr:\n%s\nwant the prefix %s", stderr, want)
+	}
 }
 
 // runWithTerminalSink runs one command's body with a sink that renders as it

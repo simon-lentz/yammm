@@ -2,9 +2,10 @@ package schema
 
 import (
 	"fmt"
-	"path/filepath"
+	"path"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 )
 
 // The import-resolution family — E_IMPORT_RESOLVE, E_PATH_ESCAPE and
@@ -27,7 +28,7 @@ import (
 func moduleRootClause(root, origin string) string {
 	switch origin {
 	case diag.ModuleRootDiscovered:
-		return fmt.Sprintf("module root %s, discovered from %s", root, filepath.Join(root, ModuleRootMarker))
+		return fmt.Sprintf("module root %s, discovered from %s", root, path.Join(root, ModuleRootMarker))
 	case diag.ModuleRootDefault:
 		return fmt.Sprintf("module root %s, defaulted to the entry schema's directory; a %s in an ancestor directory would widen resolution", root, ModuleRootMarker)
 	case diag.ModuleRootExplicit:
@@ -39,9 +40,22 @@ func moduleRootClause(root, origin string) string {
 	}
 }
 
+// rootIdentity writes a filesystem module root as an identity, the form every
+// span source beside it takes. A synthetic root is not a path and is kept.
+func rootIdentity(root, origin string) string {
+	if root == "" || origin == diag.ModuleRootSynthetic {
+		return root
+	}
+	if id, err := location.SourceIDFromAbsolutePath(root); err == nil {
+		return id.String()
+	}
+	return root
+}
+
 // resolutionIssue is the one shape every import-resolution diagnostic takes.
 // imp may be nil for a site that has no declaration in hand.
 func resolutionIssue(code diag.Code, root, origin, message string, imp *importDecl) diag.Issue {
+	root = rootIdentity(root, origin)
 	b := diag.NewIssue(diag.Error, code, message+"; "+moduleRootClause(root, origin)).
 		WithDetail(diag.DetailKeyModuleRoot, root).
 		WithDetail(diag.DetailKeyModuleRootOrigin, origin)

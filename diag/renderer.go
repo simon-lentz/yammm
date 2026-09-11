@@ -53,10 +53,11 @@ func WithExcerpts(on bool) Option {
 	}
 }
 
-// WithModuleRoot sets the module root for path relativization.
-//
-// When set, absolute paths that start with this root are displayed
-// relative to the root for cleaner output.
+// WithModuleRoot sets the root that text locations are written relative to.
+// root is a host path; the renderer turns it into an identity once, by the
+// rule [location.NewCanonicalPath] follows, and writes a file-backed source
+// under it relative to it ([location.SourceID.RelativeTo]). JSON output keeps
+// each source's identity.
 func WithModuleRoot(root string) Option {
 	return func(c *rendererConfig) {
 		c.moduleRoot = root
@@ -88,7 +89,7 @@ type Renderer struct {
 	provider            SourceProvider
 	excerpts            bool
 	maxCols             int
-	moduleRoot          string
+	root                location.CanonicalPath // the module root as an identity; zero when unset or unresolvable
 	colorize            bool
 	distinguishFatal    bool
 	truncationIndicator string
@@ -105,15 +106,20 @@ func NewRenderer(opts ...Option) *Renderer {
 		opt(cfg)
 	}
 
-	return &Renderer{
+	r := &Renderer{
 		provider:            cfg.provider,
 		excerpts:            cfg.excerpts,
 		maxCols:             cfg.maxCols,
-		moduleRoot:          cfg.moduleRoot,
 		colorize:            cfg.colorize,
 		distinguishFatal:    cfg.distinguishFatal,
 		truncationIndicator: cfg.truncationIndicator,
 	}
+	if cfg.moduleRoot != "" {
+		if root, err := location.NewCanonicalPath(cfg.moduleRoot); err == nil {
+			r.root = root
+		}
+	}
+	return r
 }
 
 // FormatResult formats all issues in a result as text.
@@ -186,19 +192,9 @@ func (r *Renderer) writeLocation(sb *strings.Builder, issue Issue) {
 
 func (r *Renderer) formatSpanLocation(span location.Span) string {
 	source := span.Source.String()
-
-	// Relativize path if module root is set.
-	// Uses string manipulation rather than filepath.Rel because:
-	// - SourceID.String() always returns forward-slash paths (CanonicalPath invariant)
-	// - filepath.Rel would emit backslashes on Windows, breaking the invariant
-	if root := strings.TrimSuffix(r.moduleRoot, "/"); root != "" {
-		if source == root {
-			source = "."
-		} else if rel, ok := strings.CutPrefix(source, root+"/"); ok {
-			source = rel
-		}
+	if rel, ok := span.Source.RelativeTo(r.root); ok {
+		source = rel
 	}
-
 	if span.Start.IsKnown() {
 		return fmt.Sprintf("%s:%d:%d", source, span.Start.Line, span.Start.Column)
 	}

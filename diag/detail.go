@@ -135,10 +135,11 @@ const (
 	// Used with E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM.
 	DetailKeyHashAlgorithm = "hash_algorithm"
 
-	// DetailKeyModuleRoot is the canonical module root the load resolved
-	// module-style imports against, empty when the load had none. Carried by
-	// every issue in the import-resolution family (see
-	// [IsImportResolutionCode]) and by E_LOAD_MODULE_ROOT_MALFORMED.
+	// DetailKeyModuleRoot is the module root the load resolved module-style
+	// imports against, written as an identity — NFC and "/"-separated, the form
+	// every span source beside it takes — or a synthetic root as given, and empty
+	// when the load had none. Carried by every issue in the import-resolution
+	// family (see [IsImportResolutionCode]) and by E_LOAD_MODULE_ROOT_MALFORMED.
 	DetailKeyModuleRoot = "module_root"
 
 	// DetailKeyModuleRootOrigin names where the module root came from, over

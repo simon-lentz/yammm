@@ -212,7 +212,7 @@ func checkMarkerContent(path string, content []byte) error {
 func ModuleRootIssue(err error) diag.Issue {
 	if malformed, ok := errors.AsType[*MalformedModuleRootError](err); ok {
 		return diag.NewIssue(diag.Error, diag.E_LOAD_MODULE_ROOT_MALFORMED, malformed.Error()).
-			WithDetail(diag.DetailKeyModuleRoot, filepath.Dir(malformed.Path)).
+			WithDetail(diag.DetailKeyModuleRoot, rootIdentity(filepath.Dir(malformed.Path), diag.ModuleRootDiscovered)).
 			WithDetail(diag.DetailKeyModuleRootOrigin, diag.ModuleRootDiscovered).Build()
 	}
 	return errorToFatalIssue(err)

@@ -865,7 +865,8 @@ declaration describes (below).
 Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
 are on the `review` branch and reach `main` at the unit's close. **Its pass-A
 fix pass removes two exported declarations, `location.ErrUNCPath` and
-`location.PositionRegistry`** (the blocks below).
+`location.PositionRegistry`, and its pass-B fix pass adds one,
+`location.SourceID.RelativeTo`** (the blocks below).
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
@@ -1446,6 +1447,32 @@ does not read this output**, measured at its tree.
   rather than embedding it, and its one implementation, `internal/source`'s
   registry, keeps the method. A caller that named the type names the method
   set it needs instead, or `schema.SourceRegistry`.
+
+### Unit 7, pass B — text locations relative to the module root
+
+- **A text location is written relative to the module root by one rule, on
+  identities.** The renderer turns the root it is given into an identity once
+  — symlinks resolved, NFC, forward slashes — and writes a source under it
+  relative to it. The prefix match it replaces compared the root's bytes on
+  disk with a source's identity. So a location rendered as an absolute path
+  under a directory whose name holds a decomposed character, for a failed load
+  through a symlinked schema file, for `yammm fmt` run from a symlinked
+  working directory, and on Windows for every location.
+- **Added: `location.SourceID.RelativeTo`**, the rule itself. It compares two
+  identities segment by segment, and a root of `/` holds every absolute path.
+- **Two text forms change.** Under a root of `/` (`--module-root /`) every
+  absolute path is written relative to it, where none was. A file given as the
+  root renders the file's path, where it rendered `.`.
+- **JSON output does not change:** every span's source is its identity,
+  whatever module root the renderer holds. `diag.WithModuleRoot` affects text
+  only, and its godoc says so.
+- **The `module_root` detail, and the module-root clause in an
+  import-resolution message, carry the root's identity** — the form every span
+  source in the same document takes — and so does
+  E_LOAD_MODULE_ROOT_MALFORMED's detail. They carried the root's bytes on
+  disk, which differ on Windows (`\`) and under a decomposed directory name. A
+  synthetic root is written as given. rdata reads neither the key nor the
+  clause.
 
 ## v0.21.0 under this policy
 

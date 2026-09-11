@@ -38,18 +38,6 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 		return p
 	}
 
-	knownBroken := map[string]string{
-		"a root directory with a decomposed name": "the root's host bytes are not its NFC identity, so the prefix match fails (PB1)",
-	}
-	if runtime.GOOS == "windows" {
-		for _, name := range []string{"the root as the host spells it", "a source below the root", "a root with a trailing separator"} {
-			knownBroken[name] = "a backslash-separated root never prefixes a /-separated identity (B3)"
-		}
-	} else {
-		knownBroken["a root of /"] = "trimming the trailing slash empties the root, so nothing is relativized (B7)"
-		knownBroken["a file given as the root"] = "the source equals the root, and the renderer writes \".\" (B8)"
-	}
-
 	rows := []struct {
 		name     string
 		unixOnly bool
@@ -123,11 +111,17 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 				return base, location.MustNewSourceID("test://a.yammm"), "test://a.yammm"
 			},
 		},
+		{
+			name: "no module root",
+			setup: func(t *testing.T) (string, location.SourceID, string) {
+				t.Helper()
+				src := fileID(t, filepath.Join(base, "none", "a.yammm"))
+				return "", src, src.String()
+			},
+		},
 	}
 
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		names[row.name] = true
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			if row.unixOnly && runtime.GOOS == "windows" {
@@ -137,22 +131,10 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 			out := formatIssue(NewRenderer(WithModuleRoot(root)),
 				NewIssue(Error, E_SYNTAX, "msg").WithSpan(location.Point(src, 1, 1)).Build())
 			got, _, _ := strings.Cut(out, ": error[")
-			want += ":1:1"
-			reason, broken := knownBroken[row.name]
-			switch ok := got == want; {
-			case broken && ok:
-				t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
-			case broken:
-				t.Logf("known broken: %s\n got %q\nwant %q", reason, got, want)
-			case !ok:
+			if want += ":1:1"; got != want {
 				t.Errorf("location under root %q\n got %q\nwant %q", root, got, want)
 			}
 		})
-	}
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names no row: %q", name)
-		}
 	}
 }
 

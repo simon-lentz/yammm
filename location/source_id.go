@@ -2,6 +2,7 @@ package location
 
 import (
 	"fmt"
+	"strings"
 )
 
 // SourceID identifies a source uniquely within a build.
@@ -122,6 +123,25 @@ func (s SourceID) String() string {
 		return s.synthetic
 	}
 	return s.cp.String()
+}
+
+// RelativeTo returns s written relative to root, and true, when s is a
+// file-backed source under root. Both are identities, so they are compared
+// segment by segment, and a root of "/" holds every absolute path. A synthetic
+// source, a source outside root or equal to it, and a zero root return false.
+func (s SourceID) RelativeTo(root CanonicalPath) (string, bool) {
+	if s.cp.IsZero() || root.IsZero() {
+		return "", false
+	}
+	base := root.path
+	if !strings.HasSuffix(base, "/") {
+		base += "/"
+	}
+	rel, ok := strings.CutPrefix(s.cp.path, base)
+	if !ok || rel == "" {
+		return "", false
+	}
+	return rel, true
 }
 
 // IsZero reports whether this is a zero-value SourceID.

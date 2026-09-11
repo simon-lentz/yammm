@@ -1,6 +1,7 @@
 package diag
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -119,116 +120,6 @@ func TestRenderer_WithExcerpts_Disabled(t *testing.T) {
 	// Should NOT contain excerpt
 	if strings.Contains(output, "source content") {
 		t.Error("excerpts should be disabled")
-	}
-}
-
-func TestRenderer_WithModuleRoot(t *testing.T) {
-	// Use SourceIDFromAbsolutePath to create a file-backed source for testing
-	// path relativization. We need to use a path that exists or test the logic
-	// directly.
-	//
-	// For unit testing, we use synthetic sources but test relativization
-	// by verifying the logic works with the String() output.
-	source := location.MustNewSourceID("file:///home/user/project/src/file.yammm")
-
-	r := NewRenderer(WithModuleRoot("file:///home/user/project"))
-
-	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.Point(source, 5, 10)).
-		Build()
-
-	output := formatIssue(r, issue)
-
-	// Should show relative path
-	if strings.Contains(output, "file:///home/user/project/") {
-		t.Errorf("should relativize path, got: %s", output)
-	}
-	if !strings.Contains(output, "src/file.yammm") {
-		t.Errorf("should contain relative path, got: %s", output)
-	}
-}
-
-func TestRenderer_WithModuleRoot_EdgeCases(t *testing.T) {
-	// Note: SourceID.String() always returns forward-slash paths for file-backed sources.
-	// For testing the relativization logic, we use synthetic sources with file:// prefix
-	// which produces the same String() output format as CanonicalPath-based sources.
-	tests := []struct {
-		name       string
-		source     string
-		moduleRoot string
-		wantPath   string
-	}{
-		{
-			name:       "exact match returns dot",
-			source:     "file:///home/user/project",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   ".:1:1",
-		},
-		{
-			name:       "nested path is relativized",
-			source:     "file:///home/user/project/src/file.yammm",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   "src/file.yammm:1:1",
-		},
-		{
-			name:       "non-matching path unchanged",
-			source:     "file:///home/user/other/file.yammm",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   "file:///home/user/other/file.yammm:1:1",
-		},
-		{
-			name:       "trailing slash on root is normalized",
-			source:     "file:///home/user/project/src/file.yammm",
-			moduleRoot: "file:///home/user/project/",
-			wantPath:   "src/file.yammm:1:1",
-		},
-		{
-			name:       "Windows-style canonical path",
-			source:     "file://C:/Users/project/src/file.yammm",
-			moduleRoot: "file://C:/Users/project",
-			wantPath:   "src/file.yammm:1:1",
-		},
-		{
-			name:       "Windows root exact match",
-			source:     "file://C:/Users/project",
-			moduleRoot: "file://C:/Users/project",
-			wantPath:   ".:1:1",
-		},
-		{
-			name:       "synthetic source not relativized",
-			source:     "test://unit/person.yammm",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   "test://unit/person.yammm:1:1",
-		},
-		{
-			name:       "prefix but not path segment",
-			source:     "file:///home/user/project-other/file.yammm",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   "file:///home/user/project-other/file.yammm:1:1",
-		},
-		{
-			name:       "empty module root does nothing",
-			source:     "file:///home/user/project/file.yammm",
-			moduleRoot: "",
-			wantPath:   "file:///home/user/project/file.yammm:1:1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			source := location.MustNewSourceID(tt.source)
-			r := NewRenderer(WithModuleRoot(tt.moduleRoot))
-
-			issue := NewIssue(Error, E_SYNTAX, "error").
-				WithSpan(location.Point(source, 1, 1)).
-				Build()
-
-			output := formatIssue(r, issue)
-
-			if !strings.Contains(output, tt.wantPath) {
-				t.Errorf("output should contain %q, got: %s", tt.wantPath, output)
-			}
-		})
 	}
 }
 
@@ -574,14 +465,21 @@ func TestRenderer_Excerpt_SourceNotAvailable(t *testing.T) {
 }
 
 func TestRenderer_CompleteOutput(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := location.SourceIDFromAbsolutePath(filepath.Join(root, "src", "schema.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("file:///project/src/schema.yammm")
 	provider.Add(source, "type User {\n  name: String\n  age: Int\n}\n")
 
 	r := NewRenderer(
 		WithSourceProvider(provider),
 		WithExcerpts(true),
-		WithModuleRoot("file:///project"),
+		WithModuleRoot(root),
 	)
 
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "type 'User' is already defined").
