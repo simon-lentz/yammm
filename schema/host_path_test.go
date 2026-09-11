@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -154,6 +156,81 @@ func loadSourcesOutcome(t *testing.T, dir string) (bool, string) {
 
 func loadOutcome(s *schema.Schema, res diag.Result) (bool, string) {
 	return s != nil && !res.HasErrors(), fmt.Sprintf("schema loaded: %v, issues: %v", s != nil, issueCodes(res))
+}
+
+// TestHostPath_ModuleRootDetailIsTheRootsIdentity holds an import-resolution
+// diagnostic's module root to the form every span source beside it takes: the
+// root's identity, not the bytes the host gives its directory.
+func TestHostPath_ModuleRootDetailIsTheRootsIdentity(t *testing.T) {
+	t.Parallel()
+
+	knownBroken := map[string]string{
+		"a root directory with a decomposed name": "the detail and the message carry the root's host bytes, which are not its NFC identity (B19)",
+	}
+	if runtime.GOOS == "windows" {
+		knownBroken["a plain root directory"] = "the detail and the message carry the root's backslash-separated host path (B19)"
+	}
+
+	rows := []struct{ name, dir string }{
+		{"a plain root directory", "plain"},
+		{"a root directory with a decomposed name", "cafe\u0301"},
+	}
+
+	names := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		names[row.name] = true
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			root := filepath.Join(t.TempDir(), row.dir)
+			entry := filepath.Join(root, "main.yammm")
+			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \"./missing\" as missing\n\ntype T {\n\tid String primary\n}\n")
+
+			_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+			resolved, err := filepath.EvalSymlinks(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := location.SourceIDFromAbsolutePath(resolved)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := id.String()
+
+			var detail, message string
+			found := false
+			for issue := range res.Issues() {
+				if issue.Code() != diag.E_IMPORT_RESOLVE {
+					continue
+				}
+				found, message = true, issue.Message()
+				for _, d := range issue.Details() {
+					if d.Key == diag.DetailKeyModuleRoot {
+						detail = d.Value
+					}
+				}
+				break
+			}
+			if !found {
+				t.Fatalf("no E_IMPORT_RESOLVE in %v", issueCodes(res))
+			}
+
+			ok := detail == want && strings.Contains(message, want)
+			reason, broken := knownBroken[row.name]
+			switch {
+			case broken && ok:
+				t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
+			case broken:
+				t.Logf("known broken: %s\ndetail %q\nmessage %q\nwant %q", reason, detail, message, want)
+			case !ok:
+				t.Errorf("detail %q, message %q: want both to carry %q", detail, message, want)
+			}
+		})
+	}
+	for name := range knownBroken {
+		if !names[name] {
+			t.Errorf("knownBroken names no row: %q", name)
+		}
+	}
 }
 
 func issueCodes(res diag.Result) []string {

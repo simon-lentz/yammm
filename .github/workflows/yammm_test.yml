@@ -65,13 +65,19 @@ jobs:
   # Every other job runs on Linux, where a backslash is a file-name character
   # and no path has a UNC volume, so the Windows half of the path identity
   # rules — and every runtime.GOOS == "windows" branch in location's tests —
-  # never ran. This job runs those tests on the host whose rules they state.
-  # bash, not the default pwsh, because pwsh reports only the last command's
-  # exit status and would hide a failing first run.
+  # never ran. This job runs those tests on the host whose rules they state,
+  # with diag's rendering of locations under a backslash-separated root and
+  # the CLI's. bash, not the default pwsh, because pwsh reports only the last
+  # command's exit status and would hide a failing first run.
   windows:
     name: Test Windows
     runs-on: windows-latest
     steps:
+      # Git for Windows checks out with core.autocrlf=true, which would give
+      # diag's goldens CRLF line endings its renderer never writes.
+      - name: Keep committed line endings
+        shell: bash
+        run: git config --global core.autocrlf false
       - name: Checkout
         uses: actions/checkout@v7
       - name: Set up Go
@@ -82,7 +88,9 @@ jobs:
         shell: bash
         run: |
           go test -count=1 -v ./location/...
+          go test -count=1 -v ./diag/
           go test -count=1 -v -run '^TestHostPath_' ./schema/
+          go test -count=1 -v -run '^TestRenderedLocations_' ./cmd/yammm/
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS

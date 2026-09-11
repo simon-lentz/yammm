@@ -37,7 +37,15 @@ if [ ! -f "${file}" ]; then
 	exit 2
 fi
 
-hits=$(grep -F -c -- "${search}" "${file}" || true)
+# Counted as the replacement matches, one literal that may span lines; grep -c
+# reads a multi-line search as one pattern per line and counts matching lines.
+hits=$(python3 - "${file}" "${search}" <<'PY'
+import sys
+path, search = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8", newline="") as fh:
+    print(fh.read().count(search))
+PY
+)
 if [ "${hits}" -eq 0 ]; then
 	printf 'mutate: the search string matched NOTHING in %s\n' "${file}" >&2
 	printf '  searched for: %s\n' "${search}" >&2
@@ -62,9 +70,10 @@ trap 'cp -- "${backup}" "${file}"; rm -f -- "${backup}"' EXIT
 python3 - "${file}" "${search}" "${replace}" <<'PY'
 import sys
 path, search, replace = sys.argv[1], sys.argv[2], sys.argv[3]
-with open(path) as fh:
+# newline="" keeps a CRLF file's line endings, so only the mutation changes.
+with open(path, encoding="utf-8", newline="") as fh:
     text = fh.read()
-with open(path, "w") as fh:
+with open(path, "w", encoding="utf-8", newline="") as fh:
     fh.write(text.replace(search, replace))
 PY
 
