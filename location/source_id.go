@@ -3,6 +3,7 @@ package location
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // SourceID identifies a source uniquely within a build.
@@ -61,17 +62,16 @@ func MustNewSourceID(identifier string) SourceID {
 	return SourceID{synthetic: identifier}
 }
 
-// ValidateSyntheticSourceID validates that an identifier is safe for use as
-// a synthetic SourceID.
-//
-// Returns an error if the identifier:
-//   - Is empty ([ErrEmptySourceID])
-//   - Resembles an absolute file path ([ErrAbsolutePathSourceID])
-//
-// This is called automatically by MustNewSourceID.
+// ValidateSyntheticSourceID reports whether an identifier is safe as a
+// synthetic SourceID: not empty ([ErrEmptySourceID]), not shaped like an
+// absolute file path ([ErrAbsolutePathSourceID]), and valid UTF-8
+// ([ErrInvalidUTF8Path]). MustNewSourceID calls it.
 func ValidateSyntheticSourceID(identifier string) error {
 	if identifier == "" {
 		return ErrEmptySourceID
+	}
+	if !utf8.ValidString(identifier) {
+		return fmt.Errorf("%w: %q", ErrInvalidUTF8Path, identifier)
 	}
 	if looksLikeAbsolute(identifier) {
 		return fmt.Errorf("%w: %q; use a scheme prefix (e.g., test://, inline:) to avoid collision with file-backed sources", ErrAbsolutePathSourceID, identifier)
@@ -79,10 +79,9 @@ func ValidateSyntheticSourceID(identifier string) error {
 	return nil
 }
 
-// SourceIDFromPath canonicalizes the path via NewCanonicalPath (including
-// symlink resolution) and creates a file-backed SourceID.
-//
-// Use for normal file loading scenarios.
+// SourceIDFromPath canonicalizes path via [NewCanonicalPath], so the identity
+// is the filesystem's own spelling of the file, and returns a file-backed
+// SourceID. Use it for normal file loading.
 func SourceIDFromPath(path string) (SourceID, error) {
 	cp, err := NewCanonicalPath(path)
 	if err != nil {
@@ -168,8 +167,8 @@ func (s SourceID) CanonicalPath() (CanonicalPath, bool) {
 
 // CanonicalizePathForSourceID returns the canonical form of an existing path,
 // for a Sources key whose TypeIDs must equal a Load of the same file. Unlike
-// NewCanonicalPath it requires symlink resolution to succeed, so it fails for
-// a path that does not exist; its result is what SourceIDFromPath produces.
+// NewCanonicalPath it requires the path itself to exist, so it fails for one
+// that does not; its result is what SourceIDFromPath produces.
 func CanonicalizePathForSourceID(path string) (string, error) {
 	canonical, err := canonicalize(path, false, symlinksStrict)
 	if err != nil {

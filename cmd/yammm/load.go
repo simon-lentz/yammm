@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -118,7 +119,7 @@ func diagRootFor(s *schema.Schema, explicitRoot, absSchemaPath string) string {
 	base := explicitRoot
 	if base == "" {
 		file := absSchemaPath
-		if resolved, err := filepath.EvalSymlinks(absSchemaPath); err == nil {
+		if resolved, err := location.ResolveHostPath(absSchemaPath); err == nil {
 			file = resolved
 		}
 		base = filepath.Dir(file)
@@ -128,7 +129,7 @@ func diagRootFor(s *schema.Schema, explicitRoot, absSchemaPath string) string {
 			return root
 		}
 	}
-	if resolved, err := filepath.EvalSymlinks(base); err == nil {
+	if resolved, err := location.ResolveHostPath(base); err == nil {
 		return resolved
 	}
 	return filepath.Clean(base)

@@ -192,9 +192,10 @@ func TestLoad_RefusesAnOversizedSource(t *testing.T) {
 	}
 }
 
-// Entry selection over the sources map is deterministic even when a key is
-// the empty string, which is a legal key and not a "nothing chosen" sentinel.
-func TestLoadSourcesWithEntry_EmptyKeyIsAKey(t *testing.T) {
+// An empty source key names no file, and a file-backed identity for it would
+// be the working directory's. It is refused, as the synthetic-root door
+// already refused it. Entry selection over the sources map stays deterministic.
+func TestLoadSourcesWithEntry_EmptyKeyIsRefused(t *testing.T) {
 	t.Parallel()
 
 	sources := map[string][]byte{
@@ -203,11 +204,33 @@ func TestLoadSourcesWithEntry_EmptyKeyIsAKey(t *testing.T) {
 	}
 	for i := range 20 {
 		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "", "", schema.WithSourcesOnly(true))
+		if res.Err() == nil {
+			t.Fatalf("run %d loaded %v; want the empty key refused", i, s)
+		}
+		// The loader renders the cause into a diagnostic, so the sentinel
+		// reaches the caller as text rather than through the error chain.
+		if !res.HasCode(diag.E_LOAD_IO_FAILURE) || !strings.Contains(res.Err().Error(), location.ErrEmptyPath.Error()) {
+			t.Fatalf("run %d: %v; want E_LOAD_IO_FAILURE naming %v", i, res.Err(), location.ErrEmptyPath)
+		}
+	}
+}
+
+// Entry selection over the sources map is deterministic: the entry key chooses
+// the schema, whatever else the map holds.
+func TestLoadSourcesWithEntry_EntryKeyChoosesTheSchema(t *testing.T) {
+	t.Parallel()
+
+	sources := map[string][]byte{
+		"a.yammm": []byte("schema \"alpha\"\n\ntype A {\n    id String primary\n}\n"),
+		"b.yammm": []byte("schema \"bravo\"\n\ntype B {\n    id String primary\n}\n"),
+	}
+	for i := range 20 {
+		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "a.yammm", t.TempDir(), schema.WithSourcesOnly(true))
 		if res.Err() != nil {
 			t.Fatalf("run %d: %v", i, res.Err())
 		}
 		if s == nil || s.Name() != "alpha" {
-			t.Fatalf("run %d chose %v; want the schema under the empty key", i, s)
+			t.Fatalf("run %d chose %v; want the schema under the entry key", i, s)
 		}
 	}
 }

@@ -67,7 +67,7 @@ func newRootLoader(moduleRoot string) (*rootLoader, error) {
 		return nil, fmt.Errorf("open module root %q: %w", moduleRoot, err)
 	}
 	// Get the canonical path for consistent SourceID construction
-	canonicalRoot, err := makeCanonicalPath(moduleRoot)
+	canonicalRoot, err := location.ResolveHostPath(moduleRoot)
 	if err != nil {
 		_ = root.Close() // best-effort cleanup; primary error is canonicalization failure
 		return nil, fmt.Errorf("canonicalize module root %q: %w", moduleRoot, err)
@@ -254,8 +254,8 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 		return fatalResult(err, diag.Result{})
 	}
 
-	// Resolve the path to an absolute, symlink-resolved canonical path
-	absPath, err := makeCanonicalPath(path)
+	// Resolve the path to the host path the filesystem spells it with
+	absPath, err := location.ResolveHostPath(path)
 	if err != nil {
 		return fatalResult(fmt.Errorf("resolve path %q: %w", path, err), diag.Result{})
 	}
@@ -291,7 +291,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 		}
 	} else {
 		var err error
-		moduleRoot, err = makeCanonicalPath(moduleRoot)
+		moduleRoot, err = location.ResolveHostPath(moduleRoot)
 		if err != nil {
 			return fatalResult(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), diag.Result{})
 		}
@@ -388,7 +388,7 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	// Canonicalize moduleRoot to absolute path if provided.
 	// This ensures SourceIDFromAbsolutePath will work correctly.
 	if moduleRoot != "" {
-		canonical, err := makeCanonicalPath(moduleRoot)
+		canonical, err := location.ResolveHostPath(moduleRoot)
 		if err != nil {
 			return fatalResult(fmt.Errorf("invalid module root %q: %w", moduleRoot, err), diag.Result{})
 		}
@@ -1440,9 +1440,9 @@ func inMemorySource(syntheticRoot, moduleRoot, key string) (location.SourceID, s
 	if !filepath.IsAbs(key) && moduleRoot != "" {
 		absPath = filepath.Join(moduleRoot, key)
 	} else {
-		abs, err := makeCanonicalPath(key)
+		abs, err := location.ResolveHostPath(key)
 		if err != nil {
-			return location.SourceID{}, "", err
+			return location.SourceID{}, "", fmt.Errorf("resolve source key %q: %w", key, err)
 		}
 		absPath = abs
 	}
@@ -1526,26 +1526,4 @@ func rejectSyntheticRoot(cfg *loadConfig) error {
 		return nil
 	}
 	return errors.New("WithSyntheticRoot applies to LoadSourcesWithEntry only")
-}
-
-// makeCanonicalPath converts a path to absolute, cleaned, symlink-resolved form.
-// This is used for trusted entry-point paths (not imports), where we need a
-// canonical path for SourceID construction.
-//
-// If filepath.EvalSymlinks fails (e.g., the path doesn't exist yet, or permission
-// issues in LSP scenarios), the function silently falls back to returning the
-// cleaned absolute path without symlink resolution. This allows the loader to
-// proceed with non-existent paths for better error reporting downstream.
-func makeCanonicalPath(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("abs path: %w", err)
-	}
-	cleaned := filepath.Clean(abs)
-
-	// Attempt to resolve symlinks
-	if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
-		return resolved, nil
-	}
-	return cleaned, nil
 }

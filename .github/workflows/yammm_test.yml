@@ -108,6 +108,40 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash
         run: go test -count=1 -v -run '^TestRenderedLocations_' ./cmd/yammm/
+  # Linux is case-sensitive and Windows spells a path through FindFirstFile, so
+  # the darwin branch of the host resolver — fcntl(F_GETPATH), the file-kind
+  # check that keeps it off a FIFO, and its permission fallback — runs on no
+  # other runner. schema is here beside location because the guards that see a
+  # blocking open are its FIFO and socket rows, and because a case-insensitive
+  # volume is where two spellings of one module root exist at all.
+  macos:
+    name: Test macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # One step per package, each run after an earlier failure, as the Windows
+      # job does: bash -e stops a multi-command step at its first failure.
+      - name: Path identity tests — location
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: go test -count=1 -v ./location/...
+      - name: Path identity tests — schema
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: go test -count=1 -v ./schema/
+      - name: Path identity tests — diag
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: go test -count=1 -v ./diag/
+      - name: Path identity tests — rendered locations
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: go test -count=1 -v -run '^TestRenderedLocations_' ./cmd/yammm/
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS

@@ -129,7 +129,7 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 	blocks := markdown.ExtractCodeBlocks(text)
 
 	// Assign virtual SourceIDs
-	path, err := lsputil.URIToPath(uri)
+	rawPath, err := lsputil.URIToPath(uri)
 	if err != nil {
 		w.logger.Warn(
 			"failed to parse markdown URI",
@@ -138,6 +138,9 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 		)
 		return
 	}
+	// The file is spelled on disk before a block's identity is built on it, so
+	// that identity equals the overlay key the analyzer files the block under.
+	path := hostPath(rawPath)
 
 	validBlocks := make([]markdown.CodeBlock, 0, len(blocks))
 	for i, block := range blocks {

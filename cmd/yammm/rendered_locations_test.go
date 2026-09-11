@@ -39,6 +39,19 @@ func hostRelative(t *testing.T, root, file string) string {
 	return norm.NFC.String(filepath.ToSlash(rel))
 }
 
+// caseFoldingFilesystem reports whether dir's filesystem finds a file by
+// another spelling of its name.
+func caseFoldingFilesystem(t *testing.T, dir string) bool {
+	t.Helper()
+	probe := filepath.Join(dir, "CaseProbe")
+	if err := os.WriteFile(probe, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(probe) })
+	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
+	return err == nil
+}
+
 func writeRenderedFile(t *testing.T, p, content string) string {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
@@ -103,6 +116,19 @@ func TestRenderedLocations_RelativeToTheRoot(t *testing.T) {
 				t.Helper()
 				file := writeRenderedFile(t, filepath.Join(base, "cafe\u0301", "bad.yammm"), renderedBadSchema)
 				return []string{"validate", "--module-root", filepath.Dir(file), file}, filepath.Dir(file), file
+			},
+		},
+		{
+			// A location is relative to the directory the root names, not to
+			// the bytes the root was typed with.
+			name: "a --module-root typed in another case",
+			setup: func(t *testing.T, base string) ([]string, string, string) {
+				t.Helper()
+				if !caseFoldingFilesystem(t, base) {
+					t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
+				}
+				file := writeRenderedFile(t, filepath.Join(base, "Proj", "bad.yammm"), renderedBadSchema)
+				return []string{"validate", "--module-root", filepath.Join(base, "proj"), file}, filepath.Dir(file), file
 			},
 		},
 	}

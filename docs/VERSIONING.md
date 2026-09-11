@@ -865,9 +865,10 @@ declaration describes (below).
 Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
 are on the `review` branch and reach `main` at the unit's close. **Its pass-A
 fix pass removes two exported declarations, `location.ErrUNCPath` and
-`location.PositionRegistry`, and its pass-B fix pass adds two,
+`location.PositionRegistry`; its pass-B fix pass adds two,
 `location.SourceID.RelativeTo` and `schema.CaptureSources`, and removes one,
-`diag.Result.Limit`** (the blocks below).
+`diag.Result.Limit`; and its slate fix pass adds three, `location.ResolveHostPath`,
+`location.ErrEmptyPath` and `location.ErrInvalidUTF8Path`** (the blocks below).
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
@@ -1584,6 +1585,49 @@ existing declaration.
   spells it**, so a marshal writes that path back byte for byte. A path holding
   a raw control character or an unpaired surrogate now draws
   `E_SNAPSHOT_PATH_FALLBACK` and is kept as stated.
+
+### Unit 7, the slate fix pass — an identity is what the filesystem calls the file
+
+**Three exported declarations are added and none is removed or changed:**
+`location.ResolveHostPath`, `location.ErrEmptyPath` and
+`location.ErrInvalidUTF8Path`.
+
+- **Two spellings of one file give one identity, and it is the spelling the
+  filesystem holds.** `location.ResolveHostPath` answers what the filesystem
+  calls a path, and every file-backed identity is that answer normalized. On
+  darwin it reads the on-disk spelling through `fcntl(F_GETPATH)`, because
+  `filepath.EvalSymlinks` there keeps the case as typed; Linux is
+  case-sensitive and Go's Windows implementation already spells each component
+  on disk. **What this repairs:** on a case-insensitive volume a
+  `--module-root` or entry path typed in another case failed a valid import
+  with `E_PATH_ESCAPE`, and a diagnostic's location rendered as an absolute
+  path. **What it moves:** an identity changes only where a path was typed in a
+  spelling the filesystem does not use — which is exactly the input that failed.
+- **An identity minted before a file exists equals the one minted after.** A
+  path that does not exist yet resolves to its deepest existing ancestor with
+  the missing tail kept as typed, where the whole path was left unresolved. A
+  path under a regular file can never exist and is refused everywhere; the
+  loader had kept it.
+- **An empty path is refused** by `NewCanonicalPath`, `SourceIDFromPath`,
+  `CanonicalizePathForSourceID` and `ResolveHostPath`, with `ErrEmptyPath`,
+  where `filepath.Abs("")` made it the working directory. **Consumer-visible
+  once:** `schema.LoadSourcesWithEntry` with an **empty source key** now fails
+  rather than filing that source under the working directory's identity. The
+  synthetic-root door already refused an empty key, so the two agree.
+- **A path that is not valid UTF-8 is refused**, with `ErrInvalidUTF8Path`, by
+  every file-backed constructor and by `location.ValidateSyntheticSourceID`.
+  NFC passes such bytes through and `encoding/json` writes them as U+FFFD,
+  which merges two names on both wires an identity reaches — a diagnostic under
+  `--format json`, and the `.ys` header's `schema_source`.
+- **Deleted in the resolver's favour:** `schema`'s own entry-path
+  canonicalizer and the LSP's, both unexported. The editor and the loader now
+  mint a key through one rule, and a markdown code block's identity is built on
+  its file's on-disk spelling.
+- **CI gains a `macos-latest` job** running `./location/...`, `./schema/`,
+  `./diag/` and the rendered-location rows. The darwin branch of the resolver
+  runs on no other runner.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing.
 
 ## v0.21.0 under this policy
 

@@ -125,6 +125,64 @@ func TestHostPath_Loads(t *testing.T) {
 	}
 }
 
+// caseFoldingFilesystem reports whether dir's filesystem finds a file by
+// another spelling of its name. Two spellings of one directory are what the
+// rows below are about, and a case-sensitive filesystem cannot produce them.
+func caseFoldingFilesystem(t *testing.T, dir string) bool {
+	t.Helper()
+	probe := filepath.Join(dir, "CaseProbe")
+	if err := os.WriteFile(probe, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(probe) })
+	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
+	return err == nil
+}
+
+// TestHostPath_LoadsWhenTheRootAndTheEntryAreSpelledDifferently holds the
+// loader to the FILE a path names rather than to the bytes it was typed with.
+// Where the filesystem finds one directory by two spellings, an import
+// resolves whichever spelling the root and the entry were given in: the escape
+// check compares two identities, and both name the same directory.
+func TestHostPath_LoadsWhenTheRootAndTheEntryAreSpelledDifferently(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name string
+		// spell derives the pair (root, entry) handed to the loader from the
+		// created directory and the created entry path.
+		spell func(dir, entry, lowerDir, lowerEntry string) (root, path string)
+	}{
+		{
+			name:  "the root is typed in another case",
+			spell: func(_, entry, lowerDir, _ string) (string, string) { return lowerDir, entry },
+		},
+		{
+			name:  "the entry is typed in another case",
+			spell: func(dir, _, _, lowerEntry string) (string, string) { return dir, lowerEntry },
+		},
+	}
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			if !caseFoldingFilesystem(t, base) {
+				t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
+			}
+			dir := filepath.Join(base, "Proj")
+			entry := writeHostPathModule(t, dir, "rel_main.yammm")
+			lowerDir := filepath.Join(base, "proj")
+			lowerEntry := filepath.Join(lowerDir, "rel_main.yammm")
+
+			root, path := row.spell(dir, entry, lowerDir, lowerEntry)
+			if ok, detail := loadOutcome(schema.Load(t.Context(), path, schema.WithModuleRoot(root))); !ok {
+				t.Errorf("loading %q under root %q fails: %s", path, root, detail)
+			}
+		})
+	}
+}
+
 // writeHostPathModule writes a two-file module into dir — an entry named entry
 // that imports "./rel_dep", and the imported file — and returns the entry path.
 func writeHostPathModule(t *testing.T, dir, entry string) string {

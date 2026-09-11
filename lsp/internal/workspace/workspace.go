@@ -222,7 +222,7 @@ func (w *Workspace) AddRoot(uri string) {
 		return
 	}
 
-	canonicalPath := lsputil.CanonicalPath(path)
+	canonicalPath := hostPath(path)
 
 	if slices.Contains(w.roots, canonicalPath) {
 		w.logger.Debug("workspace root already exists", slog.String("path", canonicalPath))
@@ -248,7 +248,7 @@ func (w *Workspace) RemoveRoot(uri string) {
 		return
 	}
 
-	canonicalPath := lsputil.CanonicalPath(path)
+	canonicalPath := hostPath(path)
 
 	lenBefore := len(w.roots)
 	w.roots = slices.DeleteFunc(w.roots, func(root string) bool {
@@ -290,7 +290,7 @@ func (w *Workspace) documentOpened(uri string, version int, text string) {
 		return
 	}
 
-	canonicalPath := lsputil.CanonicalPath(path)
+	canonicalPath := hostPath(path)
 
 	sourceID, err := location.SourceIDFromAbsolutePath(canonicalPath)
 	if err != nil {
@@ -390,7 +390,7 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 		return
 	}
 
-	canonicalPath := lsputil.CanonicalPath(path)
+	canonicalPath := hostPath(path)
 
 	// The root is resolved before the analyzer is called: the analyzer takes
 	// a root as an argument and never discovers one. A discovery failure is a
@@ -475,7 +475,7 @@ func (w *Workspace) FileChanged(uri string, changeType protocol.UInteger) {
 
 	canonicalURI := uri
 	if path, err := lsputil.URIToPath(uri); err == nil {
-		path = lsputil.CanonicalPath(path)
+		path = hostPath(path)
 		if sourceID, err := location.SourceIDFromAbsolutePath(path); err == nil {
 			canonicalURI = lsputil.PathToURI(sourceID.String())
 		}

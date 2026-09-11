@@ -29,7 +29,10 @@ const diagnosticSource = "yammm"
 // The server already hands Analyze canonical paths; this holds the property
 // for a caller that does not.
 func canonicalSourceID(path string) (location.SourceID, error) {
-	canonical := lsputil.CanonicalPath(path)
+	canonical, err := location.ResolveHostPath(path)
+	if err != nil {
+		return location.SourceID{}, fmt.Errorf("resolve host path %q: %w", path, err)
+	}
 	id, err := location.SourceIDFromAbsolutePath(canonical)
 	if err != nil {
 		return location.SourceID{}, fmt.Errorf("mint source ID for %q: %w", canonical, err)

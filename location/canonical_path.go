@@ -1,28 +1,26 @@
 package location
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
 )
 
 // CanonicalPath is a file-backed source identity: an absolute, clean,
-// NFC-normalized path written with forward slashes, whose symlinks
-// NewCanonicalPath resolves when the path exists. It is an identity, not a path
-// to open; the package documentation states the rules it follows. The zero
-// value is invalid; use IsZero to check.
+// NFC-normalized path written with forward slashes, spelled as the filesystem
+// spells it. It is an identity, not a path to open; the package documentation
+// states the rules it follows. The zero value is invalid; use IsZero to check.
 type CanonicalPath struct {
 	path string
 }
 
-// NewCanonicalPath canonicalizes p by the host's path rules: it makes p
-// absolute and clean, resolves its symlinks when the path exists, applies NFC,
-// and writes its separators as forward slashes. A path that does not exist is
-// kept unresolved; any other symlink-resolution failure is returned.
+// NewCanonicalPath is the identity of the host path [ResolveHostPath] returns
+// for p: absolute, clean, symlink-resolved and spelled on disk, then NFC with
+// forward slashes. A path that does not exist yet keeps its missing tail as
+// typed; a resolution that fails for any other reason is returned.
 func NewCanonicalPath(p string) (CanonicalPath, error) {
 	canonical, err := canonicalize(p, false, symlinksBestEffort)
 	if err != nil {
@@ -121,22 +119,25 @@ func looksLikeAbsolute(s string) bool {
 	return false
 }
 
-// symlinkMode selects how canonicalize treats symbolic links.
+// symlinkMode selects what canonicalize asks the filesystem.
 type symlinkMode int
 
 const (
-	// symlinksNone leaves links as written and touches no filesystem.
+	// symlinksNone touches no filesystem, and pairs with requireAbs.
 	symlinksNone symlinkMode = iota
-	// symlinksBestEffort resolves links when the path exists.
+	// symlinksBestEffort spells the path on disk as far as it exists.
 	symlinksBestEffort
-	// symlinksStrict resolves links and fails when resolution fails.
+	// symlinksStrict fails for a path whose leaf does not exist.
 	symlinksStrict
 )
 
-// canonicalize is the one rule behind every file-backed identity: the host's
-// own path semantics, then NFC and forward slashes. On Unix a backslash is a
-// file-name character; only Windows reads it as a separator.
+// canonicalize is the one rule behind every file-backed identity: the host path
+// the filesystem answers with, then NFC and forward slashes. On Unix a
+// backslash is a file-name character; only Windows reads it as a separator.
 func canonicalize(p string, requireAbs bool, links symlinkMode) (string, error) {
+	if !utf8.ValidString(p) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidUTF8Path, p)
+	}
 	var abs string
 	if requireAbs {
 		if !filepath.IsAbs(p) {
@@ -144,26 +145,9 @@ func canonicalize(p string, requireAbs bool, links symlinkMode) (string, error) 
 		}
 		abs = filepath.Clean(p)
 	} else {
-		a, err := filepath.Abs(p)
+		resolved, err := resolveHostPath(p, links == symlinksStrict)
 		if err != nil {
-			return "", fmt.Errorf("absolute path: %w", err)
-		}
-		abs = a
-	}
-	switch links {
-	case symlinksNone:
-	case symlinksBestEffort:
-		resolved, err := filepath.EvalSymlinks(abs)
-		switch {
-		case err == nil:
-			abs = resolved
-		case !errors.Is(err, fs.ErrNotExist):
-			return "", fmt.Errorf("resolve symlinks: %w", err)
-		}
-	case symlinksStrict:
-		resolved, err := filepath.EvalSymlinks(abs)
-		if err != nil {
-			return "", fmt.Errorf("resolve symlinks: %w", err)
+			return "", err
 		}
 		abs = resolved
 	}

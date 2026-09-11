@@ -37,6 +37,26 @@ var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks li
 // Returned by: SourceIDFromAbsolutePath.
 var ErrNotAbsolute = errors.New("location: path is not absolute")
 
+// ErrEmptyPath is returned when a file-backed path is empty.
+//
+// An empty path is a caller that never set the file name. Without this rule it
+// would name the working directory, because filepath.Abs("") does, and a
+// directory would get a valid-looking identity for a file that was never named.
+//
+// Returned by: ResolveHostPath, NewCanonicalPath, SourceIDFromPath and
+// CanonicalizePathForSourceID (and transitively by their Must forms).
+var ErrEmptyPath = errors.New("location: path is empty")
+
+// ErrInvalidUTF8Path is returned for a path that is not valid UTF-8.
+//
+// An identity is text that reaches two JSON wires — a diagnostic under
+// --format json, and the .ys header's schema_source — and encoding/json writes
+// an invalid byte as U+FFFD, which merges two names into one. NFC passes such
+// bytes through unchanged, so nothing else refuses them.
+//
+// Returned by: every file-backed constructor, and ValidateSyntheticSourceID.
+var ErrInvalidUTF8Path = errors.New("location: path is not valid UTF-8")
+
 // ErrAbsoluteJoinElement is returned when CanonicalPath.Join receives an
 // element that looks like an absolute path (Unix "/path", Windows "C:/path",
 // or UNC "//server").

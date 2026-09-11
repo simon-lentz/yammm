@@ -90,7 +90,7 @@ func TestModuleRoot_EditorAndLoaderAgree(t *testing.T) {
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 
 	root, entry := markerTree(t, "# project root\n")
-	canonical := lsputil.CanonicalPath(root)
+	canonical := hostPath(root)
 
 	direct, found, err := schema.FindModuleRoot(filepath.Dir(entry))
 	if err != nil || !found {
@@ -101,7 +101,7 @@ func TestModuleRoot_EditorAndLoaderAgree(t *testing.T) {
 	}
 
 	ws := newTestWorkspace(t, quietLogger(), Config{})
-	editor, err := ws.FindModuleRoot(lsputil.CanonicalPath(entry))
+	editor, err := ws.FindModuleRoot(hostPath(entry))
 	if err != nil {
 		t.Fatalf("Workspace.FindModuleRoot: %v", err)
 	}
@@ -131,11 +131,11 @@ func TestModuleRoot_MarkerBeatsWorkspaceFolder(t *testing.T) {
 	ws := newTestWorkspace(t, quietLogger(), Config{})
 	ws.AddRoot(lsputil.PathToURI(outer))
 
-	got, err := ws.FindModuleRoot(lsputil.CanonicalPath(entry))
+	got, err := ws.FindModuleRoot(hostPath(entry))
 	if err != nil {
 		t.Fatalf("Workspace.FindModuleRoot: %v", err)
 	}
-	if want := lsputil.CanonicalPath(root); got != want {
+	if want := hostPath(root); got != want {
 		t.Errorf("FindModuleRoot = %q, want the marker's directory %q over the workspace folder %q", got, want, outer)
 	}
 }
@@ -149,7 +149,7 @@ func TestModuleRoot_ExplicitConfigBeatsMarker(t *testing.T) {
 	_, entry := markerTree(t, "")
 
 	ws := newTestWorkspace(t, quietLogger(), Config{ModuleRoot: "/configured/root"})
-	got, err := ws.FindModuleRoot(lsputil.CanonicalPath(entry))
+	got, err := ws.FindModuleRoot(hostPath(entry))
 	if err != nil {
 		t.Fatalf("Workspace.FindModuleRoot: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestModuleRoot_MalformedMarkerReachesTheEditor(t *testing.T) {
 	// The editor half: discovery fails, and the failure becomes a document
 	// diagnostic rather than a dropped analysis.
 	ws := newTestWorkspace(t, quietLogger(), Config{})
-	if _, err := ws.FindModuleRoot(lsputil.CanonicalPath(entry)); err == nil {
+	if _, err := ws.FindModuleRoot(hostPath(entry)); err == nil {
 		t.Fatal("Workspace.FindModuleRoot returned no error for a malformed marker")
 	} else {
 		issue := schema.ModuleRootIssue(err)
@@ -234,7 +234,7 @@ func TestFileChanged_MarkerReanalyzesOpenDocuments(t *testing.T) {
 	root, entry := markerTree(t, "")
 	ws := newTestWorkspace(t, quietLogger(), Config{})
 
-	uri := lsputil.PathToURI(lsputil.CanonicalPath(entry))
+	uri := lsputil.PathToURI(hostPath(entry))
 	content, err := os.ReadFile(entry)
 	if err != nil {
 		t.Fatal(err)
