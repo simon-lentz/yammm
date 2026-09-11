@@ -2,9 +2,6 @@ package location
 
 import (
 	"fmt"
-	"path/filepath"
-
-	"golang.org/x/text/unicode/norm"
 )
 
 // SourceID identifies a source uniquely within a build.
@@ -103,43 +100,17 @@ func MustSourceIDFromPath(path string) SourceID {
 	return sid
 }
 
-// SourceIDFromAbsolutePath creates a file-backed SourceID using
-// filesystem-independent canonicalization.
-//
-// This applies path.Clean() to normalize . and .. segments, NFC normalization,
-// and forward-slash conversion—but NO symlink resolution. Returns error if
-// path is not absolute.
-//
-// Use for in-memory loading scenarios (Sources) where filesystem access
-// is unavailable or undesirable.
-//
-// For paths without symlinks, this produces SourceIDs equal to those from
-// SourceIDFromPath. When symlinks are involved, the results may differ—use
-// CanonicalizePathForSourceID() before constructing Sources keys to ensure
-// TypeID equality.
-//
-// # Sources Key Requirements
-//
-// The following transformations are applied automatically:
-//   - path.Clean(): Normalizes . and .. segments (/a/../b → /b)
-//   - NFC normalization: NFD é (e + combining accent) → NFC é
-//   - Forward-slash conversion: \ → / on Windows
-//
-// The following are the caller's responsibility (NOT handled internally):
-//   - Case normalization: On case-insensitive filesystems (macOS HFS+/APFS,
-//     Windows NTFS), paths like /Users/Simon/file.yammm and /users/simon/file.yammm
-//     produce DISTINCT SourceIDs. Callers reading from case-insensitive filesystems
-//     should normalize case before building the sources map if TypeID equality
-//     across different key casings matters.
-//   - Symlink resolution: Use CanonicalizePathForSourceID() for symlink-resolved keys.
+// SourceIDFromAbsolutePath creates a file-backed SourceID from an absolute
+// path without touching the filesystem: it cleans the path by the host's rules,
+// applies NFC and writes forward slashes, but resolves no symlink. It returns
+// [ErrNotAbsolute] for a path the host does not call absolute. Use it for
+// in-memory Sources keys; for a path with symlinks, derive the key with
+// CanonicalizePathForSourceID so it matches what Load produces.
 func SourceIDFromAbsolutePath(absPath string) (SourceID, error) {
-	canonical, err := canonicalizeAbsolutePath(absPath)
+	canonical, err := canonicalize(absPath, true, symlinksNone)
 	if err != nil {
 		return SourceID{}, fmt.Errorf("create source ID from absolute path %q: %w", absPath, err)
 	}
-	// Create CanonicalPath directly from the cleaned path.
-	// Since canonicalizeAbsolutePath already ensures it's absolute, clean,
-	// NFC-normalized, and uses forward slashes, we can safely wrap it.
 	return SourceID{cp: CanonicalPath{path: canonical}}, nil
 }
 
@@ -176,49 +147,16 @@ func (s SourceID) CanonicalPath() (CanonicalPath, bool) {
 	return s.cp, true
 }
 
-// CanonicalizePathForSourceID resolves symlinks and returns a path suitable
-// for use as a Sources key when TypeID equality with Load() is required.
-//
-// Performs strict canonicalization: absolute, cleaned, NFC-normalized,
-// forward-slashes, and symlink-resolved. Unlike NewCanonicalPath (which
-// provides best-effort symlink resolution for general use), this function
-// requires symlink resolution to succeed—guaranteeing the result matches
-// what SourceIDFromPath would produce.
-//
-// Returns error if:
-//   - The path does not exist
-//   - Symlink resolution fails (e.g., broken symlink, permission error)
-//   - The current directory cannot be determined (for relative paths)
-//   - Path is a UNC path ([ErrUNCPath])
+// CanonicalizePathForSourceID returns the canonical form of an existing path,
+// for a Sources key whose TypeIDs must equal a Load of the same file. Unlike
+// NewCanonicalPath it requires symlink resolution to succeed, so it fails for
+// a path that does not exist; its result is what SourceIDFromPath produces.
 func CanonicalizePathForSourceID(path string) (string, error) {
-	// Get absolute path
-	absPath, err := filepath.Abs(path)
+	canonical, err := canonicalize(path, false, symlinksStrict)
 	if err != nil {
 		return "", fmt.Errorf("canonicalize path for source ID: %w", err)
 	}
-
-	// Strictly resolve symlinks - must succeed for TypeID equality guarantee
-	resolved, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return "", fmt.Errorf("canonicalize path for source ID: resolve symlinks: %w", err)
-	}
-
-	// Apply NFC normalization
-	normalized := norm.NFC.String(resolved)
-
-	// Convert to forward slashes
-	slashed := filepath.ToSlash(normalized)
-
-	// Reject UNC paths - path.Clean would corrupt // to / causing SourceID collisions.
-	// This ensures consistency with NewCanonicalPath and SourceIDFromAbsolutePath.
-	if len(slashed) >= 2 && slashed[0] == '/' && slashed[1] == '/' {
-		return "", fmt.Errorf("%w: %q; use a local mount point", ErrUNCPath, path)
-	}
-
-	// Apply Windows drive-root fixup
-	cleaned := fixWindowsClean(slashed)
-
-	return cleaned, nil
+	return canonical, nil
 }
 
 // MustCanonicalizePathForSourceID is like CanonicalizePathForSourceID but

@@ -139,58 +139,66 @@ func TestMustSourceIDFromPath(t *testing.T) {
 	}
 }
 
+// TestSourceIDFromAbsolutePath holds the constructor to the host's path rules:
+// a path the host calls absolute is cleaned, normalized to NFC and written with
+// forward slashes, and any other path is refused with ErrNotAbsolute.
 func TestSourceIDFromAbsolutePath(t *testing.T) {
-	tests := []struct {
+	type row struct {
 		name    string
 		input   string
-		wantErr bool
-	}{
-		{
-			name:    "unix absolute",
-			input:   "/a/b/c",
-			wantErr: false,
-		},
-		{
-			name:    "unix with dotdot",
-			input:   "/a/../b",
-			wantErr: false,
-		},
-		{
-			name:    "windows absolute",
-			input:   "C:/a/b",
-			wantErr: false,
-		},
-		{
-			name:    "relative path",
-			input:   "a/b/c",
-			wantErr: true,
-		},
-		{
-			name:    "UNC path forward slashes rejected",
-			input:   "//server/share/file.txt",
-			wantErr: true,
-		},
-		{
-			name:    "UNC path backslashes rejected",
-			input:   "\\\\server\\share\\file.txt",
-			wantErr: true,
-		},
+		want    string
+		wantErr error
+	}
+	rows := []row{
+		{"relative path", "a/b/c", "", ErrNotAbsolute},
+		{"empty path", "", "", ErrNotAbsolute},
+	}
+	if runtime.GOOS == "windows" {
+		rows = append(rows,
+			row{"drive path", "C:/a/b", "C:/a/b", nil},
+			row{"backslash separators", `C:\a\b`, "C:/a/b", nil},
+			row{"dotdot to the drive root", "C:/a/..", "C:/", nil},
+			row{"dotdot above the drive root keeps what follows", "C:/../x", "C:/x", nil},
+			row{"rooted without a volume", "/a/b", "", ErrNotAbsolute},
+			row{"network share with backslashes", `\\server\share\file.txt`, "//server/share/file.txt", nil},
+			row{"network share with forward slashes", "//server/share/file.txt", "//server/share/file.txt", nil},
+			row{"decomposed name", "C:/Users/cafe\u0301/file.txt", "C:/Users/caf\u00e9/file.txt", nil},
+		)
+	} else {
+		rows = append(rows,
+			row{"absolute path", "/a/b/c", "/a/b/c", nil},
+			row{"dotdot", "/a/../b", "/b", nil},
+			row{"double slash inside", "/a//b", "/a/b", nil},
+			row{"dot", "/a/./b", "/a/b", nil},
+			row{"backslash is a file-name character", `/path/with\backslash/file.txt`, `/path/with\backslash/file.txt`, nil},
+			row{"trailing backslash is a file-name character", `/path/to/dir\`, `/path/to/dir\`, nil},
+			row{"dotdot beside a backslash stays one name", `/a\..\b`, `/a\..\b`, nil},
+			row{"leading double slash names the root", "//server/share/file.txt", "/server/share/file.txt", nil},
+			row{"drive form is not absolute", "C:/a/b", "", ErrNotAbsolute},
+			row{"backslash share form is not absolute", `\\server\share\file.txt`, "", ErrNotAbsolute},
+			row{"decomposed name", "/path/cafe\u0301/file.txt", "/path/caf\u00e9/file.txt", nil},
+			row{"several decomposed characters", "/path/re\u0301sume\u0301.txt", "/path/r\u00e9sum\u00e9.txt", nil},
+			row{"composed name stays composed", "/path/caf\u00e9/file.txt", "/path/caf\u00e9/file.txt", nil},
+		)
 	}
 
-	for _, tt := range tests {
+	for _, tt := range rows {
 		t.Run(tt.name, func(t *testing.T) {
 			sid, err := SourceIDFromAbsolutePath(tt.input)
-			if tt.wantErr {
-				if err == nil {
-					t.Errorf("expected error, got %v", sid)
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("SourceIDFromAbsolutePath(%q) error = %v; want %v", tt.input, err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+				t.Fatalf("SourceIDFromAbsolutePath(%q): %v", tt.input, err)
 			}
 			if !sid.IsFilePath() {
 				t.Error("should be file-backed")
+			}
+			if got := sid.String(); got != tt.want {
+				t.Errorf("SourceIDFromAbsolutePath(%q) = %q; want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -198,13 +206,17 @@ func TestSourceIDFromAbsolutePath(t *testing.T) {
 
 func TestSourceIDFromAbsolutePath_CleaningEquivalence(t *testing.T) {
 	// Paths with . and .. should produce equal SourceIDs to cleaned paths
+	root := "/"
+	if runtime.GOOS == "windows" {
+		root = "C:/"
+	}
 	tests := []struct {
 		dirty string
 		clean string
 	}{
-		{"/a/../b", "/b"},
-		{"/a/./b", "/a/b"},
-		{"/a//b", "/a/b"},
+		{root + "a/../b", root + "b"},
+		{root + "a/./b", root + "a/b"},
+		{root + "a//b", root + "a/b"},
 	}
 
 	for _, tt := range tests {
@@ -226,34 +238,23 @@ func TestSourceIDFromAbsolutePath_CleaningEquivalence(t *testing.T) {
 	}
 }
 
-func TestSourceIDFromAbsolutePath_UNCRejection(t *testing.T) {
-	// UNC paths must be rejected to prevent SourceID collisions.
-	// Without rejection, path.Clean would collapse // to /, causing:
-	//   "//server/share" and "/server/share" → same SourceID
-	// This violates SourceID injectivity (different paths should produce different IDs).
+// TestSourceIDFromAbsolutePath_LeadingDoubleSlash pins the Unix reading of a
+// leading "//": the kernel resolves it as the root, so it names the same file.
+func TestSourceIDFromAbsolutePath_LeadingDoubleSlash(t *testing.T) {
+	skipOnWindows(t, "a leading // names a network share on Windows")
 
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{"forward slash UNC", "//server/share"},
-		{"forward slash UNC with file", "//server/share/path/file.txt"},
-		{"backslash UNC", "\\\\server\\share"},
-		{"backslash UNC with file", "\\\\server\\share\\path\\file.txt"},
-		{"triple slash collapses", "///server/share"},
+	want, err := SourceIDFromAbsolutePath("/server/share")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := SourceIDFromAbsolutePath(tt.input)
-			if err == nil {
-				t.Errorf("SourceIDFromAbsolutePath(%q) should return error for UNC path", tt.input)
-				return
-			}
-			if !errors.Is(err, ErrUNCPath) {
-				t.Errorf("expected ErrUNCPath, got: %v", err)
-			}
-		})
+	for _, in := range []string{"//server/share", "///server/share"} {
+		got, err := SourceIDFromAbsolutePath(in)
+		if err != nil {
+			t.Fatalf("SourceIDFromAbsolutePath(%q): %v", in, err)
+		}
+		if got != want {
+			t.Errorf("SourceIDFromAbsolutePath(%q) = %q; want %q", in, got, want)
+		}
 	}
 }
 

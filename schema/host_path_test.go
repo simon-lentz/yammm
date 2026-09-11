@@ -23,19 +23,6 @@ const (
 func TestHostPath_Loads(t *testing.T) {
 	t.Parallel()
 
-	// knownBroken names the rows that fail today; a listed row that starts
-	// passing fails, so the repair must remove its entry.
-	knownBroken := map[string]string{
-		"Load, decomposed directory, explicit root":  "the import is resolved from the NFC identity against the root's host bytes (E_PATH_ESCAPE)",
-		"Load, decomposed directory, implicit root":  "the import is resolved from the NFC identity against the root's host bytes (E_PATH_ESCAPE)",
-		"LoadSourcesWithEntry, decomposed directory": "the import is resolved from the NFC identity against the root's host bytes (E_PATH_ESCAPE)",
-	}
-	if runtime.GOOS != "windows" {
-		knownBroken["Load, import under a directory named x\\y"] = "the identity rewrites the backslash, so the import escapes the root (E_PATH_ESCAPE)"
-		knownBroken["Load, entry named m\\main.yammm"] = "the identity rewrites the backslash, so the import is looked for in m/ (E_IMPORT_RESOLVE)"
-		knownBroken["a\\b.yammm and a/b.yammm are two sources"] = "the identity rewrites the backslash, so both files get one SourceID"
-	}
-
 	rows := []struct {
 		name     string
 		unixOnly bool
@@ -123,28 +110,13 @@ func TestHostPath_Loads(t *testing.T) {
 		},
 	}
 
-	names := make(map[string]bool, len(rows))
-	for _, row := range rows {
-		names[row.name] = true
-	}
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names %q, which is no row", name)
-		}
-	}
-
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			if row.unixOnly && runtime.GOOS == "windows" {
 				t.Skip("a backslash is a separator on Windows")
 			}
-			ok, detail := row.run(t, t.TempDir())
-			reason, known := knownBroken[row.name]
-			switch {
-			case ok && known:
-				t.Errorf("the row now passes (%s); remove it from knownBroken, which said: %s", detail, reason)
-			case !ok && !known:
+			if ok, detail := row.run(t, t.TempDir()); !ok {
 				t.Errorf("the row fails: %s", detail)
 			}
 		})

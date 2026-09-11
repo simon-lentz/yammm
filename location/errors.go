@@ -11,9 +11,9 @@ import "errors"
 //
 // Example usage:
 //
-//	_, err := location.NewCanonicalPath("//server/share")
-//	if errors.Is(err, location.ErrUNCPath) {
-//	    // Handle UNC path rejection specifically
+//	_, err := location.SourceIDFromAbsolutePath("schemas/main.yammm")
+//	if errors.Is(err, location.ErrNotAbsolute) {
+//	    // Handle a relative path specifically
 //	}
 
 // ErrEmptySourceID is returned when a synthetic source ID is empty.
@@ -31,20 +31,10 @@ var ErrEmptySourceID = errors.New("location: synthetic source ID cannot be empty
 // Returned by: ValidateSyntheticSourceID (and transitively by MustNewSourceID).
 var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks like absolute file path")
 
-// ErrUNCPath is returned when a UNC path (//server/share or \\server\share)
-// is provided where a local filesystem path is required.
-//
-// UNC paths are rejected because path.Clean collapses "//" to "/", which would
-// cause SourceID collisions between UNC paths and regular Unix paths.
-// Use a local mount point instead.
-//
-// Returned by: NewCanonicalPath, SourceIDFromAbsolutePath, CanonicalizePathForSourceID.
-var ErrUNCPath = errors.New("location: UNC paths are not supported")
-
 // ErrNotAbsolute is returned when an absolute path is required but a
 // relative path was provided.
 //
-// Returned by: SourceIDFromAbsolutePath (via canonicalizeAbsolutePath).
+// Returned by: SourceIDFromAbsolutePath.
 var ErrNotAbsolute = errors.New("location: path is not absolute")
 
 // ErrAbsoluteJoinElement is returned when CanonicalPath.Join receives an

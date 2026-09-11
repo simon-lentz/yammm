@@ -30,18 +30,6 @@ func TestErrAbsolutePathSourceID_ErrorsIs(t *testing.T) {
 	}
 }
 
-func TestErrUNCPath_ErrorsIs(t *testing.T) {
-	err := ErrUNCPath
-
-	if !errors.Is(err, ErrUNCPath) {
-		t.Error("errors.Is(ErrUNCPath, ErrUNCPath) = false; want true")
-	}
-
-	if errors.Is(err, ErrNotAbsolute) {
-		t.Error("ErrUNCPath should not match ErrNotAbsolute")
-	}
-}
-
 func TestErrNotAbsolute_ErrorsIs(t *testing.T) {
 	err := ErrNotAbsolute
 
@@ -49,8 +37,8 @@ func TestErrNotAbsolute_ErrorsIs(t *testing.T) {
 		t.Error("errors.Is(ErrNotAbsolute, ErrNotAbsolute) = false; want true")
 	}
 
-	if errors.Is(err, ErrUNCPath) {
-		t.Error("ErrNotAbsolute should not match ErrUNCPath")
+	if errors.Is(err, ErrAbsoluteJoinElement) {
+		t.Error("ErrNotAbsolute should not match ErrAbsoluteJoinElement")
 	}
 }
 
@@ -74,7 +62,6 @@ func TestSentinelErrors_WrappedMatchViaErrorsIs(t *testing.T) {
 	}{
 		{"ErrEmptySourceID", ErrEmptySourceID},
 		{"ErrAbsolutePathSourceID", ErrAbsolutePathSourceID},
-		{"ErrUNCPath", ErrUNCPath},
 		{"ErrNotAbsolute", ErrNotAbsolute},
 		{"ErrAbsoluteJoinElement", ErrAbsoluteJoinElement},
 	}

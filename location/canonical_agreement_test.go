@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // TestConstructors_AgreeOnARealFile holds the three file-backed constructors to
@@ -15,17 +17,6 @@ import (
 // sits under a symlink-resolved directory, so no symlink separates them.
 func TestConstructors_AgreeOnARealFile(t *testing.T) {
 	t.Parallel()
-
-	// knownDisagreements names the rows that disagree today; a listed row that
-	// starts agreeing fails, so the repair must remove its entry.
-	knownDisagreements := map[string]string{}
-	if runtime.GOOS != "windows" {
-		knownDisagreements = map[string]string{
-			"backslash in a file name":   "two constructors rewrite a backslash to a separator, one keeps it",
-			"dot-dot beside a backslash": "the rewrite runs after cleaning, so one result keeps a .. segment",
-			"double slash prefix":        "SourceIDFromAbsolutePath refuses a leading // that the others clean to /",
-		}
-	}
 
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -52,16 +43,6 @@ func TestConstructors_AgreeOnARealFile(t *testing.T) {
 		{name: "decomposed name", rel: "cafe\u0301.yammm"},
 	}
 
-	names := make(map[string]bool, len(rows))
-	for _, row := range rows {
-		names[row.name] = true
-	}
-	for name := range knownDisagreements {
-		if !names[name] {
-			t.Errorf("knownDisagreements names %q, which is no row", name)
-		}
-	}
-
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
@@ -85,20 +66,16 @@ func TestConstructors_AgreeOnARealFile(t *testing.T) {
 				input = row.input(created)
 			}
 
-			detail, agree := constructorAgreement(input)
-			reason, known := knownDisagreements[row.name]
-			switch {
-			case agree && known:
-				t.Errorf("the constructors now agree on %q (%s); remove the row from knownDisagreements, which said: %s", input, detail, reason)
-			case !agree && !known:
-				t.Errorf("the constructors disagree on %q: %s", input, detail)
+			if detail, agree := constructorAgreement(input); !agree {
+				t.Errorf("the constructors disagree on %q, or their identity is not NFC: %s", input, detail)
 			}
 		})
 	}
 }
 
 // constructorAgreement runs the three file-backed constructors over one path
-// and reports whether they produced one identity, with every result.
+// and reports whether they produced one identity, and whether it is NFC: the
+// three share one canonicalizer, so agreement alone cannot see a dropped step.
 func constructorAgreement(p string) (string, bool) {
 	fromPath, errPath := SourceIDFromPath(p)
 	fromAbs, errAbs := SourceIDFromAbsolutePath(p)
@@ -108,5 +85,6 @@ func constructorAgreement(p string) (string, bool) {
 	if errPath != nil || errAbs != nil || errKey != nil {
 		return detail, false
 	}
-	return detail, fromPath.String() == fromAbs.String() && fromAbs.String() == forKey
+	id := fromPath.String()
+	return detail, id == fromAbs.String() && id == forKey && id == norm.NFC.String(id)
 }

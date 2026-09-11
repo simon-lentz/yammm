@@ -862,6 +862,11 @@ candidate reports `diag.E_COMMAND_FAILED`, `diag.W_SNAPSHOT_PATH_EXTENSION`,
 suggests `v0.22.0`. `snapshot info --format json`'s payload breaks in a way no
 declaration describes (below).
 
+Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
+are on the `review` branch and reach `main` at the unit's close. **Its pass-A
+fix pass removes one exported declaration, `location.ErrUNCPath`** (the path
+identity block below).
+
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
 Measured through binaries built from `v0.21.0`'s tree and from the candidate,
@@ -1391,6 +1396,40 @@ does not read this output**, measured at its tree.
   `yammm-invalid` is highlighted as yammm, where only `yammm` was. A block with
   an unbalanced brace — most `yammm-invalid` examples — no longer carries its
   highlighting past the closing fence into the rest of the document.
+
+### Unit 7, pass A — path identity follows the host
+
+- **Every file-backed identity follows one rule: the host's own path
+  semantics, then NFC and forward slashes.** `NewCanonicalPath`,
+  `SourceIDFromAbsolutePath` and `CanonicalizePathForSourceID` each rewrote
+  separators, cleaned and refused UNC paths in their own order, so one input
+  could produce three identities. They now share one rule, and
+  `SourceIDFromAbsolutePath` still touches no filesystem.
+- **On Unix a backslash is a file-name character.** A path holding one names
+  that file, where it named a nested one. `a\b.yammm` and `a/b.yammm` are two
+  sources, where they shared one identity. A module under a directory named
+  `x\y` loads, where it failed with `E_PATH_ESCAPE`, and an entry named
+  `m\main.yammm` resolves its imports, where it failed with `E_IMPORT_RESOLVE`.
+  `CanonicalPath.Join` keeps a backslash in an element on Unix; on Windows it
+  is a separator, as before.
+- **A module in a directory whose name holds a decomposed character loads.**
+  The loader resolved an import from the importing file's NFC identity against
+  the module root's bytes on disk, so such a module failed with
+  `E_PATH_ESCAPE` through `schema.Load` and `schema.LoadSourcesWithEntry`. It
+  now resolves imports from the path each file was read from.
+- **`SourceIDFromAbsolutePath` accepts exactly what the host calls absolute.**
+  On Unix it refuses a drive-letter form (`C:/a`) with `ErrNotAbsolute`, and
+  reads a leading `//` as the root (`//x` is `/x`), where it refused it. On
+  Windows it refuses a rooted path without a volume (`/a`), and a `..` above a
+  drive root keeps what follows it: `C:/../x` is `C:/x`, where it was `C:/`.
+- **Network shares are canonicalized on Windows** — `\\server\share\x` is
+  `//server/share/x` — where every constructor refused them. **Removed:
+  `location.ErrUNCPath`**, whose only ground was a `path.Clean` collision the
+  host's rules cannot produce. A device-namespace spelling such as `\\?\C:\x`
+  is now its own identity, as an 8.3 short name already was.
+- **No other identity moves.** On Unix only a path holding a backslash or a
+  decomposed character changes. A snapshot's `schema_source` header records
+  the schema's identity and is informational: it decides nothing on load.
 
 ## v0.21.0 under this policy
 

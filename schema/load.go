@@ -167,21 +167,22 @@ func readSourceFile(absPath string) ([]byte, error) {
 	return readSource(f, fmt.Sprintf("schema %q", absPath))
 }
 
-// readFile reads a file relative to the module root with sandboxed access.
+// readFile reads a file relative to the module root with sandboxed access,
+// returning its content, its SourceID and the host path it was read from.
 // Returns ErrPathEscape if the path would escape the module root.
-func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, error) {
+func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, string, error) {
 	f, err := rl.openFile(relativePath)
 	if err != nil {
 		if errors.Is(err, errNotRegularFile) {
-			return nil, location.SourceID{}, fmt.Errorf("import %q is not a regular file", relativePath)
+			return nil, location.SourceID{}, "", fmt.Errorf("import %q is not a regular file", relativePath)
 		}
-		return nil, location.SourceID{}, err
+		return nil, location.SourceID{}, "", err
 	}
 	defer f.Close()
 
 	content, err := readSource(f, fmt.Sprintf("import %q", relativePath))
 	if err != nil {
-		return nil, location.SourceID{}, err
+		return nil, location.SourceID{}, "", err
 	}
 
 	// Construct SourceID from the canonical path
@@ -189,10 +190,10 @@ func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, 
 	absPath := filepath.Join(rl.rootPath, cleanPath)
 	sourceID, err := location.SourceIDFromAbsolutePath(absPath)
 	if err != nil {
-		return nil, location.SourceID{}, fmt.Errorf("create source ID for %q: %w", relativePath, err)
+		return nil, location.SourceID{}, "", fmt.Errorf("create source ID for %q: %w", relativePath, err)
 	}
 
-	return content, sourceID, nil
+	return content, sourceID, absPath, nil
 }
 
 // handleOpenError converts os.Root errors to appropriate domain errors.
@@ -412,7 +413,7 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	// module root with the same keys — land on identical IDs regardless of
 	// what exists on disk.
 	for path, content := range sources {
-		sourceID, err := inMemorySourceID(syntheticRoot, moduleRoot, path)
+		sourceID, hostPath, err := inMemorySource(syntheticRoot, moduleRoot, path)
 		if err != nil {
 			return fatalResult(fmt.Errorf("invalid path %q: %w", path, err), diag.Result{})
 		}
@@ -422,6 +423,9 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		}
 
 		ldr.sourceContent[sourceID] = content
+		if hostPath != "" {
+			ldr.hostPaths[sourceID] = hostPath
+		}
 	}
 
 	// Determine the entry point
@@ -498,6 +502,7 @@ type loader struct {
 	imports        map[string]importBinding       // alias -> binding (resolved or failed) for current schema
 	failedCompiles map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
 	closureSeen    map[*Schema]struct{}           // schemas whose cached closures are already registered
+	hostPaths      map[location.SourceID]string   // file-backed source -> the host path its bytes were read from
 }
 
 // registryAdapter adapts *Registry to the completionRegistry interface.
@@ -545,6 +550,7 @@ func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot, rootOrigin string) *l
 		imports:         make(map[string]importBinding),
 		failedCompiles:  make(map[location.SourceID]struct{}),
 		closureSeen:     make(map[*Schema]struct{}),
+		hostPaths:       make(map[location.SourceID]string),
 	}
 }
 
@@ -598,6 +604,7 @@ func (l *loader) loadFile(ctx context.Context, absPath string, content []byte) (
 	}
 
 	l.sourceContent[sourceID] = content
+	l.hostPaths[sourceID] = absPath
 
 	return l.loadSource(ctx, sourceID, content)
 }
@@ -1070,6 +1077,12 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	// Resolve the import path to a relative path (relative to module root)
 	relativePath, err := l.resolveImportToRelative(sourceID, imp.Path)
 	if err != nil {
+		if errors.Is(err, errNoHostPath) {
+			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
+				fmt.Sprintf("resolve import %q: %v", imp.Path, err)).Build())
+			l.markImportFailed(imp)
+			return nil
+		}
 		root, origin := l.loaderRoot()
 		l.collector.Collect(importResolveIssue(root, origin,
 			fmt.Sprintf("cannot resolve import %q: %v", imp.Path, err), imp))
@@ -1156,16 +1169,24 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	return nil
 }
 
+// errNoHostPath reports a file-backed source the loader never recorded reading,
+// which leaves its relative imports nothing to resolve against.
+var errNoHostPath = errors.New("no host path recorded for the importing source")
+
 // resolveImportToRelative resolves an import path to a path relative to the module root.
 func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath string) (string, error) {
 	// Relative import (./foo or ../bar)
 	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
-		// Get the source file's directory
-		cp, ok := sourceID.CanonicalPath()
-		if !ok {
+		if !sourceID.IsFilePath() {
 			return "", errors.New("relative imports require a file-based source")
 		}
-		sourceDir := filepath.Dir(cp.String())
+		// The importer's host path, never its identity: NFC and the separator
+		// rewrite can leave the identity's bytes naming no file.
+		importer, ok := l.hostPaths[sourceID]
+		if !ok {
+			return "", fmt.Errorf("%w: %s", errNoHostPath, sourceID)
+		}
+		sourceDir := filepath.Dir(importer)
 
 		// Compute the target path
 		targetPath := filepath.Join(sourceDir, importPath)
@@ -1344,8 +1365,9 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 	// For path escape errors, we return immediately since they are security-relevant.
 	var lastErr error
 	for _, candidate := range candidates {
-		content, sourceID, err := l.rootLoader.readFile(candidate)
+		content, sourceID, hostPath, err := l.rootLoader.readFile(candidate)
 		if err == nil {
+			l.hostPaths[sourceID] = hostPath
 			return content, sourceID, nil
 		}
 
@@ -1389,15 +1411,22 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 // stay inside the sandbox (e.g. a /var/... overlay key against a
 // /private/var/... root would otherwise escape).
 func inMemorySourceID(syntheticRoot, moduleRoot, key string) (location.SourceID, error) {
+	id, _, err := inMemorySource(syntheticRoot, moduleRoot, key)
+	return id, err
+}
+
+// inMemorySource is inMemorySourceID plus the host path the identity was
+// derived from; the path is empty for a synthetic key.
+func inMemorySource(syntheticRoot, moduleRoot, key string) (location.SourceID, string, error) {
 	if syntheticRoot != "" {
 		normalized, err := syntheticSourceKey(key)
 		if err != nil {
-			return location.SourceID{}, err
+			return location.SourceID{}, "", err
 		}
 		// NewSourceID bypasses validation, which is right here: the root was
 		// validated once at load, and no key can make a validated root look
 		// absolute. The joined string is deliberately not cleaned.
-		return location.NewSourceID(syntheticRoot + "/" + normalized), nil
+		return location.NewSourceID(syntheticRoot + "/" + normalized), "", nil
 	}
 
 	var absPath string
@@ -1406,15 +1435,15 @@ func inMemorySourceID(syntheticRoot, moduleRoot, key string) (location.SourceID,
 	} else {
 		abs, err := makeCanonicalPath(key)
 		if err != nil {
-			return location.SourceID{}, err
+			return location.SourceID{}, "", err
 		}
 		absPath = abs
 	}
 	id, err := location.SourceIDFromAbsolutePath(absPath)
 	if err != nil {
-		return location.SourceID{}, fmt.Errorf("derive source ID for %q: %w", key, err)
+		return location.SourceID{}, "", fmt.Errorf("derive source ID for %q: %w", key, err)
 	}
-	return id, nil
+	return id, absPath, nil
 }
 
 // syntheticSourceKey normalizes an in-memory source key for joining to a

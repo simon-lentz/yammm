@@ -10,8 +10,17 @@
 //   - Absolute (not relative)
 //   - Clean (no . or .. segments)
 //   - NFC-normalized (Unicode)
-//   - Forward-slash normalized (uses "/" on all platforms)
+//   - Written with "/" as its separator, on every host
 //   - Symlink-resolved (best-effort)
+//
+// Canonicalization follows the host's own path rules. On Windows a backslash
+// is a separator and is written as "/", and a network share is canonicalized
+// like any other path; on Unix a backslash is a file-name character and is
+// kept, and a leading "//" names the root, as the kernel resolves it.
+//
+// A CanonicalPath is an identity, not a path to open. NFC can change its bytes,
+// so on a filesystem that distinguishes normalization forms it may name no
+// file; read a file through the host path it was derived from.
 //
 // Create via NewCanonicalPath or MustCanonicalPath. The type uses an unexported
 // field to enforce construction through validated constructors only.
@@ -24,7 +33,9 @@
 //   - Synthetic: Created via NewSourceID or MustNewSourceID for non-file sources
 //     like "<stdin>", "inline:test", or "test://unit/person.yammm".
 //
-// SourceID is comparable and safe for use as map keys.
+// SourceID is comparable and safe for use as map keys. Case is not normalized:
+// on a case-insensitive filesystem, /Users/Simon/a.yammm and /users/simon/a.yammm
+// are distinct SourceIDs.
 //
 // # Position
 //
