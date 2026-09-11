@@ -1,8 +1,9 @@
 // Package location provides source location tracking for diagnostics.
 //
 // This package defines the core types used by the YAMMM diagnostic system
-// to track source locations. It depends only on the standard library and can be
-// imported by all other packages without introducing circular dependencies.
+// to track source locations. Besides the standard library it depends only on
+// its location/path sub-package and golang.org/x/text/unicode/norm (see
+// Dependencies), so every other package can import it without an import cycle.
 //
 // # CanonicalPath
 //
@@ -28,8 +29,8 @@
 // # SourceID
 //
 // SourceID identifies a source uniquely within a build. It supports two modes:
-//   - File-backed: Created via SourceIDFromPath, SourceIDFromCanonicalPath, or
-//     SourceIDFromAbsolutePath. Stores a CanonicalPath directly.
+//   - File-backed: Created via SourceIDFromPath or SourceIDFromAbsolutePath.
+//     Stores a CanonicalPath directly.
 //   - Synthetic: Created via NewSourceID or MustNewSourceID for non-file sources
 //     like "<stdin>", "inline:test", or "test://unit/person.yammm".
 //
@@ -65,7 +66,7 @@
 //
 // RelatedInfo provides supplementary location context for diagnostics, such as
 // "previous definition here" for duplicate type errors or showing edges of an
-// import cycle. Use the Msg* constants for consistent message formatting.
+// import cycle.
 //
 // # Provenance
 //

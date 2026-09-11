@@ -13,15 +13,17 @@ import (
 // contains '.', 'e', or 'E', it is treated as float64; otherwise as int64.
 // This correctly classifies scientific notation like "1e2" as float64 (its
 // JSON representation uses exponent notation, even though its mathematical
-// value is an integer).
+// value is an integer). A float-form string that is malformed or has no finite
+// float64 value (e.g., "1e400") is returned unchanged.
 //
 // Fallback chain for integer-form strings (no '.', 'e', 'E'):
 //  1. strconv.ParseInt(s, 10, 64) — succeeds for values in int64 range
 //  2. strconv.ParseFloat(s, 64) — fallback for values exceeding int64 range
 //     (e.g., "99999999999999999999"); precision may be lost but the value is
 //     representable
-//  3. Returns the original json.Number unchanged if both parsers fail
-//     (malformed number string)
+//  3. Returns the original json.Number unchanged if neither yields a finite
+//     value: the string is malformed, or no float64 holds it (e.g., a
+//     400-digit integer)
 //
 // Classification is by lexical form alone: a float indicator ('.', 'e', 'E')
 // means float64, an int-shaped literal means int64 — the reader sees only the

@@ -1840,6 +1840,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - UTF-8 encoding is required
 - One schema per file
 - Import paths are case-sensitive on case-sensitive filesystems
+- `/` separates an import path's segments on every host; on Windows `\` does too, and elsewhere a backslash is part of a file name
 - Canonical formatting is defined by `format.TokenStream` (see [API.md](API.md#formatting))
 
 ## Schema Identity

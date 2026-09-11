@@ -1411,7 +1411,8 @@ does not read this output**, measured at its tree.
   `x\y` loads, where it failed with `E_PATH_ESCAPE`, and an entry named
   `m\main.yammm` resolves its imports, where it failed with `E_IMPORT_RESOLVE`.
   `CanonicalPath.Join` keeps a backslash in an element on Unix; on Windows it
-  is a separator, as before.
+  is a separator, as before. `docs/SPEC.md` now states the rule for import
+  paths.
 - **A module in a directory whose name holds a decomposed character loads.**
   The loader resolved an import from the importing file's NFC identity against
   the module root's bytes on disk, so such a module failed with

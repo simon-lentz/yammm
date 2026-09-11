@@ -3,6 +3,7 @@ package immutable
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -45,6 +46,11 @@ func TestNormalizeNumber(t *testing.T) {
 		{name: "NaN", num: json.Number("NaN"), want: json.Number("NaN")},
 		{name: "Infinity", num: json.Number("Infinity"), want: json.Number("Infinity")},
 		{name: "empty string", num: json.Number(""), want: json.Number("")},
+
+		// Well-formed but no finite float64 → return original json.Number
+		{name: "exponent overflow positive", num: json.Number("1e400"), want: json.Number("1e400")},
+		{name: "exponent overflow negative", num: json.Number("-1e400"), want: json.Number("-1e400")},
+		{name: "integer beyond float64", num: json.Number(strings.Repeat("9", 400)), want: json.Number(strings.Repeat("9", 400))},
 	}
 
 	for _, tt := range tests {

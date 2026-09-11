@@ -7,8 +7,7 @@ import (
 // SourceID identifies a source uniquely within a build.
 //
 // A SourceID can represent:
-//   - File-backed source: Created via SourceIDFromPath, SourceIDFromCanonicalPath,
-//     or SourceIDFromAbsolutePath
+//   - File-backed source: Created via SourceIDFromPath or SourceIDFromAbsolutePath
 //   - Synthetic source: Created via NewSourceID or MustNewSourceID, such as
 //     "<stdin>", "inline:test", or "test://unit/person.yammm"
 //
