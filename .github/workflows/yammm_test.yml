@@ -89,13 +89,25 @@ jobs:
       - name: Vet every package for Windows
         shell: bash
         run: go vet ./...
-      - name: Path identity tests
+      # One step per package, each run after an earlier failure: bash -e stops a
+      # multi-command step at its first failing command, which hid three
+      # packages' results behind one location failure.
+      - name: Path identity tests — location
+        if: ${{ !cancelled() }}
         shell: bash
-        run: |
-          go test -count=1 -v ./location/...
-          go test -count=1 -v ./diag/
-          go test -count=1 -v -run '^TestHostPath_' ./schema/
-          go test -count=1 -v -run '^TestRenderedLocations_' ./cmd/yammm/
+        run: go test -count=1 -v ./location/...
+      - name: Path identity tests — diag
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: go test -count=1 -v ./diag/
+      - name: Path identity tests — schema host paths
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: go test -count=1 -v -run '^TestHostPath_' ./schema/
+      - name: Path identity tests — rendered locations
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: go test -count=1 -v -run '^TestRenderedLocations_' ./cmd/yammm/
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
