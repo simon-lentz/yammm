@@ -155,10 +155,7 @@ func TestRenderContracts(t *testing.T) {
 	}
 
 	knownBroken := map[string]string{
-		"Result.String ends at its last issue":                    "Result.String writes a newline after every issue (B16)",
-		"an error from Result.Err ends at its last issue":         "the error string is Result.String (B16)",
-		"an error from Result.WithContext ends at its last issue": "the error string ends in Result.String's newline (B16)",
-		"an issue with no location renders no location":           "the renderer writes \"<unknown>: \" (B42)",
+		"an issue with no location renders no location": "the renderer writes \"<unknown>: \" (B42)",
 	}
 
 	rows := []struct {

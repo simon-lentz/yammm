@@ -56,13 +56,12 @@ type detailWire struct {
 // resultWire is the JSON wire format for Result.
 type resultWire struct {
 	Issues       []issueWire `json:"issues"`
-	Limit        int         `json:"limit,omitzero"`
 	LimitReached bool        `json:"limitReached,omitzero"`
 	DroppedCount int         `json:"droppedCount,omitzero"`
 }
 
 // FormatResultJSON returns the JSON representation of a diagnostic result: an
-// array of issues, and the limit tracking fields when issues were dropped.
+// array of issues, and the truncation facts when issues were dropped.
 // Every span's source is its identity, whatever module root the renderer
 // holds.
 func (r *Renderer) FormatResultJSON(res Result) json.RawMessage {
@@ -92,9 +91,8 @@ func toResultWire(res Result) resultWire {
 		Issues: issues,
 	}
 
-	// Only include limit-related fields when the limit was reached
+	// Only include the truncation facts when issues were dropped
 	if res.LimitReached() {
-		wire.Limit = res.limit
 		wire.LimitReached = true
 		wire.DroppedCount = res.DroppedCount()
 	}

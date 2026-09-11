@@ -866,7 +866,8 @@ Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
 are on the `review` branch and reach `main` at the unit's close. **Its pass-A
 fix pass removes two exported declarations, `location.ErrUNCPath` and
 `location.PositionRegistry`, and its pass-B fix pass adds one,
-`location.SourceID.RelativeTo`** (the blocks below).
+`location.SourceID.RelativeTo`, and removes one, `diag.Result.Limit`** (the
+blocks below).
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
@@ -1367,7 +1368,7 @@ does not read this output**, measured at its tree.
 
 - **Each `--dir` entry carries its result under `diagnostics`, in the wire the
   diagnostic stream uses:** `issues`, each carrying every field a diagnostic
-  has, plus `limit`, `limitReached` and `droppedCount` when the entry's issues
+  has, plus `limitReached` and `droppedCount` when the entry's issues
   were truncated. `v0.21.0` carried an `issues` array of severity, code and
   message on an entry that had issues and none on a clean one, and the entry
   above made the array always present. A truncated entry listed 100 issues with
@@ -1494,6 +1495,31 @@ does not read this output**, measured at its tree.
   excerpt. rdata renders excerpts in its pipeline runner's text output and
   parses none of it. `diag` now imports `golang.org/x/text/width`, from a
   module the library already requires.
+
+### Unit 7, pass B — what a result says about truncation, and where its error string ends
+
+- **Removed: `diag.Result.Limit`, and the `limit` key of the JSON diagnostic
+  wire.** A cap is a collector's setting, not a fact about a result. After a
+  merge, `Limit` reported the receiving collector's own cap, which is 0 on
+  every CLI path, and not the cap that dropped the issues. The truncation
+  facts are `Result.LimitReached` and `Result.DroppedCount`, and the wire's
+  `limitReached` and `droppedCount`. They hold across a merge. A caller that
+  read `Limit` already holds the cap it configured. `snapshot info --dir
+  --format json` entries lose the key too, and unit 6's entry above is
+  corrected to say so.
+- **`Result.TruncationNote` names no cap:** `N more issue(s) dropped at an
+  issue limit; resolve issues and re-run to see the rest`. The CLI's text note
+  prints it. The LSP's truncation log line drops its `limit` attribute.
+- **`Result.String` ends at its last issue, with no trailing newline.** The
+  errors from `Result.Err` and `Result.WithContext` are built from it, so they
+  end there too. Wrapped in `fmt.Errorf("…: %w", err)`, they no longer end in
+  a stray newline. rdata wraps these errors at about twenty sites and matches
+  none of their text.
+- **`snapshot.UpdateMetadataOrReMarshal` keeps a truncated result truncated
+  when its fallback fails.** It merges the two legs' results through
+  `Collector.Merge`. A dropped issue stays counted in `DroppedCount`,
+  `SeverityCounts` and `CodeCounts`, where re-collecting the survivors lost
+  it.
 
 ## v0.21.0 under this policy
 

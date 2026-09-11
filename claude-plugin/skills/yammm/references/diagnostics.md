@@ -58,7 +58,7 @@ One load pass reports every *independent* error in a schema and its import closu
 - **References through a failed import are deferred, not re-blamed.** The import failure is the single root-cause diagnostic; `extends`, relation targets, and property datatypes reached through that alias stay silent until the import is fixed. A qualifier that names no declared import at all is a genuine `E_UNKNOWN_TYPE`.
 - **An alias binds once (keep-first).** A repeated alias is reported once (`E_DUPLICATE_IMPORT`) and the later declaration is inert; references resolve against the first binding.
 - **`LoadString` / markdown blocks**: the imports-not-allowed rejection (`E_IMPORT_NOT_ALLOWED`) no longer suppresses the source's other diagnostics.
-- **Truncation is visible**: past the issue limit (default 100), the CLI's text output appends a dropped-issues note, and the JSON output carries `limit` / `limitReached` / `droppedCount`.
+- **Truncation is visible**: past the issue limit (default 100), the CLI's text output appends a dropped-issues note, and the JSON output carries `limitReached` / `droppedCount`.
 
 The all-or-nothing contract is unchanged: any error still yields a nil schema.
 

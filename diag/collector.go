@@ -145,11 +145,10 @@ func (c *Collector) CollectAll(issues []Issue) {
 // receiver. So a dropped error in res cannot flip the merged result to OK — the
 // same guarantee [Collector] already gives for directly-collected issues.
 //
-// The receiver's own configured limit is unchanged: merging a truncated res
-// into an unlimited collector yields LimitReached()==true with Limit()==0.
-// [Result.LimitReached] and [Result.DroppedCount] are the authoritative
-// truncation facts after a merge; Limit() remains the receiver's local cap, not
-// the cap that produced res's drops.
+// The receiver keeps its own limit, which governs only what it stores. A cap
+// is a collector's setting, so a Result reports none: [Result.LimitReached]
+// and [Result.DroppedCount] are the truncation facts, and they hold across a
+// merge.
 func (c *Collector) Merge(res Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -329,7 +328,7 @@ func (c *Collector) Result() Result {
 	// issues are absent from sorted, and recomputing would make Result.OK /
 	// HasErrors blind to a dropped error exactly as the gates would be. In the
 	// non-truncated case the two are identical (every collected issue is stored).
-	result := newResultWithCounts(sorted, c.limit, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone())
+	result := newResultWithCounts(sorted, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone())
 	c.cachedResult = &result
 	return result
 }

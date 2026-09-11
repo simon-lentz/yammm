@@ -824,24 +824,27 @@ func TestCollector_DeterministicOrdering_MixedIssueTypes(t *testing.T) {
 // are normalized to 0 (unlimited) in NewCollector.
 func TestNewCollector_NormalizesNegativeLimit(t *testing.T) {
 	tests := []struct {
-		input    int
-		expected int
+		input  int
+		stored int // of three issues collected
 	}{
-		{-100, 0},
-		{-1, 0},
-		{0, 0},
+		{-100, 3},
+		{-1, 3},
+		{0, 3},
 		{1, 1},
-		{100, 100},
+		{100, 3},
 	}
 
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("limit=%d", tt.input), func(t *testing.T) {
 			c := NewCollector(tt.input)
+			for i := range 3 {
+				c.Collect(NewIssue(Error, E_SYNTAX, fmt.Sprintf("error %d", i)).Build())
+			}
 			result := c.Result()
 
-			if result.Limit() != tt.expected {
-				t.Errorf("NewCollector(%d).Result().Limit() = %d; want %d",
-					tt.input, result.Limit(), tt.expected)
+			if result.Len() != tt.stored || result.LimitReached() != (tt.stored < 3) {
+				t.Errorf("NewCollector(%d) over three issues: Len() = %d, LimitReached() = %v; want %d, %v",
+					tt.input, result.Len(), result.LimitReached(), tt.stored, tt.stored < 3)
 			}
 		})
 	}

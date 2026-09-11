@@ -13,9 +13,9 @@ func TestResult_TruncationNote(t *testing.T) {
 	c.Collect(NewIssue(Error, E_SYNTAX, "b").Build())
 	c.Collect(NewIssue(Error, E_SYNTAX, "c").Build()) // dropped past the limit
 
-	note := c.Result().TruncationNote()
-	if !strings.Contains(note, "1 more issue(s) dropped after reaching the 2-issue limit") {
-		t.Errorf("TruncationNote() = %q; want the dropped-count/limit summary", note)
+	const want = "1 more issue(s) dropped at an issue limit; resolve issues and re-run to see the rest"
+	if note := c.Result().TruncationNote(); note != want {
+		t.Errorf("TruncationNote() = %q; want %q", note, want)
 	}
 
 	if got := OK().TruncationNote(); got != "" {
@@ -23,27 +23,25 @@ func TestResult_TruncationNote(t *testing.T) {
 	}
 }
 
-func TestResult_TruncationNote_MergedIntoUnlimited_OmitsBogusLimit(t *testing.T) {
-	// Merging a truncated result into an unlimited collector carries the
-	// truncation state forward but not a positive limit, so the note must
-	// report the dropped count without naming a nonsensical "0-issue limit".
+// TestResult_TruncationNote_SameAfterAMerge holds the note to the dropped
+// count alone: a Result reports no cap, so the collector it is merged into
+// cannot change what the note says.
+func TestResult_TruncationNote_SameAfterAMerge(t *testing.T) {
 	src := NewCollector(1)
 	src.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
 	src.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
+	want := src.Result().TruncationNote()
 
-	dst := NewCollectorUnlimited()
-	dst.Merge(src.Result())
-	r := dst.Result()
-
-	if !r.LimitReached() || r.DroppedCount() != 1 {
-		t.Fatalf("setup: LimitReached=%v DroppedCount=%d; want true/1", r.LimitReached(), r.DroppedCount())
-	}
-	note := r.TruncationNote()
-	if strings.Contains(note, "0-issue") {
-		t.Errorf("TruncationNote() = %q; must not name a 0-issue limit after merge into an unlimited collector", note)
-	}
-	if !strings.Contains(note, "1 more issue(s) dropped") {
-		t.Errorf("TruncationNote() = %q; want the dropped-count summary", note)
+	for _, limit := range []int{NoLimit, 50} {
+		dst := NewCollector(limit)
+		dst.Merge(src.Result())
+		r := dst.Result()
+		if !r.LimitReached() || r.DroppedCount() != 1 {
+			t.Fatalf("limit %d: LimitReached=%v DroppedCount=%d; want true/1", limit, r.LimitReached(), r.DroppedCount())
+		}
+		if note := r.TruncationNote(); note != want {
+			t.Errorf("merged into a collector of limit %d, TruncationNote() = %q; want %q", limit, note, want)
+		}
 	}
 }
 
@@ -72,7 +70,7 @@ func TestResult_HasCode(t *testing.T) {
 		NewIssue(Error, E_SYNTAX, "error").Build(),
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 	}
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	if !r.HasCode(E_SYNTAX) {
 		t.Error("HasCode(E_SYNTAX) = false; want true")
@@ -199,7 +197,7 @@ func TestResult_SeverityQueries(t *testing.T) {
 		NewIssue(Hint, E_INTERNAL, "hint").Build(),
 	}
 
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	if r.OK() {
 		t.Error("OK() = true; want false (has fatal and error)")
@@ -238,7 +236,7 @@ func TestResult_OKWithWarnings(t *testing.T) {
 		NewIssue(Info, E_INTERNAL, "info").Build(),
 	}
 
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	// Result should be OK because there are no Fatal or Error issues
 	if !r.OK() {
@@ -254,7 +252,7 @@ func TestResult_LimitTracking(t *testing.T) {
 		NewIssue(Error, E_SYNTAX, "error").Build(),
 	}
 
-	r := newResult(issues, 10, true, 5)
+	r := newResult(issues, true, 5)
 
 	if !r.LimitReached() {
 		t.Error("LimitReached() = false; want true")
@@ -271,7 +269,7 @@ func TestResult_Issues_Iterator(t *testing.T) {
 		NewIssue(Error, E_DUPLICATE_TYPE, "third").Build(),
 	}
 
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	var count int
 	var messages []string
@@ -295,7 +293,7 @@ func TestResult_Issues_EarlyBreak(t *testing.T) {
 		NewIssue(Error, E_SYNTAX, "third").Build(),
 	}
 
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	var count int
 	for range r.Issues() {
@@ -317,7 +315,7 @@ func TestResult_Errors(t *testing.T) {
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 	}
 
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	var count int
 	for issue := range r.Errors() {
@@ -341,7 +339,7 @@ func TestResult_BySeverity(t *testing.T) {
 		NewIssue(Hint, E_INTERNAL, "hint").Build(),
 	}
 
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	for _, sev := range []Severity{Fatal, Error, Warning, Info, Hint} {
 		var count int
@@ -409,11 +407,10 @@ func TestResult_String_WarningsOnlyKeepsTheLimitNote(t *testing.T) {
 	c.Collect(NewIssue(Warning, W_ANNOTATION_SHADOWED, "dropped").Build())
 	s := c.Result().String()
 
-	if !strings.Contains(s, "OK, 2 warning(s) [limit reached, 1 dropped]") {
-		t.Errorf("String() = %q; want the limit note on the OK branch", s)
-	}
-	if !strings.Contains(s, "kept") || strings.Contains(s, "dropped\n") {
-		t.Errorf("String() = %q; want the stored warning listed and the dropped one absent", s)
+	// The limit note on the OK branch, the stored warning, the dropped one
+	// absent, and nothing after the last issue.
+	if want := "OK, 2 warning(s) [limit reached, 1 dropped]\n  W_ANNOTATION_SHADOWED: kept"; s != want {
+		t.Errorf("String() = %q; want %q", s, want)
 	}
 }
 
@@ -423,7 +420,7 @@ func TestResult_String_WithErrors(t *testing.T) {
 		NewIssue(Error, E_DUPLICATE_TYPE, "type collision").Build(),
 	}
 
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	s := r.String()
 	if !strings.Contains(s, "2 error(s)") {
@@ -439,7 +436,7 @@ func TestResult_String_WithLimitReached(t *testing.T) {
 		NewIssue(Error, E_SYNTAX, "error").Build(),
 	}
 
-	r := newResult(issues, 10, true, 5)
+	r := newResult(issues, true, 5)
 
 	s := r.String()
 	if !strings.Contains(s, "limit reached") {
@@ -467,7 +464,7 @@ func TestResult_Immutability(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "test").Build(),
 	}
-	r = newResult(issues, 0, false, 0)
+	r = newResult(issues, false, 0)
 
 	slice1 := slices.Collect(r.Issues())
 	slice2 := slices.Collect(r.Issues())
@@ -493,7 +490,7 @@ func TestResult_Err_NilWhenWarningsOnly(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Warning, E_INVALID_NAME, "name looks odd").Build(),
 	}
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	if !r.OK() {
 		t.Fatal("result with only warnings should be OK")
@@ -507,7 +504,7 @@ func TestResult_Err_NonNilOnError(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
 	}
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	err := r.Err()
 	if err == nil {
@@ -524,7 +521,7 @@ func TestResult_Err_NonNilOnFatal(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Fatal, E_INTERNAL, "limit reached").Build(),
 	}
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	err := r.Err()
 	if err == nil {
@@ -537,7 +534,7 @@ func TestResult_Err_ErrorsAs(t *testing.T) {
 		NewIssue(Error, E_DUPLICATE_TYPE, `type "Person" already defined`).Build(),
 		NewIssue(Warning, E_INVALID_NAME, "name looks odd").Build(),
 	}
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	err := r.Err()
 	if err == nil {
@@ -562,7 +559,7 @@ func TestResult_Err_WrappableWithFmtErrorf(t *testing.T) {
 	issues := []Issue{
 		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
 	}
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	wrapped := errors.Join(errors.New("schema validation failed"), r.Err())
 
@@ -576,7 +573,7 @@ func TestResult_Err_MatchesString(t *testing.T) {
 		NewIssue(Error, E_SYNTAX, "unexpected token").Build(),
 		NewIssue(Error, E_DUPLICATE_TYPE, "duplicate type").Build(),
 	}
-	r := newResult(issues, 0, false, 0)
+	r := newResult(issues, false, 0)
 
 	err := r.Err()
 	if err == nil {

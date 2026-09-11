@@ -297,7 +297,6 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 		a.logger.Warn(
 			"diagnostics truncated at issue limit",
 			slog.String("entry", entryPath),
-			slog.Int("limit", diagResult.Limit()),
 			slog.Int("dropped", diagResult.DroppedCount()),
 		)
 	}

@@ -35,14 +35,6 @@ func TestMergeResults_KeepsTruncation(t *testing.T) {
 		}
 	}
 
-	const lost = "mergeResults re-collects the survivors into a fresh collector, which never saw the dropped issue (B0)"
-	knownBroken := map[string]string{
-		"the merged result is still truncated":                  lost,
-		"the dropped issue is still counted":                    lost,
-		"every error the truncated result saw is still counted": lost,
-		"every code the truncated result saw is still counted":  lost,
-	}
-
 	rows := []struct {
 		name   string
 		ok     bool
@@ -58,25 +50,12 @@ func TestMergeResults_KeepsTruncation(t *testing.T) {
 		{"the other result's issue is kept", merged.HasCode(diag.W_SNAPSHOT_VALUE_DROPPED), "the warning is gone"},
 	}
 
-	names := make(map[string]bool, len(rows))
 	for _, row := range rows {
-		names[row.name] = true
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			reason, broken := knownBroken[row.name]
-			switch {
-			case broken && row.ok:
-				t.Errorf("listed as broken (%s) and now passes: remove its knownBroken entry", reason)
-			case broken:
-				t.Logf("known broken: %s: %s", reason, row.detail)
-			case !row.ok:
+			if !row.ok {
 				t.Error(row.detail)
 			}
 		})
-	}
-	for name := range knownBroken {
-		if !names[name] {
-			t.Errorf("knownBroken names no row: %q", name)
-		}
 	}
 }

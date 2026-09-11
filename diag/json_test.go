@@ -500,6 +500,10 @@ func TestFormatResultJSON_WithLimit(t *testing.T) {
 	if parsed["droppedCount"] != float64(2) {
 		t.Errorf("droppedCount = %v; want 2", parsed["droppedCount"])
 	}
+	// A cap is the collector's setting, not a fact the result carries.
+	if limit, exists := parsed["limit"]; exists {
+		t.Errorf("the wire carries limit = %v; want no limit key", limit)
+	}
 }
 
 func TestFormatIssueJSON_CompleteIssue(t *testing.T) {
@@ -578,6 +582,11 @@ func TestJSON_RoundTrip(t *testing.T) {
 	var parsed issueWire
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
+	}
+	// A wire that lost the span would still re-marshal to itself.
+	if s := parsed.Span; s == nil || s.Source != source.String() || s.Start.Line != 1 || s.Start.Column != 1 ||
+		s.End.Column != 10 || s.End.Byte == nil || *s.End.Byte != 9 {
+		t.Errorf("the wire does not carry the issue's span: %s", data)
 	}
 
 	data2, err := json.Marshal(parsed)

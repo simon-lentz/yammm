@@ -230,11 +230,10 @@ Dropped issues still count toward `Result.OK()` / `HasErrors()` /
 stored), so truncation never flips a failing result to OK and the
 all-or-nothing contract holds regardless of the limit.
 `WithIssueLimit(0)` (or `diag.NoLimit`) means unlimited. When the cap was hit,
-the JSON output format carries `limitReached` and `droppedCount`; those two are
-the authoritative pair. `limit` reports the producing collector's own cap and is
-omitted when it is zero, so a truncated result merged into an unlimited
-collector carries `limitReached` and `droppedCount` without it. The CLI's text
-output appends a dropped-issues note.
+the JSON output format carries `limitReached` and `droppedCount`, and a
+truncated result merged into any collector keeps both. A cap is a collector's
+setting, so a `Result` reports none. The CLI's text output appends a
+dropped-issues note.
 
 ### Shared Registry Semantics
 
@@ -1084,7 +1083,6 @@ result.BySeverity(diag.Warning)          // Issues at a specific severity
 
 // Metadata
 result.Len()              // Retained issue count; the total seen is Len() + DroppedCount()
-result.Limit()            // Configured collection limit
 result.DroppedCount()     // Issues dropped after limit
 result.SeverityCounts()   // Counts by severity level
 result.CodeCounts(diag.Warning) // Seen-based per-code counts at one severity — a copy; truthful under truncation where HasCode is not

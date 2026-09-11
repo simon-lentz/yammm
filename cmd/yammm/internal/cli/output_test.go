@@ -112,7 +112,7 @@ func TestRenderResult_Text_SurfacesTruncation(t *testing.T) {
 	var buf bytes.Buffer
 	err := RenderResult(&buf, renderer, FormatText, res)
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "2 more issue(s) dropped after reaching the 5-issue limit",
+	assert.Contains(t, buf.String(), "2 more issue(s) dropped at an issue limit",
 		"the text format must say how many issues fell past the limit")
 }
 
@@ -129,7 +129,7 @@ func TestRenderResult_Text_SurfacesTruncationOnOKResult(t *testing.T) {
 	var buf bytes.Buffer
 	err := RenderResult(&buf, renderer, FormatText, res)
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "2 more issue(s) dropped after reaching the 5-issue limit",
+	assert.Contains(t, buf.String(), "2 more issue(s) dropped at an issue limit",
 		"truncation must not hide behind the no-errors early return")
 }
 

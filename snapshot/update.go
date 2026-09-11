@@ -457,15 +457,12 @@ func distinctTriggeringCodes(r diag.Result) []string {
 	return codes
 }
 
-// mergeResults returns a new Result containing every issue from a and b.
+// mergeResults returns a Result holding a's and b's issues. It merges both, so
+// a truncated input's dropped issues stay counted and its truncation carries.
 func mergeResults(a, b diag.Result) diag.Result {
 	c := diag.NewCollector(0)
-	for iss := range a.Issues() {
-		c.Collect(iss)
-	}
-	for iss := range b.Issues() {
-		c.Collect(iss)
-	}
+	c.Merge(a)
+	c.Merge(b)
 	return c.Result()
 }
 

@@ -175,7 +175,7 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
-`--header-only` reads the header alone and reports the file's size. `--dir <path>` scans every `.ys` file in a directory, header-only. The text and `--format json` modes render one structure, so a field one reports the other reports too, and absent `metadata` renders as `{}`. Under `--format json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limit`, `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning.
+`--header-only` reads the header alone and reports the file's size. `--dir <path>` scans every `.ys` file in a directory, header-only. The text and `--format json` modes render one structure, so a field one reports the other reports too, and absent `metadata` renders as `{}`. Under `--format json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning.
 
 ### snapshot update-metadata
 

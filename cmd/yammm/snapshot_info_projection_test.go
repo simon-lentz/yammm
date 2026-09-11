@@ -87,13 +87,16 @@ func TestSnapshotInfo_DirEntriesCarryTheDiagnosticWire(t *testing.T) {
 				break
 			}
 			var missing []string
-			for _, key := range []string{"issues", "limit", "limitReached", "droppedCount"} {
+			for _, key := range []string{"issues", "limitReached", "droppedCount"} {
 				if _, present := wire[key]; !present {
 					missing = append(missing, key)
 				}
 			}
 			if len(missing) > 0 {
 				failure = "the wire lacks " + strings.Join(missing, ", ")
+			}
+			if _, present := wire["limit"]; present {
+				failure = "the wire carries limit, a collector's setting and not a fact about the entry"
 			}
 		}
 		checkRepairState(t, "snapshot info: a directory entry carries the diagnostic wire", failure)

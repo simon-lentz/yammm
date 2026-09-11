@@ -61,13 +61,13 @@ func NewRenderer(format OutputFormat, isTTY, noColor bool, provider diag.SourceP
 //
 // Truncation at the collector's issue limit is surfaced in both formats even
 // when no errors render: the text format appends a summary line, and the JSON
-// format emits its wire object (which carries limit, limitReached, and
-// droppedCount) rather than nothing — otherwise a machine consumer could not
+// format emits its wire object (which carries limitReached and droppedCount)
+// rather than nothing — otherwise a machine consumer could not
 // tell a truncated result from a clean one.
 func RenderResult(w io.Writer, renderer *diag.Renderer, format OutputFormat, result diag.Result) error {
 	switch format {
 	case FormatJSON:
-		// The JSON wire object carries limit/limitReached/droppedCount, so it is
+		// The JSON wire object carries limitReached/droppedCount, so it is
 		// the single truncation surface for JSON: emit it whenever there is
 		// anything to report — any issue at any severity, or a truncation that an
 		// issue-free result would otherwise render as nothing.
