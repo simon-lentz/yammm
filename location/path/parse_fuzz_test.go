@@ -79,16 +79,29 @@ func FuzzBuilderRoundTrip(f *testing.F) {
 	f.Add("\xffkey", uint16(65535), "a1", "\u2028", int64(math.MinInt64), uint64(0), 1e300, true)
 
 	f.Fuzz(func(t *testing.T, key string, idx uint16, name, sv string, iv int64, uv uint64, fv float64, bv bool) {
-		if !isIdentifierSafe(name) || math.IsNaN(fv) || math.IsInf(fv, 0) {
-			t.Skip("the grammar spells no such PK name or value")
+		build := func() Builder {
+			return Root().Key(key).Index(int(idx)).PK(
+				PKField{Name: name, Value: sv},
+				PKField{Name: name, Value: iv},
+				PKField{Name: name, Value: uv},
+				PKField{Name: name, Value: fv},
+				PKField{Name: name, Value: bv},
+			)
 		}
-		b := Root().Key(key).Index(int(idx)).PK(
-			PKField{Name: name, Value: sv},
-			PKField{Name: name, Value: iv},
-			PKField{Name: name, Value: uv},
-			PKField{Name: name, Value: fv},
-			PKField{Name: name, Value: bv},
-		)
+
+		// The Builder refuses what the grammar does not spell, so the inputs
+		// this harness once skipped are now the ones asserting that refusal.
+		if !isIdentifierSafe(name) || math.IsNaN(fv) || math.IsInf(fv, 0) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatalf("the Builder wrote a PK the grammar does not spell: name %q, float %v", name, fv)
+				}
+			}()
+			_ = build()
+			return
+		}
+
+		b := build()
 		s := b.String()
 		parsed, err := Parse(s)
 		if err != nil {

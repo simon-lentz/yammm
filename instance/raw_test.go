@@ -58,35 +58,3 @@ func TestProvenance_Span(t *testing.T) {
 		assert.Equal(t, location.Span{}, prov.Span())
 	})
 }
-
-func TestProvenance_AtKey(t *testing.T) {
-	t.Run("non_nil", func(t *testing.T) {
-		span := location.Range(location.SourceID{}, 5, 1, 10, 20)
-		prov := location.NewProvenance("test.json", path.Root().Key("users"), span)
-
-		extended := prov.AtKey("name")
-
-		assert.Equal(t, "test.json", extended.SourceName())
-		assert.Equal(t, `$.users.name`, extended.Path().String())
-		assert.Equal(t, span, extended.Span())
-		// Original should be unchanged
-		assert.Equal(t, `$.users`, prov.Path().String())
-	})
-
-	t.Run("nil_creates_new_with_key", func(t *testing.T) {
-		var prov *location.Provenance
-
-		extended := prov.AtKey("property")
-
-		assert.Empty(t, extended.SourceName())
-		assert.Equal(t, `$.property`, extended.Path().String())
-	})
-
-	t.Run("special_characters_escaped", func(t *testing.T) {
-		prov := location.NewProvenance("test.json", path.Root(), location.Span{})
-
-		extended := prov.AtKey("my field")
-
-		assert.Equal(t, `$["my field"]`, extended.Path().String())
-	})
-}

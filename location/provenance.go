@@ -4,25 +4,12 @@ import (
 	"github.com/simon-lentz/yammm/location/path"
 )
 
-// Provenance captures source location metadata for error reporting.
+// Provenance captures source location metadata for error reporting: it links a
+// validation error back to where in the input document the data came from.
 //
-// Provenance links validation errors back to their source location in the
-// input document. This enables helpful error messages that point to the
-// exact position of invalid data.
-//
-// # Nil Receiver Behavior
-//
-// All Provenance methods are safe to call on nil receivers. The navigation
-// methods AtKey and WithRawPath convert nil to a new Provenance carrying the
-// specified path and empty source information:
-//
-//	var prov *Provenance = nil
-//	derived := prov.AtKey("items").AtKey("name") // Safe, returns valid Provenance
-//
-// After any navigation operation on nil, sourceName and span will be zero values.
-// This is intentional: it preserves path navigation for diagnostics while indicating
-// no source location is available. Accessor methods (SourceName, Path, Span) return
-// zero values when called on nil.
+// Every method is safe on a nil receiver. [Provenance.WithRawPath] turns nil
+// into a new Provenance carrying that raw path and no source information, and
+// the accessors return zero values. The package documentation states the rules.
 type Provenance struct {
 	sourceName string
 	path       path.Builder
@@ -66,18 +53,6 @@ func (p *Provenance) Span() Span {
 		return Span{}
 	}
 	return p.span
-}
-
-// AtKey returns a new Provenance with the path extended by a key.
-func (p *Provenance) AtKey(key string) *Provenance {
-	if p == nil {
-		return &Provenance{path: path.Root().Key(key)}
-	}
-	return &Provenance{
-		sourceName: p.sourceName,
-		path:       p.path.Key(key),
-		span:       p.span,
-	}
 }
 
 // RawPath returns the raw path string preserved from snapshot loading.

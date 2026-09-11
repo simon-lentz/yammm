@@ -51,20 +51,18 @@ func Range(source SourceID, startLine, startCol, endLine, endCol int) Span {
 
 // RangeWithBytes creates a Span with known byte offsets.
 //
-// Panics if end < start (geometric soundness invariant). When byte offsets are
-// present, the byte comparison takes precedence over line/column comparison.
-// This means a span may be considered valid even if line/column ordering appears
-// inverted, as long as byte ordering is correct.
+// Panics if end is before start by either measure it has: the byte offsets, or
+// the line and column where both are known. A span whose two orders disagree is
+// unsafe whichever one a reader takes — an LSP range reads the line from one
+// and the character from the other — so it is a construction bug, not a span.
 func RangeWithBytes(source SourceID, startLine, startCol, startByte, endLine, endCol, endByte int) Span {
 	start := Position{Line: startLine, Column: startCol, Byte: startByte}
 	end := Position{Line: endLine, Column: endCol, Byte: endByte}
 
-	// Use byte comparison when both have valid byte offsets
-	if start.HasByte() && end.HasByte() {
-		if end.Byte < start.Byte {
-			panic(fmt.Sprintf("location.RangeWithBytes: end byte %d before start byte %d", endByte, startByte))
-		}
-	} else if positionBefore(end, start) {
+	if start.HasByte() && end.HasByte() && end.Byte < start.Byte {
+		panic(fmt.Sprintf("location.RangeWithBytes: end byte %d before start byte %d", endByte, startByte))
+	}
+	if positionBefore(end, start) {
 		panic(fmt.Sprintf("location.RangeWithBytes: end %v before start %v", end, start))
 	}
 	return Span{Source: source, Start: start, End: end}
@@ -106,27 +104,23 @@ func (s Span) IsValid() bool {
 	return true
 }
 
-// IsGeometricallySafe reports whether the span satisfies Start <= End.
+// IsGeometricallySafe reports whether the span satisfies Start <= End by every
+// measure it has: the byte offsets when both are known, and the line and column
+// when both are known. A zero span and a point span are safe.
 //
-// Returns true for:
-//   - Zero spans
-//   - Point spans (Start == End)
-//   - Valid range spans where Start is at or before End
-//
-// Use this to validate spans constructed via struct literals or from
-// untrusted sources.
+// Use this to validate spans constructed via struct literals or from untrusted
+// sources, where the constructors' panics never ran.
 func (s Span) IsGeometricallySafe() bool {
 	if s.IsZero() || s.IsPoint() {
 		return true
 	}
-
-	// If both positions have known bytes, use byte comparison
+	if positionBefore(s.End, s.Start) {
+		return false
+	}
 	if s.Start.HasByte() && s.End.HasByte() {
 		return s.Start.Byte <= s.End.Byte
 	}
-
-	// Otherwise use line/column comparison
-	return !positionBefore(s.End, s.Start)
+	return true
 }
 
 // String returns a human-readable representation of the span.

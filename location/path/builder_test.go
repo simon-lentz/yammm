@@ -1,6 +1,7 @@
 package path
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,11 +30,6 @@ func TestBuilder_Index(t *testing.T) {
 			name:     "nested index",
 			build:    func() Builder { return Root().Index(0).Index(1) },
 			expected: "$[0][1]",
-		},
-		{
-			name:     "negative index",
-			build:    func() Builder { return Root().Index(-1) },
-			expected: "$[-1]",
 		},
 		{
 			name:     "large index",
@@ -236,6 +232,56 @@ func TestBuilder_PK(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			b := Root().Key("Person").PK(tt.fields...)
 			assert.Equal(t, tt.expected, b.String())
+		})
+	}
+}
+
+// TestBuilder_RefusesWhatParseCannotRead holds the Builder to the grammar its
+// own String output must satisfy: every input below writes a path Parse
+// refuses, so a path that exists is a path that reads back.
+func TestBuilder_RefusesWhatParseCannotRead(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func() Builder
+	}{
+		{"negative index", func() Builder { return Root().Index(-1) }},
+		{"PK name with a space", func() Builder {
+			return Root().PK(PKField{Name: "my field", Value: 1})
+		}},
+		{"PK name starting with a digit", func() Builder {
+			return Root().PK(PKField{Name: "1st", Value: 1})
+		}},
+		{"empty PK name", func() Builder {
+			return Root().PK(PKField{Name: "", Value: 1})
+		}},
+		{"NaN float64 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: math.NaN()})
+		}},
+		{"+Inf float64 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: math.Inf(1)})
+		}},
+		{"-Inf float64 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: math.Inf(-1)})
+		}},
+		{"NaN float32 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: float32(math.NaN())})
+		}},
+		{"+Inf float32 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: float32(math.Inf(1))})
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Error("the Builder should panic on input Parse cannot read back")
+				}
+			}()
+			s := tt.build().String()
+			if _, err := Parse(s); err != nil {
+				t.Errorf("no panic, and the path it wrote does not parse: %q: %v", s, err)
+			}
 		})
 	}
 }

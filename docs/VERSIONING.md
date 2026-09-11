@@ -1629,6 +1629,40 @@ existing declaration.
 - **Consumer reach: none measured.** rdata's suite against this tree differs
   from its run against `v0.21.0` by nothing.
 
+### Unit 7, the slate fix pass — spans and paths refuse what they cannot mean
+
+**One exported declaration is removed and none is added:**
+`location.Provenance.AtKey`.
+
+- **Removed: `location.Provenance.AtKey`.** It extended a provenance's path by
+  one key and dropped the raw path recorded beside it, and no correct form of it
+  exists: a raw path a parser could not read cannot be extended by a key. It had
+  no caller in this module, in rdata, in wfac or in rdata-python — only a test.
+  A caller that navigated with it builds the path through
+  `location/path.Builder` and calls `location.NewProvenance`.
+- **`location.RangeWithBytes` panics when a span's two orders disagree.** It had
+  compared byte offsets alone whenever both were known, so a span whose bytes
+  run forward and whose line and column run backward was accepted and became an
+  inverted LSP range downstream, where the line is read from one order and the
+  character from the other. Its one production caller, the parser, derives both
+  from the same offsets and cannot produce such a span.
+- **`location.Span.IsGeometricallySafe` asks the same question of both orders**,
+  and reports false for a span that satisfies only one. It is the check for a
+  span from a struct literal or an untrusted source, which the constructors
+  never saw.
+- **`location/path.Builder` panics on the three inputs the grammar does not
+  spell**, so a path it writes is a path `Parse` reads back: a negative index, a
+  PK field name that is not an identifier, and a NaN or infinite float PK value
+  (which were written `$[score=NaN.0]`, `$[score=+Inf.0]` and `$[score=-Inf.0]`,
+  each refused by a different arm of the parser). **The grammar is not
+  extended:** no producer in this module or in any consumer makes such a value,
+  and widening the path language would oblige every `.ys` reader to accept it.
+  The panic follows the package's own precedent, `RangeWithBytes` and
+  `MustNewSourceID`.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing, and no consumer names any of the
+  three symbols.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

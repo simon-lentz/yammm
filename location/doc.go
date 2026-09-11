@@ -92,11 +92,15 @@
 //   - End: Exclusive end position (equals Start for point spans)
 //
 // Create spans via Point, PointWithByte, Range, or RangeWithBytes. The Range
-// constructors panic if end < start (geometric soundness invariant).
+// constructors panic if end is before start by any order they are given: the
+// line and column, and for RangeWithBytes the byte offsets too. A span whose
+// two orders disagree is unsafe whichever one a reader takes, so it is refused
+// at construction rather than carried.
 //
 // Use IsZero() to check for "no location", IsValid() to check for LSP
 // compatibility, and IsGeometricallySafe() to validate spans from untrusted
-// sources.
+// sources or from struct literals, which the constructors never saw. It asks
+// the same question of both orders.
 //
 // # RelatedInfo
 //
@@ -110,8 +114,14 @@
 // adapter → validator → graph pipeline. It carries the source name,
 // a [github.com/simon-lentz/yammm/location/path] builder for JSONPath-like
 // instance paths, and an optional [Span] for byte-level source location.
-// Create via [NewProvenance]; use [Provenance.AtKey] to extend the path during
-// recursive parsing.
+// Create via [NewProvenance], extending the path through its own
+// [github.com/simon-lentz/yammm/location/path.Builder] while parsing.
+//
+// Every method is safe on a nil receiver: [Provenance.WithRawPath] turns nil
+// into a new Provenance carrying that raw path and no source information, and
+// [Provenance.SourceName], [Provenance.Path] and [Provenance.Span] return zero
+// values. A nil receiver therefore keeps a diagnostic's path without claiming a
+// source location it does not have.
 //
 // # Dependencies
 //

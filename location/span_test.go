@@ -80,6 +80,20 @@ func TestRangeWithBytes_Panics_EndByteBeforeStartByte(t *testing.T) {
 	RangeWithBytes(testSource, 10, 5, 110, 10, 15, 100) // End byte before start byte
 }
 
+// TestRangeWithBytes_Panics_OrdersDisagree holds the constructor to both orders
+// when both are known. A span whose bytes run forward and whose line and column
+// run backward reaches lsputil.SpanToLSPRange, which takes the line from one
+// and the character from the other, and becomes an inverted LSP range.
+func TestRangeWithBytes_Panics_OrdersDisagree(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("RangeWithBytes should panic when the byte and line/column orders disagree")
+		}
+	}()
+
+	RangeWithBytes(testSource, 10, 15, 100, 10, 5, 110)
+}
+
 func TestSpan_IsZero(t *testing.T) {
 	var zeroSpan Span
 	if !zeroSpan.IsZero() {
@@ -175,6 +189,17 @@ func TestSpan_IsGeometricallySafe(t *testing.T) {
 				Source: testSource,
 				Start:  Position{Line: 1, Column: 1, Byte: 100},
 				End:    Position{Line: 1, Column: 10, Byte: 50},
+			},
+			want: false,
+		},
+		{
+			// Both orders are known and they disagree, so the span is unsafe
+			// whichever one a reader takes.
+			name: "ordered bytes, inverted line and column",
+			span: Span{
+				Source: testSource,
+				Start:  Position{Line: 10, Column: 15, Byte: 100},
+				End:    Position{Line: 10, Column: 5, Byte: 110},
 			},
 			want: false,
 		},

@@ -49,6 +49,13 @@
 //	p := path.Root().Key("Person").PK(path.PKField{Name: "id", Value: 42})
 //	fmt.Println(p.String()) // $.Person[id=42]
 //
+// A Builder writes only paths [Parse] reads back, so a path that exists is a
+// path that round-trips. It panics on the three inputs the grammar does not
+// spell: a negative index, a PK field name that is not an identifier, and a
+// NaN or infinite float PK value. Each is a programmer error rather than user
+// input — no producer in this module makes one, and the grammar is not extended
+// to carry them.
+//
 // # Thread Safety
 //
 // All types in this package are immutable and safe for concurrent use.
