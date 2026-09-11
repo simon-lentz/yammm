@@ -17,8 +17,9 @@
 //     via slices.Collect. The [Issue] accessors that return reference types
 //     ([Issue.Related], [Issue.Details]) return defensive copies.
 //   - Stable error codes: [Code] values are stable identifiers that tools can
-//     match on, even when message text changes. The Code type uses an unexported
-//     struct to enforce a closed set of valid codes.
+//     match on, even when message text changes. The code set is open: adapters
+//     and consumers register codes through [NewCode], and [AllCodes] lists
+//     every code registered.
 //   - Deterministic ordering: [Collector.Result] sorts issues by source, position,
 //     and code to ensure stable output across runs.
 //   - Builder pattern: [IssueBuilder] is the only valid construction path for
@@ -30,17 +31,22 @@
 //
 // All YAMMM diagnostic-producing operations return (T, [Result]):
 //
-//   - [Result.HasFatal]: unrecoverable condition (I/O failure, context cancellation)
+//   - [Result.HasFatal]: an unrecoverable condition — an I/O failure, a
+//     cancellation, an internal fault, or input a reader cannot go past, such
+//     as a schema header that does not parse
 //   - [Result.HasErrors]: semantic failure represented as structured issues
 //   - [Result.OK]: success (may still include warnings/info/hints)
 //
-// Pure transformations (serialization, query generation) return (T, error).
+// A serializer that reports issues returns ([]byte, [Result]), as
+// snapshot.Marshal does. An operation that can only succeed or fail returns
+// (T, error).
 //
 // # Severity Semantics
 //
 // [Severity] is an ordered enumeration where lower values are more severe:
 //
-//   - [Fatal]: Unrecoverable condition or collection limit reached sentinel
+//   - [Fatal]: An unrecoverable condition. Reaching a collection limit marks
+//     no severity; [Result.LimitReached] reports it
 //   - [Error]: Validation failure but collection can continue
 //   - [Warning], [Info], [Hint]: Non-blocking diagnostics
 //
@@ -139,16 +145,16 @@
 // # v0.3.0 Diagnostic Code Additions
 //
 // v0.3.0 adds three stable diagnostic codes under [CategorySnapshot],
-// surfaced by the new primitives in the snapshot package. They land in
-// this file ahead of the primitive PRs so every per-item PR has concrete
-// codes to reference at merge time. The W_ prefix on the warning code
+// raised by the snapshot package's scan and metadata primitives. The W_
+// prefix on the warning code
 // inaugurates the convention for Warning-severity codes added from
 // v0.3.0 onward; existing Warning-severity codes retain their E_
 // identifiers for backwards compatibility.
 //
 //	Code                              Severity  Emitted by
 //	--------------------------------  --------  -----------------------------------------------------
-//	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (per-file I/O failure on ScanEntry.Result)
+//	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (a file that fails to open, on ScanEntry.Result)
+//	                                            snapshot.ScanDirSlice (a directory that fails to read)
 //	E_UPDATE_METADATA_BODY_OFFSET     Fatal     snapshot.UpdateMetadata (body-offset tracker cannot resolve)
 //	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Load+Marshal)
 //

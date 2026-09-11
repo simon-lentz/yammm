@@ -257,7 +257,7 @@ func TestModuleRootIssue_Shape(t *testing.T) {
 	}
 	issue := schema.ModuleRootIssue(malformed)
 	if issue.Severity() != diag.Error {
-		t.Errorf("severity = %v, want Error: a marker is user content, and Fatal is reserved for I/O", issue.Severity())
+		t.Errorf("severity = %v, want Error: a marker is user content, reported as an invalid schema is", issue.Severity())
 	}
 	if issue.Code() != diag.E_LOAD_MODULE_ROOT_MALFORMED {
 		t.Errorf("code = %v, want E_LOAD_MODULE_ROOT_MALFORMED", issue.Code())
@@ -344,7 +344,7 @@ func TestLoad_MalformedMarkerFailsTheLoad(t *testing.T) {
 		t.Fatal("a malformed marker must fail the load")
 	}
 	if res.HasFatal() {
-		t.Error("a malformed marker is Error severity; Fatal is reserved for I/O and cancellation")
+		t.Error("a malformed marker is Error severity, reported as an invalid schema is, not Fatal")
 	}
 
 	var found bool

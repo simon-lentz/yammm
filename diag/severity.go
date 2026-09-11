@@ -7,8 +7,9 @@ package diag
 type Severity uint8
 
 const (
-	// Fatal indicates an unrecoverable condition or collection limit reached.
-	// Fatal issues typically halt further processing.
+	// Fatal indicates an unrecoverable condition. Fatal issues typically halt
+	// further processing. Reaching a collection limit marks no severity; see
+	// [Result.LimitReached].
 	Fatal Severity = iota
 
 	// Error indicates a validation failure where collection can continue.

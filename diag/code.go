@@ -229,8 +229,8 @@ var (
 
 	// E_LOAD_MODULE_ROOT_MALFORMED indicates a yammm.mod module-root marker
 	// whose content violates the marker rule: it must be empty or hold only
-	// comment lines. Error severity rather than Fatal — the marker is user
-	// content like a schema, and Fatal is reserved for I/O and cancellation.
+	// comment lines. Error severity: the marker is user content like a schema,
+	// and the load reports it as it reports an invalid schema.
 	E_LOAD_MODULE_ROOT_MALFORMED = NewCode("E_LOAD_MODULE_ROOT_MALFORMED", CategorySchema)
 
 	// E_LOAD_SOURCE_CHANGED indicates a source re-registered in a shared
@@ -380,7 +380,9 @@ var (
 
 // Graph codes.
 var (
-	// E_DUPLICATE_PK indicates a duplicate primary key in the graph.
+	// E_DUPLICATE_PK indicates a primary key stated twice for one type: by two
+	// instances added to a graph, or by two root instances in a snapshot that
+	// snapshot.Load reads.
 	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
 
 	// E_DUPLICATE_COMPOSED_PK indicates a duplicate composed child primary key.
@@ -504,10 +506,11 @@ var (
 
 	// --- v0.3.0 additions ---
 
-	// E_SNAPSHOT_IO indicates a filesystem I/O failure encountered during
-	// a directory scan — either a dir-level failure (os.ReadDir on
-	// snapshot.ScanDir / snapshot.ScanDirSlice) or a per-file failure
-	// (os.Open or the underlying file Read on ScanDir's per-file path).
+	// E_SNAPSHOT_IO indicates a filesystem I/O failure during a directory
+	// scan: a directory that fails to read (os.ReadDir, reported by
+	// snapshot.ScanDirSlice) or a file that fails to open (os.Open, on
+	// ScanDir's per-file path). A read error inside a file that opened is
+	// HeaderOnlyRead's Error-severity E_SNAPSHOT_MALFORMED, never this code.
 	// Per-file emissions land on ScanEntry.Result so the iterator
 	// continues to the next file rather than aborting; dir-level
 	// emissions surface on the outer Result returned by ScanDirSlice.
@@ -531,14 +534,13 @@ var (
 
 	// W_UPDATE_METADATA_FALLBACK (Warning) indicates that
 	// snapshot.UpdateMetadataOrReMarshal fell back from the UpdateMetadata
-	// fast path to Load + Marshal because the input triggered a
-	// recoverable Fatal code (E_SNAPSHOT_MALFORMED,
-	// E_UPDATE_METADATA_BODY_OFFSET, or another non-cancellation Fatal
-	// issue). The output bytes are byte-identical to what Marshal would
-	// produce; the warning surfaces the path transition so operators can
-	// observe fallback frequency and triage persistent cases. Details
-	// include a "triggering_codes" entry listing the original Fatal
-	// code(s) that caused the fallback.
+	// fast path to Load + Marshal because the fast path reported an Error or
+	// Fatal issue other than a cancellation: E_SNAPSHOT_MALFORMED at Error,
+	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output bytes are
+	// byte-identical to what Marshal would produce; the warning surfaces the
+	// path transition so operators can observe fallback frequency and triage
+	// persistent cases. Details include a "triggering_codes" entry listing the
+	// distinct Error and Fatal codes that caused the fallback.
 	//
 	// Uses the W_ prefix, inaugurating the convention for
 	// Warning-severity codes added from v0.3.0 onward; existing

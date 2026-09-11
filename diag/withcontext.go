@@ -51,10 +51,9 @@ func (r Result) WithContext(tag string) error {
 
 // Error returns the formatted error string "<tag>: <result>".
 //
-// The result portion uses [Result.String], which lists the fatal/error count
-// on the first line and each error-severity issue's code+message on subsequent
-// lines. For rendered output with source excerpts, use a [Renderer] against the
-// underlying Result.
+// The result portion is [Result.String]: a summary line, then one line per
+// retained issue at every severity. For rendered output with source excerpts,
+// use a [Renderer] against the underlying Result.
 //
 // Nil-safe: a nil receiver returns a fixed diagnostic string rather than
 // panicking.

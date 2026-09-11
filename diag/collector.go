@@ -14,12 +14,15 @@ import (
 // Collector is thread-safe and can be used from multiple goroutines. It provides
 // O(1) severity queries via precomputed counts that are updated during collection.
 //
-// Limit behavior: the retained set is the `limit` most severe issues seen, ties
-// broken by arrival order. Once the store is full an incoming issue that is more
-// severe than the least severe stored one takes its slot (see storeLocked), so a
-// flood of warnings can never starve the errors that explain why an operation
-// failed. Truncation never affects [Result.OK]; use [Result.LimitReached]
-// to detect it. This design allows callers to handle truncated results
+// Limit behavior: the retained set is the `limit` most severe issues collected
+// into the collector, ties broken by arrival order. Once the store is full an
+// incoming issue that is more severe than the least severe stored one takes its
+// slot (see storeLocked), so a flood of warnings can never starve the errors
+// that explain why an operation failed. A result merged in ([Collector.Merge])
+// adds its dropped issues to the counts but cannot supply them, so after a
+// truncated result is merged a less severe issue can hold a slot one of them
+// would have taken. Truncation never affects [Result.OK]; use
+// [Result.LimitReached] to detect it. This design allows callers to handle truncated results
 // appropriately without forcing failure semantics.
 //
 // Create a Collector with [NewCollector], then use [Collector.Collect] to add
@@ -70,8 +73,8 @@ const NoLimit = 0
 //
 // A limit of 0 means no limit (use [NoLimit] constant for clarity). Negative
 // values are normalized to 0. Once the limit is reached the collector retains
-// the most severe issues it has seen — evicting a stored issue for a more severe
-// incoming one — and counts the rest as dropped, queryable via
+// the most severe issues collected into it — evicting a stored issue for a more
+// severe incoming one — and counts the rest as dropped, queryable via
 // [Result.DroppedCount]. See [Collector.storeLocked] for the retention rule.
 func NewCollector(limit int) *Collector {
 	if limit < 0 {
@@ -92,8 +95,9 @@ func NewCollectorUnlimited() *Collector {
 
 // Collect adds an issue to the collector.
 //
-// This method is thread-safe. If the limit is reached, the issue is counted
-// as dropped but not stored.
+// This method is thread-safe. Once the limit is reached, the issue takes the
+// slot of a less severe stored issue, which is dropped, or is dropped itself;
+// either drop is counted (see [NewCollector]).
 //
 // Collect panics if the issue is a zero value or is invalid. Use [NewIssue]
 // and [IssueBuilder] to construct valid issues. This panic behavior catches
@@ -246,8 +250,8 @@ func (c *Collector) collectLocked(issue Issue) {
 // governs storage, not counting, so an issue that is not retained still shows up
 // in the severity totals (and thus in HasErrors/OK/ErrorCount).
 //
-// The retained set is the `limit` most severe issues seen, ties broken by
-// arrival order. Truncation that simply dropped whatever arrived after the cap
+// The retained set is the `limit` most severe issues that reach this function,
+// ties broken by arrival order. Truncation that simply dropped whatever arrived after the cap
 // let a producer starve its own errors: a load collects warnings during
 // inheritance linearization and errors in every later phase, so a schema with
 // enough shadowed annotations filled the budget with warnings and stored none of

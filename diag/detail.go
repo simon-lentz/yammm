@@ -34,9 +34,10 @@ const (
 	// DetailKeyPrimaryKey is the primary key value.
 	DetailKeyPrimaryKey = "pk"
 
-	// DetailKeyReason is the failure reason discriminant.
-	// Used with E_UNRESOLVED_REQUIRED ("absent", "empty", "target_missing")
-	// and E_UNRESOLVED_REQUIRED_COMPOSITION ("absent", "empty").
+	// DetailKeyReason is the failure reason discriminant. Used with
+	// E_UNRESOLVED_REQUIRED ("absent", "empty", "target_missing"),
+	// E_UNRESOLVED_REQUIRED_COMPOSITION ("absent", "empty"), and E_UNKNOWN_FIELD
+	// and E_UNKNOWN_EDGE_FIELD ("case_fold_shadowed").
 	DetailKeyReason = "reason"
 
 	// DetailKeyField is the data-level field name (for unknown/unexpected fields).
@@ -74,8 +75,9 @@ const (
 	// DetailKeyID is the identifier value (e.g., synthetic SourceID).
 	DetailKeyID = "id"
 
-	// DetailKeyTypeSchema is the schema path where a type is defined.
-	// Used for transitive import diagnostics (E_GRAPH_TYPE_NOT_FOUND).
+	// DetailKeyTypeSchema is the identity of the schema a type is defined in,
+	// its SchemaPath, written as the identity and never relativized. Used with
+	// E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_PARENT_NOT_FOUND and E_INTERNAL.
 	DetailKeyTypeSchema = "type_schema"
 
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.
@@ -128,7 +130,7 @@ const (
 	DetailKeyOriginalPath = "original_path"
 
 	// DetailKeyDepth is the actual nesting depth that exceeded the limit.
-	// Used with E_SNAPSHOT_DEPTH_EXCEEDED.
+	// Used with E_SNAPSHOT_DEPTH_EXCEEDED and E_COMPOSITION_DEPTH_EXCEEDED.
 	DetailKeyDepth = "depth"
 
 	// DetailKeyHashAlgorithm is the unrecognized hash algorithm version.

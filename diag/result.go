@@ -361,11 +361,11 @@ func (e *ResultError) Error() string {
 //
 // This provides idiomatic error conversion for use in error-returning functions:
 //
-//	schema, result, err := load.Load(ctx, path)
-//	if err != nil { return err }
+//	s, result := schema.Load(ctx, path)
 //	if err := result.Err(); err != nil {
-//	    return fmt.Errorf("schema validation: %w", err)
+//	    return nil, fmt.Errorf("load schema: %w", err)
 //	}
+//	return s, nil
 //
 // The returned error supports [errors.As] with *[ResultError] for access to
 // the full [Result].
