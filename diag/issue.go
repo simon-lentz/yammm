@@ -169,6 +169,8 @@ func (i Issue) Clone() Issue {
 //   - "message" (string): the human-readable description. Always emitted.
 //   - "code" (string): the stable [Code] identifier. Omitted when
 //     [Code.IsZero] is true.
+//   - "source_name" (string): the document the issue came from. Omitted when
+//     empty.
 //   - "path" (string): the canonical instance path. Omitted when empty.
 //   - "location" (group): {source, line, column} derived from the issue's
 //     span. Omitted when [Issue.HasSpan] is false.
@@ -195,6 +197,9 @@ func (i Issue) LogValue() slog.Value {
 	)
 	if !i.code.IsZero() {
 		attrs = append(attrs, slog.String("code", i.code.String()))
+	}
+	if i.sourceName != "" {
+		attrs = append(attrs, slog.String("source_name", i.sourceName))
 	}
 	if i.path != "" {
 		attrs = append(attrs, slog.String("path", i.path))
@@ -237,6 +242,9 @@ func issueLogMap(i Issue) map[string]any {
 	}
 	if !i.code.IsZero() {
 		m["code"] = i.code.String()
+	}
+	if i.sourceName != "" {
+		m["source_name"] = i.sourceName
 	}
 	if i.path != "" {
 		m["path"] = i.path

@@ -121,7 +121,7 @@ func TestSnapshotInfoSurfacesWarnings(t *testing.T) {
 		{
 			name: "full read, unparseable provenance path",
 			args: []string{"snapshot", "info", provenanceFixture},
-			code: "E_SNAPSHOT_PATH_FALLBACK",
+			code: "W_SNAPSHOT_PATH_FALLBACK",
 		},
 	}
 
@@ -205,7 +205,7 @@ func TestOwnPhaseDiagnosticsReachTheOperator(t *testing.T) {
 		if code != cli.ExitOK {
 			t.Errorf("exit code = %d, want %d: a warning is not a failure", code, cli.ExitOK)
 		}
-		if !strings.Contains(stderr, "E_SNAPSHOT_PATH_FALLBACK") {
+		if !strings.Contains(stderr, "W_SNAPSHOT_PATH_FALLBACK") {
 			t.Errorf("the snapshot's warning was discarded; stderr:\n%s", stderr)
 		}
 	})
@@ -238,7 +238,7 @@ func TestSnapshotSaveSurfacesImportedWarning(t *testing.T) {
 	if code != cli.ExitOK {
 		t.Errorf("exit code = %d, want %d: a warning is not a failure", code, cli.ExitOK)
 	}
-	if !strings.Contains(stderr, "E_SNAPSHOT_PATH_FALLBACK") {
+	if !strings.Contains(stderr, "W_SNAPSHOT_PATH_FALLBACK") {
 		t.Errorf("the imported snapshot's warning was discarded; stderr:\n%s", stderr)
 	}
 }
@@ -289,7 +289,7 @@ func TestDiagnosticsPrecedeThePayload(t *testing.T) {
 		{
 			name:    "snapshot info",
 			args:    []string{"snapshot", "info", provenanceFixture},
-			first:   "E_SNAPSHOT_PATH_FALLBACK",
+			first:   "W_SNAPSHOT_PATH_FALLBACK",
 			payload: "Snapshot: test",
 		},
 		{
@@ -313,7 +313,7 @@ func TestDiagnosticsPrecedeThePayload(t *testing.T) {
 		{
 			name:    "export from a snapshot, to stdout",
 			args:    []string{"export", "--to", "json", "testdata/valid.yammm", provenanceFixture},
-			first:   "E_SNAPSHOT_PATH_FALLBACK",
+			first:   "W_SNAPSHOT_PATH_FALLBACK",
 			payload: `"Person"`,
 		},
 		{

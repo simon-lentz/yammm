@@ -20,7 +20,8 @@
       },
       "message": "full-shape issue",
       "path": "$.Foo[0].bar",
-      "severity": "error"
+      "severity": "error",
+      "source_name": "data.json"
     }
   ]
 }

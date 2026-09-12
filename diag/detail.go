@@ -63,6 +63,18 @@ const (
 	// DetailKeyImportPath is the import path (for import resolution errors).
 	DetailKeyImportPath = "path"
 
+	// DetailKeyFilePath is a file's path on disk, as a directory scan reports
+	// it. [DetailKeyImportPath] names an import path and is not this key.
+	DetailKeyFilePath = "file_path"
+
+	// DetailKeyExitCode is the process exit code a command failure carries.
+	// Used with E_COMMAND_FAILED.
+	DetailKeyExitCode = "exit_code"
+
+	// DetailKeyTriggeringCodes is the comma-joined list of Error and Fatal
+	// codes that caused a fallback. Used with W_UPDATE_METADATA_FALLBACK.
+	DetailKeyTriggeringCodes = "triggering_codes"
+
 	// DetailKeyAlias is the import alias (for alias validation errors).
 	DetailKeyAlias = "alias"
 
@@ -126,7 +138,7 @@ const (
 	DetailKeyFeature = "feature"
 
 	// DetailKeyOriginalPath is the original provenance path string before fallback.
-	// Used with E_SNAPSHOT_PATH_FALLBACK.
+	// Used with W_SNAPSHOT_PATH_FALLBACK.
 	DetailKeyOriginalPath = "original_path"
 
 	// DetailKeyDepth is the actual nesting depth that exceeded the limit.

@@ -464,7 +464,7 @@ func marshalProvenance(inst *graph.Instance) *provenanceWire {
 	// A recorded raw path is written back verbatim, INCLUDING an empty one.
 	// Reading RawPath() alone could not tell a recorded "" from no record, so
 	// a document that carried an empty path came back carrying "$" — and the
-	// E_SNAPSHOT_PATH_FALLBACK warning that named the substitution was gone by
+	// W_SNAPSHOT_PATH_FALLBACK warning that named the substitution was gone by
 	// the second read.
 	pathStr := prov.Path().String()
 	if prov.HasRawPath() {

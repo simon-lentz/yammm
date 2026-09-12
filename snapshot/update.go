@@ -379,7 +379,7 @@ func UpdateMetadataOrReMarshal(
 
 	warn := diag.NewIssue(diag.Warning, diag.W_UPDATE_METADATA_FALLBACK,
 		"snapshot.UpdateMetadataOrReMarshal: fell back to Load + Marshal after UpdateMetadata refused input").
-		WithDetail("triggering_codes", strings.Join(triggeringCodes, ",")).
+		WithDetail(diag.DetailKeyTriggeringCodes, strings.Join(triggeringCodes, ",")).
 		Build()
 	// The legs' own warnings travel with it. A fresh collector holding only
 	// this warning discarded everything Load and Marshal reported — a

@@ -1,9 +1,11 @@
 package diag
 
 import (
+	"cmp"
 	"fmt"
 	"iter"
 	"maps"
+	"slices"
 	"strings"
 )
 
@@ -117,6 +119,30 @@ type Result struct {
 	// counts, truthful under truncation the same way. Read through
 	// [Result.CodeCounts]; never handed out.
 	codeCounts codeCounts
+
+	// arrival[i] is the order issues[i] was collected in, which sorting
+	// discards. A merge stores by it, so eviction keeps its meaning.
+	arrival []uint64
+}
+
+// inArrivalOrder returns r's issues as they were collected, for a merge to
+// store. A Result carrying no index keeps the sorted order.
+func (r Result) inArrivalOrder() []Issue {
+	if len(r.arrival) != len(r.issues) {
+		return r.issues
+	}
+	order := make([]int, len(r.issues))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return cmp.Compare(r.arrival[a], r.arrival[b])
+	})
+	out := make([]Issue, len(r.issues))
+	for i, idx := range order {
+		out[i] = r.issues[idx]
+	}
+	return out
 }
 
 // codeCounts counts issues seen by severity and code.
@@ -192,6 +218,14 @@ func newResultWithCounts(issues []Issue, limitReached bool, droppedCount int, co
 		counts:       counts,
 		codeCounts:   codes,
 	}
+}
+
+// newResultWithArrival is [newResultWithCounts] plus the arrival order sorting
+// discarded, which only a [Collector] knows.
+func newResultWithArrival(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts, arrival []uint64) Result {
+	r := newResultWithCounts(issues, limitReached, droppedCount, counts, codes)
+	r.arrival = arrival
+	return r
 }
 
 // OK returns a Result representing success (no issues).

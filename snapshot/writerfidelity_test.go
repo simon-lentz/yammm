@@ -110,7 +110,7 @@ func TestWriter_PreservesAnEmptyProvenancePath(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("first load: %s", res)
 	}
-	if !res.HasCode(diag.E_SNAPSHOT_PATH_FALLBACK) {
+	if !res.HasCode(diag.W_SNAPSHOT_PATH_FALLBACK) {
 		t.Errorf("an unparseable path must warn on the first read: %s", res)
 	}
 
@@ -125,7 +125,7 @@ func TestWriter_PreservesAnEmptyProvenancePath(t *testing.T) {
 	// The warning must survive too: a second read of a document still holding
 	// the unparseable path reports it again.
 	_, res2 := snapshot.Load(t.Context(), again, s)
-	if !res2.HasCode(diag.E_SNAPSHOT_PATH_FALLBACK) {
+	if !res2.HasCode(diag.W_SNAPSHOT_PATH_FALLBACK) {
 		t.Errorf("the fallback warning vanished on the second read: %s", res2)
 	}
 }

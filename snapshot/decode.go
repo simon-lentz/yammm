@@ -744,7 +744,7 @@ func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
 	if _, err := path.Parse(inst.Provenance.Path); err == nil {
 		return
 	}
-	sd.collector.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_PATH_FALLBACK,
+	sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_FALLBACK,
 		fmt.Sprintf("provenance path %q could not be parsed, falling back to root path", inst.Provenance.Path)).
 		WithDetail(diag.DetailKeyOriginalPath, inst.Provenance.Path).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).

@@ -1811,7 +1811,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
 - `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
 - `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Load`, `Verify`, `Info`, `UpdateMetadata`): the document is refused rather than half-trusted. A Warning on header-only reads, which stay classifiable for dispatch
-- `E_SNAPSHOT_PATH_FALLBACK` (Warning) — a provenance path string could not be parsed into a canonical path and fell back to the root path; the original string is preserved for round-trip fidelity
+- `W_SNAPSHOT_PATH_FALLBACK` (Warning) — a provenance path string could not be parsed into a canonical path and fell back to the root path; the original string is preserved for round-trip fidelity
 - `E_SNAPSHOT_IO` — a directory- or file-level I/O failure during `ScanDir` / `ScanDirSlice`
 - `E_UPDATE_METADATA_BODY_OFFSET` — `UpdateMetadata` could not resolve the byte range of the body it reuses
 - `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Load` + `Marshal`

@@ -156,7 +156,7 @@ func (c *Collector) CollectAll(issues []Issue) {
 func (c *Collector) Merge(res Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.mergeLocked(res, res.issues)
+	c.mergeLocked(res, res.inArrivalOrder())
 }
 
 // MergeFunc is [Collector.Merge] with fn applied to each of res's surviving
@@ -172,8 +172,9 @@ func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
 	// transform that changed an issue's severity or code would leave the
 	// counts describing issues that are no longer stored: only a from-scratch
 	// NewIssue can change either, and doing so is a programmer error.
-	transformed := make([]Issue, len(res.issues))
-	for i, issue := range res.issues {
+	ordered := res.inArrivalOrder()
+	transformed := make([]Issue, len(ordered))
+	for i, issue := range ordered {
 		out := fn(issue)
 		c.validateIssue("MergeFunc", out)
 		if out.Severity() != issue.Severity() || out.Code() != issue.Code() {
@@ -319,21 +320,23 @@ func (c *Collector) Result() Result {
 		return *c.cachedResult
 	}
 
-	// Copy issues into a new slice for sorting (don't mutate c.issues)
-	sorted := make([]Issue, len(c.issues))
-	for i, st := range c.issues {
-		sorted[i] = st.issue
+	// The arrival numbers travel with the copy, so a Merge can put the issues
+	// back in collection order; c.issues itself is never sorted.
+	stored := make([]storedIssue, len(c.issues))
+	copy(stored, c.issues)
+	slices.SortFunc(stored, func(a, b storedIssue) int { return compareIssues(a.issue, b.issue) })
+	sorted := make([]Issue, len(stored))
+	arrival := make([]uint64, len(stored))
+	for i, st := range stored {
+		sorted[i], arrival[i] = st.issue, st.arrival
 	}
-
-	// Sort by source, position, code
-	slices.SortFunc(sorted, compareIssues)
 
 	// Carry the collector's SEEN severity counts rather than recomputing from
 	// the stored slice (what newResult does): under truncation the dropped
 	// issues are absent from sorted, and recomputing would make Result.OK /
 	// HasErrors blind to a dropped error exactly as the gates would be. In the
 	// non-truncated case the two are identical (every collected issue is stored).
-	result := newResultWithCounts(sorted, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone())
+	result := newResultWithArrival(sorted, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone(), arrival)
 	c.cachedResult = &result
 	return result
 }

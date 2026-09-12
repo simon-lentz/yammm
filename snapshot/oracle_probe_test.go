@@ -598,7 +598,7 @@ func TestWireProbe_DuplicateInstanceUnparseableProvenance(t *testing.T) {
 	edited = append(edited, data[at+len(`"provenance":null`):]...)
 
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	expectOutcome(t, "load[warning:E_SNAPSHOT_PATH_FALLBACK] verify[warning:E_SNAPSHOT_PATH_FALLBACK]",
+	expectOutcome(t, "load[warning:W_SNAPSHOT_PATH_FALLBACK] verify[warning:W_SNAPSHOT_PATH_FALLBACK]",
 		"load["+loadSig+"] verify["+verifySig+"]")
 }
 
@@ -950,7 +950,7 @@ func TestWireProbe_UnparseableProvenancePath(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"provenance":null`, `"provenance":{"source_name":"probe","path":"not a path ["}`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	expectOutcome(t, "load[warning:E_SNAPSHOT_PATH_FALLBACK] verify[warning:E_SNAPSHOT_PATH_FALLBACK]", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[warning:W_SNAPSHOT_PATH_FALLBACK] verify[warning:W_SNAPSHOT_PATH_FALLBACK]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_NonCanonicalProvenancePathSurvives replaces an instance's null

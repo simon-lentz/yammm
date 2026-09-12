@@ -165,10 +165,14 @@ func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
 	}
 }
 
-// location renders where an issue is: its span, else its instance path after
-// its source name, else its source name, else nothing.
+// location renders where an issue is: its span then its instance path, else
+// its path after its source name, else its source name, else nothing. The span
+// locates the record and the path the field; the source name names the span's
+// document, so it is not repeated beside one.
 func (r *Renderer) location(issue Issue) string {
 	switch {
+	case issue.HasSpan() && issue.Path() != "":
+		return r.formatSpanLocation(issue.Span()) + " " + issue.Path()
 	case issue.HasSpan():
 		return r.formatSpanLocation(issue.Span())
 	case issue.Path() != "" && issue.SourceName() != "":

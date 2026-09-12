@@ -393,7 +393,7 @@ Two consequences worth knowing:
   `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
   `_` (unbounded) has no effect") is the common one; `yammm snapshot verify`,
   `yammm export`, and `yammm snapshot save --into` additionally surface the
-  snapshot decoder's `E_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
+  snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
   files. From v0.15.0, `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on
   these body-reading commands — the document is refused, not warned about;
   only header-only reads (`yammm snapshot info --header-only`, `--dir`) keep

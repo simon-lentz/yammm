@@ -220,7 +220,7 @@ func scanFile(ctx context.Context, name, path string, open func(string) (*os.Fil
 		c.Collect(
 			diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO,
 				fmt.Sprintf("open %q: %v", path, err)).
-				WithDetail("path", path).
+				WithDetail(diag.DetailKeyFilePath, path).
 				WithDetail(diag.DetailKeyDetail, err.Error()).
 				Build(),
 		)

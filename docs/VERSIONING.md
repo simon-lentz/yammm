@@ -1584,7 +1584,7 @@ existing declaration.
 - **`snapshot.Load` keeps a provenance path spelled other than `Builder`
   spells it**, so a marshal writes that path back byte for byte. A path holding
   a raw control character or an unpaired surrogate now draws
-  `E_SNAPSHOT_PATH_FALLBACK` and is kept as stated.
+  `W_SNAPSHOT_PATH_FALLBACK` and is kept as stated.
 
 ### Unit 7, the slate fix pass — an identity is what the filesystem calls the file
 
@@ -1690,6 +1690,53 @@ existing declaration.
   array is how a scalar carrier is spelled here rather than a list —
   `uuid.UUID` is `[16]byte` — so wrapping one as a `Slice` would turn a single
   UUID into sixteen byte values. No behaviour changes.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing.
+
+### Unit 7, the slate fix pass — the diagnostic wire and log say what they mean
+
+**One exported declaration is renamed and three are added.**
+`diag.E_SNAPSHOT_PATH_FALLBACK` becomes `diag.W_SNAPSHOT_PATH_FALLBACK`;
+`diag.DetailKeyExitCode`, `diag.DetailKeyFilePath` and
+`diag.DetailKeyTriggeringCodes` are new.
+
+- **Renamed: `E_SNAPSHOT_PATH_FALLBACK` → `W_SNAPSHOT_PATH_FALLBACK`**, and the
+  code string it writes changes with it. It was the only `E_` code raised at
+  Warning alone, so a consumer matching on the prefix read a warning as an
+  error. `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` keeps its `E_` because it is
+  raised at both severities. **No `.ys` document or fixture carries the old
+  string**, so nothing stored changes; rdata, wfac and rdata-python name the
+  code nowhere.
+- **A scanned file's path has a key of its own.** `E_SNAPSHOT_IO` wrote it under
+  `"path"`, which is `DetailKeyImportPath` — the key five `schema` sites use for
+  an import path — so a reader keying on it read a file path as one. It now
+  writes `DetailKeyFilePath` (`"file_path"`). **The wire key of `E_SNAPSHOT_IO`
+  moves.** The two details that had no constant, `"exit_code"` on
+  `E_COMMAND_FAILED` and `"triggering_codes"` on `W_UPDATE_METADATA_FALLBACK`,
+  now have one each; their wire keys are unchanged.
+- **A log entry names the document an issue came from.** `Issue.LogValue` and
+  the map shape `ContextualError` uses both emit `source_name` when the issue
+  has one, beside the `path` they already emitted. A path without its source
+  named a position in a file the reader could not identify.
+- **A truncated result says so in its log.** `ContextualError.LogValue` emits
+  `limit_reached` and `dropped` when the result hit its issue limit, so a
+  consumer reading `issues` knows it is not reading all of them. Omitted
+  otherwise. `docs/API.md` names all three new fields.
+- **A hybrid issue's text location carries both halves.** An issue with a span
+  and an instance path renders `data.json:3:1 $.Car[0].regNbr`, where it
+  rendered the span alone. The span locates the record and the path the field;
+  the source name names the span's document, so it is not repeated. JSON output
+  is unchanged — it always carried all three.
+- **A merged result keeps its issues' arrival order.** A `Result` carries the
+  order its issues were collected in, and `Merge` stores by it. The collector
+  evicts the latest-arrived of the least severe, so storing in sort order made
+  the victim depend on how the merged messages happened to compare — reachable
+  since `snapshot`'s `mergeResults` began merging through `Merge`.
+- **Two programmer errors now fail where they are made.**
+  `IssueBuilder.Build` panics on a builder neither `NewIssue` nor `FromIssue`
+  made, rather than returning a zero `Issue` that `Collector.Collect` panics on
+  one call later; `NewCode` panics on an empty value, as it already does on a
+  duplicate.
 - **Consumer reach: none measured.** rdata's suite against this tree differs
   from its run against `v0.21.0` by nothing.
 

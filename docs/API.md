@@ -1142,7 +1142,8 @@ type ContextualError struct {
 - `context` (string) — the tag. Always emitted.
 - `code` (string) — the first error-severity issue's stable code. Omitted when the result has no error-severity issue with a non-zero code.
 - `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted.
-- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
+- `limit_reached` (bool) and `dropped` (int) — emitted together when the result was truncated at its issue limit, so a consumer reading `issues` knows it is not reading all of them. Omitted otherwise.
+- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `source_name`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
 
 `Issue.LogValue()` emits the same per-issue shape and is independently useful when a consumer wants to log a single issue: `logger.Error("problem", slog.Any("issue", issue))`.
 

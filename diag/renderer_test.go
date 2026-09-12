@@ -482,7 +482,9 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "span takes precedence",
+			// The span locates the record and the path the field inside it; the
+			// source name names the span's document, so it is not repeated.
+			name: "span then path, for a hybrid issue",
 			issue: Issue{
 				severity:   Error,
 				code:       E_SYNTAX,
@@ -491,7 +493,18 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 				sourceName: "data.json",
 				path:       "$.foo",
 			},
-			expected: "test://schema.yammm:10:5",
+			expected: "test://schema.yammm:10:5 $.foo",
+		},
+		{
+			name: "span alone when there is no path",
+			issue: Issue{
+				severity:   Error,
+				code:       E_SYNTAX,
+				message:    "test",
+				span:       location.Point(source, 10, 5),
+				sourceName: "data.json",
+			},
+			expected: "test://schema.yammm:10:5:",
 		},
 		{
 			name: "path takes precedence over sourceName alone",

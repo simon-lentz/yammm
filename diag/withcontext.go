@@ -89,6 +89,9 @@ func (e *ContextualError) Unwrap() error {
 //     sum of Fatal and Error severity counts; "warnings" is the Warning
 //     count. Always emitted. Info and Hint counts are deliberately omitted
 //     — they are not observability signals consumers filter on in practice.
+//   - "limit_reached" (bool) and "dropped" (int): emitted together when the
+//     result was truncated, so a consumer reading "issues" knows it is not
+//     reading all of them. Omitted otherwise.
 //   - "issues" (slice of maps): one entry per issue in the result, each
 //     carrying the per-issue shape documented on [Issue.LogValue]. Always
 //     emitted as a slice. Log consumers iterate the slice directly rather
@@ -122,6 +125,13 @@ func (e *ContextualError) LogValue() slog.Value {
 		slog.Int("errors", counts.Fatal+counts.Errors),
 		slog.Int("warnings", counts.Warnings),
 	))
+
+	if e.Result.LimitReached() {
+		attrs = append(attrs,
+			slog.Bool("limit_reached", true),
+			slog.Int("dropped", e.Result.DroppedCount()),
+		)
+	}
 
 	issues := slices.Collect(e.Result.Issues())
 	issueMaps := make([]map[string]any, len(issues))

@@ -98,14 +98,18 @@ var (
 // identifier and category. Registered codes appear in [AllCodes] and
 // [CodesByCategory].
 //
-// Panics if a code with the same identifier has already been registered.
-// Use a package-scoped prefix to avoid collisions (e.g., "E_NEO4J_*").
+// Panics on an empty value, which no issue can carry ([Code.IsZero] reports it
+// unset) and which [AllCodes] would still list, and on an identifier already
+// registered. Use a package-scoped prefix to avoid collisions (e.g., "E_NEO4J_*").
 //
 // Codes should be defined as package-level variables so that
 // registration happens at program startup:
 //
 //	var E_MY_ERROR = diag.NewCode("E_MY_ERROR", diag.CategoryAdapter)
 func NewCode(value string, cat CodeCategory) Code {
+	if value == "" {
+		panic("diag.NewCode: empty code value")
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if seen[value] {
@@ -502,10 +506,10 @@ var (
 	// on the header-only surfaces, which stay classifiable for dispatch.
 	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM", CategorySnapshot)
 
-	// E_SNAPSHOT_PATH_FALLBACK (Warning) indicates a provenance path string could
+	// W_SNAPSHOT_PATH_FALLBACK (Warning) indicates a provenance path string could
 	// not be parsed and fell back to the root path. The original path string is
 	// preserved for round-trip fidelity via Provenance.RawPath().
-	E_SNAPSHOT_PATH_FALLBACK = NewCode("E_SNAPSHOT_PATH_FALLBACK", CategorySnapshot)
+	W_SNAPSHOT_PATH_FALLBACK = NewCode("W_SNAPSHOT_PATH_FALLBACK", CategorySnapshot)
 
 	// --- v0.3.0 additions ---
 
@@ -545,12 +549,9 @@ var (
 	// persistent cases. Details include a "triggering_codes" entry listing the
 	// distinct Error and Fatal codes that caused the fallback.
 	//
-	// Uses the W_ prefix, inaugurating the convention for
-	// Warning-severity codes added from v0.3.0 onward; existing
-	// Warning-severity codes (E_SNAPSHOT_PATH_FALLBACK, and
-	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM on a header-only read)
-	// retain their E_ identifiers for backwards compatibility — severity
-	// is carried on the Issue, not the Code, so the prefix is a naming
+	// Uses the W_ prefix, the convention for a code raised at Warning alone.
+	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM keeps E_ because it is raised at
+	// both severities; severity lives on the Issue, so the prefix is a naming
 	// convention rather than a type-enforced property.
 	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
 
