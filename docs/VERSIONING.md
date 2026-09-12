@@ -863,12 +863,22 @@ suggests `v0.22.0`. `snapshot info --format json`'s payload breaks in a way no
 declaration describes (below).
 
 Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
-are on the `review` branch and reach `main` at the unit's close. **Its pass-A
-fix pass removes two exported declarations, `location.ErrUNCPath` and
-`location.PositionRegistry`; its pass-B fix pass adds two,
-`location.SourceID.RelativeTo` and `schema.CaptureSources`, and removes one,
-`diag.Result.Limit`; and its slate fix pass adds three, `location.ResolveHostPath`,
-`location.ErrEmptyPath` and `location.ErrInvalidUTF8Path`** (the blocks below).
+are on the `review` branch and reach `main` at the unit's close. Its three fix
+passes move **nine additions and five removals**:
+
+- **pass A** removes `location.ErrUNCPath` and `location.PositionRegistry`;
+- **pass B** adds `location.SourceID.RelativeTo` and `schema.CaptureSources`,
+  and removes `diag.Result.Limit`;
+- **the slate fix pass** adds `location.ResolveHostPath`,
+  `location.ErrEmptyPath`, `location.ErrInvalidUTF8Path`,
+  `diag.DetailKeyExitCode`, `diag.DetailKeyFilePath` and
+  `diag.DetailKeyTriggeringCodes`; removes `location.Provenance.AtKey`; and
+  renames `diag.E_SNAPSHOT_PATH_FALLBACK` to `diag.W_SNAPSHOT_PATH_FALLBACK`,
+  which `gorelease` counts as one removal and one addition.
+
+**With unit 6's six additions, `gorelease -base=v0.21.0` reads fifteen
+compatible changes and five incompatible ones, and suggests `v0.22.0`.** Each
+block below was written by the pass or group that landed its behaviour.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
