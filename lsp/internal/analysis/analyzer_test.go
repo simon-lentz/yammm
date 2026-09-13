@@ -377,11 +377,12 @@ func TestSources_DiskFallback(t *testing.T) {
 	// The resolved parent should be "Helper" from the utils schema
 	assert.Equal(t, "Helper", supers[0].Name(), "Parent type name")
 
-	// Verify ImportedPaths includes the disk-based import
-	// Note: paths are canonicalized (symlinks resolved), so we need to compare canonical paths
-	utilsCanonical, _ := filepath.EvalSymlinks(utilsPath)
-	assert.True(t, slices.Contains(snapshot.ImportedPaths, utilsCanonical),
-		"ImportedPaths should include %s; got %v", utilsCanonical, snapshot.ImportedPaths)
+	// ImportedPaths holds each import's identity: symlinks resolved, and
+	// '/'-separated on every host.
+	utilsIdentity, _ := filepath.EvalSymlinks(utilsPath)
+	utilsIdentity = filepath.ToSlash(utilsIdentity)
+	assert.True(t, slices.Contains(snapshot.ImportedPaths, utilsIdentity),
+		"ImportedPaths should include %s; got %v", utilsIdentity, snapshot.ImportedPaths)
 }
 
 func TestHasURIScheme_FileURI(t *testing.T) {

@@ -148,12 +148,13 @@ func TestModuleRoot_ExplicitConfigBeatsMarker(t *testing.T) {
 
 	_, entry := markerTree(t, "")
 
-	ws := newTestWorkspace(t, quietLogger(), Config{ModuleRoot: "/configured/root"})
+	configured := yammmtest.HostAbs("/configured/root")
+	ws := newTestWorkspace(t, quietLogger(), Config{ModuleRoot: configured})
 	got, err := ws.FindModuleRoot(hostPath(entry))
 	if err != nil {
 		t.Fatalf("Workspace.FindModuleRoot: %v", err)
 	}
-	if got != "/configured/root" {
+	if got != configured {
 		t.Errorf("FindModuleRoot = %q, want the configured root", got)
 	}
 }

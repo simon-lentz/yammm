@@ -1,6 +1,7 @@
 package hover
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -182,10 +183,10 @@ func TestRenderSymbol_Golden(t *testing.T) {
 		},
 		{
 			name: "type with source path relative to root",
-			root: "/project",
+			root: yammmtest.HostAbs("/project"),
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromAbsolutePath("/project/schemas/person.yammm")
+				sourceID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/schemas/person.yammm"))
 				require.NoError(t, err)
 				s, result := schema.NewBuilder().
 					WithName("test").
@@ -202,7 +203,7 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "type with absolute source path when no root",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromAbsolutePath("/project/person.yammm")
+				sourceID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs(rootlessSource))
 				require.NoError(t, err)
 				s, result := schema.NewBuilder().
 					WithName("test").
@@ -223,5 +224,11 @@ func TestRenderSymbol_Golden(t *testing.T) {
 		out.WriteString(RenderSymbol(tc.build(t), tc.root))
 		out.WriteString("\n")
 	}
-	yammmtest.Golden(t, "render_symbol", []byte(out.String()))
+	// A root-less source renders as its identity, which carries the fixture's
+	// drive on Windows; the golden spells it as the Unix path.
+	rendered := strings.ReplaceAll(out.String(), filepath.ToSlash(yammmtest.HostAbs(rootlessSource)), rootlessSource)
+	yammmtest.Golden(t, "render_symbol", []byte(rendered))
 }
+
+// rootlessSource is the golden's source path for a symbol rendered with no root.
+const rootlessSource = "/project/person.yammm"

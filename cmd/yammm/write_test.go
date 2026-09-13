@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -165,6 +166,9 @@ func writePaths() []writePath {
 // else. An export can carry every value in the graph; 0644 publishes it to
 // every account on the host.
 func TestWrite_NewFileIsOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(noModeBitsOnWindows)
+	}
 	for _, tc := range writePaths() {
 		if !tc.creates {
 			continue
@@ -184,6 +188,9 @@ func TestWrite_NewFileIsOwnerOnly(t *testing.T) {
 // A file the operator already made is theirs. Whatever mode it carries is the
 // mode it keeps: the CLI is rewriting content, not taking ownership of policy.
 func TestWrite_ExistingFileKeepsItsMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(noModeBitsOnWindows)
+	}
 	for _, tc := range writePaths() {
 		for _, mode := range []fs.FileMode{0o644, 0o600, 0o640} {
 			t.Run(tc.name+"/"+mode.String(), func(t *testing.T) {
@@ -228,6 +235,9 @@ func TestWrite_ReplacesRatherThanTruncates(t *testing.T) {
 			if err != nil {
 				t.Fatalf("stat before: %v", err)
 			}
+			// Windows reads a stat's file ID only when SameFile first asks for it,
+			// so it is read now, before the command can replace the file.
+			_ = os.SameFile(before, before)
 
 			if code, _, errOut := runCLI(t, args...); code != 0 {
 				t.Fatalf("exit %d: %s", code, errOut)
@@ -362,6 +372,9 @@ func TestWrite_PartialDirectoryExportLeavesTheDirectoryAsItWas(t *testing.T) {
 
 // The files of a directory export are the operator's too.
 func TestWrite_DirectoryExportFilesAreOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip(noModeBitsOnWindows)
+	}
 	dir := t.TempDir()
 	outDir := filepath.Join(dir, "csvs")
 	schemaPath, dataPath := multiTypeFixture(t)
@@ -382,6 +395,9 @@ func TestWrite_DirectoryExportFilesAreOwnerOnly(t *testing.T) {
 		assertMode(t, filepath.Join(outDir, e.Name()), 0o600)
 	}
 }
+
+// noModeBitsOnWindows is why a test of the CLI's mode policy cannot run there.
+const noModeBitsOnWindows = "Windows has no owner, group or other permission bits: Go reports a writable file as 0666, and os.Chmod sets only the read-only attribute"
 
 func assertMode(t *testing.T, path string, want fs.FileMode) {
 	t.Helper()

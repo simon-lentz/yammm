@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -84,6 +85,9 @@ func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 
 func TestWriteFile_ModePolicy(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip(noModeBitsOnWindows)
+	}
 
 	t.Run("a new file is owner-only", func(t *testing.T) {
 		t.Parallel()
@@ -178,8 +182,10 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 		if err := staged.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
-		for _, name := range []string{"a.csv", "b.csv"} {
-			assertPerm(t, filepath.Join(dir, name), NewFileMode)
+		if runtime.GOOS != "windows" {
+			for _, name := range []string{"a.csv", "b.csv"} {
+				assertPerm(t, filepath.Join(dir, name), NewFileMode)
+			}
 		}
 		assertNoDebris(t, dir, filepath.Join(dir, "a.csv"), filepath.Join(dir, "b.csv"))
 	})
@@ -257,6 +263,9 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 
 	t.Run("a rename refused at Commit names the file, not its staging name", func(t *testing.T) {
 		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip(noDirPermissionsOnWindows)
+		}
 		if os.Geteuid() == 0 {
 			t.Skip("root ignores the write bit")
 		}

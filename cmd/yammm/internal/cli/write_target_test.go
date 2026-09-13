@@ -7,11 +7,19 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 const targetPayload = "payload\n"
+
+// Why a case or an assertion cannot run on Windows.
+const (
+	noModeBitsOnWindows       = "Windows has no owner, group or other permission bits: Go reports a writable file as 0666"
+	noDirPermissionsOnWindows = "Windows does not honour a directory's permission bits, so a sealed directory still takes a write"
+	noNULLinkOnWindows        = "a symlink cannot name NUL, Windows' null device"
+)
 
 // writeTargetCase is one kind of target a CLI write can be pointed at, with
 // the outcome the operator is owed: what the reader of the target receives,
@@ -20,6 +28,8 @@ type writeTargetCase struct {
 	name  string
 	setup func(dir string) (target string, err error)
 	check func(dir, target string, err error) string
+	// windowsSkip says why Windows cannot set the case up; empty when it can.
+	windowsSkip string
 }
 
 // writeTargetCases is the outcome table both write primitives are judged by.
@@ -182,7 +192,8 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 		{
-			name: "a link to a path under /dev/ is written through",
+			name:        "a link to a path under /dev/ is written through",
+			windowsSkip: noNULLinkOnWindows,
 			setup: func(dir string) (string, error) {
 				link := filepath.Join(dir, "null")
 				return link, os.Symlink(os.DevNull, link)
@@ -214,7 +225,8 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 		{
-			name: "a writable file in a read-only directory is refused",
+			name:        "a writable file in a read-only directory is refused",
+			windowsSkip: noDirPermissionsOnWindows,
 			setup: func(dir string) (string, error) {
 				sub := filepath.Join(dir, "ro")
 				if err := os.Mkdir(sub, 0o750); err != nil {
@@ -246,7 +258,8 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 		{
-			name: "an error names the operator's path",
+			name:        "an error names the operator's path",
+			windowsSkip: noDirPermissionsOnWindows,
 			setup: func(dir string) (string, error) {
 				sub := filepath.Join(dir, "sealed")
 				if err := os.Mkdir(sub, 0o750); err != nil {
@@ -278,6 +291,9 @@ func TestWriteFile_TargetKinds(t *testing.T) {
 	for _, tc := range writeTargetCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			if tc.windowsSkip != "" && runtime.GOOS == "windows" {
+				t.Skip(tc.windowsSkip)
+			}
 			dir := unsealedTempDir(t)
 			target, err := tc.setup(dir)
 			if err != nil {
@@ -302,6 +318,9 @@ func TestStagedFiles_TargetKinds(t *testing.T) {
 	for _, tc := range writeTargetCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			if tc.windowsSkip != "" && runtime.GOOS == "windows" {
+				t.Skip(tc.windowsSkip)
+			}
 			dir := unsealedTempDir(t)
 			target, err := tc.setup(dir)
 			if err != nil {
@@ -354,6 +373,9 @@ func expectWritten(target string, mode fs.FileMode, err error) string {
 	}
 	if string(got) != targetPayload {
 		return fmt.Sprintf("the target holds %q, want the payload", got)
+	}
+	if runtime.GOOS == "windows" {
+		return "" // noModeBitsOnWindows: the payload is the whole outcome there.
 	}
 	if info, _ := os.Stat(target); info != nil && info.Mode().Perm() != mode {
 		return fmt.Sprintf("mode %v, want %v", info.Mode().Perm(), mode)

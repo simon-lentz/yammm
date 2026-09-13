@@ -1,6 +1,7 @@
 package doclint_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestAssertDependencyLines_AgreeingLinesAreSilent(t *testing.T) {
 	t.Parallel()
 	r, checked := runDepGate(t)
 	for _, quiet := range []string{"correct", "wrapped", "prose"} {
-		if r.reports("/" + quiet + "/") {
+		if r.reports(filepath.FromSlash("/" + quiet + "/")) {
 			t.Errorf("%s reported: %v", quiet, r.msgs)
 		}
 	}
@@ -105,7 +106,7 @@ func TestAssertDependencyLines_StopsAtTheEndOfTheBlock(t *testing.T) {
 func TestAssertDependencyLines_CountsOnlyDocsThatCarryARow(t *testing.T) {
 	t.Parallel()
 	r, checked := runDepGate(t)
-	if r.reports("/leaf/") {
+	if r.reports(filepath.FromSlash("/leaf/")) {
 		t.Errorf("a package with no dependency block was reported: %v", r.msgs)
 	}
 	// correct, extra, absent, wrapped, prose, plus the family table's rows and

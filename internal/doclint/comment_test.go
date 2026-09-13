@@ -1,6 +1,7 @@
 package doclint_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,7 +21,9 @@ func runCommentGate(t *testing.T) (*recorder, int) {
 func TestAssertDocCommentsRender_WellFormedDocsAreSilent(t *testing.T) {
 	t.Parallel()
 	r, checked := runCommentGate(t)
-	for _, quiet := range []string{"/clean/", "/attached/"} {
+	// The gate reports host paths, so a path fragment is spelled with the
+	// host's separator or a check could never match on Windows.
+	for _, quiet := range []string{filepath.FromSlash("/clean/"), filepath.FromSlash("/attached/")} {
 		for _, m := range r.msgs {
 			if strings.Contains(m, quiet) {
 				t.Errorf("well-formed doc reported: %s", m)
@@ -57,7 +60,7 @@ func TestAssertDocCommentsRender_ReportsADetachedBlock(t *testing.T) {
 func TestAssertDocCommentsRender_ReportsAsteriskPairEmphasis(t *testing.T) {
 	t.Parallel()
 	r, _ := runCommentGate(t)
-	if !r.reports("emphasis/emphasis.go") {
+	if !r.reports(filepath.FromSlash("emphasis/emphasis.go")) {
 		t.Errorf("the emphasis was not reported: %v", r.msgs)
 	}
 }
@@ -67,7 +70,7 @@ func TestAssertDocCommentsRender_ReportsAsteriskPairEmphasis(t *testing.T) {
 func TestAssertDocCommentsRender_IgnoresUnexportedDeclarations(t *testing.T) {
 	t.Parallel()
 	r, _ := runCommentGate(t)
-	if r.reports("/unexported/") {
+	if r.reports(filepath.FromSlash("/unexported/")) {
 		t.Errorf("an unexported declaration was reported: %v", r.msgs)
 	}
 }

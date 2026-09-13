@@ -1899,6 +1899,13 @@ func canonicalPath(t *testing.T, path string) string {
 	return filepath.Clean(abs)
 }
 
+// rootIdentity is canonicalPath spelled as an identity, '/'-separated on every
+// host: the form a module_root detail carries.
+func rootIdentity(t *testing.T, path string) string {
+	t.Helper()
+	return filepath.ToSlash(canonicalPath(t, path))
+}
+
 // writeModuleTree writes a two-file module-style layout under a fresh
 // temp root: sub/entry.yammm imports lib/dep.yammm by module path.
 // Returns (root, entryPath).

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -22,6 +23,9 @@ func TestSnapshotSave_ExtensionWarningDescribesAWrittenFile(t *testing.T) {
 
 	t.Run("a failed write raises no extension warning", func(t *testing.T) {
 		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows does not honour a directory's permission bits, so the write cannot be made to fail")
+		}
 		sealed := filepath.Join(t.TempDir(), "sealed")
 		if err := os.Mkdir(sealed, 0o550); err != nil {
 			t.Fatalf("mkdir: %v", err)

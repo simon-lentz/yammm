@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
 	"github.com/simon-lentz/yammm/lsp/internal/markdown"
 
@@ -402,19 +403,19 @@ func TestVirtualSourceID(t *testing.T) {
 	}{
 		{
 			name:       "basic path",
-			path:       "/home/user/docs/README.md",
+			path:       yammmtest.HostAbs("/home/user/docs/README.md"),
 			blockIndex: 0,
 			wantSuffix: "#block-0",
 		},
 		{
 			name:       "second block",
-			path:       "/home/user/docs/README.md",
+			path:       yammmtest.HostAbs("/home/user/docs/README.md"),
 			blockIndex: 1,
 			wantSuffix: "#block-1",
 		},
 		{
 			name:       "third block",
-			path:       "/home/user/docs/README.md",
+			path:       yammmtest.HostAbs("/home/user/docs/README.md"),
 			blockIndex: 2,
 			wantSuffix: "#block-2",
 		},
@@ -446,11 +447,11 @@ func TestVirtualSourceID(t *testing.T) {
 func TestVirtualSourceID_Distinct(t *testing.T) {
 	t.Parallel()
 
-	id0, err := markdown.VirtualSourceID("/path/to/file.md", 0)
+	id0, err := markdown.VirtualSourceID(yammmtest.HostAbs("/path/to/file.md"), 0)
 	require.NoError(t, err)
-	id1, err := markdown.VirtualSourceID("/path/to/file.md", 1)
+	id1, err := markdown.VirtualSourceID(yammmtest.HostAbs("/path/to/file.md"), 1)
 	require.NoError(t, err)
-	id2, err := markdown.VirtualSourceID("/path/to/file.md", 2)
+	id2, err := markdown.VirtualSourceID(yammmtest.HostAbs("/path/to/file.md"), 2)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, id0, id1)

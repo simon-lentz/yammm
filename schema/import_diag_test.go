@@ -85,7 +85,7 @@ func TestImportResolveProvenance_Default(t *testing.T) {
 	_, res := schema.Load(t.Context(), entry)
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
 	assertProvenance(t, issue, details,
-		canonicalPath(t, filepath.Dir(entry)), diag.ModuleRootDefault, "defaulted to the entry schema's directory")
+		rootIdentity(t, filepath.Dir(entry)), diag.ModuleRootDefault, "defaulted to the entry schema's directory")
 
 	// The remedy clause is the sentence that would have saved the consumer's
 	// CLI failure: it names the marker, not just the root.
@@ -103,7 +103,7 @@ func TestImportResolveProvenance_Discovered(t *testing.T) {
 
 	_, res := schema.Load(t.Context(), entry)
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
-	assertProvenance(t, issue, details, canonicalPath(t, root), diag.ModuleRootDiscovered, "discovered from")
+	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootDiscovered, "discovered from")
 }
 
 func TestImportResolveProvenance_Explicit(t *testing.T) {
@@ -114,7 +114,7 @@ func TestImportResolveProvenance_Explicit(t *testing.T) {
 
 	_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
-	assertProvenance(t, issue, details, canonicalPath(t, root), diag.ModuleRootExplicit, "given explicitly")
+	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootExplicit, "given explicitly")
 }
 
 func TestImportResolveProvenance_Synthetic(t *testing.T) {
@@ -161,7 +161,7 @@ func TestPathEscapeProvenance(t *testing.T) {
 
 	_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
 	issue, details := resolutionIssue(t, res, diag.E_PATH_ESCAPE)
-	assertProvenance(t, issue, details, canonicalPath(t, root), diag.ModuleRootExplicit, "given explicitly")
+	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootExplicit, "given explicitly")
 
 	// One code, one shape: the escape site has the declaration in hand and
 	// must carry the same details every sibling in the family carries.
@@ -186,7 +186,7 @@ func TestImportCycleProvenance(t *testing.T) {
 
 	_, res := schema.Load(t.Context(), a, schema.WithModuleRoot(root))
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_CYCLE)
-	assertProvenance(t, issue, details, canonicalPath(t, root), diag.ModuleRootExplicit, "given explicitly")
+	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootExplicit, "given explicitly")
 }
 
 // TestBuilderImportResolve_SameShape pins that the Builder's front door builds

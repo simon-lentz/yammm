@@ -117,14 +117,15 @@ func TestServer_WorkspaceCreated(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := lsp.NewServer(logger, lsp.Config{ModuleRoot: "/test"})
+	configured := yammmtest.HostAbs("/test")
+	server := lsp.NewServer(logger, lsp.Config{ModuleRoot: configured})
 
 	require.NotNil(t, server.Workspace())
 
 	// The workspace should inherit the config's module root
-	root, err := server.Workspace().FindModuleRoot("/any/path/file.yammm")
+	root, err := server.Workspace().FindModuleRoot(yammmtest.HostAbs("/any/path/file.yammm"))
 	require.NoError(t, err)
-	assert.Equal(t, "/test", root)
+	assert.Equal(t, configured, root)
 }
 
 func TestIntegration_InitializeSuccess(t *testing.T) {

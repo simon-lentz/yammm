@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/schema/expr"
@@ -683,7 +684,7 @@ func TestBuilder_SyntheticSourceIDValidation_AcceptsSchemePrefix(t *testing.T) {
 func TestBuilder_FileBackedSourceIDSkipsValidation(t *testing.T) {
 	// File-backed SourceIDs skip synthetic validation
 	// Use SourceIDFromAbsolutePath which doesn't require file existence
-	fileID, err := location.SourceIDFromAbsolutePath("/project/schemas/test.yammm")
+	fileID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/schemas/test.yammm"))
 	require.NoError(t, err)
 
 	s, result := schema.NewBuilder().
@@ -1129,11 +1130,11 @@ func TestBuilder_DuplicateImportByResolvedSourceID(t *testing.T) {
 func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 	// Test Case 1: File-backed SourceID with relative import
 	// Create a file-backed SourceID (simulating a schema loaded from disk)
-	mainID, err := location.SourceIDFromAbsolutePath("/project/schemas/main.yammm")
+	mainID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/schemas/main.yammm"))
 	require.NoError(t, err)
 
 	// Create the imported schema with file-backed SourceID
-	helperID, err := location.SourceIDFromAbsolutePath("/project/schemas/helper.yammm")
+	helperID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/schemas/helper.yammm"))
 	require.NoError(t, err)
 
 	helperSchema, helperResult := schema.NewBuilder().
@@ -1174,7 +1175,7 @@ func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 
 func TestBuilder_FileBackedSourceID_RelativeImport_NotFound(t *testing.T) {
 	// Test Case 1: File-backed SourceID with relative import that doesn't exist
-	mainID, err := location.SourceIDFromAbsolutePath("/project/schemas/main.yammm")
+	mainID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/schemas/main.yammm"))
 	require.NoError(t, err)
 
 	// Create empty registry (no helper registered)
@@ -1208,11 +1209,11 @@ func TestBuilder_FileBackedSourceID_RelativeImport_NotFound(t *testing.T) {
 func TestBuilder_FileBackedSourceID_ParentDirImport(t *testing.T) {
 	// Test Case 1: File-backed SourceID with ../ relative import
 	// Main schema is in /project/schemas/sub/main.yammm
-	mainID, err := location.SourceIDFromAbsolutePath("/project/schemas/sub/main.yammm")
+	mainID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/schemas/sub/main.yammm"))
 	require.NoError(t, err)
 
 	// Helper schema is in /project/schemas/helper.yammm
-	helperID, err := location.SourceIDFromAbsolutePath("/project/schemas/helper.yammm")
+	helperID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/schemas/helper.yammm"))
 	require.NoError(t, err)
 
 	helperSchema, helperResult := schema.NewBuilder().

@@ -355,7 +355,7 @@ func TestLoad_MalformedMarkerFailsTheLoad(t *testing.T) {
 			for _, d := range issue.Details() {
 				details[d.Key] = d.Value
 			}
-			if got, want := details[diag.DetailKeyModuleRoot], canonicalPath(t, root); got != want {
+			if got, want := details[diag.DetailKeyModuleRoot], rootIdentity(t, root); got != want {
 				t.Errorf("module_root detail = %q, want %q", got, want)
 			}
 			if got := details[diag.DetailKeyModuleRootOrigin]; got != diag.ModuleRootDiscovered {
