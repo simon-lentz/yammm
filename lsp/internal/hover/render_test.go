@@ -46,10 +46,10 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
 				sources := map[string][]byte{
-					"/test/main.yammm":  []byte("schema \"main\"\nimport \"./parts\" as parts\n"),
-					"/test/parts.yammm": []byte("schema \"parts\"\ntype Wheel {\n  id String primary\n}\n"),
+					yammmtest.HostAbs("/test/main.yammm"):  []byte("schema \"main\"\nimport \"./parts\" as parts\n"),
+					yammmtest.HostAbs("/test/parts.yammm"): []byte("schema \"parts\"\ntype Wheel {\n  id String primary\n}\n"),
 				}
-				s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "/test/main.yammm", "/test")
+				s, result := schema.LoadSourcesWithEntry(t.Context(), sources, yammmtest.HostAbs("/test/main.yammm"), yammmtest.HostAbs("/test"))
 				require.False(t, result.HasErrors(), "load: %s", result)
 				var imp *schema.Import
 				for i := range s.Imports() {
@@ -203,7 +203,7 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "type with absolute source path when no root",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs(rootlessSource))
+				sourceID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/person.yammm"))
 				require.NoError(t, err)
 				s, result := schema.NewBuilder().
 					WithName("test").
@@ -224,11 +224,8 @@ func TestRenderSymbol_Golden(t *testing.T) {
 		out.WriteString(RenderSymbol(tc.build(t), tc.root))
 		out.WriteString("\n")
 	}
-	// A root-less source renders as its identity, which carries the fixture's
-	// drive on Windows; the golden spells it as the Unix path.
-	rendered := strings.ReplaceAll(out.String(), filepath.ToSlash(yammmtest.HostAbs(rootlessSource)), rootlessSource)
+	// A rendered identity carries the fixtures' drive on Windows; the golden
+	// spells every fixture path the Unix way, and a path on another drive fails.
+	rendered := strings.ReplaceAll(out.String(), filepath.ToSlash(yammmtest.HostAbs("/")), "/")
 	yammmtest.Golden(t, "render_symbol", []byte(rendered))
 }
-
-// rootlessSource is the golden's source path for a symbol rendered with no root.
-const rootlessSource = "/project/person.yammm"
