@@ -6,19 +6,42 @@ on:
     branches: ["*"]
   workflow_dispatch: {}
 jobs:
+  # One job definition on every host the module supports. Windows and macOS each
+  # carry path rules Linux lacks — a backslash separator and UNC volumes, a
+  # case-insensitive volume spelled through fcntl(F_GETPATH) — so each host
+  # lints, vets and runs the whole suite through scripts/test.sh, the pre-commit
+  # hook's and the release workflow's test definition. Vet and test run after an
+  # earlier step fails, and fail-fast is off, so one run reports every host's
+  # every failure.
   test:
-    name: Test Linux
-    runs-on: ubuntu-latest
+    name: Test ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+          - name: Windows
+            os: windows-latest
+          - name: macOS
+            os: macos-latest
+    defaults:
+      run:
+        # bash on every host: pwsh reports only the last command's exit status.
+        shell: bash
     steps:
+      # Git for Windows checks out with core.autocrlf=true, which would give
+      # diag's goldens CRLF line endings its renderer never writes. Linux and
+      # macOS already default to false, so the step is the same on every host.
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
       - name: Checkout
         uses: actions/checkout@v7
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-        id: go
-      # Root module
-      #
       # The linter is built from this module's tool dependency, not downloaded.
       # A release binary and a `go build` of the same golangci-lint version are
       # not the same linter: the release embeds whichever golang.org/x/tools its
@@ -29,10 +52,11 @@ jobs:
       # single source of truth, so the surface moves only on a deliberate
       # x/tools bump and `go tool golangci-lint run` reproduces this step
       # exactly. install-mode: none keeps the action's inline PR annotations
-      # while running the binary built here.
+      # while running the binary built here. An output path ending in a
+      # separator names a directory, so Windows gets golangci-lint.exe.
       - name: Build the pinned linter
         run: |
-          go build -o "${{ runner.temp }}/bin/golangci-lint" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+          go build -o "${{ runner.temp }}/bin/" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
           echo "${{ runner.temp }}/bin" >> "$GITHUB_PATH"
       # The schema comes from the module cache, not from golangci-lint.run.
       # The action's own `verify` fetches it over the network at the start of
@@ -46,102 +70,25 @@ jobs:
       # `next` is the right file, not a versioned one. For a source build the
       # binary asks for `golangci.next.jsonschema.json` at its own ref, and the
       # newest versioned schema in the module lags the module's own version.
+      # The schema is passed as a path, not a file:// URL, so a Windows drive
+      # path needs no URL spelling.
       - name: Verify the linter config
         run: |
           schema="$(go list -m -f '{{.Dir}}' github.com/golangci/golangci-lint/v2)/jsonschema/golangci.next.jsonschema.json"
           test -f "$schema" || { echo "schema not found at $schema"; exit 1; }
-          golangci-lint config verify --config=.golangci.yml --schema "file://$schema"
+          golangci-lint config verify --config=.golangci.yml --schema "$schema"
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           install-mode: none
           verify: false
           args: --config=.golangci.yml
-      - name: Test
-        # -race enforces the data-race gate in CI rather than as local
-        # etiquette; -shuffle=on surfaces inter-test order coupling, which
-        # large-scale test dedup/merging is most likely to introduce.
-        run: go test -v -race -shuffle=on ./...
-  # Every other job runs on Linux, where a backslash is a file-name character
-  # and no path has a UNC volume, so the Windows half of the path identity
-  # rules — and every runtime.GOOS == "windows" branch in location's tests —
-  # never ran. This job runs those tests on the host whose rules they state,
-  # with diag's rendering of locations under a backslash-separated root and
-  # the CLI's. bash, not the default pwsh, because pwsh reports only the last
-  # command's exit status and would hide a failing first run.
-  windows:
-    name: Test Windows
-    runs-on: windows-latest
-    steps:
-      # Git for Windows checks out with core.autocrlf=true, which would give
-      # diag's goldens CRLF line endings its renderer never writes.
-      - name: Keep committed line endings
-        shell: bash
-        run: git config --global core.autocrlf false
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      # Compiles every package's tests for Windows, the ones this job does not
-      # run included, so a Unix-only call in a test file fails here.
-      - name: Vet every package for Windows
-        shell: bash
+      - name: Vet
+        if: ${{ !cancelled() }}
         run: go vet ./...
-      # One step per package, each run after an earlier failure: bash -e stops a
-      # multi-command step at its first failing command, which hid three
-      # packages' results behind one location failure.
-      - name: Path identity tests — location
+      - name: Test
         if: ${{ !cancelled() }}
-        shell: bash
-        run: go test -count=1 -v ./location/...
-      - name: Path identity tests — diag
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: go test -count=1 -v ./diag/
-      - name: Path identity tests — schema host paths
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: go test -count=1 -v -run '^TestHostPath_' ./schema/
-      - name: Path identity tests — rendered locations
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: go test -count=1 -v -run '^TestRenderedLocations_' ./cmd/yammm/
-  # Linux is case-sensitive and Windows spells a path through FindFirstFile, so
-  # the darwin branch of the host resolver — fcntl(F_GETPATH), the file-kind
-  # check that keeps it off a FIFO, and its permission fallback — runs on no
-  # other runner. schema is here beside location because the guards that see a
-  # blocking open are its FIFO and socket rows, and because a case-insensitive
-  # volume is where two spellings of one module root exist at all.
-  macos:
-    name: Test macOS
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      # One step per package, each run after an earlier failure, as the Windows
-      # job does: bash -e stops a multi-command step at its first failure.
-      - name: Path identity tests — location
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: go test -count=1 -v ./location/...
-      - name: Path identity tests — schema
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: go test -count=1 -v ./schema/
-      - name: Path identity tests — diag
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: go test -count=1 -v ./diag/
-      - name: Path identity tests — rendered locations
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: go test -count=1 -v -run '^TestRenderedLocations_' ./cmd/yammm/
+        run: scripts/test.sh
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
@@ -151,8 +98,10 @@ jobs:
   # it is why accepting both spellings is required rather than renaming to the
   # newer one.
   #
-  # Behind the neo4j_integration build tag, so `go test ./...` above stays
-  # Docker-free.
+  # Behind the neo4j_integration build tag, so scripts/test.sh stays Docker-free.
+  # Linux only: GitHub's Windows and macOS runners cannot run the Linux server
+  # image, and the adapter is platform-independent Go. `make test-integration`
+  # runs the same matrix on a developer's machine.
   integration:
     name: Neo4j ${{ matrix.label }}
     runs-on: ubuntu-latest

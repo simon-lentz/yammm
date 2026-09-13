@@ -60,7 +60,12 @@ repos:
         pass_filenames: false
         files: '(\.go$)|(\bgo\.mod$)|(\bgo\.sum$)'
         entry: scripts/gomodtidy.sh
-  # --- lint & test ---
+  # --- lint, vet & test ---
+  #
+  # The same three checks each CI host's job runs: the pinned linter natively,
+  # vet, and scripts/test.sh. vet.sh also vets the Linux and Windows builds,
+  # which only CI executes. The CI pre-commit job skips these three hooks
+  # because the host jobs run them.
   - repo: local
     hooks:
       - id: golangci-lint
@@ -69,9 +74,15 @@ repos:
         pass_filenames: false
         files: \.go$
         entry: go tool golangci-lint run
+      - id: go-vet
+        name: go vet (host, linux, windows)
+        language: system
+        pass_filenames: false
+        files: '(\.go$)|(\bgo\.mod$)|(\bgo\.sum$)'
+        entry: scripts/vet.sh
       - id: go-test
         name: go test
         language: system
         pass_filenames: false
         always_run: true
-        entry: go test ./...
+        entry: scripts/test.sh

@@ -14,10 +14,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Test
-        run: go test ./...
+      # The same pinned linter, vet and test definition as every host in
+      # yammm_test.yml, so a tag ships no binary a weaker suite passed.
       - name: Lint
         run: make lint
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: scripts/test.sh
       - name: Build all platforms
         env:
           VERSION: ${{ github.ref_name }}
