@@ -40,26 +40,26 @@ func respellAfter(t *testing.T, data []byte, marker, from, to string) []byte {
 // addresses agree. Comparing the raw spellings again turns this red.
 func TestLoad_DuplicateRecordKeyAgreesAcrossSpellings(t *testing.T) {
 	t.Parallel()
-	s := residueRecordSchema(t)
+	s := foreignSpellingSchema(t)
 	sensorType, _ := s.Type("Sensor")
 	readingType, _ := s.Type("Reading")
 
 	reading := func() *instance.ValidInstance {
 		return instance.NewValidInstance("Reading", readingType.ID(),
-			immutable.WrapKey([]any{residueCanonStamp}),
-			immutable.WrapProperties(map[string]any{"taken_at": residueCanonStamp}),
+			immutable.WrapKey([]any{canonicalStamp}),
+			immutable.WrapProperties(map[string]any{"taken_at": canonicalStamp}),
 			nil, nil, nil)
 	}
 	sensor := instance.NewValidInstance("Sensor", sensorType.ID(),
-		immutable.WrapKey([]any{residueCanonStamp}),
-		immutable.WrapProperties(map[string]any{"observed_at": residueCanonStamp}),
+		immutable.WrapKey([]any{canonicalStamp}),
+		immutable.WrapProperties(map[string]any{"observed_at": canonicalStamp}),
 		nil, map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading()})}, nil)
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), sensor); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	if r := g.AddComposed(t.Context(), sensorType.ID(), graph.FormatKey(residueCanonStamp),
+	if r := g.AddComposed(t.Context(), sensorType.ID(), graph.FormatKey(canonicalStamp),
 		"READINGS", reading()); r.OK() {
 		t.Fatal("a duplicate sibling was accepted")
 	}
@@ -70,19 +70,19 @@ func TestLoad_DuplicateRecordKeyAgreesAcrossSpellings(t *testing.T) {
 	}
 	// Only the duplicate record's STATED key moves, so it disagrees as text
 	// with the instance it carries and names the same value.
-	doc := rehashDocument(t, respellAfter(t, data, `"duplicates"`, residueCanonStamp, residueRawStamp))
+	doc := rehashDocument(t, respellAfter(t, data, `"duplicates"`, canonicalStamp, rawStamp))
 
 	if _, res := snapshot.Load(t.Context(), doc, s); hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Errorf("two spellings of one instant were called a key disagreement: %s", res)
 	}
 }
 
-// group3ReaderSchema declares a (one) ADDRESS composition beside a (_:many)
+// oneSlotReaderSchema declares a (one) ADDRESS composition beside a (_:many)
 // LINES, so the reader's cardinality guard has both the shape it refuses and
 // the shape it must leave alone.
-func group3ReaderSchema(t *testing.T) *schema.Schema {
+func oneSlotReaderSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	const src = `schema "group3_reader"
+	const src = `schema "one_slot_reader"
 
 type Order {
 	id String primary
@@ -98,14 +98,14 @@ part type Line {
 	sku String primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "group3_reader.yammm")
+	s, res := schema.LoadString(t.Context(), src, "one_slot_reader.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
 	return s
 }
 
-// group3OneSlotDocument writes a document whose (one) ADDRESS slot holds a
+// oneSlotDocument writes a document whose (one) ADDRESS slot holds a
 // sole occupant, and returns it beside a copy carrying a second one.
 //
 // The second occupant is spliced into the composed array rather than written:
@@ -114,7 +114,7 @@ part type Line {
 // foreign document is the only way to present it to the reader. The splice is
 // byte-level because the reader requires yammm_snapshot to be the object's
 // first key, which a JSON round trip through a Go map does not preserve.
-func group3OneSlotDocument(t *testing.T, s *schema.Schema) (sole, twoOccupants []byte) {
+func oneSlotDocument(t *testing.T, s *schema.Schema) (sole, twoOccupants []byte) {
 	t.Helper()
 	orderType, _ := s.Type("Order")
 	addressType, _ := s.Type("Address")
@@ -182,8 +182,8 @@ func soleArrayElement(data []byte, marker string) (string, bool) {
 // _composed_key for both. Removing the guard turns this red.
 func TestLoad_RefusesASecondOccupantInAOneSlot(t *testing.T) {
 	t.Parallel()
-	s := group3ReaderSchema(t)
-	sole, twoOccupants := group3OneSlotDocument(t, s)
+	s := oneSlotReaderSchema(t)
+	sole, twoOccupants := oneSlotDocument(t, s)
 
 	// The control runs first: a sole occupant must still load, or the guard
 	// would pass by refusing everything.

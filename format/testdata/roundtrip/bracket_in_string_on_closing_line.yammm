@@ -1,4 +1,4 @@
-schema "g5"
+schema "closing_bracket"
 
 // A "]" inside a string literal on the closing line of a multiline enum.
 // The output still parses and loads, and the enum value has gained a space.

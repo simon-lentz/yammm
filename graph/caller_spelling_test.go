@@ -16,13 +16,13 @@ const (
 	canonInstant = "2020-01-02T03:04:05Z"
 )
 
-// group10Schema declares a Timestamp-keyed root that composes a part and
+// callerSpellingSchema declares a Timestamp-keyed root that composes a part and
 // associates to a Timestamp-keyed peer, so every address the graph receives
 // — a composed parent, an edge endpoint, an unresolved target — has a
 // canonical spelling distinct from the one a caller may hold.
-func group10Schema(t *testing.T) *schema.Schema {
+func callerSpellingSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	const src = `schema "group10"
+	const src = `schema "caller_spelling"
 
 type Run {
 	at Timestamp primary
@@ -38,7 +38,7 @@ type Tag {
 	name String primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "group10.yammm")
+	s, res := schema.LoadString(t.Context(), src, "caller_spelling.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
@@ -65,7 +65,7 @@ func runInstance(t *testing.T, s *schema.Schema, at string, next string) *instan
 // it installs.
 func TestAddComposed_ParentAddressedByTheCallersSpelling(t *testing.T) {
 	t.Parallel()
-	s := group10Schema(t)
+	s := callerSpellingSchema(t)
 	runID := mustTypeID(t, s, "Run")
 	stepID := mustTypeID(t, s, "Step")
 	run := runInstance(t, s, rawInstant, "")
@@ -92,7 +92,7 @@ func TestAddComposed_ParentAddressedByTheCallersSpelling(t *testing.T) {
 // refused address addresses nothing, so nothing canonicalizes it.
 func TestAddComposed_RefusedParentKeepsTheCallersSpelling(t *testing.T) {
 	t.Parallel()
-	s := group10Schema(t)
+	s := callerSpellingSchema(t)
 	runID := mustTypeID(t, s, "Run")
 	stepID := mustTypeID(t, s, "Step")
 	step := instance.NewValidInstance("Step", stepID, immutable.WrapKey([]any{"s1"}),
@@ -122,7 +122,7 @@ func TestAddComposed_RefusedParentKeepsTheCallersSpelling(t *testing.T) {
 // produce one record from one input.
 func TestUnresolvedTarget_OneAddressOnEveryPath(t *testing.T) {
 	t.Parallel()
-	s := group10Schema(t)
+	s := callerSpellingSchema(t)
 	runID := mustTypeID(t, s, "Run")
 	want := graph.FormatKey(canonInstant)
 
@@ -164,7 +164,7 @@ func TestUnresolvedTarget_OneAddressOnEveryPath(t *testing.T) {
 // the record carries the canonical form.
 func TestRebuildSnapshot_SourceAddressesMoveWithTheInstances(t *testing.T) {
 	t.Parallel()
-	s := group10Schema(t)
+	s := callerSpellingSchema(t)
 	runID := mustTypeID(t, s, "Run")
 	const other = "2021-01-01T00:00:00Z"
 	parts := func(at string) graph.InstanceParts {

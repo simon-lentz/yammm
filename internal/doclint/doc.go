@@ -39,4 +39,22 @@
 // would be an import cycle to depend on. Links resolving outside the module are
 // skipped: the standard library and this module's dependencies are not this
 // gate's business.
+//
+// # Names
+//
+// [AssertProcessFreeNames] refuses a process reference in a name: a tracked
+// path's file or directory name, testdata included, or a Test, Fuzz, Benchmark
+// or Example function. A name states what its file or test holds. A review
+// round, a fix-pass group or a row identifier does not, and it outlives the
+// plan that gave it meaning.
+//
+// A name is split into lowercase words at every non-alphanumeric rune and at
+// camel-case boundaries; a digit run stays on the word before it. A word is a
+// process reference when it is residue, slate, tranche, fixpass or fixdiff; a
+// stage word (tier, group, round, unit, step, phase, wave, pass, batch, stage,
+// sweep) carrying a number, as group3 or group_3; gate followed by fix or fixes,
+// or fix followed by pass or diff; or a single letter and digits, as g11, p2
+// and a01. Two words of that last shape are legitimate and pass: a version
+// such as v2, and o1 for constant time. An all-lowercase run such as a fuzz
+// corpus hash is one word, so it never takes the row-identifier shape.
 package doclint

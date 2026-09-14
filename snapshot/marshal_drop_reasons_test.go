@@ -14,12 +14,12 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// group6Schema declares a required association, so a graph can hold an
+// dropReasonSchema declares a required association, so a graph can hold an
 // unresolved record whose reason is "absent" — the shape whose stated target
 // key and edge properties the wire cannot carry.
-func group6Schema(t *testing.T) *schema.Schema {
+func dropReasonSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	const src = `schema "group6"
+	const src = `schema "drop_reason"
 
 type Target {
 	id String primary
@@ -32,7 +32,7 @@ type Source {
 	}
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "group6.yammm")
+	s, res := schema.LoadString(t.Context(), src, "drop_reason.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
@@ -46,7 +46,7 @@ type Source {
 // about them rested on reading. Removing either arm turns this red.
 func TestMarshal_DropsUnderAReasonTheWireRefuses_AreMarked(t *testing.T) {
 	t.Parallel()
-	s := group6Schema(t)
+	s := dropReasonSchema(t)
 	sourceType, _ := s.Type("Source")
 
 	// A stated target key and edge properties under reason "absent" is the
@@ -99,7 +99,7 @@ func TestMarshal_DropsUnderAReasonTheWireRefuses_AreMarked(t *testing.T) {
 // gated loss detection on the code alone would be told nothing was lost.
 func TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked(t *testing.T) {
 	t.Parallel()
-	s := group6Schema(t)
+	s := dropReasonSchema(t)
 	targetType, _ := s.Type("Target")
 
 	row := func(key string) *instance.ValidInstance {
@@ -143,7 +143,7 @@ func TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked(t *testing.T) {
 // writes from such a graph.
 func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	t.Parallel()
-	s := group6Schema(t)
+	s := dropReasonSchema(t)
 	targetType, _ := s.Type("Target")
 
 	build := func(prov *location.Provenance) *graph.Snapshot {

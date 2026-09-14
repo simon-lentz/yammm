@@ -11,12 +11,12 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// group4Schema declares a foldable property beside two relations whose field
+// cancellationSchema declares a foldable property beside two relations whose field
 // names fold, so one row can carry a property error, a property-name collision
 // and a relation collision at once.
-func group4Schema(t *testing.T) *schema.Schema {
+func cancellationSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	const src = `schema "group4"
+	const src = `schema "cancellation"
 
 type Target {
 	id String primary
@@ -33,7 +33,7 @@ type Row {
 	*-> PARTS (one:many) Part
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "group4.yammm")
+	s, res := schema.LoadString(t.Context(), src, "cancellation.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
@@ -89,7 +89,7 @@ func (h *recordingHandler) sawContextValue(want any) bool {
 func TestValidate_NormalizationRecordCarriesTheCallersContext(t *testing.T) {
 	t.Parallel()
 	h := &recordingHandler{}
-	v := NewValidator(group4Schema(t), WithLogger(slog.New(h)))
+	v := NewValidator(cancellationSchema(t), WithLogger(slog.New(h)))
 
 	ctx := context.WithValue(t.Context(), ctxKey{}, "req-1")
 	// "Count" folds onto "count", which is what emits the record.
@@ -114,7 +114,7 @@ func TestValidate_NormalizationRecordCarriesTheCallersContext(t *testing.T) {
 // gates to HasErrors turns these red.
 func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 	t.Parallel()
-	v := NewValidator(group4Schema(t))
+	v := NewValidator(cancellationSchema(t))
 
 	t.Run("a property error beside a relation collision reports both", func(t *testing.T) {
 		t.Parallel()
@@ -195,7 +195,7 @@ func cancelOnNormalize(t *testing.T, s *schema.Schema) (*Validator, context.Cont
 // Removing ValidateOne's post-row check turns this red.
 func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 	t.Parallel()
-	v, ctx := cancelOnNormalize(t, group4Schema(t))
+	v, ctx := cancelOnNormalize(t, cancellationSchema(t))
 
 	inst, res := v.ValidateOne(ctx, "Row", RawInstance{
 		Properties: map[string]any{"id": "r1", "Count": "not a number"},
@@ -220,7 +220,7 @@ func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 // caller could not tell a failed row from an abandoned one.
 func TestValidateProperties_CancellationRecordedAtEveryExit(t *testing.T) {
 	t.Parallel()
-	v, ctx := cancelOnNormalize(t, group4Schema(t))
+	v, ctx := cancelOnNormalize(t, cancellationSchema(t))
 
 	_, res := v.Validate(ctx, "Row", []RawInstance{{
 		Properties: map[string]any{"id": "r1", "Count": "not a number"},
@@ -235,7 +235,7 @@ func TestValidateProperties_CancellationRecordedAtEveryExit(t *testing.T) {
 // second E_CONTEXT_CANCELLED as the parent unwinds through its own exits.
 func TestValidate_NestedBatchCancellationIsReportedOnce(t *testing.T) {
 	t.Parallel()
-	v, ctx := cancelOnNormalize(t, group4Schema(t))
+	v, ctx := cancelOnNormalize(t, cancellationSchema(t))
 
 	_, res := v.Validate(ctx, "Row", []RawInstance{{
 		Properties: map[string]any{

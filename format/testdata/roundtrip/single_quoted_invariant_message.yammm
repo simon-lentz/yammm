@@ -1,4 +1,4 @@
-schema "g12"
+schema "quoted_message"
 
 type T {
 	id    String primary

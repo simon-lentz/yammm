@@ -1,4 +1,4 @@
-schema "g1"
+schema "quoted_comma"
 
 // A single-quoted enum value containing a comma, on a line over the
 // hundred-column wrap threshold. quoteAwareScanner tracks only the double

@@ -10,25 +10,25 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// group3Schema declares one Run type whose key takes the named constraint, so
+// instantKeySchema declares one Run type whose key takes the named constraint, so
 // a snapshot written under one spelling of the schema can be imported under
 // another — the key migration replayed over a persisted snapshot.
-func group3Schema(t *testing.T, keyKind string) *schema.Schema {
+func instantKeySchema(t *testing.T, keyKind string) *schema.Schema {
 	t.Helper()
-	src := `schema "group3"
+	src := `schema "instant_key"
 
 type Run {
 	at ` + keyKind + ` primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "group3.yammm")
+	s, res := schema.LoadString(t.Context(), src, "instant_key.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load %s: %s", keyKind, res)
 	}
 	return s
 }
 
-func group3Run(t *testing.T, s *schema.Schema, key, prop string) *instance.ValidInstance {
+func instantKeyInstance(t *testing.T, s *schema.Schema, key, prop string) *instance.ValidInstance {
 	t.Helper()
 	return instance.NewValidInstance("Run", mustTypeID(t, s, "Run"),
 		immutable.WrapKey([]any{key}),
@@ -45,14 +45,14 @@ func group3Run(t *testing.T, s *schema.Schema, key, prop string) *instance.Valid
 // re-Add duplicated it silently. Removing the re-key turns this red.
 func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 	t.Parallel()
-	before, after := group3Schema(t, "String"), group3Schema(t, "Timestamp")
+	before, after := instantKeySchema(t, "String"), instantKeySchema(t, "Timestamp")
 	runID := mustTypeID(t, before, "Run")
 	if runID != mustTypeID(t, after, "Run") {
 		t.Fatal("the two schemas hold different type identities, so this is not one type migrated")
 	}
 
 	persisted := graph.New(before)
-	if r := persisted.Add(t.Context(), group3Run(t, before, rawInstant, rawInstant)); !r.OK() {
+	if r := persisted.Add(t.Context(), instantKeyInstance(t, before, rawInstant, rawInstant)); !r.OK() {
 		t.Fatalf("add under the String key: %s", r)
 	}
 	// The String constraint canonicalizes nothing, so the persisted address is
@@ -81,7 +81,7 @@ func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 
 	// The second half of the defect: with the index holding one spelling and
 	// Add canonicalizing another, the re-Add found no conflict.
-	res := g.Add(t.Context(), group3Run(t, after, rawInstant, rawInstant))
+	res := g.Add(t.Context(), instantKeyInstance(t, after, rawInstant, rawInstant))
 	if !hasIssueCode(res, diag.E_DUPLICATE_PK) {
 		t.Errorf("re-adding the imported instance did not draw E_DUPLICATE_PK: %s", res)
 	}
@@ -95,11 +95,11 @@ func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 // already canonical, and canon.key is idempotent on them.
 func TestNewFromSnapshot_ReKeyIsANoOpOnTheCommonPath(t *testing.T) {
 	t.Parallel()
-	s := group3Schema(t, "Timestamp")
+	s := instantKeySchema(t, "Timestamp")
 	runID := mustTypeID(t, s, "Run")
 
 	src := graph.New(s)
-	if r := src.Add(t.Context(), group3Run(t, s, rawInstant, rawInstant)); !r.OK() {
+	if r := src.Add(t.Context(), instantKeyInstance(t, s, rawInstant, rawInstant)); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
 	before := src.Snapshot().InstancesOf(runID)[0].PrimaryKey().String()
@@ -121,11 +121,11 @@ func TestNewFromSnapshot_ReKeyIsANoOpOnTheCommonPath(t *testing.T) {
 // Comparing the two raw again turns this red.
 func TestAdd_KeyComponentAgreesAcrossSpellings(t *testing.T) {
 	t.Parallel()
-	s := group3Schema(t, "Timestamp")
+	s := instantKeySchema(t, "Timestamp")
 	runID := mustTypeID(t, s, "Run")
 
 	g := graph.New(s)
-	if res := g.Add(t.Context(), group3Run(t, s, rawInstant, canonInstant)); !res.OK() {
+	if res := g.Add(t.Context(), instantKeyInstance(t, s, rawInstant, canonInstant)); !res.OK() {
 		t.Fatalf("two spellings of one instant were refused as a disagreement: %s", res)
 	}
 	if got := g.Snapshot().InstancesOf(runID)[0].PrimaryKey().String(); got != graph.FormatKey(canonInstant) {
@@ -150,10 +150,10 @@ func TestAdd_KeyComponentAgreesAcrossSpellings(t *testing.T) {
 // property, which is the whole reason the check exists.
 func TestAdd_KeyComponentStillRefusesADifferentValue(t *testing.T) {
 	t.Parallel()
-	s := group3Schema(t, "Timestamp")
+	s := instantKeySchema(t, "Timestamp")
 	const other = "2021-06-07T08:09:10Z"
 
-	res := graph.New(s).Add(t.Context(), group3Run(t, s, canonInstant, other))
+	res := graph.New(s).Add(t.Context(), instantKeyInstance(t, s, canonInstant, other))
 	if res.OK() {
 		t.Fatal("a key naming a different instant than its property was accepted")
 	}
@@ -171,7 +171,7 @@ func TestAdd_KeyComponentStillRefusesADifferentValue(t *testing.T) {
 // this clean.
 func TestAdd_EdgePropertiesAreCanonicalized(t *testing.T) {
 	t.Parallel()
-	const src = `schema "group3_edge"
+	const src = `schema "edge_properties"
 
 type Note {
 	id String primary
@@ -184,7 +184,7 @@ type Doc {
 	}
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "group3_edge.yammm")
+	s, res := schema.LoadString(t.Context(), src, "edge_properties.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
@@ -224,7 +224,7 @@ type Doc {
 // value in a spelling no other path uses.
 func TestNewFromSnapshot_EdgePropertiesAreCanonicalized(t *testing.T) {
 	t.Parallel()
-	const src = `schema "group3_import_edge"
+	const src = `schema "import_edge_properties"
 
 type Note {
 	id String primary
@@ -237,7 +237,7 @@ type Doc {
 	}
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "group3_import_edge.yammm")
+	s, res := schema.LoadString(t.Context(), src, "import_edge_properties.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
@@ -245,7 +245,7 @@ type Doc {
 
 	// Built through RebuildSnapshot with the canonicalizer INACTIVE, so the
 	// persisted edge property keeps the raw spelling for the import to meet.
-	inert, ires := schema.LoadString(t.Context(), `schema "group3_import_edge"
+	inert, ires := schema.LoadString(t.Context(), `schema "import_edge_properties"
 
 type Note {
 	id String primary
@@ -257,7 +257,7 @@ type Doc {
 		seen_at String
 	}
 }
-`, "group3_import_edge.yammm")
+`, "import_edge_properties.yammm")
 	if ires.HasErrors() {
 		t.Fatalf("load the inert schema: %s", ires)
 	}
@@ -295,12 +295,12 @@ type Doc {
 	}
 }
 
-// group3ComposedSchema declares a (one) composition beside a (_:many) one, so
+// composedOneSlotSchema declares a (one) composition beside a (_:many) one, so
 // the cardinality guard has both the shape it refuses and the shape it must
 // leave alone.
-func group3ComposedSchema(t *testing.T) *schema.Schema {
+func composedOneSlotSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	const src = `schema "group3_composed"
+	const src = `schema "composed_one_slot"
 
 type Order {
 	id String primary
@@ -316,14 +316,14 @@ part type Line {
 	sku String primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "group3_composed.yammm")
+	s, res := schema.LoadString(t.Context(), src, "composed_one_slot.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
 	return s
 }
 
-func group3Part(t *testing.T, s *schema.Schema, typeName, prop, key string) graph.InstanceParts {
+func composedOneSlotPart(t *testing.T, s *schema.Schema, typeName, prop, key string) graph.InstanceParts {
 	t.Helper()
 	return graph.InstanceParts{
 		TypeName: typeName, TypeID: mustTypeID(t, s, typeName),
@@ -340,11 +340,11 @@ func group3Part(t *testing.T, s *schema.Schema, typeName, prop, key string) grap
 // byte-identical _composed_key for both. Removing the guard turns this red.
 func TestRebuildSnapshot_RefusesASecondOccupantInAOneSlot(t *testing.T) {
 	t.Parallel()
-	s := group3ComposedSchema(t)
+	s := composedOneSlotSchema(t)
 	orderID := mustTypeID(t, s, "Order")
 
 	parts := func(relation string, children ...graph.InstanceParts) graph.SnapshotParts {
-		root := group3Part(t, s, "Order", "id", "o1")
+		root := composedOneSlotPart(t, s, "Order", "id", "o1")
 		root.Composed = map[string][]graph.InstanceParts{relation: children}
 		return graph.SnapshotParts{
 			Types:     []schema.TypeID{orderID},
@@ -353,8 +353,8 @@ func TestRebuildSnapshot_RefusesASecondOccupantInAOneSlot(t *testing.T) {
 	}
 
 	_, res := graph.RebuildSnapshot(s, parts("ADDRESS",
-		group3Part(t, s, "Address", "street", "first"),
-		group3Part(t, s, "Address", "street", "second")))
+		composedOneSlotPart(t, s, "Address", "street", "first"),
+		composedOneSlotPart(t, s, "Address", "street", "second")))
 	if !res.HasErrors() {
 		t.Fatal("two occupants of a (one) composition were accepted")
 	}
@@ -365,12 +365,12 @@ func TestRebuildSnapshot_RefusesASecondOccupantInAOneSlot(t *testing.T) {
 	// The controls: one occupant is the shape the slot is for, and a (many)
 	// slot carries as many as it likes.
 	if _, res := graph.RebuildSnapshot(s, parts("ADDRESS",
-		group3Part(t, s, "Address", "street", "first"))); res.HasErrors() {
+		composedOneSlotPart(t, s, "Address", "street", "first"))); res.HasErrors() {
 		t.Errorf("a sole occupant of a (one) composition was refused: %s", res)
 	}
 	if _, res := graph.RebuildSnapshot(s, parts("LINES",
-		group3Part(t, s, "Line", "sku", "a"),
-		group3Part(t, s, "Line", "sku", "b"))); res.HasErrors() {
+		composedOneSlotPart(t, s, "Line", "sku", "a"),
+		composedOneSlotPart(t, s, "Line", "sku", "b"))); res.HasErrors() {
 		t.Errorf("two occupants of a (many) composition were refused: %s", res)
 	}
 }

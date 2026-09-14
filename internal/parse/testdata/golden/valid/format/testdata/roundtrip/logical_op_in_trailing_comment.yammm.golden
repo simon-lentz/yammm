@@ -1,15 +1,15 @@
 {
-  "name": "\"g12\"",
+  "name": "\"comment_operator\"",
   "span": {
     "s": 0,
-    "e": 12
+    "e": 25
   },
   "types": [
     {
       "name": "T",
       "name_span": {
-        "s": 19,
-        "e": 20
+        "s": 229,
+        "e": 230
       },
       "props": [
         {
@@ -17,14 +17,14 @@
           "constraint": {
             "kind": "String",
             "span": {
-              "s": 30,
-              "e": 36
+              "s": 240,
+              "e": 246
             }
           },
           "primary": true,
           "span": {
-            "s": 24,
-            "e": 44
+            "s": 234,
+            "e": 254
           }
         },
         {
@@ -32,13 +32,13 @@
           "constraint": {
             "kind": "Integer",
             "span": {
-              "s": 52,
-              "e": 59
+              "s": 262,
+              "e": 269
             }
           },
           "span": {
-            "s": 46,
-            "e": 59
+            "s": 256,
+            "e": 269
           }
         },
         {
@@ -46,33 +46,33 @@
           "constraint": {
             "kind": "Integer",
             "span": {
-              "s": 67,
-              "e": 74
+              "s": 277,
+              "e": 284
             }
           },
           "span": {
-            "s": 61,
-            "e": 74
+            "s": 271,
+            "e": 284
           }
         }
       ],
       "invariants": [
         {
-          "msg": "'a single-quoted invariant message that is long enough to need wrapping'",
+          "msg": "\"left and right must both be positive and bounded\"",
           "expr": "(\u0026\u0026 (\u0026\u0026 (\u003e (. ($ \"self\") \"left\") 0) (\u003e (. ($ \"self\") \"right\") 0)) (\u003c (. ($ \"self\") \"left\") 1000))",
           "expr_span": {
-            "s": 152,
-            "e": 206
+            "s": 340,
+            "e": 394
           },
           "span": {
-            "s": 77,
-            "e": 206
+            "s": 287,
+            "e": 394
           }
         }
       ],
       "span": {
-        "s": 14,
-        "e": 208
+        "s": 224,
+        "e": 411
       }
     }
   ]

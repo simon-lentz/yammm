@@ -18,11 +18,11 @@ const (
 	canonStamp = "2020-01-02T03:04:05Z"
 )
 
-// residueKeyedSchema declares a canonicalizing key at a root and at a keyed
+// keyedDuplicateSchema declares a canonicalizing key at a root and at a keyed
 // composed child, which is what the duplicate records address.
-func residueKeyedSchema(t *testing.T) *schema.Schema {
+func keyedDuplicateSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	const src = `schema "residue_keyed"
+	const src = `schema "keyed_duplicates"
 
 type Sensor {
 	observed_at Timestamp primary
@@ -34,7 +34,7 @@ part type Reading {
 	note String
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "residue_keyed.yammm")
+	s, res := schema.LoadString(t.Context(), src, "keyed_duplicates.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
@@ -48,7 +48,7 @@ part type Reading {
 // ValidInstance turns this red.
 func TestAdd_RootDuplicateRecordCarriesTheCanonicalAddress(t *testing.T) {
 	t.Parallel()
-	s := residueKeyedSchema(t)
+	s := keyedDuplicateSchema(t)
 	sensorID := mustTypeID(t, s, "Sensor")
 
 	sensor := func(spelling string) *instance.ValidInstance {
@@ -111,7 +111,7 @@ func addSensorWithReading(t *testing.T, s *schema.Schema) *graph.Graph {
 // reports names that one address rather than the caller's spelling.
 func TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress(t *testing.T) {
 	t.Parallel()
-	s := residueKeyedSchema(t)
+	s := keyedDuplicateSchema(t)
 	sensorID, readingID := mustTypeID(t, s, "Sensor"), mustTypeID(t, s, "Reading")
 	g := addSensorWithReading(t, s)
 
@@ -174,7 +174,7 @@ func TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress(t *testing.T) {
 // rewrite turns the lookup into a miss and the record into a Fatal.
 func TestRebuildSnapshot_DuplicateRecordResolvesFromEverySpelling(t *testing.T) {
 	t.Parallel()
-	s := residueKeyedSchema(t)
+	s := keyedDuplicateSchema(t)
 	sensorID, readingID := mustTypeID(t, s, "Sensor"), mustTypeID(t, s, "Reading")
 
 	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
@@ -239,7 +239,7 @@ func TestRebuildSnapshot_DuplicateRecordResolvesFromEverySpelling(t *testing.T) 
 // snapshot uses rather than the caller's spelling.
 func TestRebuildSnapshot_DuplicateRefusalNamesTheCanonicalAddress(t *testing.T) {
 	t.Parallel()
-	s := residueKeyedSchema(t)
+	s := keyedDuplicateSchema(t)
 	sensorID, readingID := mustTypeID(t, s, "Sensor"), mustTypeID(t, s, "Reading")
 
 	// A duplicate instance carrying composed children is refused; the message

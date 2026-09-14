@@ -1,4 +1,4 @@
-schema "g2"
+schema "extends_comment"
 
 type A {
 	id String primary

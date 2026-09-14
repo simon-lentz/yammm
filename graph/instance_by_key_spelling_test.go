@@ -16,7 +16,7 @@ import (
 // one rebuilt from parts.
 func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 	t.Parallel()
-	s := group10Schema(t)
+	s := callerSpellingSchema(t)
 	runID := mustTypeID(t, s, "Run")
 	want := graph.FormatKey(canonInstant)
 
@@ -68,7 +68,7 @@ func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 // canonicalizing key type and on a plain String key alike.
 func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 	t.Parallel()
-	s := group10Schema(t)
+	s := callerSpellingSchema(t)
 	runID := mustTypeID(t, s, "Run")
 	// Tag is a ROOT with a plain String key. Step is a PART: no instance of
 	// it reaches the snapshot's index, so an arm written on Step returns at

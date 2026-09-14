@@ -92,11 +92,11 @@ func TestAddComposed_OneOverflow_RebuiltKeylessOccupantReportsNoStandIn(t *testi
 	}
 }
 
-// canonGroup5Schema declares a canonicalizing kind at every position the Add
+// canonicalKeySchema declares a canonicalizing kind at every position the Add
 // path fills: a root property, a composed child's key and a child property,
 // and an association whose TARGET KEY canonicalizes, so the agreement test
 // reaches an edge position as well as an instance one.
-func canonGroup5Schema(t *testing.T) *schema.Schema {
+func canonicalKeySchema(t *testing.T) *schema.Schema {
 	t.Helper()
 	const src = `schema "canon_add_path"
 
@@ -132,7 +132,7 @@ part type Reading {
 // one canonicalizer with it.
 func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 	t.Parallel()
-	s := canonGroup5Schema(t)
+	s := canonicalKeySchema(t)
 	sensorID := mustTypeID(t, s, "Sensor")
 	readingID := mustTypeID(t, s, "Reading")
 

@@ -46,7 +46,7 @@ func TestLoad_ReadsATaggedTestFile(t *testing.T) {
 // machine and in no checkout. Dropping the tracked filter turns this red.
 func TestLoad_ReadsTheTrackedTreeOnly(t *testing.T) {
 	// Not parallel: it writes a file into the module and removes it.
-	const probe = "residue_group5_untracked_probe.go"
+	const probe = "untracked_probe.go"
 	const src = "package doclint\n\n// UntrackedProbe is declared by a file no checkout holds.\nfunc UntrackedProbe() {}\n"
 	if err := os.WriteFile(probe, []byte(src), 0o600); err != nil {
 		t.Fatalf("writing the probe: %v", err)

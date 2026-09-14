@@ -13,17 +13,17 @@ import (
 )
 
 const (
-	residueCanonStamp = "2020-01-02T03:04:05Z"
-	residueRawStamp   = "2020-01-02T03:04:05+00:00"
+	canonicalStamp = "2020-01-02T03:04:05Z"
+	rawStamp       = "2020-01-02T03:04:05+00:00"
 )
 
-// residueRecordSchema declares a Timestamp key at the root and at a keyed
+// foreignSpellingSchema declares a Timestamp key at the root and at a keyed
 // composed child, plus an optional association, so one document can carry a
 // composed duplicate record and an unresolved-edge record whose addresses
 // are all canonicalizing.
-func residueRecordSchema(t *testing.T) *schema.Schema {
+func foreignSpellingSchema(t *testing.T) *schema.Schema {
 	t.Helper()
-	const src = `schema "residue_records"
+	const src = `schema "foreign_spelling"
 
 type Station {
 	id String primary
@@ -39,7 +39,7 @@ part type Reading {
 	taken_at Timestamp primary
 }
 `
-	s, res := schema.LoadString(t.Context(), src, "residue_records.yammm")
+	s, res := schema.LoadString(t.Context(), src, "foreign_spelling.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %s", res)
 	}
@@ -55,21 +55,21 @@ part type Reading {
 // one of the three turns its lookup into a dangling reference.
 func TestLoad_RecordAddressesResolveFromAForeignSpelling(t *testing.T) {
 	t.Parallel()
-	s := residueRecordSchema(t)
+	s := foreignSpellingSchema(t)
 	sensorType, _ := s.Type("Sensor")
 	readingType, _ := s.Type("Reading")
 
 	reading := func() *instance.ValidInstance {
 		return instance.NewValidInstance("Reading", readingType.ID(),
-			immutable.WrapKey([]any{residueCanonStamp}),
-			immutable.WrapProperties(map[string]any{"taken_at": residueCanonStamp}),
+			immutable.WrapKey([]any{canonicalStamp}),
+			immutable.WrapProperties(map[string]any{"taken_at": canonicalStamp}),
 			nil, nil, nil)
 	}
 	// The association names a Station that is never added, so the snapshot
 	// carries an unresolved record whose SOURCE is the Timestamp-keyed root.
 	sensor := instance.NewValidInstance("Sensor", sensorType.ID(),
-		immutable.WrapKey([]any{residueCanonStamp}),
-		immutable.WrapProperties(map[string]any{"observed_at": residueCanonStamp}),
+		immutable.WrapKey([]any{canonicalStamp}),
+		immutable.WrapProperties(map[string]any{"observed_at": canonicalStamp}),
 		map[string]*instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"missing"}), immutable.WrapProperties(nil)),
 		})},
@@ -81,7 +81,7 @@ func TestLoad_RecordAddressesResolveFromAForeignSpelling(t *testing.T) {
 	}
 	// A second child at the same address makes a COMPOSED duplicate record,
 	// which carries both a parent address and a conflict address.
-	if r := g.AddComposed(t.Context(), sensorType.ID(), graph.FormatKey(residueCanonStamp),
+	if r := g.AddComposed(t.Context(), sensorType.ID(), graph.FormatKey(canonicalStamp),
 		"READINGS", reading()); r.OK() {
 		t.Fatal("a duplicate sibling was accepted")
 	}
@@ -100,7 +100,7 @@ func TestLoad_RecordAddressesResolveFromAForeignSpelling(t *testing.T) {
 	}
 	// Respell every rendering of the instant the other way, as a foreign
 	// writer would. The reader canonicalizes each address it reads back.
-	doc := rehashDocument(t, bytes.ReplaceAll(data, []byte(residueCanonStamp), []byte(residueRawStamp)))
+	doc := rehashDocument(t, bytes.ReplaceAll(data, []byte(canonicalStamp), []byte(rawStamp)))
 
 	if _, res := snapshot.Load(t.Context(), doc, s); res.HasErrors() {
 		t.Errorf("Load of the foreign spelling: %s", res)

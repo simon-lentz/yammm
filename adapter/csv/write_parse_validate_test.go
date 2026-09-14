@@ -14,7 +14,7 @@ import (
 // The CSV round-trip corpus: write → parse → validate is the identity for a fully
 // resolved graph. CSV has no nested lists and no compositions — both are
 // documented limitations — so its schema declares neither.
-const p2CSVSchema = `schema "p2csv"
+const roundTripCSVSchema = `schema "roundtrip_csv"
 
 type Target {
 	on Date primary
@@ -38,10 +38,10 @@ type Item {
 }
 `
 
-func TestRoundTripP2_CSVWriteParseValidateIsTheIdentity(t *testing.T) {
+func TestRoundTrip_CSVWriteParseValidateIsTheIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), p2CSVSchema, "p2csv.yammm")
+	s, res := schema.LoadString(t.Context(), roundTripCSVSchema, "roundtrip_csv.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res.String())
 	}
@@ -134,7 +134,7 @@ func TestRoundTripP2_CSVWriteParseValidateIsTheIdentity(t *testing.T) {
 func TestCSV_AbsentEdgeGroupMeansAbsent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s, res := schema.LoadString(t.Context(), p2CSVSchema, "p2csv.yammm")
+	s, res := schema.LoadString(t.Context(), roundTripCSVSchema, "roundtrip_csv.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res.String())
 	}

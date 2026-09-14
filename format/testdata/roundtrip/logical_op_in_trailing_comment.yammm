@@ -1,4 +1,4 @@
-schema "g4"
+schema "comment_operator"
 
 // A long invariant carrying a "&&" inside its trailing comment. The
 // wrapper looks for a top-level logical operator by scanning text, finds the

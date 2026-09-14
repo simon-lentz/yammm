@@ -14,7 +14,7 @@ import (
 // The round-trip corpus: write → parse → validate is the identity for a fully
 // resolved graph. Unresolved edges are deliberately not written; the last
 // test pins that drop.
-const p2Schema = `schema "p2"
+const roundTripSchema = `schema "roundtrip"
 
 type Target {
 	on Date primary
@@ -47,7 +47,7 @@ type Item {
 
 func p2Source(t *testing.T) (*schema.Schema, location.SourceID) {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), p2Schema, "p2.yammm")
+	s, res := schema.LoadString(t.Context(), roundTripSchema, "roundtrip.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load schema: %s", res.String())
 	}
@@ -109,7 +109,7 @@ func buildP2Snapshot(t *testing.T, s *schema.Schema, raws map[string][]map[strin
 	return g.Snapshot()
 }
 
-func TestRoundTripP2_JSONWriteParseValidateIsTheIdentity(t *testing.T) {
+func TestRoundTrip_JSONWriteParseValidateIsTheIdentity(t *testing.T) {
 	t.Parallel()
 	s, source := p2Source(t)
 	snap := buildP2Snapshot(t, s, p2Raws())

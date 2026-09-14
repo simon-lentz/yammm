@@ -1,4 +1,4 @@
-schema "g11"
+schema "annotated_enum"
 
 // A long annotated enum property. Wrapping moves the annotation onto the
 // closing "]" line, where it attaches to nothing: the output parses and is
