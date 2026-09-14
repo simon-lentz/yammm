@@ -1750,6 +1750,34 @@ existing declaration.
 - **Consumer reach: none measured.** rdata's suite against this tree differs
   from its run against `v0.21.0` by nothing.
 
+### Unit 7 — `snapshot.WriteFile` stages each write in its own file
+
+**No declaration moves, and the staging contract changes.**
+`gorelease -base=v0.21.0` reports nothing new for it.
+
+- **Each call stages in a file of its own.** `WriteFile` staged at
+  `path+TmpSuffix`, one name for every writer of a path, so concurrent writers
+  shared one file. On Windows a sibling's open handle failed the create or the
+  rename. On Unix a sibling's write reached the committed file after its
+  rename, so a write that had succeeded could be overwritten, or mixed with
+  another writer's bytes. The staging name is now the path's stem, a random
+  token, the path's extension and `TmpSuffix` — `snap.12345.ys.tmp` for
+  `snap.ys` — and it is created exclusively. Each rename commits one writer's
+  bytes whole, and the last rename wins.
+- **`WriteFile` removes only its own staging file.** A file already named
+  `path+TmpSuffix` stays as it is, because it can belong to a live writer.
+  `WriteFile` replaced such a file before.
+- **Crash residue keeps its suffix.** A crashed write still leaves a file whose
+  name ends in `TmpSuffix`, and in `.ys` then `TmpSuffix` for a `.ys` target.
+  `ScanDir`'s skip and a sweep keyed on either suffix still find it. **A sweep
+  that looks for the exact name `path+TmpSuffix` no longer finds it.**
+- **The file mode is unchanged:** `0o666` under the process umask, as
+  `os.Create` gives.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing. rdata writes each `.ys` under a
+  per-batch lock, and its residue check keys on `.ys` then `TmpSuffix`, which
+  the new name keeps.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

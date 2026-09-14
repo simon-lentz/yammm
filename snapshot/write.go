@@ -1,55 +1,35 @@
 package snapshot
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"math/rand/v2"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 )
 
-// TmpSuffix is the extension [WriteFile] appends to path when staging a
-// tmp+fsync+rename atomic write. Exported so callers and other yammm
-// primitives (notably ScanDir's tmp-skip filter, landing in v0.3.0) key
-// off the same constant rather than duplicating the string literal,
-// preventing silent divergence on the convention across the snapshot
-// package.
-//
-// Contract: a crashed WriteFile may leave a file at path+TmpSuffix as a
-// partial write. Bespoke cleanup tools that enumerate or remove stale
-// staging files reference TmpSuffix directly rather than hard-coding
-// ".tmp" so a future change to the convention propagates through a
-// single source of truth.
+// TmpSuffix ends the name of every staging file [WriteFile] creates, and
+// [ScanDir] skips a file whose name ends in it. A crashed write can leave such
+// a file beside its target. A sweep that removes that residue keys on this
+// constant, not on the literal ".tmp".
 const TmpSuffix = ".tmp"
 
-// WriteFile writes data to path atomically, using the tmp+fsync+rename
-// pattern: the payload is staged at path+[TmpSuffix], fsync'd, closed,
-// and renamed into place. If the process crashes between fsync and
-// rename, the staging file is left behind as a partial write; consumers
-// with bespoke sweeps reference [TmpSuffix] directly to enumerate or
-// clean up these stale entries.
-//
-// On any error, WriteFile attempts to remove the path+[TmpSuffix]
-// staging file as cleanup and returns the original error wrapped with a
-// descriptive prefix.
-//
-// WriteFile does not validate that data is a valid .ys document. It is
-// a general-purpose atomic-write primitive; callers are responsible for
-// providing valid bytes (typically the output of [Marshal]).
-//
-// Durability semantics:
-//   - File mode is 0o666 subject to umask (matching os.Create). Callers
-//     who require stricter permissions should chmod the result after
-//     WriteFile returns.
-//   - WriteFile fsyncs the file before rename but does NOT fsync the
-//     parent directory. On some filesystems (e.g., ext4 with
-//     data=ordered and no commit barrier), the rename may not be
-//     durable across a crash. Consumers with stronger durability
-//     requirements should fork this helper and add parent-directory
-//     fsync.
+// WriteFile writes data to path atomically: it stages the bytes beside path,
+// fsyncs and closes the staging file, then renames it into place. Each call
+// stages in a file of its own, named path's stem, a random token, path's
+// extension and [TmpSuffix]. On an error, WriteFile removes its own staging
+// file and returns the error wrapped with the failing step. The package
+// documentation states the file mode, the durability limits and what a crash
+// leaves behind.
 func WriteFile(path string, data []byte) error {
-	tmp := path + TmpSuffix
-	f, err := os.Create(tmp)
+	f, err := createStaging(path)
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}
+	tmp := f.Name()
 	if _, err := f.Write(data); err != nil {
 		f.Close()      //nolint:gosec // best-effort close before cleanup
 		os.Remove(tmp) //nolint:gosec // best-effort cleanup on write failure
@@ -69,4 +49,22 @@ func WriteFile(path string, data []byte) error {
 		return fmt.Errorf("rename temp to final: %w", err)
 	}
 	return nil
+}
+
+// createStaging creates a staging file for path that no other call shares. A
+// name another file already holds is retried, as os.CreateTemp retries.
+func createStaging(path string) (*os.File, error) {
+	dir, base := filepath.Split(path)
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for range 10000 {
+		token := strconv.FormatUint(uint64(rand.Uint32()), 10) //nolint:gosec // O_EXCL makes the name unique; the token only spreads the attempts
+		name := filepath.Join(dir, stem+"."+token+ext+TmpSuffix)
+		f, err := os.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666) //nolint:gosec // 0o666 under umask is the documented mode, as os.Create gives
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		return f, err //nolint:wrapcheck // WriteFile wraps the error with the failing step
+	}
+	return nil, fmt.Errorf("no unused staging name beside %s: %w", path, fs.ErrExist)
 }

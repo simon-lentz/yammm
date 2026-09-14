@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1611,6 +1612,25 @@ func TestWriteFile_TmpSuffixConstant(t *testing.T) {
 	assert.Equal(t, ".tmp", snapshot.TmpSuffix)
 }
 
+// assertNoStagingFiles fails when a file under dir ends in TmpSuffix. A
+// missing dir holds none.
+func assertNoStagingFiles(t *testing.T, dir string) {
+	t.Helper()
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), snapshot.TmpSuffix) {
+			t.Errorf("staging file left behind: %s", p)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 func TestWriteFile_HappyPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "snap.ys")
@@ -1621,10 +1641,7 @@ func TestWriteFile_HappyPath(t *testing.T) {
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, data, got)
-
-	// The staging file must be renamed away — no tmp left on success.
-	_, statErr := os.Stat(path + snapshot.TmpSuffix)
-	assert.True(t, os.IsNotExist(statErr), "successful WriteFile should leave no tmp file behind")
+	assertNoStagingFiles(t, dir)
 }
 
 func TestWriteFile_OverwriteExisting(t *testing.T) {
@@ -1640,47 +1657,31 @@ func TestWriteFile_OverwriteExisting(t *testing.T) {
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, second, got, "second WriteFile should fully overwrite the first content via rename semantics")
-
-	_, statErr := os.Stat(path + snapshot.TmpSuffix)
-	assert.True(t, os.IsNotExist(statErr))
+	assertNoStagingFiles(t, dir)
 }
 
 func TestWriteFile_CreateFailsOnNonexistentDirectory(t *testing.T) {
 	dir := t.TempDir()
-	// Parent directory does not exist — os.Create on the tmp sibling fails.
 	path := filepath.Join(dir, "no-such-dir", "snap.ys")
 
 	err := snapshot.WriteFile(path, []byte("payload"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "create temp", "error should be tagged with the failing step")
 	require.ErrorIs(t, err, fs.ErrNotExist, "wrapped cause should be fs.ErrNotExist")
-
-	// No partial tmp should exist anywhere reachable under dir.
-	_, statErr := os.Stat(path + snapshot.TmpSuffix)
-	assert.True(t, os.IsNotExist(statErr))
+	assertNoStagingFiles(t, dir)
 }
 
 func TestWriteFile_RenameFailsCleansUpTmp(t *testing.T) {
 	dir := t.TempDir()
-	// Pre-create path as a directory so os.Rename(tmp, path) fails:
-	// the tmp is a regular file, and renaming a file over a non-empty
-	// directory (or a directory at all, on some platforms) surfaces
-	// as an error.
+	// A non-empty directory at path makes the rename fail on every host.
 	path := filepath.Join(dir, "occupied")
 	require.NoError(t, os.Mkdir(path, 0o750))
-	// Place a file inside so the directory is non-empty; rename over a
-	// non-empty directory is universally an error across darwin/linux.
 	require.NoError(t, os.WriteFile(filepath.Join(path, "sentinel"), []byte("x"), 0o600))
 
 	err := snapshot.WriteFile(path, []byte("payload"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "rename temp to final", "error should surface the rename step")
-
-	// The rename-failure branch must have removed the staging file —
-	// this is the cleanup path consumers rely on when a destination
-	// becomes unwritable between runs.
-	_, statErr := os.Stat(path + snapshot.TmpSuffix)
-	assert.True(t, os.IsNotExist(statErr), "rename-failure branch should have removed the staging file")
+	assertNoStagingFiles(t, dir)
 }
 
 func TestWriteFile_EmptyData(t *testing.T) {
@@ -1692,19 +1693,11 @@ func TestWriteFile_EmptyData(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), info.Size(), "zero-length data should produce a zero-byte file, not a special case")
-
-	_, statErr := os.Stat(path + snapshot.TmpSuffix)
-	assert.True(t, os.IsNotExist(statErr))
+	assertNoStagingFiles(t, dir)
 }
 
 func TestWriteFile_ConcurrentDistinctPaths(t *testing.T) {
-	// The realistic consumer shape: N goroutines write to N distinct
-	// paths concurrently. This is the common consumer case — one .ys
-	// per batch, one goroutine per batch, no shared path. Pins that
-	// the primitive is safe for concurrent use when callers coordinate
-	// destinations (via RunID-suffixed paths, per-batch keys, etc.)
-	// and catches any accidental shared state introduced by a future
-	// refactor.
+	// The common consumer shape: one goroutine per batch, one .ys per batch.
 	dir := t.TempDir()
 
 	letters := []byte{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'}
@@ -1729,90 +1722,78 @@ func TestWriteFile_ConcurrentDistinctPaths(t *testing.T) {
 		require.NoError(t, err)
 		expected := bytes.Repeat([]byte{letters[i]}, 32)
 		assert.Equal(t, expected, got, "goroutine %d's write should not be corrupted by a sibling", i)
+	}
+	assertNoStagingFiles(t, dir)
+}
 
-		_, statErr := os.Stat(path + snapshot.TmpSuffix)
-		assert.True(t, os.IsNotExist(statErr), "goroutine %d should have renamed its staging file away", i)
+// TestWriteFile_ConcurrentSamePath pins that concurrent writers to one path
+// commit exactly one writer's bytes. The contenders differ in length, so a
+// write that reaches the committed file after its rename shows as a mix.
+func TestWriteFile_ConcurrentSamePath(t *testing.T) {
+	letters := []byte("ABCDEFGH")
+	contenders := make([][]byte, len(letters))
+	for i, l := range letters {
+		contenders[i] = bytes.Repeat([]byte{l}, 16<<i)
+	}
+	for round := range 200 {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "racy.ys")
+		errs := make([]error, len(contenders))
+		var wg sync.WaitGroup
+		for i := range contenders {
+			wg.Go(func() { errs[i] = snapshot.WriteFile(path, contenders[i]) })
+		}
+		wg.Wait()
+
+		var successes int
+		for i, err := range errs {
+			if err == nil {
+				successes++
+				continue
+			}
+			assert.Contains(t, err.Error(), "rename temp to final", "round %d: writer %d failed before its rename", round, i)
+		}
+		require.GreaterOrEqual(t, successes, 1, "round %d: no writer committed", round)
+
+		got, err := os.ReadFile(path)
+		require.NoError(t, err)
+		if !slices.ContainsFunc(contenders, func(c []byte) bool { return bytes.Equal(got, c) }) {
+			t.Fatalf("round %d: the committed file (%d bytes) matches no writer", round, len(got))
+		}
+		assertNoStagingFiles(t, dir)
 	}
 }
 
-func TestWriteFile_ConcurrentSamePath(t *testing.T) {
-	// N goroutines race to WriteFile to the SAME path. This primitive
-	// is not designed for multi-writer coordination — a consumer's state
-	// machine ensures one writer per path via its lockfile protocol —
-	// but the filesystem-level race is well-defined: exactly one
-	// rename wins, the rest see ENOENT because the tmp was renamed
-	// away first.
-	//
-	// Invariants pinned:
-	//   1. At least one call returned nil (otherwise no file would
-	//      exist at path).
-	//   2. The final file contents match EXACTLY one contender's
-	//      bytes. Contenders are same-length so a truncate-then-write
-	//      interleave cannot produce a mix (the second write
-	//      overwrites the first in full).
-	//   3. Any call that returned an error returned a rename-step
-	//      error — no corruption-at-create, no partial-write surface.
-	//   4. No staging file survives once all goroutines finish: the
-	//      winning rename removes the tmp; losing renames' cleanup
-	//      os.Remove is a no-op but leaves nothing behind.
-	//
-	// Runs under -race via the default matrix to catch any accidental
-	// in-process shared state.
+// TestWriteFile_HeldStagingFileLeavesTheCommitUnchanged pins that a writer
+// holding a staging file beside path cannot reach the file WriteFile commits.
+// It holds path+TmpSuffix open, as a concurrent writer of path would, and
+// writes through it after WriteFile returns.
+func TestWriteFile_HeldStagingFileLeavesTheCommitUnchanged(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "racy.ys")
+	path := filepath.Join(dir, "snap.ys")
+	held, err := os.OpenFile(path+snapshot.TmpSuffix, os.O_RDWR|os.O_CREATE, 0o600)
+	require.NoError(t, err)
+	defer held.Close()
 
-	letters := []byte{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'}
-	const n = 8
-	contenders := make([][]byte, n)
-	for i := range contenders {
-		contenders[i] = bytes.Repeat([]byte{letters[i]}, 32)
-	}
+	data := []byte("committed-payload")
+	require.NoError(t, snapshot.WriteFile(path, data))
 
-	errs := make([]error, n)
-	var wg sync.WaitGroup
-	wg.Add(n)
-	for i := range n {
-		go func(idx int) {
-			defer wg.Done()
-			errs[idx] = snapshot.WriteFile(path, contenders[idx])
-		}(i)
-	}
-	wg.Wait()
-
-	var successes int
-	for i, err := range errs {
-		if err == nil {
-			successes++
-			continue
-		}
-		assert.Contains(t, err.Error(), "rename temp to final", "goroutine %d's error should be at the rename step (the expected race outcome)", i)
-	}
-	assert.GreaterOrEqual(t, successes, 1, "at least one concurrent writer must succeed")
+	_, err = held.Write([]byte("sibling"))
+	require.NoError(t, err)
 
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)
-	var matched bool
-	for _, c := range contenders {
-		if bytes.Equal(got, c) {
-			matched = true
-			break
-		}
-	}
-	assert.True(t, matched, "final file contents must match exactly one contender's bytes (no interleave)")
-
-	_, statErr := os.Stat(path + snapshot.TmpSuffix)
-	assert.True(t, os.IsNotExist(statErr), "no staging file should remain after all goroutines complete")
+	assert.Equal(t, data, got)
 }
 
-func TestWriteFile_LeavesNoTmpOnSuccess(t *testing.T) {
-	// Pre-seed a stale tmp file at the staging path (simulating a prior
-	// crashed write that didn't get to its own cleanup). A successful
-	// WriteFile must overwrite it via os.Create and ultimately rename
-	// it away, leaving no tmp behind.
+// TestWriteFile_LeavesAnotherWritersStagingFileAlone pins that WriteFile removes
+// only its own staging file. A file already named path+TmpSuffix can belong to
+// a live writer, so a sweep decides when it is residue.
+func TestWriteFile_LeavesAnotherWritersStagingFileAlone(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "snap.ys")
-	stale := path + snapshot.TmpSuffix
-	require.NoError(t, os.WriteFile(stale, []byte("stale-garbage-from-prior-crash"), 0o600))
+	residue := path + snapshot.TmpSuffix
+	require.NoError(t, os.WriteFile(residue, []byte("residue"), 0o600))
 
 	fresh := []byte("fresh-content")
 	require.NoError(t, snapshot.WriteFile(path, fresh))
@@ -1821,8 +1802,9 @@ func TestWriteFile_LeavesNoTmpOnSuccess(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fresh, got)
 
-	_, statErr := os.Stat(stale)
-	assert.True(t, os.IsNotExist(statErr), "successful WriteFile must rename the tmp away, even when a stale tmp pre-existed")
+	kept, err := os.ReadFile(residue)
+	require.NoError(t, err, "WriteFile removed a staging file it did not create")
+	assert.Equal(t, []byte("residue"), kept)
 }
 
 // TestMarshal_GoldenBytes pins the exact serialized .ys wire bytes for a
