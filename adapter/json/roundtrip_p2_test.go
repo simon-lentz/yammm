@@ -11,7 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// The P2 corpus: write → parse → validate is the identity for a fully
+// The round-trip corpus: write → parse → validate is the identity for a fully
 // resolved graph. Unresolved edges are deliberately not written; the last
 // test pins that drop.
 const p2Schema = `schema "p2"

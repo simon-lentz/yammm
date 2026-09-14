@@ -93,7 +93,7 @@ func benchValidatorProps() map[string]any {
 
 // The two benchmarks below share a schema, an instance and a workload; they
 // differ only in whether the invariants NAME a relation. The delta is the cost
-// unit 7 added — building the relation scope and evaluating over it — isolated
+// of an invariant that names a relation — building the relation scope and evaluating over it — isolated
 // from the edge and composition validation both pay.
 //
 // The three benchmarks above use a relation-free schema, where invariantScope

@@ -10,7 +10,8 @@ import (
 	"github.com/simon-lentz/yammm/instance"
 )
 
-// T1 (A-300): a relation fold collision is reported by the pass that reads
+// TestRelationCollision_DoesNotSuppressCompositionDiagnostics pins that a
+// relation fold collision is reported by the pass that reads
 // the entry, so it no longer trips the property pass's error gate and hides
 // every edge and composition diagnostic behind it.
 func TestRelationCollision_DoesNotSuppressCompositionDiagnostics(t *testing.T) {
@@ -47,7 +48,8 @@ func TestRelationCollision_OnAnAssociationIsStillReported(t *testing.T) {
 	}
 }
 
-// T2 (A-301), with T22 (v): one cancellation rule at every point that ends
+// TestValidate_CancellationInsideAComposedBatchIsReportedOnce pins one
+// cancellation rule at every point that ends
 // work. A cancellation raised INSIDE a composed batch — the fold sits on a
 // child row — is exactly one E_CONTEXT_CANCELLED on the root row, not one per
 // nesting level.
@@ -142,9 +144,10 @@ func (h *countingCancelOnNormalize) Handle(_ context.Context, r slog.Record) err
 func (h *countingCancelOnNormalize) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h *countingCancelOnNormalize) WithGroup(string) slog.Handler      { return h }
 
-// T3 (A-302): the one list reader takes slices, not arrays — a fixed-size
+// TestListProperty_RefusesAUUIDAsSixteenIntegers pins that the one list
+// reader takes slices, not arrays — a fixed-size
 // array is how a scalar carrier is spelled in this module, and uuid.UUID is
-// [16]byte. A UUID at a List<Integer> property is E_TYPE_MISMATCH again.
+// [16]byte. A UUID at a List<Integer> property is E_TYPE_MISMATCH.
 func TestListProperty_RefusesAUUIDAsSixteenIntegers(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, "schema \"p\"\n\ntype T {\n\tid String primary\n\tnums List<Integer>\n}\n")

@@ -9,7 +9,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// T13 (A-315): one scope per instance, built once and shared upward. A chain
+// TestScope_IsMemoisedAndLinearInDepth pins one scope per instance, built
+// once and shared upward. A chain
 // of composed instances with an invariant at every level costs linear work
 // in its depth, because a parent's scope holds each child's memoised scope
 // rather than rebuilding the whole subtree per level. Allocations stand in

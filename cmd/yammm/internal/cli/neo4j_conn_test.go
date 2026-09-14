@@ -24,8 +24,8 @@ func closedPort(t *testing.T) string {
 	return addr
 }
 
-// TestConnectNeo4j_RefusesAnUnreachableServer pins B60. The driver is created
-// lazily, so without the VerifyConnectivity guard ConnectNeo4j returns a driver
+// TestConnectNeo4j_RefusesAnUnreachableServer pins the VerifyConnectivity
+// guard. The driver is created lazily, so without the guard ConnectNeo4j returns a driver
 // and a nil error for a server that is not there — and the failure surfaces
 // later, inside the first query, as something other than a connection problem.
 func TestConnectNeo4j_RefusesAnUnreachableServer(t *testing.T) {

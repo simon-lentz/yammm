@@ -219,9 +219,9 @@ type Doc {
 
 // TestNewFromSnapshot_EdgePropertiesAreCanonicalized pins that the import path
 // stores an edge's own properties in the form every other path stores them.
-// A-401 names the instance key and the pending target key; the edge properties
-// beside them are the same class, and leaving them raw would keep import the
-// one path that installs a value in a spelling no other path uses.
+// The instance key and the pending target key are canonicalized on import
+// too. A raw edge property would make import the one path that installs a
+// value in a spelling no other path uses.
 func TestNewFromSnapshot_EdgePropertiesAreCanonicalized(t *testing.T) {
 	t.Parallel()
 	const src = `schema "group3_import_edge"

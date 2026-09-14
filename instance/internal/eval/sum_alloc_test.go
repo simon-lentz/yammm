@@ -2,10 +2,11 @@ package eval
 
 import "testing"
 
-// T5 (A-304): Sum classifies in two passes over the slice, not into two
+// TestSum_AllocatesNothingPerElement pins that Sum classifies in two passes
+// over the slice, not into two
 // slices, so nothing it allocates grows with its input — the boxed result is
-// the only allocation, and a small integer sum has none — while P3's rule
-// holds: a list holding a float is float arithmetic, and the integer subtotal
+// the only allocation, and a small integer sum has none — while the float
+// rule holds: a list holding a float is float arithmetic, and the integer subtotal
 // it would discard cannot overflow it.
 func TestSum_AllocatesNothingPerElement(t *testing.T) {
 	big := make([]any, 300)

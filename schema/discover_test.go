@@ -388,7 +388,7 @@ func TestLoad_ExplicitRootDoesNotReadTheMarker(t *testing.T) {
 	}
 }
 
-// TestModuleRoot_ReportsSyntheticRoot pins A-175: the accessor reports the
+// TestModuleRoot_ReportsSyntheticRoot pins that the accessor reports the
 // root the load actually resolved imports against. A synthetic root stands in
 // for the module root — WithSyntheticRoot's own contract — so an accessor
 // returning "" denied the root the loader used, and gogen's embedded keys

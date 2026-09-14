@@ -488,8 +488,8 @@ func TestAddComposed_KeylessOneSlot_NamesThePositionalAddress(t *testing.T) {
 	}
 }
 
-// TestDiagnosticDetails_CarryBareValues pins the two detail surfaces the
-// fix-diff round found wrong. A consumer matches on details, not wording, so a
+// TestDiagnosticDetails_CarryBareValues pins two detail surfaces. A consumer
+// matches on details, not wording, so a
 // detail must carry a value it can compare: the graph's canonical tag form for
 // a type name, and an unquoted name for expected / got.
 func TestDiagnosticDetails_CarryBareValues(t *testing.T) {

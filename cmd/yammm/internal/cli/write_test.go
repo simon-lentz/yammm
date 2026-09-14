@@ -47,9 +47,9 @@ func TestWriteFile_RefusesATargetItMayNotWrite(t *testing.T) {
 	assertNoDebris(t, dir, path)
 }
 
-// B9: the staging file an interrupted write leaves behind must be invisible to
-// a directory scan. The convention is the shared suffix, and the contrast is
-// what the CLI used to stage on.
+// TestStagingName_IsInvisibleToADirectoryScan pins that the staging file an
+// interrupted write leaves behind is invisible to a directory scan. The shared
+// .tmp suffix hides it, and a name that ends in .ys is the contrast.
 func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 	t.Parallel()
 
@@ -72,7 +72,7 @@ func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 		t.Errorf("a directory scan reported the staging file: %v", entries)
 	}
 
-	// The name the CLI staged on before is reported, which is the defect.
+	// A staging name that ends in .ys is reported, so the suffix is what hides it.
 	old := filepath.Join(dir, ".yammm-save-999999.ys")
 	if err := os.WriteFile(old, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)

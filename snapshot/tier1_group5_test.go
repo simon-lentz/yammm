@@ -185,7 +185,7 @@ func TestLoad_TwoSpellingsOfOneKeyAreOneDuplicate(t *testing.T) {
 	}
 }
 
-// TestLoad_UnresolvedTargetIsCanonicalized pins the reader's half of A-352:
+// TestLoad_UnresolvedTargetIsCanonicalized pins the reader's side:
 // a document whose unresolved record carries a non-canonical spelling of the
 // target instant loads with the canonical target key, as the graph would
 // have written it.

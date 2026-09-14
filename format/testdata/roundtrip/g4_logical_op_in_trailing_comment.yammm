@@ -1,6 +1,6 @@
 schema "g4"
 
-// G4: a long invariant carrying a "&&" inside its trailing comment. The
+// A long invariant carrying a "&&" inside its trailing comment. The
 // wrapper looks for a top-level logical operator by scanning text, finds the
 // one in the comment, and breaks the line there.
 type T {

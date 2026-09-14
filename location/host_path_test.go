@@ -69,9 +69,8 @@ func TestNewCanonicalPath_OneIdentityForTwoSpellingsOfOneFile(t *testing.T) {
 	}
 }
 
-// TestConstructors_AgreeOnTwoSpellingsOfOneFile is the second implementation of
-// that rule (A-229 rule 1): the constructors that touch the filesystem answer
-// it alike, so the property is not one function's behaviour.
+// TestConstructors_AgreeOnTwoSpellingsOfOneFile pins that rule across every
+// constructor that touches the filesystem: each one answers it alike.
 func TestConstructors_AgreeOnTwoSpellingsOfOneFile(t *testing.T) {
 	t.Parallel()
 
@@ -196,9 +195,9 @@ func TestCanonicalize_RefusesAPathThatIsNotValidUTF8(t *testing.T) {
 	})
 }
 
-// TestResolveHostPath_RefusesAPathUnderARegularFile pins the one refusal that
-// held before this group: a path can never exist under a regular file, and
-// every door says so rather than keeping the path as typed.
+// TestResolveHostPath_RefusesAPathUnderARegularFile pins a refusal: a path can
+// never exist under a regular file, and every door says so rather than keeping
+// the path as typed.
 func TestResolveHostPath_RefusesAPathUnderARegularFile(t *testing.T) {
 	t.Parallel()
 
@@ -216,9 +215,8 @@ func TestResolveHostPath_RefusesAPathUnderARegularFile(t *testing.T) {
 	}
 }
 
-// TestResolveHostPath_KeepsWhatTheLSPDependsOn carries the three rows the
-// editor's own canonicalizer held before this group folded it into the
-// resolver: a path is made absolute before anything else, cleaning runs before
+// TestResolveHostPath_KeepsWhatTheLSPDependsOn pins the three rules the editor
+// depends on: a path is made absolute before anything else, cleaning runs before
 // resolution so a ".." across a symlink lands where the loader lands it, and a
 // name that no file answers to is kept as typed.
 func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {

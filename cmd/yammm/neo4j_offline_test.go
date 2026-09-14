@@ -107,10 +107,9 @@ func recordedRelationships() []map[string]any {
 	}
 }
 
-// TestIntrospectSchema_Golden is the offline harness A-430 names: recorded
-// records in, the emitted scaffold out. Nothing past the command's --uri guard
-// was reachable by any test before it, which is why emptying both inputs to
-// InferSchema left the suite green.
+// TestIntrospectSchema_Golden is the offline harness: recorded records in, the
+// emitted scaffold out. It drives the command past its --uri guard and into
+// InferSchema.
 func TestIntrospectSchema_Golden(t *testing.T) {
 	t.Parallel()
 

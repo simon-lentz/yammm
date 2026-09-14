@@ -1,6 +1,6 @@
 schema "g1"
 
-// G1: a single-quoted enum value containing a comma, on a line over the
+// A single-quoted enum value containing a comma, on a line over the
 // hundred-column wrap threshold. quoteAwareScanner tracks only the double
 // quote, so the comma inside the literal is taken as a value separator.
 type T {

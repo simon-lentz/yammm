@@ -254,7 +254,7 @@ func TestValidate_NestedBatchCancellationIsReportedOnce(t *testing.T) {
 	}
 }
 
-// TestKeepInternalErrors pins A-370's rule directly. A row's Fatal E_INTERNAL
+// TestKeepInternalErrors pins the rule directly. A row's Fatal E_INTERNAL
 // survives the cancellation that drops the rest, so a library defect is never
 // reported as a deadline. The end-to-end trigger is a panic inside the
 // validator that no probe has reached from a loaded schema, so the rule is

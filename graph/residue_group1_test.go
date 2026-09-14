@@ -105,8 +105,8 @@ func addSensorWithReading(t *testing.T, s *schema.Schema) *graph.Graph {
 }
 
 // TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress pins the
-// sibling-duplicate message and its primary_key detail (G7), and the
-// rejected child's own key and properties (G8). A raw-spelled sibling is the
+// sibling-duplicate message and its primary_key detail, and the rejected
+// child's own key and properties. A raw-spelled sibling is the
 // same address as the canonical occupant, and every position the refusal
 // reports names that one address rather than the caller's spelling.
 func TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress(t *testing.T) {
@@ -130,7 +130,7 @@ func TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress(t *testing.T) {
 		if issue.Code() != diag.E_DUPLICATE_COMPOSED_PK {
 			continue
 		}
-		// G7: the message and the primary_key detail.
+		// The message and the primary_key detail.
 		if got := issue.Message(); !strings.Contains(got, wantKey) {
 			t.Errorf("message = %q, want it to name the canonical address %s", got, wantKey)
 		}
@@ -149,7 +149,7 @@ func TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress(t *testing.T) {
 		}
 	}
 
-	// G8: the rejected child's own key and properties.
+	// The rejected child's own key and properties.
 	dups := g.Snapshot().Duplicates()
 	if len(dups) != 1 {
 		t.Fatalf("duplicates = %d, want 1", len(dups))

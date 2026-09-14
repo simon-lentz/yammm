@@ -9,8 +9,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// TestInstanceByKey_AnySpellingOnEveryPath is the second implementation for
-// A-355: a Timestamp-keyed instance entered by a non-canonical spelling is
+// TestInstanceByKey_AnySpellingOnEveryPath pins that a Timestamp-keyed
+// instance entered by a non-canonical spelling is
 // found by its own key, by FormatKey of the canonical text and by FormatKey
 // of the spelling the caller wrote, on a snapshot built through Add and on
 // one rebuilt from parts.

@@ -1,6 +1,6 @@
 schema "g11"
 
-// G11: a long annotated enum property. Wrapping moves the annotation onto the
+// A long annotated enum property. Wrapping moves the annotation onto the
 // closing "]" line, where it attaches to nothing: the output parses and is
 // then refused at load with E_INVALID_ANNOTATION.
 type T {

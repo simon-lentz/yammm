@@ -18,10 +18,9 @@ func helpText(t *testing.T, args ...string) string {
 	return out
 }
 
-// TestRootHelp_NamesEveryCommandTakingTheDataFlags pins B35. The root listed
-// "check, load, export" as the commands accepting --from while `snapshot save`
-// accepts it too, and never named --type or --type-column at all — so the two
-// flags a CSV input requires appeared in no overview.
+// TestRootHelp_NamesEveryCommandTakingTheDataFlags pins that the root help
+// names every command that accepts --from, `snapshot save` included, and names
+// --type and --type-column, the two flags a CSV input requires.
 func TestRootHelp_NamesEveryCommandTakingTheDataFlags(t *testing.T) {
 	t.Parallel()
 
@@ -39,9 +38,9 @@ func TestRootHelp_NamesEveryCommandTakingTheDataFlags(t *testing.T) {
 	}
 }
 
-// TestSnapshotSaveHelp_OutputIsNotUnconditionallyRequired pins B36. --output
-// read "(required)" while `--into` alone satisfies the destination check, so
-// the help refused a working invocation the command accepts.
+// TestSnapshotSaveHelp_OutputIsNotUnconditionallyRequired pins that --output
+// does not read "(required)". `--into` alone satisfies the destination check,
+// so that text would refuse an invocation the command accepts.
 func TestSnapshotSaveHelp_OutputIsNotUnconditionallyRequired(t *testing.T) {
 	t.Parallel()
 

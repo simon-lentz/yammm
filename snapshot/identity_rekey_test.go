@@ -273,7 +273,7 @@ func sampleTypeRef() snapshot.TypeRef {
 	return snapshot.TypeRef{Schema: "a", Name: "Person"}
 }
 
-// TestTypeRef_RendersPathHashName pins the ratified display form. The
+// TestTypeRef_RendersPathHashName pins the display form. The
 // separator is the contract: schema.TypeID renders "path:name" and TypeRef
 // renders "schema#name", the one form this package states a type identity in.
 func TestTypeRef_RendersPathHashName(t *testing.T) {

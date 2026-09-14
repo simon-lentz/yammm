@@ -53,7 +53,7 @@ func unlimitedFindings(t *testing.T, s *schema.Schema, data []byte) int {
 	return res.Len()
 }
 
-// TestLoad_WithIssueLimit_BoundsTheStoredIssuesNotTheWalk pins A-126's shape:
+// TestLoad_WithIssueLimit_BoundsTheStoredIssuesNotTheWalk pins the limit's shape:
 // the collector stops storing at the limit, the walk continues, and the
 // dropped count is therefore exact — stored plus dropped equals the unlimited
 // total. An early exit when the collector fills would undercount the drops.

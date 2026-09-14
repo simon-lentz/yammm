@@ -127,8 +127,8 @@ func writePaths() []writePath {
 			},
 		},
 		{
-			// B1 and B38: writeOutput guarded by string equality, so the same
-			// file spelled differently took a different write path entirely.
+			// The same file spelled differently takes the same write path. A guard
+			// on string equality sends it down a different one.
 			name:    "snapshot save --into, same file spelled differently",
 			creates: false,
 			build: func(t *testing.T, dir string) (string, []string) {
@@ -291,10 +291,9 @@ func TestWrite_ASymlinkSurvivesAndItsFileIsWritten(t *testing.T) {
 	}
 }
 
-// B9: the staging file drifted off the shared convention onto
-// .yammm-save-*.ys, which ScanDir reports as a malformed snapshot while a
-// sibling .tmp is correctly skipped. Whatever a crash leaves behind must be
-// invisible to a directory scan.
+// TestWrite_LeavesNoDebrisADirectoryScanReports pins that whatever a crash
+// leaves behind is invisible to a directory scan. ScanDir skips a .tmp file but
+// reports a name like .yammm-save-*.ys as a malformed snapshot.
 func TestWrite_LeavesNoDebrisADirectoryScanReports(t *testing.T) {
 	for _, tc := range writePaths() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -306,9 +305,9 @@ func TestWrite_LeavesNoDebrisADirectoryScanReports(t *testing.T) {
 				t.Fatalf("exit %d: %s", code, errOut)
 			}
 
-			// Only the file the operator asked for may be new. A staging file
-			// left behind is what B9 reported: ScanDir counted it as a
-			// malformed snapshot because it ended in .ys rather than .tmp.
+			// Only the file the operator asked for may be new. ScanDir counts a
+			// staging file left behind as a malformed snapshot when it ends in .ys
+			// rather than .tmp.
 			for name := range dirEntryNames(t, dir) {
 				if _, existed := before[name]; existed {
 					continue
@@ -335,9 +334,9 @@ func dirEntryNames(t *testing.T, dir string) map[string]struct{} {
 	return names
 }
 
-// B6: a blocked second type left the first type's file complete in the
-// operator's directory, with nothing saying the set was partial. Either every
-// file arrives or none does.
+// TestWrite_PartialDirectoryExportLeavesTheDirectoryAsItWas pins that a
+// directory export is all or nothing. When a later type's file is blocked, no
+// earlier type's file is left complete in the operator's directory.
 func TestWrite_PartialDirectoryExportLeavesTheDirectoryAsItWas(t *testing.T) {
 	dir := t.TempDir()
 	outDir := filepath.Join(dir, "csvs")

@@ -12,7 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// The P1 matrix schema: one type carrying a bound, an enum, a pattern, an
+// The revalidation matrix schema: one type carrying a bound, an enum, a pattern, an
 // invariant, an edge with a declared property, a required association, and a
 // required composition — each violated by exactly one matrix row.
 const revalSchema = `schema "reval"
@@ -91,7 +91,7 @@ func revalDocument(t *testing.T, s *schema.Schema, opts ...instancetest.VIOption
 	return data
 }
 
-// TestLoad_RevalidationMatrix pins the audit's P1 matrix: every constraint
+// TestLoad_RevalidationMatrix pins the revalidation matrix: every constraint
 // class the validator enforces is reported under WithRevalidation and
 // silent without it.
 func TestLoad_RevalidationMatrix(t *testing.T) {

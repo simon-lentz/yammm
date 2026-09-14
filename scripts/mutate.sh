@@ -5,8 +5,8 @@
 # test packages expecting them to FAIL. A mutation the suite does not notice is
 # a surviving mutant: nothing asserts the behaviour it changed.
 #
-# Two things are asserted before any verdict, because both have gone wrong here
-# in one fix pass and neither was caught. The search string MUST match: a
+# Two things are asserted before any verdict, because each fails silently.
+# The search string MUST match: a
 # pattern matching nothing rewrites nothing, and "nothing red" then reads as
 # "mutant killed" when no mutant existed. The build MUST succeed: a mutation
 # that does not compile makes go test exit non-zero for an unrelated reason,
@@ -56,7 +56,7 @@ fi
 # Restore from a byte copy rather than from git: the harness must put the file
 # back exactly as it found it without performing a git write.
 # The suite MUST be green before the mutation: a test that is already red
-# makes every mutant read as killed, which voided two sweeps in one fix pass.
+# makes every mutant read as killed.
 if ! go test "${pkgs[@]}" >/dev/null 2>&1; then
 	printf 'mutate: the UNMUTATED tree is already red in %s, so no verdict is possible\n' "${pkgs[*]}" >&2
 	exit 1

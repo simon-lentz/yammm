@@ -16,10 +16,9 @@ type wrappedEPIPE struct{}
 
 func (wrappedEPIPE) Error() string { return "write tcp 127.0.0.1:1: broken pipe" }
 
-// TestIsCleanShutdown pins B59. The function classified every fatal-versus-
-// normal disconnect the server reports and no test referenced it, so a mutation
-// making it answer false for everything survived — and every client closing
-// stdio would have been logged as a crash.
+// TestIsCleanShutdown pins how every disconnect the server reports is
+// classified as fatal or normal. If the function answers false for everything,
+// every client that closes stdio is logged as a crash.
 func TestIsCleanShutdown(t *testing.T) {
 	t.Parallel()
 

@@ -11,7 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// The CSV P2 corpus: write → parse → validate is the identity for a fully
+// The CSV round-trip corpus: write → parse → validate is the identity for a fully
 // resolved graph. CSV has no nested lists and no compositions — both are
 // documented limitations — so its schema declares neither.
 const p2CSVSchema = `schema "p2csv"

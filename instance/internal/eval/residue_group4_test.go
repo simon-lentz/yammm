@@ -15,7 +15,7 @@ import (
 // turns its row red.
 func TestArrayIsNotAList(t *testing.T) {
 	t.Parallel()
-	// A [16]byte is the array the round found reachable: a uuid.UUID IS one.
+	// A [16]byte is the array that reaches the evaluator: a uuid.UUID IS one.
 	var arr [4]int64
 
 	if _, ok := value.ListElems(arr); ok {

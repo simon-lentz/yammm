@@ -115,8 +115,8 @@ func TestAddComposed_RefusedParentKeepsTheCallersSpelling(t *testing.T) {
 	}
 }
 
-// TestUnresolvedTarget_OneAddressOnEveryPath is the second implementation
-// for A-352: a forward reference whose target key the caller spelled
+// TestUnresolvedTarget_OneAddressOnEveryPath pins that a forward reference
+// whose target key the caller spelled
 // non-canonically carries the canonical target key whether the record was
 // built through Add or through RebuildSnapshot, so the two entry points
 // produce one record from one input.

@@ -10,10 +10,10 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// TestSnapshotInfo_FullTextStatesTheAttestation pins B55. Deleting the
-// attestation line from the full report left every test green: the header-only
-// renderer's copy was covered and this one was not, so the report could stop
-// stating the writer's validity claim without anything noticing.
+// TestSnapshotInfo_FullTextStatesTheAttestation pins the attestation line in
+// the full report. The header-only renderer has its own copy and its own test,
+// so without this one the full report could stop stating the writer's validity
+// claim unnoticed.
 func TestSnapshotInfo_FullTextStatesTheAttestation(t *testing.T) {
 	t.Parallel()
 
@@ -32,8 +32,9 @@ func TestSnapshotInfo_FullTextStatesTheAttestation(t *testing.T) {
 	}
 }
 
-// TestScanEntryToDTO_ZeroModTimeRendersEmpty pins B56. A file that could not be
-// stat'd carries the zero Time, and rendering it would publish
+// TestScanEntryToDTO_ZeroModTimeRendersEmpty pins an empty mod time for a file
+// that could not be stat'd. That file carries the zero Time, and rendering it
+// would publish
 // "0001-01-01T00:00:00.000000000Z" — a value that parses, sorts FIRST, and
 // silently corrupts any chronological ordering built on the key.
 func TestScanEntryToDTO_ZeroModTimeRendersEmpty(t *testing.T) {

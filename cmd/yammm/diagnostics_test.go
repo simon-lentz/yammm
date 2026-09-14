@@ -47,10 +47,9 @@ func TestNoColorReachesTheRenderer(t *testing.T) {
 	}
 }
 
-// TestDiagnosticsSurviveEveryEarlyReturn pins B13, B14, B15 and B16: a command
-// that returns before its own phase completes discarded the schema load's
-// diagnostics entirely, because the render happened at the end of the happy
-// path and nowhere else.
+// TestDiagnosticsSurviveEveryEarlyReturn pins that a command renders the schema
+// load's diagnostics when it returns before its own phase completes, not only
+// at the end of the success path.
 //
 // Every row loads a schema that produces W_ANNOTATION_SHADOWED and then fails
 // on something later, so the warning is the only thing under test. The control
@@ -100,11 +99,10 @@ func TestNeo4jConstraints_RefusesAnEditionBeforeWork(t *testing.T) {
 	}
 }
 
-// TestSnapshotInfoSurfacesWarnings pins B10 at both sites where a warning is
-// reachable. Each gated its render on HasErrors, so a result carrying only
-// warnings printed the summary, exited 0, and wrote nothing at all to stderr —
-// the operator read a report of a document whose identity could not be checked
-// and was told nothing.
+// TestSnapshotInfoSurfacesWarnings pins both sites where a warning is
+// reachable. A render gated on HasErrors prints the summary, exits 0 and writes
+// nothing to stderr for a result that carries only warnings, so the operator
+// is not told that the document's identity could not be checked.
 func TestSnapshotInfoSurfacesWarnings(t *testing.T) {
 	t.Parallel()
 
@@ -142,9 +140,9 @@ func TestSnapshotInfoSurfacesWarnings(t *testing.T) {
 	}
 }
 
-// TestSnapshotInfoDirMarksWarnings pins B11. printDirEntries branched on
-// HasErrors alone, so an entry carrying only warnings printed "ok" and was
-// counted among the healthy files — the one place a dispatch-style scan reads.
+// TestSnapshotInfoDirMarksWarnings pins that printDirEntries does not print
+// "ok" for an entry that carries only warnings. A branch on HasErrors alone
+// counts it among the healthy files, the one place a dispatch-style scan reads.
 func TestSnapshotInfoDirMarksWarnings(t *testing.T) {
 	t.Parallel()
 
@@ -243,10 +241,10 @@ func TestSnapshotSaveSurfacesImportedWarning(t *testing.T) {
 	}
 }
 
-// TestUpdateMetadataSurfacesHeaderWarning pins B12. The header read's result
-// was rendered only when it carried errors, so the one warning HeaderOnly can
-// produce was dropped — and the operator saw the later error alone, with no
-// statement that the header had already been read and found unverifiable.
+// TestUpdateMetadataSurfacesHeaderWarning pins that the header read's result
+// renders when it carries only a warning. Otherwise the one warning HeaderOnly
+// can produce is dropped, and the operator sees the later error alone, with no
+// statement that the header was read and found unverifiable.
 func TestUpdateMetadataSurfacesHeaderWarning(t *testing.T) {
 	t.Parallel()
 
@@ -484,10 +482,9 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 	}
 }
 
-// TestStatusSummariesShareOneStream pins B51: update-metadata reported its
-// result on stdout where every other command reports progress on stderr, so a
-// caller redirecting the two apart got one command's summary in the payload
-// channel.
+// TestStatusSummariesShareOneStream pins that update-metadata reports its
+// result on stderr, where every other command reports progress. A summary on
+// stdout reaches the payload channel of a caller that redirects the two apart.
 func TestStatusSummariesShareOneStream(t *testing.T) {
 	dir := t.TempDir()
 	meta := filepath.Join(dir, "meta.ys")
@@ -505,8 +502,8 @@ func TestStatusSummariesShareOneStream(t *testing.T) {
 	}
 }
 
-// TestNonYSExtensionIsADiagnostic pins B23's warning half: a path that is not
-// .ys is a fact about the artefact, so it reaches a machine consumer as a coded
+// TestNonYSExtensionIsADiagnostic pins the warning for a path that is not .ys.
+// The extension is a fact about the artefact, so it reaches a machine consumer as a coded
 // diagnostic rather than as prose no JSON reader can see.
 func TestNonYSExtensionIsADiagnostic(t *testing.T) {
 	t.Parallel()
