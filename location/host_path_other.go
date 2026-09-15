@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !windows
 
 package location
 
@@ -8,8 +8,8 @@ import (
 )
 
 // spellOnDisk returns the existing path p as the filesystem spells it, which
-// EvalSymlinks answers on every host but darwin: Linux is case-sensitive, and
-// Go's Windows implementation spells each component through FindFirstFile.
+// EvalSymlinks answers on Linux: the host is case-sensitive, and its kernel
+// takes a link target's ".." on disk as EvalSymlinks takes it.
 func spellOnDisk(p string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(p)
 	if err != nil {

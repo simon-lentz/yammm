@@ -142,11 +142,39 @@ func TestNewCanonicalPath_IdentityDoesNotChangeWhenTheFileIsCreated(t *testing.T
 	}
 }
 
+// holdLinkIdentity holds the path typed, which reaches a file through a link,
+// to the file the host opens through it: content written at the resolved path
+// is what a read of typed returns, and the resolved path is the on-disk
+// spelling, before and after the write.
+func holdLinkIdentity(t *testing.T, typed string, content []byte) {
+	t.Helper()
+	before, err := ResolveHostPath(typed)
+	if err != nil {
+		t.Fatalf("ResolveHostPath(%q) before the write: %v", typed, err)
+	}
+	if err := os.WriteFile(before, content, 0o600); err != nil {
+		t.Fatalf("write the resolved path %q: %v", before, err)
+	}
+	if got, err := os.ReadFile(typed); err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("reading %q returns %q (err %v), not the file written at its resolved path %q: the host reaches another file through the link",
+			typed, got, err, before)
+	}
+	after, err := ResolveHostPath(typed)
+	if err != nil {
+		t.Fatalf("ResolveHostPath(%q) after the write: %v", typed, err)
+	}
+	if onDisk := diskSpelling(t, typed); after != before || onDisk != before {
+		t.Errorf("ResolveHostPath(%q):\n  before the write   %q\n  after              %q\n  on-disk spelling   %q",
+			typed, before, after, onDisk)
+	}
+}
+
 // TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated holds a
 // dangling link's identity to the file the host reaches through it: a file
 // written at the path resolved before the target exists is the file a read
-// through the link returns, and resolving again gives that path. A ".." after a
-// symlinked directory tells a parent taken on disk from one read from the text.
+// through the link returns, and resolving again gives that path. A ".." in a
+// target tells a parent taken on disk, as Unix takes it, from one taken from
+// the text, as Windows takes it; the read through the link is the judge.
 func TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated(t *testing.T) {
 	t.Parallel()
 
@@ -225,27 +253,69 @@ func TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated(t *t
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			base := diskSpelling(t, t.TempDir())
-			typed := row.setup(t, base)
+			holdLinkIdentity(t, row.setup(t, base), []byte(row.name))
+		})
+	}
+}
 
-			before, err := ResolveHostPath(typed)
-			if err != nil {
-				t.Fatalf("ResolveHostPath(%q) before the target exists: %v", typed, err)
+// TestResolveHostPath_LinkNamesTheFileTheHostReaches holds a link whose target
+// names a symlinked directory before a ".." to the file the host opens through
+// it. Unix follows that directory and takes its parent on disk; Windows
+// evaluates the ".." on the target's text and never follows it. A file at each
+// answer means a resolver with the other host's rule names a file the host
+// does not open.
+func TestResolveHostPath_LinkNamesTheFileTheHostReaches(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name string
+		// files are the paths under base written before the link is resolved,
+		// each holding its own name.
+		files []string
+	}{
+		{"a file at both answers", []string{"x", filepath.FromSlash("real/x")}},
+		{"a file at the text's answer alone", []string{"x"}},
+		{"a file at the disk's answer alone", []string{filepath.FromSlash("real/x")}},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			base := diskSpelling(t, t.TempDir())
+			mkdirAll(t, filepath.Join(base, "real", "deep"))
+			symlink(t, filepath.Join("real", "deep"), filepath.Join(base, "sub"))
+			symlink(t, filepath.FromSlash("sub/../x"), filepath.Join(base, "l"))
+			for _, f := range row.files {
+				if err := os.WriteFile(filepath.Join(base, f), []byte(f), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
-			content := []byte(row.name)
-			if err := os.WriteFile(before, content, 0o600); err != nil {
-				t.Fatalf("write the resolved path %q: %v", before, err)
-			}
-			if got, err := os.ReadFile(typed); err != nil || !bytes.Equal(got, content) {
-				t.Fatalf("reading %q returns %q (err %v), not the file written at its resolved path %q: the host reaches another file through the link",
-					typed, got, err, before)
-			}
-			after, err := ResolveHostPath(typed)
-			if err != nil {
-				t.Fatalf("ResolveHostPath(%q) after the target exists: %v", typed, err)
-			}
-			if onDisk := diskSpelling(t, typed); after != before || onDisk != before {
-				t.Errorf("ResolveHostPath(%q):\n  before the target exists %q\n  after                    %q\n  on-disk spelling         %q",
-					typed, before, after, onDisk)
+			holdLinkIdentity(t, filepath.Join(base, "l"), []byte(row.name))
+		})
+	}
+}
+
+// TestLexicalTarget_EvaluatesADotDotOnTheText holds the Windows rule for a
+// link target as a function of text alone: nothing is looked up, so a ".."
+// after a name takes that name's textual parent whatever the name is on disk.
+func TestLexicalTarget_EvaluatesADotDotOnTheText(t *testing.T) {
+	t.Parallel()
+
+	base := yammmtest.HostAbs("/base")
+	root := filepath.VolumeName(base) + string(filepath.Separator)
+	rows := []struct{ name, dir, target, want string }{
+		{"a relative target with .. after a name", base, filepath.FromSlash("sub/../x"), filepath.Join(base, "x")},
+		{"a relative target with .. after two names", base, filepath.FromSlash("sub/../alias/../x"), filepath.Join(base, "x")},
+		{"a relative target that climbs out of the directory", filepath.Join(base, "real", "dir"), filepath.FromSlash("../x"), filepath.Join(base, "real", "x")},
+		{"a relative target with no ..", filepath.Join(base, "dir"), "x", filepath.Join(base, "dir", "x")},
+		{"a target of .", filepath.Join(base, "dir"), ".", filepath.Join(base, "dir")},
+		{"an absolute target with ..", base, base + filepath.FromSlash("/sub/../x"), filepath.Join(base, "x")},
+		{"a rooted target with ..", base, filepath.FromSlash("/r/../x"), filepath.Join(root, "x")},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			if got := lexicalTarget(row.dir, row.target); got != row.want {
+				t.Errorf("lexicalTarget(%q, %q) = %q; want %q", row.dir, row.target, got, row.want)
 			}
 		})
 	}

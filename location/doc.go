@@ -2,8 +2,9 @@
 //
 // This package defines the core types used by the YAMMM diagnostic system
 // to track source locations. Besides the standard library it depends only on
-// its location/path sub-package and golang.org/x/text/unicode/norm (see
-// Dependencies), so every other package can import it without an import cycle.
+// its location/path sub-package, golang.org/x/text/unicode/norm and, on
+// Windows, golang.org/x/sys/windows (see Dependencies), so every other package
+// can import it without an import cycle.
 //
 // # CanonicalPath
 //
@@ -44,22 +45,32 @@
 // concurrent lookup of another hard link, or another firmlinked spelling, of
 // the same file rewrites. A firmlink is not a symbolic link, so
 // /System/Volumes/Data/Users and /Users stay two spellings, as a bind mount
-// does on Linux. Everywhere else filepath.EvalSymlinks is already the answer:
-// Linux is case-sensitive, and Go's Windows implementation spells each
-// component through FindFirstFile. A Linux directory mounted with case folding
-// (ext4 +F) keeps the typed case and is out of scope.
+// does on Linux. On Windows the answer is the final path of the file
+// (GetFinalPathNameByHandleW), read from a handle opened with no access: the
+// kernel resolves it through every symbolic link, junction and mount point and
+// spells it in the volume's case with long names, so a path through a junction
+// gives the junction target's identity. filepath.EvalSymlinks is not used
+// there: it follows a link named inside a target before a ".." that follows
+// it, where Windows evaluates the ".." first. On Linux filepath.EvalSymlinks
+// is the answer: the host is case-sensitive, and a directory mounted with case
+// folding (ext4 +F) keeps the typed case and is out of scope.
 //
 // A path that does not exist yet resolves as far as it exists: the deepest
 // existing ancestor is spelled on disk and the missing tail is appended as
-// typed, and a dangling symbolic link resolves to the path the kernel reaches
-// through it: each ".." in its target takes the parent of the directory reached
-// so far on disk, not a parent read from the target's text. An identity minted
-// for a file before it is written therefore equals the one minted after, which
-// is what lets an in-memory source key match the file it will become. A
-// component the process cannot traverse ends the resolution the same way. A
-// path under a regular file can never exist and is refused, as is a cycle of
-// dangling links, and so is an existing path whose resolved form is longer than
-// the host allows a path to be (PATH_MAX, 1024 bytes on darwin).
+// typed, and a dangling symbolic link resolves to the path the kernel will
+// reach through it. On Unix each ".." in its target takes the parent of the
+// directory reached so far on disk, not a parent read from the target's text.
+// On Windows the target replaces the link in the path's text and the text's
+// ".." is evaluated before any further link is followed. One Windows case is
+// not seen: a ".." that climbs out through a junction in the link's typed
+// path, which the kernel takes from the typed text and the resolution from the
+// junction's target; such a link's identity settles once its target exists. An
+// identity minted for a file before it is written therefore equals the one
+// minted after, which is what lets an in-memory source key match the file it
+// will become. A component the process cannot traverse ends the resolution the
+// same way. A path under a regular file can never exist and is refused, as is
+// a cycle of dangling links, and so is an existing path whose resolved form is
+// longer than the host allows a path to be (PATH_MAX, 1024 bytes on darwin).
 //
 // # SourceID
 //
@@ -126,7 +137,9 @@
 // # Dependencies
 //
 //	location  ──imports──▶  location/path, golang.org/x/text/unicode/norm
+//	                        golang.org/x/sys/windows (on Windows)
 //
-// The sub-package carries provenance paths and the x/text import is NFC
-// normalization. It can be imported by all other packages without cycles.
+// The sub-package carries provenance paths, the x/text import is NFC
+// normalization, and the x/sys import is the final-path call. It can be
+// imported by all other packages without cycles.
 package location

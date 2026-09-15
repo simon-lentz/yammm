@@ -217,7 +217,8 @@ func TestDiskSpelling_FindsAnEntryListedUnderANameNoFoldingMatches(t *testing.T)
 
 // TestDiskSpelling_ResolvesSymbolicLinks holds the walk to a link's target,
 // relative to the link's directory or absolute, with a ".." in the target
-// taken from the directory the target reaches rather than removed lexically.
+// taken as the host takes it: on Unix from the directory the target reaches,
+// on Windows from the target's text.
 func TestDiskSpelling_ResolvesSymbolicLinks(t *testing.T) {
 	t.Parallel()
 
@@ -228,6 +229,11 @@ func TestDiskSpelling_ResolvesSymbolicLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	sep := string(filepath.Separator)
+	// b's parent on disk is a; the textual parent of "b-link/.." is base.
+	upWant := "a"
+	if runtime.GOOS == "windows" {
+		upWant = "."
+	}
 
 	rows := []struct {
 		name         string
@@ -245,10 +251,9 @@ func TestDiskSpelling_ResolvesSymbolicLinks(t *testing.T) {
 			in: filepath.Join("abs", "f.yammm"), want: filepath.Join("real", "f.yammm"),
 		},
 		{
-			// b's parent on disk is a; the lexical parent of "b-link/.." is base.
 			name: "a target whose .. follows a link",
 			link: "up", target: "b-link" + sep + "..",
-			in: "up", want: "a",
+			in: "up", want: upWant,
 		},
 	}
 

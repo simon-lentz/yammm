@@ -40,7 +40,8 @@ func CaseFoldingFilesystem(tb testing.TB, dir string) bool {
 // lists it. It reads directory listings and never calls the location package,
 // so a test can hold that package's resolver to it. A ".." in path is removed
 // lexically first, as filepath.Abs removes it, and a ".." in a link target is
-// walked on disk; path must exist.
+// taken as the host's kernel takes it: on disk on Unix, and on the text of the
+// path on Windows; path must exist.
 func DiskSpelling(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -79,17 +80,15 @@ func DiskSpelling(path string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("spell %q: %w", path, err)
 		}
-		switch {
-		case filepath.IsAbs(target):
-			current = volumeRoot(target)
-			target = target[len(filepath.VolumeName(target)):]
-		case target != "" && os.IsPathSeparator(target[0]):
-			// Only Windows reaches this: a rooted target names the link's volume.
-			current = volumeRoot(current)
-		}
-		pending = append(components(target), pending...)
+		current, pending = afterLink(current, target, pending)
 	}
 	return current, nil
+}
+
+// rootAndComponents splits the absolute path p into its volume root and its
+// components after the volume.
+func rootAndComponents(p string) (string, []string) {
+	return volumeRoot(p), components(p[len(filepath.VolumeName(p)):])
 }
 
 // volumeRoot returns the root directory of p's volume, with a drive letter in

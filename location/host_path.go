@@ -107,8 +107,8 @@ func resolveHostPath(p string, requireExist bool) (string, error) {
 }
 
 // danglingTarget reports whether p is a symbolic link and, when it is, the
-// path it names, with each ".." applied on disk as the kernel applies it. p's
-// directory exists, because p's own entry does.
+// path the host's kernel reaches through it, by that host's rule for a ".."
+// in a target. p's directory exists, because p's own entry does.
 func danglingTarget(p string) (string, bool, error) {
 	info, err := os.Lstat(p)
 	switch {
@@ -126,19 +126,36 @@ func danglingTarget(p string) (string, bool, error) {
 	if target == "" {
 		return "", false, nil
 	}
-	if filepath.IsAbs(target) {
-		volume := filepath.VolumeName(target)
-		return walkTarget(volume+string(filepath.Separator), target[len(volume):]), true, nil
-	}
 	dir, err := spellOnDisk(filepath.Dir(p))
 	if err != nil {
 		return "", false, fmt.Errorf("resolve the directory of link %q: %w", p, err)
 	}
-	if os.IsPathSeparator(target[0]) {
-		// Only Windows reaches this: a rooted target names the link's volume.
-		return walkTarget(filepath.VolumeName(dir)+string(filepath.Separator), target), true, nil
+	return linkTarget(dir, target), true, nil
+}
+
+// walkedTarget resolves the target of a link in the directory dir as a Unix
+// kernel does: an absolute target from its root and a relative one from dir,
+// each ".." taking the parent of the directory reached so far on disk.
+func walkedTarget(dir, target string) string {
+	if filepath.IsAbs(target) {
+		volume := filepath.VolumeName(target)
+		return walkTarget(volume+string(filepath.Separator), target[len(volume):])
 	}
-	return walkTarget(dir, target), true, nil
+	return walkTarget(dir, target)
+}
+
+// lexicalTarget resolves the target of a link in the directory dir as the
+// Windows kernel does: the target replaces the link in the path's text, and
+// the text's ".." is evaluated before any further component is looked up.
+func lexicalTarget(dir, target string) string {
+	switch {
+	case filepath.IsAbs(target):
+		return filepath.Clean(target)
+	case os.IsPathSeparator(target[0]):
+		return filepath.Join(filepath.VolumeName(dir)+string(filepath.Separator), target)
+	default:
+		return filepath.Join(dir, target)
+	}
 }
 
 // walkTarget joins target's components to start, an existing directory that
