@@ -150,8 +150,7 @@ func TestSourceIDFromAbsolutePath(t *testing.T) {
 		wantErr error
 	}
 	rows := []row{
-		{"relative path", "a/b/c", "", ErrNotAbsolute},
-		{"empty path", "", "", ErrNotAbsolute},
+		{"empty path", "", "", ErrEmptyPath},
 	}
 	if runtime.GOOS == "windows" {
 		rows = append(rows,
@@ -159,7 +158,6 @@ func TestSourceIDFromAbsolutePath(t *testing.T) {
 			row{"backslash separators", `C:\a\b`, "C:/a/b", nil},
 			row{"dotdot to the drive root", "C:/a/..", "C:/", nil},
 			row{"dotdot above the drive root keeps what follows", "C:/../x", "C:/x", nil},
-			row{"rooted without a volume", "/a/b", "", ErrNotAbsolute},
 			row{"network share with backslashes", `\\server\share\file.txt`, "//server/share/file.txt", nil},
 			row{"network share with forward slashes", "//server/share/file.txt", "//server/share/file.txt", nil},
 			row{"decomposed name", "C:/Users/cafe\u0301/file.txt", "C:/Users/caf\u00e9/file.txt", nil},
@@ -174,8 +172,6 @@ func TestSourceIDFromAbsolutePath(t *testing.T) {
 			row{"trailing backslash is a file-name character", `/path/to/dir\`, `/path/to/dir\`, nil},
 			row{"dotdot beside a backslash stays one name", `/a\..\b`, `/a\..\b`, nil},
 			row{"leading double slash names the root", "//server/share/file.txt", "/server/share/file.txt", nil},
-			row{"drive form is not absolute", "C:/a/b", "", ErrNotAbsolute},
-			row{"backslash share form is not absolute", `\\server\share\file.txt`, "", ErrNotAbsolute},
 			row{"decomposed name", "/path/cafe\u0301/file.txt", "/path/caf\u00e9/file.txt", nil},
 			row{"several decomposed characters", "/path/re\u0301sume\u0301.txt", "/path/r\u00e9sum\u00e9.txt", nil},
 			row{"composed name stays composed", "/path/caf\u00e9/file.txt", "/path/caf\u00e9/file.txt", nil},
@@ -184,21 +180,21 @@ func TestSourceIDFromAbsolutePath(t *testing.T) {
 
 	for _, tt := range rows {
 		t.Run(tt.name, func(t *testing.T) {
-			sid, err := SourceIDFromAbsolutePath(tt.input)
+			sid, err := SourceIDFromPath(tt.input)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
-					t.Fatalf("SourceIDFromAbsolutePath(%q) error = %v; want %v", tt.input, err, tt.wantErr)
+					t.Fatalf("SourceIDFromPath(%q) error = %v; want %v", tt.input, err, tt.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("SourceIDFromAbsolutePath(%q): %v", tt.input, err)
+				t.Fatalf("SourceIDFromPath(%q): %v", tt.input, err)
 			}
 			if !sid.IsFilePath() {
 				t.Error("should be file-backed")
 			}
 			if got := sid.String(); got != tt.want {
-				t.Errorf("SourceIDFromAbsolutePath(%q) = %q; want %q", tt.input, got, tt.want)
+				t.Errorf("SourceIDFromPath(%q) = %q; want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -221,18 +217,18 @@ func TestSourceIDFromAbsolutePath_CleaningEquivalence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.dirty, func(t *testing.T) {
-			dirtySID, err := SourceIDFromAbsolutePath(tt.dirty)
+			dirtySID, err := SourceIDFromPath(tt.dirty)
 			if err != nil {
-				t.Fatalf("SourceIDFromAbsolutePath(%q) failed: %v", tt.dirty, err)
+				t.Fatalf("SourceIDFromPath(%q) failed: %v", tt.dirty, err)
 			}
 
-			cleanSID, err := SourceIDFromAbsolutePath(tt.clean)
+			cleanSID, err := SourceIDFromPath(tt.clean)
 			if err != nil {
-				t.Fatalf("SourceIDFromAbsolutePath(%q) failed: %v", tt.clean, err)
+				t.Fatalf("SourceIDFromPath(%q) failed: %v", tt.clean, err)
 			}
 
 			if dirtySID != cleanSID {
-				t.Errorf("SourceIDFromAbsolutePath(%q) = %v; want equal to %v", tt.dirty, dirtySID, cleanSID)
+				t.Errorf("SourceIDFromPath(%q) = %v; want equal to %v", tt.dirty, dirtySID, cleanSID)
 			}
 		})
 	}
@@ -243,17 +239,17 @@ func TestSourceIDFromAbsolutePath_CleaningEquivalence(t *testing.T) {
 func TestSourceIDFromAbsolutePath_LeadingDoubleSlash(t *testing.T) {
 	skipOnWindows(t, "a leading // names a network share on Windows")
 
-	want, err := SourceIDFromAbsolutePath("/server/share")
+	want, err := SourceIDFromPath("/server/share")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, in := range []string{"//server/share", "///server/share"} {
-		got, err := SourceIDFromAbsolutePath(in)
+		got, err := SourceIDFromPath(in)
 		if err != nil {
-			t.Fatalf("SourceIDFromAbsolutePath(%q): %v", in, err)
+			t.Fatalf("SourceIDFromPath(%q): %v", in, err)
 		}
 		if got != want {
-			t.Errorf("SourceIDFromAbsolutePath(%q) = %q; want %q", in, got, want)
+			t.Errorf("SourceIDFromPath(%q) = %q; want %q", in, got, want)
 		}
 	}
 }
@@ -312,9 +308,9 @@ func TestSourceID_Equality(t *testing.T) {
 
 	// File-backed SourceIDs
 	if runtime.GOOS != "windows" {
-		path1, _ := SourceIDFromAbsolutePath("/a/b/c")
-		path2, _ := SourceIDFromAbsolutePath("/a/b/c")
-		path3, _ := SourceIDFromAbsolutePath("/a/b/d")
+		path1, _ := SourceIDFromPath("/a/b/c")
+		path2, _ := SourceIDFromPath("/a/b/c")
+		path3, _ := SourceIDFromPath("/a/b/d")
 
 		if path1 != path2 {
 			t.Error("equal file-backed SourceIDs should be equal")
@@ -339,14 +335,14 @@ func TestSourceID_MapKey(t *testing.T) {
 }
 
 func TestSourceID_CaseSensitivity(t *testing.T) {
-	// Different case should produce distinct SourceIDs
-	// This is intentional design: YAMMM cannot know the caller's filesystem semantics
+	// Case is read from the filesystem, so a spelling nothing on disk answers
+	// for keeps its typed case.
 	if runtime.GOOS != "windows" {
-		upper, _ := SourceIDFromAbsolutePath("/Users/Simon/schema.yammm")
-		lower, _ := SourceIDFromAbsolutePath("/users/simon/schema.yammm")
+		upper, _ := SourceIDFromPath("/nonexistent-root-7f3a/Simon/schema.yammm")
+		lower, _ := SourceIDFromPath("/nonexistent-root-7f3a/simon/schema.yammm")
 
 		if upper == lower {
-			t.Error("different-case paths should produce distinct SourceIDs (design decision)")
+			t.Error("different-case spellings under a missing root should stay distinct")
 		}
 	}
 }
@@ -520,12 +516,12 @@ func TestNewSourceID_AbsolutePathCollision(t *testing.T) {
 	}
 
 	// Create a file-backed SourceID for the same path (if it existed)
-	// For demonstration, we use SourceIDFromAbsolutePath which doesn't require
+	// For demonstration, we use SourceIDFromPath which doesn't require
 	// the file to exist.
 	if runtime.GOOS != "windows" {
-		fileID, err := SourceIDFromAbsolutePath("/absolute/path/file.yammm")
+		fileID, err := SourceIDFromPath("/absolute/path/file.yammm")
 		if err != nil {
-			t.Fatalf("SourceIDFromAbsolutePath failed: %v", err)
+			t.Fatalf("SourceIDFromPath failed: %v", err)
 		}
 
 		// The file-backed ID IS a file path

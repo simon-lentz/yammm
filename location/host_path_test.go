@@ -3,34 +3,42 @@ package location
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
+
+	"golang.org/x/text/unicode/norm"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
-// caseFoldingFilesystem reports whether dir's filesystem finds a file by
-// another spelling of its name. The rows below it ask what an identity does
-// when two spellings name one file, which a case-sensitive filesystem cannot
-// produce.
-func caseFoldingFilesystem(t *testing.T, dir string) bool {
+// diskSpelling is [yammmtest.DiskSpelling], which reads directory listings and
+// shares no code with resolveHostPath, failing the test on error.
+func diskSpelling(t *testing.T, p string) string {
 	t.Helper()
-	probe := filepath.Join(dir, "CaseProbe")
-	if err := os.WriteFile(probe, nil, 0o600); err != nil {
+	spelled, err := yammmtest.DiskSpelling(p)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Remove(probe) })
-	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
-	return err == nil
+	return spelled
+}
+
+// identityForm writes a host path in the form an identity takes.
+func identityForm(host string) string {
+	return norm.NFC.String(filepath.ToSlash(host))
 }
 
 // hostPathTree writes root/Proj/Sub/File.yammm and returns the created path
 // and the same file typed in lower case.
 func hostPathTree(t *testing.T) (created, typed string) {
 	t.Helper()
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !caseFoldingFilesystem(t, root) {
+	root := diskSpelling(t, t.TempDir())
+	if !yammmtest.CaseFoldingFilesystem(t, root) {
 		t.Skip("the filesystem is case-sensitive, so two spellings name two files")
 	}
 	created = filepath.Join(root, "Proj", "Sub", "File.yammm")
@@ -64,25 +72,28 @@ func TestNewCanonicalPath_OneIdentityForTwoSpellingsOfOneFile(t *testing.T) {
 		t.Errorf("two spellings of one file give two identities:\n  created %q\n  typed   %q",
 			fromCreated.String(), fromTyped.String())
 	}
-	if want := filepath.ToSlash(created); fromTyped.String() != want {
+	if want := identityForm(created); fromTyped.String() != want {
 		t.Errorf("the identity is %q; want the filesystem's own spelling %q", fromTyped.String(), want)
 	}
 }
 
-// TestConstructors_AgreeOnTwoSpellingsOfOneFile pins that rule across every
-// constructor that touches the filesystem: each one answers it alike.
+// TestConstructors_AgreeOnTwoSpellingsOfOneFile holds every constructor that
+// touches the filesystem to the spelling [yammmtest.DiskSpelling] reads from
+// the directory listings for the typed path. That reading shares no code with
+// resolveHostPath, so a resolver that spells a component wrongly fails here.
 func TestConstructors_AgreeOnTwoSpellingsOfOneFile(t *testing.T) {
 	t.Parallel()
 
-	created, typed := hostPathTree(t)
+	_, typed := hostPathTree(t)
+	onDisk := diskSpelling(t, typed)
+	want := identityForm(onDisk)
 
-	want := filepath.ToSlash(created)
 	resolved, err := ResolveHostPath(typed)
 	if err != nil {
 		t.Fatalf("ResolveHostPath(%q): %v", typed, err)
 	}
-	if got := filepath.ToSlash(resolved); got != want {
-		t.Errorf("ResolveHostPath(%q) = %q; want %q", typed, got, want)
+	if resolved != onDisk {
+		t.Errorf("ResolveHostPath(%q) = %q; want %q", typed, resolved, onDisk)
 	}
 
 	id, err := SourceIDFromPath(typed)
@@ -130,6 +141,259 @@ func TestNewCanonicalPath_IdentityDoesNotChangeWhenTheFileIsCreated(t *testing.T
 	}
 }
 
+// TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated holds
+// a dangling link to the path the kernel reaches once its target exists: a ".."
+// after a symlinked directory takes that directory's parent on disk, and a
+// relative target joins the link's directory as the filesystem spells it.
+func TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name string
+		// setup builds the tree under base and returns the path to resolve and the
+		// file whose creation makes the link resolve.
+		setup func(t *testing.T, base string) (typed, target string)
+	}{
+		{
+			name: "a relative target with .. after a symlinked directory",
+			setup: func(t *testing.T, base string) (string, string) {
+				t.Helper()
+				mkdirAll(t, filepath.Join(base, "real", "deep"))
+				symlink(t, filepath.Join("real", "deep"), filepath.Join(base, "sub"))
+				symlink(t, filepath.FromSlash("sub/../x"), filepath.Join(base, "l"))
+				return filepath.Join(base, "l"), filepath.Join(base, "real", "x")
+			},
+		},
+		{
+			name: "an absolute target with .. after a symlinked directory",
+			setup: func(t *testing.T, base string) (string, string) {
+				t.Helper()
+				mkdirAll(t, filepath.Join(base, "real", "deep"))
+				symlink(t, filepath.Join("real", "deep"), filepath.Join(base, "sub"))
+				symlink(t, base+filepath.FromSlash("/sub/../x"), filepath.Join(base, "l"))
+				return filepath.Join(base, "l"), filepath.Join(base, "real", "x")
+			},
+		},
+		{
+			name: "a relative target inside a symlinked directory",
+			setup: func(t *testing.T, base string) (string, string) {
+				t.Helper()
+				mkdirAll(t, filepath.Join(base, "real", "dir"))
+				symlink(t, filepath.Join("real", "dir"), filepath.Join(base, "alias"))
+				symlink(t, "x", filepath.Join(base, "real", "dir", "l"))
+				return filepath.Join(base, "alias", "l"), filepath.Join(base, "real", "dir", "x")
+			},
+		},
+		{
+			name: "a relative target with .. inside a symlinked directory",
+			setup: func(t *testing.T, base string) (string, string) {
+				t.Helper()
+				mkdirAll(t, filepath.Join(base, "real", "dir"))
+				symlink(t, filepath.Join("real", "dir"), filepath.Join(base, "alias"))
+				symlink(t, filepath.FromSlash("../x"), filepath.Join(base, "real", "dir", "l"))
+				return filepath.Join(base, "alias", "l"), filepath.Join(base, "real", "x")
+			},
+		},
+		{
+			name: "a relative target whose second .. follows another symlinked directory",
+			setup: func(t *testing.T, base string) (string, string) {
+				t.Helper()
+				mkdirAll(t, filepath.Join(base, "real", "deep"))
+				mkdirAll(t, filepath.Join(base, "real", "other", "deep"))
+				symlink(t, filepath.Join("real", "deep"), filepath.Join(base, "sub"))
+				symlink(t, filepath.Join("other", "deep"), filepath.Join(base, "real", "alias"))
+				symlink(t, filepath.FromSlash("sub/../alias/../x"), filepath.Join(base, "l"))
+				return filepath.Join(base, "l"), filepath.Join(base, "real", "other", "x")
+			},
+		},
+		{
+			name: "a relative target inside a directory typed in another case",
+			setup: func(t *testing.T, base string) (string, string) {
+				t.Helper()
+				if !yammmtest.CaseFoldingFilesystem(t, base) {
+					t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
+				}
+				mkdirAll(t, filepath.Join(base, "Dir"))
+				symlink(t, "x", filepath.Join(base, "Dir", "l"))
+				return filepath.Join(base, "dir", "l"), filepath.Join(base, "Dir", "x")
+			},
+		},
+	}
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			base := diskSpelling(t, t.TempDir())
+			typed, target := row.setup(t, base)
+
+			before, err := ResolveHostPath(typed)
+			if err != nil {
+				t.Fatalf("ResolveHostPath(%q) before the target exists: %v", typed, err)
+			}
+			if err := os.WriteFile(target, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			after, err := ResolveHostPath(typed)
+			if err != nil {
+				t.Fatalf("ResolveHostPath(%q) after the target exists: %v", typed, err)
+			}
+			if onDisk := diskSpelling(t, typed); before != onDisk || after != onDisk {
+				t.Errorf("ResolveHostPath(%q):\n  before the target exists %q\n  after                    %q\n  want the on-disk spelling %q",
+					typed, before, after, onDisk)
+			}
+		})
+	}
+}
+
+func mkdirAll(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+}
+
+func writeEmpty(t *testing.T, file string) {
+	t.Helper()
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// longTail creates a file under base whose path is exactly n bytes long and
+// returns that path relative to base.
+func longTail(t *testing.T, base string, n int) string {
+	t.Helper()
+	const nameMax = 255
+	var dirs []string
+	room := n - len(base) - len(string(filepath.Separator))
+	for room > nameMax {
+		dirs = append(dirs, strings.Repeat("d", 200))
+		room -= 200 + len(string(filepath.Separator))
+	}
+	if room <= len(".yammm") {
+		t.Fatalf("%q leaves no room for a path of %d bytes", base, n)
+	}
+	leaf := strings.Repeat("f", room-len(".yammm")) + ".yammm"
+	dir := filepath.Join(append([]string{base}, dirs...)...)
+	mkdirAll(t, dir)
+	writeEmpty(t, filepath.Join(dir, leaf))
+	return filepath.Join(append(dirs, leaf)...)
+}
+
+// childResolveEnv carries the path a child run of a test resolves, and
+// childWantEnv the host path the child must get back.
+const (
+	childResolveEnv = "LOCATION_TEST_CHILD_RESOLVE"
+	childWantEnv    = "LOCATION_TEST_CHILD_WANT"
+)
+
+// resolveInChild runs the top-level test name again in a new process of this
+// test binary, handing it typed and want, and fails t with the child's output
+// when the child fails. realpath(3) writes up to PATH_MAX bytes into the buffer
+// it is given, so a resolver with a shorter buffer can crash the process; the
+// crash then fails only t.
+func resolveInChild(t *testing.T, name, typed, want string) {
+	t.Helper()
+	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+name+"$", "-test.count=1") //nolint:gosec // runs this test binary again
+	child.Env = append(os.Environ(), childResolveEnv+"="+typed, childWantEnv+"="+want)
+	if output, err := child.CombinedOutput(); err != nil {
+		t.Errorf("the child run of %s for %q failed: %v\n%s", name, typed, err, output[:min(len(output), 4096)])
+	}
+}
+
+// TestResolveHostPath_SpellsALongPathInFull holds the resolver to the whole
+// answer for a path longer than a short buffer holds, up to the longest path
+// that PATH_MAX, 1024 bytes with its NUL on darwin, leaves room for. Each path
+// resolves in a child run of this test.
+func TestResolveHostPath_SpellsALongPathInFull(t *testing.T) {
+	t.Parallel()
+	if typed, ok := os.LookupEnv(childResolveEnv); ok {
+		want := os.Getenv(childWantEnv)
+		if got, err := ResolveHostPath(typed); err != nil || got != want {
+			t.Errorf("ResolveHostPath(%q) = %q (%d bytes), %v; want %q (%d bytes)", typed, got, len(got), err, want, len(want))
+		}
+		return
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("a Windows path longer than MAX_PATH depends on the host's long-path setting")
+	}
+
+	for _, n := range []int{257, 600, 1023} {
+		t.Run(strconv.Itoa(n)+" bytes", func(t *testing.T) {
+			t.Parallel()
+			// The path is typed from t.TempDir as given, so its resolved form,
+			// not its typed form, is the one that is n bytes long.
+			typedBase := t.TempDir()
+			typed := filepath.Join(typedBase, longTail(t, diskSpelling(t, typedBase), n))
+			want := diskSpelling(t, typed)
+			if len(want) != n {
+				t.Fatalf("%q resolves to %d bytes on disk; the row needs %d", typed, len(want), n)
+			}
+			resolveInChild(t, "TestResolveHostPath_SpellsALongPathInFull", typed, want)
+		})
+	}
+}
+
+// TestResolveHostPath_RefusesAPathWhoseResolvedFormExceedsPathMax pins a
+// refusal on darwin. stat follows links with no bound on the length of the path
+// they reach, but realpath(3) cannot write an answer of PATH_MAX bytes or more.
+// Such a path exists and has no spelling, so every door refuses it rather than
+// return part of one.
+func TestResolveHostPath_RefusesAPathWhoseResolvedFormExceedsPathMax(t *testing.T) {
+	t.Parallel()
+	if typed, ok := os.LookupEnv(childResolveEnv); ok {
+		if got, err := ResolveHostPath(typed); !errors.Is(err, syscall.ENAMETOOLONG) {
+			t.Errorf("ResolveHostPath(%q) = %q, %v; want ENAMETOOLONG", typed, got, err)
+		}
+		if got, err := NewCanonicalPath(typed); !errors.Is(err, syscall.ENAMETOOLONG) {
+			t.Errorf("NewCanonicalPath(%q) = %q, %v; want ENAMETOOLONG", typed, got.String(), err)
+		}
+		if got, err := CanonicalizePathForSourceID(typed); !errors.Is(err, syscall.ENAMETOOLONG) {
+			t.Errorf("CanonicalizePathForSourceID(%q) = %q, %v; want ENAMETOOLONG", typed, got, err)
+		}
+		return
+	}
+	if runtime.GOOS != "darwin" {
+		t.Skip("the PATH_MAX bound belongs to darwin's realpath(3)")
+	}
+
+	// base/hop and chain/hop each name the relative chain below them, so base/hop/hop
+	// resolves to base/chain/chain. The kernel's lookup holds one link's target at
+	// a time, under PATH_MAX, while the resolved path is longer than PATH_MAX.
+	// darwin refuses mkdir by a path that resolves that far, so the tree is built
+	// through a directory descriptor.
+	base := diskSpelling(t, t.TempDir())
+	chain := filepath.Join(slices.Repeat([]string{strings.Repeat("d", 200)}, 4)...)
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Join(chain, chain), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range []string{"hop", filepath.Join(chain, "hop")} {
+		if err := root.Symlink(chain, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	typed := filepath.Join(base, "hop", "hop")
+	if resolved := filepath.Join(base, chain, chain); len(resolved) < 1024 {
+		t.Fatalf("the resolved path %q is %d bytes; want at least PATH_MAX", resolved, len(resolved))
+	}
+	if info, err := os.Stat(typed); err != nil || !info.IsDir() {
+		t.Fatalf("stat(%q) through the links = %v, %v; want a directory", typed, info, err)
+	}
+	resolveInChild(t, "TestResolveHostPath_RefusesAPathWhoseResolvedFormExceedsPathMax", typed, "")
+}
+
 // TestCanonicalize_RefusesAnEmptyPath holds every file-backed door to refusing
 // an unset file name, where filepath.Abs would make it the working directory.
 func TestCanonicalize_RefusesAnEmptyPath(t *testing.T) {
@@ -175,10 +439,10 @@ func TestCanonicalize_RefusesAPathThatIsNotValidUTF8(t *testing.T) {
 			t.Errorf("ResolveHostPath(%q) error = %v; want ErrInvalidUTF8Path", bad, err)
 		}
 	})
-	t.Run("SourceIDFromAbsolutePath", func(t *testing.T) {
+	t.Run("SourceIDFromPath", func(t *testing.T) {
 		t.Parallel()
-		if _, err := SourceIDFromAbsolutePath(bad); !errors.Is(err, ErrInvalidUTF8Path) {
-			t.Errorf("SourceIDFromAbsolutePath(%q) error = %v; want ErrInvalidUTF8Path", bad, err)
+		if _, err := SourceIDFromPath(bad); !errors.Is(err, ErrInvalidUTF8Path) {
+			t.Errorf("SourceIDFromPath(%q) error = %v; want ErrInvalidUTF8Path", bad, err)
 		}
 	})
 	t.Run("NewCanonicalPath", func(t *testing.T) {
@@ -215,17 +479,74 @@ func TestResolveHostPath_RefusesAPathUnderARegularFile(t *testing.T) {
 	}
 }
 
+// TestResolveHostPath_SpellsAPathTheProcessCannotRead holds the resolver to
+// looking a path up without reading it. A file with no permission bits and a
+// directory the process can traverse but not list are spelled on disk, and
+// CanonicalizePathForSourceID, which requires the path to exist, accepts them.
+func TestResolveHostPath_SpellsAPathTheProcessCannotRead(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("a Windows permission bit does not stop a read")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a path whatever its permission bits")
+	}
+
+	root := diskSpelling(t, t.TempDir())
+	// Where the filesystem folds case, each path is typed in lower case, so a
+	// resolver that keeps the typed spelling is seen.
+	retype := func(p string) string { return p }
+	if yammmtest.CaseFoldingFilesystem(t, root) {
+		retype = func(p string) string { return root + strings.ToLower(strings.TrimPrefix(p, root)) }
+	}
+
+	sealed := filepath.Join(root, "Sealed.yammm")
+	unlisted := filepath.Join(root, "Unlisted")
+	inUnlisted := filepath.Join(unlisted, "File.yammm")
+	if err := os.Mkdir(unlisted, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{sealed, inUnlisted} {
+		if err := os.WriteFile(f, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(sealed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unlisted, 0o300); err != nil { //nolint:gosec // a directory the process can traverse but not list
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(unlisted, 0o700) }) //nolint:gosec // the temp directory's removal lists it
+
+	rows := []struct{ name, created string }{
+		{"a file with no permission bits", sealed},
+		{"a directory the process can traverse but not list", unlisted},
+		{"a file in a directory the process can traverse but not list", inUnlisted},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			typed := retype(row.created)
+			if got, err := ResolveHostPath(typed); err != nil || got != row.created {
+				t.Errorf("ResolveHostPath(%q) = %q, %v; want %q", typed, got, err, row.created)
+			}
+			if got, err := CanonicalizePathForSourceID(typed); err != nil || got != identityForm(row.created) {
+				t.Errorf("CanonicalizePathForSourceID(%q) = %q, %v; want %q", typed, got, err, identityForm(row.created))
+			}
+		})
+	}
+}
+
 // TestResolveHostPath_KeepsWhatTheLSPDependsOn pins the three rules the editor
-// depends on: a path is made absolute before anything else, cleaning runs before
-// resolution so a ".." across a symlink lands where the loader lands it, and a
-// name that no file answers to is kept as typed.
+// depends on: a relative path is made absolute from the working directory as
+// the filesystem spells it, cleaning runs before resolution so a ".." across a
+// symlink lands where the loader lands it, and a name no file answers to is
+// kept as typed.
 func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {
 	t.Parallel()
 
-	base, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	base := diskSpelling(t, t.TempDir())
 	sep := string(filepath.Separator)
 
 	t.Run("a relative path is made absolute", func(t *testing.T) {
@@ -239,24 +560,31 @@ func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ResolveHostPath(%q): %v", rel, err)
 		}
-		if want := filepath.Join(cwd, rel); got != want {
+		// os.Getwd keeps a symlinked or differently cased $PWD; the resolver
+		// spells the working directory, the deepest part that exists, on disk.
+		if want := filepath.Join(diskSpelling(t, cwd), rel); got != want {
 			t.Errorf("ResolveHostPath(%q) = %q; want %q", rel, got, want)
 		}
 	})
 
 	t.Run("cleaning runs before resolution", func(t *testing.T) {
 		t.Parallel()
-		outerDir := filepath.Join(base, "outer")
-		innerDir := filepath.Join(outerDir, "inner")
-		if err := os.MkdirAll(innerDir, 0o750); err != nil {
+		dir := filepath.Join(base, "clean")
+		real := filepath.Join(dir, "a", "real")
+		if err := os.MkdirAll(real, 0o750); err != nil {
 			t.Fatal(err)
 		}
-		outer := filepath.Join(outerDir, "target.yammm")
-		if err := os.WriteFile(outer, nil, 0o600); err != nil {
-			t.Fatal(err)
+		// The link's own directory is dir and its target's parent is dir/a, so
+		// the two orders reach two different files.
+		cleanedFirst := filepath.Join(dir, "target.yammm")
+		resolvedFirst := filepath.Join(dir, "a", "target.yammm")
+		for _, f := range []string{cleanedFirst, resolvedFirst} {
+			if err := os.WriteFile(f, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		link := filepath.Join(outerDir, "link")
-		if err := os.Symlink(innerDir, link); err != nil {
+		link := filepath.Join(dir, "link")
+		if err := os.Symlink(real, link); err != nil {
 			t.Skipf("symlinks unavailable: %v", err)
 		}
 
@@ -267,8 +595,9 @@ func TestResolveHostPath_KeepsWhatTheLSPDependsOn(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ResolveHostPath(%q): %v", in, err)
 		}
-		if got != outer {
-			t.Errorf("ResolveHostPath(%q) = %q; want %q — the link's real parent absorbed the \"..\"", in, got, outer)
+		if got != cleanedFirst {
+			t.Errorf("ResolveHostPath(%q) = %q; want %q, where cleaning removes the \"..\" before the link is followed to %q",
+				in, got, cleanedFirst, resolvedFirst)
 		}
 	})
 

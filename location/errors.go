@@ -11,9 +11,9 @@ import "errors"
 //
 // Example usage:
 //
-//	_, err := location.SourceIDFromAbsolutePath("schemas/main.yammm")
-//	if errors.Is(err, location.ErrNotAbsolute) {
-//	    // Handle a relative path specifically
+//	_, err := location.SourceIDFromPath("")
+//	if errors.Is(err, location.ErrEmptyPath) {
+//	    // Handle a caller that never set the file name
 //	}
 
 // ErrEmptySourceID is returned when a synthetic source ID is empty.
@@ -30,12 +30,6 @@ var ErrEmptySourceID = errors.New("location: synthetic source ID cannot be empty
 //
 // Returned by: ValidateSyntheticSourceID (and transitively by MustNewSourceID).
 var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks like absolute file path")
-
-// ErrNotAbsolute is returned when an absolute path is required but a
-// relative path was provided.
-//
-// Returned by: SourceIDFromAbsolutePath.
-var ErrNotAbsolute = errors.New("location: path is not absolute")
 
 // ErrEmptyPath is returned when a file-backed path is empty.
 //

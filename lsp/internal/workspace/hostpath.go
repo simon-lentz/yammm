@@ -1,21 +1,19 @@
 package workspace
 
 import (
-	"path/filepath"
+	"fmt"
 
 	"github.com/simon-lentz/yammm/location"
 )
 
-// hostPath is the editor's door to [location.ResolveHostPath], so a key the
-// LSP mints matches the SourceID the loader mints for one file. A path the
-// resolver refuses keeps its cleaned absolute form, because a deleted file
-// still needs a stable key and its event must not be dropped.
-func hostPath(path string) string {
-	if resolved, err := location.ResolveHostPath(path); err == nil {
-		return resolved
+// hostPath is the editor's door to [location.ResolveHostPath], so a key the LSP
+// mints matches the one the loader mints for one file. A deleted file resolves
+// like any path that does not exist; the error is a path that can never name a
+// file.
+func hostPath(path string) (string, error) {
+	resolved, err := location.ResolveHostPath(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", path, err)
 	}
-	if abs, err := filepath.Abs(path); err == nil {
-		return filepath.Clean(abs)
-	}
-	return path
+	return resolved, nil
 }

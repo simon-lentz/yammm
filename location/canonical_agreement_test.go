@@ -11,10 +11,10 @@ import (
 )
 
 // TestConstructors_AgreeOnARealFile holds the three file-backed constructors to
-// one identity for one existing file. SourceIDFromAbsolutePath promises
-// equality with SourceIDFromPath for a path without symlinks, and
-// CanonicalizePathForSourceID promises to match SourceIDFromPath; every file
-// sits under a symlink-resolved directory, so no symlink separates them.
+// one identity for one existing file. ResolveSourcePath promises the identity
+// SourceIDFromPath mints, and CanonicalizePathForSourceID promises to match
+// SourceIDFromPath; every file sits under a symlink-resolved directory, so no
+// symlink separates them.
 func TestConstructors_AgreeOnARealFile(t *testing.T) {
 	t.Parallel()
 
@@ -36,8 +36,8 @@ func TestConstructors_AgreeOnARealFile(t *testing.T) {
 		unixOnly bool
 	}{
 		{name: "plain file", rel: "plain.yammm"},
-		{name: "backslash in a file name", rel: `a\b.yammm`},
-		{name: "dot-dot beside a backslash", rel: `d\..\c.yammm`},
+		{name: "backslash in a file name", rel: `a\b.yammm`, unixOnly: true},
+		{name: "dot-dot beside a backslash", rel: `d\..\c.yammm`, unixOnly: true},
 		{name: "trailing separator", rel: "dir", dir: true, input: func(p string) string { return p + sep }},
 		{name: "double slash prefix", rel: "dslash.yammm", input: func(p string) string { return "/" + p }, unixOnly: true},
 		{name: "decomposed name", rel: "cafe\u0301.yammm"},
@@ -51,6 +51,9 @@ func TestConstructors_AgreeOnARealFile(t *testing.T) {
 			}
 
 			created := root + sep + row.rel
+			if filepath.Dir(created) != root || filepath.Base(created) != row.rel {
+				t.Fatalf("the host reads %q as more than one name, so the row would create a nested or cleaned path", row.rel)
+			}
 			if err := os.MkdirAll(filepath.Dir(created), 0o750); err != nil {
 				t.Fatal(err)
 			}
@@ -78,13 +81,13 @@ func TestConstructors_AgreeOnARealFile(t *testing.T) {
 // three share one canonicalizer, so agreement alone cannot see a dropped step.
 func constructorAgreement(p string) (string, bool) {
 	fromPath, errPath := SourceIDFromPath(p)
-	fromAbs, errAbs := SourceIDFromAbsolutePath(p)
+	fromResolve, _, errResolve := ResolveSourcePath(p)
 	forKey, errKey := CanonicalizePathForSourceID(p)
-	detail := fmt.Sprintf("SourceIDFromPath=%q (err %v), SourceIDFromAbsolutePath=%q (err %v), CanonicalizePathForSourceID=%q (err %v)",
-		fromPath.String(), errPath, fromAbs.String(), errAbs, forKey, errKey)
-	if errPath != nil || errAbs != nil || errKey != nil {
+	detail := fmt.Sprintf("SourceIDFromPath=%q (err %v), ResolveSourcePath=%q (err %v), CanonicalizePathForSourceID=%q (err %v)",
+		fromPath.String(), errPath, fromResolve.String(), errResolve, forKey, errKey)
+	if errPath != nil || errResolve != nil || errKey != nil {
 		return detail, false
 	}
 	id := fromPath.String()
-	return detail, id == fromAbs.String() && id == forKey && id == norm.NFC.String(id)
+	return detail, fromResolve == fromPath && id == forKey && id == norm.NFC.String(id)
 }

@@ -351,7 +351,7 @@ func TestSpan_Contains_WithBytes(t *testing.T) {
 func TestCompare_ZeroOnlyForEqualSpans(t *testing.T) {
 	t.Parallel()
 
-	file, err := SourceIDFromAbsolutePath(filepath.Join(t.TempDir(), "a.yammm"))
+	file, err := SourceIDFromPath(filepath.Join(t.TempDir(), "a.yammm"))
 	if err != nil {
 		t.Fatal(err)
 	}

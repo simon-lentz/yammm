@@ -29,7 +29,7 @@ func NewOverlay() *Overlay {
 // The caller is responsible for resolving the canonical SourceID (symlinks, etc.).
 //
 // Must be called with Workspace.mu held.
-func (d *Overlay) OpenDocument(uri string, sourceID location.SourceID, version int, text string) {
+func (d *Overlay) OpenDocument(uri string, sourceID location.SourceID, hostPath string, version int, text string) {
 	if d.Open == nil {
 		d.Open = make(map[string]*Document)
 	}
@@ -40,6 +40,7 @@ func (d *Overlay) OpenDocument(uri string, sourceID location.SourceID, version i
 	d.Open[uri] = &Document{
 		URI:       uri,
 		SourceID:  sourceID,
+		HostPath:  hostPath,
 		Version:   version,
 		Text:      text,
 		OpenOrder: d.OpenCounter,
@@ -126,15 +127,32 @@ func (d *Overlay) GetSnapshot(uri string) *Snapshot {
 	}
 }
 
-// CollectOverlays builds an overlay map from all open documents.
-// Uses canonical SourceID as key to ensure symlinks and path variations
-// map to the same entry that the loader will use.
+// CollectOverlays builds an overlay map from all open documents, keyed by each
+// document's resolved host path: the loader reads a key as a path, and an
+// identity may name no file. Of the documents that name one source — one file
+// opened twice, or two names one identity folds, such as NFC and NFD spellings
+// — the first opened wins, so the loader gets one key per source and the map
+// does not depend on iteration order.
 //
 // Must be called with Workspace.mu held (at least RLock).
 func (d *Overlay) CollectOverlays() map[string][]byte {
-	overlays := make(map[string][]byte, len(d.Open))
+	first := make(map[string]*Document, len(d.Open))
 	for _, doc := range d.Open {
-		overlays[doc.SourceID.String()] = []byte(doc.Text)
+		if doc.HostPath == "" {
+			continue
+		}
+		source := doc.HostPath
+		if !doc.SourceID.IsZero() {
+			source = doc.SourceID.String()
+		}
+		if chosen, seen := first[source]; seen && chosen.OpenOrder < doc.OpenOrder {
+			continue
+		}
+		first[source] = doc
+	}
+	overlays := make(map[string][]byte, len(first))
+	for _, doc := range first {
+		overlays[doc.HostPath] = []byte(doc.Text)
 	}
 	return overlays
 }

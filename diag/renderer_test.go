@@ -413,7 +413,7 @@ func TestRenderer_CompleteOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := location.SourceIDFromAbsolutePath(filepath.Join(root, "src", "schema.yammm"))
+	source, err := location.SourceIDFromPath(filepath.Join(root, "src", "schema.yammm"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -78,7 +78,7 @@ func TestMapper_buildCanonicalToURIMap_prefersSourceID(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test.yammm")
 	require.NoError(t, os.WriteFile(filePath, []byte("content"), 0o600))
 
-	sourceID, err := location.SourceIDFromAbsolutePath(filePath)
+	sourceID, err := location.SourceIDFromPath(filePath)
 	require.NoError(t, err)
 
 	uri := lsputil.PathToURI(filePath)
@@ -107,11 +107,8 @@ func TestMapper_buildCanonicalToURIMap_fallbackWithoutSourceID(t *testing.T) {
 
 	cache := m.buildCanonicalToURIMap(open)
 
-	// Should fall back to resolved path
-	resolved, err := filepath.EvalSymlinks(filePath)
-	require.NoError(t, err)
-	lookupKey := filepath.ToSlash(resolved)
-	assert.Equal(t, uri, cache[lookupKey])
+	// Should fall back to the identity of the file's on-disk spelling
+	assert.Equal(t, uri, cache[spelledIdentity(t, filePath)])
 }
 
 func TestMapper_buildCanonicalToURIMap_symlinkResolution(t *testing.T) {
@@ -132,11 +129,8 @@ func TestMapper_buildCanonicalToURIMap_symlinkResolution(t *testing.T) {
 
 	cache := m.buildCanonicalToURIMap(open)
 
-	// Cache key should be the resolved (real) path
-	resolved, err := filepath.EvalSymlinks(linkFile)
-	require.NoError(t, err)
-	lookupKey := filepath.ToSlash(resolved)
-	assert.Equal(t, linkURI, cache[lookupKey])
+	// Cache key should be the identity of the real file's on-disk spelling
+	assert.Equal(t, linkURI, cache[spelledIdentity(t, realFile)])
 }
 
 func TestMapper_buildCanonicalToURIMap_prefersEarlierOpenOrder(t *testing.T) {
@@ -147,7 +141,7 @@ func TestMapper_buildCanonicalToURIMap_prefersEarlierOpenOrder(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test.yammm")
 	require.NoError(t, os.WriteFile(filePath, []byte("content"), 0o600))
 
-	sourceID, err := location.SourceIDFromAbsolutePath(filePath)
+	sourceID, err := location.SourceIDFromPath(filePath)
 	require.NoError(t, err)
 
 	uri1 := lsputil.PathToURI(filePath)
@@ -268,7 +262,7 @@ func TestMapper_remapPathToURI_fileURI(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test.yammm")
 	require.NoError(t, os.WriteFile(filePath, []byte("content"), 0o600))
 
-	sourceID, err := location.SourceIDFromAbsolutePath(filePath)
+	sourceID, err := location.SourceIDFromPath(filePath)
 	require.NoError(t, err)
 
 	clientURI := lsputil.PathToURI(filePath)
@@ -288,7 +282,7 @@ func TestMapper_remapPathToURI_barePath(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test.yammm")
 	require.NoError(t, os.WriteFile(filePath, []byte("content"), 0o600))
 
-	sourceID, err := location.SourceIDFromAbsolutePath(filePath)
+	sourceID, err := location.SourceIDFromPath(filePath)
 	require.NoError(t, err)
 
 	clientURI := lsputil.PathToURI(filePath)
@@ -315,7 +309,7 @@ func TestMapper_remapPathToURI_symlink(t *testing.T) {
 	require.NoError(t, os.WriteFile(realFile, []byte("content"), 0o600))
 	require.NoError(t, os.Symlink(realFile, linkFile))
 
-	sourceID, err := location.SourceIDFromAbsolutePath(realFile)
+	sourceID, err := location.SourceIDFromPath(realFile)
 	require.NoError(t, err)
 
 	clientURI := lsputil.PathToURI(realFile)

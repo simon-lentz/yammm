@@ -10,6 +10,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -247,6 +248,63 @@ func TestFindModuleRoot_WalksTheCanonicalChain(t *testing.T) {
 	}
 }
 
+// TestFindModuleRoot_SpellsTheRootAsItsDirectoryListsIt holds discovery to the
+// directory a start path names rather than to the bytes it was typed with:
+// where the filesystem finds one directory by two spellings, the root is the
+// spelling its parent lists.
+func TestFindModuleRoot_SpellsTheRootAsItsDirectoryListsIt(t *testing.T) {
+	t.Parallel()
+	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
+
+	base := t.TempDir()
+	if !yammmtest.CaseFoldingFilesystem(t, base) {
+		t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
+	}
+	root := mkdirs(t, base, "Proj")
+	mkdirs(t, root, "Sub")
+	writeMarker(t, root, "")
+
+	typed := filepath.Join(base, "proj", "sub")
+	got, found, err := schema.FindModuleRoot(typed)
+	if err != nil {
+		t.Fatalf("FindModuleRoot(%q): %v", typed, err)
+	}
+	if !found {
+		t.Fatalf("FindModuleRoot(%q) found no marker; one sits in %q", typed, root)
+	}
+	if want := canonicalPath(t, filepath.Dir(typed)); got != want {
+		t.Errorf("FindModuleRoot(%q) = %q, want %q", typed, got, want)
+	}
+}
+
+// TestFindModuleRoot_RefusesAPathTheResolverRefuses holds discovery to the
+// resolver's refusals: an empty path and a path that is not valid UTF-8 name no
+// directory, so no walk starts from the working directory in their place.
+func TestFindModuleRoot_RefusesAPathTheResolverRefuses(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name string
+		dir  string
+		want error
+	}{
+		{"an empty path", "", location.ErrEmptyPath},
+		{"a path that is not valid UTF-8", "caf\xff", location.ErrInvalidUTF8Path},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			root, found, err := schema.FindModuleRoot(row.dir)
+			if !errors.Is(err, row.want) {
+				t.Errorf("FindModuleRoot(%q) error = %v, want %v", row.dir, err, row.want)
+			}
+			if found || root != "" {
+				t.Errorf("FindModuleRoot(%q) = (%q, %v), want (\"\", false)", row.dir, root, found)
+			}
+		})
+	}
+}
+
 func TestModuleRootIssue_Shape(t *testing.T) {
 	t.Parallel()
 
@@ -266,7 +324,7 @@ func TestModuleRootIssue_Shape(t *testing.T) {
 	for _, d := range issue.Details() {
 		details[d.Key] = d.Value
 	}
-	if got, want := details[diag.DetailKeyModuleRoot], filepath.Join("/tmp", "proj"); got != want {
+	if got, want := details[diag.DetailKeyModuleRoot], location.MustSourceIDFromPath(filepath.Join("/tmp", "proj")).String(); got != want {
 		t.Errorf("module_root detail = %q, want the marker's directory %q", got, want)
 	}
 	if got := details[diag.DetailKeyModuleRootOrigin]; got != diag.ModuleRootDiscovered {

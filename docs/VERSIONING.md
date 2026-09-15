@@ -863,8 +863,8 @@ suggests `v0.22.0`. `snapshot info --format json`'s payload breaks in a way no
 declaration describes (below).
 
 Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
-are on the `review` branch and reach `main` at the unit's close. Its three fix
-passes move **nine additions and five removals**:
+are on the `review` branch and reach `main` at the unit's close. Its fix passes
+move **ten additions and seven removals**:
 
 - **pass A** removes `location.ErrUNCPath` and `location.PositionRegistry`;
 - **pass B** adds `location.SourceID.RelativeTo` and `schema.CaptureSources`,
@@ -874,10 +874,12 @@ passes move **nine additions and five removals**:
   `diag.DetailKeyExitCode`, `diag.DetailKeyFilePath` and
   `diag.DetailKeyTriggeringCodes`; removes `location.Provenance.AtKey`; and
   renames `diag.E_SNAPSHOT_PATH_FALLBACK` to `diag.W_SNAPSHOT_PATH_FALLBACK`,
-  which `gorelease` counts as one removal and one addition.
+  which `gorelease` counts as one removal and one addition;
+- **the second fix pass** adds `location.ResolveSourcePath` and removes
+  `location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute`.
 
-**With unit 6's six additions, `gorelease -base=v0.21.0` reads fifteen
-compatible changes and five incompatible ones, and suggests `v0.22.0`.** Each
+**With unit 6's six additions, `gorelease -base=v0.21.0` reads sixteen
+compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Each
 block below was written by the pass or group that landed its behaviour.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
@@ -1416,8 +1418,7 @@ does not read this output**, measured at its tree.
   semantics, then NFC and forward slashes.** `NewCanonicalPath`,
   `SourceIDFromAbsolutePath` and `CanonicalizePathForSourceID` each rewrote
   separators, cleaned and refused UNC paths in their own order, so one input
-  could produce three identities. They now share one rule, and
-  `SourceIDFromAbsolutePath` still touches no filesystem.
+  could produce three identities. They now share one rule.
 - **On Unix a backslash is a file-name character.** A path holding one names
   that file, where it named a nested one. `a\b.yammm` and `a/b.yammm` are two
   sources, where they shared one identity. A module under a directory named
@@ -1431,11 +1432,6 @@ does not read this output**, measured at its tree.
   the module root's bytes on disk, so such a module failed with
   `E_PATH_ESCAPE` through `schema.Load` and `schema.LoadSourcesWithEntry`. It
   now resolves imports from the path each file was read from.
-- **`SourceIDFromAbsolutePath` accepts exactly what the host calls absolute.**
-  On Unix it refuses a drive-letter form (`C:/a`) with `ErrNotAbsolute`, and
-  reads a leading `//` as the root (`//x` is `/x`), where it refused it. On
-  Windows it refuses a rooted path without a volume (`/a`), and a `..` above a
-  drive root keeps what follows it: `C:/../x` is `C:/x`, where it was `C:/`.
 - **Network shares are canonicalized on Windows** — `\\server\share\x` is
   `//server/share/x` — where every constructor refused them. **Removed:
   `location.ErrUNCPath`**, whose only ground was a `path.Clean` collision the
@@ -1605,7 +1601,8 @@ existing declaration.
 - **Two spellings of one file give one identity, and it is the spelling the
   filesystem holds.** `location.ResolveHostPath` answers what the filesystem
   calls a path, and every file-backed identity is that answer normalized. On
-  darwin it reads the on-disk spelling through `fcntl(F_GETPATH)`, because
+  darwin it reads the on-disk spelling through `realpath(3)` (the second fix
+  pass replaced `fcntl(F_GETPATH)`; see its block), because
   `filepath.EvalSymlinks` there keeps the case as typed; Linux is
   case-sensitive and Go's Windows implementation already spells each component
   on disk. **What this repairs:** on a case-insensitive volume a
@@ -1777,6 +1774,59 @@ existing declaration.
   from its run against `v0.21.0` by nothing. rdata writes each `.ys` under a
   per-batch lock, and its residue check keys on `.ys` then `TmpSuffix`, which
   the new name keeps.
+
+### Unit 7, the second fix pass — one resolver mints every file-backed identity
+
+**Two exported declarations are removed and one is added:**
+`location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute` are removed, and
+`location.ResolveSourcePath` is added.
+
+- **Removed: `location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute`.**
+  It was the one constructor that minted a file-backed identity from a path's text
+  alone, so for one file its identity could differ from `schema.Load`'s by a
+  symlink or by case. Every file-backed identity now comes from
+  `SourceIDFromPath`, `NewCanonicalPath`, `CanonicalizePathForSourceID`,
+  `CanonicalPath.Join` or `ResolveSourcePath`, and each resolves. A caller that
+  built a key with it calls `SourceIDFromPath`. No consumer calls it.
+- **Added: `location.ResolveSourcePath`**, which returns a path's identity and the
+  host path it was read from, out of one resolution.
+- **On darwin the on-disk spelling comes from `realpath(3)`**, called through
+  libSystem, where it came from `fcntl(F_GETPATH)`. `F_GETPATH` answers from a
+  vnode's cached name, and a concurrent lookup of another hard link of the same
+  file rewrites that name: measured, 653 and 1,350 wrong answers in 16,000. The
+  new call opens nothing, so a FIFO, an unreadable file and a full descriptor
+  table resolve like any other path. A firmlinked spelling such as
+  `/System/Volumes/Data/Users/…` and `/Users/…` stays two spellings, as a Linux
+  bind mount does. The binaries still build with `CGO_ENABLED=0`.
+- **A path resolves as far as it exists.** A dangling symbolic link resolves to
+  the path the kernel reaches through it, each `..` in its target applied to the
+  directory reached on disk, so an identity minted before its target exists equals
+  the one minted after. A component the process cannot traverse ends the resolution as a
+  missing one does, and the rest keeps its typed spelling, where it was refused.
+  What is refused is a property of the path: empty, not valid UTF-8, under a
+  regular file, a cycle of dangling links, or longer once resolved than the host
+  allows a path to be.
+- **`CanonicalPath.Join` resolves its result**, as `NewCanonicalPath` does, and
+  refuses an element that is not valid UTF-8 and a join through a regular file. On
+  Unix it joins `C:/x`, `C:\x` and `\\srv` as names; Windows still refuses a rooted,
+  drive-relative, volume or network-share element.
+- **`schema.FindModuleRoot` returns an error for a path the resolver refuses**,
+  `""` included, where it walked the path as typed or the working directory. The
+  editor's key for such a path is an error too, and its document is analysed and
+  shows the refusal.
+- **An import's identity carries its file's on-disk case.** On a
+  case-insensitive volume, `import "./Dep"` binds the identity of `dep.yammm`, and
+  `./dep` beside `./DEP` draws `E_DUPLICATE_IMPORT`, where it drew
+  `E_DUPLICATE_SCHEMA`.
+- **`schema.LoadSourcesWithEntry` refuses two source keys that name one source**,
+  naming both, with a Fatal `E_LOAD_IO_FAILURE`. Which key's bytes were loaded had
+  depended on the host and the key order. An empty key is refused with or without
+  a module root.
+- **`schema.LoadString` refuses a source name that is not valid UTF-8**, as every
+  file-backed constructor does.
+- **Consumer reach: none measured.** rdata calls none of the `location`
+  constructors, and its suite against this tree differs from its run against
+  `v0.21.0` by nothing.
 
 ## v0.21.0 under this policy
 

@@ -556,20 +556,19 @@ func (b *Builder) resolveImportPath(importPath string) (location.SourceID, bool)
 		// Get schema's directory
 		schemaDir := cp.Dir()
 
-		// Resolve the relative path
-		resolved, err := schemaDir.Join(importPath)
+		// The extension is part of the name the import names, so it is added
+		// before Join resolves the path: a directory beside the file may share
+		// the import's name.
+		fileName := importPath
+		if !strings.HasSuffix(fileName, ".yammm") {
+			fileName += ".yammm"
+		}
+		resolved, err := schemaDir.Join(fileName)
 		if err != nil {
 			return location.SourceID{}, false
 		}
 
-		// Auto-append .yammm if missing
-		resolvedPath := resolved.String()
-		if !strings.HasSuffix(resolvedPath, ".yammm") {
-			resolvedPath += ".yammm"
-		}
-
-		// Construct SourceID from resolved path
-		resolvedID, err := location.SourceIDFromAbsolutePath(resolvedPath)
+		resolvedID, err := location.SourceIDFromPath(resolved.String())
 		if err != nil {
 			return location.SourceID{}, false
 		}

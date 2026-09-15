@@ -23,7 +23,7 @@ func TestSourceID_RelativeTo(t *testing.T) {
 	}
 	file := func(parts ...string) SourceID {
 		t.Helper()
-		id, err := SourceIDFromAbsolutePath(filepath.Join(append([]string{base}, parts...)...))
+		id, err := SourceIDFromPath(filepath.Join(append([]string{base}, parts...)...))
 		if err != nil {
 			t.Fatal(err)
 		}

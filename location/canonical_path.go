@@ -3,7 +3,6 @@ package location
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
@@ -19,14 +18,13 @@ type CanonicalPath struct {
 
 // NewCanonicalPath is the identity of the host path [ResolveHostPath] returns
 // for p: absolute, clean, symlink-resolved and spelled on disk, then NFC with
-// forward slashes. A path that does not exist yet keeps its missing tail as
-// typed; a resolution that fails for any other reason is returned.
+// forward slashes. It fails where ResolveHostPath does.
 func NewCanonicalPath(p string) (CanonicalPath, error) {
-	canonical, err := canonicalize(p, false, symlinksBestEffort)
+	host, err := resolveHostPath(p, false)
 	if err != nil {
 		return CanonicalPath{}, fmt.Errorf("canonicalize path %q: %w", p, err)
 	}
-	return CanonicalPath{path: canonical}, nil
+	return identityOf(host), nil
 }
 
 // MustCanonicalPath is like NewCanonicalPath but panics on error.
@@ -57,16 +55,15 @@ func (c CanonicalPath) Dir() CanonicalPath {
 	if c.IsZero() {
 		return CanonicalPath{}
 	}
-	dir := filepath.Dir(filepath.Clean(filepath.FromSlash(c.path)))
-	return CanonicalPath{path: filepath.ToSlash(norm.NFC.String(dir))}
+	return identityOf(filepath.Dir(filepath.Clean(filepath.FromSlash(c.path))))
 }
 
-// Join appends path elements to c by the host's path rules and returns the
-// cleaned result. It is lexical: symlinks in the result are not resolved. An
-// element that is not relative on the host returns [ErrAbsoluteJoinElement];
-// on Windows that includes a rooted `\x` and a drive-relative `C:x`. On Unix a
-// backslash in an element is part of a file name. For the zero value it returns
-// the zero value, as [CanonicalPath.Dir] does.
+// Join appends path elements to c and returns the identity of the result,
+// resolved as [NewCanonicalPath] resolves a path. An element that is not
+// relative on the host returns [ErrAbsoluteJoinElement]; on Windows that
+// includes a rooted `\x` or `/x` and a drive-relative `C:x`, and on Unix a
+// backslash is part of a file name. An element that is not valid UTF-8 returns
+// [ErrInvalidUTF8Path]. For the zero value it returns the zero value.
 func (c CanonicalPath) Join(elem ...string) (CanonicalPath, error) {
 	if c.IsZero() {
 		return CanonicalPath{}, nil
@@ -74,32 +71,42 @@ func (c CanonicalPath) Join(elem ...string) (CanonicalPath, error) {
 	parts := make([]string, 0, len(elem)+1)
 	parts = append(parts, filepath.FromSlash(c.path))
 	for _, e := range elem {
-		if looksLikeAbsolute(e) || hostRootsElement(e) {
+		if !utf8.ValidString(e) {
+			return CanonicalPath{}, fmt.Errorf("%w: %q", ErrInvalidUTF8Path, e)
+		}
+		if filepath.IsAbs(e) || hostRootsElement(e) {
 			return CanonicalPath{}, fmt.Errorf("%w: %s; use relative path or NewCanonicalPath for absolute paths", ErrAbsoluteJoinElement, e)
 		}
 		parts = append(parts, filepath.FromSlash(e))
 	}
-	return CanonicalPath{path: filepath.ToSlash(norm.NFC.String(filepath.Join(parts...)))}, nil
+	return NewCanonicalPath(filepath.Join(parts...))
 }
 
 // hostRootsElement reports whether the host resolves e against something other
-// than the path it is joined to: on Windows a leading backslash roots e at the
+// than the path it is joined to: on Windows a leading separator roots e at the
 // current drive, and a volume name selects a drive. Unix has no such element.
 func hostRootsElement(e string) bool {
-	if filepath.Separator != '\\' {
+	if filepath.Separator != '\\' || e == "" {
 		return false
 	}
-	return strings.HasPrefix(e, `\`) || filepath.VolumeName(e) != ""
+	return e[0] == '\\' || e[0] == '/' || filepath.VolumeName(e) != ""
 }
 
-// looksLikeAbsolute reports whether s looks like an absolute filesystem
-// path: Unix absolute (a leading '/', which also covers forward-slash UNC),
-// UNC with backslashes, or a Windows volume root (C:/ or C:\).
-//
-// Two guards share this predicate: [CanonicalPath.Join] rejects absolute
-// elements (joining one would produce a nonsensical path — the caller
-// should use NewCanonicalPath), and [ValidateSyntheticSourceID] rejects
-// synthetic identifiers that could collide with file-backed SourceIDs.
+// identityOf writes a resolved host path as an identity: NFC, with forward
+// slashes, and a network share's root with its trailing separator as a drive's
+// root has one, because filepath.Clean keeps `\\server\share\` and
+// `\\server\share` as two spellings of one directory.
+func identityOf(host string) CanonicalPath {
+	if vol := filepath.VolumeName(host); len(vol) > 2 && host == vol {
+		host += string(filepath.Separator)
+	}
+	return CanonicalPath{path: filepath.ToSlash(norm.NFC.String(host))}
+}
+
+// looksLikeAbsolute reports whether s looks like an absolute path on any host:
+// a leading '/', a backslash UNC prefix, or a Windows volume root. It is the
+// shape [ValidateSyntheticSourceID] refuses everywhere, so a synthetic
+// identifier cannot collide with a file-backed one minted on another host.
 func looksLikeAbsolute(s string) bool {
 	if len(s) == 0 {
 		return false
@@ -117,41 +124,6 @@ func looksLikeAbsolute(s string) bool {
 		return true
 	}
 	return false
-}
-
-// symlinkMode selects what canonicalize asks the filesystem.
-type symlinkMode int
-
-const (
-	// symlinksNone touches no filesystem, and pairs with requireAbs.
-	symlinksNone symlinkMode = iota
-	// symlinksBestEffort spells the path on disk as far as it exists.
-	symlinksBestEffort
-	// symlinksStrict fails for a path whose leaf does not exist.
-	symlinksStrict
-)
-
-// canonicalize is the one rule behind every file-backed identity: the host path
-// the filesystem answers with, then NFC and forward slashes. On Unix a
-// backslash is a file-name character; only Windows reads it as a separator.
-func canonicalize(p string, requireAbs bool, links symlinkMode) (string, error) {
-	if !utf8.ValidString(p) {
-		return "", fmt.Errorf("%w: %q", ErrInvalidUTF8Path, p)
-	}
-	var abs string
-	if requireAbs {
-		if !filepath.IsAbs(p) {
-			return "", fmt.Errorf("%w: %q", ErrNotAbsolute, p)
-		}
-		abs = filepath.Clean(p)
-	} else {
-		resolved, err := resolveHostPath(p, links == symlinksStrict)
-		if err != nil {
-			return "", err
-		}
-		abs = resolved
-	}
-	return filepath.ToSlash(norm.NFC.String(abs)), nil
 }
 
 // isLetter reports whether c is an ASCII letter.

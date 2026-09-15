@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
@@ -252,19 +253,13 @@ func TestSources_PopulatesSourceRegistry(t *testing.T) {
 	require.False(t, snapshot.Result.HasErrors(),
 		"fixture must load cleanly: %v", snapshot.Result.Err())
 
-	// Canonicalize paths to match loader behavior (symlink resolution)
-	mainCanonical, _ := filepath.EvalSymlinks(mainPath)
-	partsCanonical, _ := filepath.EvalSymlinks(partsPath)
-
 	// Verify registry contains the entry file
-	mainSourceID, err := location.SourceIDFromAbsolutePath(mainCanonical)
-	require.NoError(t, err, "failed to create main source ID")
-	assert.True(t, snapshot.Sources.Has(mainSourceID), "registry should contain main file: %s", mainCanonical)
+	mainSourceID := spelledSourceID(t, mainPath)
+	assert.True(t, snapshot.Sources.Has(mainSourceID), "registry should contain main file: %s", mainSourceID)
 
 	// Verify registry contains the imported file
-	partsSourceID, err := location.SourceIDFromAbsolutePath(partsCanonical)
-	require.NoError(t, err, "failed to create parts source ID")
-	assert.True(t, snapshot.Sources.Has(partsSourceID), "registry should contain imported file: %s", partsCanonical)
+	partsSourceID := spelledSourceID(t, partsPath)
+	assert.True(t, snapshot.Sources.Has(partsSourceID), "registry should contain imported file: %s", partsSourceID)
 
 	// Verify LineStartByte works for imported file (critical for UTF-16 conversion)
 	offset, ok := snapshot.Sources.LineStartByte(partsSourceID, 1)
@@ -304,14 +299,9 @@ func TestSources_FailedLoadKeepsOverlays(t *testing.T) {
 	require.Nil(t, snapshot.Schema, "the load must fail for this contract to apply")
 	require.True(t, snapshot.Result.HasErrors())
 
-	// The registry keys overlays canonically (symlinks resolved), matching
-	// the loader's identity, so the expected ID is minted the same way.
-	mainCanonical, err := filepath.EvalSymlinks(mainPath)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(%s): %v", mainPath, err)
-	}
-	mainSourceID, err := location.SourceIDFromAbsolutePath(mainCanonical)
-	require.NoError(t, err)
+	// The registry keys an overlay by the loader's identity for it: the
+	// identity of the file's on-disk spelling.
+	mainSourceID := spelledSourceID(t, mainPath)
 	assert.True(t, snapshot.Sources.Has(mainSourceID), "overlay content stays available")
 	assert.Equal(t, 1, snapshot.Sources.Len(), "no partially-loaded sources beyond the overlays")
 }
@@ -377,10 +367,9 @@ func TestSources_DiskFallback(t *testing.T) {
 	// The resolved parent should be "Helper" from the utils schema
 	assert.Equal(t, "Helper", supers[0].Name(), "Parent type name")
 
-	// ImportedPaths holds each import's identity: symlinks resolved, and
+	// ImportedPaths holds each import's identity: the on-disk spelling,
 	// '/'-separated on every host.
-	utilsIdentity, _ := filepath.EvalSymlinks(utilsPath)
-	utilsIdentity = filepath.ToSlash(utilsIdentity)
+	utilsIdentity := spelledSourceID(t, utilsPath).String()
 	assert.True(t, slices.Contains(snapshot.ImportedPaths, utilsIdentity),
 		"ImportedPaths should include %s; got %v", utilsIdentity, snapshot.ImportedPaths)
 }
@@ -545,7 +534,7 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			sourceID, err := location.SourceIDFromAbsolutePath(tt.path)
+			sourceID, err := location.SourceIDFromPath(tt.path)
 			if err != nil {
 				t.Skipf("skipping: %v", err)
 			}
@@ -565,4 +554,19 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 			assert.Equal(t, tt.wantURI, gotURI)
 		})
 	}
+}
+
+// spelledSourceID returns the identity of path's on-disk spelling, which
+// [yammmtest.DiskSpelling] reads without the location package's resolver.
+func spelledSourceID(t *testing.T, path string) location.SourceID {
+	t.Helper()
+	spelled, err := yammmtest.DiskSpelling(path)
+	if err != nil {
+		t.Fatalf("DiskSpelling(%q): %v", path, err)
+	}
+	id, err := location.SourceIDFromPath(spelled)
+	if err != nil {
+		t.Fatalf("SourceIDFromPath(%q): %v", spelled, err)
+	}
+	return id
 }

@@ -140,7 +140,15 @@ func (w *Workspace) AnalyzeMarkdownAndPublish(analyzeCtx context.Context, uri st
 	}
 	// The file is spelled on disk before a block's identity is built on it, so
 	// that identity equals the overlay key the analyzer files the block under.
-	path := hostPath(rawPath)
+	path, err := hostPath(rawPath)
+	if err != nil {
+		w.logger.Warn(
+			"failed to resolve markdown path",
+			slog.String("uri", uri),
+			slog.Any("error", err),
+		)
+		return
+	}
 
 	validBlocks := make([]markdown.CodeBlock, 0, len(blocks))
 	for i, block := range blocks {

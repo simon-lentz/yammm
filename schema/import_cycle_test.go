@@ -28,7 +28,7 @@ func TestImportCycle_ReportedOnTheClosingImport(t *testing.T) {
 	_, res := schema.Load(t.Context(), a, schema.WithModuleRoot(root))
 
 	fileID := func(p string) location.SourceID {
-		id, err := location.SourceIDFromAbsolutePath(canonicalPath(t, p))
+		id, err := location.SourceIDFromPath(canonicalPath(t, p))
 		if err != nil {
 			t.Fatal(err)
 		}

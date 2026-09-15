@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -16,12 +17,17 @@ import (
 const (
 	hostPathDep   = "schema \"reldep\"\n\ntype Zone {\n\tcode String primary\n}\n"
 	hostPathEntry = "schema \"relmain\"\n\nimport \"./rel_dep\" as dep\n\ntype Site {\n\tid String primary\n\t--> IN_ZONE (one) dep.Zone\n}\n"
+	// hostPathDepImporting replaces hostPathDep where the import has a
+	// relative import of its own.
+	hostPathDepImporting = "schema \"reldep\"\n\nimport \"./rel_leaf\" as leaf\n\ntype Zone {\n\tcode String primary\n\t--> IN_REGION (one) leaf.Region\n}\n"
+	hostPathLeaf         = "schema \"relleaf\"\n\ntype Region {\n\tcode String primary\n}\n"
 )
 
 // TestHostPath_Loads holds the loader to the host's path rules: a schema is
-// read, and its imports resolved, by the name the host gives each file. A
-// name the canonical identity spells differently — a backslash on Unix, a
-// decomposed character anywhere — must load like any other.
+// read, and its imports resolved, by the name the host gives each file. The
+// decomposed-name rows hold every import to the host path its importer was
+// read from, since the identity spells that name in NFC and may name no file.
+// The backslash rows hold that a backslash is part of a file name on Unix.
 func TestHostPath_Loads(t *testing.T) {
 	t.Parallel()
 
@@ -60,6 +66,17 @@ func TestHostPath_Loads(t *testing.T) {
 				t.Helper()
 				dir := filepath.Join(tmp, "cafe\u0301")
 				return loadOutcome(schema.Load(t.Context(), writeHostPathModule(t, dir, "rel_main.yammm")))
+			},
+		},
+		{
+			name: "Load, decomposed directory, an import with a relative import of its own",
+			run: func(t *testing.T, tmp string) (bool, string) {
+				t.Helper()
+				dir := filepath.Join(tmp, "cafe\u0301")
+				entry := writeHostPathModule(t, dir, "rel_main.yammm")
+				writeHostPathFile(t, filepath.Join(dir, "rel_dep.yammm"), hostPathDepImporting)
+				writeHostPathFile(t, filepath.Join(dir, "rel_leaf.yammm"), hostPathLeaf)
+				return loadOutcome(schema.Load(t.Context(), entry, schema.WithModuleRoot(dir)))
 			},
 		},
 		{
@@ -125,25 +142,12 @@ func TestHostPath_Loads(t *testing.T) {
 	}
 }
 
-// caseFoldingFilesystem reports whether dir's filesystem finds a file by
-// another spelling of its name. Two spellings of one directory are what the
-// rows below are about, and a case-sensitive filesystem cannot produce them.
-func caseFoldingFilesystem(t *testing.T, dir string) bool {
-	t.Helper()
-	probe := filepath.Join(dir, "CaseProbe")
-	if err := os.WriteFile(probe, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Remove(probe) })
-	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
-	return err == nil
-}
-
 // TestHostPath_LoadsWhenTheRootAndTheEntryAreSpelledDifferently holds the
 // loader to the FILE a path names rather than to the bytes it was typed with.
 // Where the filesystem finds one directory by two spellings, an import
-// resolves whichever spelling the root and the entry were given in: the escape
-// check compares two identities, and both name the same directory.
+// resolves whichever spelling the root and the entry were given in, from disk
+// and from an in-memory source under an absolute key. The schema records the
+// root as its directory lists it.
 func TestHostPath_LoadsWhenTheRootAndTheEntryAreSpelledDifferently(t *testing.T) {
 	t.Parallel()
 
@@ -163,23 +167,88 @@ func TestHostPath_LoadsWhenTheRootAndTheEntryAreSpelledDifferently(t *testing.T)
 		},
 	}
 
-	for _, row := range rows {
-		t.Run(row.name, func(t *testing.T) {
-			t.Parallel()
-			base := t.TempDir()
-			if !caseFoldingFilesystem(t, base) {
-				t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
-			}
-			dir := filepath.Join(base, "Proj")
-			entry := writeHostPathModule(t, dir, "rel_main.yammm")
-			lowerDir := filepath.Join(base, "proj")
-			lowerEntry := filepath.Join(lowerDir, "rel_main.yammm")
+	doors := []struct {
+		name string
+		load func(t *testing.T, root, path string) (*schema.Schema, diag.Result)
+	}{
+		{
+			name: "Load",
+			load: func(t *testing.T, root, path string) (*schema.Schema, diag.Result) {
+				t.Helper()
+				return schema.Load(t.Context(), path, schema.WithModuleRoot(root))
+			},
+		},
+		{
+			name: "LoadSourcesWithEntry",
+			load: func(t *testing.T, root, path string) (*schema.Schema, diag.Result) {
+				t.Helper()
+				return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{path: []byte(hostPathEntry)}, path, root)
+			},
+		},
+	}
 
-			root, path := row.spell(dir, entry, lowerDir, lowerEntry)
-			if ok, detail := loadOutcome(schema.Load(t.Context(), path, schema.WithModuleRoot(root))); !ok {
-				t.Errorf("loading %q under root %q fails: %s", path, root, detail)
-			}
-		})
+	for _, door := range doors {
+		for _, row := range rows {
+			t.Run(door.name+", "+row.name, func(t *testing.T) {
+				t.Parallel()
+				base := t.TempDir()
+				if !yammmtest.CaseFoldingFilesystem(t, base) {
+					t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
+				}
+				dir := filepath.Join(base, "Proj")
+				entry := writeHostPathModule(t, dir, "rel_main.yammm")
+				lowerDir := filepath.Join(base, "proj")
+				lowerEntry := filepath.Join(lowerDir, "rel_main.yammm")
+
+				root, path := row.spell(dir, entry, lowerDir, lowerEntry)
+				s, res := door.load(t, root, path)
+				if ok, detail := loadOutcome(s, res); !ok {
+					t.Fatalf("loading %q under root %q fails: %s", path, root, detail)
+				}
+				if want := canonicalPath(t, root); s.ModuleRoot() != want {
+					t.Errorf("ModuleRoot() = %q; want the root as its directory lists it, %q", s.ModuleRoot(), want)
+				}
+			})
+		}
+	}
+}
+
+// TestHostPath_ImportThroughALinkedDirectoryResolvesFromItsTarget holds an
+// import's own relative imports to the directory its file was read from. The
+// import is reached through a link inside the module root, so its "../" climbs
+// out of the link's target, not out of the directory holding the link.
+func TestHostPath_ImportThroughALinkedDirectoryResolvesFromItsTarget(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeHostPathFile(t, filepath.Join(root, "a", "b", "rel_dep.yammm"),
+		"schema \"reldep\"\n\nimport \"../rel_leaf\" as leaf\n\ntype Zone {\n\tcode String primary\n\t--> IN_REGION (one) leaf.Region\n}\n")
+	writeHostPathFile(t, filepath.Join(root, "a", "rel_leaf.yammm"), hostPathLeaf)
+	if err := os.Symlink(filepath.Join("a", "b"), filepath.Join(root, "link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	entry := filepath.Join(root, "rel_main.yammm")
+	writeHostPathFile(t, entry,
+		"schema \"relmain\"\n\nimport \"./link/rel_dep\" as dep\n\ntype Site {\n\tid String primary\n\t--> IN_ZONE (one) dep.Zone\n}\n")
+
+	s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
+	if ok, detail := loadOutcome(s, res); !ok {
+		t.Fatalf("the load fails: %s", detail)
+	}
+	dep, ok := s.ImportByAlias("dep")
+	if !ok || dep.Schema() == nil {
+		t.Fatal("the entry's import dep is not bound")
+	}
+	leaf, ok := dep.Schema().ImportByAlias("leaf")
+	if !ok || leaf.Schema() == nil {
+		t.Fatal("dep's import leaf is not bound")
+	}
+	want, err := location.SourceIDFromPath(canonicalPath(t, filepath.Join(root, "a", "rel_leaf.yammm")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := leaf.ResolvedSourceID(); got != want {
+		t.Errorf("dep's import leaf resolves to %s, want %s", got, want)
 	}
 }
 
@@ -203,13 +272,17 @@ func writeHostPathFile(t *testing.T, p, content string) {
 	}
 }
 
-// loadSourcesOutcome loads the entry from memory, as the editor does, with its
-// import left on disk under the module root.
+// loadSourcesOutcome loads the entry from memory as the editor does: the
+// overlay is keyed by the entry's resolved host path, the same path names the
+// entry and its directory is the root, and the import is left on disk.
 func loadSourcesOutcome(t *testing.T, dir string) (bool, string) {
 	t.Helper()
-	entry := writeHostPathModule(t, dir, "rel_main.yammm")
+	entry, err := location.ResolveHostPath(writeHostPathModule(t, dir, "rel_main.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return loadOutcome(schema.LoadSourcesWithEntry(t.Context(),
-		map[string][]byte{entry: []byte(hostPathEntry)}, entry, dir))
+		map[string][]byte{entry: []byte(hostPathEntry)}, entry, filepath.Dir(entry)))
 }
 
 func loadOutcome(s *schema.Schema, res diag.Result) (bool, string) {
@@ -235,15 +308,7 @@ func TestHostPath_ModuleRootDetailIsTheRootsIdentity(t *testing.T) {
 			writeHostPathFile(t, entry, "schema \"main\"\n\nimport \"./missing\" as missing\n\ntype T {\n\tid String primary\n}\n")
 
 			_, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
-			resolved, err := filepath.EvalSymlinks(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			id, err := location.SourceIDFromAbsolutePath(resolved)
-			if err != nil {
-				t.Fatal(err)
-			}
-			want := id.String()
+			want := rootIdentity(t, root)
 
 			var detail, message string
 			found := false
@@ -290,14 +355,7 @@ func TestHostPath_MalformedMarkerDetailIsTheRootsIdentity(t *testing.T) {
 			writeHostPathFile(t, entry, "schema \"main\"\n\ntype T {\n\tid String primary\n}\n")
 
 			_, res := schema.Load(t.Context(), entry)
-			resolved, err := filepath.EvalSymlinks(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			id, err := location.SourceIDFromAbsolutePath(resolved)
-			if err != nil {
-				t.Fatal(err)
-			}
+			want := rootIdentity(t, root)
 
 			found := false
 			for issue := range res.Issues() {
@@ -306,8 +364,8 @@ func TestHostPath_MalformedMarkerDetailIsTheRootsIdentity(t *testing.T) {
 				}
 				found = true
 				for _, d := range issue.Details() {
-					if d.Key == diag.DetailKeyModuleRoot && d.Value != id.String() {
-						t.Errorf("module_root detail %q, want the marker directory's identity %q", d.Value, id)
+					if d.Key == diag.DetailKeyModuleRoot && d.Value != want {
+						t.Errorf("module_root detail %q, want the marker directory's identity %q", d.Value, want)
 					}
 				}
 			}

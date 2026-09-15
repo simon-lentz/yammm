@@ -20,36 +20,24 @@ import (
 const renderedBadSchema = "schema \"bad\"\n\ntype T {\n\tid String primary\n\tname Strin\n}\n"
 
 // hostRelative is the relativization the loader resolves imports by: the
-// host's relative path from root to file, both symlink-resolved, written with
-// "/" and in NFC, the form a SourceID takes.
+// host's relative path from root to file, both as [yammmtest.DiskSpelling]
+// reads them from the directory listings, written with "/" and in NFC, the
+// form a SourceID takes.
 func hostRelative(t *testing.T, root, file string) string {
 	t.Helper()
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+	spelledRoot, err := yammmtest.DiskSpelling(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolvedFile, err := filepath.EvalSymlinks(file)
+	spelledFile, err := yammmtest.DiskSpelling(file)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rel, err := filepath.Rel(resolvedRoot, resolvedFile)
+	rel, err := filepath.Rel(spelledRoot, spelledFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return norm.NFC.String(filepath.ToSlash(rel))
-}
-
-// caseFoldingFilesystem reports whether dir's filesystem finds a file by
-// another spelling of its name.
-func caseFoldingFilesystem(t *testing.T, dir string) bool {
-	t.Helper()
-	probe := filepath.Join(dir, "CaseProbe")
-	if err := os.WriteFile(probe, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Remove(probe) })
-	_, err := os.Stat(filepath.Join(dir, "caseprobe"))
-	return err == nil
 }
 
 func writeRenderedFile(t *testing.T, p, content string) string {
@@ -124,11 +112,12 @@ func TestRenderedLocations_RelativeToTheRoot(t *testing.T) {
 			name: "a --module-root typed in another case",
 			setup: func(t *testing.T, base string) ([]string, string, string) {
 				t.Helper()
-				if !caseFoldingFilesystem(t, base) {
+				if !yammmtest.CaseFoldingFilesystem(t, base) {
 					t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
 				}
 				file := writeRenderedFile(t, filepath.Join(base, "Proj", "bad.yammm"), renderedBadSchema)
-				return []string{"validate", "--module-root", filepath.Join(base, "proj"), file}, filepath.Dir(file), file
+				root := filepath.Join(base, "proj")
+				return []string{"validate", "--module-root", root, file}, root, file
 			},
 		},
 	}

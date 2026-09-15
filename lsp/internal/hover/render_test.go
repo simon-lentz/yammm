@@ -186,7 +186,7 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			root: yammmtest.HostAbs("/project"),
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/schemas/person.yammm"))
+				sourceID, err := location.SourceIDFromPath(yammmtest.HostAbs("/project/schemas/person.yammm"))
 				require.NoError(t, err)
 				s, result := schema.NewBuilder().
 					WithName("test").
@@ -203,7 +203,7 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "type with absolute source path when no root",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromAbsolutePath(yammmtest.HostAbs("/project/person.yammm"))
+				sourceID, err := location.SourceIDFromPath(yammmtest.HostAbs("/project/person.yammm"))
 				require.NoError(t, err)
 				s, result := schema.NewBuilder().
 					WithName("test").

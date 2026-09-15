@@ -72,7 +72,7 @@ func TestHandleDefinition_CrossSchemaImport(t *testing.T) {
 	snapshot, doc, tmpDir := buildCrossSchemaSnapshot(t)
 
 	foundationPath := filepath.Join(tmpDir, "foundation.yammm")
-	foundationSourceID, err := location.SourceIDFromAbsolutePath(foundationPath)
+	foundationSourceID, err := location.SourceIDFromPath(foundationPath)
 	require.NoError(t, err)
 	foundationURI := lsputil.PathToURI(foundationPath)
 

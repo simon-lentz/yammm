@@ -30,41 +30,41 @@
 // # Host paths and identities
 //
 // [ResolveHostPath] answers one question — what does the filesystem call this
-// file — and every file-backed identity is that answer, normalized. Two
-// spellings that name one file therefore give one identity, and it is the
-// spelling the filesystem holds.
+// file — and every file-backed identity is that answer, normalized. The
+// constructors [SourceIDFromPath], [ResolveSourcePath], [NewCanonicalPath],
+// [CanonicalPath.Join] and [CanonicalizePathForSourceID] all resolve, and none
+// derives an identity from a path's text alone. Two spellings that name one
+// file therefore give one identity, and it is the spelling the filesystem holds.
 //
-// Asking the filesystem costs an open on darwin. filepath.EvalSymlinks keeps
-// the case as typed there, even through a symlink it resolved, so on a
-// case-insensitive volume it cannot tell two spellings of one file apart;
-// fcntl(F_GETPATH) on an open descriptor returns every component as the volume
-// holds it, case and normalization both, and costs what EvalSymlinks costs.
-// Everywhere else EvalSymlinks is already that answer: Linux is
-// case-sensitive, and Go's Windows implementation spells each component
-// through FindFirstFile. A Linux directory mounted with case folding (ext4 +F)
-// keeps the typed case and is out of scope.
-//
-// The descriptor is why the file kind is checked before the open. Opening a
-// FIFO blocks until a writer appears and opening a socket fails outright,
-// while a caller canonicalizes a path before it knows what kind of file it
-// names — the schema loader does exactly that — so anything but a directory or
-// a regular file is spelled by EvalSymlinks, which opens nothing. An open also
-// needs read permission where a resolution needs only traversal, so a
-// mode-000 file and a directory that is traversable but not readable fall back
-// to EvalSymlinks and keep the typed case, which is the best answer available
-// for a path the caller cannot open.
+// On darwin the answer is realpath(3), called through libSystem. It reads each
+// component's name from the directory the lookup passed through, so it answers
+// in the volume's case and normalization; it opens nothing, so a FIFO, an
+// unreadable file and a full descriptor table resolve like any other path.
+// fcntl(F_GETPATH) is not used: it answers from a vnode's cached name, which a
+// concurrent lookup of another hard link, or another firmlinked spelling, of
+// the same file rewrites. A firmlink is not a symbolic link, so
+// /System/Volumes/Data/Users and /Users stay two spellings, as a bind mount
+// does on Linux. Everywhere else filepath.EvalSymlinks is already the answer:
+// Linux is case-sensitive, and Go's Windows implementation spells each
+// component through FindFirstFile. A Linux directory mounted with case folding
+// (ext4 +F) keeps the typed case and is out of scope.
 //
 // A path that does not exist yet resolves as far as it exists: the deepest
 // existing ancestor is spelled on disk and the missing tail is appended as
-// typed. An identity minted for a file before it is written therefore equals
-// the one minted after, which is what lets an in-memory source key match the
-// file it will become. A path under a regular file can never exist, and is
-// refused rather than kept.
+// typed, and a dangling symbolic link resolves to the path the kernel reaches
+// through it: each ".." in its target takes the parent of the directory reached
+// so far on disk, not a parent read from the target's text. An identity minted
+// for a file before it is written therefore equals the one minted after, which
+// is what lets an in-memory source key match the file it will become. A
+// component the process cannot traverse ends the resolution the same way. A
+// path under a regular file can never exist and is refused, as is a cycle of
+// dangling links, and so is an existing path whose resolved form is longer than
+// the host allows a path to be (PATH_MAX, 1024 bytes on darwin).
 //
 // # SourceID
 //
 // SourceID identifies a source uniquely within a build. It supports two modes:
-//   - File-backed: Created via SourceIDFromPath or SourceIDFromAbsolutePath.
+//   - File-backed: Created via SourceIDFromPath or ResolveSourcePath.
 //     Stores a CanonicalPath directly.
 //   - Synthetic: Created via NewSourceID or MustNewSourceID for non-file sources
 //     like "<stdin>", "inline:test", or "test://unit/person.yammm".

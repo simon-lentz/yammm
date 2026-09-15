@@ -14,9 +14,11 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/source"
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -1886,24 +1888,22 @@ func TestLoad_SharedRegistry_TopLevelReparse(t *testing.T) {
 		"registry must retain the first Load's pointer; idempotent Register must not overwrite")
 }
 
-// canonicalPath mirrors the loader's path canonicalization (absolute,
-// cleaned, symlinks resolved) so ModuleRoot expectations compare equal on
-// systems where TempDir rides a symlink (e.g. macOS /var -> /private/var).
+// canonicalPath is the existing path as its directories list it, read by
+// [yammmtest.DiskSpelling], which shares no code with the loader's resolver.
 func canonicalPath(t *testing.T, path string) string {
 	t.Helper()
-	abs, err := filepath.Abs(path)
-	require.NoError(t, err)
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return resolved
+	spelled, err := yammmtest.DiskSpelling(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return filepath.Clean(abs)
+	return spelled
 }
 
-// rootIdentity is canonicalPath spelled as an identity, '/'-separated on every
-// host: the form a module_root detail carries.
+// rootIdentity is canonicalPath written as an identity, NFC and '/'-separated
+// on every host: the form a module_root detail carries.
 func rootIdentity(t *testing.T, path string) string {
 	t.Helper()
-	return filepath.ToSlash(canonicalPath(t, path))
+	return norm.NFC.String(filepath.ToSlash(canonicalPath(t, path)))
 }
 
 // writeModuleTree writes a two-file module-style layout under a fresh
@@ -2188,7 +2188,7 @@ func TestSharedRegistry_CacheHitDivergentSourceConflict(t *testing.T) {
 	// The second load shares the schema registry but its source registry
 	// already holds DIFFERENT bytes under dep's SourceID; the import of dep
 	// cache-hits the first load's schema, whose closure content collides.
-	depID, err := location.SourceIDFromAbsolutePath(filepath.Join(canonicalPath(t, root), "dep.yammm"))
+	depID, err := location.SourceIDFromPath(filepath.Join(canonicalPath(t, root), "dep.yammm"))
 	require.NoError(t, err)
 	srcReg := source.NewRegistry()
 	require.NoError(t, srcReg.Register(depID, []byte("schema \"dep\"\n\ntype Part {\n\tpart_id String primary\n\tname String required\n}\n")))

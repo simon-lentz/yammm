@@ -14,6 +14,7 @@ type LineState struct {
 type Document struct {
 	URI       string
 	SourceID  location.SourceID
+	HostPath  string // the resolved path the document's file is read from; the overlay key
 	Version   int
 	Text      string
 	OpenOrder int // Order in which document was opened (for deterministic URI selection)

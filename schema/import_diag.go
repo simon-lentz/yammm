@@ -46,7 +46,7 @@ func rootIdentity(root, origin string) string {
 	if root == "" || origin == diag.ModuleRootSynthetic {
 		return root
 	}
-	if id, err := location.SourceIDFromAbsolutePath(root); err == nil {
+	if id, err := location.SourceIDFromPath(root); err == nil {
 		return id.String()
 	}
 	return root

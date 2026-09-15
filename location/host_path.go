@@ -7,22 +7,41 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
+// maxLinkHops bounds how many dangling links one resolution follows. The kernel
+// refuses a cycle with ELOOP before the walk sees it; the bound is for links
+// rewritten while the walk runs.
+const maxLinkHops = 255
+
+// errTooManyLinks refuses a walk that followed more than maxLinkHops links.
+var errTooManyLinks = errors.New("too many levels of symbolic links")
+
 // ResolveHostPath returns p as the filesystem spells it: absolute, clean,
 // symlink-resolved, each existing component in its on-disk spelling. The
-// result is a host path, not an identity; pass it to [NewCanonicalPath] for
-// that. A path that does not exist yet resolves as far as it exists and keeps
-// its missing tail as typed; a path under a regular file is refused. It
-// returns [ErrEmptyPath], [ErrInvalidUTF8Path], or the filesystem's own error.
-// The package documentation states the rules.
+// result is a host path, not an identity; [SourceIDFromPath] turns p into one.
+// The package documentation states what it answers for a path that does not
+// exist, one the process cannot traverse and one that can never exist.
 func ResolveHostPath(p string) (string, error) {
 	return resolveHostPath(p, false)
 }
 
+// ResolveSourcePath returns the identity of p and the host path it was derived
+// from, out of one resolution, so the two cannot disagree. It is
+// [SourceIDFromPath] for a caller that also reads the file, and it fails where
+// [ResolveHostPath] does.
+func ResolveSourcePath(p string) (SourceID, string, error) {
+	host, err := resolveHostPath(p, false)
+	if err != nil {
+		return SourceID{}, "", err
+	}
+	return SourceID{cp: identityOf(host)}, host, nil
+}
+
 // resolveHostPath is ResolveHostPath, where requireExist refuses a path whose
-// leaf is absent rather than keeping it.
+// leaf the process cannot find rather than keeping it as typed.
 func resolveHostPath(p string, requireExist bool) (string, error) {
 	if p == "" {
 		return "", ErrEmptyPath
@@ -36,41 +55,127 @@ func resolveHostPath(p string, requireExist bool) (string, error) {
 	}
 
 	var missing []string
-	for current := abs; ; {
+	hops := 0
+	current := abs
+	for {
 		info, err := os.Stat(current)
-		switch {
-		case err == nil:
+		if err == nil {
 			// Windows reports a path under a regular file absent rather than
 			// ENOTDIR, so this is where its half of that refusal lands.
 			if len(missing) > 0 && !info.IsDir() {
 				return "", fmt.Errorf("resolve %q: %q is not a directory", p, current)
 			}
-			spelled, err := spellOnDisk(current, info.Mode())
-			if err != nil {
-				return "", fmt.Errorf("resolve %q: %w", p, err)
+			spelled, serr := spellOnDisk(current)
+			if serr == nil {
+				return joinMissing(spelled, missing), nil
 			}
-			slices.Reverse(missing)
-			return filepath.Join(append([]string{spelled}, missing...)...), nil
-		case errors.Is(err, fs.ErrNotExist) && !requireExist:
-			parent := filepath.Dir(current)
-			if parent == current {
-				// filepath.Dir is its own fixed point at a volume root.
-				return abs, nil
+			// Removed between the stat and the spelling: walk on as absent.
+			err = serr
+		}
+		if requireExist {
+			return "", fmt.Errorf("resolve %q: %w", p, err)
+		}
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			// os.Stat follows links, so a dangling link reads as absent;
+			// resolving its target keeps its identity fixed as the target appears.
+			target, isLink, lerr := danglingTarget(current)
+			if lerr != nil {
+				return "", fmt.Errorf("resolve %q: %w", p, lerr)
 			}
-			missing = append(missing, filepath.Base(current))
-			current = parent
+			if isLink {
+				if hops++; hops > maxLinkHops {
+					return "", fmt.Errorf("resolve %q: %w", p, errTooManyLinks)
+				}
+				current = target
+				continue
+			}
+		case errors.Is(err, fs.ErrPermission):
+			// The process cannot look past this component, so the rest keeps
+			// the spelling it was given, as a path that does not exist does.
 		default:
 			return "", fmt.Errorf("resolve %q: %w", p, err)
 		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			// filepath.Dir is its own fixed point at a volume root.
+			return joinMissing(current, missing), nil
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
 	}
 }
 
-// evalSymlinks is filepath.EvalSymlinks with the path in its error, which is
-// what a caller of a canonicalizer needs to see.
-func evalSymlinks(p string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return "", fmt.Errorf("resolve symlinks %q: %w", p, err)
+// danglingTarget reports whether p is a symbolic link and, when it is, the
+// path it names, with each ".." applied on disk as the kernel applies it. p's
+// directory exists, because p's own entry does.
+func danglingTarget(p string) (string, bool, error) {
+	info, err := os.Lstat(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, fs.ErrPermission):
+		return "", false, nil
+	case err != nil:
+		return "", false, fmt.Errorf("lstat %q: %w", p, err)
+	case info.Mode()&fs.ModeSymlink == 0:
+		return "", false, nil
 	}
-	return resolved, nil
+	target, err := os.Readlink(p)
+	if err != nil {
+		return "", false, fmt.Errorf("read link %q: %w", p, err)
+	}
+	if target == "" {
+		return "", false, nil
+	}
+	if filepath.IsAbs(target) {
+		volume := filepath.VolumeName(target)
+		return walkTarget(volume+string(filepath.Separator), target[len(volume):]), true, nil
+	}
+	dir, err := spellOnDisk(filepath.Dir(p))
+	if err != nil {
+		return "", false, fmt.Errorf("resolve the directory of link %q: %w", p, err)
+	}
+	if os.IsPathSeparator(target[0]) {
+		// Only Windows reaches this: a rooted target names the link's volume.
+		return walkTarget(filepath.VolumeName(dir)+string(filepath.Separator), target), true, nil
+	}
+	return walkTarget(dir, target), true, nil
+}
+
+// walkTarget joins target's components to start, an existing directory that
+// holds no link, so ".." takes the parent the kernel reaches. From the first
+// component that is not an existing directory, the rest is joined as written.
+func walkTarget(start, target string) string {
+	current := start
+	components := strings.FieldsFunc(target, func(r rune) bool {
+		return r == '/' || r == filepath.Separator
+	})
+	for i, c := range components {
+		switch c {
+		case ".":
+			continue
+		case "..":
+			current = filepath.Dir(current)
+			continue
+		}
+		next := filepath.Join(current, c)
+		if info, err := os.Stat(next); err == nil && info.IsDir() {
+			if spelled, err := spellOnDisk(next); err == nil {
+				current = spelled
+				continue
+			}
+		}
+		return strings.Join(append([]string{next}, components[i+1:]...), string(filepath.Separator))
+	}
+	return current
+}
+
+// joinMissing appends the components a resolution could not look up, in the
+// order they were typed, to the part it spelled.
+func joinMissing(spelled string, missing []string) string {
+	parts := make([]string, 0, len(missing)+1)
+	parts = append(parts, spelled)
+	for _, m := range slices.Backward(missing) {
+		parts = append(parts, m)
+	}
+	return filepath.Join(parts...)
 }

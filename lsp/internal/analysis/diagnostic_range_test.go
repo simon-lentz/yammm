@@ -11,6 +11,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 )
 
@@ -41,12 +42,7 @@ func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 		lsputil.PositionEncodingUTF16,
 		lsputil.PositionEncodingUTF8,
 	} {
-		// The loader canonicalises the source path, so an unresolved temp root
-		// would miss the registry and fall back to the rune column.
-		dir, err := filepath.EvalSymlinks(t.TempDir())
-		if err != nil {
-			t.Fatalf("resolve temp dir: %v", err)
-		}
+		dir := t.TempDir()
 		path := filepath.Join(dir, "main.yammm")
 		if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
 			t.Fatalf("write fixture: %v", err)
@@ -109,10 +105,11 @@ func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 		"\ttitle Enum[\"🎉日\", \"🎉日\"]\n" +
 		"}\n"
 
-	// Resolve the base so the symlink below is the only indirection in play.
-	base, err := filepath.EvalSymlinks(t.TempDir())
+	// Spell the base as the filesystem lists it, so the symlink below is the
+	// only indirection in play.
+	base, err := yammmtest.DiskSpelling(t.TempDir())
 	if err != nil {
-		t.Fatalf("resolve temp base: %v", err)
+		t.Fatalf("spell temp base: %v", err)
 	}
 	realDir := filepath.Join(base, "real")
 	if err := os.MkdirAll(realDir, 0o750); err != nil {

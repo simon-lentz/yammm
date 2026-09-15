@@ -12,6 +12,13 @@
 # that does not compile makes go test exit non-zero for an unrelated reason,
 # and that also reads as "killed".
 #
+# The named packages must pass before the mutation. When MUTATE_BASELINE_CACHE
+# names a directory, a passing baseline is recorded there under a key over the
+# packages, TMPDIR, YAMMM_* variables, the Go environment and the tree's content,
+# and a later run with the same key skips the baseline. The harness restores
+# each mutated file byte for byte, so the key still matches after a mutant, and
+# any edit to the tree changes it.
+#
 # Usage:
 #   scripts/mutate.sh <file> <search> <replace> <pkg> [pkg...]
 #   scripts/mutate.sh format/wrap.go 'Threshold = 100' 'Threshold = 1000' ./format/
@@ -53,15 +60,44 @@ if [ "${hits}" -eq 0 ]; then
 	exit 1
 fi
 
-# Restore from a byte copy rather than from git: the harness must put the file
-# back exactly as it found it without performing a git write.
+# baseline_key hashes the packages, the environment the tests read, and the
+# content of every tracked, staged, unstaged and untracked file.
+baseline_key() {
+	{
+		printf '%s\n' "${pkgs[@]}"
+		printf 'TMPDIR=%s\n' "${TMPDIR:-}"
+		env | grep '^YAMMM_' | LC_ALL=C sort || true
+		go env GOOS GOARCH CGO_ENABLED GOFLAGS GOEXPERIMENT
+		go version
+		git ls-files --stage
+		git diff --binary
+		git ls-files --others --exclude-standard
+		git ls-files --others --exclude-standard | git hash-object --stdin-paths
+	} | shasum -a 256 | cut -d' ' -f1
+}
+
 # The suite MUST be green before the mutation: a test that is already red
 # makes every mutant read as killed.
-if ! go test "${pkgs[@]}" >/dev/null 2>&1; then
-	printf 'mutate: the UNMUTATED tree is already red in %s, so no verdict is possible\n' "${pkgs[*]}" >&2
-	exit 1
+stamp=""
+if [ -n "${MUTATE_BASELINE_CACHE:-}" ]; then
+	mkdir -p -- "${MUTATE_BASELINE_CACHE}"
+	stamp="${MUTATE_BASELINE_CACHE}/$(baseline_key)"
 fi
-printf 'mutate: baseline green\n'
+if [ -n "${stamp}" ] && [ -f "${stamp}" ]; then
+	printf 'mutate: baseline green (recorded for this tree in %s)\n' "${MUTATE_BASELINE_CACHE}"
+else
+	if ! go test "${pkgs[@]}" >/dev/null 2>&1; then
+		printf 'mutate: the UNMUTATED tree is already red in %s, so no verdict is possible\n' "${pkgs[*]}" >&2
+		exit 1
+	fi
+	if [ -n "${stamp}" ]; then
+		: >"${stamp}"
+	fi
+	printf 'mutate: baseline green\n'
+fi
+
+# Restore from a byte copy rather than from git: the harness must put the file
+# back exactly as it found it without performing a git write.
 
 backup=$(mktemp)
 cp -- "${file}" "${backup}"
@@ -103,5 +139,5 @@ if [ "${rc}" -eq 0 ]; then
 fi
 
 printf 'mutate: MUTANT KILLED (exit %d)\n' "${rc}"
-printf '%s\n' "${test_out}" | grep -E '^(---|\s+---)? *(FAIL|ok)' | head -20
+printf '%s\n' "${test_out}" | grep -E '^[[:space:]]*--- FAIL|^FAIL' || true
 exit 0

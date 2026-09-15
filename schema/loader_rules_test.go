@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -202,16 +203,145 @@ func TestLoadSourcesWithEntry_EmptyKeyIsRefused(t *testing.T) {
 		"":        []byte("schema \"alpha\"\n\ntype A {\n    id String primary\n}\n"),
 		"b.yammm": []byte("schema \"bravo\"\n\ntype B {\n    id String primary\n}\n"),
 	}
-	for i := range 20 {
-		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "", "", schema.WithSourcesOnly(true))
-		if res.Err() == nil {
-			t.Fatalf("run %d loaded %v; want the empty key refused", i, s)
-		}
-		// The loader renders the cause into a diagnostic, so the sentinel
-		// reaches the caller as text rather than through the error chain.
-		if !res.HasCode(diag.E_LOAD_IO_FAILURE) || !strings.Contains(res.Err().Error(), location.ErrEmptyPath.Error()) {
-			t.Fatalf("run %d: %v; want E_LOAD_IO_FAILURE naming %v", i, res.Err(), location.ErrEmptyPath)
-		}
+	rows := []struct {
+		name string
+		root func(t *testing.T) string
+	}{
+		{"no module root", func(*testing.T) string { return "" }},
+		// Joined under a root, the empty key would name the root directory.
+		{"a module root", func(t *testing.T) string {
+			t.Helper()
+			return t.TempDir()
+		}},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			root := row.root(t)
+			for i := range 20 {
+				s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "", root, schema.WithSourcesOnly(true))
+				if res.Err() == nil {
+					t.Fatalf("run %d loaded %v; want the empty key refused", i, s)
+				}
+				// The loader renders the cause into a diagnostic, so the sentinel
+				// reaches the caller as text rather than through the error chain.
+				if !res.HasCode(diag.E_LOAD_IO_FAILURE) || !strings.Contains(res.Err().Error(), location.ErrEmptyPath.Error()) {
+					t.Fatalf("run %d: %v; want E_LOAD_IO_FAILURE naming %v", i, res.Err(), location.ErrEmptyPath)
+				}
+			}
+		})
+	}
+}
+
+// Two source keys that name one source are refused, and the refusal names
+// both keys: registering both would let one key's content stand for the other.
+func TestLoadSourcesWithEntry_TwoKeysNamingOneSourceAreRefused(t *testing.T) {
+	t.Parallel()
+
+	src := []byte("schema \"alpha\"\n\ntype A {\n    id String primary\n}\n")
+	rows := []struct {
+		name string
+		keys func(t *testing.T, root string) (string, string)
+	}{
+		{
+			name: "a key with a dot segment",
+			keys: func(*testing.T, string) (string, string) { return "./a.yammm", "a.yammm" },
+		},
+		{
+			name: "an absolute key and a relative key",
+			keys: func(_ *testing.T, root string) (string, string) { return filepath.Join(root, "a.yammm"), "a.yammm" },
+		},
+		{
+			name: "a key typed in another case",
+			keys: func(t *testing.T, root string) (string, string) {
+				t.Helper()
+				if !yammmtest.CaseFoldingFilesystem(t, root) {
+					t.Skip("the filesystem is case-sensitive, so two spellings name two files")
+				}
+				if err := os.WriteFile(filepath.Join(root, "A.yammm"), src, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return "A.yammm", "a.yammm"
+			},
+		},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			first, second := row.keys(t, root)
+			sources := map[string][]byte{first: src, second: src}
+			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, second, root)
+			if s != nil {
+				t.Errorf("loaded %q; want the two keys refused", s.Name())
+			}
+			if !res.HasFatal() || !res.HasCode(diag.E_LOAD_IO_FAILURE) {
+				t.Fatalf("want a Fatal E_LOAD_IO_FAILURE; got %v", res.Err())
+			}
+			msg := res.Err().Error()
+			for _, key := range []string{first, second} {
+				if !strings.Contains(msg, strconv.Quote(key)) {
+					t.Errorf("the refusal does not name key %q: %s", key, msg)
+				}
+			}
+		})
+	}
+}
+
+// A source name that is not valid UTF-8 cannot be written as an identity, so
+// LoadString refuses it before it mints one.
+func TestLoadString_RefusesASourceNameThatIsNotValidUTF8(t *testing.T) {
+	t.Parallel()
+
+	s, res := schema.LoadString(t.Context(), "schema \"s\"\n\ntype T {\n    id String primary\n}\n", "caf\xff")
+	if s != nil {
+		t.Errorf("loaded %q; want the source name refused", s.Name())
+	}
+	if !res.HasFatal() || !res.HasCode(diag.E_LOAD_IO_FAILURE) || !strings.Contains(res.Err().Error(), location.ErrInvalidUTF8Path.Error()) {
+		t.Fatalf("want a Fatal E_LOAD_IO_FAILURE naming %v; got %v", location.ErrInvalidUTF8Path, res.Err())
+	}
+}
+
+// A schema imported from the closure of a registered schema binds the object
+// that closure was compiled with, even where the registry holds only the
+// closure's root. Recompiling it from the closure's bytes would find no host
+// path for its own relative imports.
+func TestSharedRegistry_AnImportFromARegisteredClosureBindsItsCompiledSchema(t *testing.T) {
+	t.Parallel()
+
+	dir := writeFiles(t, map[string]string{
+		"leaf.yammm": "schema \"leaf\"\n\ntype Region {\n    code String primary\n}\n",
+		"mid.yammm": "schema \"mid\"\n\nimport \"./leaf\" as leaf\n\n" +
+			"type Zone {\n    code String primary\n    --> IN_REGION (one) leaf.Region\n}\n",
+		"common.yammm": "schema \"common\"\n\nimport \"./mid\" as mid\n\n" +
+			"type Site {\n    id String primary\n    --> IN_ZONE (one) mid.Zone\n}\n",
+		"app.yammm": "schema \"app\"\n\nimport \"./common\" as c\nimport \"./mid\" as m\n\n" +
+			"type Visit {\n    id String primary\n    --> AT (one) c.Site\n    --> IN (one) m.Zone\n}\n",
+	})
+
+	common, res := schema.Load(t.Context(), filepath.Join(dir, "common.yammm"), schema.WithModuleRoot(dir))
+	if res.Err() != nil {
+		t.Fatal(res.Err())
+	}
+	reg := schema.NewRegistry()
+	if err := reg.Register(common); err != nil {
+		t.Fatal(err)
+	}
+
+	app, res := schema.Load(t.Context(), filepath.Join(dir, "app.yammm"), schema.WithModuleRoot(dir), schema.WithRegistry(reg))
+	if res.Err() != nil {
+		t.Fatalf("loading an import from a registered closure: %v", res.Err())
+	}
+	fromApp, ok := app.ImportByAlias("m")
+	if !ok {
+		t.Fatal("app has no import m")
+	}
+	fromCommon, ok := common.ImportByAlias("mid")
+	if !ok {
+		t.Fatal("common has no import mid")
+	}
+	if fromApp.Schema() == nil || fromApp.Schema() != fromCommon.Schema() {
+		t.Error("app's import of mid is not the schema common's closure was compiled with")
 	}
 }
 
@@ -317,7 +447,7 @@ func TestSharedRegistry_AsymmetricProvenanceIsNotTheSameSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := location.SourceIDFromAbsolutePath(canonical)
+	id, err := location.SourceIDFromPath(canonical)
 	if err != nil {
 		t.Fatal(err)
 	}

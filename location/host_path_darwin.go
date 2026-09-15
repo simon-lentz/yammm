@@ -2,53 +2,30 @@ package location
 
 import (
 	"bytes"
-	"fmt"
 	"io/fs"
-	"os"
+	"runtime"
 	"syscall"
 	"unsafe"
 )
 
-// darwinPathMax is PATH_MAX, the size F_GETPATH writes into.
+// darwinPathMax is PATH_MAX, the size realpath(3) writes into.
 const darwinPathMax = 1024
 
-// spellOnDisk returns the existing path p as the filesystem spells it. It
-// opens only a directory or a regular file, because a FIFO's open blocks and a
-// socket's fails, and falls back to EvalSymlinks — which opens nothing —
-// for every other kind and for a path it may not read. See the package doc.
-func spellOnDisk(p string, mode fs.FileMode) (string, error) {
-	if !mode.IsRegular() && !mode.IsDir() {
-		return evalSymlinks(p)
-	}
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+// spellOnDisk returns the existing path p as the filesystem spells it, through
+// realpath(3), which reads names from the directories a lookup passes through
+// and opens nothing. The package documentation states why fcntl(F_GETPATH) is
+// not used.
+func spellOnDisk(p string) (string, error) {
+	in, err := syscall.BytePtrFromString(p)
 	if err != nil {
-		return evalSymlinks(p)
-	}
-	defer f.Close()
-	spelled, err := fcntlGetPath(f)
-	if err != nil {
-		return evalSymlinks(p)
-	}
-	return spelled, nil
-}
-
-// fcntlGetPath asks the kernel for the path of f's vnode. The call goes
-// through syscall because golang.org/x/sys/unix exposes no pointer-taking
-// fcntl.
-func fcntlGetPath(f *os.File) (string, error) {
-	conn, err := f.SyscallConn()
-	if err != nil {
-		return "", fmt.Errorf("syscall conn for %q: %w", f.Name(), err)
+		return "", &fs.PathError{Op: "realpath", Path: p, Err: err}
 	}
 	buf := make([]byte, darwinPathMax)
-	var errno syscall.Errno
-	if err := conn.Control(func(fd uintptr) {
-		_, _, errno = syscall.Syscall(syscall.SYS_FCNTL, fd, syscall.F_GETPATH, uintptr(unsafe.Pointer(&buf[0])))
-	}); err != nil {
-		return "", fmt.Errorf("fcntl F_GETPATH on %q: %w", f.Name(), err)
-	}
-	if errno != 0 {
-		return "", errno
+	r1, _, errno := syscallPtr(libcRealpathTrampolineAddr,
+		uintptr(unsafe.Pointer(in)), uintptr(unsafe.Pointer(&buf[0])), 0)
+	runtime.KeepAlive(in)
+	if r1 == 0 {
+		return "", &fs.PathError{Op: "realpath", Path: p, Err: errno}
 	}
 	end := bytes.IndexByte(buf, 0)
 	if end < 0 {
@@ -56,3 +33,16 @@ func fcntlGetPath(f *os.File) (string, error) {
 	}
 	return string(buf[:end]), nil
 }
+
+// syscallPtr is the runtime's libSystem call for a function that
+// reports failure by returning NULL, reached as golang.org/x/sys/unix reaches
+// it: a libc call keeps to the ABI Apple supports, where a raw trap does not.
+//
+//go:linkname syscallPtr syscall.syscallPtr
+func syscallPtr(fn, a1, a2, a3 uintptr) (r1, r2 uintptr, err syscall.Errno)
+
+// libcRealpathTrampolineAddr is the address of the assembly trampoline that
+// jumps to libSystem's realpath.
+var libcRealpathTrampolineAddr uintptr
+
+//go:cgo_import_dynamic libc_realpath realpath "/usr/lib/libSystem.B.dylib"

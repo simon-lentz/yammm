@@ -66,19 +66,14 @@ func (e *MalformedModuleRootError) Error() string {
 //
 // The walk runs on the chain [location.ResolveHostPath] answers with, so a
 // marker reachable only through a symlinked spelling is normally not
-// consulted. Resolution is best-effort: a path the resolver refuses — a
-// directory an editor may not read, most often — falls back to the cleaned
-// absolute chain rather than failing the walk. Discovery itself is not
-// sandboxed and cannot be: it runs before any root exists, and costs one
+// consulted. A path the resolver refuses is an error; a directory the process
+// cannot traverse is kept as typed, as the resolver keeps it. Discovery itself
+// is not sandboxed and cannot be: it runs before any root exists, and costs one
 // os.Lstat per ancestor level.
 func FindModuleRoot(dir string) (string, bool, error) {
 	canonical, err := location.ResolveHostPath(dir)
 	if err != nil {
-		abs, absErr := filepath.Abs(dir)
-		if absErr != nil {
-			return "", false, fmt.Errorf("canonicalize %q: %w", dir, err)
-		}
-		canonical = filepath.Clean(abs)
+		return "", false, fmt.Errorf("canonicalize %q: %w", dir, err)
 	}
 
 	for current := canonical; ; {

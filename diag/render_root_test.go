@@ -24,7 +24,7 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 	}
 	fileID := func(t *testing.T, p string) location.SourceID {
 		t.Helper()
-		id, err := location.SourceIDFromAbsolutePath(p)
+		id, err := location.SourceIDFromPath(p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -166,7 +166,7 @@ func TestRenderContracts(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				id, err := location.SourceIDFromAbsolutePath(filepath.Join(base, "a.yammm"))
+				id, err := location.SourceIDFromPath(filepath.Join(base, "a.yammm"))
 				if err != nil {
 					t.Fatal(err)
 				}

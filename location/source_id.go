@@ -9,7 +9,7 @@ import (
 // SourceID identifies a source uniquely within a build.
 //
 // A SourceID can represent:
-//   - File-backed source: Created via SourceIDFromPath or SourceIDFromAbsolutePath
+//   - File-backed source: Created via SourceIDFromPath or ResolveSourcePath
 //   - Synthetic source: Created via NewSourceID or MustNewSourceID, such as
 //     "<stdin>", "inline:test", or "test://unit/person.yammm"
 //
@@ -79,9 +79,10 @@ func ValidateSyntheticSourceID(identifier string) error {
 	return nil
 }
 
-// SourceIDFromPath canonicalizes path via [NewCanonicalPath], so the identity
-// is the filesystem's own spelling of the file, and returns a file-backed
-// SourceID. Use it for normal file loading.
+// SourceIDFromPath returns the file-backed identity of path, derived as
+// [NewCanonicalPath] derives it. Every file-backed identity is minted through
+// it, [ResolveSourcePath] or [CanonicalizePathForSourceID], so two spellings of
+// one file give one identity. A path that does not exist yet is allowed.
 func SourceIDFromPath(path string) (SourceID, error) {
 	cp, err := NewCanonicalPath(path)
 	if err != nil {
@@ -97,20 +98,6 @@ func MustSourceIDFromPath(path string) SourceID {
 		panic("location.MustSourceIDFromPath: " + err.Error())
 	}
 	return sid
-}
-
-// SourceIDFromAbsolutePath creates a file-backed SourceID from an absolute
-// path without touching the filesystem: it cleans the path by the host's rules,
-// applies NFC and writes forward slashes, but resolves no symlink. It returns
-// [ErrNotAbsolute] for a path the host does not call absolute. Use it for
-// in-memory Sources keys; for a path with symlinks, derive the key with
-// CanonicalizePathForSourceID so it matches what Load produces.
-func SourceIDFromAbsolutePath(absPath string) (SourceID, error) {
-	canonical, err := canonicalize(absPath, true, symlinksNone)
-	if err != nil {
-		return SourceID{}, fmt.Errorf("create source ID from absolute path %q: %w", absPath, err)
-	}
-	return SourceID{cp: CanonicalPath{path: canonical}}, nil
 }
 
 // String returns the source identifier.
@@ -170,11 +157,11 @@ func (s SourceID) CanonicalPath() (CanonicalPath, bool) {
 // NewCanonicalPath it requires the path itself to exist, so it fails for one
 // that does not; its result is what SourceIDFromPath produces.
 func CanonicalizePathForSourceID(path string) (string, error) {
-	canonical, err := canonicalize(path, false, symlinksStrict)
+	host, err := resolveHostPath(path, true)
 	if err != nil {
 		return "", fmt.Errorf("canonicalize path for source ID: %w", err)
 	}
-	return canonical, nil
+	return identityOf(host).String(), nil
 }
 
 // MustCanonicalizePathForSourceID is like CanonicalizePathForSourceID but

@@ -1,0 +1,297 @@
+simon ~/go/src/github.com/simon-lentz/yammm (review|●61) % git commit -m "fix(location): mints every file-backed identity through one resolver that spells paths as the disk does"
+trim trailing whitespace.................................................Passed
+fix end of files.........................................................Passed
+check for added large files..............................................Passed
+check yaml...........................................(no files to check)Skipped
+check json...........................................(no files to check)Skipped
+yamlfmt..............................................(no files to check)Skipped
+actionlint (GHA).....................................(no files to check)Skipped
+gofumpt..................................................................Passed
+goimports................................................................Passed
+go mod tidy..............................................................Passed
+golangci-lint config verify..........................(no files to check)Skipped
+golangci-lint............................................................Passed
+go vet (host, windows, unix family)......................................Passed
+go test..................................................................Failed
+- hook id: go-test
+- exit code: 1
+
+packages: leaving out 1 package(s) that hold no tracked Go file:
+  github.com/simon-lentz/yammm/lsp/editors/vscode/node_modules/flatted/golang/pkg/flatted
+?       github.com/simon-lentz/yammm/adapter    [no test files]
+?       github.com/simon-lentz/yammm/adapter/gogen/internal/temporal    [no test files]
+ok      github.com/simon-lentz/yammm    1.445s
+ok      github.com/simon-lentz/yammm/adapter/csv        1.938s
+?       github.com/simon-lentz/yammm/adapter/neo4j/integration  [no test files]
+ok      github.com/simon-lentz/yammm/adapter/json       3.657s
+ok      github.com/simon-lentz/yammm/adapter/json/internal      3.718s
+ok      github.com/simon-lentz/yammm/adapter/jschema    4.158s
+ok      github.com/simon-lentz/yammm/adapter/json/internal/typetag      3.994s
+ok      github.com/simon-lentz/yammm/adapter/gogen      5.506s
+ok      github.com/simon-lentz/yammm/adapter/markdown   5.050s
+ok      github.com/simon-lentz/yammm/cmd/yammm-lsp      1.537s
+ok      github.com/simon-lentz/yammm/cmd/yammm/internal/cli     1.830s
+ok      github.com/simon-lentz/yammm/diag       2.191s
+ok      github.com/simon-lentz/yammm/adapter/neo4j      7.219s
+ok      github.com/simon-lentz/yammm/immutable  2.982s
+ok      github.com/simon-lentz/yammm/instance/internal/eval     2.917s
+ok      github.com/simon-lentz/yammm/internal/buildversion      4.006s
+ok      github.com/simon-lentz/yammm/internal/ident     1.415s
+ok      github.com/simon-lentz/yammm/internal/instancetest      1.588s
+ok      github.com/simon-lentz/yammm/internal/mdsnippet 1.712s
+ok      github.com/simon-lentz/yammm/internal/raceskip  1.425s
+ok      github.com/simon-lentz/yammm/cmd/yammm  54.721s
+# github.com/simon-lentz/yammm/internal/source.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/internal/source [build failed]
+# github.com/simon-lentz/yammm/internal/testsummary.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/internal/testsummary [build failed]
+# github.com/simon-lentz/yammm/internal/trace.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/internal/trace [build failed]
+# github.com/simon-lentz/yammm/internal/value.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/internal/value [build failed]
+# github.com/simon-lentz/yammm/internal/yammmtest.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/internal/yammmtest [build failed]
+# github.com/simon-lentz/yammm/location.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/location [build failed]
+# github.com/simon-lentz/yammm/location/path.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/location/path [build failed]
+# github.com/simon-lentz/yammm/lsp.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/lsp [build failed]
+# github.com/simon-lentz/yammm/lsp/internal/analysis.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/lsp/internal/analysis [build failed]
+# github.com/simon-lentz/yammm/lsp/internal/completion.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+# github.com/simon-lentz/yammm/lsp/internal/completion
+# [github.com/simon-lentz/yammm/lsp/internal/completion]
+vet: lsp/internal/completion/complete.go:5:2: could not import cmp (open /Users/simon/Library/Caches/go-build/03/0375e392eae589b6d05a50d8e671067e902a96757781ab991ed947337cd3f84e-d: no such file or directory)
+FAIL    github.com/simon-lentz/yammm/lsp/internal/completion [build failed]
+# github.com/simon-lentz/yammm/lsp/internal/definition_test [github.com/simon-lentz/yammm/lsp/internal/definition.test]
+lsp/internal/definition/resolve_test.go:8:2: could not import github.com/stretchr/testify/require (open /Users/simon/Library/Caches/go-build/00/003fbab0cf7af633ef9fcfd2134eeb2d1447e985f06ee722109334193d39f887-d: no such file or directory)
+FAIL    github.com/simon-lentz/yammm/lsp/internal/definition [build failed]
+# github.com/simon-lentz/yammm/lsp/internal/docstate.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/lsp/internal/docstate [build failed]
+# github.com/simon-lentz/yammm/lsp/internal/hover [github.com/simon-lentz/yammm/lsp/internal/hover.test]
+lsp/internal/hover/hover_test.go:7:2: could not import github.com/stretchr/testify/require (open /Users/simon/Library/Caches/go-build/00/003fbab0cf7af633ef9fcfd2134eeb2d1447e985f06ee722109334193d39f887-d: no such file or directory)
+FAIL    github.com/simon-lentz/yammm/lsp/internal/hover [build failed]
+?       github.com/simon-lentz/yammm/lsp/internal/lsperr        [no test files]
+# github.com/simon-lentz/yammm/lsp/internal/lsputil.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/lsp/internal/lsputil [build failed]
+# github.com/simon-lentz/yammm/lsp/internal/markdown.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+# github.com/simon-lentz/yammm/lsp/internal/markdown_test
+# [github.com/simon-lentz/yammm/lsp/internal/markdown_test]
+vet: lsp/internal/markdown/markdown_test.go:15:2: could not import github.com/stretchr/testify/require (open /Users/simon/Library/Caches/go-build/00/003fbab0cf7af633ef9fcfd2134eeb2d1447e985f06ee722109334193d39f887-d: no such file or directory)
+FAIL    github.com/simon-lentz/yammm/lsp/internal/markdown [build failed]
+# github.com/simon-lentz/yammm/lsp/internal/protocol.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/lsp/internal/protocol [build failed]
+# github.com/simon-lentz/yammm/lsp/internal/symbols.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/lsp/internal/symbols [build failed]
+?       github.com/simon-lentz/yammm/lsp/internal/testutil      [no test files]
+# github.com/simon-lentz/yammm/lsp/internal/workspace.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/lsp/internal/workspace [build failed]
+# github.com/simon-lentz/yammm/schema.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/schema [build failed]
+# github.com/simon-lentz/yammm/schema/expr.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/schema/expr [build failed]
+# github.com/simon-lentz/yammm/snapshot.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/snapshot [build failed]
+# github.com/simon-lentz/yammm/snapshot/snapshottest.test
+/usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: open /Users/simon/Library/Caches/go-build/07/07153c526069a66d86b149a6760a6d2993d2e9d7540bdcd296471dd296d104d8-d: no such file or directory
+FAIL    github.com/simon-lentz/yammm/snapshot/snapshottest [build failed]
+=== RUN   TestTestScript_LeavesOutAnUntrackedPackage
+=== PAUSE TestTestScript_LeavesOutAnUntrackedPackage
+=== CONT  TestTestScript_LeavesOutAnUntrackedPackage
+    test_sh_test.go:149: exit 1, want 0
+        stdout:
+
+        stderr:
+        packages: leaving out 1 package(s) that hold no tracked Go file:
+          github.com/simon-lentz/yammm/untracked
+        # github.com/simon-lentz/yammm/internal/testsummary
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: open /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: no such file or directory
+--- FAIL: TestTestScript_LeavesOutAnUntrackedPackage (39.84s)
+=== RUN   TestTestScript_RunsUnderTheRaceDetector
+=== PAUSE TestTestScript_RunsUnderTheRaceDetector
+=== CONT  TestTestScript_RunsUnderTheRaceDetector
+    test_sh_test.go:55: stdout does not hold "WARNING: DATA RACE"
+        stdout:
+
+        stderr:
+        # github.com/simon-lentz/yammm/internal/testsummary
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: open /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: no such file or directory
+    test_sh_test.go:56: stderr does not hold "test: 1 of 3 packages failed:\n  github.com/simon-lentz/yammm/ok\n"
+        stdout:
+
+        stderr:
+        # github.com/simon-lentz/yammm/internal/testsummary
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: open /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: no such file or directory
+--- FAIL: TestTestScript_RunsUnderTheRaceDetector (41.05s)
+=== RUN   TestTestScript_FailsWhenATestFails
+=== PAUSE TestTestScript_FailsWhenATestFails
+=== CONT  TestTestScript_FailsWhenATestFails
+    test_sh_test.go:40: stdout does not hold "boom_test.go:5: boom"
+        stdout:
+
+        stderr:
+        # github.com/simon-lentz/yammm/internal/testsummary
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: open /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: no such file or directory
+    test_sh_test.go:41: stdout does not hold "-test.shuffle "
+        stdout:
+
+        stderr:
+        # github.com/simon-lentz/yammm/internal/testsummary
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: open /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: no such file or directory
+    test_sh_test.go:42: stderr does not hold "test: 1 of 3 packages failed:\n  github.com/simon-lentz/yammm/ok\n"
+        stdout:
+
+        stderr:
+        # github.com/simon-lentz/yammm/internal/testsummary
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: open /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: no such file or directory
+    test_sh_test.go:43: stderr does not hold "test: FAILED\n"
+        stdout:
+
+        stderr:
+        # github.com/simon-lentz/yammm/internal/testsummary
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: open /Users/simon/Library/Caches/go-build/04/04f585aeb2bda10afeedb637ca45acbb62739ccbef55ce39daec4f8656f2a534-d: no such file or directory
+--- FAIL: TestTestScript_FailsWhenATestFails (39.72s)
+=== RUN   TestMutateScript_NamesTheTestThatKilledTheMutant
+=== PAUSE TestMutateScript_NamesTheTestThatKilledTheMutant
+=== CONT  TestMutateScript_NamesTheTestThatKilledTheMutant
+    mutate_sh_test.go:182: exit 1, want 0
+        stdout:
+
+        stderr:
+        mutate: the UNMUTATED tree is already red in ./p01/ ./p02/ ./p03/ ./p04/ ./p05/ ./p06/ ./p07/ ./p08/ ./p09/ ./p10/ ./p11/ ./p12/ ./p13/ ./p14/ ./p15/ ./p16/ ./p17/ ./p18/ ./p19/ ./p20/ ./p21/ ./p22/ ./p23/ ./p24/ ./p25/ ./m/, so no verdict is possible
+--- FAIL: TestMutateScript_NamesTheTestThatKilledTheMutant (41.10s)
+=== RUN   TestMutateScript_RecordsNoRedBaseline
+=== PAUSE TestMutateScript_RecordsNoRedBaseline
+=== CONT  TestMutateScript_RecordsNoRedBaseline
+    mutate_sh_test.go:204: after call 1: 0 test runs, want 1 (the baseline alone, never skipped)
+    mutate_sh_test.go:204: after call 2: 0 test runs, want 2 (the baseline alone, never skipped)
+--- FAIL: TestMutateScript_RecordsNoRedBaseline (46.76s)
+ok      github.com/simon-lentz/yammm/internal/doclint   72.622s
+=== RUN   TestMutateScript_RunsTheBaselineBeforeEveryMutantWithoutACache
+=== PAUSE TestMutateScript_RunsTheBaselineBeforeEveryMutantWithoutACache
+=== CONT  TestMutateScript_RunsTheBaselineBeforeEveryMutantWithoutACache
+    mutate_sh_test.go:105: after call 1: 1 test runs, want 2 (a baseline and a mutant per call)
+    mutate_sh_test.go:105: after call 2: 3 test runs, want 4 (a baseline and a mutant per call)
+--- FAIL: TestMutateScript_RunsTheBaselineBeforeEveryMutantWithoutACache (61.58s)
+=== RUN   TestTestScript_NamesEveryPackageWithNoTestAndEverySkip
+=== PAUSE TestTestScript_NamesEveryPackageWithNoTestAndEverySkip
+=== CONT  TestTestScript_NamesEveryPackageWithNoTestAndEverySkip
+    test_sh_test.go:23: exit 1, want 0
+        stdout:
+        ?       github.com/simon-lentz/yammm/internal/raceskip  [no test files]
+        ?       github.com/simon-lentz/yammm/internal/testsummary       [no test files]
+        ?       github.com/simon-lentz/yammm/notests    [no test files]
+        # github.com/simon-lentz/yammm/ok.test
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: open /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: no such file or directory
+        FAIL    github.com/simon-lentz/yammm/ok [build failed]
+        # github.com/simon-lentz/yammm/skips.test
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: open /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: no such file or directory
+        FAIL    github.com/simon-lentz/yammm/skips [build failed]
+        test: 3 package(s) ran no test:
+          github.com/simon-lentz/yammm/internal/raceskip
+          github.com/simon-lentz/yammm/internal/testsummary
+          github.com/simon-lentz/yammm/notests
+
+        stderr:
+        test: 2 of 5 packages failed:
+          github.com/simon-lentz/yammm/ok
+          github.com/simon-lentz/yammm/skips
+        test: FAILED
+--- FAIL: TestTestScript_NamesEveryPackageWithNoTestAndEverySkip (26.00s)
+ok      github.com/simon-lentz/yammm/docs       82.290s
+=== RUN   TestTestScript_RunsEveryPackageHoldingATrackedGoFile
+=== PAUSE TestTestScript_RunsEveryPackageHoldingATrackedGoFile
+=== CONT  TestTestScript_RunsEveryPackageHoldingATrackedGoFile
+    test_sh_test.go:138: stderr does not hold "test: 2 of 5 packages failed:\n  github.com/simon-lentz/yammm\n  github.com/simon-lentz/yammm/cafe\n"
+        stdout:
+        # github.com/simon-lentz/yammm/ok.test
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: open /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: no such file or directory
+        # github.com/simon-lentz/yammm.test
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: open /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: no such file or directory
+        FAIL    github.com/simon-lentz/yammm [build failed]
+        # github.com/simon-lentz/yammm/cafe.test
+        /usr/local/go/pkg/tool/darwin_arm64/link: cannot open file /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: open /Users/simon/Library/Caches/go-build/0c/0c59c174aafdaaf415f446111012da4bc3795f03377be0d821b0d2492cc035dd-d: no such file or directory
+        FAIL    github.com/simon-lentz/yammm/cafe [build failed]
+        ?       github.com/simon-lentz/yammm/internal/raceskip  [no test files]
+        ?       github.com/simon-lentz/yammm/internal/testsummary       [no test files]
+        FAIL    github.com/simon-lentz/yammm/ok [build failed]
+        test: 2 package(s) ran no test:
+          github.com/simon-lentz/yammm/internal/raceskip
+          github.com/simon-lentz/yammm/internal/testsummary
+
+        stderr:
+        packages: leaving out 1 package(s) that hold no tracked Go file:
+          github.com/simon-lentz/yammm/untracked
+        test: 3 of 5 packages failed:
+          github.com/simon-lentz/yammm
+          github.com/simon-lentz/yammm/cafe
+          github.com/simon-lentz/yammm/ok
+        test: FAILED
+--- FAIL: TestTestScript_RunsEveryPackageHoldingATrackedGoFile (23.50s)
+=== RUN   TestMutateScript_RecordsAGreenBaselineOncePerTreeAndEnvironment
+=== PAUSE TestMutateScript_RecordsAGreenBaselineOncePerTreeAndEnvironment
+=== CONT  TestMutateScript_RecordsAGreenBaselineOncePerTreeAndEnvironment
+    mutate_sh_test.go:150: exit 1, want 0
+        stdout:
+
+        stderr:
+        mutate: the UNMUTATED tree is already red in ./m/, so no verdict is possible
+--- FAIL: TestMutateScript_RecordsAGreenBaselineOncePerTreeAndEnvironment (45.72s)
+ok      github.com/simon-lentz/yammm/instance   108.401s
+ok      github.com/simon-lentz/yammm/internal/parse     116.676s
+ok      github.com/simon-lentz/yammm/graph      130.840s
+-test.shuffle 1789486487057032000
+FAIL
+FAIL    github.com/simon-lentz/yammm/internal/scripttest        118.246s
+ok      github.com/simon-lentz/yammm/format     149.329s
+test: 5 package(s) ran no test:
+  github.com/simon-lentz/yammm/adapter
+  github.com/simon-lentz/yammm/adapter/gogen/internal/temporal
+  github.com/simon-lentz/yammm/adapter/neo4j/integration
+  github.com/simon-lentz/yammm/lsp/internal/lsperr
+  github.com/simon-lentz/yammm/lsp/internal/testutil
+test: 23 of 54 packages failed:
+  github.com/simon-lentz/yammm/internal/scripttest
+  github.com/simon-lentz/yammm/internal/source
+  github.com/simon-lentz/yammm/internal/testsummary
+  github.com/simon-lentz/yammm/internal/trace
+  github.com/simon-lentz/yammm/internal/value
+  github.com/simon-lentz/yammm/internal/yammmtest
+  github.com/simon-lentz/yammm/location
+  github.com/simon-lentz/yammm/location/path
+  github.com/simon-lentz/yammm/lsp
+  github.com/simon-lentz/yammm/lsp/internal/analysis
+  github.com/simon-lentz/yammm/lsp/internal/completion
+  github.com/simon-lentz/yammm/lsp/internal/definition
+  github.com/simon-lentz/yammm/lsp/internal/docstate
+  github.com/simon-lentz/yammm/lsp/internal/hover
+  github.com/simon-lentz/yammm/lsp/internal/lsputil
+  github.com/simon-lentz/yammm/lsp/internal/markdown
+  github.com/simon-lentz/yammm/lsp/internal/protocol
+  github.com/simon-lentz/yammm/lsp/internal/symbols
+  github.com/simon-lentz/yammm/lsp/internal/workspace
+  github.com/simon-lentz/yammm/schema
+  github.com/simon-lentz/yammm/schema/expr
+  github.com/simon-lentz/yammm/snapshot
+  github.com/simon-lentz/yammm/snapshot/snapshottest
+test: FAILED

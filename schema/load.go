@@ -7,13 +7,16 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
 
@@ -168,32 +171,23 @@ func readSourceFile(absPath string) ([]byte, error) {
 }
 
 // readFile reads a file relative to the module root with sandboxed access,
-// returning its content, its SourceID and the host path it was read from.
+// returning its content and the path under the root it was read from.
 // Returns ErrPathEscape if the path would escape the module root.
-func (rl *rootLoader) readFile(relativePath string) ([]byte, location.SourceID, string, error) {
+func (rl *rootLoader) readFile(relativePath string) ([]byte, string, error) {
 	f, err := rl.openFile(relativePath)
 	if err != nil {
 		if errors.Is(err, errNotRegularFile) {
-			return nil, location.SourceID{}, "", fmt.Errorf("import %q is not a regular file", relativePath)
+			return nil, "", fmt.Errorf("import %q is not a regular file", relativePath)
 		}
-		return nil, location.SourceID{}, "", err
+		return nil, "", err
 	}
 	defer f.Close()
 
 	content, err := readSource(f, fmt.Sprintf("import %q", relativePath))
 	if err != nil {
-		return nil, location.SourceID{}, "", err
+		return nil, "", err
 	}
-
-	// Construct SourceID from the canonical path
-	cleanPath := filepath.Clean(relativePath)
-	absPath := filepath.Join(rl.rootPath, cleanPath)
-	sourceID, err := location.SourceIDFromAbsolutePath(absPath)
-	if err != nil {
-		return nil, location.SourceID{}, "", fmt.Errorf("create source ID for %q: %w", relativePath, err)
-	}
-
-	return content, sourceID, absPath, nil
+	return content, filepath.Join(rl.rootPath, filepath.Clean(relativePath)), nil
 }
 
 // handleOpenError converts os.Root errors to appropriate domain errors.
@@ -254,8 +248,8 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 		return fatalResult(err, diag.Result{})
 	}
 
-	// Resolve the path to the host path the filesystem spells it with
-	absPath, err := location.ResolveHostPath(path)
+	// One resolution gives the entry's identity and the host path it is read from.
+	sourceID, absPath, err := location.ResolveSourcePath(path)
 	if err != nil {
 		return fatalResult(fmt.Errorf("resolve path %q: %w", path, err), diag.Result{})
 	}
@@ -301,7 +295,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	ldr := newLoader(cfg, moduleRoot, "", rootOrigin)
 	defer ldr.Close() // Release rootLoader resources when done
 
-	s, result, err := ldr.loadFile(ctx, absPath, content)
+	s, result, err := ldr.loadFile(ctx, sourceID, absPath, content)
 	if err != nil {
 		return fatalResult(err, result)
 	}
@@ -337,6 +331,9 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 		return fatalResult(err, diag.Result{})
 	}
 	cfg.disallowImports = true // Always disallow imports from string, even if user opts try to enable
+	if !utf8.ValidString(sourceName) {
+		return fatalResult(fmt.Errorf("source name %q: %w", sourceName, location.ErrInvalidUTF8Path), diag.Result{})
+	}
 
 	// Create a synthetic source ID (NewSourceID returns just SourceID, no error)
 	sourceID := location.NewSourceID("string://" + sourceName)
@@ -385,8 +382,8 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		return fatalResult(err, diag.Result{})
 	}
 
-	// Canonicalize moduleRoot to absolute path if provided.
-	// This ensures SourceIDFromAbsolutePath will work correctly.
+	// Resolve moduleRoot, so a relative key joins the host path every identity
+	// under the root is resolved from.
 	if moduleRoot != "" {
 		canonical, err := location.ResolveHostPath(moduleRoot)
 		if err != nil {
@@ -408,15 +405,20 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 	ldr := newLoader(cfg, moduleRoot, syntheticRoot, rootOrigin)
 	defer ldr.Close() // Release rootLoader resources when done
 
-	// Pre-register all sources. SourceIDs are derived textually (no symlink
-	// resolution of the joined path) so import lookups — which join the same
-	// module root with the same keys — land on identical IDs regardless of
-	// what exists on disk.
-	for path, content := range sources {
-		sourceID, hostPath, err := inMemorySource(syntheticRoot, moduleRoot, path)
+	// Pre-register all sources, in key order so the report of two keys that
+	// name one source does not depend on map iteration.
+	keys := slices.Sorted(maps.Keys(sources))
+	keyOf := make(map[location.SourceID]string, len(keys))
+	for _, path := range keys {
+		content := sources[path]
+		sourceID, hostPath, err := ldr.inMemorySource(path)
 		if err != nil {
 			return fatalResult(fmt.Errorf("invalid path %q: %w", path, err), diag.Result{})
 		}
+		if other, dup := keyOf[sourceID]; dup {
+			return fatalResult(fmt.Errorf("source keys %q and %q name one source, %s", other, path, sourceID), diag.Result{})
+		}
+		keyOf[sourceID] = path
 
 		if err := ldr.sourceRegistry.Register(sourceID, content); err != nil {
 			return fatalResult(fmt.Errorf("register source %q: %w", path, err), diag.Result{})
@@ -434,19 +436,13 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		// Use the provided entry path
 		selectedEntry = entryPath
 	} else {
-		// Fall back to lexicographic selection. A found flag, not the empty
-		// string, marks "nothing chosen yet": an empty key is a legal entry.
-		var found bool
-		for path := range sources {
-			if !found || path < selectedEntry {
-				selectedEntry, found = path, true
-			}
-		}
+		// Fall back to lexicographic selection.
+		selectedEntry = keys[0]
 	}
 
 	// Derive the entry SourceID exactly like pre-registration did, so the
 	// entry lookup hits the just-registered content.
-	sourceID, err := inMemorySourceID(syntheticRoot, moduleRoot, selectedEntry)
+	sourceID, err := ldr.inMemorySourceID(selectedEntry)
 	if err != nil {
 		return fatalResult(fmt.Errorf("invalid entry path %q: %w", selectedEntry, err), diag.Result{})
 	}
@@ -503,6 +499,25 @@ type loader struct {
 	failedCompiles map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
 	closureSeen    map[*Schema]struct{}           // schemas whose cached closures are already registered
 	hostPaths      map[location.SourceID]string   // file-backed source -> the host path its bytes were read from
+	resolveMu      sync.Mutex
+	resolved       map[string]resolvedSource // path -> its one resolution in this load
+}
+
+// loadRegistry is the completionRegistry a load completes against: the schemas
+// this load has bound, among them a cached closure's, then the shared registry.
+type loadRegistry struct {
+	l *loader
+}
+
+// LookupBySourceID implements the completionRegistry interface.
+func (r loadRegistry) LookupBySourceID(id location.SourceID) (*Schema, bool) {
+	r.l.mu.Lock()
+	s, ok := r.l.loadedSchemas[id]
+	r.l.mu.Unlock()
+	if ok {
+		return s, true
+	}
+	return r.l.registry.LookupBySourceID(id)
 }
 
 // registryAdapter adapts *Registry to the completionRegistry interface.
@@ -554,6 +569,7 @@ func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot, rootOrigin string) *l
 		failedCompiles:  make(map[location.SourceID]struct{}),
 		closureSeen:     make(map[*Schema]struct{}),
 		hostPaths:       make(map[location.SourceID]string),
+		resolved:        make(map[string]resolvedSource),
 	}
 }
 
@@ -591,14 +607,7 @@ func (l *loader) Close() error {
 }
 
 // loadFile loads a schema from a file path.
-func (l *loader) loadFile(ctx context.Context, absPath string, content []byte) (*Schema, diag.Result, error) {
-	sourceID, err := location.SourceIDFromAbsolutePath(absPath)
-	if err != nil {
-		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
-			fmt.Sprintf("invalid source path %q: %v", absPath, err)).Build())
-		return nil, l.collector.Result(), nil
-	}
-
+func (l *loader) loadFile(ctx context.Context, sourceID location.SourceID, absPath string, content []byte) (*Schema, diag.Result, error) {
 	// Register the source content
 	if err := l.sourceRegistry.Register(sourceID, content); err != nil {
 		l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
@@ -713,7 +722,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Complete the schema (resolve types, validate, etc.)
-	s := completeModel(m, sourceID, l.collector, &registryAdapter{l.registry}, resolvedImports)
+	s := completeModel(m, sourceID, l.collector, loadRegistry{l}, resolvedImports)
 
 	if s == nil {
 		return nil, l.collector.Result(), nil
@@ -1074,7 +1083,7 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	if err != nil {
 		if errors.Is(err, errNoHostPath) {
 			l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
-				fmt.Sprintf("resolve import %q: %v", imp.Path, err)).Build())
+				fmt.Sprintf("resolve import %q: %v", imp.Path, err)).WithSpan(imp.Span).Build())
 			l.markImportFailed(imp)
 			return nil
 		}
@@ -1245,10 +1254,9 @@ func importCandidates(relativePath string) []string {
 //
 // It derives its candidates from [importCandidates], the same function
 // readImportFile reads through, and emits an identity for each of the two code
-// paths readImportFile exercises: the in-memory source-content lookup uses
-// l.moduleRoot verbatim, while rootLoader.readFile uses the canonicalized
-// rootPath. Both forms are emitted so a Registry populated by either path hits
-// on the short-circuit. Paths that fail canonicalization are silently dropped;
+// paths readImportFile exercises: the in-memory lookup joins l.moduleRoot, and
+// rootLoader.readFile joins the root it resolved when it opened. Both forms are
+// emitted so a Registry populated by either path hits on the short-circuit. Paths that fail canonicalization are silently dropped;
 // they would fail again in readImportFile with a uniform diagnostic.
 func (l *loader) candidateImportSourceIDs(relativePath string) []location.SourceID {
 	candidates := importCandidates(relativePath)
@@ -1263,23 +1271,19 @@ func (l *loader) candidateImportSourceIDs(relativePath string) []location.Source
 		ids = append(ids, id)
 	}
 
-	// Mirror readImportFile's in-memory lookup: l.moduleRoot + candidate,
-	// derived textually.
+	// Mirror readImportFile's in-memory lookup: l.moduleRoot + candidate.
 	for _, candidate := range candidates {
-		if id, err := inMemorySourceID(l.syntheticRoot, l.moduleRoot, candidate); err == nil {
+		if id, err := l.inMemorySourceID(candidate); err == nil {
 			appendUnique(id)
 		}
 	}
 
-	// Mirror rootLoader.readFile's path computation: canonical rootPath +
-	// filepath.Clean(candidate). rootLoader canonicalizes the module root
-	// once via makeCanonicalPath (symlink-resolved); candidate SourceIDs
-	// derived here must use that same canonical root to match the SourceIDs
-	// previously registered via rootLoader.readFile.
+	// Mirror rootLoader.readFile's path computation: its resolved root joined
+	// with the cleaned candidate.
 	if l.rootLoader != nil {
 		for _, candidate := range candidates {
 			absPath := filepath.Join(l.rootLoader.rootPath, filepath.Clean(candidate))
-			if id, err := location.SourceIDFromAbsolutePath(absPath); err == nil {
+			if id, _, err := l.resolveSource(absPath); err == nil {
 				appendUnique(id)
 			}
 		}
@@ -1308,6 +1312,11 @@ func (l *loader) registerCachedClosureSources(s *Schema) {
 		return
 	}
 	l.closureSeen[s] = struct{}{}
+	// A closure schema is bound as compiled, so an import of it never recompiles
+	// its bytes, which carry no host path for its relative imports.
+	if _, ok := l.loadedSchemas[s.SourceID()]; !ok {
+		l.loadedSchemas[s.SourceID()] = s
+	}
 	srcs := s.Sources()
 	if srcs == nil {
 		return
@@ -1336,10 +1345,10 @@ func (l *loader) registerCachedClosureSources(s *Schema) {
 func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, location.SourceID, error) {
 	candidates := importCandidates(relativePath)
 
-	// First check if we have it in in-memory sources (for Sources). The
-	// candidate SourceID derivation matches pre-registration's exactly.
+	// First check the content this load already holds; the candidate
+	// derivation matches pre-registration's.
 	for _, candidate := range candidates {
-		testID, err := inMemorySourceID(l.syntheticRoot, l.moduleRoot, candidate)
+		testID, err := l.inMemorySourceID(candidate)
 		if err != nil {
 			continue
 		}
@@ -1372,8 +1381,12 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 	// For path escape errors, we return immediately since they are security-relevant.
 	var lastErr error
 	for _, candidate := range candidates {
-		content, sourceID, hostPath, err := l.rootLoader.readFile(candidate)
+		content, path, err := l.rootLoader.readFile(candidate)
 		if err == nil {
+			sourceID, hostPath, rerr := l.resolveSource(path)
+			if rerr != nil {
+				return nil, location.SourceID{}, fmt.Errorf("create source ID for %q: %w", candidate, rerr)
+			}
 			l.hostPaths[sourceID] = hostPath
 			return content, sourceID, nil
 		}
@@ -1393,6 +1406,30 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 	return nil, location.SourceID{}, fmt.Errorf("import file %q not found", imp.Path)
 }
 
+// resolvedSource is one resolution of a path: its identity and its spelling
+// on disk.
+type resolvedSource struct {
+	id   location.SourceID
+	host string
+}
+
+// resolveSource resolves p once per load. Pre-registration, the import
+// candidates, the in-memory lookup and the sandboxed read all derive an
+// identity for one path, and each receives the one answer the filesystem gave.
+func (l *loader) resolveSource(p string) (location.SourceID, string, error) {
+	l.resolveMu.Lock()
+	defer l.resolveMu.Unlock()
+	if r, ok := l.resolved[p]; ok {
+		return r.id, r.host, nil
+	}
+	id, host, err := location.ResolveSourcePath(p)
+	if err != nil {
+		return location.SourceID{}, "", fmt.Errorf("resolve %q: %w", p, err)
+	}
+	l.resolved[p] = resolvedSource{id: id, host: host}
+	return id, host, nil
+}
+
 // inMemorySourceID derives the SourceID for an in-memory source key or an
 // import candidate resolved against the load's root.
 //
@@ -1402,30 +1439,19 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 // meaningful with an empty module root, and the module-root branch below would
 // otherwise re-derive a filesystem path from the working directory.
 //
-// Root-relative keys join the (already canonical) module root textually —
-// the joined path is never resolved against the filesystem — so
-// pre-registration in LoadSourcesWithEntry, entry selection,
-// the in-memory lookup in readImportFile, and the sandboxed disk reads in
-// rootLoader.readFile all derive byte-identical SourceIDs for the same
-// root-relative path regardless of disk state (including symlinked
-// directories under the root).
-//
-// Absolute keys (and the legacy empty-root relative form) are instead
-// canonicalized like entry paths — best-effort symlink resolution — so they
-// land in the same path regime as the canonicalized module root:
-// relative-import resolution computes filepath.Rel between the importing
-// file's directory and the root, and the two must agree for the result to
-// stay inside the sandbox (e.g. a /var/... overlay key against a
-// /private/var/... root would otherwise escape).
-func inMemorySourceID(syntheticRoot, moduleRoot, key string) (location.SourceID, error) {
-	id, _, err := inMemorySource(syntheticRoot, moduleRoot, key)
+// Every other key is resolved as a host path, a relative one against the
+// module root. Pre-registration, entry selection, the in-memory lookup in
+// readImportFile and the sandboxed reads in rootLoader.readFile all resolve
+// the same path, so they derive one SourceID for one file however it is spelled.
+func (l *loader) inMemorySourceID(key string) (location.SourceID, error) {
+	id, _, err := l.inMemorySource(key)
 	return id, err
 }
 
 // inMemorySource is inMemorySourceID plus the host path the identity was
 // derived from; the path is empty for a synthetic key.
-func inMemorySource(syntheticRoot, moduleRoot, key string) (location.SourceID, string, error) {
-	if syntheticRoot != "" {
+func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
+	if l.syntheticRoot != "" {
 		normalized, err := syntheticSourceKey(key)
 		if err != nil {
 			return location.SourceID{}, "", err
@@ -1433,24 +1459,21 @@ func inMemorySource(syntheticRoot, moduleRoot, key string) (location.SourceID, s
 		// NewSourceID bypasses validation, which is right here: the root was
 		// validated once at load, and no key can make a validated root look
 		// absolute. The joined string is deliberately not cleaned.
-		return location.NewSourceID(syntheticRoot + "/" + normalized), "", nil
+		return location.NewSourceID(l.syntheticRoot + "/" + normalized), "", nil
 	}
 
-	var absPath string
-	if !filepath.IsAbs(key) && moduleRoot != "" {
-		absPath = filepath.Join(moduleRoot, key)
-	} else {
-		abs, err := location.ResolveHostPath(key)
-		if err != nil {
-			return location.SourceID{}, "", fmt.Errorf("resolve source key %q: %w", key, err)
-		}
-		absPath = abs
+	if key == "" {
+		return location.SourceID{}, "", location.ErrEmptyPath
 	}
-	id, err := location.SourceIDFromAbsolutePath(absPath)
+	hostKey := key
+	if !filepath.IsAbs(key) && l.moduleRoot != "" {
+		hostKey = filepath.Join(l.moduleRoot, key)
+	}
+	id, host, err := l.resolveSource(hostKey)
 	if err != nil {
-		return location.SourceID{}, "", fmt.Errorf("derive source ID for %q: %w", key, err)
+		return location.SourceID{}, "", fmt.Errorf("resolve source key %q: %w", key, err)
 	}
-	return id, absPath, nil
+	return id, host, nil
 }
 
 // syntheticSourceKey normalizes an in-memory source key for joining to a
@@ -1479,8 +1502,8 @@ func syntheticSourceKey(key string) (string, error) {
 	if cleaned == "." {
 		return "", fmt.Errorf("source key %q resolves to the synthetic root itself", key)
 	}
-	// NFC completes the three normalizations location.SourceIDFromAbsolutePath
-	// applies for a file-backed key; location.NewSourceID applies none.
+	// NFC, as every file-backed identity carries; location.NewSourceID applies
+	// none.
 	return norm.NFC.String(cleaned), nil
 }
 
