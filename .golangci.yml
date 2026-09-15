@@ -11,6 +11,11 @@ run:
     - neo4j_integration
   # Don't let tools mutate go.mod/go.sum.
   modules-download-mode: readonly
+  # golangci-lint refuses to start while another golangci-lint runs anywhere on
+  # the machine. scripts/lint.sh runs it twice, an editor's integration runs it
+  # at will, and the script's own tests run it side by side; its cache makes
+  # concurrent runs safe.
+  allow-parallel-runners: true
 issues:
   # Don't cap number of issues reported.
   max-issues-per-linter: 0

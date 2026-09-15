@@ -237,6 +237,7 @@ func TestPreCommitHooks_RunTheGateScripts(t *testing.T) {
 		alwaysRun bool
 	}{
 		{id: "golangci-lint-config", entry: "scripts/lintconfig.sh", fires: []string{".golangci.yml", "go.mod", "go.sum"}},
+		{id: "golangci-lint", entry: "scripts/lint.sh", fires: []string{"schema/load.go", "location/host_path_windows.go"}},
 		{id: "go-vet", entry: "scripts/vet.sh", fires: []string{"schema/load.go", "go.mod", "go.sum"}},
 		{id: "go-test", entry: "scripts/test.sh", alwaysRun: true},
 	}

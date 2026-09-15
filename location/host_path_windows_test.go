@@ -46,7 +46,7 @@ func TestResolveHostPath_ResolvesAJunction(t *testing.T) {
 	if out, err := exec.CommandContext(t.Context(), "cmd", "/c", "mklink", "/j", junction, target).CombinedOutput(); err != nil {
 		t.Skipf("mklink /j: %v\n%s", err, out)
 	}
-	t.Cleanup(func() { os.Remove(junction) })
+	t.Cleanup(func() { _ = os.Remove(junction) })
 
 	typed := filepath.Join(junction, "x")
 	want := filepath.Join(target, "x")

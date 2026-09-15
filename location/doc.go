@@ -136,10 +136,10 @@
 //
 // # Dependencies
 //
-//	location  ──imports──▶  location/path, golang.org/x/text/unicode/norm
-//	                        golang.org/x/sys/windows (on Windows)
+//	location  ──imports──▶  location/path, golang.org/x/text/unicode/norm,
+//	                        golang.org/x/sys/windows
 //
 // The sub-package carries provenance paths, the x/text import is NFC
-// normalization, and the x/sys import is the final-path call. It can be
-// imported by all other packages without cycles.
+// normalization, and the x/sys import, made on Windows alone, is the
+// final-path call. It can be imported by all other packages without cycles.
 package location

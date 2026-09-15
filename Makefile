@@ -2,10 +2,10 @@
 
 .PHONY: lint lint-fix
 lint:
-	go tool golangci-lint run
+	scripts/lint.sh
 
 lint-fix:
-	go tool golangci-lint run --fix
+	scripts/lint.sh --fix
 
 # The one test definition the pre-commit hook, every CI host and the release
 # workflow share.

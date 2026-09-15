@@ -79,7 +79,7 @@ repos:
         language: system
         pass_filenames: false
         files: \.go$
-        entry: go tool golangci-lint run
+        entry: scripts/lint.sh
       - id: go-vet
         name: go vet (host, windows, unix family)
         language: system

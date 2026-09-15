@@ -33,36 +33,37 @@ func spellOnDisk(p string) (string, error) {
 	if err != nil {
 		return "", &fs.PathError{Op: "open", Path: p, Err: err}
 	}
-	defer windows.CloseHandle(h)
+	defer windows.CloseHandle(h) //nolint:errcheck // a handle opened with no access holds nothing to flush
 
-	final, err := finalPath(h, fileNameNormalized|volumeNameDOS)
+	final, err := finalPath(h, p, fileNameNormalized|volumeNameDOS)
 	switch {
 	case errors.Is(err, windows.ERROR_PATH_NOT_FOUND):
 		// The volume has no drive letter, so its GUID path is its name.
-		final, err = finalPath(h, fileNameNormalized|volumeNameGUID)
+		final, err = finalPath(h, p, fileNameNormalized|volumeNameGUID)
 	case errors.Is(err, windows.ERROR_ACCESS_DENIED):
 		// SMB cannot normalize a component the user may not query.
-		final, err = finalPath(h, fileNameOpened|volumeNameDOS)
+		final, err = finalPath(h, p, fileNameOpened|volumeNameDOS)
 	}
 	if err != nil {
-		return "", &fs.PathError{Op: "final path", Path: p, Err: err}
+		return "", err
 	}
 	return dropExtendedPrefix(final), nil
 }
 
-// finalPath is GetFinalPathNameByHandleW with its buffer grown to the size
-// it asks for.
-func finalPath(h windows.Handle, flags uint32) (string, error) {
-	buf := make([]uint16, 260)
+// finalPath is GetFinalPathNameByHandleW for the handle h opened on p, with
+// its buffer grown to the size it asks for.
+func finalPath(h windows.Handle, p string, flags uint32) (string, error) {
+	var size uint32 = 260
 	for {
-		n, err := windows.GetFinalPathNameByHandle(h, &buf[0], uint32(len(buf)), flags)
+		buf := make([]uint16, size)
+		n, err := windows.GetFinalPathNameByHandle(h, &buf[0], size, flags)
 		if err != nil {
-			return "", err
+			return "", &fs.PathError{Op: "final path", Path: p, Err: err}
 		}
-		if n < uint32(len(buf)) {
+		if n < size {
 			return syscall.UTF16ToString(buf[:n]), nil
 		}
-		buf = make([]uint16, n)
+		size = n
 	}
 }
 

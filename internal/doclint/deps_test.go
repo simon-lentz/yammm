@@ -32,6 +32,17 @@ func TestAssertDependencyLines_AgreeingLinesAreSilent(t *testing.T) {
 	}
 }
 
+// A row states what a directory imports on every host, so a file behind a
+// build constraint this host does not satisfy still counts, and a generator
+// behind "ignore" never does.
+func TestAssertDependencyLines_ReadsEveryFileWhateverItsConstraint(t *testing.T) {
+	t.Parallel()
+	r, _ := runDepGate(t)
+	if r.reports(filepath.FromSlash("/constrained/")) {
+		t.Errorf("constrained reported: %v", r.msgs)
+	}
+}
+
 // A row naming an import the directory does not have is the shape the gate
 // exists to refuse.
 func TestAssertDependencyLines_ReportsANameTheDirectoryDoesNotImport(t *testing.T) {
