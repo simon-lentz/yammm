@@ -21,11 +21,12 @@ jobs:
           cache: true
       - name: Install pre-commit
         run: pip install pre-commit
-      # Each host's job in yammm_test.yml lints, vets and tests, so this job
-      # skips those hooks rather than running them a second time on Linux.
+      # Each host's job in yammm_test.yml verifies the linter config, lints,
+      # vets and tests, so this job skips those hooks rather than running them a
+      # second time on Linux.
       - name: Run all checks
         env:
-          SKIP: golangci-lint,go-vet,go-test
+          SKIP: golangci-lint-config,golangci-lint,go-vet,go-test
         run: pre-commit run --all-files
   # Linux only: the integration tests need xvfb, and every platform's LSP
   # binary cross-compiles from this host with CGO_ENABLED=0.

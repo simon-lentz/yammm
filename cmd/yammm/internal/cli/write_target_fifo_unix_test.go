@@ -1,4 +1,4 @@
-//go:build unix
+//go:build unix && !aix && !solaris
 
 package cli
 
@@ -10,6 +10,7 @@ import (
 )
 
 // platformTargetCases returns the target kinds only a Unix host can create.
+// The syscall package has no Mkfifo on aix, solaris or illumos.
 func platformTargetCases() []writeTargetCase {
 	return []writeTargetCase{{
 		name: "a FIFO receives the bytes and stays a FIFO",
