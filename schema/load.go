@@ -244,6 +244,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 
 	cfg := defaultLoadConfig()
 	applyLoadOptions(cfg, opts)
+	cfg.startCapture()
 	if err := rejectSyntheticRoot(cfg); err != nil {
 		return fatalResult(err, diag.Result{})
 	}
@@ -327,6 +328,7 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 
 	cfg := defaultLoadConfig()
 	applyLoadOptions(cfg, opts)
+	cfg.startCapture()
 	if err := rejectSyntheticRoot(cfg); err != nil {
 		return fatalResult(err, diag.Result{})
 	}
@@ -370,12 +372,13 @@ func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryP
 		panic("load.SourcesWithEntry: context must not be nil")
 	}
 
+	cfg := defaultLoadConfig()
+	applyLoadOptions(cfg, opts)
+	cfg.startCapture()
+
 	if len(sources) == 0 {
 		return fatalResult(errors.New("no sources provided"), diag.Result{})
 	}
-
-	cfg := defaultLoadConfig()
-	applyLoadOptions(cfg, opts)
 
 	syntheticRoot, err := normalizeSyntheticRoot(cfg, moduleRoot)
 	if err != nil {
@@ -541,9 +544,6 @@ func newLoader(cfg *loadConfig, moduleRoot, syntheticRoot, rootOrigin string) *l
 	sourceReg := cfg.sourceRegistry
 	if sourceReg == nil {
 		sourceReg = source.NewRegistry()
-	}
-	if cfg.sourcesOut != nil {
-		*cfg.sourcesOut = NewSources(sourceReg)
 	}
 
 	// Use provided logger or create a discard logger (zero overhead when unused)

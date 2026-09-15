@@ -177,6 +177,36 @@ func TestCollector_MergeTruncatedResult_PreservesCountsAndTruncation(t *testing.
 	}
 }
 
+func TestCollector_Merge_AddsEachTruncatedResultsDrops(t *testing.T) {
+	// Two truncated results merged in turn: the receiver's dropped count is the
+	// sum of both, and each dropped error still counts.
+	src := NewCollector(1)
+	src.Collect(NewIssue(Warning, E_SYNTAX, "fills the limit").Build())
+	src.Collect(NewIssue(Error, E_SYNTAX, "dropped but real").Build())
+	srcRes := src.Result()
+	if srcRes.DroppedCount() != 1 {
+		t.Fatalf("source setup: Dropped=%d; want 1", srcRes.DroppedCount())
+	}
+
+	dst := NewCollectorUnlimited()
+	dst.Merge(srcRes)
+	dst.Merge(srcRes)
+	res := dst.Result()
+
+	if !res.LimitReached() {
+		t.Error("LimitReached() = false; want true")
+	}
+	if res.DroppedCount() != 2 {
+		t.Errorf("DroppedCount() = %d; want 2 (one from each merged result)", res.DroppedCount())
+	}
+	if got := res.SeverityCounts(); got.Errors != 2 || got.Warnings != 2 {
+		t.Errorf("SeverityCounts() = %+v; want 2 errors and 2 warnings", got)
+	}
+	if res.Len() != 2 {
+		t.Errorf("Result.Len() = %d; want 2 (each merge stores one issue)", res.Len())
+	}
+}
+
 func TestCollector_Limit(t *testing.T) {
 	c := NewCollector(2)
 
@@ -820,9 +850,9 @@ func TestCollector_DeterministicOrdering_MixedIssueTypes(t *testing.T) {
 	}
 }
 
-// TestNewCollector_NormalizesNegativeLimit verifies that negative limits
-// are normalized to 0 (unlimited) in NewCollector.
-func TestNewCollector_NormalizesNegativeLimit(t *testing.T) {
+// TestNewCollector_LimitAtOrBelowZeroStoresEverything holds the limit rule over
+// three collected issues: a limit of zero or less stores all three.
+func TestNewCollector_LimitAtOrBelowZeroStoresEverything(t *testing.T) {
 	tests := []struct {
 		input  int
 		stored int // of three issues collected

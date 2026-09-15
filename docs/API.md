@@ -49,7 +49,7 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | `WithModuleRoot` | Root directory for module-style imports. It is the first rung of the ladder in [Module root discovery](#module-root-discovery), and under it no `yammm.mod` marker is read at all |
 | `WithIssueLimit` | Maximum diagnostic issues to collect (default: 100) |
 | `WithLogger` | Structured logger for load diagnostics |
-| `CaptureSources(&dst)` | Store the load's sources in `dst` before the load reads anything, so a caller can render excerpts for a load that fails and returns no schema |
+| `CaptureSources(&dst)` | Store the load's sources in `dst` before the load reads anything, so a caller can render excerpts for a load that fails and returns no schema; a load that fails before it reads anything leaves `dst` holding that load's empty sources |
 | `WithImportsAllowed` | Whether import declarations are processed (default `true`); `false` refuses them with `E_IMPORT_NOT_ALLOWED` |
 | `WithSourcesOnly` | With `true`, restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
 | `WithSyntheticRoot` | Give in-memory sources synthetic identities under a root such as `embedded://app`, so type identities do not move with the working directory (see [Synthetic source identities](#synthetic-source-identities)) |
@@ -230,7 +230,10 @@ Dropped issues still count toward `Result.OK()` / `HasErrors()` /
 `SeverityCounts()` (the counts reflect every issue *seen*, not only those
 stored), so truncation never flips a failing result to OK and the
 all-or-nothing contract holds regardless of the limit.
-`WithIssueLimit(0)` (or `diag.NoLimit`) means unlimited. When the cap was hit,
+`WithIssueLimit(0)` (or `diag.NoLimit`) means unlimited. Under
+`snapshot.WithRevalidation` the revalidator caps each row at the load's limit,
+so the load has one cap and an unlimited load stores every finding a row
+draws. When the cap was hit,
 the JSON output format carries `limitReached` and `droppedCount`, and a
 truncated result merged into any collector keeps both. A cap is a collector's
 setting, so a `Result` reports none. The CLI's text output appends a

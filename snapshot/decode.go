@@ -55,6 +55,10 @@ type streamDecoder struct {
 	// schema is present; walkInstance then runs every root back through it.
 	revalidator *instance.Validator
 
+	// cancelReported is set once a revalidated row has reported the context's
+	// cancellation, so the walk's own poll does not report it a second time.
+	cancelReported bool
+
 	// bodyOffset is the byte offset of the body suffix UpdateMetadata
 	// reuses verbatim; -1 until decodeHeader captures it.
 	bodyOffset int64
@@ -73,12 +77,14 @@ func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDeco
 }
 
 // newRevalidator builds the validator the revalidation walk runs, or nil
-// when nobody asked or no schema is present to validate against.
+// when nobody asked or no schema is present to validate against. It caps a
+// row at the load's limit, so the load has one cap and an unlimited load
+// stores every finding a row draws.
 func newRevalidator(s *schema.Schema, cfg loadConfig) *instance.Validator {
 	if !cfg.revalidate || s == nil {
 		return nil
 	}
-	return instance.NewValidator(s)
+	return instance.NewValidator(s, instance.WithIssueLimit(cfg.issueLimit))
 }
 
 // newStreamDecoderFromReader creates a streamDecoder backed by an io.Reader,
@@ -310,7 +316,9 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 	seenRows := make(map[int]int, len(groups))
 	for gi, g := range groups {
 		if err := ctx.Err(); err != nil {
-			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+			if !sd.cancelReported {
+				sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+			}
 			return nil, fmt.Errorf("context cancelled: %w", err)
 		}
 		row, ok := sd.requireRow(g.Type, func() string { return fmt.Sprintf("instances entry %d", gi) })
@@ -518,18 +526,32 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instW
 	keyStr := formatWireKey(inst.Key)
 	props := sd.rebuildRawProperties(t, keyStr, inst, 0)
 	_, res := sd.revalidator.ValidateOne(ctx, sd.tableTags[row], instance.RawInstance{Properties: props})
-	for issue := range res.Issues() {
-		// The severity map moves findings ABOUT THE DATA. A cancellation and
-		// the validator's own internal failure are statements about the run:
-		// retagging a Fatal E_INTERNAL to the caller's chosen Warning made
-		// Load return HasErrors() false on data the validator reported it
-		// could not finish checking.
-		if issue.Code() == diag.E_CONTEXT_CANCELLED || issue.Code() == diag.E_INTERNAL {
-			sd.collector.Collect(issue)
-			continue
-		}
-		sd.collector.Collect(retagIssue(issue, sd.loadCfg.revalidateSeverity, sd.refAt(row), keyStr))
-	}
+	// MergeRetag keeps the validator's order, so a capped collector evicts by
+	// when a finding was raised, not by how its message sorts.
+	sev, typeRef := sd.loadCfg.revalidateSeverity, sd.refAt(row)
+	sd.collector.MergeRetag(res,
+		func(s diag.Severity, code diag.Code) (diag.Severity, bool) {
+			if code == diag.E_CONTEXT_CANCELLED {
+				sd.cancelReported = true
+			}
+			if reportsTheRun(code) {
+				return s, true
+			}
+			return sev, true
+		},
+		func(issue diag.Issue) diag.Issue {
+			if reportsTheRun(issue.Code()) {
+				return issue
+			}
+			return retagIssue(issue, sev, typeRef, keyStr)
+		})
+}
+
+// reportsTheRun reports whether code states something about the revalidation run
+// rather than the data. Such an issue keeps its severity, so a Fatal E_INTERNAL
+// never reads as the caller's chosen Warning on data left unchecked.
+func reportsTheRun(code diag.Code) bool {
+	return code == diag.E_CONTEXT_CANCELLED || code == diag.E_INTERNAL
 }
 
 // rebuildRawProperties inverts the wire encoding back to the validator's

@@ -207,12 +207,26 @@ func WithLogger(logger *slog.Logger) LoadOption {
 	}
 }
 
-// CaptureSources stores the load's source registry in *dst before the load
-// reads anything. A load that fails returns a nil Schema, and Schema.Sources
-// with it, so a caller that renders excerpts for a failed load takes the
-// sources from here. A nil dst captures nothing.
+// CaptureSources stores the load's source registry in *dst when the load
+// starts, before it reads anything, so a load that fails early leaves *dst
+// holding that load's empty registry, never an earlier load's. A load that
+// fails returns a nil Schema, and Schema.Sources with it, so a caller that
+// renders excerpts for a failed load takes the sources from here. A nil dst
+// captures nothing.
 func CaptureSources(dst **Sources) LoadOption {
 	return func(c *loadConfig) {
 		c.sourcesOut = dst
 	}
+}
+
+// startCapture gives the load its source registry at the load's entry and, when
+// [CaptureSources] asked for it, stores the registry in the caller's dst.
+func (c *loadConfig) startCapture() {
+	if c.sourcesOut == nil {
+		return
+	}
+	if c.sourceRegistry == nil {
+		c.sourceRegistry = source.NewRegistry()
+	}
+	*c.sourcesOut = NewSources(c.sourceRegistry)
 }

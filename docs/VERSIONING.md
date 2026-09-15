@@ -864,7 +864,7 @@ declaration describes (below).
 
 Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
 are on the `review` branch and reach `main` at the unit's close. Its fix passes
-move **ten additions and seven removals**:
+move **eleven additions and seven removals**:
 
 - **pass A** removes `location.ErrUNCPath` and `location.PositionRegistry`;
 - **pass B** adds `location.SourceID.RelativeTo` and `schema.CaptureSources`,
@@ -875,10 +875,11 @@ move **ten additions and seven removals**:
   `diag.DetailKeyTriggeringCodes`; removes `location.Provenance.AtKey`; and
   renames `diag.E_SNAPSHOT_PATH_FALLBACK` to `diag.W_SNAPSHOT_PATH_FALLBACK`,
   which `gorelease` counts as one removal and one addition;
-- **the second fix pass** adds `location.ResolveSourcePath` and removes
+- **the second fix pass** adds `location.ResolveSourcePath` and
+  `diag.Collector.MergeRetag`, and removes
   `location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute`.
 
-**With unit 6's six additions, `gorelease -base=v0.21.0` reads sixteen
+**With unit 6's six additions, `gorelease -base=v0.21.0` reads seventeen
 compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Each
 block below was written by the pass or group that landed its behaviour.
 
@@ -1738,7 +1739,9 @@ existing declaration.
   order its issues were collected in, and `Merge` stores by it. The collector
   evicts the latest-arrived of the least severe, so storing in sort order made
   the victim depend on how the merged messages happened to compare — reachable
-  since `snapshot`'s `mergeResults` began merging through `Merge`.
+  since `snapshot`'s `mergeResults` began merging through `Merge`. `MergeFunc`
+  stores by it too, and the second fix pass carries it to a snapshot's
+  revalidation and the validator's internal-error filter.
 - **Two programmer errors now fail where they are made.**
   `IssueBuilder.Build` panics on a builder neither `NewIssue` nor `FromIssue`
   made, rather than returning a zero `Issue` that `Collector.Collect` panics on
@@ -1827,6 +1830,45 @@ existing declaration.
 - **Consumer reach: none measured.** rdata calls none of the `location`
   constructors, and its suite against this tree differs from its run against
   `v0.21.0` by nothing.
+
+### Unit 7, the second fix pass — a retagging merge, and an excerpt draws what a terminal shows
+
+**One exported declaration is added:** `diag.Collector.MergeRetag`.
+
+- **Added: `diag.Collector.MergeRetag(res, retag, fn)`.** `retag` declares the
+  severity each merged issue is stored at and whether it is kept, and `fn` builds
+  each kept issue. Survivors are stored in arrival order, and the counts and
+  truncation facts are derived from `res`'s per-code counts through `retag`, so they
+  stay exact when `res` was truncated. It panics when `fn` builds an issue that
+  differs from the declaration.
+- **A snapshot's revalidation and the validator's internal-error filter merge
+  through it.** Under an issue limit, a revalidating `snapshot.Load` keeps the
+  findings the validator raised first, where it kept the ones whose messages sort
+  first. The validator's internal-error filter reports every internal error it saw
+  in its counts, `LimitReached` and `DroppedCount`, where it counted only the ones
+  it kept. **The revalidator caps a row at the load's limit**, where it capped
+  every row at the validator's default of 100 whatever the load asked: a row
+  drawing more than 100 findings now loads unlimited with every finding stored,
+  and under a finite limit reports its drops once, where the exact counts would
+  otherwise have reported the row's own cap as a truncation of an unlimited load.
+  A cancellation inside a revalidated row is reported once, by the row; the
+  walk's own poll reported it a second time at the next group.
+- **An excerpt draws what a terminal shows.** A tab inside a span is copied into
+  the mark row, as a tab before it already was. A format character other than the
+  soft hyphen, and a conjoining Hangul vowel or final consonant, take no column; an
+  East Asian wide rune takes two; each emoji of a ZWJ sequence takes two, and the
+  joiner none. A C0 control other than a tab is shown as its Control Pictures
+  glyph, DEL as U+2421, and a C1 control or a bidirectional control as U+FFFD, each
+  in one column, so no source byte acts on the terminal. Text on a terminal only.
+- **`schema.CaptureSources` captures from the load's start.** A load that fails
+  before it reads anything, such as one with an unreadable entry or a malformed
+  module-root marker, leaves `*dst` holding that load's empty sources, never an
+  earlier load's.
+- **Consumer reach: rdata's log attributes.** rdata revalidates at Warning under
+  a 500-issue limit and logs `limit_reached` and `dropped` from every such load,
+  so which finding survives a truncation moves for it, and a row with more than
+  100 findings is now capped at 500 like the load rather than at 100. None of its
+  tests reads either.
 
 ## v0.21.0 under this policy
 

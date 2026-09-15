@@ -285,3 +285,32 @@ func TestKeepInternalErrors(t *testing.T) {
 		t.Errorf("a row with no internal error kept something: %s", kept)
 	}
 }
+
+// TestKeepInternalErrors_CountsTheInternalErrorsItsInputDropped pins that the
+// kept result counts every E_INTERNAL the row saw, including one its own
+// capped collector could not store: two defects through a one-slot collector
+// read as two, one of them dropped.
+func TestKeepInternalErrors_CountsTheInternalErrorsItsInputDropped(t *testing.T) {
+	t.Parallel()
+	c := diag.NewCollector(1)
+	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, "a library defect").Build())
+	c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, "a second library defect").Build())
+
+	kept := keepInternalErrors(c.Result())
+
+	if got := kept.SeverityCounts().Fatal; got != 2 {
+		t.Errorf("SeverityCounts().Fatal = %d, want 2", got)
+	}
+	if got := kept.CodeCounts(diag.Fatal)[diag.E_INTERNAL]; got != 2 {
+		t.Errorf("CodeCounts(Fatal)[E_INTERNAL] = %d, want 2", got)
+	}
+	if got := kept.Len(); got != 1 {
+		t.Errorf("Len() = %d, want the one stored E_INTERNAL", got)
+	}
+	if !kept.LimitReached() {
+		t.Error("LimitReached() = false, want true")
+	}
+	if got := kept.DroppedCount(); got != 1 {
+		t.Errorf("DroppedCount() = %d, want 1", got)
+	}
+}

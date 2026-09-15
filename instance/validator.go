@@ -251,11 +251,9 @@ func cancelled(ctx context.Context, collector *diag.Collector, prov *location.Pr
 // deadline hides a class of bug behind a timeout.
 func keepInternalErrors(res diag.Result) diag.Result {
 	c := diag.NewCollectorUnlimited()
-	for is := range res.Issues() {
-		if is.Code() == diag.E_INTERNAL {
-			c.Collect(is)
-		}
-	}
+	c.MergeRetag(res,
+		func(sev diag.Severity, code diag.Code) (diag.Severity, bool) { return sev, code == diag.E_INTERNAL },
+		func(issue diag.Issue) diag.Issue { return issue })
 	return c.Result()
 }
 

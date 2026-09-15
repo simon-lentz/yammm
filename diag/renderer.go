@@ -247,6 +247,9 @@ func (r *Renderer) writeExcerpt(sb *strings.Builder, issue Issue) {
 		return
 	}
 	line := []rune(text)
+	for i, c := range line {
+		line[i] = shownRune(c)
+	}
 
 	// Rune indexes. start may equal len(line): the column one past the last
 	// rune is where an end-of-line diagnostic points.
@@ -280,11 +283,23 @@ func (r *Renderer) writeExcerpt(sb *strings.Builder, issue Issue) {
 	for _, c := range line[lo:start] {
 		marks.WriteString(blankUnder(c))
 	}
+	// A tab inside the span is copied, as before it, so the marks end where the
+	// terminal draws the span's end.
+	var under strings.Builder
 	carets := 0
 	for _, c := range line[start:max(start, min(end, hi))] {
+		if c == '\t' {
+			under.WriteByte('\t')
+			continue
+		}
 		carets += runeCols(c)
+		under.WriteString(strings.Repeat("^", runeCols(c)))
 	}
-	marks.WriteString(strings.Repeat("^", max(carets, 1)))
+	if carets == 0 {
+		under.Reset()
+		under.WriteString("^")
+	}
+	marks.WriteString(under.String())
 
 	num := strconv.Itoa(span.Start.Line)
 	gutter := strings.Repeat(" ", len(num))
@@ -302,10 +317,12 @@ func blankUnder(c rune) string {
 	return strings.Repeat(" ", runeCols(c))
 }
 
-// runeCols returns the terminal columns c takes: none for a combining mark,
-// two for an East Asian wide or fullwidth rune, one otherwise.
+// runeCols returns the terminal columns c takes, by wcwidth's rule: none for a
+// combining mark, a format character other than the soft hyphen, or a
+// conjoining Hangul vowel or final consonant; two for an East Asian wide or
+// fullwidth rune; one otherwise.
 func runeCols(c rune) int {
-	if unicode.In(c, unicode.Mn, unicode.Me) {
+	if unicode.In(c, unicode.Mn, unicode.Me, unicode.Cf) && c != 0xad || isConjoiningJamo(c) {
 		return 0
 	}
 	switch width.LookupRune(c).Kind() {
@@ -314,6 +331,37 @@ func runeCols(c rune) int {
 	default:
 		return 1
 	}
+}
+
+// isConjoiningJamo reports whether c is a Hangul medial vowel or final consonant,
+// which a terminal draws inside the preceding syllable's cell.
+func isConjoiningJamo(c rune) bool {
+	return c >= 0x1160 && c <= 0x11ff || c >= 0xd7b0 && c <= 0xd7ff
+}
+
+// shownRune returns what an excerpt prints for c: a C0 control other than a tab
+// as its Control Pictures glyph, DEL as U+2421, and a C1 control or a
+// bidirectional override or isolate as U+FFFD, so no source byte can act on the
+// terminal the excerpt is written to.
+func shownRune(c rune) rune {
+	switch {
+	case c == '\t':
+		return c
+	case c < 0x20:
+		return 0x2400 + c
+	case c == 0x7f:
+		return 0x2421
+	case c >= 0x80 && c < 0xa0, isBidiControl(c):
+		return unicode.ReplacementChar
+	default:
+		return c
+	}
+}
+
+// isBidiControl reports whether c is a bidirectional mark, embedding, override or
+// isolate, which reorders how a terminal draws the text after it.
+func isBidiControl(c rune) bool {
+	return c == 0x61c || c == 0x200e || c == 0x200f || c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069
 }
 
 // extractLine returns the nth line (1-based) of content without its line

@@ -71,15 +71,12 @@ const NoLimit = 0
 
 // NewCollector creates a collector with an optional issue limit.
 //
-// A limit of 0 means no limit (use [NoLimit] constant for clarity). Negative
-// values are normalized to 0. Once the limit is reached the collector retains
+// A limit of 0 or less means no limit (use [NoLimit] constant for clarity).
+// Once the limit is reached the collector retains
 // the most severe issues collected into it — evicting a stored issue for a more
 // severe incoming one — and counts the rest as dropped, queryable via
 // [Result.DroppedCount]. See [Collector.storeLocked] for the retention rule.
 func NewCollector(limit int) *Collector {
-	if limit < 0 {
-		limit = 0
-	}
 	return &Collector{
 		limit: limit,
 	}
@@ -188,27 +185,76 @@ func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
 	c.mergeLocked(res, transformed)
 }
 
+// MergeRetag is [Collector.MergeFunc] for a merge that changes what an issue is:
+// retag declares, for each severity and code, the severity an issue is stored at
+// and whether it is kept, and fn builds each kept issue at that severity. The
+// counts and truncation facts are derived from res's per-code counts through
+// retag, so they stay exact when res was truncated, and the survivors are stored
+// in arrival order. It panics when fn's issue differs from the declaration in
+// severity or code.
+func (c *Collector) MergeRetag(res Result, retag func(Severity, Code) (Severity, bool), fn func(Issue) Issue) {
+	var counts SeverityCounts
+	var codes codeCounts
+	seen := 0
+	for sev, byCode := range res.codeCounts {
+		for code, n := range byCode {
+			to, keep := retag(sev, code)
+			if !keep {
+				continue
+			}
+			counts.addN(to, n)
+			codes.addN(to, code, n)
+			seen += n
+		}
+	}
+	ordered := res.inArrivalOrder()
+	kept := make([]Issue, 0, len(ordered))
+	for _, issue := range ordered {
+		to, keep := retag(issue.Severity(), issue.Code())
+		if !keep {
+			continue
+		}
+		out := fn(issue)
+		c.validateIssue("MergeRetag", out)
+		if out.Severity() != to || out.Code() != issue.Code() {
+			panic(fmt.Sprintf("diag.Collector.MergeRetag: fn built %s %s where retag declared %s %s",
+				out.Severity(), out.Code(), to, issue.Code()))
+		}
+		kept = append(kept, out)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.foldLocked(counts, codes, seen-len(kept), kept)
+}
+
 // mergeLocked folds res's counts and truncation into c and stores issues,
 // which are res's surviving issues as the caller wants them stored. Caller
 // must hold c.mu.
 func (c *Collector) mergeLocked(res Result, issues []Issue) {
+	c.foldLocked(res.SeverityCounts(), res.codeCounts, res.droppedCount, issues)
+}
+
+// foldLocked folds a merged result's seen counts and drops into c and stores
+// issues, its surviving issues as the caller wants them stored. Caller must hold
+// c.mu.
+func (c *Collector) foldLocked(counts SeverityCounts, codes codeCounts, dropped int, issues []Issue) {
 	c.cachedResult = nil
 
-	// Fold in res's seen-severity counts wholesale. Each Result's counts reflect
-	// every issue it saw — stored and dropped past its own limit — so adding the
-	// counts (rather than re-counting only the surviving issues) keeps
-	// OK/HasErrors/ErrorCount truthful even when res was itself truncated and its
-	// dropped issues are no longer enumerable.
-	c.counts.addCounts(res.SeverityCounts())
-	c.codeCounts.addCounts(res.codeCounts)
+	// Fold in the seen-severity counts wholesale. A Result's counts reflect every
+	// issue it saw — stored and dropped past its own limit — so adding the counts
+	// (rather than re-counting only the surviving issues) keeps
+	// OK/HasErrors/ErrorCount truthful even when the result was itself truncated
+	// and its dropped issues are no longer enumerable.
+	c.counts.addCounts(counts)
+	c.codeCounts.addCounts(codes)
 
-	// res's own drops can never be recovered, so carry its truncation forward.
-	if res.limitReached {
+	// The merged result's drops can never be recovered, so carry them forward.
+	if dropped > 0 {
 		c.limitReached = true
-		c.droppedCount += res.droppedCount
+		c.droppedCount += dropped
 	}
 
-	// Store res's surviving issues, honoring c's own limit. storeLocked does not
+	// Store the surviving issues, honoring c's own limit. storeLocked does not
 	// re-count (the counts were folded in above); issues past c's limit are
 	// dropped and flagged.
 	for _, issue := range issues {
@@ -309,7 +355,7 @@ func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
 //
 // The returned Result is independent of the Collector; subsequent Collect
 // calls do not affect it. Results are cached until the collector next changes,
-// through Collect, CollectAll, Merge or MergeFunc.
+// through Collect, CollectAll, Merge, MergeFunc or MergeRetag.
 //
 // Issues are sorted by source, position, and code for deterministic output.
 func (c *Collector) Result() Result {

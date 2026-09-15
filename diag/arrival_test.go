@@ -12,7 +12,8 @@ import (
 //
 // The merged warnings arrive A, B, C and sort C, B, A. Two evictions must drop
 // C then B, the two latest-arrived; storing in sort order drops A then B, so
-// the survivor names which order was stored.
+// the survivor names which order was stored. Merge, MergeFunc and MergeRetag
+// each store by this rule.
 func TestMerge_StoresSurvivorsInArrivalOrder(t *testing.T) {
 	t.Parallel()
 
@@ -20,18 +21,36 @@ func TestMerge_StoresSurvivorsInArrivalOrder(t *testing.T) {
 	src.Collect(NewIssue(Warning, E_SYNTAX, "c arrives first, sorts last").Build())
 	src.Collect(NewIssue(Warning, E_SYNTAX, "b arrives second, sorts second").Build())
 	src.Collect(NewIssue(Warning, E_SYNTAX, "a arrives third, sorts first").Build())
+	res := src.Result()
 
-	c := NewCollector(3)
-	c.Merge(src.Result())
-	// Two issues past the limit, each more severe than every warning, so two
-	// warnings yield their slots and the one that arrived first survives.
-	c.Collect(NewIssue(Error, E_INTERNAL, "first error").Build())
-	c.Collect(NewIssue(Error, E_INTERNAL, "second error").Build())
+	same := func(is Issue) Issue { return is }
+	merges := []struct {
+		name  string
+		merge func(c *Collector)
+	}{
+		{"Merge", func(c *Collector) { c.Merge(res) }},
+		{"MergeFunc", func(c *Collector) { c.MergeFunc(res, same) }},
+		{"MergeRetag", func(c *Collector) {
+			c.MergeRetag(res, func(sev Severity, _ Code) (Severity, bool) { return sev, true }, same)
+		}},
+	}
 
-	got := retainedMessages(c)
-	want := []string{"c arrives first, sorts last", "first error", "second error"}
-	if !slices.Equal(got, want) {
-		t.Errorf("retained = %v\nwant       %v\nthe evicted warnings are not the latest-arrived", got, want)
+	for _, m := range merges {
+		t.Run(m.name, func(t *testing.T) {
+			t.Parallel()
+			c := NewCollector(3)
+			m.merge(c)
+			// Two issues past the limit, each more severe than every warning, so two
+			// warnings yield their slots and the one that arrived first survives.
+			c.Collect(NewIssue(Error, E_INTERNAL, "first error").Build())
+			c.Collect(NewIssue(Error, E_INTERNAL, "second error").Build())
+
+			got := retainedMessages(c)
+			want := []string{"c arrives first, sorts last", "first error", "second error"}
+			if !slices.Equal(got, want) {
+				t.Errorf("retained = %v\nwant       %v\nthe evicted warnings are not the latest-arrived", got, want)
+			}
+		})
 	}
 }
 

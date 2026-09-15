@@ -24,18 +24,23 @@ type SeverityCounts struct {
 // cannot disagree on how a severity is counted and a new Severity is handled in
 // exactly one switch.
 func (c *SeverityCounts) add(sev Severity) {
+	c.addN(sev, 1)
+}
+
+// addN adds n to the counter for sev; [SeverityCounts.add] is its one-issue form.
+func (c *SeverityCounts) addN(sev Severity, n int) {
 	//exhaustive:enforce
 	switch sev {
 	case Fatal:
-		c.Fatal++
+		c.Fatal += n
 	case Error:
-		c.Errors++
+		c.Errors += n
 	case Warning:
-		c.Warnings++
+		c.Warnings += n
 	case Info:
-		c.Info++
+		c.Info += n
 	case Hint:
-		c.Hints++
+		c.Hints += n
 	}
 }
 
@@ -150,6 +155,11 @@ type codeCounts map[Severity]map[Code]int
 
 // add increments the counter for one issue.
 func (c *codeCounts) add(sev Severity, code Code) {
+	c.addN(sev, code, 1)
+}
+
+// addN adds n issues of sev and code.
+func (c *codeCounts) addN(sev Severity, code Code, n int) {
 	if *c == nil {
 		*c = make(codeCounts)
 	}
@@ -158,7 +168,7 @@ func (c *codeCounts) add(sev Severity, code Code) {
 		m = make(map[Code]int)
 		(*c)[sev] = m
 	}
-	m[code]++
+	m[code] += n
 }
 
 // addCounts folds o into c, for [Collector.Merge].
