@@ -1,6 +1,7 @@
 package location
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -141,81 +142,81 @@ func TestNewCanonicalPath_IdentityDoesNotChangeWhenTheFileIsCreated(t *testing.T
 	}
 }
 
-// TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated holds
-// a dangling link to the path the kernel reaches once its target exists: a ".."
-// after a symlinked directory takes that directory's parent on disk, and a
-// relative target joins the link's directory as the filesystem spells it.
+// TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated holds a
+// dangling link's identity to the file the host reaches through it: a file
+// written at the path resolved before the target exists is the file a read
+// through the link returns, and resolving again gives that path. A ".." after a
+// symlinked directory tells a parent taken on disk from one read from the text.
 func TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated(t *testing.T) {
 	t.Parallel()
 
 	rows := []struct {
 		name string
-		// setup builds the tree under base and returns the path to resolve and the
-		// file whose creation makes the link resolve.
-		setup func(t *testing.T, base string) (typed, target string)
+		// setup builds the tree under base and returns the dangling path to resolve.
+		setup func(t *testing.T, base string) string
 	}{
 		{
 			name: "a relative target with .. after a symlinked directory",
-			setup: func(t *testing.T, base string) (string, string) {
+			setup: func(t *testing.T, base string) string {
 				t.Helper()
 				mkdirAll(t, filepath.Join(base, "real", "deep"))
 				symlink(t, filepath.Join("real", "deep"), filepath.Join(base, "sub"))
 				symlink(t, filepath.FromSlash("sub/../x"), filepath.Join(base, "l"))
-				return filepath.Join(base, "l"), filepath.Join(base, "real", "x")
+				return filepath.Join(base, "l")
 			},
 		},
 		{
 			name: "an absolute target with .. after a symlinked directory",
-			setup: func(t *testing.T, base string) (string, string) {
+			setup: func(t *testing.T, base string) string {
 				t.Helper()
 				mkdirAll(t, filepath.Join(base, "real", "deep"))
 				symlink(t, filepath.Join("real", "deep"), filepath.Join(base, "sub"))
 				symlink(t, base+filepath.FromSlash("/sub/../x"), filepath.Join(base, "l"))
-				return filepath.Join(base, "l"), filepath.Join(base, "real", "x")
+				return filepath.Join(base, "l")
 			},
 		},
 		{
 			name: "a relative target inside a symlinked directory",
-			setup: func(t *testing.T, base string) (string, string) {
+			setup: func(t *testing.T, base string) string {
 				t.Helper()
 				mkdirAll(t, filepath.Join(base, "real", "dir"))
 				symlink(t, filepath.Join("real", "dir"), filepath.Join(base, "alias"))
 				symlink(t, "x", filepath.Join(base, "real", "dir", "l"))
-				return filepath.Join(base, "alias", "l"), filepath.Join(base, "real", "dir", "x")
+				return filepath.Join(base, "alias", "l")
 			},
 		},
 		{
 			name: "a relative target with .. inside a symlinked directory",
-			setup: func(t *testing.T, base string) (string, string) {
+			setup: func(t *testing.T, base string) string {
 				t.Helper()
 				mkdirAll(t, filepath.Join(base, "real", "dir"))
 				symlink(t, filepath.Join("real", "dir"), filepath.Join(base, "alias"))
 				symlink(t, filepath.FromSlash("../x"), filepath.Join(base, "real", "dir", "l"))
-				return filepath.Join(base, "alias", "l"), filepath.Join(base, "real", "x")
+				return filepath.Join(base, "alias", "l")
 			},
 		},
 		{
 			name: "a relative target whose second .. follows another symlinked directory",
-			setup: func(t *testing.T, base string) (string, string) {
+			setup: func(t *testing.T, base string) string {
 				t.Helper()
 				mkdirAll(t, filepath.Join(base, "real", "deep"))
 				mkdirAll(t, filepath.Join(base, "real", "other", "deep"))
 				symlink(t, filepath.Join("real", "deep"), filepath.Join(base, "sub"))
 				symlink(t, filepath.Join("other", "deep"), filepath.Join(base, "real", "alias"))
 				symlink(t, filepath.FromSlash("sub/../alias/../x"), filepath.Join(base, "l"))
-				return filepath.Join(base, "l"), filepath.Join(base, "real", "other", "x")
+				return filepath.Join(base, "l")
 			},
 		},
 		{
 			name: "a relative target inside a directory typed in another case",
-			setup: func(t *testing.T, base string) (string, string) {
+			setup: func(t *testing.T, base string) string {
 				t.Helper()
 				if !yammmtest.CaseFoldingFilesystem(t, base) {
 					t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
 				}
 				mkdirAll(t, filepath.Join(base, "Dir"))
 				symlink(t, "x", filepath.Join(base, "Dir", "l"))
-				return filepath.Join(base, "dir", "l"), filepath.Join(base, "Dir", "x")
+				return filepath.Join(base, "dir", "l")
 			},
 		},
 	}
@@ -224,21 +225,26 @@ func TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated(t *t
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			base := diskSpelling(t, t.TempDir())
-			typed, target := row.setup(t, base)
+			typed := row.setup(t, base)
 
 			before, err := ResolveHostPath(typed)
 			if err != nil {
 				t.Fatalf("ResolveHostPath(%q) before the target exists: %v", typed, err)
 			}
-			if err := os.WriteFile(target, nil, 0o600); err != nil {
-				t.Fatal(err)
+			content := []byte(row.name)
+			if err := os.WriteFile(before, content, 0o600); err != nil {
+				t.Fatalf("write the resolved path %q: %v", before, err)
+			}
+			if got, err := os.ReadFile(typed); err != nil || !bytes.Equal(got, content) {
+				t.Fatalf("reading %q returns %q (err %v), not the file written at its resolved path %q: the host reaches another file through the link",
+					typed, got, err, before)
 			}
 			after, err := ResolveHostPath(typed)
 			if err != nil {
 				t.Fatalf("ResolveHostPath(%q) after the target exists: %v", typed, err)
 			}
-			if onDisk := diskSpelling(t, typed); before != onDisk || after != onDisk {
-				t.Errorf("ResolveHostPath(%q):\n  before the target exists %q\n  after                    %q\n  want the on-disk spelling %q",
+			if onDisk := diskSpelling(t, typed); after != before || onDisk != before {
+				t.Errorf("ResolveHostPath(%q):\n  before the target exists %q\n  after                    %q\n  on-disk spelling         %q",
 					typed, before, after, onDisk)
 			}
 		})

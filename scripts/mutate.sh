@@ -73,7 +73,7 @@ baseline_key() {
 		git diff --binary
 		git ls-files --others --exclude-standard
 		git ls-files --others --exclude-standard | git hash-object --stdin-paths
-	} | shasum -a 256 | cut -d' ' -f1
+	} | git hash-object --stdin
 }
 
 # The suite MUST be green before the mutation: a test that is already red

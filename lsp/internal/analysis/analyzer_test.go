@@ -509,24 +509,26 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 	analyzer := NewAnalyzer(logger)
 
 	tests := []struct {
-		name    string
+		name string
+		// path is slash-separated and uriPath is the same path escaped for a URI;
+		// yammmtest.HostAbs and yammmtest.FileURI put both on this host's volume.
 		path    string
-		wantURI string
+		uriPath string
 	}{
 		{
 			name:    "path with spaces",
 			path:    "/path/with spaces/file.yammm",
-			wantURI: "file:///path/with%20spaces/file.yammm",
+			uriPath: "/path/with%20spaces/file.yammm",
 		},
 		{
 			name:    "path with multiple spaces",
 			path:    "/my projects/my file.yammm",
-			wantURI: "file:///my%20projects/my%20file.yammm",
+			uriPath: "/my%20projects/my%20file.yammm",
 		},
 		{
 			name:    "path without spaces",
 			path:    "/normal/path/file.yammm",
-			wantURI: "file:///normal/path/file.yammm",
+			uriPath: "/normal/path/file.yammm",
 		},
 	}
 
@@ -534,9 +536,9 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			sourceID, err := location.SourceIDFromPath(tt.path)
+			sourceID, err := location.SourceIDFromPath(yammmtest.HostAbs(tt.path))
 			if err != nil {
-				t.Skipf("skipping: %v", err)
+				t.Fatalf("SourceIDFromPath(%q): %v", yammmtest.HostAbs(tt.path), err)
 			}
 
 			related := []location.RelatedInfo{
@@ -551,7 +553,7 @@ func TestConvertRelatedInfo_URIEncodingWithSpaces(t *testing.T) {
 			require.Len(t, result, 1, "expected 1 related info")
 
 			gotURI := result[0].Location.URI
-			assert.Equal(t, tt.wantURI, gotURI)
+			assert.Equal(t, yammmtest.FileURI(tt.uriPath), gotURI)
 		})
 	}
 }
