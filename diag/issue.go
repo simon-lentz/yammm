@@ -98,10 +98,12 @@ func (i Issue) IsZero() bool {
 //   - A non-empty message
 //   - A valid severity (not an undefined value like Severity(255))
 //
-// This method exists for documentation and testing; production code using
-// [IssueBuilder] never needs to call it because the builder guarantees validity.
-// The severity check catches diag-internal mistakes where issues are constructed
-// directly rather than via the builder pattern.
+// [IssueBuilder.Build], [FromIssue] and every [Collector] method that takes an
+// issue directly — [Collector.Collect], [Collector.CollectAll],
+// [Collector.MergeFunc], [Collector.MergeRetag] — call it, so an issue from the
+// builder is valid and a caller need not check. [Collector.Merge] does not: a
+// [Result] holds only issues already validated. The severity check catches an
+// issue constructed directly rather than through the builder.
 func (i Issue) IsValid() bool {
 	return !i.code.IsZero() &&
 		i.message != "" &&

@@ -285,8 +285,9 @@ func (w *Workspace) PositionEncoding() lsputil.PositionEncoding {
 	return w.posEncoding
 }
 
-// documentOpened handles a document being opened.
-// Resolves symlinks to compute the canonical SourceID before storing.
+// documentOpened opens a document under the identity and host path
+// [location.ResolveSourcePath] mints. A path the resolver refuses is opened with
+// no identity, so its analysis reports the refusal.
 func (w *Workspace) documentOpened(uri string, version int, text string) {
 	path, err := lsputil.URIToPath(uri)
 	if err != nil {

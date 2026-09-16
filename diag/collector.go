@@ -357,7 +357,9 @@ func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
 // calls do not affect it. Results are cached until the collector next changes,
 // through Collect, CollectAll, Merge, MergeFunc or MergeRetag.
 //
-// Issues are sorted by source, position, and code for deterministic output.
+// Issues are sorted by location, then by code, for deterministic output:
+// span-backed issues first, in [location.Compare] order, then path-only issues
+// by source name and path.
 func (c *Collector) Result() Result {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -391,7 +393,8 @@ func (c *Collector) Result() Result {
 //
 // Ordering rules:
 //  1. Span-backed issues before path-only issues
-//  2. Span-backed: Source, Start position, End position
+//  2. Span-backed: [location.Compare] — source, start and end position, start
+//     and end byte offset, then source kind
 //  3. Path-only: SourceName, Path
 //  4. Common tie-breakers: Code, Severity, Message, Hint
 //  5. Provenance tie-breakers: SourceName, Path (for hybrid issue total order)

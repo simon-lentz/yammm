@@ -144,8 +144,10 @@ func formatKey(key string) string {
 }
 
 // formatPKValue formats a primary key value for path output. Strings are
-// quoted, integers and booleans are unquoted, and any other value is written as
-// the quoted, escaped text of its fmt.Sprint form, which Parse reads as a string.
+// quoted; integers and booleans are unquoted; a float is unquoted, with ".0"
+// appended when it has no fraction, and Parse reads it back as a float64; any
+// other value is written as the quoted, escaped text of its fmt.Sprint form,
+// which Parse reads as a string.
 func formatPKValue(v any) string {
 	switch val := v.(type) {
 	case string:

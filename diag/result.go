@@ -217,9 +217,9 @@ func newResult(issues []Issue, limitReached bool, droppedCount int) Result {
 }
 
 // newResultWithCounts builds a Result from explicit precomputed severity counts.
-// It is the single point that constructs the Result struct, so a new Result
-// field is added in exactly one place. The issues slice is owned by the Result
-// (see [newResult]'s contract).
+// It is the single point that constructs the Result struct; newResultWithArrival
+// sets the arrival order on the struct it returns. The issues slice is owned by
+// the Result (see [newResult]'s contract).
 func newResultWithCounts(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts) Result {
 	return Result{
 		issues:       issues,

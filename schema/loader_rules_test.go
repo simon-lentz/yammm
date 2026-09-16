@@ -195,7 +195,7 @@ func TestLoad_RefusesAnOversizedSource(t *testing.T) {
 
 // An empty source key names no file, and a file-backed identity for it would
 // be the working directory's. It is refused, as the synthetic-root door
-// already refused it. Entry selection over the sources map stays deterministic.
+// already refused it, before any entry is selected.
 func TestLoadSourcesWithEntry_EmptyKeyIsRefused(t *testing.T) {
 	t.Parallel()
 

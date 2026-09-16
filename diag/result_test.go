@@ -190,7 +190,7 @@ func TestCollector_MergeRetainsMostSevere(t *testing.T) {
 
 func TestResult_SeverityQueries(t *testing.T) {
 	issues := []Issue{
-		NewIssue(Fatal, E_INTERNAL, "limit").Build(),
+		NewIssue(Fatal, E_INTERNAL, "internal fault").Build(),
 		NewIssue(Error, E_SYNTAX, "error").Build(),
 		NewIssue(Warning, E_INVALID_NAME, "warning").Build(),
 		NewIssue(Info, E_INTERNAL, "info").Build(),
@@ -519,7 +519,7 @@ func TestResult_Err_NonNilOnError(t *testing.T) {
 
 func TestResult_Err_NonNilOnFatal(t *testing.T) {
 	issues := []Issue{
-		NewIssue(Fatal, E_INTERNAL, "limit reached").Build(),
+		NewIssue(Fatal, E_INTERNAL, "internal fault").Build(),
 	}
 	r := newResult(issues, false, 0)
 

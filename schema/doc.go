@@ -43,8 +43,12 @@
 //	// LSP, and for a generated package's embedded sources)
 //	s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot)
 //
-// A non-OK result with a nil Schema indicates failure. Check result.HasFatal()
-// for I/O or cancellation errors. Check result.HasErrors() to determine
+// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
+// a load that could not start or finish: an I/O failure, a cancellation, or
+// input a load cannot begin from, such as no sources, a source key the loader
+// refuses, two keys that name one source, or a source name that is not valid
+// UTF-8, or a source whose header yields no usable schema name, which the
+// parser reports as a Fatal E_SYNTAX. Check result.HasErrors() to determine
 // semantic success.
 //
 // # Load Options

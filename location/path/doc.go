@@ -20,12 +20,21 @@
 //
 // # PK-Based Indexing
 //
-// Primary key-based indices use the format [field=value] where the value
-// type is preserved:
+// Primary key-based indices use the format [field=value], where the value's
+// written form records its kind; Parse reads an integer back as an int64 (a
+// uint64 above the int64 range), a float as a float64, and any other value as
+// a string:
 //
 //   - String: [name="Alice"] (quoted)
-//   - Integer: [id=123] (unquoted)
+//   - Integer of any of Go's sized or unsized integer types, int through
+//     int64 and uint through uint64: [id=123] (unquoted); Parse reads a value
+//     above the int64 range as a uint64. A uintptr, and a defined type whose
+//     underlying type is an integer, take the quoted form below
+//   - Float: [score=2.5], [score=2.0] (unquoted, ".0" appended to a whole
+//     value); Parse reads it as a float64
 //   - Boolean: [active=true] (unquoted)
+//   - Any other value: the quoted, escaped text of its fmt.Sprint form, which
+//     Parse reads as a string
 //   - Composite: [region="us",studentId=12345] (comma-separated, mixed types)
 //
 // # Escaping

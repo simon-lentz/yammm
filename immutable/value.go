@@ -68,9 +68,9 @@ func (v Value) Unwrap() any {
 }
 
 // Clone returns the wrapped value as mutable Go data: a [Map] or [Properties] as
-// a map, a [Slice] or [Key] as a slice, a map or slice stored as given as a deep
-// copy, and anything else as it is. A nil container clones to a typed nil, so a
-// nil container and an empty one stay apart.
+// a map, a [Slice] or [Key] as a slice, a map stored as given as a deep copy,
+// and anything else as it is. A nil container clones to a typed nil, so a nil
+// container and an empty one stay apart.
 func (v Value) Clone() any {
 	return cloneValue(v)
 }
@@ -80,7 +80,9 @@ func (v Value) Clone() any {
 // This returns true for:
 //   - Literal nil passed to [Wrap]
 //   - Typed nil pointers, channels, functions, interfaces
-//   - Nil maps and slices (wrapped as typed [Map] or [Slice])
+//   - Nil maps and slices: a string-keyed map or a slice wrapped as [Map] or
+//     [Slice], and any other map stored as its typed nil
+//   - A nil [Map], [Slice], [Properties] or [Key] a constructor adopted
 func (v Value) IsNil() bool {
 	if v.val == nil {
 		return true

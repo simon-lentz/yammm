@@ -385,8 +385,9 @@ func TestLoad_NoMarkerKeepsTheEntryDirectory(t *testing.T) {
 // TestLoad_MalformedMarkerFailsTheLoad pins that a marker the author wrote and
 // the loader could not honour fails loudly rather than falling through to the
 // entry directory — the silent-ignore failure mode discovery exists to remove.
-// The severity is Error, not Fatal: the marker is user content, and HasFatal
-// promises I/O or cancellation.
+// The severity is Error, not Fatal: the marker is user content its author
+// corrects, rather than the machine-level failure Fatal marks. The load stops
+// either way, as the assertion on a nil schema below pins.
 func TestLoad_MalformedMarkerFailsTheLoad(t *testing.T) {
 	t.Parallel()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)

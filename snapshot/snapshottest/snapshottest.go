@@ -113,8 +113,9 @@ type dupProjection struct {
 
 // provProjection distinguishes an instance carrying provenance from one
 // without: a nil pointer means none, a zero-valued one means empty fields.
-// Both path forms are carried because RawPath is populated only on a parse
-// failure, so it alone leaves a well-formed path empty on both sides.
+// Both path forms are carried because RawPath is populated only for a path
+// that failed to parse or parsed to another spelling, so it alone leaves most
+// well-formed paths empty on both sides.
 type provProjection struct {
 	SourceName string
 	Path       string

@@ -317,9 +317,9 @@ func TestContractValidationCodesExist(t *testing.T) {
 // exported E_* or W_* variable in code.go is auto-registered via NewCode()
 // and appears in AllCodes() exactly once.
 //
-// The E_ prefix covers error-severity and sentinel codes (the historical
-// default); the W_ prefix covers warning-severity codes added from v0.3.0
-// onward. Severity is carried on the Issue, not the Code, so the prefix
+// The W_ prefix names a code whose severity is fixed at Warning, and the E_
+// prefix every other code. Severity is carried on the Issue, not the Code, so
+// W_SNAPSHOT_UNRESOLVED_REQUIRED takes snapshot.WithRevalidation's; the prefix
 // is a naming convention rather than a type-enforced property — the
 // registry itself does not distinguish between the two.
 func TestAllCodes_MatchesDefinedCodes(t *testing.T) {

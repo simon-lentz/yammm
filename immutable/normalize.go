@@ -16,6 +16,15 @@ import (
 // value is an integer). A float-form string that is malformed or has no finite
 // float64 value (e.g., "1e400") is returned unchanged.
 //
+// Malformed means strconv's syntax, which is wider than JSON's, and both paths
+// use it. Step 2 of the integer-form chain below therefore accepts more than an
+// out-of-range integer: a hexadecimal float ("0x1p4" is 16) and '_' between
+// digits ("1_000" is 1000) each reach it after ParseInt refuses them, and each
+// yields a float64 rather than the int64 the form suggests. A leading '+' is
+// read on either path. A hexadecimal literal whose exponent letter is 'e'
+// ("0x1e4") takes the float path, which refuses it. encoding/json never
+// produces such a Number, so only a caller that builds one meets them.
+//
 // Fallback chain for integer-form strings (no '.', 'e', 'E'):
 //  1. strconv.ParseInt(s, 10, 64) — succeeds for values in int64 range
 //  2. strconv.ParseFloat(s, 64) — fallback for values exceeding int64 range

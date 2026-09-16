@@ -386,12 +386,15 @@ var (
 var (
 	// E_DUPLICATE_PK indicates a primary key stated twice for one type: by two
 	// instances added to a graph, or by two root instances in a snapshot that
-	// snapshot.Load reads.
+	// snapshot.Load, Verify or Info reads.
 	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
 
 	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a
 	// child: two children of one (many) slot share a primary key, or a (one)
-	// slot is given several. The validator and graph assembly both raise it.
+	// slot is given several. The validator and graph assembly raise it, and
+	// snapshot.Load and Verify raise it for a (one) slot a document fills more
+	// than once. Info reads without a schema, which the check needs to know a
+	// relation's cardinality, so it makes no such claim.
 	E_DUPLICATE_COMPOSED_PK = NewCode("E_DUPLICATE_COMPOSED_PK", CategoryGraph)
 
 	// E_UNRESOLVED_REQUIRED indicates a required association is unresolved.
@@ -543,16 +546,19 @@ var (
 	// snapshot.UpdateMetadataOrReMarshal fell back from the UpdateMetadata
 	// fast path to Load + Marshal because the fast path reported an Error or
 	// Fatal issue other than a cancellation: E_SNAPSHOT_MALFORMED at Error,
-	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output bytes are
-	// byte-identical to what Marshal would produce; the warning surfaces the
+	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output carries the
+	// input's indentation and created_at, so it differs from a direct Marshal
+	// only where the input did; the warning surfaces the
 	// path transition so operators can observe fallback frequency and triage
 	// persistent cases. Details include a "triggering_codes" entry listing the
 	// distinct Error and Fatal codes that caused the fallback.
 	//
-	// Uses the W_ prefix, the convention for a code raised at Warning alone.
-	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM keeps E_ because it is raised at
-	// both severities; severity lives on the Issue, so the prefix is a naming
-	// convention rather than a type-enforced property.
+	// Uses the W_ prefix, the convention for a code whose severity is fixed at
+	// Warning. E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM keeps E_ because it is
+	// raised at both severities; severity lives on the Issue, so the prefix is
+	// a naming convention rather than a type-enforced property, and
+	// W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
+	// snapshot.WithRevalidation was given.
 	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
 
 	// W_SNAPSHOT_VALUE_NONCONFORMING indicates that a stored property value

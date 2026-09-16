@@ -1299,9 +1299,10 @@ then:
 - **The staging name has a fixed length**, `.yammm-<random>.tmp`, so a basename
   near the filesystem's name limit is written again; the earlier fix pass
   refused a 245-byte name at exit 3.
-- **A file `export --output-dir` creates is owner-only (0600)**, as a file
-  `--output` creates already was at `v0.21.0`, which created per-type CSV files
-  0644. An existing file keeps its mode.
+- **A file `export --output-dir` creates is owner-only (0600) on Unix**, as a
+  file `--output` creates already was at `v0.21.0`, which created per-type CSV
+  files 0644. Windows honours only a mode's write bit. An existing file keeps
+  its mode.
 
 **Measured against `v0.21.0`, every target kind behaves as it did, with one
 deliberate exception: a writable file in a read-only directory is refused at
@@ -1469,9 +1470,21 @@ does not read this output**, measured at its tree.
   working directory, and on Windows for every location.
 - **Added: `location.SourceID.RelativeTo`**, the rule itself. It compares two
   identities segment by segment, and a root of `/` holds every absolute path.
-- **Two text forms change.** Under a root of `/` (`--module-root /`) every
-  absolute path is written relative to it, where none was. A file given as the
-  root renders the file's path, where it rendered `.`.
+- **The text form moves in these cases.** Under a root of `/` (`--module-root /`)
+  every absolute path is written relative to it, where none was. A file given as
+  the root renders the file's path, where it rendered `.`. A synthetic source is
+  never under a root: under `diag.WithModuleRoot("embedded://app")` it renders
+  its whole identity, `embedded://app/a.yammm:1:1`, where it rendered
+  `a.yammm:1:1`. A relative root is resolved against the working directory: a
+  file `sub/a.yammm` under the root `sub` renders `a.yammm:1:1`, where it
+  rendered the source's absolute identity, because the old rule cut the root's
+  own bytes off an already-absolute one and never matched. An absolute root
+  carrying `..` or a doubled separator is cleaned before it is compared, so a
+  file under it renders relative, where the uncleaned bytes never matched and it
+  rendered absolute. A root the resolver refuses — under a regular file, or not
+  valid UTF-8 — relativizes nothing, so every path renders absolute, where the
+  old rule still cut the root's bytes off; through the CLI a `--module-root`
+  naming such a path now yields the longer form.
 - **JSON output does not change:** every span's source is its identity,
   whatever module root the renderer holds. `diag.WithModuleRoot` affects text
   only, and its godoc says so.
@@ -1490,9 +1503,10 @@ does not read this output**, measured at its tree.
   numbered row, so every mark sat two columns to the right of its text. The
   mark row copies each tab of the line, gives an East Asian wide rune two
   columns, and gives a combining mark none.
-- **Four excerpts render that rendered nothing.** A blank line and the line
-  after a final newline each show their line and a caret. A point one column
-  past the end of a line, where an end-of-input error points, takes a caret.
+- **Four excerpts gain their marks.** A blank line and the line after a final
+  newline each show their line and a caret, where neither rendered. A point one
+  column past the end of a line, where an end-of-input error points, takes a
+  caret, where its line showed an empty mark row.
   A span past column 120 of a long line is shown in a window of 120 runes
   around its start, with `...` at each end the window cuts. It rendered the
   line's first 120 runes and an empty mark row.
@@ -1540,9 +1554,11 @@ does not read this output**, measured at its tree.
 - **An import cycle is reported on the import that closes it.**
   `E_IMPORT_CYCLE` carries that declaration's span, import path and alias, as
   `E_IMPORT_RESOLVE` and `E_PATH_ESCAPE` do. Its message is `import "./a"
-  closes an import cycle`, then the module-root clause, and it names no
-  absolute path. That import draws no `E_UPSTREAM_FAIL`, because nothing
-  failed to compile. The code had no span, so its text form began
+  closes an import cycle`, then the module-root clause: it names no source
+  file, and the clause names the module root's identity. That import draws no
+  `E_UPSTREAM_FAIL`, because nothing it imports failed to compile; the import
+  that opened the cycle still draws `import "./b" failed to compile`, as it
+  did. The code had no span, so its text form began
   `<unknown>`. Its message named the absolute path of the schema it entered,
   and the closing import also reported that schema as failing to compile.
 - **An issue with no location renders with no location prefix** in text:
@@ -1587,7 +1603,8 @@ existing declaration.
     and an error names the real character, not one byte of it.
   - `Builder` writes invalid UTF-8 in a key as U+FFFD, the character `Parse`
     reads it as. It escapes the text of a PK value of any other type.
-  - Every path yammm writes parses exactly as before.
+  - Every path yammm writes still parses. An integer PK value above the
+    int64 range, which `Parse` refused, now reads back as a uint64.
 - **`snapshot.Load` keeps a provenance path spelled other than `Builder`
   spells it**, so a marshal writes that path back byte for byte. A path holding
   a raw control character or an unpaired surrogate now draws
@@ -1614,26 +1631,32 @@ existing declaration.
 - **An identity minted before a file exists equals the one minted after.** A
   path that does not exist yet resolves to its deepest existing ancestor with
   the missing tail kept as typed, where the whole path was left unresolved. A
-  path under a regular file can never exist and is refused everywhere; the
-  loader had kept it.
+  path under a regular file can never exist and is refused by every
+  constructor and by the loader, which had kept it. The CLI's diagnostic root
+  keeps such a path cleaned, and mints no identity from it.
 - **An empty path is refused** by `NewCanonicalPath`, `SourceIDFromPath`,
   `CanonicalizePathForSourceID` and `ResolveHostPath`, with `ErrEmptyPath`,
-  where `filepath.Abs("")` made it the working directory. **Consumer-visible
-  once:** `schema.LoadSourcesWithEntry` with an **empty source key** now fails
+  where `filepath.Abs("")` made it the working directory. **Consumer-visible:**
+  `schema.LoadSourcesWithEntry` with an **empty source key** now fails
   rather than filing that source under the working directory's identity. The
   synthetic-root door already refused an empty key, so the two agree.
 - **A path that is not valid UTF-8 is refused**, with `ErrInvalidUTF8Path`, by
   every file-backed constructor and by `location.ValidateSyntheticSourceID`.
   NFC passes such bytes through and `encoding/json` writes them as U+FFFD,
   which merges two names on both wires an identity reaches — a diagnostic under
-  `--format json`, and the `.ys` header's `schema_source`.
+  `--format json`, and the `.ys` header's `schema_source`. **Consumer-visible:**
+  `schema.Load` of a schema whose path is not valid UTF-8 fails with a Fatal
+  `E_LOAD_IO_FAILURE`, where it loaded at `v0.21.0` (measured on Linux; darwin's
+  volumes refuse such a name), and so does every `schema.LoadSourcesWithEntry`
+  source key — absolute, relative, or under a synthetic root — with its module
+  root, and the CLI.
 - **Deleted in the resolver's favour:** `schema`'s own entry-path
-  canonicalizer and the LSP's, both unexported. The editor and the loader now
+  canonicalizer, which was unexported, and the LSP's `lsputil.CanonicalPath`,
+  which was exported from an internal package. The editor and the loader now
   mint a key through one rule, and a markdown code block's identity is built on
   its file's on-disk spelling.
-- **CI gains a `macos-latest` job** running `./location/...`, `./schema/`,
-  `./diag/` and the rendered-location rows. The darwin branch of the resolver
-  runs on no other runner.
+- **CI runs the whole suite on Linux, Windows and macOS.** The darwin branch of
+  the resolver runs on the macOS job alone.
 - **Consumer reach: none measured.** rdata's suite against this tree differs
   from its run against `v0.21.0` by nothing.
 
@@ -1679,8 +1702,10 @@ existing declaration.
 
 - **A value that refers to itself is refused with a panic**, which a caller can
   recover from. It had exhausted the stack instead — a fatal runtime error that
-  no deferred recover can contain — through every door: `Wrap`, `WrapMap`,
-  `WrapProperties`, `WrapSlice`, `WrapKey`, and the `WithClone` path.
+  no deferred recover can contain — wherever the value is walked: `Wrap`,
+  `WrapMap`, `WrapProperties`, `WrapSlice`, `WrapKey`, the `WithClone` path and
+  a `Clone`. A map with non-string keys is stored as it is and not walked, so a
+  cycle inside one is refused when something walks it.
   `WrapKey`'s godoc already promised a panic for a cyclic component, so the
   promise is now true. The walk counts its depth and records the maps and
   slices on its path only past the depth `encoding/json` uses, so an ordinary
@@ -2692,3 +2717,4 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **2026-09-06** — **Corrected the unit-4 "Additive API surface" enumeration of `ReceiverKind`.** It named `RecvScalar`, which no declaration in the module carries, and listed four constants where `gorelease -base=v0.20.0` reports ten. The line now names all ten as declared: `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList`, `RecvNumericList`. `RecvScalar` was added and renamed inside the unreleased range, so it leaves no trace for a consumer; the enumeration had kept its old spelling. Prose only; no behaviour changed.
 - **2026-09-10** — **Corrected condition-1 unit 6's Unreleased section against the candidate (A-456).** Retitled it, since unit 6 sits unmerged on `review` (A-417), and gave pass A its own heading; stated the section's whole declaration delta, six compatible additions; added an exit-code table measured against `v0.21.0`, replacing two sentences that said no exit code moves; stated how `W_NEO4J_INDEXES_UNREADABLE` and the one-result rule reach the stream; recorded the 0600 mode of the files `--output-dir` creates; and pointed pass B's `issues` item at its rename.
 - **2026-09-10 (night)** — **Corrected the Unreleased section's heading and preamble, which still said unit 6 sat unmerged on `review` after A-461 closed it and `fb57e99` (PR #107) merged it, and added the A-433 block**: the plugin corpus's load gate retagged and guarded, and the VS Code extension's Markdown injection widened to the whole fence vocabulary with its leak past an unbalanced brace closed.
+- **2026-09-14** — **Wrote condition-1 unit 7's second fix pass into the Unreleased section, and corrected its earlier blocks.** Added four blocks: one resolver mints every file-backed identity, a retagging merge and a terminal-true excerpt, import paths and the path grammar, and `immutable`'s pointers with `graph`'s content order. Restated the unit's declaration delta from `gorelease -base=v0.21.0` over the composed tree, twelve additions and seven removals. Corrected the earlier blocks where the round found them false: the text forms a synthetic or relative module root moves, the excerpts that had an empty mark row rather than none, the cycle's module-root clause and the opening import's `E_UPSTREAM_FAIL`, a uint64 PK that now parses, the non-UTF-8 path refusal that reaches `schema.Load`, the resolver's refusal under a regular file, the deleted LSP canonicalizer's visibility, the CI matrix, the cyclic value stored as it is, and the file mode on Windows.

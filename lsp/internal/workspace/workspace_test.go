@@ -288,13 +288,14 @@ func TestWorkspace_FindModuleRoot_NonExistentRoot(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
-	// Add a root that doesn't exist (symlink resolution will fail, falls back to raw)
+	// A root that does not exist resolves to its existing ancestor's spelling with
+	// the missing tail kept as typed.
 	ws.AddRoot(yammmtest.FileURI("/nonexistent/project"))
 
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
-	// Root should still be stored (as raw path since symlink resolution failed)
+	// The root is stored under that answer, which here is the path as typed.
 	require.Len(t, ws.roots, 1)
 	assert.Equal(t, yammmtest.HostAbs("/nonexistent/project"), ws.roots[0])
 }

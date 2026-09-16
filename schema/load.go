@@ -46,9 +46,9 @@ func fatalResult(err error, partial diag.Result) (*Schema, diag.Result) {
 
 // issueResult creates a diag.Result carrying a single non-Fatal issue and a
 // nil Schema. It is the shape a load takes when it fails on user content
-// before any source is parsed — a malformed module-root marker, today — where
-// [fatalResult]'s Fatal severity would contradict HasFatal's promise of I/O
-// or cancellation.
+// before any source is parsed — a malformed module-root marker, today — which
+// its author corrects, rather than the machine-level failure Fatal marks. The
+// load still stops: [Load] returns a nil Schema with this result.
 func issueResult(issue diag.Issue) diag.Result {
 	c := diag.NewCollectorUnlimited()
 	c.Collect(issue)
@@ -236,7 +236,10 @@ func (e *pathEscapeError) Error() string {
 // if WithModuleRoot is provided.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
+// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
+// a load that could not start or finish — an I/O failure, a cancellation, input a
+// load cannot begin from, or a source whose header yields no usable schema name;
+// the package documentation enumerates them.
 func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
 		panic("load.Load: context must not be nil")
@@ -320,7 +323,10 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 // are never probed or resolved.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
+// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
+// a load that could not start or finish — an I/O failure, a cancellation, input a
+// load cannot begin from, or a source whose header yields no usable schema name;
+// the package documentation enumerates them.
 func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
 		panic("load.String: context must not be nil")
@@ -366,7 +372,10 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 // empty, the lexicographically smallest key is selected.
 //
 // ctx must not be nil. Passing nil will panic.
-// A non-OK result with a nil Schema indicates failure. Check result.HasFatal() for I/O or cancellation errors.
+// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
+// a load that could not start or finish — an I/O failure, a cancellation, input a
+// load cannot begin from, or a source whose header yields no usable schema name;
+// the package documentation enumerates them.
 func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
 		panic("load.SourcesWithEntry: context must not be nil")
@@ -1243,7 +1252,7 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 
 	// Module-style import (just a path like "common/types"). A synthetic root
 	// stands in for the module root here; the relative branch above cannot,
-	// because it needs the importing source's canonical path.
+	// because it needs the path the importing source was read from.
 	if !l.hasImportRoot() {
 		return "", errors.New("module-style imports require a module root")
 	}

@@ -13,7 +13,10 @@
 //   - Clean (no . or .. segments)
 //   - NFC-normalized (Unicode)
 //   - Written with "/" as its separator, on every host
-//   - Symlink-resolved, and spelled as the filesystem spells it
+//   - Resolved as far as the process can look: symlinks followed, and each
+//     component it can look up spelled as the filesystem spells it; a missing
+//     tail, and anything under a component it cannot traverse, is kept as
+//     typed (see Host paths and identities)
 //   - Valid UTF-8
 //
 // Canonicalization follows the host's own path rules. On Windows a backslash

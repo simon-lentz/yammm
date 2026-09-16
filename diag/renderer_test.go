@@ -164,7 +164,7 @@ func TestRenderer_WithColors_Disabled(t *testing.T) {
 }
 
 func TestRenderer_WithDistinguishFatal(t *testing.T) {
-	issue := NewIssue(Fatal, E_INTERNAL, "limit").Build()
+	issue := NewIssue(Fatal, E_INTERNAL, "internal fault").Build()
 
 	// Default: Fatal renders as "error"
 	r1 := NewRenderer()
@@ -471,7 +471,8 @@ func TestRenderer_WriteLocation_SourceNameOnly(t *testing.T) {
 }
 
 // TestRenderer_WriteLocation_Precedence verifies location rendering precedence:
-// Span > Path > SourceName > none
+// a span then its path, else a path after its source name, else a path, else a
+// source name, else nothing.
 func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 	r := NewRenderer()
 	source := location.MustNewSourceID("test://schema.yammm")

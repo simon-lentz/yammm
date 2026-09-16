@@ -24,9 +24,10 @@ func HostAbs(slashPath string) string {
 	return slashPath
 }
 
-// FileURI returns the file URI naming HostAbs(uriPath). uriPath is
-// slash-separated and already escaped for a URI, such as "/a%20b.yammm". It
-// panics when uriPath does not start with '/', which would name a host.
+// FileURI returns the file URI naming HostAbs of uriPath unescaped. uriPath is
+// slash-separated and already escaped for a URI: "/a%20b.yammm" names
+// HostAbs("/a b.yammm"). It panics when uriPath does not start with '/', which
+// would name a host.
 func FileURI(uriPath string) string {
 	mustBeRooted("FileURI", uriPath)
 	if runtime.GOOS == "windows" {

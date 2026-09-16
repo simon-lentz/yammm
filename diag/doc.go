@@ -20,8 +20,8 @@
 //     match on, even when message text changes. The code set is open: adapters
 //     and consumers register codes through [NewCode], and [AllCodes] lists
 //     every code registered.
-//   - Deterministic ordering: [Collector.Result] sorts issues by source, position,
-//     and code to ensure stable output across runs.
+//   - Deterministic ordering: [Collector.Result] sorts issues by location, a span
+//     in [location.Compare] order, then by code, so output is stable across runs.
 //   - Builder pattern: [IssueBuilder] is the only valid construction path for
 //     [Issue] values, eliminating common construction mistakes.
 //   - Precomputed counts: [Collector] maintains O(1) severity queries via
@@ -126,8 +126,9 @@
 //
 // The resulting group carries: "context" (the tag), an optional "code"
 // (the first error-severity issue's code), "counts" (errors and warnings),
-// and "issues" (a slice of per-issue objects matching [Issue.LogValue]'s
-// shape). See [ContextualError.LogValue] for the full attribute tree.
+// "limit_reached" and "dropped" when the result hit its issue limit, and
+// "issues" (a slice of per-issue objects matching [Issue.LogValue]'s shape).
+// See [ContextualError.LogValue] for the full attribute tree.
 //
 // At the receiving end, [AsContextualError] recovers a [*ContextualError]
 // from an arbitrarily-wrapped error. If the chain carries a
@@ -146,10 +147,11 @@
 //
 // v0.3.0 adds three stable diagnostic codes under [CategorySnapshot],
 // raised by the snapshot package's scan and metadata primitives. The W_
-// prefix on the warning code
-// inaugurates the convention for Warning-severity codes added from
-// v0.3.0 onward; existing Warning-severity codes retain their E_
-// identifiers for backwards compatibility.
+// prefix names a code whose severity is fixed at Warning; a code raised at
+// more than one severity, such as E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM, keeps
+// E_. Severity lives on the Issue, so the prefix is a convention and not a
+// guarantee: W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
+// snapshot.WithRevalidation was given.
 //
 //	Code                              Severity  Emitted by
 //	--------------------------------  --------  -----------------------------------------------------

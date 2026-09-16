@@ -1155,8 +1155,8 @@ func TestLoad_BoundaryPath_AtRoot(t *testing.T) {
 // TestLoad_SymlinkWithinModuleRoot_Blocked verifies that os.Root blocks symlinks
 // even when they point to files within the module root. This is a security feature:
 // os.Root does not follow symlinks to prevent potential path escape attacks.
-// Note: Entry point files (via Load()) are handled differently - makeCanonicalPath
-// resolves symlinks BEFORE opening the root, which is why TestLoad_SymlinkCanonicalization works.
+// An entry file given to Load is resolved before the root opens, so a symlinked
+// entry still loads (TestLoad_SymlinkCanonicalization).
 func TestLoad_SymlinkWithinModuleRoot_Blocked(t *testing.T) {
 	tmpDir := t.TempDir()
 	subdir := filepath.Join(tmpDir, "subdir")

@@ -201,9 +201,9 @@ func TestFormatIssueJSON_ByteOffsetEncoding(t *testing.T) {
 // TestFormatIssueJSON_UnknownPosition verifies behavior when a span
 // has a known source but unknown positions.
 //
-// This scenario occurs with TrackLocations=false in JSON adapters. Unknown
-// positions use UnknownPosition() which sets Byte=-1, causing the byte field
-// to be correctly omitted from JSON output
+// A span that names its source but no position is built with
+// UnknownPosition, whose Byte is -1, so the byte field is omitted from JSON
+// output.
 func TestFormatIssueJSON_UnknownPosition(t *testing.T) {
 	source := location.MustNewSourceID("test://file.json")
 

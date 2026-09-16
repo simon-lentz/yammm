@@ -1202,8 +1202,9 @@ func TestOwnership_WrapOwnershipDocumentation(t *testing.T) {
 
 // This file contains concurrent read safety tests.
 //
-// All immutable types are safe for concurrent read access.
-// The underlying data structures are never modified after construction.
+// All immutable types are safe for concurrent read access. Their entries never
+// change after construction, and a string-keyed Map computes its sorted keys and
+// folded index once, under a sync.Once.
 
 func TestConcurrent_Value_Read(t *testing.T) {
 	input := map[string]any{

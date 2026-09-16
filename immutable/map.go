@@ -116,9 +116,10 @@ func (m Map[K]) Clone() map[K]any {
 	return result
 }
 
-// cloneValue returns a mutable deep copy of v's content: a map[string]any for a
-// Map[string], an []any for a Slice, a deep copy of a map stored as given, and
-// the value itself otherwise.
+// cloneValue returns a mutable deep copy of v's content, as [Value.Clone] states:
+// each of this package's containers as a map or slice, a map stored as given as
+// a deep copy, and any other value as it is. No slice is ever stored as given:
+// wrapValueAt wraps every slice as a [Slice].
 func cloneValue(v Value) any {
 	if v.val == nil {
 		return nil

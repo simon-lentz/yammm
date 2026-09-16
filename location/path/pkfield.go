@@ -7,6 +7,8 @@ package path
 //   - string (formatted as quoted: [name="Alice"])
 //   - int, int64, or other integer types (formatted unquoted: [id=123])
 //   - bool (formatted unquoted: [active=true])
+//   - float32 or float64 (formatted unquoted, ".0" appended to a whole value:
+//     [score=2.0]); it parses back as a float64
 //
 // Any other value is written as a quoted string of its fmt.Sprint form,
 // escaped, and parses back as a string.

@@ -112,8 +112,12 @@
 //
 // # Cyclic values
 //
-// A value that refers to itself is refused with a panic, which a caller can
-// recover from. The walk counts its depth and, past the point where real data
+// A map or slice that refers to itself is refused with a panic, which a caller
+// can recover from; a cycle closed through a pointer or a struct field is stored
+// as given and never walked. A map with non-string keys is stored as it is; the
+// default wrap does not walk it, so a cycle inside one is refused only when
+// something does: [WithClone] and [WrapKey] at construction, or a Clone
+// afterwards. The walk counts its depth and, past the point where real data
 // stops nesting, records the maps and slices on its path — the shape
 // encoding/json uses, so an ordinary value pays a counter and nothing more.
 // Without it such a value exhausts the stack, and a fatal runtime error is not
@@ -125,10 +129,11 @@
 //   - Literal nil passed to [Wrap]
 //   - Typed nil pointers, channels, functions, interfaces
 //   - Nil maps and slices
+//   - A nil [Map], [Slice], [Properties] or [Key] a constructor adopted
 //
-// When wrapping nil maps or slices, the resulting Value still identifies as a
-// [Map] or [Slice] via [Value.Map] and [Value.Slice], allowing callers to distinguish
-// nil-typed values from literal nil:
+// A nil string-keyed map or a nil slice is still wrapped as a [Map] or [Slice],
+// so [Value.Map] or [Value.Slice] reports true, which tells a nil-typed value
+// from literal nil:
 //
 //	var m map[string]any // nil map
 //	v := immutable.Wrap(m)

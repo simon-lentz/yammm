@@ -105,10 +105,12 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // IntegrityStatus "mismatch", and a reference naming no table row is reported
 // and left out of the counts. Read the result before the summary.
 //
-// Info runs the same structural validation as [Load] and [Verify] and stops
-// before materialization, so the three surfaces classify every document
-// identically. It resolves no schema, so a document Info summarizes cleanly
-// can still fail Load or Verify on schema resolution — never on structure.
+// Info runs the structural validation [Load] and [Verify] run and stops before
+// materialization. It resolves no schema, so a document Info summarizes cleanly
+// can still fail Load or Verify on schema resolution, and on the two structural
+// checks that need a schema: a (one) slot a document fills twice, which raises
+// E_DUPLICATE_COMPOSED_PK, and two spellings of one timestamp, date or UUID
+// key, which Info compares as written and Load and Verify fold.
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
 func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {

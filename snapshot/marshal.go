@@ -455,7 +455,8 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags
 }
 
 // marshalProvenance converts an instance's provenance to its wire form,
-// preferring the raw path a failed parse preserved.
+// preferring the raw path a load kept, for a path that failed to parse or
+// parsed to another spelling.
 func marshalProvenance(inst *graph.Instance) *provenanceWire {
 	prov := inst.Provenance()
 	if prov == nil {

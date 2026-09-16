@@ -37,8 +37,9 @@ var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks li
 // would name the working directory, because filepath.Abs("") does, and a
 // directory would get a valid-looking identity for a file that was never named.
 //
-// Returned by: ResolveHostPath, NewCanonicalPath, SourceIDFromPath and
-// CanonicalizePathForSourceID (and transitively by their Must forms).
+// Returned by: ResolveHostPath, NewCanonicalPath, SourceIDFromPath,
+// ResolveSourcePath and CanonicalizePathForSourceID (and transitively by their
+// Must forms).
 var ErrEmptyPath = errors.New("location: path is empty")
 
 // ErrInvalidUTF8Path is returned for a path that is not valid UTF-8.
@@ -48,7 +49,11 @@ var ErrEmptyPath = errors.New("location: path is empty")
 // an invalid byte as U+FFFD, which merges two names into one. NFC passes such
 // bytes through unchanged, so nothing else refuses them.
 //
-// Returned by: every file-backed constructor, and ValidateSyntheticSourceID.
+// Returned by: ResolveHostPath, every file-backed constructor (NewCanonicalPath,
+// SourceIDFromPath, ResolveSourcePath, CanonicalizePathForSourceID and
+// CanonicalPath.Join), and ValidateSyntheticSourceID (and transitively by their
+// Must forms). A schema load reports it as a Fatal diagnostic, whose message
+// carries the error's text, so errors.Is cannot match it there.
 var ErrInvalidUTF8Path = errors.New("location: path is not valid UTF-8")
 
 // ErrAbsoluteJoinElement is returned when CanonicalPath.Join receives an
