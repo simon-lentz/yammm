@@ -1946,8 +1946,23 @@ existing declaration.
   another schema's import closure, whatever order it imports them in.** It bound
   such a schema only after importing the schema whose closure held it. Imported
   first, the schema was compiled again from its file, and a `WithSourcesOnly` load
-  refused it with `E_IMPORT_RESOLVE`. A source that two registered closures
-  compiled from different bytes is not bound; it is read like any other import.
+  refused it with `E_IMPORT_RESOLVE`. **A source that two registered closures
+  compiled from different bytes is refused with `E_IMPORT_RESOLVE`, in either
+  import order and whether or not the load is restricted to its own sources**;
+  before, importing the owner first bound the owner's compile silently, and
+  reading from disk after the owner compiled the source a third time. **Two
+  registered schemas whose closures hold one source compiled from different
+  bytes cannot both be imported by one load**: the second import is refused with
+  `E_IMPORT_RESOLVE` naming the source, so a load never holds two compiles under
+  one `SourceID`; a refused schema is refused again under a second alias, which
+  draws `E_DUPLICATE_IMPORT` as a compile failure's does. **A load that already
+  holds bytes for a source — its entry, or a source the caller handed in — and
+  imports a registered schema whose closure compiled that source from other
+  bytes is refused with `E_LOAD_SOURCE_CHANGED` at the import**; before, the
+  cached compile bound silently and the load's `Sources()` reported the other
+  bytes, and the edit was reported only when the entry itself was re-registered.
+  The cached-content conflict that was `E_INTERNAL` with no span is this
+  `E_LOAD_SOURCE_CHANGED` at the import's span.
 - **The language server publishes a refused document's diagnostic under the URI
   the editor opened it with.** A document at a path the resolver refuses, such as
   one under a regular file, has no identity, and its one diagnostic went to a URI

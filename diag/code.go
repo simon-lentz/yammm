@@ -237,10 +237,12 @@ var (
 	// and the load reports it as it reports an invalid schema.
 	E_LOAD_MODULE_ROOT_MALFORMED = NewCode("E_LOAD_MODULE_ROOT_MALFORMED", CategorySchema)
 
-	// E_LOAD_SOURCE_CHANGED indicates a source re-registered in a shared
-	// Registry with content that differs from what the registry holds: its
-	// bytes changed, or an import beneath an unchanged entry did. A shared
-	// registry assumes its files do not change while it lives.
+	// E_LOAD_SOURCE_CHANGED indicates a source a shared Registry holds with
+	// content that differs from what a load holds for it: a source re-registered
+	// after its bytes changed, an import beneath an unchanged entry that did, or
+	// an import whose registered compile was made from other bytes than the
+	// load's own for that source, reported at the import. A shared registry
+	// assumes its files do not change while it lives.
 	E_LOAD_SOURCE_CHANGED = NewCode("E_LOAD_SOURCE_CHANGED", CategorySchema)
 
 	// E_UNKNOWN_ANNOTATION indicates an annotation name absent from the built-in

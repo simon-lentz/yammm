@@ -137,7 +137,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading |
 | `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines |
-| `E_LOAD_SOURCE_CHANGED` | A source re-registered in a shared registry with content that differs from what the registry holds |
+| `E_LOAD_SOURCE_CHANGED` | A source a shared registry holds with content that differs from the load's: re-registered after an edit, or imported where the load's own bytes for it differ from the ones the registry compiled |
 | `E_UNKNOWN_ANNOTATION` | Annotation name not in the built-in registry for its placement |
 | `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
 | `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation |

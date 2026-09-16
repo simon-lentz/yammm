@@ -512,6 +512,8 @@ type loader struct {
 	failedCompiles  map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
 	closureSeen     map[*Schema]struct{}           // schemas whose cached closures are already registered
 	registryClosure map[location.SourceID]*Schema  // schemas the shared registry holds inside an import closure; nil until first needed
+	closureBound    map[location.SourceID]*Schema  // every closure member a bound schema brought into this load, by SourceID
+	closureConflict map[*Schema]*closureConflict   // a bound schema whose closure conflicted with this load, and how
 	hostPaths       map[location.SourceID]string   // file-backed source -> the host path its bytes were read from
 	resolveMu       sync.Mutex
 	resolved        map[string]resolvedSource // path -> its one resolution in this load
@@ -1072,26 +1074,82 @@ func (l *loader) bindIfKnown(imp *importDecl, sourceID location.SourceID) bool {
 	if !ok {
 		loaded, ok = l.registry.LookupBySourceID(sourceID)
 		if !ok {
-			loaded, ok = l.registeredClosureMember(sourceID)
+			var refused bool
+			loaded, refused = l.registeredClosureMember(sourceID)
+			if refused {
+				l.mu.Unlock()
+				l.reportAmbiguousImport(imp, sourceID)
+				return true
+			}
+			ok = loaded != nil
 		}
 		if !ok {
 			l.mu.Unlock()
 			return false
 		}
-		l.loadedSchemas[sourceID] = loaded
 	}
-	l.registerCachedClosureSources(loaded)
+	if c := l.registerCachedClosureSources(loaded); c != nil {
+		l.mu.Unlock()
+		l.reportClosureConflict(imp, sourceID, c)
+		return true
+	}
+	l.loadedSchemas[sourceID] = loaded
 	l.imports[imp.Alias] = importBinding{sourceID: sourceID, schema: loaded, decl: imp}
 	l.mu.Unlock()
 	return true
+}
+
+// reportAmbiguousImport fails imp: the shared registry holds sourceID as two
+// compiles with different bytes, so no load that shares it can bind one, in
+// whatever order the load imports the schemas whose closures hold it.
+func (l *loader) reportAmbiguousImport(imp *importDecl, sourceID location.SourceID) {
+	l.mu.Lock()
+	l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: sourceID}
+	l.mu.Unlock()
+	l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
+		fmt.Sprintf("import %q names a source the shared registry holds as two compiles with different bytes", imp.Path)).
+		WithSpan(imp.Span).
+		WithDetail(diag.DetailKeyImportPath, imp.Path).
+		WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
+}
+
+// closureConflict names a closure member one load cannot hold beside what it
+// already holds: two compiles of one source from different bytes, or, when
+// sourceChanged, bytes this load holds that differ from the ones the shared
+// registry compiled the member from.
+type closureConflict struct {
+	member        location.SourceID
+	sourceChanged bool
+}
+
+// reportClosureConflict fails imp on c. Two compiles of one source are an
+// unresolvable import; a source this load holds differently from the registry's
+// compile is a changed source, the registry assuming its files do not change
+// while it lives. The binding keeps sourceID, so a second declaration of the
+// same import draws a duplicate.
+func (l *loader) reportClosureConflict(imp *importDecl, sourceID location.SourceID, c *closureConflict) {
+	l.mu.Lock()
+	l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: sourceID}
+	l.mu.Unlock()
+	code, msg := diag.E_IMPORT_RESOLVE,
+		fmt.Sprintf("import %q holds %s in its closure compiled from different bytes than the compile this load already holds", imp.Path, c.member)
+	if c.sourceChanged {
+		code, msg = diag.E_LOAD_SOURCE_CHANGED,
+			fmt.Sprintf("import %q: the shared registry compiled %s from different bytes than this load holds for it", imp.Path, c.member)
+	}
+	l.collector.Collect(diag.NewIssue(diag.Error, code, msg).
+		WithSpan(imp.Span).
+		WithDetail(diag.DetailKeyImportPath, imp.Path).
+		WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
 }
 
 // registeredClosureMember returns the compiled schema the shared registry holds
 // for sourceID inside a registered schema's import closure. Without it, whether
 // such an import binds that schema or reads its bytes would depend on whether the
 // load had already bound the schema whose closure holds it. A source held by two
-// compiled schemas whose bytes differ is not bound. Callers hold l.mu.
-func (l *loader) registeredClosureMember(sourceID location.SourceID) (*Schema, bool) {
+// compiled schemas whose bytes differ is refused, and refused reports it, so an
+// import of it fails rather than reading the source again. Callers hold l.mu.
+func (l *loader) registeredClosureMember(sourceID location.SourceID) (member *Schema, refused bool) {
 	if l.registryClosure == nil {
 		l.registryClosure = make(map[location.SourceID]*Schema)
 		seen := make(map[*Schema]struct{})
@@ -1120,8 +1178,8 @@ func (l *loader) registeredClosureMember(sourceID location.SourceID) (*Schema, b
 			walk(s)
 		}
 	}
-	s := l.registryClosure[sourceID]
-	return s, s != nil
+	s, ok := l.registryClosure[sourceID]
+	return s, ok && s == nil
 }
 
 // sameSourceBytes reports whether two compiled schemas of one SourceID were
@@ -1377,51 +1435,71 @@ func (l *loader) candidateImportSourceIDs(relativePath string) []location.Source
 	return ids
 }
 
-// registerCachedClosureSources copies the source content of a
-// registry-cached schema and its transitive imports into this load's
-// source registries, so the current load's Sources() carries the full
-// import closure even when the cross-Load short-circuit skipped the
-// read+parse pipeline. Without it a cache-hit import is absent from
-// Sources(), breaking consumers that need the closure's content —
-// diagnostics rendering across imports, and gogen's embedded
-// SerializedModel (whose round-trip check would see a single source
-// that still declares imports). A registration that collides with
-// different pre-registered bytes under the same SourceID is surfaced
-// as E_INTERNAL: silently keeping both would hand consumers a
-// Sources() view that disagrees with the schema the import was
-// compiled from. Each schema is visited at most once per load (the
-// closureSeen memo) — diamond-shaped import graphs have exponentially
-// many import paths but only linearly many schemas. Callers hold l.mu.
-func (l *loader) registerCachedClosureSources(s *Schema) {
-	if _, ok := l.closureSeen[s]; ok {
-		return
+// registerCachedClosureSources copies the source content of a registry-cached
+// schema and its transitive imports into this load's source registries, so the
+// load's Sources() carries the whole import closure even when the cross-Load
+// short-circuit skipped the read+parse pipeline; diagnostics rendered across
+// imports and gogen's embedded SerializedModel read that content. One load
+// holds one content per SourceID: a member compiled from different bytes than a
+// compile this load already holds, or whose bytes differ from the content this
+// load already holds, is a conflict, which the walk returns and the caller
+// fails the import on. The conflict is remembered per schema, so a second
+// import of the same schema is refused too; every other schema is visited at
+// most once per load (closureSeen), since a diamond-shaped import graph has
+// exponentially many import paths but only linearly many schemas. Callers hold
+// l.mu.
+func (l *loader) registerCachedClosureSources(s *Schema) *closureConflict {
+	if c, found := l.closureConflict[s]; found {
+		return c
+	}
+	if _, seen := l.closureSeen[s]; seen {
+		return nil
 	}
 	l.closureSeen[s] = struct{}{}
-	// A closure schema is bound as compiled, so an import of it never recompiles
-	// its bytes, which carry no host path for its relative imports.
-	if _, ok := l.loadedSchemas[s.SourceID()]; !ok {
-		l.loadedSchemas[s.SourceID()] = s
+	c := l.walkCachedClosure(s)
+	if c != nil {
+		if l.closureConflict == nil {
+			l.closureConflict = make(map[*Schema]*closureConflict)
+		}
+		l.closureConflict[s] = c
 	}
-	srcs := s.Sources()
-	if srcs == nil {
-		return
-	}
+	return c
+}
+
+// walkCachedClosure is registerCachedClosureSources' walk of one schema, below
+// its memo: the compile and content checks, then its imports. Callers hold l.mu.
+func (l *loader) walkCachedClosure(s *Schema) *closureConflict {
 	id := s.SourceID()
-	if _, ok := l.sourceContent[id]; !ok {
-		if content, ok := srcs.ContentBySource(id); ok {
-			if err := l.sourceRegistry.Register(id, content); err != nil {
-				l.collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL,
-					fmt.Sprintf("cached import source %s conflicts with pre-registered content: %v", id, err)).Build())
-				return
+	if l.closureBound == nil {
+		l.closureBound = make(map[location.SourceID]*Schema)
+	}
+	for _, prev := range []*Schema{l.loadedSchemas[id], l.closureBound[id]} {
+		if prev != nil && prev != s && !sameSourceBytes(prev, s) {
+			return &closureConflict{member: id}
+		}
+	}
+	l.closureBound[id] = s
+	if srcs := s.Sources(); srcs != nil {
+		if content, found := srcs.ContentBySource(id); found {
+			if held, ok := l.sourceContent[id]; ok {
+				if !bytes.Equal(held, content) {
+					return &closureConflict{member: id, sourceChanged: true}
+				}
+			} else if err := l.sourceRegistry.Register(id, content); err != nil {
+				return &closureConflict{member: id, sourceChanged: true}
+			} else {
+				l.sourceContent[id] = content
 			}
-			l.sourceContent[id] = content
 		}
 	}
 	for _, imp := range s.ImportsSlice() {
 		if sub := imp.Schema(); sub != nil {
-			l.registerCachedClosureSources(sub)
+			if c := l.registerCachedClosureSources(sub); c != nil {
+				return c
+			}
 		}
 	}
+	return nil
 }
 
 // readImportFile reads an import file from the in-memory sources, else through
