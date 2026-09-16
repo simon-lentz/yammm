@@ -17,9 +17,14 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
+// byteOrderMark is the UTF-8 encoding of U+FEFF. One leading mark is skipped,
+// as the CSV adapter skips it; a second is a parse error.
+var byteOrderMark = []byte("\uFEFF")
+
 // ParseObject parses JSON data structured as one top-level key per type name,
 // each holding an array of instances — {"Person": [...], "Company": [...]}.
-// Returns a map of type name -> slice of RawInstance.
+// Returns a map of type name -> slice of RawInstance. Data can start with one
+// UTF-8 byte order mark.
 //
 //nolint:revive // ctx and source reserved for future use (cancellation, provenance)
 func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
@@ -27,7 +32,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	result := make(map[string][]instance.RawInstance)
 
 	// Preprocess with jsonc: comments and trailing commas are tolerated.
-	processedData := jsonc.ToJSON(data)
+	processedData := jsonc.ToJSON(bytes.TrimPrefix(data, byteOrderMark))
 
 	// Parse as map[string]json.RawMessage to preserve nested structure
 	dec := json.NewDecoder(bytes.NewReader(processedData))

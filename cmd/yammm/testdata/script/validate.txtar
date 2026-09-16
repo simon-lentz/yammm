@@ -3,6 +3,10 @@
 
 exec yammm validate valid.yammm
 
+# A schema file that starts with a UTF-8 byte order mark loads clean.
+exec yammm validate marked.yammm
+! stderr .
+
 ! exec yammm validate invalid.yammm
 
 # schema.Load wraps file-not-found into diagnostics, so a missing file is a
@@ -20,6 +24,14 @@ stderr 'E_IMPORT_RESOLVE'
 exec yammm validate --module-root . sub/entry.yammm
 ! stderr .
 
+-- marked.yammm --
+﻿schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}
 -- valid.yammm --
 schema "test"
 

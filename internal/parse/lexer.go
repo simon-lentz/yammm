@@ -71,10 +71,25 @@ type Token struct {
 	End   int // byte offset, exclusive
 }
 
+// byteOrderMark is U+FEFF. A source can start with one, as Go's scanner
+// allows; [lexStart] skips it, and a mark anywhere else lexes as ANY_OTHER.
+const byteOrderMark = "\uFEFF"
+
+// lexStart returns the byte offset the lexer starts at: past one leading byte
+// order mark, else 0. Every offset the lexer reports is shifted by it, so a
+// token's offsets index the whole source and not the text the lexer saw.
+func lexStart(src string) int {
+	if strings.HasPrefix(src, byteOrderMark) {
+		return len(byteOrderMark)
+	}
+	return 0
+}
+
 // Lex returns every token in src, in source order, with nothing elided —
 // whitespace and comments included, EOF excluded. A caller needing the stream
 // alongside the node tree uses [LexAndParse] instead, which returns both from
-// one lex; Lex is the stream on its own.
+// one lex; Lex is the stream on its own. One leading byte order mark is no
+// token, and the first token's offsets count its bytes.
 //
 // The lexer is total: no input fails to lex, because the last rule matches any
 // single rune, so Lex reports no error and never rejects src.

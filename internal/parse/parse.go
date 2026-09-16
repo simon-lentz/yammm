@@ -18,7 +18,9 @@ import (
 // diagnostic found, ordered by position. The tree is never nil: a source that
 // fails outright yields an empty file node and the diagnostics explaining why.
 // sourceID names the source that spans belong to, and the zero SourceID is
-// supported for callers with no file behind the text.
+// supported for callers with no file behind the text. A source can start with
+// one UTF-8 byte order mark: it is skipped, and every span still counts its
+// bytes, so line 1's columns start after it.
 func Parse(src []byte, sourceID location.SourceID) (*File, []diag.Issue) {
 	file, _, issues := parseSource(string(src), sourceID, false)
 	return file, issues
@@ -36,11 +38,12 @@ func LexAndParse(src string, sourceID location.SourceID) (*File, []Token, []diag
 func parseSource(text string, sourceID location.SourceID, withTokens bool) (*File, []Token, []diag.Issue) {
 	ps := mustParsers()
 
-	lx, err := ps.def.LexString("", text)
+	base := lexStart(text)
+	lx, err := ps.def.LexString("", text[base:])
 	if err != nil {
 		panic("parse: " + err.Error())
 	}
-	counted := &countingLexer{inner: lx}
+	counted := &countingLexer{inner: lx, base: base}
 	plex, err := lexer.Upgrade(counted, ps.elide...)
 	if err != nil {
 		panic("parse: " + err.Error())
@@ -75,9 +78,11 @@ func parseSource(text string, sourceID location.SourceID, withTokens bool) (*Fil
 }
 
 // countingLexer records how many tokens passed through, which is the only way
-// to name the end of the PeekingLexer's raw token range from outside it.
+// to name the end of the PeekingLexer's raw token range from outside it, and
+// shifts each token's offset by base, the bytes the lexer was not shown.
 type countingLexer struct {
 	inner lexer.Lexer
+	base  int
 	n     int
 }
 
@@ -86,6 +91,7 @@ func (c *countingLexer) Next() (lexer.Token, error) {
 	if err != nil {
 		return t, err //nolint:wrapcheck // the caller panics on any lexer failure
 	}
+	t.Pos.Offset += c.base
 	c.n++
 	return t, nil
 }
@@ -94,9 +100,11 @@ func (c *countingLexer) Next() (lexer.Token, error) {
 // slice below so a whole-file lex does not grow and copy repeatedly.
 const bytesPerToken = 3
 
-// lexAll drains the lexer into a slice, EOF token included.
+// lexAll drains the lexer into a slice, EOF token included, with every offset
+// indexing src as [countingLexer] shifts it.
 func lexAll(ps *parsers, src string) ([]lexer.Token, error) {
-	lx, err := ps.def.LexString("", src)
+	base := lexStart(src)
+	lx, err := ps.def.LexString("", src[base:])
 	if err != nil {
 		return nil, fmt.Errorf("lex source: %w", err)
 	}
@@ -106,6 +114,7 @@ func lexAll(ps *parsers, src string) ([]lexer.Token, error) {
 		if err != nil {
 			return nil, fmt.Errorf("lex source: %w", err)
 		}
+		t.Pos.Offset += base
 		toks = append(toks, t)
 		if t.EOF() {
 			return toks, nil

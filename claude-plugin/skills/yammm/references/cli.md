@@ -86,7 +86,8 @@ file unchanged, names the file on stderr and exits 3. A pre-commit hook running
 
 The check normalizes line endings before formatting, so a CRLF file is reported
 as unformatted even when nothing else differs. That is what `-w` already does to
-the same file.
+the same file. A file that starts with a UTF-8 byte order mark is reported the
+same way, and `-w` removes the mark.
 
 ### Typical development loop
 

@@ -3,6 +3,11 @@
 
 exec yammm check valid.yammm data.json
 
+# A data file that starts with a UTF-8 byte order mark parses as the same
+# document, as a CSV file already did.
+exec yammm check valid.yammm marked.json
+! stderr .
+
 exec yammm check --type Person valid.yammm data.csv
 
 # CSV without --type is rejected.
@@ -46,6 +51,13 @@ type Person {
 	id   String primary
 	name String required
 	age  Integer
+}
+-- marked.json --
+﻿{
+  "Person": [
+    {"id": "alice", "name": "Alice", "age": 30},
+    {"id": "bob", "name": "Bob", "age": 25}
+  ]
 }
 -- data.json --
 {

@@ -1817,7 +1817,7 @@ formatted, err := format.TokenStream(input)
 
 The CLI reports a parse failure as the positioned `E_SYNTAX` diagnostic, naming the file as `validate` does, and exits with `ExitValidation`; it maps a refusal to `ExitRuntime`, leaving the file unchanged. The LSP returns no edits for either, and logs a refusal as a warning.
 
-Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so a CRLF file always reports as unformatted under `yammm fmt --check`.
+Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so a CRLF file always reports as unformatted under `yammm fmt --check`. A leading UTF-8 byte order mark is no token, so the output never carries one and a marked file reports as unformatted the same way.
 
 The formatter then applies a five-phase pipeline:
 

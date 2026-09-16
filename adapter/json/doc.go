@@ -41,6 +41,11 @@
 // only to locally-defined types; imported types require alias-qualified form
 // (alias.Type).
 //
+// # Byte Order Mark
+//
+// ParseObject skips one leading UTF-8 byte order mark, as the CSV adapter's
+// parse methods do. A second mark is a parse error.
+//
 // # Thread Safety
 //
 // The Adapter type is safe for concurrent use after construction. No shared
