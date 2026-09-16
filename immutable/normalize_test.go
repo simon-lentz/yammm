@@ -3,6 +3,7 @@ package immutable
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -45,6 +46,11 @@ func TestNormalizeNumber(t *testing.T) {
 		{name: "NaN", num: json.Number("NaN"), want: json.Number("NaN")},
 		{name: "Infinity", num: json.Number("Infinity"), want: json.Number("Infinity")},
 		{name: "empty string", num: json.Number(""), want: json.Number("")},
+
+		// Well-formed but no finite float64 → return original json.Number
+		{name: "exponent overflow positive", num: json.Number("1e400"), want: json.Number("1e400")},
+		{name: "exponent overflow negative", num: json.Number("-1e400"), want: json.Number("-1e400")},
+		{name: "integer beyond float64", num: json.Number(strings.Repeat("9", 400)), want: json.Number(strings.Repeat("9", 400))},
 	}
 
 	for _, tt := range tests {
@@ -53,6 +59,24 @@ func TestNormalizeNumber(t *testing.T) {
 				t.Errorf("NormalizeNumber(%q) = %v (%T), want %v (%T)", tt.num, got, got, tt.want, tt.want)
 			}
 		})
+	}
+}
+
+// TestNormalizeValue_RewritesInPlace pins what NormalizeValue's godoc states:
+// a map[string]any or []any is rewritten where it is, and returned.
+func TestNormalizeValue_RewritesInPlace(t *testing.T) {
+	inner := []any{json.Number("1.5")}
+	in := map[string]any{"n": json.Number("7"), "s": inner}
+	out, ok := NormalizeValue(in).(map[string]any)
+	if !ok {
+		t.Fatal("NormalizeValue did not return a map[string]any")
+	}
+	if in["n"] != int64(7) || inner[0] != 1.5 {
+		t.Errorf("the caller's containers were not rewritten: %#v, %#v", in, inner)
+	}
+	out["probe"] = true
+	if _, same := in["probe"]; !same {
+		t.Error("NormalizeValue returned a different map from the one it was given")
 	}
 }
 

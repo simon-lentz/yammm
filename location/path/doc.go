@@ -20,12 +20,21 @@
 //
 // # PK-Based Indexing
 //
-// Primary key-based indices use the format [field=value] where the value
-// type is preserved:
+// Primary key-based indices use the format [field=value], where the value's
+// written form records its kind; Parse reads an integer back as an int64 (a
+// uint64 above the int64 range), a float as a float64, and any other value as
+// a string:
 //
 //   - String: [name="Alice"] (quoted)
-//   - Integer: [id=123] (unquoted)
+//   - Integer of any of Go's sized or unsized integer types, int through
+//     int64 and uint through uint64: [id=123] (unquoted); Parse reads a value
+//     above the int64 range as a uint64. A uintptr, and a defined type whose
+//     underlying type is an integer, take the quoted form below
+//   - Float: [score=2.5], [score=2.0] (unquoted, ".0" appended to a whole
+//     value); Parse reads it as a float64
 //   - Boolean: [active=true] (unquoted)
+//   - Any other value: the quoted, escaped text of its fmt.Sprint form, which
+//     Parse reads as a string
 //   - Composite: [region="us",studentId=12345] (comma-separated, mixed types)
 //
 // # Escaping
@@ -34,8 +43,12 @@
 //
 //	\\ for literal backslash
 //	\" for literal double quote
-//	\n \r \t for whitespace
-//	\uXXXX for unicode escapes
+//	\n \r \t \b \f for those control characters
+//	\uXXXX for any other control character
+//
+// Parse decodes a quoted string as RFC 8259 section 7 does: it also accepts
+// \/ and a \uXXXX surrogate pair, and it refuses an unpaired surrogate and a
+// raw control character. Invalid UTF-8 in a key is written as U+FFFD.
 //
 // # Builder Pattern
 //
@@ -44,6 +57,13 @@
 //
 //	p := path.Root().Key("Person").PK(path.PKField{Name: "id", Value: 42})
 //	fmt.Println(p.String()) // $.Person[id=42]
+//
+// A Builder writes only paths [Parse] reads back, so a path that exists is a
+// path that round-trips. It panics on the three inputs the grammar does not
+// spell: a negative index, a PK field name that is not an identifier, and a
+// NaN or infinite float PK value. Each is a programmer error rather than user
+// input — no producer in this module makes one, and the grammar is not extended
+// to carry them.
 //
 // # Thread Safety
 //

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 )
 
@@ -34,12 +35,12 @@ func TestAddRoot_CanonicalisesLikeEveryOtherSite(t *testing.T) {
 		string(filepath.Separator) + ".." + string(filepath.Separator) + "target"
 
 	// The expectation is derived here rather than taken from the code under
-	// test: absolute, then cleaned, then resolved.
+	// test: absolute, then cleaned, then spelled as the filesystem lists it.
 	abs, err := filepath.Abs(rootArg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := filepath.EvalSymlinks(filepath.Clean(abs))
+	want, err := yammmtest.DiskSpelling(filepath.Clean(abs))
 	if err != nil {
 		t.Fatal(err)
 	}

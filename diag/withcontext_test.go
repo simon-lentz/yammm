@@ -333,6 +333,10 @@ func TestAsContextualError_Direct(t *testing.T) {
 	if got.Result.Len() != 1 {
 		t.Errorf("recovered Result.Len() = %d, want 1", got.Result.Len())
 	}
+	var want *diag.ContextualError
+	if !errors.As(orig, &want) || got != want {
+		t.Errorf("AsContextualError returned %p, want the *ContextualError in the chain, %p", got, want)
+	}
 }
 
 func TestAsContextualError_Wrapped(t *testing.T) {
@@ -345,6 +349,10 @@ func TestAsContextualError_Wrapped(t *testing.T) {
 	}
 	if got.Tag != "schema_load" {
 		t.Errorf("recovered tag = %q, want %q", got.Tag, "schema_load")
+	}
+	got.Tag = "retagged"
+	if !strings.HasPrefix(orig.Error(), "retagged: ") {
+		t.Errorf("a tag set on the recovered error did not reach the error wrapped in the chain: %q", orig.Error())
 	}
 }
 

@@ -49,6 +49,7 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | `WithModuleRoot` | Root directory for module-style imports. It is the first rung of the ladder in [Module root discovery](#module-root-discovery), and under it no `yammm.mod` marker is read at all |
 | `WithIssueLimit` | Maximum diagnostic issues to collect (default: 100) |
 | `WithLogger` | Structured logger for load diagnostics |
+| `CaptureSources(&dst)` | Store the load's sources in `dst` before the load reads anything, so a caller can render excerpts for a load that fails and returns no schema; a load that fails before it reads anything leaves `dst` holding that load's empty sources |
 | `WithImportsAllowed` | Whether import declarations are processed (default `true`); `false` refuses them with `E_IMPORT_NOT_ALLOWED` |
 | `WithSourcesOnly` | With `true`, restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
 | `WithSyntheticRoot` | Give in-memory sources synthetic identities under a root such as `embedded://app`, so type identities do not move with the working directory (see [Synthetic source identities](#synthetic-source-identities)) |
@@ -229,19 +230,21 @@ Dropped issues still count toward `Result.OK()` / `HasErrors()` /
 `SeverityCounts()` (the counts reflect every issue *seen*, not only those
 stored), so truncation never flips a failing result to OK and the
 all-or-nothing contract holds regardless of the limit.
-`WithIssueLimit(0)` (or `diag.NoLimit`) means unlimited. When the cap was hit,
-the JSON output format carries `limitReached` and `droppedCount`; those two are
-the authoritative pair. `limit` reports the producing collector's own cap and is
-omitted when it is zero, so a truncated result merged into an unlimited
-collector carries `limitReached` and `droppedCount` without it. The CLI's text
-output appends a dropped-issues note.
+`WithIssueLimit(0)` (or `diag.NoLimit`) means unlimited. Under
+`snapshot.WithRevalidation` the revalidator caps each row at the load's limit,
+so the load has one cap and an unlimited load stores every finding a row
+draws. When the cap was hit,
+the JSON output format carries `limitReached` and `droppedCount`, and a
+truncated result merged into any collector keeps both. A cap is a collector's
+setting, so a `Result` reports none. The CLI's text output appends a
+dropped-issues note.
 
 ### Shared Registry Semantics
 
 Passing the same `*Registry` to multiple `Load` calls in one process is safe and efficient (since v0.3.0). The behavior has two coordinated parts:
 
 1. **`Registry.Register` is idempotent for the same source.** Registering the same `SourceID` twice is a no-op when the entry and every source both schemas carry match byte for byte and the `StructuralHash` matches — the first pointer remains stored and type-index entries are not re-indexed. Two schemas with no sources (Builder-built) are compared by hash alone; a schema with sources beside one without is not the same source, so a Builder-built schema never silently replaces a loaded one. A source whose bytes or hash changed returns `*RegistryError{Kind: DuplicateSourceID}` naming what differed, which the loader reports as `E_LOAD_SOURCE_CHANGED`; the hash alone would call an annotation or documentation edit identical, since it excludes both by design.
-2. **`loadImport` short-circuits cross-`Load` via the shared `Registry`.** When an import's `SourceID` is already present in the shared registry, the loader reuses the existing `*Schema` pointer and skips the read, parse, compile, and re-register pipeline entirely. This is where cross-pipeline schema caching pays off.
+2. **`loadImport` short-circuits cross-`Load` via the shared `Registry`.** When an import's `SourceID` is already present in the shared registry, or inside the import closure of a schema the registry holds, the loader reuses the existing `*Schema` pointer and skips the read, parse, compile, and re-register pipeline entirely, whatever order the load meets its imports in. A source two registered closures compiled from different bytes is not reused; it is read like any other import. This is where cross-pipeline schema caching pays off.
 
 ```go
 reg := schema.NewRegistry()
@@ -257,7 +260,7 @@ sB, _ := schema.Load(ctx, "store_promotions.yammm",
 // reg.Len() == 3: [book_catalog (shared), catalog_geo, store_promotions]
 ```
 
-**One object per `SourceID`.** The cross-`Load` short-circuit skips the re-parse of an import the registry already holds. A top-level schema is compiled on every `Load` call, but when the registry already holds its `SourceID` with the same source, `Register` keeps the first object and the `Load` returns it: calling `Load(A, WithRegistry(reg))` twice returns one `*Schema`, the one `reg.LookupBySourceID(AID)` holds. A reused object keeps the module root and sources of the load that first compiled it, so a shared registry assumes its files do not change while it lives; share one across an edit and the re-load fails with `E_LOAD_SOURCE_CHANGED`.
+**One object per `SourceID`.** The cross-`Load` short-circuit skips the re-parse of an import the registry already holds. A top-level schema is compiled on every `Load` call, but when the registry already holds its `SourceID` with the same source, `Register` keeps the first object and the `Load` returns it: calling `Load(A, WithRegistry(reg))` twice returns one `*Schema`, the one `reg.LookupBySourceID(AID)` holds. A reused object keeps the module root and sources of the load that first compiled it, so a shared registry assumes its files do not change while it lives; share one across an edit and the re-load fails with `E_LOAD_SOURCE_CHANGED`, at the re-registration when the entry changed and at the import when a load's own bytes for an imported source differ from the ones the registry compiled it from. Two registered schemas whose import closures hold one source compiled from different bytes are an inconsistent registry: an import of that source, and the second import of the two schemas, fail with `E_IMPORT_RESOLVE`, in whatever order the load declares them, so one load never holds two compiles of one `SourceID`.
 
 **SourceID discipline.** Cross-`Load` sharing only fires when imports resolve to the same `SourceID`. `SourceID`s for file-backed schemas derive from the canonical absolute path, so `WithModuleRoot` values that resolve to different canonical paths for the same file yield different `SourceID`s and do not share. For `LoadString`, the synthetic `string://<sourceName>` scheme means two `LoadString` calls sharing a Registry must use distinct `sourceName` values unless they are intentionally re-registering byte-identical content.
 
@@ -899,13 +902,13 @@ func WriteFile(path string, data []byte) error
 const TmpSuffix = ".tmp"
 ```
 
-The payload is first written to `path + snapshot.TmpSuffix`, `fsync`'d, closed, and then renamed into place. The rename is the atomic commit point: either the new file takes over (rename succeeded) or the previous file is left untouched (any earlier step failed). On any intermediate failure, `WriteFile` removes the staging file and returns an error wrapped with the failing step (`create temp`, `write temp`, `sync temp`, `close temp`, or `rename temp to final`).
+The payload is first written to a staging file of its own beside `path`, `fsync`'d, closed, and then renamed into place. The staging name is the path's stem, a random token, the path's extension and `snapshot.TmpSuffix` — `snap.12345.ys.tmp` for `snap.ys` — so concurrent writers of one path never share a staging file. The rename is the atomic commit point: either the new file takes over (rename succeeded) or the previous file is left untouched (any earlier step failed). With concurrent writers, each rename commits one writer's bytes whole and the last one wins. On any intermediate failure, `WriteFile` removes its own staging file and returns an error wrapped with the failing step (`create temp`, `write temp`, `sync temp`, `close temp`, or `rename temp to final`). It never removes a staging file it did not create.
 
 `WriteFile` does not validate that `data` is a valid `.ys` document — it is a general-purpose atomic-write primitive, and callers are responsible for the payload (typically the output of `Marshal`).
 
 **Durability semantics.** File mode is `0o666` subject to umask, matching `os.Create`; callers needing stricter permissions should `chmod` after `WriteFile` returns. The file is `fsync`'d before rename but the parent directory is NOT `fsync`'d, so on some filesystems the rename may not be durable across a crash — consumers with stronger durability requirements should fork the helper and add parent-directory fsync.
 
-**Crash recovery.** If the process crashes between `fsync` and `rename`, a partial write may remain at `path + snapshot.TmpSuffix`. The `TmpSuffix` constant is exported so downstream primitives and consumer cleanup tools key off a single source of truth rather than hard-coding `.tmp`; the directory-iterator primitive (`ScanDir`, see [Directory Iteration](#directory-iteration) below) skips entries with the suffix automatically.
+**Crash recovery.** If the process crashes between `fsync` and `rename`, a partial write may remain beside `path`, under a name that ends in the path's extension and `snapshot.TmpSuffix` (`.ys.tmp` for a `.ys` target). The `TmpSuffix` constant is exported so downstream primitives and consumer cleanup tools key off a single source of truth rather than hard-coding `.tmp`; the directory-iterator primitive (`ScanDir`, see [Directory Iteration](#directory-iteration) below) skips entries with the suffix automatically.
 
 ### Directory Iteration
 
@@ -1048,7 +1051,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 **Wire-format contracts.** The primitive depends on two contracts documented in `snapshot/wire.go`'s package Godoc: the field-order contract (top-level keys are `{yammm_snapshot, types, instances, diagnostics}` in that order) and the body-byte-range stability contract (the byte range from the `,` after the header value through the document's closing `}` is reused verbatim). Both are pinned by `TestWireFormat_TopLevelKeyOrder` and `TestWireFormat_BodySuffixContract` in `snapshot/wire_test.go`, so a future Marshal-side shape change that would silently break the primitive fails at the wire-format test level.
 
-**CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (1) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic (tmp+fsync+rename) and preserves the file's mode: the CLI follows the path's symlinks, stages every write it makes on a sibling of the file they resolve to, sets the mode before the rename rather than after it, and creates a file that did not exist at `0600`. A FIFO, a device or a path under `/dev/` is written through instead, and anything else — a read-only file, a directory, a looping link, a directory that cannot hold the staging file — is refused naming the path. It does not call `snapshot.WriteFile`, whose documented mode policy — `0o666` subject to umask, with callers told to chmod afterwards — is a library contract for consumers rather than the CLI's.
+**CLI integration.** `yammm snapshot update-metadata --set key=value [--unset key] <file>` wraps the primitive for operator tooling. `--set` and `--unset` are both repeatable; at least one is required. The command uses the strict fast path (not the fallback wrapper) — a body-offset failure surfaces as `ExitValidation` (1) with `E_UPDATE_METADATA_BODY_OFFSET` in the diagnostic output; the recovery path is a fresh `yammm snapshot save`. The write is atomic (tmp+fsync+rename) and preserves the file's mode: the CLI follows the path's symlinks, stages every write it makes on a sibling of the file they resolve to, sets the mode before the rename rather than after it, and creates a file that did not exist at `0600` on Unix (Windows honours only a mode's write bit). A FIFO, a device or a path under `/dev/` is written through instead, and anything else — a read-only file, a directory, a looping link, a directory that cannot hold the staging file — is refused naming the path. It does not call `snapshot.WriteFile`, whose documented mode policy — `0o666` subject to umask, with callers told to chmod afterwards — is a library contract for consumers rather than the CLI's.
 
 ### Wire Format Versions
 
@@ -1084,7 +1087,6 @@ result.BySeverity(diag.Warning)          // Issues at a specific severity
 
 // Metadata
 result.Len()              // Retained issue count; the total seen is Len() + DroppedCount()
-result.Limit()            // Configured collection limit
 result.DroppedCount()     // Issues dropped after limit
 result.SeverityCounts()   // Counts by severity level
 result.CodeCounts(diag.Warning) // Seen-based per-code counts at one severity — a copy; truthful under truncation where HasCode is not
@@ -1101,7 +1103,7 @@ result.String()           // "OK" when there is no issue at all; otherwise a sum
 renderer := diag.NewRenderer(
     diag.WithSourceProvider(provider),   // source text for excerpts
     diag.WithExcerpts(true),             // show source excerpts
-    diag.WithModuleRoot("/project"),     // strip prefix from paths
+    diag.WithModuleRoot("/project"),     // text locations relative to this root
     diag.WithColors(true),              // ANSI color output
     diag.WithDistinguishFatal(true),    // distinguish fatal from error
 )
@@ -1143,7 +1145,8 @@ type ContextualError struct {
 - `context` (string) — the tag. Always emitted.
 - `code` (string) — the first error-severity issue's stable code. Omitted when the result has no error-severity issue with a non-zero code.
 - `counts` (group) — `{errors: int, warnings: int}`. `errors` sums Fatal + Error; `warnings` is the Warning count. Always emitted.
-- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
+- `limit_reached` (bool) and `dropped` (int) — emitted together when the result was truncated at its issue limit, so a consumer reading `issues` knows it is not reading all of them. Omitted otherwise.
+- `issues` (slice of objects) — one entry per issue, each carrying `severity`, `message`, and optional `code`, `source_name`, `path`, `location:{source,line,column}`, `hint`, `details:{...}`. Always emitted as a slice. Log aggregators iterate the slice directly — there are no positional `issue_0`, `issue_1`… attributes.
 
 `Issue.LogValue()` emits the same per-issue shape and is independently useful when a consumer wants to log a single issue: `logger.Error("problem", slog.Any("issue", issue))`.
 

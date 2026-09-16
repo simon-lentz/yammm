@@ -18,10 +18,8 @@ import (
 type Map[K comparable] struct {
 	entries map[K]Value
 
-	// folded memoises the sorted keys and the case-folded index a
-	// [Properties] view over these entries needs, so [PropertiesOf]
-	// computes them once per map rather than once per call. Nil on a zero
-	// Map; only read for string keys.
+	// folded memoises what [PropertiesOf] needs, once per map. Nil on a zero
+	// Map and for any key type but string, which nothing reads it for.
 	folded *foldedView
 }
 
@@ -62,7 +60,17 @@ func WrapMap[K comparable](m map[K]any, opts ...Option) Map[K] {
 	for k, v := range m {
 		entries[k] = Value{val: wrapValue(v, cfg.clone)}
 	}
-	return Map[K]{entries: entries, folded: &foldedView{}}
+	return Map[K]{entries: entries, folded: newFoldedView[K]()}
+}
+
+// newFoldedView allocates the memo only when K is string: PropertiesOf, its
+// only reader, takes a Map[string], so a view on any other key type is dead.
+func newFoldedView[K comparable]() *foldedView {
+	var k K
+	if _, ok := any(k).(string); ok {
+		return &foldedView{}
+	}
+	return nil
 }
 
 // Get returns the value for the given key and true if the key exists.
@@ -108,26 +116,21 @@ func (m Map[K]) Clone() map[K]any {
 	return result
 }
 
-// cloneValue recursively clones a Value back to its original type.
+// cloneValue returns a mutable deep copy of v's content, as [Value.Clone] states:
+// each of this package's containers as a map or slice, a map stored as given as
+// a deep copy, and any other value as it is. No slice is ever stored as given:
+// wrapValueAt wraps every slice as a [Slice].
 func cloneValue(v Value) any {
 	if v.val == nil {
 		return nil
 	}
-
-	switch inner := v.val.(type) {
-	case Map[string]:
-		return inner.Clone()
-	case Slice:
-		return inner.Clone()
-	default:
-		// Primitives and other types
-		rv := reflect.ValueOf(inner)
-		if rv.Kind() == reflect.Map {
-			return deepCloneMap(rv)
-		}
-		if rv.Kind() == reflect.Slice {
-			return deepCloneSlice(rv)
-		}
-		return inner
+	if w, ok := asWrapper(v.val); ok {
+		return w.cloneToAny()
 	}
+
+	rv := reflect.ValueOf(v.val)
+	if rv.Kind() == reflect.Map {
+		return deepCloneMap(rv, 0, nil)
+	}
+	return v.val
 }

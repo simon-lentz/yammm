@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -46,9 +47,9 @@ func TestWriteFile_RefusesATargetItMayNotWrite(t *testing.T) {
 	assertNoDebris(t, dir, path)
 }
 
-// B9: the staging file an interrupted write leaves behind must be invisible to
-// a directory scan. The convention is the shared suffix, and the contrast is
-// what the CLI used to stage on.
+// TestStagingName_IsInvisibleToADirectoryScan pins that the staging file an
+// interrupted write leaves behind is invisible to a directory scan. The shared
+// .tmp suffix hides it, and a name that ends in .ys is the contrast.
 func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 	t.Parallel()
 
@@ -71,7 +72,7 @@ func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 		t.Errorf("a directory scan reported the staging file: %v", entries)
 	}
 
-	// The name the CLI staged on before is reported, which is the defect.
+	// A staging name that ends in .ys is reported, so the suffix is what hides it.
 	old := filepath.Join(dir, ".yammm-save-999999.ys")
 	if err := os.WriteFile(old, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
@@ -84,6 +85,9 @@ func TestStagingName_IsInvisibleToADirectoryScan(t *testing.T) {
 
 func TestWriteFile_ModePolicy(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip(noModeBitsOnWindows)
+	}
 
 	t.Run("a new file is owner-only", func(t *testing.T) {
 		t.Parallel()
@@ -178,8 +182,10 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 		if err := staged.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
-		for _, name := range []string{"a.csv", "b.csv"} {
-			assertPerm(t, filepath.Join(dir, name), NewFileMode)
+		if runtime.GOOS != "windows" {
+			for _, name := range []string{"a.csv", "b.csv"} {
+				assertPerm(t, filepath.Join(dir, name), NewFileMode)
+			}
 		}
 		assertNoDebris(t, dir, filepath.Join(dir, "a.csv"), filepath.Join(dir, "b.csv"))
 	})
@@ -257,6 +263,9 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 
 	t.Run("a rename refused at Commit names the file, not its staging name", func(t *testing.T) {
 		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip(noDirPermissionsOnWindows)
+		}
 		if os.Geteuid() == 0 {
 			t.Skip("root ignores the write bit")
 		}

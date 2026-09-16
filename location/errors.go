@@ -11,9 +11,9 @@ import "errors"
 //
 // Example usage:
 //
-//	_, err := location.NewCanonicalPath("//server/share")
-//	if errors.Is(err, location.ErrUNCPath) {
-//	    // Handle UNC path rejection specifically
+//	_, err := location.SourceIDFromPath("")
+//	if errors.Is(err, location.ErrEmptyPath) {
+//	    // Handle a caller that never set the file name
 //	}
 
 // ErrEmptySourceID is returned when a synthetic source ID is empty.
@@ -31,21 +31,30 @@ var ErrEmptySourceID = errors.New("location: synthetic source ID cannot be empty
 // Returned by: ValidateSyntheticSourceID (and transitively by MustNewSourceID).
 var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks like absolute file path")
 
-// ErrUNCPath is returned when a UNC path (//server/share or \\server\share)
-// is provided where a local filesystem path is required.
+// ErrEmptyPath is returned when a file-backed path is empty.
 //
-// UNC paths are rejected because path.Clean collapses "//" to "/", which would
-// cause SourceID collisions between UNC paths and regular Unix paths.
-// Use a local mount point instead.
+// An empty path is a caller that never set the file name. Without this rule it
+// would name the working directory, because filepath.Abs("") does, and a
+// directory would get a valid-looking identity for a file that was never named.
 //
-// Returned by: NewCanonicalPath, SourceIDFromAbsolutePath, CanonicalizePathForSourceID.
-var ErrUNCPath = errors.New("location: UNC paths are not supported")
+// Returned by: ResolveHostPath, NewCanonicalPath, SourceIDFromPath,
+// ResolveSourcePath and CanonicalizePathForSourceID (and transitively by their
+// Must forms).
+var ErrEmptyPath = errors.New("location: path is empty")
 
-// ErrNotAbsolute is returned when an absolute path is required but a
-// relative path was provided.
+// ErrInvalidUTF8Path is returned for a path that is not valid UTF-8.
 //
-// Returned by: SourceIDFromAbsolutePath (via canonicalizeAbsolutePath).
-var ErrNotAbsolute = errors.New("location: path is not absolute")
+// An identity is text that reaches two JSON wires — a diagnostic under
+// --format json, and the .ys header's schema_source — and encoding/json writes
+// an invalid byte as U+FFFD, which merges two names into one. NFC passes such
+// bytes through unchanged, so nothing else refuses them.
+//
+// Returned by: ResolveHostPath, every file-backed constructor (NewCanonicalPath,
+// SourceIDFromPath, ResolveSourcePath, CanonicalizePathForSourceID and
+// CanonicalPath.Join), and ValidateSyntheticSourceID (and transitively by their
+// Must forms). A schema load reports it as a Fatal diagnostic, whose message
+// carries the error's text, so errors.Is cannot match it there.
+var ErrInvalidUTF8Path = errors.New("location: path is not valid UTF-8")
 
 // ErrAbsoluteJoinElement is returned when CanonicalPath.Join receives an
 // element that looks like an absolute path (Unix "/path", Windows "C:/path",

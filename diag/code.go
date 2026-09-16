@@ -98,14 +98,18 @@ var (
 // identifier and category. Registered codes appear in [AllCodes] and
 // [CodesByCategory].
 //
-// Panics if a code with the same identifier has already been registered.
-// Use a package-scoped prefix to avoid collisions (e.g., "E_NEO4J_*").
+// Panics on an empty value, which no issue can carry ([Code.IsZero] reports it
+// unset) and which [AllCodes] would still list, and on an identifier already
+// registered. Use a package-scoped prefix to avoid collisions (e.g., "E_NEO4J_*").
 //
 // Codes should be defined as package-level variables so that
 // registration happens at program startup:
 //
 //	var E_MY_ERROR = diag.NewCode("E_MY_ERROR", diag.CategoryAdapter)
 func NewCode(value string, cat CodeCategory) Code {
+	if value == "" {
+		panic("diag.NewCode: empty code value")
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if seen[value] {
@@ -229,14 +233,16 @@ var (
 
 	// E_LOAD_MODULE_ROOT_MALFORMED indicates a yammm.mod module-root marker
 	// whose content violates the marker rule: it must be empty or hold only
-	// comment lines. Error severity rather than Fatal — the marker is user
-	// content like a schema, and Fatal is reserved for I/O and cancellation.
+	// comment lines. Error severity: the marker is user content like a schema,
+	// and the load reports it as it reports an invalid schema.
 	E_LOAD_MODULE_ROOT_MALFORMED = NewCode("E_LOAD_MODULE_ROOT_MALFORMED", CategorySchema)
 
-	// E_LOAD_SOURCE_CHANGED indicates a source re-registered in a shared
-	// Registry with content that differs from what the registry holds: its
-	// bytes changed, or an import beneath an unchanged entry did. A shared
-	// registry assumes its files do not change while it lives.
+	// E_LOAD_SOURCE_CHANGED indicates a source a shared Registry holds with
+	// content that differs from what a load holds for it: a source re-registered
+	// after its bytes changed, an import beneath an unchanged entry that did, or
+	// an import whose registered compile was made from other bytes than the
+	// load's own for that source, reported at the import. A shared registry
+	// assumes its files do not change while it lives.
 	E_LOAD_SOURCE_CHANGED = NewCode("E_LOAD_SOURCE_CHANGED", CategorySchema)
 
 	// E_UNKNOWN_ANNOTATION indicates an annotation name absent from the built-in
@@ -300,8 +306,8 @@ var (
 	// E_IMPORT_NOT_ALLOWED indicates imports are not allowed in this context.
 	E_IMPORT_NOT_ALLOWED = NewCode("E_IMPORT_NOT_ALLOWED", CategoryImport)
 
-	// E_DUPLICATE_IMPORT indicates the same schema is imported multiple times
-	// under different aliases.
+	// E_DUPLICATE_IMPORT indicates the same schema imported more than once, or
+	// two imports that share one alias.
 	E_DUPLICATE_IMPORT = NewCode("E_DUPLICATE_IMPORT", CategoryImport)
 
 	// E_IMPORT_ALIAS_COLLISION indicates an import alias collides with a local
@@ -380,10 +386,17 @@ var (
 
 // Graph codes.
 var (
-	// E_DUPLICATE_PK indicates a duplicate primary key in the graph.
+	// E_DUPLICATE_PK indicates a primary key stated twice for one type: by two
+	// instances added to a graph, or by two root instances in a snapshot that
+	// snapshot.Load, Verify or Info reads.
 	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
 
-	// E_DUPLICATE_COMPOSED_PK indicates a duplicate composed child primary key.
+	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a
+	// child: two children of one (many) slot share a primary key, or a (one)
+	// slot is given several. The validator and graph assembly raise it, and
+	// snapshot.Load and Verify raise it for a (one) slot a document fills more
+	// than once. Info reads without a schema, which the check needs to know a
+	// relation's cardinality, so it makes no such claim.
 	E_DUPLICATE_COMPOSED_PK = NewCode("E_DUPLICATE_COMPOSED_PK", CategoryGraph)
 
 	// E_UNRESOLVED_REQUIRED indicates a required association is unresolved.
@@ -484,7 +497,8 @@ var (
 	// edges, violating the duplicate structural constraint.
 	E_SNAPSHOT_EDGES_ON_DUPLICATE = NewCode("E_SNAPSHOT_EDGES_ON_DUPLICATE", CategorySnapshot)
 
-	// E_SNAPSHOT_DEPTH_EXCEEDED indicates composed nesting exceeds the depth limit (32).
+	// E_SNAPSHOT_DEPTH_EXCEEDED indicates composed nesting deeper than
+	// [github.com/simon-lentz/yammm/instance.MaxComposedDepth].
 	E_SNAPSHOT_DEPTH_EXCEEDED = NewCode("E_SNAPSHOT_DEPTH_EXCEEDED", CategorySnapshot)
 
 	// E_SNAPSHOT_INTEGRITY_MISMATCH indicates the integrity hash does not match the
@@ -497,17 +511,18 @@ var (
 	// on the header-only surfaces, which stay classifiable for dispatch.
 	E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM = NewCode("E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM", CategorySnapshot)
 
-	// E_SNAPSHOT_PATH_FALLBACK (Warning) indicates a provenance path string could
+	// W_SNAPSHOT_PATH_FALLBACK (Warning) indicates a provenance path string could
 	// not be parsed and fell back to the root path. The original path string is
 	// preserved for round-trip fidelity via Provenance.RawPath().
-	E_SNAPSHOT_PATH_FALLBACK = NewCode("E_SNAPSHOT_PATH_FALLBACK", CategorySnapshot)
+	W_SNAPSHOT_PATH_FALLBACK = NewCode("W_SNAPSHOT_PATH_FALLBACK", CategorySnapshot)
 
 	// --- v0.3.0 additions ---
 
-	// E_SNAPSHOT_IO indicates a filesystem I/O failure encountered during
-	// a directory scan — either a dir-level failure (os.ReadDir on
-	// snapshot.ScanDir / snapshot.ScanDirSlice) or a per-file failure
-	// (os.Open or the underlying file Read on ScanDir's per-file path).
+	// E_SNAPSHOT_IO indicates a filesystem I/O failure during a directory
+	// scan: a directory that fails to read (os.ReadDir, reported by
+	// snapshot.ScanDirSlice) or a file that fails to open (os.Open, on
+	// ScanDir's per-file path). A read error inside a file that opened is
+	// HeaderOnlyRead's Error-severity E_SNAPSHOT_MALFORMED, never this code.
 	// Per-file emissions land on ScanEntry.Result so the iterator
 	// continues to the next file rather than aborting; dir-level
 	// emissions surface on the outer Result returned by ScanDirSlice.
@@ -531,22 +546,21 @@ var (
 
 	// W_UPDATE_METADATA_FALLBACK (Warning) indicates that
 	// snapshot.UpdateMetadataOrReMarshal fell back from the UpdateMetadata
-	// fast path to Load + Marshal because the input triggered a
-	// recoverable Fatal code (E_SNAPSHOT_MALFORMED,
-	// E_UPDATE_METADATA_BODY_OFFSET, or another non-cancellation Fatal
-	// issue). The output bytes are byte-identical to what Marshal would
-	// produce; the warning surfaces the path transition so operators can
-	// observe fallback frequency and triage persistent cases. Details
-	// include a "triggering_codes" entry listing the original Fatal
-	// code(s) that caused the fallback.
+	// fast path to Load + Marshal because the fast path reported an Error or
+	// Fatal issue other than a cancellation: E_SNAPSHOT_MALFORMED at Error,
+	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output carries the
+	// input's indentation and created_at, so it differs from a direct Marshal
+	// only where the input did; the warning surfaces the
+	// path transition so operators can observe fallback frequency and triage
+	// persistent cases. Details include a "triggering_codes" entry listing the
+	// distinct Error and Fatal codes that caused the fallback.
 	//
-	// Uses the W_ prefix, inaugurating the convention for
-	// Warning-severity codes added from v0.3.0 onward; existing
-	// Warning-severity codes (E_SNAPSHOT_PATH_FALLBACK, and
-	// E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM on a header-only read)
-	// retain their E_ identifiers for backwards compatibility — severity
-	// is carried on the Issue, not the Code, so the prefix is a naming
-	// convention rather than a type-enforced property.
+	// Uses the W_ prefix, the convention for a code whose severity is fixed at
+	// Warning. E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM keeps E_ because it is
+	// raised at both severities; severity lives on the Issue, so the prefix is
+	// a naming convention rather than a type-enforced property, and
+	// W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
+	// snapshot.WithRevalidation was given.
 	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
 
 	// W_SNAPSHOT_VALUE_NONCONFORMING indicates that a stored property value
@@ -633,8 +647,9 @@ func IsImportDeclarationCode(code string) bool {
 // cycle, or a path that escapes the module root — the complement of
 // [IsImportDeclarationCode] within [CategoryImport].
 //
-// The two predicates partition the category, so a new import code belongs in
-// exactly one of them. This one is the enumeration a family-wide change keys
+// The two predicates partition the category's built-in codes, so a new built-in
+// import code belongs in exactly one of them; a code another package registers
+// under [CategoryImport] satisfies neither. This one is the enumeration a family-wide change keys
 // on: every issue in the resolution family carries the module root and its
 // origin as details, and every one is built by a single builder per code.
 func IsImportResolutionCode(code string) bool {

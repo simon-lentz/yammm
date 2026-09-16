@@ -14,12 +14,15 @@ import (
 // Collector is thread-safe and can be used from multiple goroutines. It provides
 // O(1) severity queries via precomputed counts that are updated during collection.
 //
-// Limit behavior: the retained set is the `limit` most severe issues seen, ties
-// broken by arrival order. Once the store is full an incoming issue that is more
-// severe than the least severe stored one takes its slot (see storeLocked), so a
-// flood of warnings can never starve the errors that explain why an operation
-// failed. Truncation never affects [Result.OK]; use [Result.LimitReached]
-// to detect it. This design allows callers to handle truncated results
+// Limit behavior: the retained set is the `limit` most severe issues collected
+// into the collector, ties broken by arrival order. Once the store is full an
+// incoming issue that is more severe than the least severe stored one takes its
+// slot (see storeLocked), so a flood of warnings can never starve the errors
+// that explain why an operation failed. A result merged in ([Collector.Merge])
+// adds its dropped issues to the counts but cannot supply them, so after a
+// truncated result is merged a less severe issue can hold a slot one of them
+// would have taken. Truncation never affects [Result.OK]; use
+// [Result.LimitReached] to detect it. This design allows callers to handle truncated results
 // appropriately without forcing failure semantics.
 //
 // Create a Collector with [NewCollector], then use [Collector.Collect] to add
@@ -47,7 +50,7 @@ type Collector struct {
 	// eviction actually happens.
 	storedCounts SeverityCounts
 
-	// Cached sorted result (invalidated on Collect)
+	// Cached sorted result, invalidated whenever the collector changes
 	cachedResult *Result
 }
 
@@ -68,15 +71,12 @@ const NoLimit = 0
 
 // NewCollector creates a collector with an optional issue limit.
 //
-// A limit of 0 means no limit (use [NoLimit] constant for clarity). Negative
-// values are normalized to 0. Once the limit is reached the collector retains
-// the most severe issues it has seen — evicting a stored issue for a more severe
-// incoming one — and counts the rest as dropped, queryable via
+// A limit of 0 or less means no limit (use [NoLimit] constant for clarity).
+// Once the limit is reached the collector retains
+// the most severe issues collected into it — evicting a stored issue for a more
+// severe incoming one — and counts the rest as dropped, queryable via
 // [Result.DroppedCount]. See [Collector.storeLocked] for the retention rule.
 func NewCollector(limit int) *Collector {
-	if limit < 0 {
-		limit = 0
-	}
 	return &Collector{
 		limit: limit,
 	}
@@ -92,8 +92,9 @@ func NewCollectorUnlimited() *Collector {
 
 // Collect adds an issue to the collector.
 //
-// This method is thread-safe. If the limit is reached, the issue is counted
-// as dropped but not stored.
+// This method is thread-safe. Once the limit is reached, the issue takes the
+// slot of a less severe stored issue, which is dropped, or is dropped itself;
+// either drop is counted (see [NewCollector]).
 //
 // Collect panics if the issue is a zero value or is invalid. Use [NewIssue]
 // and [IssueBuilder] to construct valid issues. This panic behavior catches
@@ -145,15 +146,14 @@ func (c *Collector) CollectAll(issues []Issue) {
 // receiver. So a dropped error in res cannot flip the merged result to OK — the
 // same guarantee [Collector] already gives for directly-collected issues.
 //
-// The receiver's own configured limit is unchanged: merging a truncated res
-// into an unlimited collector yields LimitReached()==true with Limit()==0.
-// [Result.LimitReached] and [Result.DroppedCount] are the authoritative
-// truncation facts after a merge; Limit() remains the receiver's local cap, not
-// the cap that produced res's drops.
+// The receiver keeps its own limit, which governs only what it stores. A cap
+// is a collector's setting, so a Result reports none: [Result.LimitReached]
+// and [Result.DroppedCount] are the truncation facts, and they hold across a
+// merge.
 func (c *Collector) Merge(res Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.mergeLocked(res, res.issues)
+	c.mergeLocked(res, res.inArrivalOrder())
 }
 
 // MergeFunc is [Collector.Merge] with fn applied to each of res's surviving
@@ -169,8 +169,9 @@ func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
 	// transform that changed an issue's severity or code would leave the
 	// counts describing issues that are no longer stored: only a from-scratch
 	// NewIssue can change either, and doing so is a programmer error.
-	transformed := make([]Issue, len(res.issues))
-	for i, issue := range res.issues {
+	ordered := res.inArrivalOrder()
+	transformed := make([]Issue, len(ordered))
+	for i, issue := range ordered {
 		out := fn(issue)
 		c.validateIssue("MergeFunc", out)
 		if out.Severity() != issue.Severity() || out.Code() != issue.Code() {
@@ -184,27 +185,76 @@ func (c *Collector) MergeFunc(res Result, fn func(Issue) Issue) {
 	c.mergeLocked(res, transformed)
 }
 
+// MergeRetag is [Collector.MergeFunc] for a merge that changes what an issue is:
+// retag declares, for each severity and code, the severity an issue is stored at
+// and whether it is kept, and fn builds each kept issue at that severity. The
+// counts and truncation facts are derived from res's per-code counts through
+// retag, so they stay exact when res was truncated, and the survivors are stored
+// in arrival order. It panics when fn's issue differs from the declaration in
+// severity or code.
+func (c *Collector) MergeRetag(res Result, retag func(Severity, Code) (Severity, bool), fn func(Issue) Issue) {
+	var counts SeverityCounts
+	var codes codeCounts
+	seen := 0
+	for sev, byCode := range res.codeCounts {
+		for code, n := range byCode {
+			to, keep := retag(sev, code)
+			if !keep {
+				continue
+			}
+			counts.addN(to, n)
+			codes.addN(to, code, n)
+			seen += n
+		}
+	}
+	ordered := res.inArrivalOrder()
+	kept := make([]Issue, 0, len(ordered))
+	for _, issue := range ordered {
+		to, keep := retag(issue.Severity(), issue.Code())
+		if !keep {
+			continue
+		}
+		out := fn(issue)
+		c.validateIssue("MergeRetag", out)
+		if out.Severity() != to || out.Code() != issue.Code() {
+			panic(fmt.Sprintf("diag.Collector.MergeRetag: fn built %s %s where retag declared %s %s",
+				out.Severity(), out.Code(), to, issue.Code()))
+		}
+		kept = append(kept, out)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.foldLocked(counts, codes, seen-len(kept), kept)
+}
+
 // mergeLocked folds res's counts and truncation into c and stores issues,
 // which are res's surviving issues as the caller wants them stored. Caller
 // must hold c.mu.
 func (c *Collector) mergeLocked(res Result, issues []Issue) {
+	c.foldLocked(res.SeverityCounts(), res.codeCounts, res.droppedCount, issues)
+}
+
+// foldLocked folds a merged result's seen counts and drops into c and stores
+// issues, its surviving issues as the caller wants them stored. Caller must hold
+// c.mu.
+func (c *Collector) foldLocked(counts SeverityCounts, codes codeCounts, dropped int, issues []Issue) {
 	c.cachedResult = nil
 
-	// Fold in res's seen-severity counts wholesale. Each Result's counts reflect
-	// every issue it saw — stored and dropped past its own limit — so adding the
-	// counts (rather than re-counting only the surviving issues) keeps
-	// OK/HasErrors/ErrorCount truthful even when res was itself truncated and its
-	// dropped issues are no longer enumerable.
-	c.counts.addCounts(res.SeverityCounts())
-	c.codeCounts.addCounts(res.codeCounts)
+	// Fold in the seen-severity counts wholesale. A Result's counts reflect every
+	// issue it saw — stored and dropped past its own limit — so adding the counts
+	// (rather than re-counting only the surviving issues) keeps
+	// OK/HasErrors/ErrorCount truthful even when the result was itself truncated
+	// and its dropped issues are no longer enumerable.
+	c.counts.addCounts(counts)
+	c.codeCounts.addCounts(codes)
 
-	// res's own drops can never be recovered, so carry its truncation forward.
-	if res.limitReached {
+	// The merged result's drops can never be recovered, so carry them forward.
+	if dropped > 0 {
 		c.limitReached = true
-		c.droppedCount += res.droppedCount
+		c.droppedCount += dropped
 	}
 
-	// Store res's surviving issues, honoring c's own limit. storeLocked does not
+	// Store the surviving issues, honoring c's own limit. storeLocked does not
 	// re-count (the counts were folded in above); issues past c's limit are
 	// dropped and flagged.
 	for _, issue := range issues {
@@ -247,8 +297,8 @@ func (c *Collector) collectLocked(issue Issue) {
 // governs storage, not counting, so an issue that is not retained still shows up
 // in the severity totals (and thus in HasErrors/OK/ErrorCount).
 //
-// The retained set is the `limit` most severe issues seen, ties broken by
-// arrival order. Truncation that simply dropped whatever arrived after the cap
+// The retained set is the `limit` most severe issues that reach this function,
+// ties broken by arrival order. Truncation that simply dropped whatever arrived after the cap
 // let a producer starve its own errors: a load collects warnings during
 // inheritance linearization and errors in every later phase, so a schema with
 // enough shadowed annotations filled the budget with warnings and stored none of
@@ -304,9 +354,12 @@ func (c *Collector) evictionSlotLocked(sev Severity) (int, bool) {
 // Result produces a sorted, immutable snapshot.
 //
 // The returned Result is independent of the Collector; subsequent Collect
-// calls do not affect it. Results are cached until the next Collect call.
+// calls do not affect it. Results are cached until the collector next changes,
+// through Collect, CollectAll, Merge, MergeFunc or MergeRetag.
 //
-// Issues are sorted by source, position, and code for deterministic output.
+// Issues are sorted by location, then by code, for deterministic output:
+// span-backed issues first, in [location.Compare] order, then path-only issues
+// by source name and path.
 func (c *Collector) Result() Result {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -315,30 +368,33 @@ func (c *Collector) Result() Result {
 		return *c.cachedResult
 	}
 
-	// Copy issues into a new slice for sorting (don't mutate c.issues)
-	sorted := make([]Issue, len(c.issues))
-	for i, st := range c.issues {
-		sorted[i] = st.issue
+	// The arrival numbers travel with the copy, so a Merge can put the issues
+	// back in collection order; c.issues itself is never sorted.
+	stored := make([]storedIssue, len(c.issues))
+	copy(stored, c.issues)
+	slices.SortFunc(stored, func(a, b storedIssue) int { return compareIssues(a.issue, b.issue) })
+	sorted := make([]Issue, len(stored))
+	arrival := make([]uint64, len(stored))
+	for i, st := range stored {
+		sorted[i], arrival[i] = st.issue, st.arrival
 	}
-
-	// Sort by source, position, code
-	slices.SortFunc(sorted, compareIssues)
 
 	// Carry the collector's SEEN severity counts rather than recomputing from
 	// the stored slice (what newResult does): under truncation the dropped
 	// issues are absent from sorted, and recomputing would make Result.OK /
 	// HasErrors blind to a dropped error exactly as the gates would be. In the
 	// non-truncated case the two are identical (every collected issue is stored).
-	result := newResultWithCounts(sorted, c.limit, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone())
+	result := newResultWithArrival(sorted, c.limitReached, c.droppedCount, c.counts, c.codeCounts.clone(), arrival)
 	c.cachedResult = &result
 	return result
 }
 
 // compareIssues compares two issues for deterministic sorting.
 //
-// Ordering rules (per architecture spec "Deterministic Ordering (Codes)"):
+// Ordering rules:
 //  1. Span-backed issues before path-only issues
-//  2. Span-backed: Source, Start position, End position
+//  2. Span-backed: [location.Compare] — source, start and end position, start
+//     and end byte offset, then source kind
 //  3. Path-only: SourceName, Path
 //  4. Common tie-breakers: Code, Severity, Message, Hint
 //  5. Provenance tie-breakers: SourceName, Path (for hybrid issue total order)

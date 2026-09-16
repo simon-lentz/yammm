@@ -13,15 +13,26 @@ import (
 // contains '.', 'e', or 'E', it is treated as float64; otherwise as int64.
 // This correctly classifies scientific notation like "1e2" as float64 (its
 // JSON representation uses exponent notation, even though its mathematical
-// value is an integer).
+// value is an integer). A float-form string that is malformed or has no finite
+// float64 value (e.g., "1e400") is returned unchanged.
+//
+// Malformed means strconv's syntax, which is wider than JSON's, and both paths
+// use it. Step 2 of the integer-form chain below therefore accepts more than an
+// out-of-range integer: a hexadecimal float ("0x1p4" is 16) and '_' between
+// digits ("1_000" is 1000) each reach it after ParseInt refuses them, and each
+// yields a float64 rather than the int64 the form suggests. A leading '+' is
+// read on either path. A hexadecimal literal whose exponent letter is 'e'
+// ("0x1e4") takes the float path, which refuses it. encoding/json never
+// produces such a Number, so only a caller that builds one meets them.
 //
 // Fallback chain for integer-form strings (no '.', 'e', 'E'):
 //  1. strconv.ParseInt(s, 10, 64) — succeeds for values in int64 range
 //  2. strconv.ParseFloat(s, 64) — fallback for values exceeding int64 range
 //     (e.g., "99999999999999999999"); precision may be lost but the value is
 //     representable
-//  3. Returns the original json.Number unchanged if both parsers fail
-//     (malformed number string)
+//  3. Returns the original json.Number unchanged if neither yields a finite
+//     value: the string is malformed, or no float64 holds it (e.g., a
+//     400-digit integer)
 //
 // Classification is by lexical form alone: a float indicator ('.', 'e', 'E')
 // means float64, an int-shaped literal means int64 — the reader sees only the
@@ -53,8 +64,10 @@ func NormalizeNumber(n json.Number) any {
 
 // NormalizeValue recursively normalizes json.Number values within arbitrary
 // Go values. It walks map[string]any, []any, and scalar positions, applying
-// NormalizeNumber to each json.Number encountered. Non-json.Number values
-// are returned unchanged.
+// NormalizeNumber to each json.Number encountered. It rewrites each
+// map[string]any and []any in place and returns the same container, so a
+// caller must own what it passes. Non-json.Number scalars are returned
+// unchanged.
 //
 // NormalizeValue enforces a maximum recursion depth of 64 levels. If the
 // depth limit is exceeded, NormalizeValue returns the value unnormalized at

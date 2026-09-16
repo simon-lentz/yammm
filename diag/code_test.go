@@ -272,10 +272,9 @@ func TestCodesByCategory_AllCategoriesCovered(t *testing.T) {
 	}
 }
 
-// TestContractValidationCodesExist verifies that all 19 contract validation
-// codes mentioned in the architecture doc are defined.
+// TestContractValidationCodesExist holds each core validation code to the
+// category it is registered under.
 func TestContractValidationCodesExist(t *testing.T) {
-	// These are codes specifically mentioned in the contracts/architecture
 	requiredCodes := []struct {
 		code     Code
 		category CodeCategory
@@ -306,9 +305,6 @@ func TestContractValidationCodesExist(t *testing.T) {
 
 	for _, tc := range requiredCodes {
 		t.Run(tc.code.String(), func(t *testing.T) {
-			if tc.code.IsZero() {
-				t.Errorf("code %s is zero", tc.code)
-			}
 			if tc.code.Category() != tc.category {
 				t.Errorf("code %s has category %s; want %s",
 					tc.code, tc.code.Category(), tc.category)
@@ -321,9 +317,9 @@ func TestContractValidationCodesExist(t *testing.T) {
 // exported E_* or W_* variable in code.go is auto-registered via NewCode()
 // and appears in AllCodes() exactly once.
 //
-// The E_ prefix covers error-severity and sentinel codes (the historical
-// default); the W_ prefix covers warning-severity codes added from v0.3.0
-// onward. Severity is carried on the Issue, not the Code, so the prefix
+// The W_ prefix names a code whose severity is fixed at Warning, and the E_
+// prefix every other code. Severity is carried on the Issue, not the Code, so
+// W_SNAPSHOT_UNRESOLVED_REQUIRED takes snapshot.WithRevalidation's; the prefix
 // is a naming convention rather than a type-enforced property — the
 // registry itself does not distinguish between the two.
 func TestAllCodes_MatchesDefinedCodes(t *testing.T) {

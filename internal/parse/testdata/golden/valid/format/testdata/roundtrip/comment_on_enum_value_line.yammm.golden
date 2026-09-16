@@ -1,0 +1,56 @@
+{
+  "name": "\"enum_value_comment\"",
+  "span": {
+    "s": 0,
+    "e": 27
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 175,
+        "e": 176
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 187,
+              "e": 193
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 180,
+            "e": 201
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"alpha\"",
+              "\"beta\""
+            ],
+            "span": {
+              "s": 210,
+              "e": 252
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 203,
+            "e": 261
+          }
+        }
+      ],
+      "span": {
+        "s": 170,
+        "e": 263
+      }
+    }
+  ]
+}

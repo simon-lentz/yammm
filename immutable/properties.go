@@ -80,8 +80,9 @@ func (p Properties) Get(name string) (Value, bool) {
 // GetFold returns the value for a property name using ASCII case-insensitive matching.
 //
 // Only ASCII letters (a-z, A-Z) are folded; other characters must match exactly.
-// If multiple keys match when folded (e.g., "Name" and "NAME"), the alphabetically
-// first key wins. This provides deterministic behavior.
+// A key that matches name exactly wins. Otherwise, of the keys that fold to name
+// (e.g., "Name" and "NAME"), the alphabetically first wins, so the result is
+// deterministic.
 //
 // Returns (zero Value, false) if no matching property exists.
 func (p Properties) GetFold(name string) (Value, bool) {

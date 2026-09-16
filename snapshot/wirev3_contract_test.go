@@ -480,8 +480,8 @@ func TestWireV3_EmptyProvenancePathWarns(t *testing.T) {
 	}
 
 	_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-	if !hasCode(loadRes, diag.E_SNAPSHOT_PATH_FALLBACK) {
-		t.Errorf("an empty provenance path drew no %s: %v", diag.E_SNAPSHOT_PATH_FALLBACK, loadRes)
+	if !hasCode(loadRes, diag.W_SNAPSHOT_PATH_FALLBACK) {
+		t.Errorf("an empty provenance path drew no %s: %v", diag.W_SNAPSHOT_PATH_FALLBACK, loadRes)
 	}
 }
 
@@ -571,7 +571,7 @@ func TestWireV3_RejectedRowDoesNotAttributeAWarning(t *testing.T) {
 	if !hasCode(res, diag.E_SNAPSHOT_MALFORMED) {
 		t.Fatalf("fixture is vacuous: the out-of-range row was accepted: %v", res)
 	}
-	if hasCode(res, diag.E_SNAPSHOT_PATH_FALLBACK) {
+	if hasCode(res, diag.W_SNAPSHOT_PATH_FALLBACK) {
 		t.Errorf("a rejected type row still drew a provenance warning, which can only name row 0's type: %v", res)
 	}
 }

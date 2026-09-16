@@ -256,7 +256,7 @@ func TestMarshal_CanonicalizesABypassBuiltValue(t *testing.T) {
 	}
 }
 
-// TestMarshal_HealsOrPassesThroughNonConformingText pins A-39's contract on the
+// TestMarshal_HealsOrPassesThroughNonConformingText pins the write contract on the
 // three new kinds, mirroring what TestMarshal_HealsNarrowedFloats pins for
 // Float: the write arm heals what it can, preserves what it cannot, and never
 // fails a write.

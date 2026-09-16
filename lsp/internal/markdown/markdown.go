@@ -3,6 +3,7 @@ package markdown
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/simon-lentz/yammm/location"
@@ -112,11 +113,14 @@ func ExtractCodeBlocks(content string) []CodeBlock {
 }
 
 // VirtualSourceID creates a virtual SourceID for a code block within a markdown file.
-// markdownPath must be an absolute path (from URIToPath). blockIndex is the 0-based
+// markdownPath is the markdown file's resolved host path. blockIndex is the 0-based
 // index of the block within the markdown file.
 func VirtualSourceID(markdownPath string, blockIndex int) (location.SourceID, error) {
+	if !filepath.IsAbs(markdownPath) {
+		return location.SourceID{}, fmt.Errorf("virtual source ID for %s block %d: the markdown path is not absolute", markdownPath, blockIndex)
+	}
 	virtualPath := fmt.Sprintf("%s#block-%d", markdownPath, blockIndex)
-	id, err := location.SourceIDFromAbsolutePath(virtualPath)
+	id, err := location.SourceIDFromPath(virtualPath)
 	if err != nil {
 		return location.SourceID{}, fmt.Errorf("virtual source ID for %s block %d: %w",
 			markdownPath, blockIndex, err)

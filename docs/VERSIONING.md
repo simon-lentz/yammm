@@ -862,6 +862,27 @@ candidate reports `diag.E_COMMAND_FAILED`, `diag.W_SNAPSHOT_PATH_EXTENSION`,
 suggests `v0.22.0`. `snapshot info --format json`'s payload breaks in a way no
 declaration describes (below).
 
+Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
+are on the `review` branch and reach `main` at the unit's close. Its fix passes
+move **twelve additions and seven removals**:
+
+- **pass A** removes `location.ErrUNCPath` and `location.PositionRegistry`;
+- **pass B** adds `location.SourceID.RelativeTo` and `schema.CaptureSources`,
+  and removes `diag.Result.Limit`;
+- **the slate fix pass** adds `location.ResolveHostPath`,
+  `location.ErrEmptyPath`, `location.ErrInvalidUTF8Path`,
+  `diag.DetailKeyExitCode`, `diag.DetailKeyFilePath` and
+  `diag.DetailKeyTriggeringCodes`; removes `location.Provenance.AtKey`; and
+  renames `diag.E_SNAPSHOT_PATH_FALLBACK` to `diag.W_SNAPSHOT_PATH_FALLBACK`,
+  which `gorelease` counts as one removal and one addition;
+- **the second fix pass** adds `location.ResolveSourcePath`,
+  `diag.Collector.MergeRetag` and `immutable.Value.Clone`, and removes
+  `location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute`.
+
+**With unit 6's six additions, `gorelease -base=v0.21.0` reads eighteen
+compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Each
+block below was written by the pass or group that landed its behaviour.
+
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
 Measured through binaries built from `v0.21.0`'s tree and from the candidate,
@@ -1278,9 +1299,10 @@ then:
 - **The staging name has a fixed length**, `.yammm-<random>.tmp`, so a basename
   near the filesystem's name limit is written again; the earlier fix pass
   refused a 245-byte name at exit 3.
-- **A file `export --output-dir` creates is owner-only (0600)**, as a file
-  `--output` creates already was at `v0.21.0`, which created per-type CSV files
-  0644. An existing file keeps its mode.
+- **A file `export --output-dir` creates is owner-only (0600) on Unix**, as a
+  file `--output` creates already was at `v0.21.0`, which created per-type CSV
+  files 0644. Windows honours only a mode's write bit. An existing file keeps
+  its mode.
 
 **Measured against `v0.21.0`, every target kind behaves as it did, with one
 deliberate exception: a writable file in a read-only directory is refused at
@@ -1361,7 +1383,7 @@ does not read this output**, measured at its tree.
 
 - **Each `--dir` entry carries its result under `diagnostics`, in the wire the
   diagnostic stream uses:** `issues`, each carrying every field a diagnostic
-  has, plus `limit`, `limitReached` and `droppedCount` when the entry's issues
+  has, plus `limitReached` and `droppedCount` when the entry's issues
   were truncated. `v0.21.0` carried an `issues` array of severity, code and
   message on an entry that had issues and none on a clean one, and the entry
   above made the array always present. A truncated entry listed 100 issues with
@@ -1391,6 +1413,565 @@ does not read this output**, measured at its tree.
   `yammm-invalid` is highlighted as yammm, where only `yammm` was. A block with
   an unbalanced brace — most `yammm-invalid` examples — no longer carries its
   highlighting past the closing fence into the rest of the document.
+
+### Unit 7, pass A — path identity follows the host
+
+- **Every file-backed identity follows one rule: the host's own path
+  semantics, then NFC and forward slashes.** `NewCanonicalPath`,
+  `SourceIDFromAbsolutePath` and `CanonicalizePathForSourceID` each rewrote
+  separators, cleaned and refused UNC paths in their own order, so one input
+  could produce three identities. They now share one rule.
+- **On Unix a backslash is a file-name character.** A path holding one names
+  that file, where it named a nested one. `a\b.yammm` and `a/b.yammm` are two
+  sources, where they shared one identity. A module under a directory named
+  `x\y` loads, where it failed with `E_PATH_ESCAPE`, and an entry named
+  `m\main.yammm` resolves its imports, where it failed with `E_IMPORT_RESOLVE`.
+  `CanonicalPath.Join` keeps a backslash in an element on Unix; on Windows it
+  is a separator, as before. `docs/SPEC.md` now states that `/` alone
+  separates an import path's segments.
+- **A module in a directory whose name holds a decomposed character loads.**
+  The loader resolved an import from the importing file's NFC identity against
+  the module root's bytes on disk, so such a module failed with
+  `E_PATH_ESCAPE` through `schema.Load` and `schema.LoadSourcesWithEntry`. It
+  now resolves imports from the path each file was read from.
+- **Network shares are canonicalized on Windows** — `\\server\share\x` is
+  `//server/share/x` — where every constructor refused them. **Removed:
+  `location.ErrUNCPath`**, whose only ground was a `path.Clean` collision the
+  host's rules cannot produce. A device-namespace spelling such as `\\?\C:\x`
+  is now its own identity, as an 8.3 short name already was.
+- **No other identity moves.** On Unix only a path holding a backslash or a
+  decomposed character changes. A snapshot's `schema_source` header records
+  the schema's identity and is informational: it decides nothing on load.
+
+### Unit 7, pass A — `immutable.Map`'s folded view
+
+- **`WrapMap` allocates its case-folded view only for a string-keyed map.**
+  `PropertiesOf`, the view's one reader, takes a `Map[string]`, so the view a
+  `Map[int]` or a map keyed by a named string type carried was never read. A
+  string-keyed map keeps it, shared by every copy. No declaration moves.
+
+### Unit 7, pass A — `location.PositionRegistry` removed
+
+- **Removed: `location.PositionRegistry`**, an interface nothing consumed. No
+  function accepts one, `schema.SourceRegistry` declares its own `PositionAt`
+  rather than embedding it, and its one implementation, `internal/source`'s
+  registry, keeps the method. A caller that named the type names the method
+  set it needs instead, or `schema.SourceRegistry`.
+
+### Unit 7, pass B — text locations relative to the module root
+
+- **A text location is written relative to the module root by one rule, on
+  identities.** The renderer turns the root it is given into an identity once
+  — symlinks resolved, NFC, forward slashes — and writes a source under it
+  relative to it. The prefix match it replaces compared the root's bytes on
+  disk with a source's identity. So a location rendered as an absolute path
+  under a directory whose name holds a decomposed character, for a failed load
+  through a symlinked schema file, for `yammm fmt` run from a symlinked
+  working directory, and on Windows for every location.
+- **Added: `location.SourceID.RelativeTo`**, the rule itself. It compares two
+  identities segment by segment, and a root of `/` holds every absolute path.
+- **The text form moves in these cases.** Under a root of `/` (`--module-root /`)
+  every absolute path is written relative to it, where none was. A file given as
+  the root renders the file's path, where it rendered `.`. A synthetic source is
+  never under a root: under `diag.WithModuleRoot("embedded://app")` it renders
+  its whole identity, `embedded://app/a.yammm:1:1`, where it rendered
+  `a.yammm:1:1`. A relative root is resolved against the working directory: a
+  file `sub/a.yammm` under the root `sub` renders `a.yammm:1:1`, where it
+  rendered the source's absolute identity, because the old rule cut the root's
+  own bytes off an already-absolute one and never matched. An absolute root
+  carrying `..` or a doubled separator is cleaned before it is compared, so a
+  file under it renders relative, where the uncleaned bytes never matched and it
+  rendered absolute. A root the resolver refuses — under a regular file, or not
+  valid UTF-8 — relativizes nothing, so every path renders absolute, where the
+  old rule still cut the root's bytes off; through the CLI a `--module-root`
+  naming such a path now yields the longer form.
+- **JSON output does not change:** every span's source is its identity,
+  whatever module root the renderer holds. `diag.WithModuleRoot` affects text
+  only, and its godoc says so.
+- **The `module_root` detail, and the module-root clause in an
+  import-resolution message, carry the root's identity** — the form every span
+  source in the same document takes — and so does
+  E_LOAD_MODULE_ROOT_MALFORMED's detail. They carried the root's bytes on
+  disk, which differ on Windows (`\`) and under a decomposed directory name. A
+  synthetic root is written as given. rdata reads neither the key nor the
+  clause.
+
+### Unit 7, pass B — the source excerpt under a text diagnostic
+
+- **An excerpt's marks sit under the text they mark.** Its three rows share
+  one gutter width. The two gutter rows were two columns wider than the
+  numbered row, so every mark sat two columns to the right of its text. The
+  mark row copies each tab of the line, gives an East Asian wide rune two
+  columns, and gives a combining mark none.
+- **Four excerpts gain their marks.** A blank line and the line after a final
+  newline each show their line and a caret, where neither rendered. A point one
+  column past the end of a line, where an end-of-input error points, takes a
+  caret, where its line showed an empty mark row.
+  A span past column 120 of a long line is shown in a window of 120 runes
+  around its start, with `...` at each end the window cuts. It rendered the
+  line's first 120 runes and an empty mark row.
+- **A span that runs onto later lines is marked to the end of its first
+  line.** It was marked from its start column to its end column on the last
+  line, so it could mark one rune.
+- **Text output only, and no declaration moves.** JSON output carries no
+  excerpt. rdata renders excerpts in its pipeline runner's text output and
+  parses none of it. `diag` now imports `golang.org/x/text/width`, from a
+  module the library already requires.
+
+### Unit 7, pass B — what a result says about truncation, and where its error string ends
+
+- **Removed: `diag.Result.Limit`, and the `limit` key of the JSON diagnostic
+  wire.** A cap is a collector's setting, not a fact about a result. After a
+  merge, `Limit` reported the receiving collector's own cap, which is 0 on
+  every CLI path, and not the cap that dropped the issues. The truncation
+  facts are `Result.LimitReached` and `Result.DroppedCount`, and the wire's
+  `limitReached` and `droppedCount`. They hold across a merge. A caller that
+  read `Limit` already holds the cap it configured. `snapshot info --dir
+  --format json` entries lose the key too, and unit 6's entry above is
+  corrected to say so.
+- **`Result.TruncationNote` names no cap:** `N more issue(s) dropped at an
+  issue limit; resolve issues and re-run to see the rest`. The CLI's text note
+  prints it. The LSP's truncation log line drops its `limit` attribute.
+- **`Result.String` ends at its last issue, with no trailing newline.** The
+  errors from `Result.Err` and `Result.WithContext` are built from it, so they
+  end there too. Wrapped in `fmt.Errorf("…: %w", err)`, they no longer end in
+  a stray newline. rdata wraps these errors at about twenty sites and matches
+  none of their text.
+- **`snapshot.UpdateMetadataOrReMarshal` keeps a truncated result truncated
+  when its fallback fails.** It merges the two legs' results through
+  `Collector.Merge`. A dropped issue stays counted in `DroppedCount`,
+  `SeverityCounts` and `CodeCounts`, where re-collecting the survivors lost
+  it.
+
+### Unit 7, pass B — where a location goes
+
+- **Added: `schema.CaptureSources(dst **Sources)`**, a load option that
+  stores the load's source registry in `*dst` before the load reads anything.
+  A load that fails returns a nil `Schema`, and no `Sources` with it, so an
+  excerpt for the failure had no source to come from. The CLI captures the
+  sources on every load its ten schema-loading commands run. A failed load
+  on a terminal now shows its excerpt, as a load that only warns did.
+- **An import cycle is reported on the import that closes it.**
+  `E_IMPORT_CYCLE` carries that declaration's span, import path and alias, as
+  `E_IMPORT_RESOLVE` and `E_PATH_ESCAPE` do. Its message is `import "./a"
+  closes an import cycle`, then the module-root clause: it names no source
+  file, and the clause names the module root's identity. That import draws no
+  `E_UPSTREAM_FAIL`, because nothing it imports failed to compile; the import
+  that opened the cycle still draws `import "./b" failed to compile`, as it
+  did. The code had no span, so its text form began
+  `<unknown>`. Its message named the absolute path of the schema it entered,
+  and the closing import also reported that schema as failing to compile.
+- **An issue with no location renders with no location prefix** in text:
+  `error[E_…]: …`, as its JSON carries no location. It rendered
+  `<unknown>: error[E_…]: …`.
+- **Unchanged by decision:** the module-root clause stays in the message of
+  every import-resolution code (A-187), because the LSP publishes an issue's
+  message and not its hint.
+
+### Unit 7 — the lane pass
+
+**No exported declaration moves.** Each item below changes behaviour behind an
+existing declaration.
+
+- **`location.Compare` returns 0 exactly when two spans are equal.** It breaks
+  a tie on the start and end byte offsets, then puts a synthetic source before a
+  file-backed one spelled alike. Two diagnostics that differ only in a byte
+  offset therefore sort one way, not in collection order.
+- **`location.Span.String` writes an unknown start or end as `<unknown>`**,
+  where it wrote `0:0`.
+- **On Windows, `CanonicalPath.Join` refuses a rooted `\x` or a drive-relative
+  `C:x` element** with `ErrAbsoluteJoinElement`. It had joined each as a child.
+- **`schema.Sources.PositionAt` on a nil `Sources` returns
+  `location.UnknownPosition()`**, whose byte offset is -1, where it returned
+  the zero `Position`, which claims offset 0.
+- **A snapshot orders edge property values that hold a map by their content.**
+  It had compared the map's in-memory address, so two equal documents could
+  write their edges in different orders.
+- **`immutable`:**
+  - `Value.Int` refuses a float of exactly 2^63. It had reported it as the
+    largest or smallest int64, by platform.
+  - `Key.String` writes a nil map or slice component as `null`, as
+    `graph.FormatKey(key.Clone()...)` does; it wrote `{}` or `[]`. A primary key
+    holds no map or slice, so no graph key changes.
+  - A nil map with non-string keys keeps its type: `Unwrap` returns the typed
+    nil, where it returned a literal nil. A deep clone keeps a typed-nil map or
+    slice element.
+- **`location/path`:**
+  - `Parse` decodes a quoted string as RFC 8259 does. It accepts `\/` and a
+    `\u` surrogate pair, and refuses an unpaired surrogate and a raw control
+    character. It reads an integer PK value above the int64 range as a uint64,
+    and an error names the real character, not one byte of it.
+  - `Builder` writes invalid UTF-8 in a key as U+FFFD, the character `Parse`
+    reads it as. It escapes the text of a PK value of any other type.
+  - Every path yammm writes still parses. An integer PK value above the
+    int64 range, which `Parse` refused, now reads back as a uint64.
+- **`snapshot.Load` keeps a provenance path spelled other than `Builder`
+  spells it**, so a marshal writes that path back byte for byte. A path holding
+  a raw control character or an unpaired surrogate now draws
+  `W_SNAPSHOT_PATH_FALLBACK` and is kept as stated.
+
+### Unit 7, the slate fix pass — an identity is what the filesystem calls the file
+
+**Three exported declarations are added and none is removed or changed:**
+`location.ResolveHostPath`, `location.ErrEmptyPath` and
+`location.ErrInvalidUTF8Path`.
+
+- **Two spellings of one file give one identity, and it is the spelling the
+  filesystem holds.** `location.ResolveHostPath` answers what the filesystem
+  calls a path, and every file-backed identity is that answer normalized. On
+  darwin it reads the on-disk spelling through `realpath(3)` (the second fix
+  pass replaced `fcntl(F_GETPATH)`; see its block), because
+  `filepath.EvalSymlinks` there keeps the case as typed; Linux is
+  case-sensitive and Go's Windows implementation already spells each component
+  on disk. **What this repairs:** on a case-insensitive volume a
+  `--module-root` or entry path typed in another case failed a valid import
+  with `E_PATH_ESCAPE`, and a diagnostic's location rendered as an absolute
+  path. **What it moves:** an identity changes only where a path was typed in a
+  spelling the filesystem does not use — which is exactly the input that failed.
+- **An identity minted before a file exists equals the one minted after.** A
+  path that does not exist yet resolves to its deepest existing ancestor with
+  the missing tail kept as typed, where the whole path was left unresolved. A
+  path under a regular file can never exist and is refused by every
+  constructor and by the loader, which had kept it. The CLI's diagnostic root
+  keeps such a path cleaned, and mints no identity from it.
+- **An empty path is refused** by `NewCanonicalPath`, `SourceIDFromPath`,
+  `CanonicalizePathForSourceID` and `ResolveHostPath`, with `ErrEmptyPath`,
+  where `filepath.Abs("")` made it the working directory. **Consumer-visible:**
+  `schema.LoadSourcesWithEntry` with an **empty source key** now fails
+  rather than filing that source under the working directory's identity. The
+  synthetic-root door already refused an empty key, so the two agree.
+- **A path that is not valid UTF-8 is refused**, with `ErrInvalidUTF8Path`, by
+  every file-backed constructor and by `location.ValidateSyntheticSourceID`.
+  NFC passes such bytes through and `encoding/json` writes them as U+FFFD,
+  which merges two names on both wires an identity reaches — a diagnostic under
+  `--format json`, and the `.ys` header's `schema_source`. **Consumer-visible:**
+  `schema.Load` of a schema whose path is not valid UTF-8 fails with a Fatal
+  `E_LOAD_IO_FAILURE`, where it loaded at `v0.21.0` (measured on Linux; darwin's
+  volumes refuse such a name), and so does every `schema.LoadSourcesWithEntry`
+  source key — absolute, relative, or under a synthetic root — with its module
+  root, and the CLI.
+- **Deleted in the resolver's favour:** `schema`'s own entry-path
+  canonicalizer, which was unexported, and the LSP's `lsputil.CanonicalPath`,
+  which was exported from an internal package. The editor and the loader now
+  mint a key through one rule, and a markdown code block's identity is built on
+  its file's on-disk spelling.
+- **CI runs the whole suite on Linux, Windows and macOS.** The darwin branch of
+  the resolver runs on the macOS job alone.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing.
+
+### Unit 7, the slate fix pass — spans and paths refuse what they cannot mean
+
+**One exported declaration is removed and none is added:**
+`location.Provenance.AtKey`.
+
+- **Removed: `location.Provenance.AtKey`.** It extended a provenance's path by
+  one key and dropped the raw path recorded beside it, and no correct form of it
+  exists: a raw path a parser could not read cannot be extended by a key. It had
+  no caller in this module, in rdata, in wfac or in rdata-python — only a test.
+  A caller that navigated with it builds the path through
+  `location/path.Builder` and calls `location.NewProvenance`.
+- **`location.RangeWithBytes` panics when a span's two orders disagree.** It had
+  compared byte offsets alone whenever both were known, so a span whose bytes
+  run forward and whose line and column run backward was accepted and became an
+  inverted LSP range downstream, where the line is read from one order and the
+  character from the other. Its one production caller, the parser, derives both
+  from the same offsets and cannot produce such a span.
+- **`location.Span.IsGeometricallySafe` asks the same question of both orders**,
+  and reports false for a span that satisfies only one. It is the check for a
+  span from a struct literal or an untrusted source, which the constructors
+  never saw.
+- **`location/path.Builder` panics on the three inputs the grammar does not
+  spell**, so a path it writes is a path `Parse` reads back: a negative index, a
+  PK field name that is not an identifier, and a NaN or infinite float PK value
+  (which were written `$[score=NaN.0]`, `$[score=+Inf.0]` and `$[score=-Inf.0]`,
+  each refused by a different arm of the parser). **The grammar is not
+  extended:** no producer in this module or in any consumer makes such a value,
+  and widening the path language would oblige every `.ys` reader to accept it.
+  The panic follows the package's own precedent, `RangeWithBytes` and
+  `MustNewSourceID`.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing, and no consumer names any of the
+  three symbols.
+
+### Unit 7, the slate fix pass — `immutable` refuses a cycle and adopts a wrapper
+
+**No exported declaration moves**: `gorelease -base=v0.21.0` is byte-identical
+to the run before this group. Each item below changes behaviour behind an
+existing declaration.
+
+- **A value that refers to itself is refused with a panic**, which a caller can
+  recover from. It had exhausted the stack instead — a fatal runtime error that
+  no deferred recover can contain — wherever the value is walked: `Wrap`,
+  `WrapMap`, `WrapProperties`, `WrapSlice`, `WrapKey`, the `WithClone` path and
+  a `Clone`. A map with non-string keys is stored as it is and not walked, so a
+  cycle inside one is refused when something walks it.
+  `WrapKey`'s godoc already promised a panic for a cyclic component, so the
+  promise is now true. The walk counts its depth and records the maps and
+  slices on its path only past the depth `encoding/json` uses, so an ordinary
+  value pays a counter and nothing more, and a value merely shared or deeply
+  nested still wraps.
+- **A constructor given one of this package's own wrappers adopts it.** A
+  `Value` contributes its content, so no `Value` holds a `Value`; a `Map`,
+  `Slice`, `Properties` or `Key` is stored as itself. **What this repairs:**
+  such a value was kept as an opaque struct, so `Value.IsNil` reported false
+  for a nil `Properties`, `Key` or non-string-keyed `Map`, a `Clone` returned
+  the wrapper rather than its data, and a `Key` holding one rendered `{}` in
+  place of its contents. Wrapping a `Value` again nested it, so every typed
+  accessor on the outer value reported false.
+- **An array is stored as it is**, and the package documentation now says so. An
+  array is how a scalar carrier is spelled here rather than a list —
+  `uuid.UUID` is `[16]byte` — so wrapping one as a `Slice` would turn a single
+  UUID into sixteen byte values. No behaviour changes.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing.
+
+### Unit 7, the slate fix pass — the diagnostic wire and log say what they mean
+
+**One exported declaration is renamed and three are added.**
+`diag.E_SNAPSHOT_PATH_FALLBACK` becomes `diag.W_SNAPSHOT_PATH_FALLBACK`;
+`diag.DetailKeyExitCode`, `diag.DetailKeyFilePath` and
+`diag.DetailKeyTriggeringCodes` are new.
+
+- **Renamed: `E_SNAPSHOT_PATH_FALLBACK` → `W_SNAPSHOT_PATH_FALLBACK`**, and the
+  code string it writes changes with it. It was the only `E_` code raised at
+  Warning alone, so a consumer matching on the prefix read a warning as an
+  error. `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` keeps its `E_` because it is
+  raised at both severities. **No `.ys` document or fixture carries the old
+  string**, so nothing stored changes; rdata, wfac and rdata-python name the
+  code nowhere.
+- **A scanned file's path has a key of its own.** `E_SNAPSHOT_IO` wrote it under
+  `"path"`, which is `DetailKeyImportPath` — the key five `schema` sites use for
+  an import path — so a reader keying on it read a file path as one. It now
+  writes `DetailKeyFilePath` (`"file_path"`). **The wire key of `E_SNAPSHOT_IO`
+  moves.** The two details that had no constant, `"exit_code"` on
+  `E_COMMAND_FAILED` and `"triggering_codes"` on `W_UPDATE_METADATA_FALLBACK`,
+  now have one each; their wire keys are unchanged.
+- **A log entry names the document an issue came from.** `Issue.LogValue` and
+  the map shape `ContextualError` uses both emit `source_name` when the issue
+  has one, beside the `path` they already emitted. A path without its source
+  named a position in a file the reader could not identify.
+- **A truncated result says so in its log.** `ContextualError.LogValue` emits
+  `limit_reached` and `dropped` when the result hit its issue limit, so a
+  consumer reading `issues` knows it is not reading all of them. Omitted
+  otherwise. `docs/API.md` names all three new fields.
+- **A hybrid issue's text location carries both halves.** An issue with a span
+  and an instance path renders `data.json:3:1 $.Car[0].regNbr`, where it
+  rendered the span alone. The span locates the record and the path the field;
+  the source name names the span's document, so it is not repeated. JSON output
+  is unchanged — it always carried all three.
+- **A merged result keeps its issues' arrival order.** A `Result` carries the
+  order its issues were collected in, and `Merge` stores by it. The collector
+  evicts the latest-arrived of the least severe, so storing in sort order made
+  the victim depend on how the merged messages happened to compare — reachable
+  since `snapshot`'s `mergeResults` began merging through `Merge`. `MergeFunc`
+  stores by it too, and the second fix pass carries it to a snapshot's
+  revalidation and the validator's internal-error filter.
+- **Two programmer errors now fail where they are made.**
+  `IssueBuilder.Build` panics on a builder neither `NewIssue` nor `FromIssue`
+  made, rather than returning a zero `Issue` that `Collector.Collect` panics on
+  one call later; `NewCode` panics on an empty value, as it already does on a
+  duplicate.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing.
+
+### Unit 7 — `snapshot.WriteFile` stages each write in its own file
+
+**No declaration moves, and the staging contract changes.**
+`gorelease -base=v0.21.0` reports nothing new for it.
+
+- **Each call stages in a file of its own.** `WriteFile` staged at
+  `path+TmpSuffix`, one name for every writer of a path, so concurrent writers
+  shared one file. On Windows a sibling's open handle failed the create or the
+  rename. On Unix a sibling's write reached the committed file after its
+  rename, so a write that had succeeded could be overwritten, or mixed with
+  another writer's bytes. The staging name is now the path's stem, a random
+  token, the path's extension and `TmpSuffix` — `snap.12345.ys.tmp` for
+  `snap.ys` — and it is created exclusively. Each rename commits one writer's
+  bytes whole, and the last rename wins.
+- **`WriteFile` removes only its own staging file.** A file already named
+  `path+TmpSuffix` stays as it is, because it can belong to a live writer.
+  `WriteFile` replaced such a file before.
+- **Crash residue keeps its suffix.** A crashed write still leaves a file whose
+  name ends in `TmpSuffix`, and in `.ys` then `TmpSuffix` for a `.ys` target.
+  `ScanDir`'s skip and a sweep keyed on either suffix still find it. **A sweep
+  that looks for the exact name `path+TmpSuffix` no longer finds it.**
+- **The file mode is unchanged:** `0o666` under the process umask, as
+  `os.Create` gives.
+- **Consumer reach: none measured.** rdata's suite against this tree differs
+  from its run against `v0.21.0` by nothing. rdata writes each `.ys` under a
+  per-batch lock, and its residue check keys on `.ys` then `TmpSuffix`, which
+  the new name keeps.
+
+### Unit 7, the second fix pass — one resolver mints every file-backed identity
+
+**Two exported declarations are removed and one is added:**
+`location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute` are removed, and
+`location.ResolveSourcePath` is added.
+
+- **Removed: `location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute`.**
+  It was the one constructor that minted a file-backed identity from a path's text
+  alone, so for one file its identity could differ from `schema.Load`'s by a
+  symlink or by case. Every file-backed identity now comes from
+  `SourceIDFromPath`, `NewCanonicalPath`, `CanonicalizePathForSourceID`,
+  `CanonicalPath.Join` or `ResolveSourcePath`, and each resolves. A caller that
+  built a key with it calls `SourceIDFromPath`. No consumer calls it.
+- **Added: `location.ResolveSourcePath`**, which returns a path's identity and the
+  host path it was read from, out of one resolution.
+- **On darwin the on-disk spelling comes from `realpath(3)`**, called through
+  libSystem, where it came from `fcntl(F_GETPATH)`. `F_GETPATH` answers from a
+  vnode's cached name, and a concurrent lookup of another hard link of the same
+  file rewrites that name: measured, 653 and 1,350 wrong answers in 16,000. The
+  new call opens nothing, so a FIFO, an unreadable file and a full descriptor
+  table resolve like any other path. A firmlinked spelling such as
+  `/System/Volumes/Data/Users/…` and `/Users/…` stays two spellings, as a Linux
+  bind mount does. The binaries still build with `CGO_ENABLED=0`.
+- **A path resolves as far as it exists.** A dangling symbolic link resolves to
+  the path the kernel reaches through it, each `..` in its target applied to the
+  directory reached on disk, so an identity minted before its target exists equals
+  the one minted after. A component the process cannot traverse ends the resolution as a
+  missing one does, and the rest keeps its typed spelling, where it was refused.
+  What is refused is a property of the path: empty, not valid UTF-8, under a
+  regular file, a cycle of dangling links, or longer once resolved than the host
+  allows a path to be.
+- **`CanonicalPath.Join` resolves its result**, as `NewCanonicalPath` does, and
+  refuses an element that is not valid UTF-8 and a join through a regular file. On
+  Unix it joins `C:/x`, `C:\x` and `\\srv` as names; Windows still refuses a rooted,
+  drive-relative, volume or network-share element.
+- **`schema.FindModuleRoot` returns an error for a path the resolver refuses**,
+  `""` included, where it walked the path as typed or the working directory. The
+  editor's key for such a path is an error too, and its document is analysed and
+  shows the refusal.
+- **An import's identity carries its file's on-disk case.** On a
+  case-insensitive volume, `import "./Dep"` binds the identity of `dep.yammm`, and
+  `./dep` beside `./DEP` draws `E_DUPLICATE_IMPORT`, where it drew
+  `E_DUPLICATE_SCHEMA`.
+- **`schema.LoadSourcesWithEntry` refuses two source keys that name one source**,
+  naming both, with a Fatal `E_LOAD_IO_FAILURE`. Which key's bytes were loaded had
+  depended on the host and the key order. An empty key is refused with or without
+  a module root.
+- **`schema.LoadString` refuses a source name that is not valid UTF-8**, as every
+  file-backed constructor does.
+- **Consumer reach: none measured.** rdata calls none of the `location`
+  constructors, and its suite against this tree differs from its run against
+  `v0.21.0` by nothing.
+
+### Unit 7, the second fix pass — a retagging merge, and an excerpt draws what a terminal shows
+
+**One exported declaration is added:** `diag.Collector.MergeRetag`.
+
+- **Added: `diag.Collector.MergeRetag(res, retag, fn)`.** `retag` declares the
+  severity each merged issue is stored at and whether it is kept, and `fn` builds
+  each kept issue. Survivors are stored in arrival order, and the counts and
+  truncation facts are derived from `res`'s per-code counts through `retag`, so they
+  stay exact when `res` was truncated. It panics when `fn` builds an issue that
+  differs from the declaration.
+- **A snapshot's revalidation and the validator's internal-error filter merge
+  through it.** Under an issue limit, a revalidating `snapshot.Load` keeps the
+  findings the validator raised first, where it kept the ones whose messages sort
+  first. The validator's internal-error filter reports every internal error it saw
+  in its counts, `LimitReached` and `DroppedCount`, where it counted only the ones
+  it kept. **The revalidator caps a row at the load's limit**, where it capped
+  every row at the validator's default of 100 whatever the load asked: a row
+  drawing more than 100 findings now loads unlimited with every finding stored,
+  and under a finite limit reports its drops once, where the exact counts would
+  otherwise have reported the row's own cap as a truncation of an unlimited load.
+  A cancellation inside a revalidated row is reported once, by the row; the
+  walk's own poll reported it a second time at the next group.
+- **An excerpt draws what a terminal shows.** A tab inside a span is copied into
+  the mark row, as a tab before it already was. A format character other than the
+  soft hyphen, and a conjoining Hangul vowel or final consonant, take no column; an
+  East Asian wide rune takes two; each emoji of a ZWJ sequence takes two, and the
+  joiner none. A C0 control other than a tab is shown as its Control Pictures
+  glyph, DEL as U+2421, and a C1 control or a bidirectional control as U+FFFD, each
+  in one column, so no source byte acts on the terminal. Text on a terminal only.
+- **`schema.CaptureSources` captures from the load's start.** A load that fails
+  before it reads anything, such as one with an unreadable entry or a malformed
+  module-root marker, leaves `*dst` holding that load's empty sources, never an
+  earlier load's.
+- **Consumer reach: rdata's log attributes.** rdata revalidates at Warning under
+  a 500-issue limit and logs `limit_reached` and `dropped` from every such load,
+  so which finding survives a truncation moves for it, and a row with more than
+  100 findings is now capped at 500 like the load rather than at 100. None of its
+  tests reads either.
+
+### Unit 7, the second fix pass — import paths and the path grammar
+
+**No exported declaration moves.**
+
+- **An import path holding a backslash is refused** with `E_IMPORT_RESOLVE`.
+  `/` is the only separator in an import path, and a backslash names a different
+  file on Windows than on any other host. No tracked schema in this module or in
+  rdata writes one. A schema NAME may still hold a backslash: the rule reaches a
+  path, and `schema.Builder`'s name lookup resolves a name, not a path.
+- **A cyclic file declared twice draws one `E_IMPORT_CYCLE` and one
+  `E_DUPLICATE_IMPORT`**, where it drew `E_IMPORT_CYCLE` twice.
+- **The discovered module root's clause keeps a network share's `//`**:
+  `discovered from //server/share/proj/yammm.mod`.
+- **An error from `location/path.Parse` that names a character quotes an invalid
+  byte as a one-byte string**, `"\xff"`, so it reads apart from a real U+FFFD. The
+  unknown-escape message reads `unknown escape sequence: a backslash then 'x'`.
+
+### Unit 7, the second fix pass — `immutable` stores a pointer as a pointer, and `graph` orders by content
+
+**One exported declaration is added:** `immutable.Value.Clone`.
+
+- **Added: `immutable.Value.Clone`**, which returns the wrapped value as mutable Go
+  data, as each container's own `Clone` does.
+- **A pointer to one of the package's containers is stored as a pointer.** A
+  pointer satisfied the containers' method set, so a nil `*Map`, `*Slice`,
+  `*Properties` or `*Key` panicked in `IsNil`, in a `Clone` and in `WrapKey`'s
+  canonical string. A nil one now reads as a typed nil, and a non-nil one is stored
+  as it is, as the package documentation says of every pointer.
+- **A `Value` adopted by a constructor is taken as it is:** `WithClone` does not
+  reach a map an earlier constructor stored as it is.
+- **A clone reads a container's content at every depth.** A map with a non-string
+  key is stored as given, so a container placed inside one was never wrapped and
+  was returned by the clone walk unchanged. `Value.Clone` now reads through it, and
+  so do `graph`'s ordering and a `Key`'s canonical string, which rendered such a
+  container as `{}`. Under `WithClone`, a container inside a cloned non-string-keyed
+  map is therefore stored as its content rather than as the container.
+- **`graph` orders property values by content for every value.** A container whose
+  entries include a string-keyed map compared by that nested map's memoised view —
+  its address — so two equal documents could write their edges and instances in
+  different orders; a nil container tied with an empty one, and one string with
+  two. Each is now ordered by its type and its content. A map with a non-string key
+  stored as given always ordered by content and is unchanged.
+
+### Unit 7, the second fix pass — a shared registry's closures, and a refused document's diagnostic
+
+**No exported declaration moves.**
+
+- **A load that shares a `Registry` binds a schema the registry holds inside
+  another schema's import closure, whatever order it imports them in.** It bound
+  such a schema only after importing the schema whose closure held it. Imported
+  first, the schema was compiled again from its file, and a `WithSourcesOnly` load
+  refused it with `E_IMPORT_RESOLVE`. **A source that two registered closures
+  compiled from different bytes is refused with `E_IMPORT_RESOLVE`, in either
+  import order and whether or not the load is restricted to its own sources**;
+  before, importing the owner first bound the owner's compile silently, and
+  reading from disk after the owner compiled the source a third time. **Two
+  registered schemas whose closures hold one source compiled from different
+  bytes cannot both be imported by one load**: the second import is refused with
+  `E_IMPORT_RESOLVE` naming the source, so a load never holds two compiles under
+  one `SourceID`; a refused schema is refused again under a second alias, which
+  draws `E_DUPLICATE_IMPORT` as a compile failure's does. **A load that already
+  holds bytes for a source — its entry, or a source the caller handed in — and
+  imports a registered schema whose closure compiled that source from other
+  bytes is refused with `E_LOAD_SOURCE_CHANGED` at the import**; before, the
+  cached compile bound silently and the load's `Sources()` reported the other
+  bytes, and the edit was reported only when the entry itself was re-registered.
+  The cached-content conflict that was `E_INTERNAL` with no span is this
+  `E_LOAD_SOURCE_CHANGED` at the import's span.
+- **The language server publishes a refused document's diagnostic under the URI
+  the editor opened it with.** A document at a path the resolver refuses, such as
+  one under a regular file, has no identity, and its one diagnostic went to a URI
+  the server re-spelled from the path. Where the editor spelled that URI
+  differently — a lower-case hex escape, an escaped tilde — the editor never showed
+  the diagnostic.
+- **Consumer reach: none measured.** rdata passes no `Registry` to a load and runs
+  no language server, and its suite against this tree differs from its run against
+  `v0.21.0` by nothing.
 
 ## v0.21.0 under this policy
 
@@ -2171,3 +2752,4 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **2026-09-06** — **Corrected the unit-4 "Additive API surface" enumeration of `ReceiverKind`.** It named `RecvScalar`, which no declaration in the module carries, and listed four constants where `gorelease -base=v0.20.0` reports ten. The line now names all ten as declared: `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList`, `RecvNumericList`. `RecvScalar` was added and renamed inside the unreleased range, so it leaves no trace for a consumer; the enumeration had kept its old spelling. Prose only; no behaviour changed.
 - **2026-09-10** — **Corrected condition-1 unit 6's Unreleased section against the candidate (A-456).** Retitled it, since unit 6 sits unmerged on `review` (A-417), and gave pass A its own heading; stated the section's whole declaration delta, six compatible additions; added an exit-code table measured against `v0.21.0`, replacing two sentences that said no exit code moves; stated how `W_NEO4J_INDEXES_UNREADABLE` and the one-result rule reach the stream; recorded the 0600 mode of the files `--output-dir` creates; and pointed pass B's `issues` item at its rename.
 - **2026-09-10 (night)** — **Corrected the Unreleased section's heading and preamble, which still said unit 6 sat unmerged on `review` after A-461 closed it and `fb57e99` (PR #107) merged it, and added the A-433 block**: the plugin corpus's load gate retagged and guarded, and the VS Code extension's Markdown injection widened to the whole fence vocabulary with its leak past an unbalanced brace closed.
+- **2026-09-14** — **Wrote condition-1 unit 7's second fix pass into the Unreleased section, and corrected its earlier blocks.** Added five blocks: one resolver mints every file-backed identity, a retagging merge and a terminal-true excerpt, import paths and the path grammar, `immutable`'s pointers with `graph`'s content order, and a shared registry's closures with a refused document's diagnostic. Restated the unit's declaration delta from `gorelease -base=v0.21.0` over the composed tree, twelve additions and seven removals. Corrected the earlier blocks where the round found them false: the text forms a synthetic or relative module root moves, the excerpts that had an empty mark row rather than none, the cycle's module-root clause and the opening import's `E_UPSTREAM_FAIL`, a uint64 PK that now parses, the non-UTF-8 path refusal that reaches `schema.Load`, the resolver's refusal under a regular file, the deleted LSP canonicalizer's visibility, the CI matrix, the cyclic value stored as it is, and the file mode on Windows.

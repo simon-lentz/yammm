@@ -39,9 +39,10 @@ Every command that writes a file you name — `--output`, `--output-dir`, `-o`,
 symlinks are followed, so a link survives and the file it names is written. A
 regular file, or one that does not exist yet, is replaced atomically: the
 content is staged beside it and renamed over it, so an interrupted write leaves
-the previous file. A new file is created at `0600`; an existing one keeps its
-mode. A FIFO, a device or a path under `/dev/` — `--output /dev/stdout`, say —
-is written through, continuing its stream: behind `>> log` the bytes are
+the previous file. A new file is created at `0600` on Unix (Windows honours
+only a mode's write bit); an existing one keeps its mode. A FIFO, a device or
+a path under `/dev/` — `--output /dev/stdout`, say — is written through,
+continuing its stream: behind `>> log` the bytes are
 appended and the log keeps its history. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
 hold the staging file, which `gofmt -w` refuses too. Omit `--output` to write
@@ -175,7 +176,7 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
-`--header-only` reads the header alone and reports the file's size. `--dir <path>` scans every `.ys` file in a directory, header-only. The text and `--format json` modes render one structure, so a field one reports the other reports too, and absent `metadata` renders as `{}`. Under `--format json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limit`, `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning.
+`--header-only` reads the header alone and reports the file's size. `--dir <path>` scans every `.ys` file in a directory, header-only. The text and `--format json` modes render one structure, so a field one reports the other reports too, and absent `metadata` renders as `{}`. Under `--format json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning.
 
 ### snapshot update-metadata
 
@@ -393,7 +394,7 @@ Two consequences worth knowing:
   `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
   `_` (unbounded) has no effect") is the common one; `yammm snapshot verify`,
   `yammm export`, and `yammm snapshot save --into` additionally surface the
-  snapshot decoder's `E_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
+  snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
   files. From v0.15.0, `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on
   these body-reading commands — the document is refused, not warned about;
   only header-only reads (`yammm snapshot info --header-only`, `--dir`) keep

@@ -371,7 +371,7 @@ func TestKey_NestedValues(t *testing.T) {
 }
 
 func TestKey_String_WithNestedStructures(t *testing.T) {
-	// Test Key.String() with nested maps and slices to cover unwrapForJSON paths
+	// Test Key.String() with nested maps and slices, which it renders through cloneValue
 	tests := []struct {
 		name     string
 		input    []any
@@ -497,10 +497,9 @@ func TestKey_WrapKey_PanicsOnNonStringKeyedMap(t *testing.T) {
 }
 
 func TestKey_String_MatchesJSONMarshal(t *testing.T) {
-	// This test defends the architecture spec's invariant:
-	// "Key.String() returns the same canonical JSON array format as graph.FormatKey()"
-	// We verify Key.String() == json.Marshal(key.Clone())
-	// which is the same underlying mechanism FormatKey will use.
+	// Key.String's stated invariant is Key.String() == graph.FormatKey(Clone()...),
+	// and FormatKey is json.Marshal over the components, so the oracle here is
+	// json.Marshal(key.Clone()).
 	//
 	// Note: for nil input Clone() returns nil and json.Marshal(nil) is "null",
 	// which is what graph.FormatKey renders for it too. String reports "[]"
@@ -519,6 +518,9 @@ func TestKey_String_MatchesJSONMarshal(t *testing.T) {
 		{map[string]any{"a": 1}},
 		{[]any{1, 2}},
 		{map[string]any{"list": []any{"x", "y"}}},
+		{map[string]any(nil)},
+		{[]any(nil)},
+		{map[string]any{"inner": []any(nil)}},
 	}
 
 	for _, input := range tests {

@@ -1,6 +1,8 @@
 package snapshot_test
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,14 +52,28 @@ func TestScanIODetail_PerFileCarriesTheOSError(t *testing.T) {
 		t.Fatalf("scanned %d entries, want 1", len(entries))
 	}
 
+	// "path" is DetailKeyImportPath, which five schema sites use for an import
+	// path, so a reader keying on it would read this file path as one.
+	if _, collides := detailOf(entries[0].Result, diag.E_SNAPSHOT_IO, diag.DetailKeyImportPath); collides {
+		t.Error("the scanned file's path is filed under the import-path key")
+	}
+	if _, ok := detailOf(entries[0].Result, diag.E_SNAPSHOT_IO, diag.DetailKeyFilePath); !ok {
+		t.Errorf("E_SNAPSHOT_IO carries no %q detail: %s", diag.DetailKeyFilePath, entries[0].Result)
+	}
+
 	detail, ok := detailOf(entries[0].Result, diag.E_SNAPSHOT_IO, diag.DetailKeyDetail)
 	if !ok {
 		t.Fatalf("E_SNAPSHOT_IO carries no %q detail: %s", diag.DetailKeyDetail, entries[0].Result)
 	}
-	// The os error names the link, not its target: open() reports the path it
-	// was given after the kernel fails to follow the dangling link.
-	if !strings.Contains(detail, "broken.ys") || !strings.Contains(detail, "no such file") {
-		t.Errorf("detail = %q, want the underlying os error", detail)
+	// The os error names the link, not its target, and its text differs by
+	// host, so the want is the errno a stat that follows the same link reports.
+	_, statErr := os.Stat(link)
+	pathErr, ok := errors.AsType[*fs.PathError](statErr)
+	if !ok {
+		t.Fatalf("following the dangling link returned %v, want a *fs.PathError", statErr)
+	}
+	if !strings.Contains(detail, "broken.ys") || !strings.Contains(detail, pathErr.Err.Error()) {
+		t.Errorf("detail = %q, want the underlying os error %q", detail, pathErr.Err)
 	}
 }
 

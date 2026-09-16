@@ -63,8 +63,8 @@ func runCLI(t *testing.T, args ...string) (code int, stdout, stderr string) {
 	return code, outBuf.String(), errBuf.String()
 }
 
-// TestRun_MissingPathExitsRuntimeEverywhere pins B29 and B30: one nonexistent
-// path drew four different exit codes across the eight commands that take one.
+// TestRun_MissingPathExitsRuntimeEverywhere pins one exit code for a
+// nonexistent path across the eight commands that take one.
 // An unreadable file is an I/O failure whichever command opened it, so every
 // row is ExitRuntime and every row says why on stderr.
 func TestRun_MissingPathExitsRuntimeEverywhere(t *testing.T) {
@@ -137,9 +137,9 @@ func TestRun_MissingSchemaExitsRuntime(t *testing.T) {
 	}
 }
 
-// TestRun_EveryFailurePrints pins B28: six cobra-level and bare-error failures
-// exited 2 with zero bytes of output, because SilenceErrors discards what the
-// command never printed itself and run() returned a code without a message.
+// TestRun_EveryFailurePrints pins that six cobra-level and bare-error failures
+// print a message. SilenceErrors discards what a command does not print itself,
+// so run() must not return a code without a message.
 func TestRun_EveryFailurePrints(t *testing.T) {
 	tests := []struct {
 		name string
@@ -180,9 +180,9 @@ func TestRun_UnclassifiedErrorExitsUsage(t *testing.T) {
 	}
 }
 
-// TestRun_ParentCommandsRequireASubcommand pins B18: `yammm neo4j` and
-// `yammm snapshot` have no RunE, so cobra printed help and exited 0 — a script
-// that drops a subcommand reports success having done nothing.
+// TestRun_ParentCommandsRequireASubcommand pins that `yammm neo4j` and
+// `yammm snapshot` fail without a subcommand. With no RunE, cobra prints help
+// and exits 0, so a script that drops a subcommand reports success.
 func TestRun_ParentCommandsRequireASubcommand(t *testing.T) {
 	for _, parent := range []string{"neo4j", "snapshot"} {
 		t.Run(parent, func(t *testing.T) {
@@ -213,9 +213,9 @@ func TestRun_ParentCommandsStillHelp(t *testing.T) {
 	}
 }
 
-// TestRun_FmtReportsEveryPath pins B31. fmt must report every offending path in
-// one invocation — that is what a pre-commit hook over a file list needs — and
-// its exit code must not let one path's failure mask another's.
+// TestRun_FmtReportsEveryPath pins that fmt reports every offending path in one
+// invocation — that is what a pre-commit hook over a file list needs — and that
+// its exit code does not let one path's failure mask another's.
 func TestRun_FmtReportsEveryPath(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "gone.yammm")
@@ -248,8 +248,8 @@ func TestRun_FmtReportsEveryPath(t *testing.T) {
 	}
 }
 
-// TestRun_FmtValidatesFormat pins B44. fmt is one of exactly two command files
-// that never called ParseOutputFormat, so `--format bogus` was accepted.
+// TestRun_FmtValidatesFormat pins that fmt refuses `--format bogus`: fmt calls
+// ParseOutputFormat like every other command that takes the flag.
 func TestRun_FmtValidatesFormat(t *testing.T) {
 	code, _, errOut := runCLI(t, "fmt", "--format", "bogus", "testdata/valid.yammm")
 	if code != cli.ExitUsage {
@@ -260,9 +260,9 @@ func TestRun_FmtValidatesFormat(t *testing.T) {
 	}
 }
 
-// TestRun_IntrospectValidatesFormatBeforeURI pins B44's second site. The --uri
-// guard fired first, so the command exited 2 for a reason other than the flag
-// under test and the site read as covered when it was not.
+// TestRun_IntrospectValidatesFormatBeforeURI pins that introspect refuses a bad
+// --format before its --uri guard runs. Otherwise the command exits 2 for a
+// reason other than the flag under test, and the check reads as covered.
 func TestRun_IntrospectValidatesFormatBeforeURI(t *testing.T) {
 	code, _, errOut := runCLI(t, "neo4j", "introspect", "--format", "bogus")
 	if code != cli.ExitUsage {
@@ -273,9 +273,9 @@ func TestRun_IntrospectValidatesFormatBeforeURI(t *testing.T) {
 	}
 }
 
-// TestRun_ExportRefusesBeforeWork pins B43 and B20. export validated --to after
-// load, parse, validate, build and render, and silently ignored flag pairs that
-// contradict each other.
+// TestRun_ExportRefusesBeforeWork pins that export validates --to, and refuses
+// flag pairs that contradict each other, before it loads, parses, validates,
+// builds or renders anything.
 func TestRun_ExportRefusesBeforeWork(t *testing.T) {
 	dir := t.TempDir()
 
@@ -310,8 +310,9 @@ func TestRun_ExportRefusesBeforeWork(t *testing.T) {
 	})
 }
 
-// TestRun_UpdateMetadataRefusesContradictoryKeys pins B45: --set and --unset
-// naming one key deleted it, exited 0, and reported "(0 keys)".
+// TestRun_UpdateMetadataRefusesContradictoryKeys pins that --set and --unset
+// naming one key are refused. Accepted, they delete the key, exit 0 and report
+// "(0 keys)".
 func TestRun_UpdateMetadataRefusesContradictoryKeys(t *testing.T) {
 	code, _, errOut := runCLI(t, "snapshot", "update-metadata",
 		"-s", "env=staging", "--unset", "env", "testdata/valid.yammm")

@@ -6,10 +6,8 @@ import (
 	"github.com/simon-lentz/yammm/location"
 )
 
-// Wire format types for JSON serialization.
-//
-// These types define the stable JSON output format
-// All field names use camelCase and optional fields use omitzero.
+// The wire types define the stable JSON output format: field names are
+// camelCase, and optional fields use omitzero.
 
 // issueWire is the JSON wire format for Issue.
 type issueWire struct {
@@ -58,15 +56,14 @@ type detailWire struct {
 // resultWire is the JSON wire format for Result.
 type resultWire struct {
 	Issues       []issueWire `json:"issues"`
-	Limit        int         `json:"limit,omitzero"`
 	LimitReached bool        `json:"limitReached,omitzero"`
 	DroppedCount int         `json:"droppedCount,omitzero"`
 }
 
-// FormatResultJSON returns the JSON representation of a diagnostic result.
-//
-// The output format is stable The returned JSON contains
-// an array of issues and optional limit tracking fields.
+// FormatResultJSON returns the JSON representation of a diagnostic result: an
+// array of issues, and the truncation facts when issues were dropped.
+// Every span's source is its identity, whatever module root the renderer
+// holds.
 func (r *Renderer) FormatResultJSON(res Result) json.RawMessage {
 	wire := toResultWire(res)
 	//nolint:errchkjson // Wire types are safe; error check is defensive
@@ -94,9 +91,8 @@ func toResultWire(res Result) resultWire {
 		Issues: issues,
 	}
 
-	// Only include limit-related fields when the limit was reached
+	// Only include the truncation facts when issues were dropped
 	if res.LimitReached() {
-		wire.Limit = res.limit
 		wire.LimitReached = true
 		wire.DroppedCount = res.DroppedCount()
 	}

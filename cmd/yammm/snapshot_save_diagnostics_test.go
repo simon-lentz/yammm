@@ -16,18 +16,15 @@ import (
 // raised only once the write has succeeded.
 func TestSnapshotSave_ExtensionWarningDescribesAWrittenFile(t *testing.T) {
 	t.Parallel()
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores the write bit")
-	}
 
 	t.Run("a failed write raises no extension warning", func(t *testing.T) {
 		t.Parallel()
-		sealed := filepath.Join(t.TempDir(), "sealed")
-		if err := os.Mkdir(sealed, 0o550); err != nil {
-			t.Fatalf("mkdir: %v", err)
+		// A parent path that is a regular file fails the write on every host and for root.
+		parent := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(parent, nil, 0o600); err != nil {
+			t.Fatalf("write the parent file: %v", err)
 		}
-		t.Cleanup(func() { _ = os.Chmod(sealed, 0o750) }) //nolint:gosec // restoring the test's own directory
-		code, _, stderr := executeCmdOutput(t, "snapshot", "save", "-o", filepath.Join(sealed, "o.dat"),
+		code, _, stderr := executeCmdOutput(t, "snapshot", "save", "-o", filepath.Join(parent, "o.dat"),
 			"testdata/valid.yammm", "testdata/data.json")
 		var failure string
 		switch {

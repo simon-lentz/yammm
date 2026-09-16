@@ -12,10 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestRun_UsageIsPrintedOnce pins B53: flag's own parser already calls Usage on
-// a bad flag, and run called it a second time, so an operator read the whole
-// option list twice and -help printed it once — the two paths disagreeing about
-// what a usage error looks like.
+// TestRun_UsageIsPrintedOnce pins that a bad flag prints the usage text once.
+// The flag parser already calls Usage on a bad flag, so run must not call it
+// again, and a bad flag and -help then print the option list alike.
 func TestRun_UsageIsPrintedOnce(t *testing.T) {
 	t.Parallel()
 

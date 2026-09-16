@@ -2,7 +2,8 @@
 //
 // This package provides the single diagnostic infrastructure used across schema
 // loading, parsing, compilation, and instance validation. It depends only on
-// [github.com/simon-lentz/yammm/location] and the standard library.
+// [github.com/simon-lentz/yammm/location], golang.org/x/text/width and the
+// standard library.
 //
 // # Design Principles
 //
@@ -16,10 +17,11 @@
 //     via slices.Collect. The [Issue] accessors that return reference types
 //     ([Issue.Related], [Issue.Details]) return defensive copies.
 //   - Stable error codes: [Code] values are stable identifiers that tools can
-//     match on, even when message text changes. The Code type uses an unexported
-//     struct to enforce a closed set of valid codes.
-//   - Deterministic ordering: [Collector.Result] sorts issues by source, position,
-//     and code to ensure stable output across runs.
+//     match on, even when message text changes. The code set is open: adapters
+//     and consumers register codes through [NewCode], and [AllCodes] lists
+//     every code registered.
+//   - Deterministic ordering: [Collector.Result] sorts issues by location, a span
+//     in [location.Compare] order, then by code, so output is stable across runs.
 //   - Builder pattern: [IssueBuilder] is the only valid construction path for
 //     [Issue] values, eliminating common construction mistakes.
 //   - Precomputed counts: [Collector] maintains O(1) severity queries via
@@ -29,17 +31,22 @@
 //
 // All YAMMM diagnostic-producing operations return (T, [Result]):
 //
-//   - [Result.HasFatal]: unrecoverable condition (I/O failure, context cancellation)
+//   - [Result.HasFatal]: an unrecoverable condition — an I/O failure, a
+//     cancellation, an internal fault, or input a reader cannot go past, such
+//     as a schema header that does not parse
 //   - [Result.HasErrors]: semantic failure represented as structured issues
 //   - [Result.OK]: success (may still include warnings/info/hints)
 //
-// Pure transformations (serialization, query generation) return (T, error).
+// A serializer that reports issues returns ([]byte, [Result]), as
+// snapshot.Marshal does. An operation that can only succeed or fail returns
+// (T, error).
 //
 // # Severity Semantics
 //
 // [Severity] is an ordered enumeration where lower values are more severe:
 //
-//   - [Fatal]: Unrecoverable condition or collection limit reached sentinel
+//   - [Fatal]: An unrecoverable condition. Reaching a collection limit marks
+//     no severity; [Result.LimitReached] reports it
 //   - [Error]: Validation failure but collection can continue
 //   - [Warning], [Info], [Hint]: Non-blocking diagnostics
 //
@@ -119,8 +126,9 @@
 //
 // The resulting group carries: "context" (the tag), an optional "code"
 // (the first error-severity issue's code), "counts" (errors and warnings),
-// and "issues" (a slice of per-issue objects matching [Issue.LogValue]'s
-// shape). See [ContextualError.LogValue] for the full attribute tree.
+// "limit_reached" and "dropped" when the result hit its issue limit, and
+// "issues" (a slice of per-issue objects matching [Issue.LogValue]'s shape).
+// See [ContextualError.LogValue] for the full attribute tree.
 //
 // At the receiving end, [AsContextualError] recovers a [*ContextualError]
 // from an arbitrarily-wrapped error. If the chain carries a
@@ -131,23 +139,24 @@
 //
 // # Dependencies
 //
-//	diag  ──imports──▶  location
+//	diag  ──imports──▶  location, golang.org/x/text/width
 //
 // It must not import schema, instance, graph, or adapter.
 //
 // # v0.3.0 Diagnostic Code Additions
 //
 // v0.3.0 adds three stable diagnostic codes under [CategorySnapshot],
-// surfaced by the new primitives in the snapshot package. They land in
-// this file ahead of the primitive PRs so every per-item PR has concrete
-// codes to reference at merge time. The W_ prefix on the warning code
-// inaugurates the convention for Warning-severity codes added from
-// v0.3.0 onward; existing Warning-severity codes retain their E_
-// identifiers for backwards compatibility.
+// raised by the snapshot package's scan and metadata primitives. The W_
+// prefix names a code whose severity is fixed at Warning; a code raised at
+// more than one severity, such as E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM, keeps
+// E_. Severity lives on the Issue, so the prefix is a convention and not a
+// guarantee: W_SNAPSHOT_UNRESOLVED_REQUIRED is raised at whatever severity
+// snapshot.WithRevalidation was given.
 //
 //	Code                              Severity  Emitted by
 //	--------------------------------  --------  -----------------------------------------------------
-//	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (per-file I/O failure on ScanEntry.Result)
+//	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (a file that fails to open, on ScanEntry.Result)
+//	                                            snapshot.ScanDirSlice (a directory that fails to read)
 //	E_UPDATE_METADATA_BODY_OFFSET     Fatal     snapshot.UpdateMetadata (body-offset tracker cannot resolve)
 //	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Load+Marshal)
 //

@@ -25,8 +25,8 @@ func canon(t *testing.T, in any, c schema.Constraint) any {
 }
 
 // TestCanonical_TimestampReachesOneSpelling covers both representations and
-// every RFC 3339 spelling that renders differently from its input, which is
-// the set §2.4's key-identity defect lives in.
+// every RFC 3339 spelling that renders differently from its input: the set in
+// which two spellings of one instant would become two keys.
 func TestCanonical_TimestampReachesOneSpelling(t *testing.T) {
 	t.Parallel()
 	bare := schema.NewTimestampConstraint()
@@ -208,7 +208,7 @@ func TestCanonical_IsIdempotent(t *testing.T) {
 	}
 }
 
-// TestCanonical_ListsCanonicalizeElementwise pins A-38's arm. A suite with
+// TestCanonical_ListsCanonicalizeElementwise pins the list arm. A suite with
 // only scalar cases cannot tell the recursion from dead code.
 func TestCanonical_ListsCanonicalizeElementwise(t *testing.T) {
 	t.Parallel()

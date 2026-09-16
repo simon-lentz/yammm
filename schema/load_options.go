@@ -19,6 +19,7 @@ type loadConfig struct {
 	logger          *slog.Logger
 	disallowImports bool
 	sourcesOnly     bool
+	sourcesOut      **Sources
 	// syntheticRootSet separates "WithSyntheticRoot not passed" from
 	// "WithSyntheticRoot passed an empty root", which is an error rather than
 	// a no-op.
@@ -41,8 +42,11 @@ func defaultLoadConfig() *loadConfig {
 // multiple Load calls is safe and efficient:
 //
 //   - Overlapping transitive imports short-circuit via the registry cache:
-//     when loadImport encounters a SourceID already registered in r, the
-//     existing *Schema pointer is reused and the import is NOT re-parsed.
+//     when loadImport encounters a SourceID already registered in r, or held
+//     inside the import closure of a schema r holds, the existing *Schema
+//     pointer is reused and the import is NOT re-parsed, whatever order the
+//     load meets its imports in. A source two schemas in r compiled from
+//     different bytes is not reused; it is read like any other import.
 //     This is where cross-Load schema caching pays off.
 //   - Re-registering the same source — the same bytes for every source both
 //     carry, the same structural hash — is a no-op (see Registry.Register); a
@@ -165,8 +169,8 @@ func WithSourcesOnly(only bool) LoadOption {
 // Keys must be relative and must not resolve to the root itself. A key that
 // escapes the root is permitted and yields a ".."-bearing identity, which stays
 // stable and distinct. Relative imports ("./x", "../x") are NOT supported under
-// a synthetic root: they resolve through the importing file's canonical path,
-// which a synthetic identity does not have, so the load reports "relative
+// a synthetic root: they resolve through the path the importing file was read
+// from, which a synthetic source does not have, so the load reports "relative
 // imports require a file-based source". [Schema.ModuleRoot] reports the
 // synthetic root, because the root is the one this load resolved imports
 // against; a schema loaded this way is a supported input to
@@ -204,4 +208,28 @@ func WithLogger(logger *slog.Logger) LoadOption {
 	return func(c *loadConfig) {
 		c.logger = logger
 	}
+}
+
+// CaptureSources stores the load's source registry in *dst when the load
+// starts, before it reads anything, so a load that fails early leaves *dst
+// holding that load's empty registry, never an earlier load's. A load that
+// fails returns a nil Schema, and Schema.Sources with it, so a caller that
+// renders excerpts for a failed load takes the sources from here. A nil dst
+// captures nothing.
+func CaptureSources(dst **Sources) LoadOption {
+	return func(c *loadConfig) {
+		c.sourcesOut = dst
+	}
+}
+
+// startCapture gives the load its source registry at the load's entry and, when
+// [CaptureSources] asked for it, stores the registry in the caller's dst.
+func (c *loadConfig) startCapture() {
+	if c.sourcesOut == nil {
+		return
+	}
+	if c.sourceRegistry == nil {
+		c.sourceRegistry = source.NewRegistry()
+	}
+	*c.sourcesOut = NewSources(c.sourceRegistry)
 }

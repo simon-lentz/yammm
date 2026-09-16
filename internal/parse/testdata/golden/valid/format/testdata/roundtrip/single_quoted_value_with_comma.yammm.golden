@@ -1,0 +1,63 @@
+{
+  "name": "\"quoted_comma\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 245,
+        "e": 246
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 257,
+              "e": 263
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 250,
+            "e": 271
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "'alpha,one'",
+              "\"beta\"",
+              "\"gamma\"",
+              "\"delta\"",
+              "\"epsilon\"",
+              "\"zeta\"",
+              "\"eta\"",
+              "\"theta\"",
+              "\"iota\""
+            ],
+            "span": {
+              "s": 280,
+              "e": 366
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 273,
+            "e": 375
+          }
+        }
+      ],
+      "span": {
+        "s": 240,
+        "e": 377
+      }
+    }
+  ]
+}

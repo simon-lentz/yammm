@@ -2,8 +2,10 @@ package path
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Builder constructs canonical instance paths for diagnostics.
@@ -22,12 +24,14 @@ func Root() Builder {
 	return Builder{}
 }
 
-// Index appends an array index segment to the path.
-//
-// Example:
+// Index appends an array index segment to the path. It panics on a negative
+// index, which [Parse] refuses to read back.
 //
 //	path.Root().Index(0).String() // returns "$[0]"
 func (b Builder) Index(i int) Builder {
+	if i < 0 {
+		panic(fmt.Sprintf("path.Builder.Index: negative index %d; Parse reads no such path", i))
+	}
 	return b.append("[" + strconv.Itoa(i) + "]")
 }
 
@@ -44,32 +48,13 @@ func (b Builder) Key(key string) Builder {
 	return b.append(formatKey(key))
 }
 
-// PK appends a primary key-based index segment to the path.
+// PK appends a primary key-based index segment, one [field=value] per field in
+// the order given; the package documentation states how each value is written.
+// The fields are not checked against a schema. It panics on a field name that
+// is not an identifier, and on a NaN or infinite float value: [Parse] reads
+// back neither.
 //
-// PK indices identify elements semantically by their primary key values
-// rather than by array position. The value types are preserved in the output:
-//
-//   - String values are quoted: [name="Alice"]
-//   - Integer values are unquoted: [id=123]
-//   - Boolean values are unquoted: [active=true]
-//   - Multiple fields produce composite keys: [region="us",studentId=12345]
-//
-// Note: The Builder does not validate that the provided PKField values
-// match any particular schema. Callers are responsible for providing
-// the correct and complete set of PK fields for the target type.
-// Incomplete PKs will produce valid path syntax but may not uniquely
-// identify an instance.
-//
-// Example:
-//
-//	path.Root().Key("Person").PK(path.PKField{Name: "id", Value: 42}).String()
-//	// returns "$.Person[id=42]"
-//
-//	path.Root().Key("Enrollment").PK(
-//	    path.PKField{Name: "region", Value: "us"},
-//	    path.PKField{Name: "studentId", Value: 12345},
-//	).String()
-//	// returns `$.Enrollment[region="us",studentId=12345]`
+//	path.Root().Key("Person").PK(path.PKField{Name: "id", Value: 42}) // $.Person[id=42]
 func (b Builder) PK(fields ...PKField) Builder {
 	if len(fields) == 0 {
 		return b
@@ -78,6 +63,12 @@ func (b Builder) PK(fields ...PKField) Builder {
 	var sb strings.Builder
 	sb.WriteByte('[')
 	for i, f := range fields {
+		if !isIdentifierSafe(f.Name) {
+			panic(fmt.Sprintf("path.Builder.PK: field name %q is not an identifier; Parse reads no such path", f.Name))
+		}
+		if !isSpellableFloat(f.Value) {
+			panic(fmt.Sprintf("path.Builder.PK: field %q holds %v, which the grammar does not spell", f.Name, f.Value))
+		}
 		if i > 0 {
 			sb.WriteByte(',')
 		}
@@ -152,8 +143,11 @@ func formatKey(key string) string {
 	return `["` + escapeString(key) + `"]`
 }
 
-// formatPKValue formats a primary key value for path output.
-// Strings are quoted, integers and booleans are unquoted.
+// formatPKValue formats a primary key value for path output. Strings are
+// quoted; integers and booleans are unquoted; a float is unquoted, with ".0"
+// appended when it has no fraction, and Parse reads it back as a float64; any
+// other value is written as the quoted, escaped text of its fmt.Sprint form,
+// which Parse reads as a string.
 func formatPKValue(v any) string {
 	switch val := v.(type) {
 	case string:
@@ -196,8 +190,21 @@ func formatPKValue(v any) string {
 		}
 		return s
 	default:
-		// Fallback: quote as string
-		return fmt.Sprintf(`"%v"`, v)
+		return `"` + escapeString(fmt.Sprint(v)) + `"`
+	}
+}
+
+// isSpellableFloat reports whether v is a value the grammar spells. A NaN or an
+// infinity is written "NaN.0" or "+Inf.0", which Parse refuses; every other
+// value formatPKValue writes reads back.
+func isSpellableFloat(v any) bool {
+	switch f := v.(type) {
+	case float32:
+		return !math.IsNaN(float64(f)) && !math.IsInf(float64(f), 0)
+	case float64:
+		return !math.IsNaN(f) && !math.IsInf(f, 0)
+	default:
+		return true
 	}
 }
 
@@ -237,17 +244,12 @@ func isDigit(r rune) bool {
 }
 
 // escapeString returns s with JSON escape sequences applied per RFC 8259.
-// Escapes: \\ \" \n \r \t \b \f and control characters.
+// Escapes: \\ \" \n \r \t \b \f and control characters. Invalid UTF-8 is
+// written as U+FFFD, the rune Parse reads it as.
 func escapeString(s string) string {
-	// Fast path: check if escaping is needed
-	needsEscape := false
-	for _, r := range s {
-		if r == '\\' || r == '"' || r == '\n' || r == '\r' || r == '\t' || r == '\b' || r == '\f' || r < 0x20 {
-			needsEscape = true
-			break
-		}
-	}
-	if !needsEscape {
+	if utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
+		return r == '\\' || r == '"' || r < 0x20
+	}) {
 		return s
 	}
 

@@ -72,9 +72,14 @@ func TestHandleDefinition_CrossSchemaImport(t *testing.T) {
 	snapshot, doc, tmpDir := buildCrossSchemaSnapshot(t)
 
 	foundationPath := filepath.Join(tmpDir, "foundation.yammm")
-	foundationSourceID, err := location.SourceIDFromAbsolutePath(foundationPath)
+	foundationSourceID, err := location.SourceIDFromPath(foundationPath)
 	require.NoError(t, err)
-	foundationURI := lsputil.PathToURI(foundationPath)
+
+	// A client URI distinct from PathToURI(foundationPath), which is what the
+	// resolver returns on a miss: mapping to it would hide the remap.
+	foundationURI := "file:///client/foundation.yammm"
+	require.NotEqual(t, lsputil.PathToURI(foundationPath), foundationURI,
+		"the mapped URI must differ from the unmapped answer, or the remap is invisible")
 
 	// Entry line 4: "type Listing extends region.Region {"
 	// Character 28 is on 'R' of 'Region'.

@@ -222,7 +222,11 @@ func (w *Workspace) AddRoot(uri string) {
 		return
 	}
 
-	canonicalPath := lsputil.CanonicalPath(path)
+	canonicalPath, err := hostPath(path)
+	if err != nil {
+		w.logger.Warn("failed to resolve workspace root", slog.String("uri", uri), slog.Any("error", err))
+		return
+	}
 
 	if slices.Contains(w.roots, canonicalPath) {
 		w.logger.Debug("workspace root already exists", slog.String("path", canonicalPath))
@@ -248,7 +252,11 @@ func (w *Workspace) RemoveRoot(uri string) {
 		return
 	}
 
-	canonicalPath := lsputil.CanonicalPath(path)
+	canonicalPath, err := hostPath(path)
+	if err != nil {
+		w.logger.Warn("failed to resolve workspace root for removal", slog.String("uri", uri), slog.Any("error", err))
+		return
+	}
 
 	lenBefore := len(w.roots)
 	w.roots = slices.DeleteFunc(w.roots, func(root string) bool {
@@ -277,8 +285,9 @@ func (w *Workspace) PositionEncoding() lsputil.PositionEncoding {
 	return w.posEncoding
 }
 
-// documentOpened handles a document being opened.
-// Resolves symlinks to compute the canonical SourceID before storing.
+// documentOpened opens a document under the identity and host path
+// [location.ResolveSourcePath] mints. A path the resolver refuses is opened with
+// no identity, so its analysis reports the refusal.
 func (w *Workspace) documentOpened(uri string, version int, text string) {
 	path, err := lsputil.URIToPath(uri)
 	if err != nil {
@@ -290,22 +299,21 @@ func (w *Workspace) documentOpened(uri string, version int, text string) {
 		return
 	}
 
-	canonicalPath := lsputil.CanonicalPath(path)
-
-	sourceID, err := location.SourceIDFromAbsolutePath(canonicalPath)
+	// A path that can never name a file is still opened with no identity, so
+	// its analysis reports the refusal and no other load receives it as an overlay.
+	sourceID, canonicalPath, err := location.ResolveSourcePath(path)
 	if err != nil {
 		w.logger.Warn(
 			"failed to create source ID",
-			slog.String("path", canonicalPath),
+			slog.String("path", path),
 			slog.Any("error", err),
 		)
-		return
 	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.docs.OpenDocument(uri, sourceID, version, text)
+	w.docs.OpenDocument(uri, sourceID, canonicalPath, version, text)
 
 	// Invalidate canonical-to-URI cache (new document may map to a canonical path)
 	w.mapper.invalidateCache()
@@ -369,17 +377,6 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 	// This intentionally bypasses GetSnapshot to avoid copying LineState
 	// and Text into a Snapshot that would be immediately discarded — we
 	// only need the version number and the overlay map here.
-	w.mu.RLock()
-	doc, ok := w.docs.Open[uri]
-	if !ok {
-		w.mu.RUnlock()
-		return
-	}
-
-	overlays := w.docs.CollectOverlays()
-	entryVersion := doc.Version
-	w.mu.RUnlock()
-
 	path, err := lsputil.URIToPath(uri)
 	if err != nil {
 		w.logger.Warn(
@@ -390,14 +387,37 @@ func (w *Workspace) analyzeAndPublish(analyzeCtx context.Context, uri string) {
 		return
 	}
 
-	canonicalPath := lsputil.CanonicalPath(path)
+	// One resolution names the entry and its overlay key, so a link retargeted
+	// since the document opened is analysed as the file it names now.
+	sourceID, canonicalPath, resolveErr := location.ResolveSourcePath(path)
+	w.mu.Lock()
+	doc, ok := w.docs.Open[uri]
+	if !ok {
+		w.mu.Unlock()
+		return
+	}
+	if resolveErr == nil && (doc.SourceID != sourceID || doc.HostPath != canonicalPath) {
+		doc.SourceID, doc.HostPath = sourceID, canonicalPath
+		w.mapper.invalidateCache()
+	}
+	overlays := w.docs.CollectOverlays()
+	entryVersion := doc.Version
+	w.mu.Unlock()
 
 	// The root is resolved before the analyzer is called: the analyzer takes
-	// a root as an argument and never discovers one. A discovery failure is a
-	// document diagnostic rather than a dropped analysis — the editor says
-	// what the CLI says, because schema.ModuleRootIssue builds it for both.
+	// a root as an argument and never discovers one. A path that cannot be
+	// resolved, like a discovery failure, is a document diagnostic rather than a
+	// dropped analysis — the editor says what the CLI says, because
+	// schema.ModuleRootIssue builds it for both.
 	var snapshot *analysis.Snapshot
-	moduleRoot, rootErr := w.FindModuleRoot(canonicalPath)
+	var moduleRoot string
+	var rootErr error
+	if resolveErr != nil {
+		rootErr = fmt.Errorf("resolve %q: %w", path, resolveErr)
+		canonicalPath = path
+	} else {
+		moduleRoot, rootErr = w.FindModuleRoot(canonicalPath)
+	}
 	if rootErr != nil {
 		result := diag.NewCollectorUnlimited()
 		result.Collect(schema.ModuleRootIssue(rootErr))
@@ -475,8 +495,7 @@ func (w *Workspace) FileChanged(uri string, changeType protocol.UInteger) {
 
 	canonicalURI := uri
 	if path, err := lsputil.URIToPath(uri); err == nil {
-		path = lsputil.CanonicalPath(path)
-		if sourceID, err := location.SourceIDFromAbsolutePath(path); err == nil {
+		if sourceID, err := location.SourceIDFromPath(path); err == nil {
 			canonicalURI = lsputil.PathToURI(sourceID.String())
 		}
 	}

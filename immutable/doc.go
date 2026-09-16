@@ -86,10 +86,42 @@
 // same scope). Use WithClone(true) when the value comes from external sources, is
 // shared, or when ownership cannot be verified.
 //
-// Note: cloning reaches only what is stored as-is. Struct values and pointer
-// values are stored as-is on every path and are never cloned. For full
-// isolation of struct-based data, do not mutate the original after Wrap, or
-// pass a map/slice representation of the data.
+// Note: cloning reaches only what is stored as-is. Struct values, pointer
+// values and arrays are stored as-is on every path and are never cloned. For
+// full isolation of struct-based data, do not mutate the original after Wrap,
+// or pass a map/slice representation of the data.
+//
+// # Arrays
+//
+// An array is stored as it is, not wrapped as a [Slice]. An array is how this
+// library spells a scalar carrier rather than a list — uuid.UUID is [16]byte —
+// so wrapping one as a Slice would turn a single UUID into sixteen byte values.
+// No decoder here produces an array for a list position.
+//
+// # Wrapping a wrapper
+//
+// A constructor given one of this package's own wrappers adopts it rather than
+// storing it as an opaque struct. A [Value] contributes its content, so no
+// Value ever holds a Value; a [Map], [Slice], [Properties] or [Key] is already
+// immutable and is stored as itself. What reads such a value — [Value.IsNil], a
+// Clone, a [Key]'s canonical string — reads the content rather than an empty
+// struct, at every depth: a container reached through a map stored as given is
+// read through too. An adopted [Value] is taken as it is, so [WithClone] does
+// not reach it: a map the earlier constructor stored as-is is still shared with
+// its original. A pointer to a wrapper is a pointer, and is stored as it is.
+//
+// # Cyclic values
+//
+// A map or slice that refers to itself is refused with a panic, which a caller
+// can recover from; a cycle closed through a pointer or a struct field is stored
+// as given and never walked. A map with non-string keys is stored as it is; the
+// default wrap does not walk it, so a cycle inside one is refused only when
+// something does: [WithClone] and [WrapKey] at construction, or a Clone
+// afterwards. The walk counts its depth and, past the point where real data
+// stops nesting, records the maps and slices on its path — the shape
+// encoding/json uses, so an ordinary value pays a counter and nothing more.
+// Without it such a value exhausts the stack, and a fatal runtime error is not
+// something a caller can contain.
 //
 // # Nil Semantics
 //
@@ -97,10 +129,11 @@
 //   - Literal nil passed to [Wrap]
 //   - Typed nil pointers, channels, functions, interfaces
 //   - Nil maps and slices
+//   - A nil [Map], [Slice], [Properties] or [Key] a constructor adopted
 //
-// When wrapping nil maps or slices, the resulting Value still identifies as a
-// [Map] or [Slice] via [Value.Map] and [Value.Slice], allowing callers to distinguish
-// nil-typed values from literal nil:
+// A nil string-keyed map or a nil slice is still wrapped as a [Map] or [Slice],
+// so [Value.Map] or [Value.Slice] reports true, which tells a nil-typed value
+// from literal nil:
 //
 //	var m map[string]any // nil map
 //	v := immutable.Wrap(m)
@@ -113,11 +146,16 @@
 //	v.IsNil()     // true (literal nil)
 //	v.Map()       // (zero Map, false) - NOT a map
 //
+// A nil map with non-string keys is stored as that typed nil: IsNil reports
+// true, [Value.Map] reports false, and [Value.Unwrap] returns the typed nil.
+//
 // # Thread Safety
 //
-// All immutable types are safe for concurrent read access. The underlying data
-// structures are never modified after construction. Multiple goroutines can
-// simultaneously call Get, Iter, Keys, Range, and other read methods.
+// All immutable types are safe for concurrent read access. Their entries never
+// change after construction. A string-keyed [Map] computes its sorted keys and
+// case-folded index once, on the first [PropertiesOf], under a sync.Once, so
+// concurrent first use is safe too. Multiple goroutines can simultaneously call
+// Get, Iter, Keys, Range, and other read methods.
 //
 // # Performance Characteristics
 //
@@ -126,7 +164,7 @@
 // | Wrap(primitive) | O(1), no allocation | Primitives stored directly |
 // | Wrap(map) | O(n) | Iterates map once to wrap values |
 // | Wrap(slice) | O(n) | Iterates slice once to wrap elements |
-// | Wrap(any, WithClone(true)) | O(n) deep | Clones non-string-keyed maps recursively; structs/pointers stored as-is |
+// | Wrap(any, WithClone(true)) | O(n) deep | Clones non-string-keyed maps recursively, a wrapper inside one to its content; other structs and pointers stored as-is |
 // | Get(key) / Get(i) | O(1) | Map/slice lookup |
 // | Keys() / Iter() | O(1) start | Iterator creation is cheap |
 // | Clone() | O(n) deep | Full recursive clone for escape hatch |

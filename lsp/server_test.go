@@ -1,6 +1,7 @@
 package lsp_test
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/location"
 	lsp "github.com/simon-lentz/yammm/lsp"
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
@@ -117,14 +119,15 @@ func TestServer_WorkspaceCreated(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := lsp.NewServer(logger, lsp.Config{ModuleRoot: "/test"})
+	configured := yammmtest.HostAbs("/test")
+	server := lsp.NewServer(logger, lsp.Config{ModuleRoot: configured})
 
 	require.NotNil(t, server.Workspace())
 
 	// The workspace should inherit the config's module root
-	root, err := server.Workspace().FindModuleRoot("/any/path/file.yammm")
+	root, err := server.Workspace().FindModuleRoot(yammmtest.HostAbs("/any/path/file.yammm"))
 	require.NoError(t, err)
-	assert.Equal(t, "/test", root)
+	assert.Equal(t, configured, root)
 }
 
 func TestIntegration_InitializeSuccess(t *testing.T) {
@@ -1405,4 +1408,51 @@ func TestIntegration_FulltextAnnotationsAnalyzeClean(t *testing.T) {
 		h.Sync()
 		return len(h.Diagnostics(uri)) > 0
 	}, analysisTimeout, 10*time.Millisecond, "an ineligible @fulltext target should produce a diagnostic")
+}
+
+// TestConfigValidate_SpellsModuleRootAsTheLoaderDoes pins that Validate hands
+// the workspace the root the loader discovers for one directory, whatever
+// spelling the operator typed: a symlink, a ".." element, a temp directory
+// under a linked prefix.
+func TestConfigValidate_SpellsModuleRootAsTheLoaderDoes(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	root := filepath.Join(base, "real")
+	if err := os.MkdirAll(filepath.Join(root, "lib"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, schema.ModuleRootMarker), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	typed := root
+	if link := filepath.Join(base, "link"); os.Symlink(root, link) == nil {
+		typed = link
+	}
+	sep := string(filepath.Separator)
+	typed += sep + "lib" + sep + ".."
+
+	want, found, err := schema.FindModuleRoot(filepath.Join(root, "lib"))
+	if err != nil || !found {
+		t.Fatalf("schema.FindModuleRoot = (%q, %v, %v)", want, found, err)
+	}
+
+	cfg := lsp.Config{ModuleRoot: typed}
+	if err := cfg.Validate(slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("Validate(%q): %v", typed, err)
+	}
+	if cfg.ModuleRoot != want {
+		t.Errorf("Validate spelled the module root %q as %q, want the loader's %q", typed, cfg.ModuleRoot, want)
+	}
+}
+
+func TestConfigValidate_RefusesARootThatCanNeverNameADirectory(t *testing.T) {
+	t.Parallel()
+
+	typed := filepath.Join(t.TempDir(), "\xff")
+	cfg := lsp.Config{ModuleRoot: typed}
+	err := cfg.Validate(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if !errors.Is(err, location.ErrInvalidUTF8Path) {
+		t.Errorf("Validate(%q) = %v, want %v", typed, err, location.ErrInvalidUTF8Path)
+	}
 }

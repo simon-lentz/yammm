@@ -3,6 +3,7 @@ package workspace
 import (
 	"path/filepath"
 
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/lsp/internal/analysis"
@@ -51,7 +52,7 @@ func (m *uriMapper) ensureCache(open map[string]*docstate.Document) map[string]s
 // buildCanonicalToURIMap builds a mapping from canonical (symlink-resolved)
 // paths to the URIs used by clients to open documents.
 //
-// This is needed because the schema loader resolves symlinks (via makeCanonicalPath),
+// This is needed because the schema loader resolves symlinks (through location.ResolveHostPath),
 // so diagnostics reference canonical paths. But clients identify documents by the
 // URI they used to open them, which may be a symlink path. This mapping allows
 // us to translate diagnostic URIs back to client-expected URIs.
@@ -74,19 +75,13 @@ func (m *uriMapper) buildCanonicalToURIMap(open map[string]*docstate.Document) m
 				continue
 			}
 
-			// Resolve symlinks to get the canonical path (matching loader behavior).
-			// filepath.EvalSymlinks also cleans the path.
-			resolved, err := filepath.EvalSymlinks(path)
-			if err != nil {
-				// If symlink resolution fails (broken symlink, permissions, etc.),
-				// fall back to the cleaned path. This ensures we still have a mapping
-				// even when EvalSymlinks fails.
-				canonical = filepath.Clean(path)
+			// A path the resolver refuses has no identity, and its diagnostics carry
+			// the path its URI decodes to.
+			if id, err := location.SourceIDFromPath(path); err == nil {
+				canonical = id.String()
 			} else {
-				canonical = resolved
+				canonical = filepath.ToSlash(path)
 			}
-			// Convert to forward slashes to match SourceID.String() format
-			canonical = filepath.ToSlash(canonical)
 		}
 
 		// For determinism when multiple URIs resolve to the same canonical path,
@@ -231,8 +226,8 @@ func (m *uriMapper) remapPathToURI(input string, open map[string]*docstate.Docum
 		return docURI
 	}
 
-	if resolved, err := filepath.EvalSymlinks(rawPath); err == nil {
-		canonicalPath := filepath.ToSlash(filepath.Clean(resolved))
+	if id, err := location.SourceIDFromPath(rawPath); err == nil {
+		canonicalPath := id.String()
 		if canonicalPath != cleanedPath {
 			if docURI, ok := cache[canonicalPath]; ok {
 				return docURI

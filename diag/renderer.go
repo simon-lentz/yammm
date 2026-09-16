@@ -4,9 +4,19 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	"unicode"
+
+	"golang.org/x/text/width"
 
 	"github.com/simon-lentz/yammm/location"
+)
+
+// An excerpt shows at most excerptCols runes of its source line. A longer line
+// is cut to a window that holds the span's start, and each cut end is marked
+// with excerptEllipsis.
+const (
+	excerptCols     = 120
+	excerptEllipsis = "..."
 )
 
 // SourceProvider provides source content for excerpt rendering.
@@ -21,13 +31,11 @@ type SourceProvider interface {
 
 // rendererConfig holds renderer configuration.
 type rendererConfig struct {
-	provider            SourceProvider
-	excerpts            bool
-	maxCols             int
-	moduleRoot          string
-	colorize            bool
-	distinguishFatal    bool
-	truncationIndicator string
+	provider         SourceProvider
+	excerpts         bool
+	moduleRoot       string
+	colorize         bool
+	distinguishFatal bool
 }
 
 // Option configures Renderer behavior.
@@ -53,10 +61,11 @@ func WithExcerpts(on bool) Option {
 	}
 }
 
-// WithModuleRoot sets the module root for path relativization.
-//
-// When set, absolute paths that start with this root are displayed
-// relative to the root for cleaner output.
+// WithModuleRoot sets the root that text locations are written relative to.
+// root is a host path; the renderer turns it into an identity once, by the
+// rule [location.NewCanonicalPath] follows, and writes a file-backed source
+// under it relative to it ([location.SourceID.RelativeTo]). JSON output keeps
+// each source's identity.
 func WithModuleRoot(root string) Option {
 	return func(c *rendererConfig) {
 		c.moduleRoot = root
@@ -85,35 +94,23 @@ func WithDistinguishFatal(distinguish bool) Option {
 //
 // Create with [NewRenderer] and configure with [Option] functions.
 type Renderer struct {
-	provider            SourceProvider
-	excerpts            bool
-	maxCols             int
-	moduleRoot          string
-	colorize            bool
-	distinguishFatal    bool
-	truncationIndicator string
+	cfg  rendererConfig
+	root location.CanonicalPath // the module root as an identity; zero when unset or unresolvable
 }
 
 // NewRenderer creates a renderer with the given options.
 func NewRenderer(opts ...Option) *Renderer {
-	cfg := &rendererConfig{
-		maxCols:             120,
-		truncationIndicator: "...",
-	}
-
+	var cfg rendererConfig
 	for _, opt := range opts {
-		opt(cfg)
+		opt(&cfg)
 	}
-
-	return &Renderer{
-		provider:            cfg.provider,
-		excerpts:            cfg.excerpts,
-		maxCols:             cfg.maxCols,
-		moduleRoot:          cfg.moduleRoot,
-		colorize:            cfg.colorize,
-		distinguishFatal:    cfg.distinguishFatal,
-		truncationIndicator: cfg.truncationIndicator,
+	r := &Renderer{cfg: cfg}
+	if cfg.moduleRoot != "" {
+		if root, err := location.NewCanonicalPath(cfg.moduleRoot); err == nil {
+			r.root = root
+		}
 	}
+	return r
 }
 
 // FormatResult formats all issues in a result as text.
@@ -131,11 +128,13 @@ func (r *Renderer) FormatResult(res Result) string {
 }
 
 func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
-	// Location prefix
-	r.writeLocation(sb, issue)
+	// Location prefix; an issue with no location has none, as in JSON.
+	if loc := r.location(issue); loc != "" {
+		sb.WriteString(loc)
+		sb.WriteString(": ")
+	}
 
 	// Severity and code
-	sb.WriteString(": ")
 	r.writeSeverity(sb, issue.Severity())
 	sb.WriteString("[")
 	sb.WriteString(issue.Code().String())
@@ -151,7 +150,7 @@ func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
 	}
 
 	// Source excerpt
-	if r.excerpts && r.provider != nil && issue.HasSpan() {
+	if r.cfg.excerpts && r.cfg.provider != nil && issue.HasSpan() {
 		r.writeExcerpt(sb, issue)
 	}
 
@@ -166,39 +165,30 @@ func (r *Renderer) formatIssueToBuilder(sb *strings.Builder, issue Issue) {
 	}
 }
 
-func (r *Renderer) writeLocation(sb *strings.Builder, issue Issue) {
+// location renders where an issue is: its span then its instance path, else
+// its path after its source name, else its source name, else nothing. The span
+// locates the record and the path the field; the source name names the span's
+// document, so it is not repeated beside one.
+func (r *Renderer) location(issue Issue) string {
 	switch {
+	case issue.HasSpan() && issue.Path() != "":
+		return r.formatSpanLocation(issue.Span()) + " " + issue.Path()
 	case issue.HasSpan():
-		sb.WriteString(r.formatSpanLocation(issue.Span()))
+		return r.formatSpanLocation(issue.Span())
+	case issue.Path() != "" && issue.SourceName() != "":
+		return issue.SourceName() + " " + issue.Path()
 	case issue.Path() != "":
-		if issue.SourceName() != "" {
-			sb.WriteString(issue.SourceName())
-			sb.WriteString(" ")
-		}
-		sb.WriteString(issue.Path())
-	case issue.SourceName() != "":
-		// File-level provenance without specific path
-		sb.WriteString(issue.SourceName())
+		return issue.Path()
 	default:
-		sb.WriteString("<unknown>")
+		return issue.SourceName()
 	}
 }
 
 func (r *Renderer) formatSpanLocation(span location.Span) string {
 	source := span.Source.String()
-
-	// Relativize path if module root is set.
-	// Uses string manipulation rather than filepath.Rel because:
-	// - SourceID.String() always returns forward-slash paths (CanonicalPath invariant)
-	// - filepath.Rel would emit backslashes on Windows, breaking the invariant
-	if root := strings.TrimSuffix(r.moduleRoot, "/"); root != "" {
-		if source == root {
-			source = "."
-		} else if rel, ok := strings.CutPrefix(source, root+"/"); ok {
-			source = rel
-		}
+	if rel, ok := span.Source.RelativeTo(r.root); ok {
+		source = rel
 	}
-
 	if span.Start.IsKnown() {
 		return fmt.Sprintf("%s:%d:%d", source, span.Start.Line, span.Start.Column)
 	}
@@ -209,11 +199,11 @@ func (r *Renderer) writeSeverity(sb *strings.Builder, sev Severity) {
 	label := sev.String()
 
 	// Map Fatal to "error" unless distinguishFatal is set
-	if sev == Fatal && !r.distinguishFatal {
+	if sev == Fatal && !r.cfg.distinguishFatal {
 		label = "error"
 	}
 
-	if r.colorize {
+	if r.cfg.colorize {
 		//exhaustive:enforce
 		switch sev {
 		case Fatal, Error:
@@ -240,119 +230,165 @@ func (r *Renderer) writeSeverity(sb *strings.Builder, sev Severity) {
 	}
 }
 
+// writeExcerpt writes the span's first line under a gutter and marks the span
+// under it, in terminal columns (see [runeCols] and [blankUnder]). A span that
+// runs onto later lines is marked to the end of its first line.
 func (r *Renderer) writeExcerpt(sb *strings.Builder, issue Issue) {
 	span := issue.Span()
 	if !span.Start.IsKnown() {
 		return
 	}
-
-	content, ok := r.provider.Content(span)
+	content, ok := r.cfg.provider.Content(span)
 	if !ok {
 		return
 	}
-
-	// Find the line containing the start of the span
-	line := r.extractLine(content, span.Start.Line)
-	if line == "" {
+	text, ok := extractLine(content, span.Start.Line)
+	if !ok {
 		return
 	}
-
-	// Truncate long lines
-	displayLine := line
-	if r.maxCols > 0 && utf8.RuneCountInString(line) > r.maxCols {
-		runes := []rune(line)
-		displayLine = string(runes[:r.maxCols]) + r.truncationIndicator
+	line := []rune(text)
+	for i, c := range line {
+		line[i] = shownRune(c)
 	}
 
-	// Format the excerpt
-	lineNum := strconv.Itoa(span.Start.Line)
-	padding := strings.Repeat(" ", len(lineNum))
-
-	sb.WriteString("\n   ")
-	sb.WriteString(padding)
-	sb.WriteString("|\n")
-
-	sb.WriteString(lineNum)
-	sb.WriteString(" | ")
-	sb.WriteString(displayLine)
-	sb.WriteString("\n")
-
-	// Underline
-	sb.WriteString("   ")
-	sb.WriteString(padding)
-	sb.WriteString("| ")
-
-	// Calculate underline position (rune-based column)
-	startCol := max(span.Start.Column, 1)
-
-	// Calculate display width - use original line length for multi-line clamp,
-	// but cap underline to truncated display width.
-	lineRuneCount := utf8.RuneCountInString(line)
-	displayRuneCount := utf8.RuneCountInString(displayLine)
-
-	// Cap startCol to displayed width; if beyond display, skip underline
-	if startCol > displayRuneCount {
+	// Rune indexes. start may equal len(line): the column one past the last
+	// rune is where an end-of-line diagnostic points.
+	start := span.Start.Column - 1
+	if start > len(line) {
 		return
 	}
-
-	// Add spaces before the underline
-	sb.WriteString(strings.Repeat(" ", startCol-1))
-
-	// Calculate underline length, clamping to line boundaries
-	endCol := span.End.Column
-	if span.IsPoint() || endCol <= startCol {
-		endCol = startCol + 1
+	end := start + 1
+	switch {
+	case span.End.Line > span.Start.Line:
+		end = len(line)
+	case span.End.Line == span.Start.Line && span.End.Column-1 > start:
+		end = span.End.Column - 1
 	}
 
-	// Clamp endCol to line length for multi-line spans
-	if endCol > lineRuneCount+1 {
-		endCol = lineRuneCount + 1
+	lo, hi := 0, len(line)
+	if len(line) > excerptCols {
+		lo = min(max(0, start-excerptCols/4), len(line)-excerptCols)
+		hi = lo + excerptCols
 	}
 
-	// Clamp endCol to displayed width after truncation
-	if endCol > displayRuneCount+1 {
-		endCol = displayRuneCount + 1
+	var shown, marks strings.Builder
+	if lo > 0 {
+		shown.WriteString(excerptEllipsis)
+		marks.WriteString(strings.Repeat(" ", len(excerptEllipsis)))
 	}
+	shown.WriteString(string(line[lo:hi]))
+	if hi < len(line) {
+		shown.WriteString(excerptEllipsis)
+	}
+	for _, c := range line[lo:start] {
+		marks.WriteString(blankUnder(c))
+	}
+	// A tab inside the span is copied, as before it, so the marks end where the
+	// terminal draws the span's end.
+	var under strings.Builder
+	carets := 0
+	for _, c := range line[start:max(start, min(end, hi))] {
+		if c == '\t' {
+			under.WriteByte('\t')
+			continue
+		}
+		carets += runeCols(c)
+		under.WriteString(strings.Repeat("^", runeCols(c)))
+	}
+	if carets == 0 {
+		under.Reset()
+		under.WriteString("^")
+	}
+	marks.WriteString(under.String())
 
-	underlineLen := max(endCol-startCol, 1)
-	sb.WriteString(strings.Repeat("^", underlineLen))
+	num := strconv.Itoa(span.Start.Line)
+	gutter := strings.Repeat(" ", len(num))
+	sb.WriteString("\n" + gutter + " |\n")
+	sb.WriteString(num + " | " + shown.String() + "\n")
+	sb.WriteString(gutter + " | " + marks.String())
 }
 
-// extractLine extracts the nth line (1-based) from content.
-func (r *Renderer) extractLine(content []byte, lineNum int) string {
-	if lineNum < 1 {
-		return ""
+// blankUnder returns what sits under c in the mark row: the tab itself, so a
+// terminal expands both alike, or one space per column c takes.
+func blankUnder(c rune) string {
+	if c == '\t' {
+		return "\t"
 	}
+	return strings.Repeat(" ", runeCols(c))
+}
 
-	currentLine := 1
-	start := 0
+// runeCols returns the terminal columns c takes, by wcwidth's rule: none for a
+// combining mark, a format character other than the soft hyphen, or a
+// conjoining Hangul vowel or final consonant; two for an East Asian wide or
+// fullwidth rune; one otherwise.
+func runeCols(c rune) int {
+	if unicode.In(c, unicode.Mn, unicode.Me, unicode.Cf) && c != 0xad || isConjoiningJamo(c) {
+		return 0
+	}
+	switch width.LookupRune(c).Kind() {
+	case width.EastAsianWide, width.EastAsianFullwidth:
+		return 2
+	default:
+		return 1
+	}
+}
 
+// isConjoiningJamo reports whether c is a Hangul medial vowel or final consonant,
+// which a terminal draws inside the preceding syllable's cell.
+func isConjoiningJamo(c rune) bool {
+	return c >= 0x1160 && c <= 0x11ff || c >= 0xd7b0 && c <= 0xd7ff
+}
+
+// shownRune returns what an excerpt prints for c: a C0 control other than a tab
+// as its Control Pictures glyph, DEL as U+2421, and a C1 control or a
+// bidirectional override or isolate as U+FFFD, so no source byte can act on the
+// terminal the excerpt is written to.
+func shownRune(c rune) rune {
+	switch {
+	case c == '\t':
+		return c
+	case c < 0x20:
+		return 0x2400 + c
+	case c == 0x7f:
+		return 0x2421
+	case c >= 0x80 && c < 0xa0, isBidiControl(c):
+		return unicode.ReplacementChar
+	default:
+		return c
+	}
+}
+
+// isBidiControl reports whether c is a bidirectional mark, embedding, override or
+// isolate, which reorders how a terminal draws the text after it.
+func isBidiControl(c rune) bool {
+	return c == 0x61c || c == 0x200e || c == 0x200f || c >= 0x202a && c <= 0x202e || c >= 0x2066 && c <= 0x2069
+}
+
+// extractLine returns the nth line (1-based) of content without its line
+// ending, and whether content has that line. "\n", "\r\n" and "\r" each end a
+// line. The empty line after a final line ending exists, so a position at the
+// end of input has a line to show.
+func extractLine(content []byte, n int) (string, bool) {
+	if n < 1 {
+		return "", false
+	}
+	line, start := 1, 0
 	for i := 0; i < len(content); i++ {
-		if currentLine == lineNum {
-			// Found the start of the target line
-			end := i
-			for end < len(content) && content[end] != '\n' && content[end] != '\r' {
-				end++
-			}
-			return string(content[i:end])
+		c := content[i]
+		if c != '\n' && c != '\r' {
+			continue
 		}
-		switch content[i] {
-		case '\n':
-			currentLine++
-			start = i + 1
-		case '\r':
-			currentLine++
-			if i+1 < len(content) && content[i+1] == '\n' {
-				i++ // Skip \n after \r
-			}
-			start = i + 1
+		if line == n {
+			return string(content[start:i]), true
 		}
+		if c == '\r' && i+1 < len(content) && content[i+1] == '\n' {
+			i++
+		}
+		line++
+		start = i + 1
 	}
-
-	// Handle last line without newline
-	if currentLine == lineNum && start < len(content) {
-		return string(content[start:])
+	if line == n {
+		return string(content[start:]), true
 	}
-
-	return ""
+	return "", false
 }

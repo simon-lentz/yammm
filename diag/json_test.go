@@ -201,9 +201,9 @@ func TestFormatIssueJSON_ByteOffsetEncoding(t *testing.T) {
 // TestFormatIssueJSON_UnknownPosition verifies behavior when a span
 // has a known source but unknown positions.
 //
-// This scenario occurs with TrackLocations=false in JSON adapters. Unknown
-// positions use UnknownPosition() which sets Byte=-1, causing the byte field
-// to be correctly omitted from JSON output
+// A span that names its source but no position is built with
+// UnknownPosition, whose Byte is -1, so the byte field is omitted from JSON
+// output.
 func TestFormatIssueJSON_UnknownPosition(t *testing.T) {
 	source := location.MustNewSourceID("test://file.json")
 
@@ -500,6 +500,10 @@ func TestFormatResultJSON_WithLimit(t *testing.T) {
 	if parsed["droppedCount"] != float64(2) {
 		t.Errorf("droppedCount = %v; want 2", parsed["droppedCount"])
 	}
+	// A cap is the collector's setting, not a fact the result carries.
+	if limit, exists := parsed["limit"]; exists {
+		t.Errorf("the wire carries limit = %v; want no limit key", limit)
+	}
 }
 
 func TestFormatIssueJSON_CompleteIssue(t *testing.T) {
@@ -578,6 +582,11 @@ func TestJSON_RoundTrip(t *testing.T) {
 	var parsed issueWire
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
+	}
+	// A wire that lost the span would still re-marshal to itself.
+	if s := parsed.Span; s == nil || s.Source != source.String() || s.Start.Line != 1 || s.Start.Column != 1 ||
+		s.End.Column != 10 || s.End.Byte == nil || *s.End.Byte != 9 {
+		t.Errorf("the wire does not carry the issue's span: %s", data)
 	}
 
 	data2, err := json.Marshal(parsed)

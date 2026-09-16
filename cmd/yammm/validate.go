@@ -27,7 +27,7 @@ func runValidate(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) er
 		return cli.Usagef("resolve path %q: %v", path, err)
 	}
 
-	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}

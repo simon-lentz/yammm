@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 	"github.com/simon-lentz/yammm/lsp/internal/testutil"
 
@@ -41,9 +43,10 @@ func TestURIToPath_Valid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := lsputil.URIToPath(tt.uri)
-			require.NoError(t, err, "lsputil.URIToPath(%q)", tt.uri)
-			assert.Equal(t, tt.want, got, "lsputil.URIToPath(%q)", tt.uri)
+			uri := yammmtest.FileURI(strings.TrimPrefix(tt.uri, "file://"))
+			got, err := lsputil.URIToPath(uri)
+			require.NoError(t, err, "lsputil.URIToPath(%q)", uri)
+			assert.Equal(t, yammmtest.HostAbs(tt.want), got, "lsputil.URIToPath(%q)", uri)
 		})
 	}
 }
@@ -94,8 +97,9 @@ func TestPathToURI_Absolute(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := lsputil.PathToURI(tt.path)
-			assert.Equal(t, tt.want, got, "lsputil.PathToURI(%q)", tt.path)
+			path := yammmtest.HostAbs(tt.path)
+			got := lsputil.PathToURI(path)
+			assert.Equal(t, yammmtest.FileURI(strings.TrimPrefix(tt.want, "file://")), got, "lsputil.PathToURI(%q)", path)
 		})
 	}
 }
@@ -112,10 +116,11 @@ func TestURIPathRoundtrip(t *testing.T) {
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			t.Parallel()
-			uri := lsputil.PathToURI(path)
+			host := yammmtest.HostAbs(path)
+			uri := lsputil.PathToURI(host)
 			got, err := lsputil.URIToPath(uri)
-			require.NoError(t, err, "lsputil.URIToPath(lsputil.PathToURI(%q))", path)
-			assert.Equal(t, path, got, "roundtrip(%q)", path)
+			require.NoError(t, err, "lsputil.URIToPath(lsputil.PathToURI(%q))", host)
+			assert.Equal(t, host, got, "roundtrip(%q)", host)
 		})
 	}
 }
@@ -137,15 +142,15 @@ func TestWorkspace_AddRoot(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
-	ws.AddRoot("file:///project/one")
-	ws.AddRoot("file:///project/two")
+	ws.AddRoot(yammmtest.FileURI("/project/one"))
+	ws.AddRoot(yammmtest.FileURI("/project/two"))
 
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
 	require.Len(t, ws.roots, 2)
-	assert.Equal(t, "/project/one", ws.roots[0])
-	assert.Equal(t, "/project/two", ws.roots[1])
+	assert.Equal(t, yammmtest.HostAbs("/project/one"), ws.roots[0])
+	assert.Equal(t, yammmtest.HostAbs("/project/two"), ws.roots[1])
 }
 
 func TestWorkspace_AddRoot_InvalidURI(t *testing.T) {
@@ -176,9 +181,7 @@ func TestWorkspace_AddRoot_SymlinkResolution(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve real dir to canonical form (handles /var -> /private/var on macOS)
-	canonicalRealDir, err := filepath.EvalSymlinks(realDir)
-	require.NoError(t, err, "failed to resolve real dir")
+	canonicalRealDir := mustDiskSpelling(t, realDir)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
@@ -201,13 +204,13 @@ func TestWorkspace_RemoveRoot(t *testing.T) {
 	t.Run("removes existing root", func(t *testing.T) {
 		t.Parallel()
 		ws := newTestWorkspace(t, nil, Config{})
-		ws.AddRoot("file:///project/one")
-		ws.AddRoot("file:///project/two")
-		ws.RemoveRoot("file:///project/one")
+		ws.AddRoot(yammmtest.FileURI("/project/one"))
+		ws.AddRoot(yammmtest.FileURI("/project/two"))
+		ws.RemoveRoot(yammmtest.FileURI("/project/one"))
 		ws.mu.RLock()
 		defer ws.mu.RUnlock()
 		require.Len(t, ws.roots, 1)
-		assert.Equal(t, "/project/two", ws.roots[0])
+		assert.Equal(t, yammmtest.HostAbs("/project/two"), ws.roots[0])
 	})
 
 	t.Run("removing non-existent root is no-op", func(t *testing.T) {
@@ -249,8 +252,11 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 	realProject := tmpDir + "/real/project"
 	require.NoError(t, os.MkdirAll(realProject, 0o750), "failed to create real project dir")
 
-	// Create a file in the real project
-	realFile := realProject + "/schema.yammm"
+	// One level down: a file directly in the project makes FindModuleRoot's
+	// fallback to its own directory equal the root, hiding a missed match.
+	realSub := realProject + "/sub"
+	require.NoError(t, os.MkdirAll(realSub, 0o750), "failed to create sub dir")
+	realFile := realSub + "/schema.yammm"
 	require.NoError(t, os.WriteFile(realFile, []byte("content"), 0o600), "failed to create file")
 
 	linkProject := tmpDir + "/link"
@@ -258,9 +264,7 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve to canonical form (handles /var -> /private/var on macOS)
-	canonicalProject, err := filepath.EvalSymlinks(realProject)
-	require.NoError(t, err, "failed to resolve project dir")
+	canonicalProject := mustDiskSpelling(t, realProject)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
@@ -269,11 +273,10 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 	ws.AddRoot(lsputil.PathToURI(canonicalProject))
 
 	// File path via symlink should still match (after canonicalization)
-	symlinkFilePath := linkProject + "/schema.yammm"
+	symlinkFilePath := linkProject + "/sub/schema.yammm"
 
-	// Canonicalize the file path as analyzeAndPublish would
-	canonicalFilePath, err := filepath.EvalSymlinks(symlinkFilePath)
-	require.NoError(t, err, "failed to resolve symlink file path")
+	// Canonicalize the file path as analyzeAndPublish does
+	canonicalFilePath := mustHostPath(t, symlinkFilePath)
 
 	got := mustFindRoot(t, ws, canonicalFilePath)
 	assert.Equal(t, canonicalProject, got, "FindModuleRoot(%q)", canonicalFilePath)
@@ -285,15 +288,16 @@ func TestWorkspace_FindModuleRoot_NonExistentRoot(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
-	// Add a root that doesn't exist (symlink resolution will fail, falls back to raw)
-	ws.AddRoot("file:///nonexistent/project")
+	// A root that does not exist resolves to its existing ancestor's spelling with
+	// the missing tail kept as typed.
+	ws.AddRoot(yammmtest.FileURI("/nonexistent/project"))
 
 	ws.mu.RLock()
 	defer ws.mu.RUnlock()
 
-	// Root should still be stored (as raw path since symlink resolution failed)
+	// The root is stored under that answer, which here is the path as typed.
 	require.Len(t, ws.roots, 1)
-	assert.Equal(t, "/nonexistent/project", ws.roots[0])
+	assert.Equal(t, yammmtest.HostAbs("/nonexistent/project"), ws.roots[0])
 }
 
 func TestWorkspace_SetPositionEncoding(t *testing.T) {
@@ -359,6 +363,24 @@ func TestWorkspace_documentOpened_InvalidURI(t *testing.T) {
 	assert.Nil(t, doc, "GetDocumentSnapshot() should return nil for invalid URI")
 }
 
+func TestDocumentOpened_RegistersARefusedPathWithNoIdentity(t *testing.T) {
+	t.Parallel()
+
+	uri := lsputil.PathToURI(filepath.Join(t.TempDir(), "caf\xff.yammm"))
+	path, err := lsputil.URIToPath(uri)
+	require.NoError(t, err)
+	_, err = hostPath(path)
+	require.ErrorIs(t, err, location.ErrInvalidUTF8Path, "the resolver must refuse %q", path)
+
+	ws := newTestWorkspace(t, quietLogger(), Config{})
+	ws.documentOpened(uri, 1, "content")
+
+	doc := ws.GetDocumentSnapshot(uri)
+	require.NotNil(t, doc, "a document whose path the resolver refuses must still be open")
+	assert.True(t, doc.SourceID.IsZero(), "SourceID = %q, want the zero identity", doc.SourceID)
+	assert.Equal(t, "content", doc.Text)
+}
+
 func TestWorkspace_DocumentChanged_NotOpen(t *testing.T) {
 	t.Parallel()
 
@@ -376,10 +398,10 @@ func TestWorkspace_FindModuleRoot_Configured(t *testing.T) {
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	ws := newTestWorkspace(t, logger, Config{ModuleRoot: "/configured/root"})
+	ws := newTestWorkspace(t, logger, Config{ModuleRoot: yammmtest.HostAbs("/configured/root")})
 
-	got := mustFindRoot(t, ws, "/any/path/file.yammm")
-	assert.Equal(t, "/configured/root", got)
+	got := mustFindRoot(t, ws, yammmtest.HostAbs("/any/path/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/configured/root"), got)
 }
 
 func TestWorkspace_FindModuleRoot_WorkspaceFolder(t *testing.T) {
@@ -387,10 +409,10 @@ func TestWorkspace_FindModuleRoot_WorkspaceFolder(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	ws.AddRoot("file:///project")
+	ws.AddRoot(yammmtest.FileURI("/project"))
 
-	got := mustFindRoot(t, ws, "/project/subdir/file.yammm")
-	assert.Equal(t, "/project", got)
+	got := mustFindRoot(t, ws, yammmtest.HostAbs("/project/subdir/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/project"), got)
 }
 
 func TestWorkspace_FindModuleRoot_Fallback(t *testing.T) {
@@ -398,11 +420,11 @@ func TestWorkspace_FindModuleRoot_Fallback(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
-	ws.AddRoot("file:///other/project")
+	ws.AddRoot(yammmtest.FileURI("/other/project"))
 
 	// Path not under any workspace folder
-	got := mustFindRoot(t, ws, "/unrelated/path/file.yammm")
-	assert.Equal(t, "/unrelated/path", got)
+	got := mustFindRoot(t, ws, yammmtest.HostAbs("/unrelated/path/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/unrelated/path"), got)
 }
 
 func TestWorkspace_FindModuleRoot_NestedWorkspaceFolders(t *testing.T) {
@@ -412,16 +434,16 @@ func TestWorkspace_FindModuleRoot_NestedWorkspaceFolders(t *testing.T) {
 	ws := newTestWorkspace(t, logger, Config{})
 
 	// Add nested workspace folders (order shouldn't matter)
-	ws.AddRoot("file:///project")
-	ws.AddRoot("file:///project/submodule")
+	ws.AddRoot(yammmtest.FileURI("/project"))
+	ws.AddRoot(yammmtest.FileURI("/project/submodule"))
 
 	// File in the nested submodule should use the deepest matching root
-	got := mustFindRoot(t, ws, "/project/submodule/schemas/file.yammm")
-	assert.Equal(t, "/project/submodule", got, "should use deepest match")
+	got := mustFindRoot(t, ws, yammmtest.HostAbs("/project/submodule/schemas/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/project/submodule"), got, "should use deepest match")
 
 	// File in the parent project should use the parent root
-	got = mustFindRoot(t, ws, "/project/other/file.yammm")
-	assert.Equal(t, "/project", got)
+	got = mustFindRoot(t, ws, yammmtest.HostAbs("/project/other/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/project"), got)
 }
 
 func TestWorkspace_FindModuleRoot_NestedWorkspaceFolders_ReverseOrder(t *testing.T) {
@@ -432,12 +454,12 @@ func TestWorkspace_FindModuleRoot_NestedWorkspaceFolders_ReverseOrder(t *testing
 
 	// Add nested workspace folders in reverse order (deepest first)
 	// to ensure the algorithm doesn't depend on iteration order
-	ws.AddRoot("file:///project/submodule")
-	ws.AddRoot("file:///project")
+	ws.AddRoot(yammmtest.FileURI("/project/submodule"))
+	ws.AddRoot(yammmtest.FileURI("/project"))
 
 	// File in the nested submodule should still use the deepest matching root
-	got := mustFindRoot(t, ws, "/project/submodule/schemas/file.yammm")
-	assert.Equal(t, "/project/submodule", got, "should use deepest match")
+	got := mustFindRoot(t, ws, yammmtest.HostAbs("/project/submodule/schemas/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/project/submodule"), got, "should use deepest match")
 }
 
 func TestWorkspace_FindModuleRoot_SimilarPrefixRoots(t *testing.T) {
@@ -446,21 +468,21 @@ func TestWorkspace_FindModuleRoot_SimilarPrefixRoots(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
-	ws.AddRoot("file:///project")
-	ws.AddRoot("file:///project-extra")
+	ws.AddRoot(yammmtest.FileURI("/project"))
+	ws.AddRoot(yammmtest.FileURI("/project-extra"))
 
 	// File in /project2 should NOT match /project (they share a string prefix
 	// but /project2 is not under /project). Should fall back to file's directory.
-	got := mustFindRoot(t, ws, "/project2/file.yammm")
-	assert.Equal(t, "/project2", got, "should fallback for /project2")
+	got := mustFindRoot(t, ws, yammmtest.HostAbs("/project2/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/project2"), got, "should fallback for /project2")
 
 	// File in /project-extra should match /project-extra, not /project
-	got = mustFindRoot(t, ws, "/project-extra/subdir/file.yammm")
-	assert.Equal(t, "/project-extra", got)
+	got = mustFindRoot(t, ws, yammmtest.HostAbs("/project-extra/subdir/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/project-extra"), got)
 
 	// File directly in /project should still match /project
-	got = mustFindRoot(t, ws, "/project/file.yammm")
-	assert.Equal(t, "/project", got)
+	got = mustFindRoot(t, ws, yammmtest.HostAbs("/project/file.yammm"))
+	assert.Equal(t, yammmtest.HostAbs("/project"), got)
 }
 
 func TestWorkspace_LatestSnapshot(t *testing.T) {
@@ -557,14 +579,44 @@ func TestDocument_SourceID(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
-	uri := "file:///test/schema.yammm"
+	uri := yammmtest.FileURI("/test/schema.yammm")
 	ws.documentOpened(uri, 1, "content")
 
 	doc := ws.GetDocumentSnapshot(uri)
 	require.NotNil(t, doc, "GetDocumentSnapshot() returned nil")
 
 	// SourceID should be set from the path
-	assert.Equal(t, "/test/schema.yammm", doc.SourceID.String())
+	assert.Equal(t, filepath.ToSlash(yammmtest.HostAbs("/test/schema.yammm")), doc.SourceID.String())
+}
+
+func TestDocumentOpened_RecordsTheHostPathTheFileIsReadFrom(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	realPath := filepath.Join(tmpDir, "real.yammm")
+	require.NoError(t, os.WriteFile(realPath, []byte("content"), 0o600))
+	linkPath := filepath.Join(tmpDir, "link.yammm")
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Skip("symlinks not supported: " + err.Error())
+	}
+	want := mustDiskSpelling(t, realPath)
+
+	ws := newTestWorkspace(t, quietLogger(), Config{})
+	for _, path := range []string{linkPath, realPath} {
+		uri := lsputil.PathToURI(path)
+		ws.documentOpened(uri, 1, "content")
+
+		ws.mu.RLock()
+		doc := ws.docs.Open[uri]
+		ws.mu.RUnlock()
+		require.NotNil(t, doc, "document opened as %s", path)
+		assert.Equal(t, want, doc.HostPath, "HostPath of the document opened as %s", path)
+	}
+
+	ws.mu.RLock()
+	overlays := ws.docs.CollectOverlays()
+	ws.mu.RUnlock()
+	assert.Equal(t, []string{want}, slices.Collect(maps.Keys(overlays)), "overlay keys")
 }
 
 func TestUpdateDeps_AddsReverseDeps(t *testing.T) {
@@ -694,10 +746,6 @@ func TestBuildCanonicalToURIMap_SymlinkResolution(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve the real path to canonical form (handles /var -> /private/var on macOS)
-	canonicalRealPath, err := filepath.EvalSymlinks(realPath)
-	require.NoError(t, err, "failed to resolve real path")
-
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
@@ -710,9 +758,10 @@ func TestBuildCanonicalToURIMap_SymlinkResolution(t *testing.T) {
 	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.Open)
 	ws.mu.RUnlock()
 
-	// The mapping should map the canonical (resolved) path to the symlink URI
-	require.Contains(t, mapping, canonicalRealPath, "mapping should contain resolved path %q; got keys: %v", canonicalRealPath, slices.Collect(maps.Keys(mapping)))
-	assert.Equal(t, linkURI, mapping[canonicalRealPath])
+	// The mapping should map the real file's identity to the symlink URI
+	key := spelledIdentity(t, realPath)
+	require.Contains(t, mapping, key, "mapping should contain resolved path %q; got keys: %v", key, slices.Collect(maps.Keys(mapping)))
+	assert.Equal(t, linkURI, mapping[key])
 }
 
 func TestBuildCanonicalToURIMap_NoSymlinks(t *testing.T) {
@@ -722,10 +771,6 @@ func TestBuildCanonicalToURIMap_NoSymlinks(t *testing.T) {
 	tmpDir := t.TempDir()
 	realPath := tmpDir + "/schema.yammm"
 	require.NoError(t, os.WriteFile(realPath, []byte("content"), 0o600), "failed to write file")
-
-	// Resolve path to canonical form (handles /var -> /private/var on macOS)
-	canonicalPath, err := filepath.EvalSymlinks(realPath)
-	require.NoError(t, err, "failed to resolve path")
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
@@ -739,9 +784,10 @@ func TestBuildCanonicalToURIMap_NoSymlinks(t *testing.T) {
 	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.Open)
 	ws.mu.RUnlock()
 
-	// The mapping should map the canonical path to the original URI
-	require.Contains(t, mapping, canonicalPath, "mapping should contain path %q; got keys: %v", canonicalPath, slices.Collect(maps.Keys(mapping)))
-	assert.Equal(t, realURI, mapping[canonicalPath])
+	// The mapping should map the file's identity to the original URI
+	key := spelledIdentity(t, realPath)
+	require.Contains(t, mapping, key, "mapping should contain path %q; got keys: %v", key, slices.Collect(maps.Keys(mapping)))
+	assert.Equal(t, realURI, mapping[key])
 }
 
 // TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink is a regression test for issue 2.3.
@@ -765,10 +811,6 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve the real path to canonical form (handles /var -> /private/var on macOS)
-	canonicalRealPath, err := filepath.EvalSymlinks(realPath)
-	require.NoError(t, err, "failed to resolve real path")
-
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
@@ -790,8 +832,9 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 	mapping := ws.mapper.buildCanonicalToURIMap(ws.docs.Open)
 	ws.mu.RUnlock()
 
-	require.Contains(t, mapping, canonicalRealPath, "mapping should contain resolved path %q; got keys: %v", canonicalRealPath, slices.Collect(maps.Keys(mapping)))
-	assert.Equal(t, linkURI, mapping[canonicalRealPath], "should prefer first-opened symlink URI")
+	key := spelledIdentity(t, realPath)
+	require.Contains(t, mapping, key, "mapping should contain resolved path %q; got keys: %v", key, slices.Collect(maps.Keys(mapping)))
+	assert.Equal(t, linkURI, mapping[key], "should prefer first-opened symlink URI")
 
 	// Now close the symlink document
 	ws.documentClosed(linkURI)
@@ -801,8 +844,8 @@ func TestBuildCanonicalToURIMap_DuplicateDocumentViaSymlink(t *testing.T) {
 	mapping2 := ws.mapper.buildCanonicalToURIMap(ws.docs.Open)
 	ws.mu.RUnlock()
 
-	require.Contains(t, mapping2, canonicalRealPath, "after close: mapping should contain resolved path %q; got keys: %v", canonicalRealPath, slices.Collect(maps.Keys(mapping2)))
-	assert.Equal(t, realURI, mapping2[canonicalRealPath], "should use remaining real path URI")
+	require.Contains(t, mapping2, key, "after close: mapping should contain resolved path %q; got keys: %v", key, slices.Collect(maps.Keys(mapping2)))
+	assert.Equal(t, realURI, mapping2[key], "should use remaining real path URI")
 }
 
 func TestRemapToOpenDocURI_MatchFound(t *testing.T) {
@@ -812,10 +855,10 @@ func TestRemapToOpenDocURI_MatchFound(t *testing.T) {
 	ws := newTestWorkspace(t, logger, Config{})
 
 	// Simulate the mapping
-	canonicalPath := "/real/path/schema.yammm"
-	symlinkURI := "file:///symlink/path/schema.yammm"
+	canonicalPath := yammmtest.HostAbs("/real/path/schema.yammm")
+	symlinkURI := yammmtest.FileURI("/symlink/path/schema.yammm")
 	mapping := map[string]string{
-		canonicalPath: symlinkURI,
+		filepath.ToSlash(canonicalPath): symlinkURI,
 	}
 
 	// Diagnostic URI uses canonical path
@@ -869,11 +912,11 @@ func TestRemapToOpenDocURI_RawPathNoMatch(t *testing.T) {
 	mapping := map[string]string{}
 
 	// Raw filesystem path (not a file:// URI)
-	rawPath := "/some/path/schema.yammm"
+	rawPath := yammmtest.HostAbs("/some/path/schema.yammm")
 
 	// Should convert to proper file:// URI for protocol correctness
 	result := ws.mapper.remapToOpenDocURI(rawPath, mapping)
-	expectedURI := "file:///some/path/schema.yammm"
+	expectedURI := yammmtest.FileURI("/some/path/schema.yammm")
 	assert.Equal(t, expectedURI, result)
 }
 
@@ -933,10 +976,6 @@ func TestPublishSnapshotDiagnostics_SymlinkURIRemapping(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve the real path to canonical form (handles /var -> /private/var on macOS)
-	canonicalRealPath, err := filepath.EvalSymlinks(realPath)
-	require.NoError(t, err, "failed to resolve real path")
-
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
@@ -944,9 +983,9 @@ func TestPublishSnapshotDiagnostics_SymlinkURIRemapping(t *testing.T) {
 	linkURI := lsputil.PathToURI(linkPath)
 	ws.documentOpened(linkURI, 1, "content")
 
-	// Create a snapshot with diagnostics using the canonical (resolved) path
-	// This simulates what the loader produces
-	canonicalURI := lsputil.PathToURI(canonicalRealPath)
+	// Create a snapshot with diagnostics under the real file's on-disk spelling,
+	// the path the loader reports
+	canonicalURI := lsputil.PathToURI(mustDiskSpelling(t, realPath))
 	snapshot := &analysis.Snapshot{
 		CreatedAt:    time.Now(),
 		EntryVersion: 1,
@@ -987,10 +1026,6 @@ func TestPublishSnapshotDiagnostics_RelatedInfoURIRemapping(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve the real path to canonical form (handles /var -> /private/var on macOS)
-	canonicalRealPath, err := filepath.EvalSymlinks(realPath)
-	require.NoError(t, err, "failed to resolve real path")
-
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
@@ -998,8 +1033,8 @@ func TestPublishSnapshotDiagnostics_RelatedInfoURIRemapping(t *testing.T) {
 	linkURI := lsputil.PathToURI(linkPath)
 	ws.documentOpened(linkURI, 1, "content")
 
-	// Create a snapshot with RelatedInformation also using canonical path
-	canonicalURI := lsputil.PathToURI(canonicalRealPath)
+	// Create a snapshot with RelatedInformation also under the on-disk spelling
+	canonicalURI := lsputil.PathToURI(mustDiskSpelling(t, realPath))
 	snapshot := &analysis.Snapshot{
 		CreatedAt:    time.Now(),
 		EntryVersion: 1,
@@ -1025,7 +1060,6 @@ func TestPublishSnapshotDiagnostics_RelatedInfoURIRemapping(t *testing.T) {
 	assert.Equal(t, linkURI, relatedURI, "RelatedInformation.Location.URI")
 }
 
-// newTestWorkspace creates a Workspace for testing and registers cleanup to prevent goroutine leaks.
 // mustFindRoot resolves a module root and fails the test on a discovery
 // error, which these tier tests never provoke: none of them plants a marker.
 func mustFindRoot(t *testing.T, ws *Workspace, path string) string {
@@ -1035,6 +1069,30 @@ func mustFindRoot(t *testing.T, ws *Workspace, path string) string {
 	return root
 }
 
+// mustDiskSpelling returns path as the filesystem lists it, spelled by
+// [yammmtest.DiskSpelling] without the location package's resolver.
+func mustDiskSpelling(t *testing.T, path string) string {
+	t.Helper()
+	spelled, err := yammmtest.DiskSpelling(path)
+	if err != nil {
+		t.Fatalf("DiskSpelling(%q): %v", path, err)
+	}
+	return spelled
+}
+
+// spelledIdentity returns the identity string of path's on-disk spelling, the
+// form the workspace keys documents and imports by.
+func spelledIdentity(t *testing.T, path string) string {
+	t.Helper()
+	spelled := mustDiskSpelling(t, path)
+	id, err := location.SourceIDFromPath(spelled)
+	if err != nil {
+		t.Fatalf("SourceIDFromPath(%q): %v", spelled, err)
+	}
+	return id.String()
+}
+
+// newTestWorkspace creates a Workspace for testing and registers cleanup to prevent goroutine leaks.
 func newTestWorkspace(t *testing.T, logger *slog.Logger, cfg Config) *Workspace {
 	t.Helper()
 	if logger == nil {
@@ -1295,9 +1353,8 @@ func TestWorkspace_FileChanged_SymlinkResolution(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Canonical path (handles /var -> /private/var on macOS).
-	canonicalParts, err := filepath.EvalSymlinks(actualParts)
-	require.NoError(t, err, "failed to resolve parts path")
+	// The analyzer reports an import under the identity of its on-disk spelling.
+	canonicalParts := spelledIdentity(t, actualParts)
 
 	// Keep the scheduled debounce pending so the real analyzeAndPublish
 	// (disk I/O) never fires; the assertion is on scheduling itself.
@@ -1485,10 +1542,6 @@ func TestRemapPathToURI_SymlinkResolution(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve the real path to canonical form (handles /var -> /private/var on macOS)
-	canonicalRealPath, err := filepath.EvalSymlinks(realPath)
-	require.NoError(t, err, "failed to resolve real path")
-
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
 
@@ -1496,8 +1549,8 @@ func TestRemapPathToURI_SymlinkResolution(t *testing.T) {
 	linkURI := lsputil.PathToURI(linkPath)
 	ws.documentOpened(linkURI, 1, "content")
 
-	// RemapPathToURI with canonical path should return the symlink URI
-	result := ws.RemapPathToURI(canonicalRealPath)
+	// RemapPathToURI with the real file's identity should return the symlink URI
+	result := ws.RemapPathToURI(spelledIdentity(t, realPath))
 	assert.Equal(t, linkURI, result, "should return symlink URI")
 }
 
@@ -1518,9 +1571,7 @@ func TestRemapPathToURI_MultipleDocumentsSameCanonical(t *testing.T) {
 		t.Skip("symlinks not supported: " + err.Error())
 	}
 
-	// Resolve the real path to canonical form
-	canonicalRealPath, err := filepath.EvalSymlinks(realPath)
-	require.NoError(t, err, "failed to resolve real path")
+	canonicalRealPath := spelledIdentity(t, realPath)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ws := newTestWorkspace(t, logger, Config{})
@@ -1907,12 +1958,9 @@ func TestRemapPathToURI_ForwardSlashNormalization(t *testing.T) {
 }
 
 func TestRemapPathToURI_NonexistentPathWithDotDot(t *testing.T) {
-	// Tests that RemapPathToURI correctly handles paths with ".." components
-	// when EvalSymlinks fails (nonexistent path). The path should still be
-	// cleaned and produce a valid file:// URI.
-	//
-	// This is a regression test for the issue where RemapPathToURI did not
-	// call filepath.Clean on the error path when EvalSymlinks fails.
+	// Tests that RemapPathToURI returns a cleaned file:// URI for a path that
+	// does not exist and holds "." and ".." elements: the resolver removes them
+	// lexically and keeps the components it cannot find as typed.
 	t.Parallel()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -1948,10 +1996,47 @@ func TestRemapPathToURI_NonexistentPathWithDotDot(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			result := ws.RemapPathToURI(tt.input)
-			assert.Equal(t, tt.want, result, "RemapPathToURI(%q)", tt.input)
+			input := yammmtest.HostAbs(tt.input)
+			result := ws.RemapPathToURI(input)
+			assert.Equal(t, yammmtest.FileURI(strings.TrimPrefix(tt.want, "file://")), result, "RemapPathToURI(%q)", input)
 		})
 	}
+}
+
+func TestRemapPathToURI_SpellsAPathAsTheDiskDoes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("missing file under a symlinked directory", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		realDir := filepath.Join(tmpDir, "real")
+		require.NoError(t, os.MkdirAll(realDir, 0o750))
+		linkDir := filepath.Join(tmpDir, "link")
+		if err := os.Symlink(realDir, linkDir); err != nil {
+			t.Skip("symlinks not supported: " + err.Error())
+		}
+
+		ws := newTestWorkspace(t, quietLogger(), Config{})
+		input := filepath.Join(linkDir, "missing.yammm")
+		want := lsputil.PathToURI(filepath.Join(mustDiskSpelling(t, realDir), "missing.yammm"))
+		assert.Equal(t, want, ws.RemapPathToURI(input), "RemapPathToURI(%q)", input)
+	})
+
+	t.Run("existing file typed in another case", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		if !yammmtest.CaseFoldingFilesystem(t, tmpDir) {
+			t.Skip("the filesystem does not fold case")
+		}
+		require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "Schema.yammm"), []byte("content"), 0o600))
+
+		ws := newTestWorkspace(t, quietLogger(), Config{})
+		input := filepath.Join(tmpDir, "schema.yammm")
+		want := lsputil.PathToURI(mustDiskSpelling(t, input))
+		assert.Equal(t, want, ws.RemapPathToURI(input), "RemapPathToURI(%q)", input)
+	})
 }
 
 // notificationCollector is a test helper that records LSP notifications.
@@ -2771,6 +2856,36 @@ func TestAnalyzeAndPublish_VersionGate(t *testing.T) {
 	assert.NotEmpty(t, collector.DiagnosticsFor(uri), "invalid schema must publish diagnostics once current")
 }
 
+// TestAnalyzeAndPublish_AnalyzesTheResolvedHostPath opens a document through a
+// symlink. The configured module root is one the loader refuses, so the load
+// fails before it reads a source, with a diagnostic that has no span and is
+// filed under the entry path the analyzer was given.
+func TestAnalyzeAndPublish_AnalyzesTheResolvedHostPath(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	content := "schema \"test\"\n"
+	realPath := filepath.Join(tmpDir, "real.yammm")
+	require.NoError(t, os.WriteFile(realPath, []byte(content), 0o600))
+	linkPath := filepath.Join(tmpDir, "link.yammm")
+	if err := os.Symlink(realPath, linkPath); err != nil {
+		t.Skip("symlinks not supported: " + err.Error())
+	}
+
+	w := newTestWorkspace(t, quietLogger(), Config{ModuleRoot: filepath.Join(tmpDir, "caf\xff")})
+	collector := &testutil.NotificationCollector{}
+	w.SetNotifier(collector.Notify)
+	uri := lsputil.PathToURI(linkPath)
+	w.OpenDocument(uri, 1, content)
+
+	snap := w.LatestSnapshot(uri)
+	require.NotNil(t, snap, "a failed load must still store a snapshot")
+	require.Len(t, snap.LSPDiagnostics, 1, "diagnostics: %+v", snap.LSPDiagnostics)
+	assert.Equal(t, lsputil.PathToURI(mustDiskSpelling(t, realPath)), snap.LSPDiagnostics[0].URI,
+		"the analyzer must be given the host path the link resolves to")
+	assert.Len(t, collector.DiagnosticsFor(uri), 1, "the diagnostic must be published on the URI the client opened")
+}
+
 func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 	t.Parallel()
 
@@ -2798,6 +2913,53 @@ func TestAnalyzeMarkdownAndPublish_ValidSchema(t *testing.T) {
 	assert.Empty(t, diags, "expected no diagnostics for valid schema")
 }
 
+func TestAnalyzeMarkdownAndPublish_BlockIdentityNamesTheFileOnDisk(t *testing.T) {
+	t.Parallel()
+
+	content := "# Doc\n\n```yammm\nschema \"doc\"\n```\n"
+	tests := []struct {
+		name  string
+		typed func(t *testing.T, dir, realPath string) string
+	}{
+		{"through a symlink", func(t *testing.T, dir, realPath string) string {
+			t.Helper()
+			link := filepath.Join(dir, "link.md")
+			if err := os.Symlink(realPath, link); err != nil {
+				t.Skip("symlinks not supported: " + err.Error())
+			}
+			return link
+		}},
+		{"in another case", func(t *testing.T, dir, _ string) string {
+			t.Helper()
+			if !yammmtest.CaseFoldingFilesystem(t, dir) {
+				t.Skip("the filesystem does not fold case")
+			}
+			return filepath.Join(dir, "DOC.md")
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			realPath := filepath.Join(dir, "doc.md")
+			require.NoError(t, os.WriteFile(realPath, []byte(content), 0o600))
+			uri := lsputil.PathToURI(tt.typed(t, dir, realPath))
+
+			w := newTestWorkspace(t, quietLogger(), Config{})
+			w.OpenDocument(uri, 1, content)
+
+			snap := w.GetMarkdownDocumentSnapshot(uri)
+			require.NotNil(t, snap)
+			require.Len(t, snap.Blocks, 1)
+			want, err := markdown.VirtualSourceID(mustDiskSpelling(t, realPath), 0)
+			require.NoError(t, err)
+			assert.Equal(t, want, snap.Blocks[0].SourceID, "block identity of %s", uri)
+		})
+	}
+}
+
 func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -2815,7 +2977,7 @@ func TestBuildBlockDocumentSnapshot(t *testing.T) {
 	}
 
 	// Assign a source ID to the block
-	id, err := markdown.VirtualSourceID("/test/doc.md", 0)
+	id, err := markdown.VirtualSourceID(yammmtest.HostAbs("/test/doc.md"), 0)
 	require.NoError(t, err)
 	mdSnap.Blocks[0].SourceID = id
 

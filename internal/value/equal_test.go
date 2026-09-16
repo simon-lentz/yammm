@@ -94,7 +94,8 @@ func TestEqual_ComparesWrappedMapsWithoutMaterialising(t *testing.T) {
 
 type namedKey string
 
-// T4 (A-303): the reflect fallback builds the key in the map's own key type,
+// TestEqual_NamedStringKeyMaps pins that the reflect fallback builds the key in
+// the map's own key type,
 // so a map whose key is a named string type — which isMap, mapLen and rangeMap
 // all declare supported — compares instead of panicking in MapIndex.
 func TestEqual_NamedStringKeyMaps(t *testing.T) {

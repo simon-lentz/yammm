@@ -56,7 +56,18 @@ func TestSources_PositionAt_NilReceiver(t *testing.T) {
 
 	pos := s.PositionAt(location.SourceID{}, 0)
 
-	assert.Equal(t, location.Position{}, pos)
+	// An unknown byte offset is -1; the zero Position claims offset 0.
+	assert.Equal(t, location.UnknownPosition(), pos)
+}
+
+// A Sources built without NewSources holds no registry and answers as a nil
+// Sources does.
+func TestSources_PositionAt_NoRegistry(t *testing.T) {
+	s := &schema.Sources{}
+
+	if got, want := s.PositionAt(location.SourceID{}, 0), location.UnknownPosition(); got != want {
+		t.Errorf("PositionAt on a Sources with no registry = %+v; want %+v", got, want)
+	}
 }
 
 func TestSources_LineStartByte_NilReceiver(t *testing.T) {

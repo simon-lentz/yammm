@@ -1,7 +1,5 @@
 package location
 
-// Common RelatedInfo message constants for consistent diagnostic output.
-// Using these constants ensures uniform casing and punctuation across the codebase.
 // RelatedInfo describes an additional location associated with a diagnostic.
 //
 // Used for supplementary context like "previous definition here" or

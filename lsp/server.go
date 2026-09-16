@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -17,6 +16,7 @@ import (
 	"github.com/creachadair/jrpc2/channel"
 	"github.com/creachadair/jrpc2/handler"
 
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/lsp/internal/docstate"
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
@@ -57,7 +57,7 @@ type Config struct {
 
 // Validate canonicalizes and validates the Config. It applies defaults
 // (e.g., Version falls back to "dev") and resolves the ModuleRoot path.
-// Hard errors are returned for unrecoverable failures (e.g., filepath.Abs error).
+// Hard errors are returned for unrecoverable failures (e.g., a root that can never name a directory).
 // Warnings are logged for conditions that might resolve later (e.g., module root
 // does not exist yet — the server has fallback mechanisms for import resolution).
 func (c *Config) Validate(logger *slog.Logger) error {
@@ -65,14 +65,11 @@ func (c *Config) Validate(logger *slog.Logger) error {
 		c.Version = "dev"
 	}
 	if c.ModuleRoot != "" {
-		absRoot, err := filepath.Abs(c.ModuleRoot)
+		resolved, err := location.ResolveHostPath(c.ModuleRoot)
 		if err != nil {
 			return fmt.Errorf("resolve module root: %w", err)
 		}
-		if resolved, err := filepath.EvalSymlinks(absRoot); err == nil {
-			absRoot = resolved
-		}
-		c.ModuleRoot = filepath.Clean(absRoot)
+		c.ModuleRoot = resolved
 
 		// Warn (not error) — path may be created later, and the server
 		// has fallback mechanisms for import resolution.

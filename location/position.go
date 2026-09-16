@@ -65,7 +65,7 @@ func (p Position) IsKnown() bool {
 //
 // Note: Byte-only positions (where byte offset is known but line/column are zero)
 // return false. This is intentional: the package design requires line/column for
-// geometric operations like Before, After, and Contains. Adapters should always
+// geometric operations like [Span.Contains]. Adapters should always
 // compute line/column coordinates alongside byte offsets.
 func (p Position) HasByte() bool {
 	return p.Byte >= 0 && !p.IsZero()

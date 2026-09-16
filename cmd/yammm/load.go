@@ -7,6 +7,7 @@ import (
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -40,7 +41,7 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 	}
 
 	// Load schema
-	moduleRoot, loadOpts, err := moduleRootOptions(cmd)
+	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)
 	if err != nil {
 		return err
 	}
@@ -75,8 +76,11 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 // [diagRootFor]).
 func bindSchemaSource(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, absSchemaPath string) {
 	var provider diag.SourceProvider
-	if s != nil && s.HasSourceProvider() {
+	switch {
+	case s != nil && s.HasSourceProvider():
 		provider = s.Sources()
+	case sink.CapturedSources() != nil:
+		provider = sink.CapturedSources()
 	}
 	sink.SetSource(provider, diagRootFor(s, explicitRoot, absSchemaPath))
 }
@@ -101,20 +105,11 @@ func reportSchemaLoad(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, 
 	return nil
 }
 
-// diagRootFor selects the root that rendered diagnostic locations are
-// relativized against. A completed load is authoritative: the schema's
-// recorded ModuleRoot is canonical (symlink-resolved), so it textually
-// prefixes every file-backed SourceID the load produced — unless it is a
-// synthetic root, which is a scheme string rather than a path and would
-// relativize nothing. The CLI never synthetic-loads, so that arm is defence.
-//
-// When no schema is available (the load failed before producing one), the
-// root is derived the way the loader derives its own: the explicit module
-// root for commands that accept one, then the nearest ancestor holding a
-// module-root marker, then the schema file's directory — each canonicalized
-// the same way, so locations still relativize. Without the discovery step a
-// failed load's diagnostics would relativize against a root the loader did
-// not use.
+// diagRootFor returns the host path rendered locations are relativized
+// against, which the renderer turns into an identity: a completed load's
+// ModuleRoot unless it is a synthetic scheme string, and for a failed load the
+// root the loader would have used — the explicit root, then the nearest
+// yammm.mod, then the directory of the schema file with its symlinks resolved.
 func diagRootFor(s *schema.Schema, explicitRoot, absSchemaPath string) string {
 	if s != nil {
 		if root := s.ModuleRoot(); root != "" && filepath.IsAbs(root) {
@@ -123,14 +118,18 @@ func diagRootFor(s *schema.Schema, explicitRoot, absSchemaPath string) string {
 	}
 	base := explicitRoot
 	if base == "" {
-		base = filepath.Dir(absSchemaPath)
+		file := absSchemaPath
+		if resolved, err := location.ResolveHostPath(absSchemaPath); err == nil {
+			file = resolved
+		}
+		base = filepath.Dir(file)
 		// A discovery error is deliberately ignored: the load already
 		// reported it, and the renderer's job is to relativize what it can.
 		if root, found, err := schema.FindModuleRoot(base); err == nil && found {
 			return root
 		}
 	}
-	if resolved, err := filepath.EvalSymlinks(base); err == nil {
+	if resolved, err := location.ResolveHostPath(base); err == nil {
 		return resolved
 	}
 	return filepath.Clean(base)

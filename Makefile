@@ -2,14 +2,16 @@
 
 .PHONY: lint lint-fix
 lint:
-	go tool golangci-lint run
+	scripts/lint.sh
 
 lint-fix:
-	go tool golangci-lint run --fix
+	scripts/lint.sh --fix
 
-.PHONY: test-internal
-test-internal:
-	go test ./...
+# The one test definition the pre-commit hook, every CI host and the release
+# workflow share.
+.PHONY: test
+test:
+	scripts/test.sh
 
 # Round-trips the neo4j adapter against a real server in Docker: the emitted DDL
 # is executed, the introspection queries are run for real, and what comes back is

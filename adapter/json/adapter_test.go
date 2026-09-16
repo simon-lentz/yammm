@@ -33,7 +33,6 @@ func newAdapter(t *testing.T, opts ...Option) *Adapter {
 	return New(opts...)
 }
 
-// mockRegistry implements location.PositionRegistry for testing.
 func TestParseObject(t *testing.T) {
 	source := location.NewSourceID("test://object")
 

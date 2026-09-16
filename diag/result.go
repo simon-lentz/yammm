@@ -1,9 +1,11 @@
 package diag
 
 import (
+	"cmp"
 	"fmt"
 	"iter"
 	"maps"
+	"slices"
 	"strings"
 )
 
@@ -22,18 +24,23 @@ type SeverityCounts struct {
 // cannot disagree on how a severity is counted and a new Severity is handled in
 // exactly one switch.
 func (c *SeverityCounts) add(sev Severity) {
+	c.addN(sev, 1)
+}
+
+// addN adds n to the counter for sev; [SeverityCounts.add] is its one-issue form.
+func (c *SeverityCounts) addN(sev Severity, n int) {
 	//exhaustive:enforce
 	switch sev {
 	case Fatal:
-		c.Fatal++
+		c.Fatal += n
 	case Error:
-		c.Errors++
+		c.Errors += n
 	case Warning:
-		c.Warnings++
+		c.Warnings += n
 	case Info:
-		c.Info++
+		c.Info += n
 	case Hint:
-		c.Hints++
+		c.Hints += n
 	}
 }
 
@@ -103,7 +110,6 @@ func (c *SeverityCounts) addCounts(o SeverityCounts) {
 // all issues in a Result are valid.
 type Result struct {
 	issues       []Issue
-	limit        int
 	limitReached bool
 	droppedCount int
 
@@ -118,6 +124,30 @@ type Result struct {
 	// counts, truthful under truncation the same way. Read through
 	// [Result.CodeCounts]; never handed out.
 	codeCounts codeCounts
+
+	// arrival[i] is the order issues[i] was collected in, which sorting
+	// discards. A merge stores by it, so eviction keeps its meaning.
+	arrival []uint64
+}
+
+// inArrivalOrder returns r's issues as they were collected, for a merge to
+// store. A Result carrying no index keeps the sorted order.
+func (r Result) inArrivalOrder() []Issue {
+	if len(r.arrival) != len(r.issues) {
+		return r.issues
+	}
+	order := make([]int, len(r.issues))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return cmp.Compare(r.arrival[a], r.arrival[b])
+	})
+	out := make([]Issue, len(r.issues))
+	for i, idx := range order {
+		out[i] = r.issues[idx]
+	}
+	return out
 }
 
 // codeCounts counts issues seen by severity and code.
@@ -125,6 +155,11 @@ type codeCounts map[Severity]map[Code]int
 
 // add increments the counter for one issue.
 func (c *codeCounts) add(sev Severity, code Code) {
+	c.addN(sev, code, 1)
+}
+
+// addN adds n issues of sev and code.
+func (c *codeCounts) addN(sev Severity, code Code, n int) {
 	if *c == nil {
 		*c = make(codeCounts)
 	}
@@ -133,7 +168,7 @@ func (c *codeCounts) add(sev Severity, code Code) {
 		m = make(map[Code]int)
 		(*c)[sev] = m
 	}
-	m[code]++
+	m[code] += n
 }
 
 // addCounts folds o into c, for [Collector.Merge].
@@ -171,29 +206,36 @@ func (c codeCounts) clone() codeCounts {
 // Use [newResultWithCounts] directly when the counts must reflect issues that
 // are not in the slice (e.g. a [Collector] carrying issues dropped past its
 // limit, which must still count toward OK/HasErrors).
-func newResult(issues []Issue, limit int, limitReached bool, droppedCount int) Result {
+func newResult(issues []Issue, limitReached bool, droppedCount int) Result {
 	var counts SeverityCounts
 	var codes codeCounts
 	for _, issue := range issues {
 		counts.add(issue.Severity())
 		codes.add(issue.Severity(), issue.Code())
 	}
-	return newResultWithCounts(issues, limit, limitReached, droppedCount, counts, codes)
+	return newResultWithCounts(issues, limitReached, droppedCount, counts, codes)
 }
 
 // newResultWithCounts builds a Result from explicit precomputed severity counts.
-// It is the single point that constructs the Result struct, so a new Result
-// field is added in exactly one place. The issues slice is owned by the Result
-// (see [newResult]'s contract).
-func newResultWithCounts(issues []Issue, limit int, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts) Result {
+// It is the single point that constructs the Result struct; newResultWithArrival
+// sets the arrival order on the struct it returns. The issues slice is owned by
+// the Result (see [newResult]'s contract).
+func newResultWithCounts(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts) Result {
 	return Result{
 		issues:       issues,
-		limit:        limit,
 		limitReached: limitReached,
 		droppedCount: droppedCount,
 		counts:       counts,
 		codeCounts:   codes,
 	}
+}
+
+// newResultWithArrival is [newResultWithCounts] plus the arrival order sorting
+// discarded, which only a [Collector] knows.
+func newResultWithArrival(issues []Issue, limitReached bool, droppedCount int, counts SeverityCounts, codes codeCounts, arrival []uint64) Result {
+	r := newResultWithCounts(issues, limitReached, droppedCount, counts, codes)
+	r.arrival = arrival
+	return r
 }
 
 // OK returns a Result representing success (no issues).
@@ -205,7 +247,7 @@ func newResultWithCounts(issues []Issue, limit int, limitReached bool, droppedCo
 //   - Len() == 0
 //   - LimitReached() == false
 func OK() Result {
-	return newResult(nil, 0, false, 0)
+	return newResult(nil, false, 0)
 }
 
 // OK reports whether no Fatal or Error issues are present.
@@ -270,21 +312,7 @@ func (r Result) TruncationNote() string {
 	if !r.limitReached {
 		return ""
 	}
-	// limit is the producing collector's own configured cap; after a Merge into
-	// an unlimited collector it can be 0 (unlimited) even though issues were
-	// dropped upstream. Name the cap only when it is a positive number;
-	// droppedCount is the authoritative fact either way.
-	if r.limit > 0 {
-		return fmt.Sprintf("%d more issue(s) dropped after reaching the %d-issue limit; resolve issues and re-run to see the rest",
-			r.droppedCount, r.limit)
-	}
-	return fmt.Sprintf("%d more issue(s) dropped; resolve issues and re-run to see the rest", r.droppedCount)
-}
-
-// Limit returns the configured issue limit (0 means unlimited).
-// Use [Result.LimitReached] to check if the limit was actually reached.
-func (r Result) Limit() int {
-	return r.limit
+	return fmt.Sprintf("%d more issue(s) dropped at an issue limit; resolve issues and re-run to see the rest", r.droppedCount)
 }
 
 // SeverityCounts returns counts by severity level.
@@ -377,11 +405,11 @@ func (e *ResultError) Error() string {
 //
 // This provides idiomatic error conversion for use in error-returning functions:
 //
-//	schema, result, err := load.Load(ctx, path)
-//	if err != nil { return err }
+//	s, result := schema.Load(ctx, path)
 //	if err := result.Err(); err != nil {
-//	    return fmt.Errorf("schema validation: %w", err)
+//	    return nil, fmt.Errorf("load schema: %w", err)
 //	}
+//	return s, nil
 //
 // The returned error supports [errors.As] with *[ResultError] for access to
 // the full [Result].
@@ -425,10 +453,8 @@ func (r Result) String() string {
 	if r.limitReached {
 		fmt.Fprintf(&sb, " [limit reached, %d dropped]", r.droppedCount)
 	}
-	sb.WriteString("\n")
-
 	for _, issue := range r.issues {
-		fmt.Fprintf(&sb, "  %s: %s\n", issue.Code(), issue.Message())
+		fmt.Fprintf(&sb, "\n  %s: %s", issue.Code(), issue.Message())
 	}
 
 	return sb.String()

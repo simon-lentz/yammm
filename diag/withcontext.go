@@ -51,10 +51,9 @@ func (r Result) WithContext(tag string) error {
 
 // Error returns the formatted error string "<tag>: <result>".
 //
-// The result portion uses [Result.String], which lists the fatal/error count
-// on the first line and each error-severity issue's code+message on subsequent
-// lines. For rendered output with source excerpts, use a [Renderer] against the
-// underlying Result.
+// The result portion is [Result.String]: a summary line, then one line per
+// retained issue at every severity. For rendered output with source excerpts,
+// use a [Renderer] against the underlying Result.
 //
 // Nil-safe: a nil receiver returns a fixed diagnostic string rather than
 // panicking.
@@ -90,6 +89,9 @@ func (e *ContextualError) Unwrap() error {
 //     sum of Fatal and Error severity counts; "warnings" is the Warning
 //     count. Always emitted. Info and Hint counts are deliberately omitted
 //     — they are not observability signals consumers filter on in practice.
+//   - "limit_reached" (bool) and "dropped" (int): emitted together when the
+//     result was truncated, so a consumer reading "issues" knows it is not
+//     reading all of them. Omitted otherwise.
 //   - "issues" (slice of maps): one entry per issue in the result, each
 //     carrying the per-issue shape documented on [Issue.LogValue]. Always
 //     emitted as a slice. Log consumers iterate the slice directly rather
@@ -124,6 +126,13 @@ func (e *ContextualError) LogValue() slog.Value {
 		slog.Int("warnings", counts.Warnings),
 	))
 
+	if e.Result.LimitReached() {
+		attrs = append(attrs,
+			slog.Bool("limit_reached", true),
+			slog.Int("dropped", e.Result.DroppedCount()),
+		)
+	}
+
 	issues := slices.Collect(e.Result.Issues())
 	issueMaps := make([]map[string]any, len(issues))
 	for i, iss := range issues {
@@ -151,8 +160,8 @@ func primaryErrorCode(r Result) (string, bool) {
 // The walk preserves tagged context when present and synthesizes a fallback tag
 // when the error chain carries only a bare [*ResultError]:
 //
-//   - If the chain carries a [*ContextualError], returns it with its tag
-//     preserved.
+//   - If the chain carries a [*ContextualError], returns that error itself,
+//     with its tag, not a copy: a change to its fields changes the original.
 //   - Otherwise, if the chain carries a bare [*ResultError], returns a new
 //     [*ContextualError] tagged with fallbackTag. This covers code paths that
 //     surface a diag result without calling [Result.WithContext] — consumers
@@ -161,7 +170,9 @@ func primaryErrorCode(r Result) (string, bool) {
 //
 // errors.As walks the chain transparently including through wrapped errors
 // (fmt.Errorf("...: %w", err), errors.Join, and any custom Unwrap chains), so
-// this helper recovers context from arbitrarily nested wrappings.
+// this helper recovers context from arbitrarily nested wrappings. It returns
+// the first match: through errors.Join, the other joined errors' results are
+// not returned.
 //
 // Nil-safe: AsContextualError(nil, tag) returns (nil, false) without consulting
 // fallbackTag.

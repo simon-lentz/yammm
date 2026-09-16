@@ -51,9 +51,9 @@ func readHeader(t *testing.T, path string) *snapshot.HeaderInfo {
 	return header
 }
 
-// TestSnapshotSave_IntoCarriesTheHeaderForward pins B5. A merge dropped the
+// TestSnapshotSave_IntoCarriesTheHeaderForward pins that a merge keeps the
 // imported header's metadata and created_at, so `--into` with -o defaulted —
-// an in-place edit — silently erased both.
+// an in-place edit — erases neither.
 func TestSnapshotSave_IntoCarriesTheHeaderForward(t *testing.T) {
 	t.Parallel()
 
@@ -190,9 +190,9 @@ func mustAbs(t *testing.T, path string) string {
 	return abs
 }
 
-// TestSnapshotSave_SummaryCountsTheArtefact pins B21. The summary counted the
-// instances this invocation parsed while describing the document it had just
-// written, so a merge reported a number no reader of the file could reproduce.
+// TestSnapshotSave_SummaryCountsTheArtefact pins that the summary counts the
+// document it wrote, not the instances this invocation parsed, so a merge
+// reports a number a reader of the file can reproduce.
 func TestSnapshotSave_SummaryCountsTheArtefact(t *testing.T) {
 	t.Parallel()
 

@@ -50,10 +50,9 @@
 //
 // # Interface Satisfaction
 //
-// The [*Registry] type satisfies:
-//
-//   - [location.PositionRegistry] — via PositionAt method
-//   - [diag.SourceProvider] — via Content method (accepts [location.Span])
+// The [*Registry] type satisfies [diag.SourceProvider] through its Content
+// method, which accepts a [location.Span]; its PositionAt method converts a byte
+// offset to a [location.Position].
 //
 // # Usage
 //

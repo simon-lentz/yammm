@@ -51,9 +51,9 @@ func TestSnapshotUpdateMetadata_MalformedInput(t *testing.T) {
 	assert.Equal(t, cli.ExitValidation, code)
 }
 
-// TestSnapshotUpdateMetadata_SummaryCountsTheKeys pins B58. The summary's key
-// count was asserted nowhere, so it could report any number: the operator's one
-// confirmation that a --set landed and an --unset removed said nothing.
+// TestSnapshotUpdateMetadata_SummaryCountsTheKeys pins the summary's key count.
+// It is the operator's one confirmation that a --set landed and an --unset
+// removed its key.
 func TestSnapshotUpdateMetadata_SummaryCountsTheKeys(t *testing.T) {
 	t.Parallel()
 

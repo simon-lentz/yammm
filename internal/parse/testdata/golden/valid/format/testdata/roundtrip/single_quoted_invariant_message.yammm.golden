@@ -1,0 +1,79 @@
+{
+  "name": "\"quoted_message\"",
+  "span": {
+    "s": 0,
+    "e": 23
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 30,
+        "e": 31
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 41,
+              "e": 47
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 35,
+            "e": 55
+          }
+        },
+        {
+          "name": "left",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 63,
+              "e": 70
+            }
+          },
+          "span": {
+            "s": 57,
+            "e": 70
+          }
+        },
+        {
+          "name": "right",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 78,
+              "e": 85
+            }
+          },
+          "span": {
+            "s": 72,
+            "e": 85
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "'a single-quoted invariant message that is long enough to need wrapping'",
+          "expr": "(\u0026\u0026 (\u0026\u0026 (\u003e (. ($ \"self\") \"left\") 0) (\u003e (. ($ \"self\") \"right\") 0)) (\u003c (. ($ \"self\") \"left\") 1000))",
+          "expr_span": {
+            "s": 163,
+            "e": 217
+          },
+          "span": {
+            "s": 88,
+            "e": 217
+          }
+        }
+      ],
+      "span": {
+        "s": 25,
+        "e": 219
+      }
+    }
+  ]
+}

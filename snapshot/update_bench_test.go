@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -140,15 +141,14 @@ func BenchmarkLoadMarshalRoundTrip(b *testing.B) {
 // under the race detector: instrumentation slows the allocation-heavy
 // Load+Marshal baseline far more than the byte-splice fast path, so the
 // instrumented ratio neither measures the documented claim nor gates it
-// honestly — and the median-of-5 loop costs ~40s instrumented. The plain
-// (uninstrumented) test run remains the gate.
+// honestly — and the median-of-5 loop costs ~40s instrumented. The skip
+// goes through [raceskip.Skip], so scripts/test.sh runs the test again
+// without -race, and that run is the gate.
 func TestUpdateMetadataRatioFloor(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping ratio-floor benchmark gate under -short")
 	}
-	if raceEnabled {
-		t.Skip("skipping ratio-floor benchmark gate under the race detector")
-	}
+	raceskip.Skip(t)
 	in := loadBenchInputs(t)
 	ctx := context.Background()
 

@@ -40,7 +40,8 @@ func resolveConfig(opts []Option) wrapConfig {
 // Value is safe for concurrent read access.
 type Value struct {
 	// val holds the wrapped value. For primitives, this is the value itself.
-	// For maps and slices, this is a wrapped Map[string] or Slice.
+	// For a string-keyed map it is a Map[string], for a slice a Slice; any
+	// other map is stored as given.
 	val any
 }
 
@@ -66,22 +67,29 @@ func (v Value) Unwrap() any {
 	return v.val
 }
 
+// Clone returns the wrapped value as mutable Go data: a [Map] or [Properties] as
+// a map, a [Slice] or [Key] as a slice, a map stored as given as a deep copy,
+// and anything else as it is. A nil container clones to a typed nil, so a nil
+// container and an empty one stay apart.
+func (v Value) Clone() any {
+	return cloneValue(v)
+}
+
 // IsNil reports whether the wrapped value is nil.
 //
 // This returns true for:
 //   - Literal nil passed to [Wrap]
 //   - Typed nil pointers, channels, functions, interfaces
-//   - Nil maps and slices (wrapped as typed [Map] or [Slice])
+//   - Nil maps and slices: a string-keyed map or a slice wrapped as [Map] or
+//     [Slice], and any other map stored as its typed nil
+//   - A nil [Map], [Slice], [Properties] or [Key] a constructor adopted
 func (v Value) IsNil() bool {
 	if v.val == nil {
 		return true
 	}
-	// Check for wrapped nil maps/slices (entries/elements are nil)
-	switch inner := v.val.(type) {
-	case Map[string]:
-		return inner.entries == nil
-	case Slice:
-		return inner.elements == nil
+	// A wrapper is a struct, so it answers for itself; a reflect kind cannot.
+	if w, ok := asWrapper(v.val); ok {
+		return w.isNil()
 	}
 	// Check for typed nils (e.g., var p *int; Wrap(p))
 	rv := reflect.ValueOf(v.val)
@@ -138,35 +146,26 @@ func (v Value) Int() (int64, bool) {
 		}
 		return int64(n), true
 	case float64:
-		// JSON numbers are float64; check if it's a representable whole number.
-		// Guard before converting to avoid implementation-dependent behavior
-		// for NaN, Inf, and out-of-range values per Go spec.
-		if math.IsNaN(n) || math.IsInf(n, 0) {
-			return 0, false
-		}
-		if n < float64(math.MinInt64) || n > float64(math.MaxInt64) {
-			return 0, false
-		}
-		if n != math.Trunc(n) {
-			return 0, false // Not a whole number
-		}
-		return int64(n), true
+		return wholeFloatToInt64(n)
 	case float32:
-		// Handle float32 with same whole-number checks as float64.
-		n64 := float64(n)
-		if math.IsNaN(n64) || math.IsInf(n64, 0) {
-			return 0, false
-		}
-		if n64 < float64(math.MinInt64) || n64 > float64(math.MaxInt64) {
-			return 0, false
-		}
-		if n64 != math.Trunc(n64) {
-			return 0, false // Not a whole number
-		}
-		return int64(n64), true
+		return wholeFloatToInt64(float64(n))
 	default:
 		return 0, false
 	}
+}
+
+// wholeFloatToInt64 returns f as an int64 when f is a whole number int64 can
+// hold. float64(math.MaxInt64) rounds up to 2^63, one past the range, so the
+// upper bound is exclusive; converting an out-of-range float is
+// implementation-defined, so every guard runs before the conversion.
+func wholeFloatToInt64(f float64) (int64, bool) {
+	if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+		return 0, false
+	}
+	if f < math.MinInt64 || f >= 0x1p63 {
+		return 0, false
+	}
+	return int64(f), true
 }
 
 // Float returns the value as a float64 and true if the value is a numeric type.
@@ -238,25 +237,38 @@ func (v Value) Slice() (Slice, bool) {
 // If clone is true, a value that would be stored as-is (a non-string-keyed
 // map) is deep-cloned first.
 func wrapValue(v any, clone bool) any {
+	return wrapValueAt(v, clone, 0, nil)
+}
+
+// wrapValueAt is wrapValue on one walk's depth and path. A Value contributes
+// its content, so no Value ever holds a Value; any other wrapper is already
+// immutable and is stored as itself.
+func wrapValueAt(v any, clone bool, depth int, seen map[cyclePtr]struct{}) any {
 	if v == nil {
 		return nil
+	}
+	if w, ok := v.(Value); ok {
+		return w.val
+	}
+	if w, ok := asWrapper(v); ok {
+		return w
 	}
 
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
 	case reflect.Map:
-		return wrapMapValue(rv, clone)
+		return wrapMapValue(rv, clone, depth, seen)
 	case reflect.Slice:
-		return wrapSliceValue(rv, clone)
+		return wrapSliceValue(rv, clone, depth, seen)
 	default:
-		// Primitives are inherently immutable
+		// Primitives, structs, pointers and arrays are stored as they are.
 		return v
 	}
 }
 
 // wrapMapValue wraps a reflect.Value of kind Map into a Map[string].
 // Only string-keyed maps are supported; other key types are stored as-is.
-func wrapMapValue(rv reflect.Value, clone bool) any {
+func wrapMapValue(rv reflect.Value, clone bool, depth int, seen map[cyclePtr]struct{}) any {
 	// Only wrap string-keyed maps as Map[string]
 	if rv.Type().Key().Kind() == reflect.String {
 		if rv.IsNil() {
@@ -264,12 +276,14 @@ func wrapMapValue(rv reflect.Value, clone bool) any {
 			// This allows Value.Map() to return (zero Map, true) for nil maps.
 			return Map[string]{}
 		}
+		seen = enterCycle(rv, depth, seen)
+		defer leaveCycle(rv, depth, seen)
 		m := make(map[string]Value, rv.Len())
 		iter := rv.MapRange()
 		for iter.Next() {
 			key := iter.Key().String()
 			val := iter.Value().Interface()
-			m[key] = Value{val: wrapValue(val, clone)}
+			m[key] = Value{val: wrapValueAt(val, clone, depth+1, seen)}
 		}
 		return Map[string]{entries: m, folded: &foldedView{}}
 	}
@@ -277,42 +291,52 @@ func wrapMapValue(rv reflect.Value, clone bool) any {
 	// For non-string-keyed maps, store as-is (unusual case)
 	// This maintains the value but doesn't provide typed access
 	if rv.IsNil() {
-		return nil
+		return rv.Interface() // the typed nil, so the value keeps its type
 	}
 	if clone {
-		return deepCloneMap(rv)
+		return deepCloneMap(rv, depth, seen)
 	}
 	return rv.Interface()
 }
 
 // wrapSliceValue wraps a reflect.Value of kind Slice into a Slice.
-func wrapSliceValue(rv reflect.Value, clone bool) any {
+func wrapSliceValue(rv reflect.Value, clone bool, depth int, seen map[cyclePtr]struct{}) any {
 	if rv.IsNil() {
 		// Return typed nil Slice (elements: nil) to distinguish from literal nil.
 		// This allows Value.Slice() to return (zero Slice, true) for nil slices.
 		return Slice{}
 	}
+	seen = enterCycle(rv, depth, seen)
+	defer leaveCycle(rv, depth, seen)
 
 	elements := make([]Value, rv.Len())
 	for i := range rv.Len() {
 		val := rv.Index(i).Interface()
-		elements[i] = Value{val: wrapValue(val, clone)}
+		elements[i] = Value{val: wrapValueAt(val, clone, depth+1, seen)}
 	}
 	return Slice{elements: elements}
 }
 
-// deepClone performs a deep clone of any value.
-func deepClone(v any) any {
+// deepCloneAt performs a deep clone of any value on one walk's depth and path.
+//
+// A container contributes its content here as it does at the walk's root: a map
+// with a non-string key is stored as given, so a container inside one reaches
+// this walk without having been wrapped, and a reflect kind reads it as a
+// struct.
+func deepCloneAt(v any, depth int, seen map[cyclePtr]struct{}) any {
 	if v == nil {
 		return nil
+	}
+	if w, ok := asWrapper(v); ok {
+		return w.cloneToAny()
 	}
 
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
 	case reflect.Map:
-		return deepCloneMap(rv)
+		return deepCloneMap(rv, depth, seen)
 	case reflect.Slice:
-		return deepCloneSlice(rv)
+		return deepCloneSlice(rv, depth, seen)
 	default:
 		return v
 	}
@@ -320,10 +344,12 @@ func deepClone(v any) any {
 
 // deepCloneMap deep-clones a map.
 // Handles nil element values correctly using reflect.Zero for interface-typed maps.
-func deepCloneMap(rv reflect.Value) any {
+func deepCloneMap(rv reflect.Value, depth int, seen map[cyclePtr]struct{}) any {
 	if rv.IsNil() {
-		return nil
+		return rv.Interface() // the typed nil, which an untyped nil would lose
 	}
+	seen = enterCycle(rv, depth, seen)
+	defer leaveCycle(rv, depth, seen)
 
 	newMap := reflect.MakeMapWithSize(rv.Type(), rv.Len())
 	elemType := rv.Type().Elem()
@@ -331,7 +357,7 @@ func deepCloneMap(rv reflect.Value) any {
 	for iter.Next() {
 		key := iter.Key()
 		val := iter.Value().Interface()
-		cloned := deepClone(val)
+		cloned := deepCloneAt(val, depth+1, seen)
 		if cloned == nil {
 			// reflect.ValueOf(nil) is invalid; use Zero for nil interface values
 			newMap.SetMapIndex(key, reflect.Zero(elemType))
@@ -344,16 +370,18 @@ func deepCloneMap(rv reflect.Value) any {
 
 // deepCloneSlice deep-clones a slice.
 // Handles nil element values correctly using reflect.Zero for interface-typed slices.
-func deepCloneSlice(rv reflect.Value) any {
+func deepCloneSlice(rv reflect.Value, depth int, seen map[cyclePtr]struct{}) any {
 	if rv.IsNil() {
-		return nil
+		return rv.Interface() // the typed nil, which an untyped nil would lose
 	}
+	seen = enterCycle(rv, depth, seen)
+	defer leaveCycle(rv, depth, seen)
 
 	newSlice := reflect.MakeSlice(rv.Type(), rv.Len(), rv.Len())
 	elemType := rv.Type().Elem()
 	for i := range rv.Len() {
 		val := rv.Index(i).Interface()
-		cloned := deepClone(val)
+		cloned := deepCloneAt(val, depth+1, seen)
 		if cloned == nil {
 			// reflect.ValueOf(nil) is invalid; use Zero for nil interface values
 			newSlice.Index(i).Set(reflect.Zero(elemType))

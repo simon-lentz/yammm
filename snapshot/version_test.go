@@ -105,7 +105,7 @@ func TestDistinctFatalCodes_CollectsBothSeverities(t *testing.T) {
 	c.Collect(diag.NewIssue(diag.Fatal, diag.E_UPDATE_METADATA_BODY_OFFSET, "fatal one").Build())
 	c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "error one").Build())
 	c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "error again").Build())
-	c.Collect(diag.NewIssue(diag.Warning, diag.E_SNAPSHOT_PATH_FALLBACK, "warning, excluded").Build())
+	c.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_FALLBACK, "warning, excluded").Build())
 
 	got := distinctTriggeringCodes(c.Result())
 	want := []string{

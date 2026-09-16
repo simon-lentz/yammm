@@ -148,7 +148,7 @@ func collectLookaheadGroups(t *testing.T) []lookaheadGroup {
 	seen := map[reflect.Type]bool{}
 	var walk func(reflect.Type)
 	walk = func(rt reflect.Type) {
-		for rt.Kind() == reflect.Ptr || rt.Kind() == reflect.Slice {
+		for rt.Kind() == reflect.Pointer || rt.Kind() == reflect.Slice {
 			rt = rt.Elem()
 		}
 		if rt.Kind() != reflect.Struct || seen[rt] {

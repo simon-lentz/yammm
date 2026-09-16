@@ -1,6 +1,7 @@
 package doclint_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,12 +23,23 @@ func TestAssertDependencyLines_AgreeingLinesAreSilent(t *testing.T) {
 	t.Parallel()
 	r, checked := runDepGate(t)
 	for _, quiet := range []string{"correct", "wrapped", "prose"} {
-		if r.reports("/" + quiet + "/") {
+		if r.reports(filepath.FromSlash("/" + quiet + "/")) {
 			t.Errorf("%s reported: %v", quiet, r.msgs)
 		}
 	}
 	if checked == 0 {
 		t.Error("the gate checked no dependency line, so it asserts nothing")
+	}
+}
+
+// A row states what a directory imports on every host, so a file behind a
+// build constraint this host does not satisfy still counts, and a generator
+// behind "ignore" never does.
+func TestAssertDependencyLines_ReadsEveryFileWhateverItsConstraint(t *testing.T) {
+	t.Parallel()
+	r, _ := runDepGate(t)
+	if r.reports(filepath.FromSlash("/constrained/")) {
+		t.Errorf("constrained reported: %v", r.msgs)
 	}
 }
 
@@ -81,10 +93,8 @@ func TestAssertDependencyLines_ReportsAHeadingWithNoRow(t *testing.T) {
 func TestAssertDependencyLines_ReadsAWrappedListWhole(t *testing.T) {
 	t.Parallel()
 	r, _ := runDepGate(t)
-	for _, m := range r.msgs {
-		if strings.Contains(m, "/wrapped/") {
-			t.Errorf("a continuation entry was not read: %s", m)
-		}
+	if r.reports(filepath.FromSlash("/wrapped/")) {
+		t.Errorf("a continuation entry was not read: %v", r.msgs)
 	}
 }
 
@@ -105,7 +115,7 @@ func TestAssertDependencyLines_StopsAtTheEndOfTheBlock(t *testing.T) {
 func TestAssertDependencyLines_CountsOnlyDocsThatCarryARow(t *testing.T) {
 	t.Parallel()
 	r, checked := runDepGate(t)
-	if r.reports("/leaf/") {
+	if r.reports(filepath.FromSlash("/leaf/")) {
 		t.Errorf("a package with no dependency block was reported: %v", r.msgs)
 	}
 	// correct, extra, absent, wrapped, prose, plus the family table's rows and

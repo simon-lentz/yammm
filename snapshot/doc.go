@@ -122,15 +122,24 @@
 // decision depends on whether the snapshot was produced under a
 // matching schema version.
 //
-// [WriteFile] writes bytes to a path atomically using the
-// tmp+fsync+rename pattern. The staging file at path+[TmpSuffix] is
-// fsync'd before rename; on any error during the write, WriteFile
-// attempts to clean up the staging file and returns a wrapped error.
-// A crash between fsync and rename leaves the staging file behind as
-// a partial write; consumer-side cleanup (e.g., directory sweeps)
-// reference [TmpSuffix] rather than hard-coding ".tmp" so the
-// convention stays single-source-of-truth across the snapshot
-// package.
+// [WriteFile] writes bytes to a path atomically. It stages the bytes in a
+// file of its own beside the path, fsyncs and closes it, then renames it into
+// place. Concurrent writers of one path never share a staging file, so each
+// rename commits one writer's bytes whole, and the last rename wins. The
+// staging name is the path's stem, a random token, the path's extension and
+// [TmpSuffix], as snap.12345.ys.tmp for snap.ys.
+//
+// On an error during the write, WriteFile removes its own staging file and
+// returns the error wrapped with the failing step. It never removes a staging
+// file it did not create, because that file can belong to a live writer. A
+// crash between fsync and rename leaves the staging file behind. A sweep finds
+// that residue by [TmpSuffix], or by the extension and [TmpSuffix] together.
+//
+// The file mode is 0o666 under the process umask, the mode os.Create gives. A
+// caller that needs a stricter mode changes it after WriteFile returns.
+// WriteFile does not fsync the parent directory, so on some filesystems the
+// rename is not durable across a crash. It does not check that the bytes are
+// a valid .ys document.
 //
 // [ScanDir] iterates every .ys file in a directory and yields one
 // [ScanEntry] per file, with the header parsed lazily via

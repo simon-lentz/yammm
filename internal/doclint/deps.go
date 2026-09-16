@@ -1,11 +1,15 @@
 package doclint
 
 import (
-	"errors"
 	"fmt"
-	"go/build"
+	"go/ast"
+	"go/build/constraint"
+	"go/parser"
+	"go/token"
+	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -94,35 +98,73 @@ func (m *Module) packageForSubject(subject, own string) (*Package, bool) {
 	return nil, false
 }
 
-// nonStdImports returns dir's non-test imports outside the standard library,
-// each in the spelling a dependency line uses: relative to the module for an
-// in-module package, and the full path for anything else.
+// nonStdImports returns the non-test imports outside the standard library of
+// every Go file in dir, whatever its build constraints, since a row states what
+// a directory imports on every host. An in-module path is spelled relative to
+// the module, any other in full.
 func nonStdImports(dir, modulePath string) ([]string, error) {
-	bp, err := build.ImportDir(dir, 0)
-	// A directory whose Go files are all excluded by build constraints imports
-	// nothing in this configuration, which is not a failure to read it.
-	if noGo, ok := errors.AsType[*build.NoGoError](err); ok && noGo != nil {
-		return nil, nil //nolint:nilerr // no buildable Go file is an empty import set, not a read failure
-	}
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading imports of %s: %w", dir, err)
 	}
-	out := make([]string, 0, len(bp.Imports))
-	for _, ip := range bp.Imports {
-		// The module prefix is tested before the dot rule, so a module path
-		// with no dot is not classified as standard library.
-		rel, inModule := strings.CutPrefix(ip, modulePath+"/")
-		if !inModule {
-			// A standard-library path has no dot in its first element.
-			if first, _, _ := strings.Cut(ip, "/"); !strings.Contains(first, ".") {
-				continue
-			}
-			rel = ip
+	fset := token.NewFileSet()
+	var out []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !isSourceFile(name) {
+			continue
 		}
-		out = append(out, rel)
+		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ImportsOnly|parser.ParseComments)
+		if err != nil {
+			return nil, fmt.Errorf("reading imports of %s: %w", dir, err)
+		}
+		if isIgnored(f) {
+			continue
+		}
+		for _, spec := range f.Imports {
+			ip, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				return nil, fmt.Errorf("reading imports of %s: %s: %w", dir, name, err)
+			}
+			// The module prefix is tested before the dot rule, so a module path
+			// with no dot is not classified as standard library.
+			rel, inModule := strings.CutPrefix(ip, modulePath+"/")
+			if !inModule {
+				// A standard-library path has no dot in its first element.
+				if first, _, _ := strings.Cut(ip, "/"); !strings.Contains(first, ".") {
+					continue
+				}
+				rel = ip
+			}
+			out = append(out, rel)
+		}
 	}
 	slices.Sort(out)
 	return slices.Compact(out), nil
+}
+
+// isSourceFile reports whether name is a Go file go/build would read for a
+// package's imports: not a test, and not a name it hides by its prefix.
+func isSourceFile(name string) bool {
+	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") &&
+		!strings.HasPrefix(name, "_") && !strings.HasPrefix(name, ".")
+}
+
+// isIgnored reports whether f carries the bare build constraint "ignore", the
+// convention for a generator no host builds into its package.
+func isIgnored(f *ast.File) bool {
+	for _, group := range f.Comments {
+		if group.Pos() > f.Package {
+			return false
+		}
+		for _, c := range group.List {
+			if expr, err := constraint.Parse(c.Text); err == nil {
+				tag, ok := expr.(*constraint.TagExpr)
+				return ok && tag.Tag == "ignore"
+			}
+		}
+	}
+	return false
 }
 
 // depRow is one arrow line: the package its subject names, and the import paths

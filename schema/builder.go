@@ -542,8 +542,17 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 //     Use the resolver.
 //  3. Otherwise (synthetic without resolver, or non-relative path):
 //     Treat path as schema name and look up by name (backward compatible).
+//
+// A relative path holding a backslash resolves to nothing, since / is its only
+// separator. Case 3 is unaffected: a schema name may hold any character.
 func (b *Builder) resolveImportPath(importPath string) (location.SourceID, bool) {
 	isRelative := strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../")
+	// Only a relative import is read as a path, where / is the only separator.
+	// Case 3 reads the string as a schema name, in which a backslash is an
+	// ordinary character, so the refusal must not reach it.
+	if isRelative && strings.ContainsRune(importPath, '\\') {
+		return location.SourceID{}, false
+	}
 
 	// Case 1: File-backed SourceID with relative import
 	if b.sourceID.IsFilePath() && isRelative {
@@ -556,20 +565,19 @@ func (b *Builder) resolveImportPath(importPath string) (location.SourceID, bool)
 		// Get schema's directory
 		schemaDir := cp.Dir()
 
-		// Resolve the relative path
-		resolved, err := schemaDir.Join(importPath)
+		// The extension is part of the name the import names, so it is added
+		// before Join resolves the path: a directory beside the file may share
+		// the import's name.
+		fileName := importPath
+		if !strings.HasSuffix(fileName, ".yammm") {
+			fileName += ".yammm"
+		}
+		resolved, err := schemaDir.Join(fileName)
 		if err != nil {
 			return location.SourceID{}, false
 		}
 
-		// Auto-append .yammm if missing
-		resolvedPath := resolved.String()
-		if !strings.HasSuffix(resolvedPath, ".yammm") {
-			resolvedPath += ".yammm"
-		}
-
-		// Construct SourceID from resolved path
-		resolvedID, err := location.SourceIDFromAbsolutePath(resolvedPath)
+		resolvedID, err := location.SourceIDFromPath(resolved.String())
 		if err != nil {
 			return location.SourceID{}, false
 		}
@@ -648,9 +656,12 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 			// Provide helpful error message based on path type
 			isRelative := strings.HasPrefix(imp.Path, "./") || strings.HasPrefix(imp.Path, "../")
 			var msg string
-			if isRelative && !b.sourceID.IsFilePath() && b.importResolver == nil {
+			switch {
+			case isRelative && strings.ContainsRune(imp.Path, '\\'):
+				msg = fmt.Sprintf("cannot resolve import %q: %s", imp.Path, errImportBackslash)
+			case isRelative && !b.sourceID.IsFilePath() && b.importResolver == nil:
 				msg = fmt.Sprintf("cannot resolve relative import %q: synthetic SourceID requires WithImportResolver() or use schema name instead", imp.Path)
-			} else {
+			default:
 				msg = fmt.Sprintf("cannot resolve import %q: schema not found in registry", imp.Path)
 			}
 			collector.Collect(importResolveIssue("", diag.ModuleRootNone, msg, imp))

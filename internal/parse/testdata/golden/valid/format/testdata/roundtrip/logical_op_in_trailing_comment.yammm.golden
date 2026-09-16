@@ -1,0 +1,79 @@
+{
+  "name": "\"comment_operator\"",
+  "span": {
+    "s": 0,
+    "e": 25
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 229,
+        "e": 230
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 240,
+              "e": 246
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 234,
+            "e": 254
+          }
+        },
+        {
+          "name": "left",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 262,
+              "e": 269
+            }
+          },
+          "span": {
+            "s": 256,
+            "e": 269
+          }
+        },
+        {
+          "name": "right",
+          "constraint": {
+            "kind": "Integer",
+            "span": {
+              "s": 277,
+              "e": 284
+            }
+          },
+          "span": {
+            "s": 271,
+            "e": 284
+          }
+        }
+      ],
+      "invariants": [
+        {
+          "msg": "\"left and right must both be positive and bounded\"",
+          "expr": "(\u0026\u0026 (\u0026\u0026 (\u003e (. ($ \"self\") \"left\") 0) (\u003e (. ($ \"self\") \"right\") 0)) (\u003c (. ($ \"self\") \"left\") 1000))",
+          "expr_span": {
+            "s": 340,
+            "e": 394
+          },
+          "span": {
+            "s": 287,
+            "e": 394
+          }
+        }
+      ],
+      "span": {
+        "s": 224,
+        "e": 411
+      }
+    }
+  ]
+}

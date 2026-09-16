@@ -1,6 +1,7 @@
 package diag
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -122,116 +123,6 @@ func TestRenderer_WithExcerpts_Disabled(t *testing.T) {
 	}
 }
 
-func TestRenderer_WithModuleRoot(t *testing.T) {
-	// Use SourceIDFromAbsolutePath to create a file-backed source for testing
-	// path relativization. We need to use a path that exists or test the logic
-	// directly.
-	//
-	// For unit testing, we use synthetic sources but test relativization
-	// by verifying the logic works with the String() output.
-	source := location.MustNewSourceID("file:///home/user/project/src/file.yammm")
-
-	r := NewRenderer(WithModuleRoot("file:///home/user/project"))
-
-	issue := NewIssue(Error, E_SYNTAX, "error").
-		WithSpan(location.Point(source, 5, 10)).
-		Build()
-
-	output := formatIssue(r, issue)
-
-	// Should show relative path
-	if strings.Contains(output, "file:///home/user/project/") {
-		t.Errorf("should relativize path, got: %s", output)
-	}
-	if !strings.Contains(output, "src/file.yammm") {
-		t.Errorf("should contain relative path, got: %s", output)
-	}
-}
-
-func TestRenderer_WithModuleRoot_EdgeCases(t *testing.T) {
-	// Note: SourceID.String() always returns forward-slash paths for file-backed sources.
-	// For testing the relativization logic, we use synthetic sources with file:// prefix
-	// which produces the same String() output format as CanonicalPath-based sources.
-	tests := []struct {
-		name       string
-		source     string
-		moduleRoot string
-		wantPath   string
-	}{
-		{
-			name:       "exact match returns dot",
-			source:     "file:///home/user/project",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   ".:1:1",
-		},
-		{
-			name:       "nested path is relativized",
-			source:     "file:///home/user/project/src/file.yammm",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   "src/file.yammm:1:1",
-		},
-		{
-			name:       "non-matching path unchanged",
-			source:     "file:///home/user/other/file.yammm",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   "file:///home/user/other/file.yammm:1:1",
-		},
-		{
-			name:       "trailing slash on root is normalized",
-			source:     "file:///home/user/project/src/file.yammm",
-			moduleRoot: "file:///home/user/project/",
-			wantPath:   "src/file.yammm:1:1",
-		},
-		{
-			name:       "Windows-style canonical path",
-			source:     "file://C:/Users/project/src/file.yammm",
-			moduleRoot: "file://C:/Users/project",
-			wantPath:   "src/file.yammm:1:1",
-		},
-		{
-			name:       "Windows root exact match",
-			source:     "file://C:/Users/project",
-			moduleRoot: "file://C:/Users/project",
-			wantPath:   ".:1:1",
-		},
-		{
-			name:       "synthetic source not relativized",
-			source:     "test://unit/person.yammm",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   "test://unit/person.yammm:1:1",
-		},
-		{
-			name:       "prefix but not path segment",
-			source:     "file:///home/user/project-other/file.yammm",
-			moduleRoot: "file:///home/user/project",
-			wantPath:   "file:///home/user/project-other/file.yammm:1:1",
-		},
-		{
-			name:       "empty module root does nothing",
-			source:     "file:///home/user/project/file.yammm",
-			moduleRoot: "",
-			wantPath:   "file:///home/user/project/file.yammm:1:1",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			source := location.MustNewSourceID(tt.source)
-			r := NewRenderer(WithModuleRoot(tt.moduleRoot))
-
-			issue := NewIssue(Error, E_SYNTAX, "error").
-				WithSpan(location.Point(source, 1, 1)).
-				Build()
-
-			output := formatIssue(r, issue)
-
-			if !strings.Contains(output, tt.wantPath) {
-				t.Errorf("output should contain %q, got: %s", tt.wantPath, output)
-			}
-		})
-	}
-}
-
 func TestRenderer_WithColors(t *testing.T) {
 	r := NewRenderer(WithColors(true))
 
@@ -273,19 +164,19 @@ func TestRenderer_WithColors_Disabled(t *testing.T) {
 }
 
 func TestRenderer_WithDistinguishFatal(t *testing.T) {
-	issue := NewIssue(Fatal, E_INTERNAL, "limit").Build()
+	issue := NewIssue(Fatal, E_INTERNAL, "internal fault").Build()
 
 	// Default: Fatal renders as "error"
 	r1 := NewRenderer()
 	output1 := formatIssue(r1, issue)
-	if !strings.Contains(output1, ": error[") {
+	if !strings.HasPrefix(output1, "error[") {
 		t.Errorf("Fatal should render as 'error' by default, got: %s", output1)
 	}
 
 	// With distinguish: Fatal renders as "fatal"
 	r2 := NewRenderer(WithDistinguishFatal(true))
 	output2 := formatIssue(r2, issue)
-	if !strings.Contains(output2, ": fatal[") {
+	if !strings.HasPrefix(output2, "fatal[") {
 		t.Errorf("Fatal should render as 'fatal' when distinguished, got: %s", output2)
 	}
 }
@@ -309,11 +200,6 @@ func TestRenderer_FormatIssue_Location(t *testing.T) {
 				WithPath("data.json", "$.items[0]").
 				Build(),
 			contains: "data.json", // path is shown, sourceName prefix comes first if present
-		},
-		{
-			name:     "unknown location",
-			issue:    NewIssue(Error, E_SYNTAX, "msg").Build(),
-			contains: "<unknown>",
 		},
 	}
 
@@ -391,88 +277,38 @@ func TestRenderer_FormatResult_Empty(t *testing.T) {
 	}
 }
 
+// TestRenderer_extractLine holds a line's text and whether it exists apart: a
+// blank line and the line after a final line ending exist and are empty.
 func TestRenderer_extractLine(t *testing.T) {
-	r := NewRenderer()
-
 	tests := []struct {
 		name    string
 		content string
 		lineNum int
 		want    string
+		wantOK  bool
 	}{
-		{
-			name:    "first line",
-			content: "line one\nline two\nline three",
-			lineNum: 1,
-			want:    "line one",
-		},
-		{
-			name:    "middle line",
-			content: "line one\nline two\nline three",
-			lineNum: 2,
-			want:    "line two",
-		},
-		{
-			name:    "last line with newline",
-			content: "line one\nline two\nline three\n",
-			lineNum: 3,
-			want:    "line three",
-		},
-		{
-			name:    "last line without newline",
-			content: "line one\nline two\nline three",
-			lineNum: 3,
-			want:    "line three",
-		},
-		{
-			name:    "CRLF line endings",
-			content: "line one\r\nline two\r\nline three",
-			lineNum: 2,
-			want:    "line two",
-		},
-		{
-			name:    "CR only line endings",
-			content: "line one\rline two\rline three",
-			lineNum: 2,
-			want:    "line two",
-		},
-		{
-			name:    "line out of range",
-			content: "line one\nline two",
-			lineNum: 5,
-			want:    "",
-		},
-		{
-			name:    "line zero",
-			content: "line one",
-			lineNum: 0,
-			want:    "",
-		},
-		{
-			name:    "negative line",
-			content: "line one",
-			lineNum: -1,
-			want:    "",
-		},
-		{
-			name:    "empty content",
-			content: "",
-			lineNum: 1,
-			want:    "",
-		},
-		{
-			name:    "single line no newline",
-			content: "only line",
-			lineNum: 1,
-			want:    "only line",
-		},
+		{"first line", "line one\nline two\nline three", 1, "line one", true},
+		{"middle line", "line one\nline two\nline three", 2, "line two", true},
+		{"last line with newline", "line one\nline two\nline three\n", 3, "line three", true},
+		{"last line without newline", "line one\nline two\nline three", 3, "line three", true},
+		{"CRLF line endings", "line one\r\nline two\r\nline three", 2, "line two", true},
+		{"CR only line endings", "line one\rline two\rline three", 2, "line two", true},
+		{"a blank line", "line one\n\nline three", 2, "", true},
+		{"the line after a final newline", "line one\n", 2, "", true},
+		{"the line after a final CRLF", "line one\r\n", 2, "", true},
+		{"empty content has one empty line", "", 1, "", true},
+		{"single line no newline", "only line", 1, "only line", true},
+		{"line out of range", "line one\nline two", 5, "", false},
+		{"two past a final newline", "line one\n", 3, "", false},
+		{"line zero", "line one", 0, "", false},
+		{"negative line", "line one", -1, "", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := r.extractLine([]byte(tt.content), tt.lineNum)
-			if got != tt.want {
-				t.Errorf("extractLine() = %q; want %q", got, tt.want)
+			got, ok := extractLine([]byte(tt.content), tt.lineNum)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("extractLine(%q, %d) = %q, %t; want %q, %t", tt.content, tt.lineNum, got, ok, tt.want, tt.wantOK)
 			}
 		})
 	}
@@ -488,16 +324,15 @@ func TestRenderer_Excerpt_PointSpan(t *testing.T) {
 		WithExcerpts(true),
 	)
 
-	// Point span (start == end)
 	issue := NewIssue(Error, E_SYNTAX, "error").
 		WithSpan(location.Point(source, 1, 3)).
 		Build()
 
 	output := formatIssue(r, issue)
 
-	// Should have single caret for point
-	if !strings.Contains(output, "^") {
-		t.Error("point span should have underline")
+	// A point is one caret, under the column it names.
+	if want := "\n1 |   token here\n  |   ^"; !strings.HasSuffix(output, want) {
+		t.Errorf("point span excerpt\n got %q\nwant suffix %q", output, want)
 	}
 }
 
@@ -522,9 +357,9 @@ func TestRenderer_Excerpt_RangeSpan(t *testing.T) {
 
 	output := formatIssue(r, issue)
 
-	// Should have 5 carets (columns 3-7 inclusive)
-	if !strings.Contains(output, "^^^^^") {
-		t.Errorf("range span should have 5 carets, got: %s", output)
+	// Five carets, under columns 3 to 7; the end column is exclusive.
+	if want := "\n  |   ^^^^^"; !strings.HasSuffix(output, want) {
+		t.Errorf("range span excerpt\n got %q\nwant suffix %q", output, want)
 	}
 }
 
@@ -574,14 +409,21 @@ func TestRenderer_Excerpt_SourceNotAvailable(t *testing.T) {
 }
 
 func TestRenderer_CompleteOutput(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := location.SourceIDFromPath(filepath.Join(root, "src", "schema.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	provider := newMockSourceProvider()
-	source := location.MustNewSourceID("file:///project/src/schema.yammm")
 	provider.Add(source, "type User {\n  name: String\n  age: Int\n}\n")
 
 	r := NewRenderer(
 		WithSourceProvider(provider),
 		WithExcerpts(true),
-		WithModuleRoot("file:///project"),
+		WithModuleRoot(root),
 	)
 
 	issue := NewIssue(Error, E_DUPLICATE_TYPE, "type 'User' is already defined").
@@ -604,7 +446,7 @@ func TestRenderer_CompleteOutput(t *testing.T) {
 }
 
 // TestRenderer_WriteLocation_SourceNameOnly verifies that issues with only
-// SourceName (no Span or Path) render the SourceName instead of "<unknown>".
+// SourceName (no Span or Path) render the SourceName as their location.
 func TestRenderer_WriteLocation_SourceNameOnly(t *testing.T) {
 	r := NewRenderer()
 
@@ -629,7 +471,8 @@ func TestRenderer_WriteLocation_SourceNameOnly(t *testing.T) {
 }
 
 // TestRenderer_WriteLocation_Precedence verifies location rendering precedence:
-// Span > Path > SourceName > "<unknown>"
+// a span then its path, else a path after its source name, else a path, else a
+// source name, else nothing.
 func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 	r := NewRenderer()
 	source := location.MustNewSourceID("test://schema.yammm")
@@ -640,7 +483,9 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 		expected string
 	}{
 		{
-			name: "span takes precedence",
+			// The span locates the record and the path the field inside it; the
+			// source name names the span's document, so it is not repeated.
+			name: "span then path, for a hybrid issue",
 			issue: Issue{
 				severity:   Error,
 				code:       E_SYNTAX,
@@ -649,7 +494,18 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 				sourceName: "data.json",
 				path:       "$.foo",
 			},
-			expected: "test://schema.yammm:10:5",
+			expected: "test://schema.yammm:10:5 $.foo",
+		},
+		{
+			name: "span alone when there is no path",
+			issue: Issue{
+				severity:   Error,
+				code:       E_SYNTAX,
+				message:    "test",
+				span:       location.Point(source, 10, 5),
+				sourceName: "data.json",
+			},
+			expected: "test://schema.yammm:10:5:",
 		},
 		{
 			name: "path takes precedence over sourceName alone",
@@ -673,13 +529,13 @@ func TestRenderer_WriteLocation_Precedence(t *testing.T) {
 			expected: "data.json:",
 		},
 		{
-			name: "unknown when nothing set",
+			name: "no location when nothing set",
 			issue: Issue{
 				severity: Error,
 				code:     E_SYNTAX,
 				message:  "test",
 			},
-			expected: "<unknown>:",
+			expected: "error[E_SYNTAX]: test",
 		},
 	}
 

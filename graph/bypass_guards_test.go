@@ -460,7 +460,7 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 	// The (one) overflow carries NO composed-key detail: the whole record is
 	// refused, so none of the children attaches and no writer assigns any of
 	// them an address. Naming one would send an operator to a node that does
-	// not exist — the defect the fix-diff round found in the streamed path.
+	// not exist, in the streamed path as in this one.
 	overflow := instancetest.VI(
 		"b.Middle",
 		instancetest.TypeID(middleID),

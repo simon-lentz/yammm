@@ -203,7 +203,7 @@ func buildCrossSchemaSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snaps
 	require.NotNil(t, snapshot.Schema, "schema should parse successfully")
 	require.True(t, snapshot.Result.OK(), "schema should have no errors")
 
-	entrySourceID, err := location.SourceIDFromAbsolutePath(entryPath)
+	entrySourceID, err := location.SourceIDFromPath(entryPath)
 	require.NoError(t, err)
 
 	doc := &docstate.Snapshot{

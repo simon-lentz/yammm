@@ -1777,14 +1777,14 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_NOT_FOUND` — referenced composition not found
 - `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the same bound the snapshot writer and reader enforce; a validated instance is always one a snapshot can carry
-- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately
+- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately. `snapshot.Load` and `snapshot.Verify` raise it for a `(one)` slot a document fills more than once; `snapshot.Info` reads without a schema and makes no such claim
 - `E_INVALID_TYPE_TAG` — `$type` tag errors
 - `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field or edge property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
 
 - `E_DUPLICATE_PK` — duplicate primary key
-- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child (also raised by the validator; see Instance)
+- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child (also raised by the validator and the snapshot reader; see Instance)
 - `E_UNRESOLVED_REQUIRED` — required association unresolved
 - `E_GRAPH_TYPE_NOT_FOUND` — type not found in graph operations
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
@@ -1806,12 +1806,12 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_DANGLING_REFERENCE` — edge target or duplicate conflict not found
 - `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges
 - `E_SNAPSHOT_INVALID_ROOT` — an instances group names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built
-- `E_DUPLICATE_PK` — two root instances in one group state the same primary key. Listed here as well as under Graph: `snapshot.Load` emits it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry
+- `E_DUPLICATE_PK` — two root instances in one group state the same primary key. Listed here as well as under Graph: `snapshot.Load`, `snapshot.Verify` and `snapshot.Info` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Info` resolves no schema, so it compares keys as written and folds only identical spellings, where `Load` and `Verify` fold a timestamp, date or UUID key written two ways
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
 - `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
 - `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` — the schema hash algorithm in the snapshot header is not recognized. An Error on the body-reading surfaces (`Load`, `Verify`, `Info`, `UpdateMetadata`): the document is refused rather than half-trusted. A Warning on header-only reads, which stay classifiable for dispatch
-- `E_SNAPSHOT_PATH_FALLBACK` (Warning) — a provenance path string could not be parsed into a canonical path and fell back to the root path; the original string is preserved for round-trip fidelity
+- `W_SNAPSHOT_PATH_FALLBACK` (Warning) — a provenance path string could not be parsed into a canonical path and fell back to the root path; the original string is preserved for round-trip fidelity
 - `E_SNAPSHOT_IO` — a directory- or file-level I/O failure during `ScanDir` / `ScanDirSlice`
 - `E_UPDATE_METADATA_BODY_OFFSET` — `UpdateMetadata` could not resolve the byte range of the body it reuses
 - `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Load` + `Marshal`
@@ -1840,6 +1840,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - UTF-8 encoding is required
 - One schema per file
 - Import paths are case-sensitive on case-sensitive filesystems
+- `/` separates an import path's segments on every host, and only a `./` or `../` prefix makes an import relative. An import path holding a backslash is refused: Windows reads a backslash as a separator and every other host as part of a file name, so the path would name a different file on each
 - Canonical formatting is defined by `format.TokenStream` (see [API.md](API.md#formatting))
 
 ## Schema Identity

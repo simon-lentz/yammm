@@ -163,7 +163,7 @@ func FailureResult(err error) (diag.Result, bool) {
 	code := strconv.Itoa(ExitForError(err))
 	c := diag.NewCollectorUnlimited()
 	for _, msg := range msgs {
-		c.Collect(diag.NewIssue(diag.Error, diag.E_COMMAND_FAILED, msg).WithDetail("exit_code", code).Build())
+		c.Collect(diag.NewIssue(diag.Error, diag.E_COMMAND_FAILED, msg).WithDetail(diag.DetailKeyExitCode, code).Build())
 	}
 	return c.Result(), true
 }

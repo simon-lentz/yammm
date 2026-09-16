@@ -265,11 +265,10 @@ func UpdateMetadata(
 	return out, sd.collector.Result()
 }
 
-// UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; on any failure
-// that indicates the input is not Marshal-shaped
-// (E_UPDATE_METADATA_BODY_OFFSET, E_SNAPSHOT_MALFORMED, or any other
-// Fatal-severity issue that is NOT E_CONTEXT_CANCELLED), transparently
-// falls back to [Load] + [Marshal] using s for the Load. The fallback
+// UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; on any Error or
+// Fatal issue other than E_CONTEXT_CANCELLED (E_SNAPSHOT_MALFORMED at Error,
+// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another), transparently falls
+// back to [Load] + [Marshal] using s for the Load. The fallback
 // carries the input's indentation and its created_at across — the created_at
 // byte-for-byte, as the fast path keeps it — so the result differs from a
 // direct Marshal only where the input document did.
@@ -283,8 +282,8 @@ func UpdateMetadata(
 // Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], every warning the Load
 // and Marshal legs produced, and one further Warning if the input stated a
 // created_at this path could not parse.
-// Its details include the original triggering Fatal code(s) via a
-// comma-joined "triggering_codes" entry so consumers can log or surface
+// Its details include the distinct Error and Fatal codes that triggered it via
+// a comma-joined "triggering_codes" entry so consumers can log or surface
 // the transition without inspecting the error chain. Callers who want
 // to treat the warning as an error check HasWarnings() or iterate
 // BySeverity(Warning); callers who just want the output bytes use the
@@ -380,7 +379,7 @@ func UpdateMetadataOrReMarshal(
 
 	warn := diag.NewIssue(diag.Warning, diag.W_UPDATE_METADATA_FALLBACK,
 		"snapshot.UpdateMetadataOrReMarshal: fell back to Load + Marshal after UpdateMetadata refused input").
-		WithDetail("triggering_codes", strings.Join(triggeringCodes, ",")).
+		WithDetail(diag.DetailKeyTriggeringCodes, strings.Join(triggeringCodes, ",")).
 		Build()
 	// The legs' own warnings travel with it. A fresh collector holding only
 	// this warning discarded everything Load and Marshal reported — a
@@ -435,17 +434,14 @@ func hasCancellation(r diag.Result) bool {
 	return false
 }
 
-// distinctTriggeringCodes extracts the distinct Fatal-severity codes from a
-// result, sorted alphabetically for deterministic detail output.
+// distinctTriggeringCodes returns the distinct Fatal- and Error-severity codes
+// in r, sorted for deterministic detail output: the fallback triggers on
+// either, and E_SNAPSHOT_MALFORMED arrives at Error.
 func distinctTriggeringCodes(r diag.Result) []string {
 	seen := make(map[string]struct{})
 	for iss := range r.BySeverity(diag.Fatal) {
 		seen[iss.Code().String()] = struct{}{}
 	}
-	// Also include Error-severity codes because some malformed-input
-	// failure modes (E_SNAPSHOT_MALFORMED from decodeHeader) surface at
-	// Error rather than Fatal; the fallback triggers on any error-severity
-	// issue outside cancellation.
 	for iss := range r.BySeverity(diag.Error) {
 		seen[iss.Code().String()] = struct{}{}
 	}
@@ -457,15 +453,12 @@ func distinctTriggeringCodes(r diag.Result) []string {
 	return codes
 }
 
-// mergeResults returns a new Result containing every issue from a and b.
+// mergeResults returns a Result holding a's and b's issues. It merges both, so
+// a truncated input's dropped issues stay counted and its truncation carries.
 func mergeResults(a, b diag.Result) diag.Result {
 	c := diag.NewCollector(0)
-	for iss := range a.Issues() {
-		c.Collect(iss)
-	}
-	for iss := range b.Issues() {
-		c.Collect(iss)
-	}
+	c.Merge(a)
+	c.Merge(b)
 	return c.Result()
 }
 

@@ -1,0 +1,56 @@
+{
+  "name": "\"closing_bracket\"",
+  "span": {
+    "s": 0,
+    "e": 24
+  },
+  "types": [
+    {
+      "name": "T",
+      "name_span": {
+        "s": 182,
+        "e": 183
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 194,
+              "e": 200
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 187,
+            "e": 208
+          }
+        },
+        {
+          "name": "status",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"alpha\"",
+              "\"c]d\""
+            ],
+            "span": {
+              "s": 217,
+              "e": 242
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 210,
+            "e": 251
+          }
+        }
+      ],
+      "span": {
+        "s": 177,
+        "e": 253
+      }
+    }
+  ]
+}

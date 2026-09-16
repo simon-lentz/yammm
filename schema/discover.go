@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 )
 
 // ModuleRootMarker is the file name that marks a directory as a module root.
@@ -63,15 +64,14 @@ func (e *MalformedModuleRootError) Error() string {
 // between discovery and its default — the editor's workspace folder does
 // exactly that. dir must be a directory: pass filepath.Dir of a file path.
 //
-// The walk runs on the canonical (symlink-resolved) ancestor chain where
-// resolution succeeds, so a marker reachable only through a symlinked spelling
-// is normally not consulted. Resolution is best-effort: makeCanonicalPath falls
-// back to the cleaned absolute path when it fails — a directory that does not
-// exist, or a permission error under an editor — and the walk then runs on the
-// unresolved chain. Discovery itself is not sandboxed and cannot be: it runs
-// before any root exists, and costs one os.Lstat per ancestor level.
+// The walk runs on the chain [location.ResolveHostPath] answers with, so a
+// marker reachable only through a symlinked spelling is normally not
+// consulted. A path the resolver refuses is an error; a directory the process
+// cannot traverse is kept as typed, as the resolver keeps it. Discovery itself
+// is not sandboxed and cannot be: it runs before any root exists, and costs one
+// os.Lstat per ancestor level.
 func FindModuleRoot(dir string) (string, bool, error) {
-	canonical, err := makeCanonicalPath(dir)
+	canonical, err := location.ResolveHostPath(dir)
 	if err != nil {
 		return "", false, fmt.Errorf("canonicalize %q: %w", dir, err)
 	}
@@ -212,7 +212,7 @@ func checkMarkerContent(path string, content []byte) error {
 func ModuleRootIssue(err error) diag.Issue {
 	if malformed, ok := errors.AsType[*MalformedModuleRootError](err); ok {
 		return diag.NewIssue(diag.Error, diag.E_LOAD_MODULE_ROOT_MALFORMED, malformed.Error()).
-			WithDetail(diag.DetailKeyModuleRoot, filepath.Dir(malformed.Path)).
+			WithDetail(diag.DetailKeyModuleRoot, rootIdentity(filepath.Dir(malformed.Path), diag.ModuleRootDiscovered)).
 			WithDetail(diag.DetailKeyModuleRootOrigin, diag.ModuleRootDiscovered).Build()
 	}
 	return errorToFatalIssue(err)

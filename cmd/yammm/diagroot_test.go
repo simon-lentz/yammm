@@ -38,7 +38,11 @@ func TestDiagnosticsRoot_Relativizes(t *testing.T) {
 		if !strings.Contains(stderr, "bad.yammm:3") {
 			t.Errorf("location should be root-relative, stderr:\n%s", stderr)
 		}
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil && strings.Contains(stderr, resolved) {
+		onDisk, err := yammmtest.DiskSpelling(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(stderr, onDisk) {
 			t.Errorf("location must not render absolute, stderr:\n%s", stderr)
 		}
 	})
@@ -65,7 +69,11 @@ func TestDiagnosticsRoot_Relativizes(t *testing.T) {
 		if !strings.Contains(stderr, "bad.yammm:3") {
 			t.Errorf("location should be root-relative, stderr:\n%s", stderr)
 		}
-		if resolved, err := filepath.EvalSymlinks(real); err == nil && strings.Contains(stderr, resolved) {
+		onDisk, err := yammmtest.DiskSpelling(real)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(stderr, onDisk) {
 			t.Errorf("location must not render absolute, stderr:\n%s", stderr)
 		}
 	})
@@ -121,11 +129,66 @@ func TestDiagRootFor_DiscoversOnTheFailurePath(t *testing.T) {
 	entry := filepath.Join(sub, "bad.yammm")
 
 	got := diagRootFor(nil, "", entry)
-	resolved, err := filepath.EvalSymlinks(root)
+	onDisk, err := yammmtest.DiskSpelling(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != resolved {
-		t.Errorf("diagRootFor = %q, want the discovered root %q, not the entry directory", got, resolved)
+	if got != onDisk {
+		t.Errorf("diagRootFor = %q, want the discovered root %q, not the entry directory", got, onDisk)
+	}
+}
+
+// TestDiagRootFor_ResolvesAnExplicitRootOnTheFailurePath pins that a failed
+// load's explicit root is the directory the loader resolved it to: a root typed
+// through a link or in another case is returned as its directories list it.
+func TestDiagRootFor_ResolvesAnExplicitRootOnTheFailurePath(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name string
+		// typed returns a spelling of real, which sits in base.
+		typed func(t *testing.T, base string) string
+	}{
+		{
+			name: "typed through a link",
+			typed: func(t *testing.T, base string) string {
+				t.Helper()
+				link := filepath.Join(base, "ln")
+				if err := os.Symlink("real", link); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				return link
+			},
+		},
+		{
+			name: "typed in another case",
+			typed: func(t *testing.T, base string) string {
+				t.Helper()
+				if !yammmtest.CaseFoldingFilesystem(t, base) {
+					t.Skip("the filesystem is case-sensitive, so two spellings name two directories")
+				}
+				return filepath.Join(base, "REAL")
+			},
+		},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			base := t.TempDir()
+			real := filepath.Join(base, "real")
+			if err := os.Mkdir(real, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			typed := row.typed(t, base)
+
+			got := diagRootFor(nil, typed, filepath.Join(typed, "bad.yammm"))
+			onDisk, err := yammmtest.DiskSpelling(real)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != onDisk {
+				t.Errorf("diagRootFor(nil, %q, ...) = %q, want %q", typed, got, onDisk)
+			}
+		})
 	}
 }

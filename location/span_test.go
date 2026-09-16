@@ -1,6 +1,7 @@
 package location
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -77,6 +78,20 @@ func TestRangeWithBytes_Panics_EndByteBeforeStartByte(t *testing.T) {
 	}()
 
 	RangeWithBytes(testSource, 10, 5, 110, 10, 15, 100) // End byte before start byte
+}
+
+// TestRangeWithBytes_Panics_OrdersDisagree holds the constructor to both orders
+// when both are known. A span whose bytes run forward and whose line and column
+// run backward reaches lsputil.SpanToLSPRange, which takes the line from one
+// and the character from the other, and becomes an inverted LSP range.
+func TestRangeWithBytes_Panics_OrdersDisagree(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("RangeWithBytes should panic when the byte and line/column orders disagree")
+		}
+	}()
+
+	RangeWithBytes(testSource, 10, 15, 100, 10, 5, 110)
 }
 
 func TestSpan_IsZero(t *testing.T) {
@@ -177,6 +192,17 @@ func TestSpan_IsGeometricallySafe(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			// Both orders are known and they disagree, so the span is unsafe
+			// whichever one a reader takes.
+			name: "ordered bytes, inverted line and column",
+			span: Span{
+				Source: testSource,
+				Start:  Position{Line: 10, Column: 15, Byte: 100},
+				End:    Position{Line: 10, Column: 5, Byte: 110},
+			},
+			want: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -208,6 +234,16 @@ func TestSpan_String(t *testing.T) {
 			name: "range span",
 			span: Range(testSource, 10, 5, 10, 15),
 			want: "test://unit:10:5-10:15",
+		},
+		{
+			name: "range with an unknown end",
+			span: Span{Source: testSource, Start: Position{Line: 10, Column: 5, Byte: -1}},
+			want: "test://unit:10:5-<unknown>",
+		},
+		{
+			name: "range with an unknown start",
+			span: Span{Source: testSource, End: Position{Line: 10, Column: 15, Byte: -1}},
+			want: "test://unit:<unknown>-10:15",
 		},
 	}
 
@@ -310,7 +346,52 @@ func TestSpan_Contains_WithBytes(t *testing.T) {
 	}
 }
 
+// TestCompare_ZeroOnlyForEqualSpans holds Compare to its contract: it returns
+// 0 exactly when the two spans are ==, so a sort by it ties nothing distinct.
+func TestCompare_ZeroOnlyForEqualSpans(t *testing.T) {
+	t.Parallel()
+
+	file, err := SourceIDFromPath(filepath.Join(t.TempDir(), "a.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairs := []struct {
+		name string
+		a, b Span
+	}{
+		{"a known and an unknown start byte", Point(testSource, 1, 1), PointWithByte(testSource, 1, 1, 0)},
+		{"two known start bytes", PointWithByte(testSource, 1, 1, 0), PointWithByte(testSource, 1, 1, 4)},
+		{"two known end bytes", RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4), RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9)},
+		{"two known start bytes before one end byte", RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9), RangeWithBytes(testSource, 1, 1, 2, 1, 5, 9)},
+		{"a synthetic and a file-backed source spelled alike", Point(NewSourceID(file.String()), 1, 1), Point(file, 1, 1)},
+	}
+	for _, p := range pairs {
+		t.Run(p.name, func(t *testing.T) {
+			t.Parallel()
+			if p.a == p.b {
+				t.Fatalf("the fixture's spans are equal: %v", p.a)
+			}
+			c := Compare(p.a, p.b)
+			if c == 0 {
+				t.Errorf("Compare(%v, %v) = 0 for spans that differ", p.a, p.b)
+			}
+			if back := Compare(p.b, p.a); back != -c {
+				t.Errorf("Compare is not antisymmetric: %d one way, %d the other", c, back)
+			}
+			if self := Compare(p.a, p.a); self != 0 {
+				t.Errorf("Compare(a, a) = %d, want 0", self)
+			}
+		})
+	}
+}
+
 func TestCompare(t *testing.T) {
+	file, err := SourceIDFromPath(filepath.Join(t.TempDir(), "a.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	synthetic := NewSourceID(file.String())
+
 	tests := []struct {
 		name string
 		a    Span
@@ -353,12 +434,63 @@ func TestCompare(t *testing.T) {
 			b:    Range(NewSourceID("bbb://"), 5, 10, 5, 20),
 			want: -1,
 		},
+		{
+			name: "end position decides before the start byte",
+			a:    RangeWithBytes(testSource, 1, 1, 9, 1, 5, 20),
+			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 6, 20),
+			want: -1,
+		},
+		{
+			name: "start byte decides before the end byte",
+			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
+			b:    RangeWithBytes(testSource, 1, 1, 2, 1, 5, 4),
+			want: -1,
+		},
+		{
+			name: "unknown start byte before a known one",
+			a:    Range(testSource, 1, 1, 1, 5),
+			b:    Span{Source: testSource, Start: Position{Line: 1, Column: 1, Byte: 0}, End: Position{Line: 1, Column: 5, Byte: -1}},
+			want: -1,
+		},
+		{
+			name: "smaller start byte first",
+			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
+			b:    RangeWithBytes(testSource, 1, 1, 4, 1, 5, 9),
+			want: -1,
+		},
+		{
+			name: "unknown end byte before a known one",
+			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, -1),
+			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4),
+			want: -1,
+		},
+		{
+			name: "smaller end byte first",
+			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4),
+			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
+			want: -1,
+		},
+		{
+			name: "synthetic source before a file-backed one spelled alike",
+			a:    Point(synthetic, 1, 1),
+			b:    Point(file, 1, 1),
+			want: -1,
+		},
+		{
+			name: "byte offset decides before the source kind",
+			a:    PointWithByte(file, 1, 1, 0),
+			b:    PointWithByte(synthetic, 1, 1, 4),
+			want: -1,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Compare(tt.a, tt.b); got != tt.want {
-				t.Errorf("Compare() = %d; want %d", got, tt.want)
+				t.Errorf("Compare(%v, %v) = %d; want %d", tt.a, tt.b, got, tt.want)
+			}
+			if got := Compare(tt.b, tt.a); got != -tt.want {
+				t.Errorf("Compare(%v, %v) = %d; want %d", tt.b, tt.a, got, -tt.want)
 			}
 		})
 	}

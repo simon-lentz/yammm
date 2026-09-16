@@ -475,9 +475,9 @@ func BenchmarkRegisterIdempotent_LargeSchema(b *testing.B) {
 	// insert. An inline ratio-emission via testing.Benchmark is avoided
 	// here: invoking testing.Benchmark from inside a benchmark deadlocks
 	// on testing's internal lock. Tools like benchstat compute the ratio
-	// cleanly from the paired ns/op output; this is the plan doc's
-	// intended diagnostic (not a CI gate — variance on shared runners
-	// would flake any tight threshold).
+	// cleanly from the paired ns/op output. The benchmark is a diagnostic,
+	// not a CI gate: variance on shared runners would flake any tight
+	// threshold.
 	r := schema.NewRegistry()
 	s1 := buildLargeBenchSchema(b)
 	if err := r.Register(s1); err != nil {

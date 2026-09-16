@@ -1,6 +1,8 @@
 package path
 
 import (
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,11 +31,6 @@ func TestBuilder_Index(t *testing.T) {
 			name:     "nested index",
 			build:    func() Builder { return Root().Index(0).Index(1) },
 			expected: "$[0][1]",
-		},
-		{
-			name:     "negative index",
-			build:    func() Builder { return Root().Index(-1) },
-			expected: "$[-1]",
 		},
 		{
 			name:     "large index",
@@ -125,6 +122,11 @@ func TestBuilder_Key(t *testing.T) {
 			name:     "hyphen",
 			key:      "my-key",
 			expected: `$["my-key"]`,
+		},
+		{
+			name:     "invalid UTF-8 is written as U+FFFD, as Parse reads it",
+			key:      "a\xffb",
+			expected: "$[\"a\uFFFDb\"]",
 		},
 	}
 
@@ -220,12 +222,102 @@ func TestBuilder_PK(t *testing.T) {
 			fields:   []PKField{},
 			expected: "$.Person",
 		},
+		{
+			name:     "a value of another type is quoted and escaped",
+			fields:   []PKField{{Name: "tags", Value: []string{`a"b\c`}}},
+			expected: `$.Person[tags="[a\"b\\c]"]`,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := Root().Key("Person").PK(tt.fields...)
 			assert.Equal(t, tt.expected, b.String())
+		})
+	}
+}
+
+// Each names the refusal in a Builder panic message.
+const (
+	refusesNegativeIndex = "Index: negative index"
+	refusesPKName        = "is not an identifier"
+	refusesPKFloat       = "which the grammar does not spell"
+)
+
+// wantPanic runs call and asserts it panicked with a string message naming what.
+func wantPanic(t *testing.T, what string, call func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Errorf("no panic; want a refusal naming %q", what)
+			return
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Errorf("panic value is %T; want a string", r)
+			return
+		}
+		if !strings.Contains(msg, what) {
+			t.Errorf("panic message %q does not name %q", msg, what)
+		}
+	}()
+	call()
+}
+
+// TestBuilder_RefusesWhatParseCannotRead holds the Builder to the grammar its
+// own String output must satisfy: every input below writes a path Parse
+// refuses, so a path that exists is a path that reads back.
+func TestBuilder_RefusesWhatParseCannotRead(t *testing.T) {
+	tests := []struct {
+		name    string
+		build   func() Builder
+		refusal string
+	}{
+		{"negative index", func() Builder { return Root().Index(-1) }, refusesNegativeIndex},
+		{"PK name with a space", func() Builder {
+			return Root().PK(PKField{Name: "my field", Value: 1})
+		}, refusesPKName},
+		{"PK name starting with a digit", func() Builder {
+			return Root().PK(PKField{Name: "1st", Value: 1})
+		}, refusesPKName},
+		{"empty PK name", func() Builder {
+			return Root().PK(PKField{Name: "", Value: 1})
+		}, refusesPKName},
+		{"a later field of a composite PK with a name that is not an identifier", func() Builder {
+			return Root().PK(PKField{Name: "region", Value: "us"}, PKField{Name: "my field", Value: 1})
+		}, refusesPKName},
+		{"NaN float64 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: math.NaN()})
+		}, refusesPKFloat},
+		{"+Inf float64 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: math.Inf(1)})
+		}, refusesPKFloat},
+		{"-Inf float64 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: math.Inf(-1)})
+		}, refusesPKFloat},
+		{"NaN float32 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: float32(math.NaN())})
+		}, refusesPKFloat},
+		{"+Inf float32 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: float32(math.Inf(1))})
+		}, refusesPKFloat},
+		{"-Inf float32 PK value", func() Builder {
+			return Root().PK(PKField{Name: "score", Value: float32(math.Inf(-1))})
+		}, refusesPKFloat},
+		{"a later field of a composite PK holding NaN", func() Builder {
+			return Root().PK(PKField{Name: "id", Value: 1}, PKField{Name: "score", Value: math.NaN()})
+		}, refusesPKFloat},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wantPanic(t, tt.refusal, func() {
+				s := tt.build().String()
+				if _, err := Parse(s); err != nil {
+					t.Errorf("no panic, and the path it wrote does not parse: %q: %v", s, err)
+				}
+			})
 		})
 	}
 }

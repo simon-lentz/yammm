@@ -2,6 +2,7 @@ package doclint_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -40,7 +41,7 @@ func TestAssertNoDanglingLinks_CleanPackageIsSilent(t *testing.T) {
 	t.Parallel()
 	r, checked := runGate(t)
 	for _, m := range r.msgs {
-		if strings.Contains(m, "/clean/") {
+		if strings.Contains(m, filepath.FromSlash("/clean/")) {
 			t.Errorf("clean fixture reported: %s", m)
 		}
 	}

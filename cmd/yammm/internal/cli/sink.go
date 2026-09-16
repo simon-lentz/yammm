@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // DiagnosticSink collects everything one invocation diagnoses, and writes it so
@@ -21,6 +22,7 @@ type DiagnosticSink struct {
 	isTTY    bool
 	provider diag.SourceProvider
 	root     string
+	captured *schema.Sources
 	results  []diag.Result
 	flushed  int
 	closed   bool
@@ -118,3 +120,13 @@ func (s *DiagnosticSink) renderFrom(i int) {
 	renderer := NewRenderer(s.format, s.isTTY, s.noColor, s.provider, s.root)
 	_ = RenderResult(s.w, renderer, s.format, MergeResults(s.results[i:]...))
 }
+
+// CaptureSchemaSources returns a load option that keeps the load's sources on
+// the sink, so a load that fails still renders excerpts: it returns no schema
+// to take them from.
+func (s *DiagnosticSink) CaptureSchemaSources() schema.LoadOption {
+	return schema.CaptureSources(&s.captured)
+}
+
+// CapturedSources returns the sources the last captured load read, or nil.
+func (s *DiagnosticSink) CapturedSources() *schema.Sources { return s.captured }

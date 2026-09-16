@@ -1,6 +1,7 @@
 package hover
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -45,10 +46,10 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
 				sources := map[string][]byte{
-					"/test/main.yammm":  []byte("schema \"main\"\nimport \"./parts\" as parts\n"),
-					"/test/parts.yammm": []byte("schema \"parts\"\ntype Wheel {\n  id String primary\n}\n"),
+					yammmtest.HostAbs("/test/main.yammm"):  []byte("schema \"main\"\nimport \"./parts\" as parts\n"),
+					yammmtest.HostAbs("/test/parts.yammm"): []byte("schema \"parts\"\ntype Wheel {\n  id String primary\n}\n"),
 				}
-				s, result := schema.LoadSourcesWithEntry(t.Context(), sources, "/test/main.yammm", "/test")
+				s, result := schema.LoadSourcesWithEntry(t.Context(), sources, yammmtest.HostAbs("/test/main.yammm"), yammmtest.HostAbs("/test"))
 				require.False(t, result.HasErrors(), "load: %s", result)
 				var imp *schema.Import
 				for i := range s.Imports() {
@@ -182,10 +183,10 @@ func TestRenderSymbol_Golden(t *testing.T) {
 		},
 		{
 			name: "type with source path relative to root",
-			root: "/project",
+			root: yammmtest.HostAbs("/project"),
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromAbsolutePath("/project/schemas/person.yammm")
+				sourceID, err := location.SourceIDFromPath(yammmtest.HostAbs("/project/schemas/person.yammm"))
 				require.NoError(t, err)
 				s, result := schema.NewBuilder().
 					WithName("test").
@@ -202,7 +203,7 @@ func TestRenderSymbol_Golden(t *testing.T) {
 			name: "type with absolute source path when no root",
 			build: func(t *testing.T) *symbols.Symbol {
 				t.Helper()
-				sourceID, err := location.SourceIDFromAbsolutePath("/project/person.yammm")
+				sourceID, err := location.SourceIDFromPath(yammmtest.HostAbs("/project/person.yammm"))
 				require.NoError(t, err)
 				s, result := schema.NewBuilder().
 					WithName("test").
@@ -223,5 +224,15 @@ func TestRenderSymbol_Golden(t *testing.T) {
 		out.WriteString(RenderSymbol(tc.build(t), tc.root))
 		out.WriteString("\n")
 	}
-	yammmtest.Golden(t, "render_symbol", []byte(out.String()))
+	// The golden spells each fixture identity the Unix way. Only the exact host
+	// identity is rewritten, so an identity that lost its volume stays and fails.
+	rendered := out.String()
+	for _, fixture := range []string{"/test/parts.yammm", "/project/person.yammm"} {
+		host := "`" + filepath.ToSlash(yammmtest.HostAbs(fixture)) + "`"
+		if !strings.Contains(rendered, host) {
+			t.Errorf("rendered hover does not name the fixture identity %s", host)
+		}
+		rendered = strings.ReplaceAll(rendered, host, "`"+fixture+"`")
+	}
+	yammmtest.Golden(t, "render_symbol", []byte(rendered))
 }

@@ -146,6 +146,8 @@ func applyLoadOptions(opts []LoadOption) loadConfig {
 // [github.com/simon-lentz/yammm/diag.Result.LimitReached] and
 // [github.com/simon-lentz/yammm/diag.Result.TruncationNote] report the rest
 // exactly. Set to 0 for unlimited. Default is 100, matching schema.Load.
+// Under [WithRevalidation] the revalidator caps each row at the same limit,
+// so the load has one cap.
 func WithIssueLimit(limit int) LoadOption {
 	return func(c *loadConfig) {
 		c.issueLimit = limit

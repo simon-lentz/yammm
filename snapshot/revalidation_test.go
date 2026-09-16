@@ -1,7 +1,11 @@
 package snapshot_test
 
 import (
+	"context"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -12,7 +16,7 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// The P1 matrix schema: one type carrying a bound, an enum, a pattern, an
+// The revalidation matrix schema: one type carrying a bound, an enum, a pattern, an
 // invariant, an edge with a declared property, a required association, and a
 // required composition — each violated by exactly one matrix row.
 const revalSchema = `schema "reval"
@@ -91,7 +95,7 @@ func revalDocument(t *testing.T, s *schema.Schema, opts ...instancetest.VIOption
 	return data
 }
 
-// TestLoad_RevalidationMatrix pins the audit's P1 matrix: every constraint
+// TestLoad_RevalidationMatrix pins the revalidation matrix: every constraint
 // class the validator enforces is reported under WithRevalidation and
 // silent without it.
 func TestLoad_RevalidationMatrix(t *testing.T) {
@@ -209,9 +213,10 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 	}
 }
 
-func TestLoad_RevalidationCleanDataSilent(t *testing.T) {
-	t.Parallel()
-	s := revalLoadSchema(t)
+// revalCleanDocument marshals a validator-built Target and Thing, so a
+// revalidating load of it reports nothing about the data.
+func revalCleanDocument(t *testing.T, s *schema.Schema) []byte {
+	t.Helper()
 	v := instance.NewValidator(s)
 
 	g := graph.New(s)
@@ -240,6 +245,13 @@ func TestLoad_RevalidationCleanDataSilent(t *testing.T) {
 	if mres.HasErrors() {
 		t.Fatalf("Marshal: %s", mres.String())
 	}
+	return data
+}
+
+func TestLoad_RevalidationCleanDataSilent(t *testing.T) {
+	t.Parallel()
+	s := revalLoadSchema(t)
+	data := revalCleanDocument(t, s)
 
 	snap, lres := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
 	if snap == nil || lres.HasErrors() {
@@ -247,6 +259,86 @@ func TestLoad_RevalidationCleanDataSilent(t *testing.T) {
 	}
 	for issue := range lres.Issues() {
 		t.Errorf("clean data drew an issue: %s", issue.Message())
+	}
+}
+
+// cancelAfterPolls is a context that reports itself cancelled from its n-th
+// Err poll on. Nothing under Load selects on Done, so a load can be cancelled
+// at any one of the points it polls.
+type cancelAfterPolls struct {
+	mu    sync.Mutex
+	polls int
+	after int
+}
+
+func (c *cancelAfterPolls) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *cancelAfterPolls) Done() <-chan struct{}       { return nil }
+func (c *cancelAfterPolls) Value(any) any               { return nil }
+
+func (c *cancelAfterPolls) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.polls++
+	if c.polls >= c.after {
+		return context.Canceled
+	}
+	return nil
+}
+
+func (c *cancelAfterPolls) polled() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.polls
+}
+
+// TestLoad_RevalidationReportsACancelledRowAtItsOwnSeverity pins that a row
+// the revalidator could not finish reports the Fatal E_CONTEXT_CANCELLED the
+// validator raised, not a Warning about the data, whatever severity the option
+// names. The load is cancelled at each of its polls in turn, which puts one
+// cancellation inside a revalidated row, where the issue carries the row's
+// root path.
+func TestLoad_RevalidationReportsACancelledRowAtItsOwnSeverity(t *testing.T) {
+	t.Parallel()
+	s := revalLoadSchema(t)
+	data := revalCleanDocument(t, s)
+
+	sawRow := false
+	for after := 1; ; after++ {
+		ctx := &cancelAfterPolls{after: after}
+		snap, res := snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
+		if ctx.polled() < after {
+			if snap == nil {
+				t.Fatalf("an uncancelled load failed: %s", res)
+			}
+			break
+		}
+		if snap != nil {
+			t.Fatalf("poll %d: a cancelled load returned a snapshot", after)
+		}
+		if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
+			t.Fatalf("poll %d: a cancelled load did not report the cancellation: %s", after, res)
+		}
+		if n := res.Len(); n != 1 {
+			t.Errorf("poll %d: one cancellation was reported %d times: %s", after, n, res)
+		}
+		for issue := range res.Issues() {
+			if issue.Code() != diag.E_CONTEXT_CANCELLED {
+				t.Errorf("poll %d: a cancelled load reported %s %s: %s", after, issue.Severity(), issue.Code(), issue.Message())
+				continue
+			}
+			if issue.Severity() != diag.Fatal {
+				t.Errorf("poll %d: the cancellation is %s, want Fatal: %s", after, issue.Severity(), issue.Message())
+			}
+			if strings.HasPrefix(issue.Message(), "revalidation of") {
+				t.Errorf("poll %d: the cancellation was reported as a finding about the data: %s", after, issue.Message())
+			}
+			if issue.Path() == "$" {
+				sawRow = true
+			}
+		}
+	}
+	if !sawRow {
+		t.Fatal("no cancellation landed inside a revalidated row")
 	}
 }
 

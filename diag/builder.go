@@ -185,9 +185,13 @@ func (b *IssueBuilder) WithExpectedGot(expected, got string) *IssueBuilder {
 // slices. This ensures builder reuse cannot mutate previously-built issues
 // (immutability guarantee).
 //
-// The returned issue is guaranteed to be valid (IsValid() returns true)
-// because NewIssue requires severity, code, and message.
+// It panics on a builder [NewIssue] and [FromIssue] did not make, which would
+// otherwise yield a zero Issue that [Collector.Collect] panics on one call
+// later. The returned issue is always valid ([Issue.IsValid]).
 func (b *IssueBuilder) Build() Issue {
+	if !b.issue.IsValid() {
+		panic("diag.IssueBuilder.Build: builder not made by NewIssue or FromIssue")
+	}
 	result := b.issue
 
 	// Deep copy slices to ensure immutability

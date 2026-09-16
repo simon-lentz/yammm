@@ -191,7 +191,7 @@ func fmtHazards(t *testing.T) map[string]string {
 	}
 	return map[string]string{
 		"an enum value on the opening line": read("enum_value_on_opening_line.yammm"),
-		"an unspaced logical operator":      tightOperators.ReplaceAllString(read("g4_logical_op_in_trailing_comment.yammm"), "$1"),
+		"an unspaced logical operator":      tightOperators.ReplaceAllString(read("logical_op_in_trailing_comment.yammm"), "$1"),
 	}
 }
 

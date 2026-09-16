@@ -68,11 +68,9 @@ func saveFixture(t *testing.T, path string) {
 	}
 }
 
-// TestSnapshotInfo_JSONKeysAreSnakeCase pins B49 across all three JSON modes.
-// Two of the three marshalled the library structs directly, so they emitted Go
-// field names, and the directory mode wrapped a PascalCase header in
-// snake_case entry keys — one command speaking two conventions in one
-// document.
+// TestSnapshotInfo_JSONKeysAreSnakeCase pins snake_case keys across all three
+// JSON modes. A mode that marshals the library structs directly emits Go field
+// names, and one command then speaks two conventions in one document.
 func TestSnapshotInfo_JSONKeysAreSnakeCase(t *testing.T) {
 	t.Parallel()
 
@@ -108,10 +106,10 @@ func TestSnapshotInfo_JSONKeysAreSnakeCase(t *testing.T) {
 	}
 }
 
-// TestSnapshotInfo_HeaderOnlyReportsFileSize pins B48. HeaderOnlyRead reports
-// zero by contract — a size is not knowable from an io.Reader — but the
-// command opened the file and holds the handle, so it published a zero it
-// could have stat'd.
+// TestSnapshotInfo_HeaderOnlyReportsFileSize pins the file size in header-only
+// mode. HeaderOnlyRead reports zero by contract — a size is not knowable from an
+// io.Reader — but the command opened the file and holds the handle, so it stats
+// the handle rather than publishing zero.
 func TestSnapshotInfo_HeaderOnlyReportsFileSize(t *testing.T) {
 	t.Parallel()
 
@@ -136,10 +134,9 @@ func TestSnapshotInfo_HeaderOnlyReportsFileSize(t *testing.T) {
 	}
 }
 
-// TestSnapshotInfo_DirDiagnosticsIsAlwaysTheWire pins B50. A clean entry omitted
-// its issues entirely while its sibling header was an explicit null, so one DTO
-// answered "nothing to report" two different ways; every entry now carries the
-// diagnostic wire object, whose issues is an array even when empty.
+// TestSnapshotInfo_DirDiagnosticsIsAlwaysTheWire pins that every directory entry
+// carries the diagnostic wire object, whose issues is an array even when empty,
+// so one DTO does not answer "nothing to report" two different ways.
 func TestSnapshotInfo_DirDiagnosticsIsAlwaysTheWire(t *testing.T) {
 	t.Parallel()
 
@@ -235,10 +232,9 @@ func TestSnapshotInfo_AbsentAttestationRenders(t *testing.T) {
 	})
 }
 
-// TestSnapshotInfo_DirExitCodeIsFormatIndependent pins the half of B17 that
-// survived its own repair: dirEntriesExit was wired to the text return only,
-// so the same malformed directory exited 1 as text and 0 as JSON — and a
-// machine consumer, the one --format json exists for, read the silent code.
+// TestSnapshotInfo_DirExitCodeIsFormatIndependent pins one exit code for a
+// malformed directory in text and in JSON. dirEntriesExit reaches both returns,
+// because a machine consumer, the one --format json exists for, reads the code.
 func TestSnapshotInfo_DirExitCodeIsFormatIndependent(t *testing.T) {
 	t.Parallel()
 
@@ -305,8 +301,9 @@ func TestSnapshotInfo_DirHeaderStatesPresenceAndSize(t *testing.T) {
 	}
 }
 
-// TestSnapshotInfo_DirModTimeSortsAsText pins B47. RFC 3339 Nano trims
-// trailing zeros, so a whole-second time renders with no fraction at all and
+// TestSnapshotInfo_DirModTimeSortsAsText pins mod times that sort as text.
+// RFC 3339 Nano trims trailing zeros, so a whole-second time renders with no
+// fraction at all and
 // sorts ABOVE one 10 µs later — "Z" is above "." in every byte ordering a
 // consumer would use.
 func TestSnapshotInfo_DirModTimeSortsAsText(t *testing.T) {
@@ -379,9 +376,9 @@ func TestSnapshotInfo_DirModTimeSortsAsText(t *testing.T) {
 	}
 }
 
-// TestSnapshotInfo_MetadataRendersSorted pins B46. Both text renderers walked
-// the metadata map directly, so one file printed its annotations in a
-// different order on consecutive runs and no diff of two reports was
+// TestSnapshotInfo_MetadataRendersSorted pins sorted metadata in both text
+// renderers. A walk over the metadata map prints one file's annotations in a
+// different order on consecutive runs, and no diff of two reports is
 // trustworthy.
 func TestSnapshotInfo_MetadataRendersSorted(t *testing.T) {
 	t.Parallel()
@@ -429,10 +426,9 @@ func TestSnapshotInfo_MetadataSortIsTheKeyOrder(t *testing.T) {
 	}
 }
 
-// TestRoot_FormatFlagDocumentsPayloadShaping pins B34's confirmed half. The
-// root called --format the "diagnostic output format" and said it applies to
-// commands that produce diagnostics, while snapshot info shapes its whole
-// stdout payload with it.
+// TestRoot_FormatFlagDocumentsPayloadShaping pins the root's description of
+// --format. snapshot info shapes its whole stdout payload with the flag, so the
+// flag is more than a diagnostic output format.
 func TestRoot_FormatFlagDocumentsPayloadShaping(t *testing.T) {
 	t.Parallel()
 

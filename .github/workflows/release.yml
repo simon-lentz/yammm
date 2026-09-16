@@ -4,20 +4,25 @@ on:
     tags:
       - "v*"
 permissions:
-  contents: write
+  contents: read
 jobs:
+  # The assets ship for darwin, Linux and Windows, so every host's lint, vet and
+  # suite, and the Neo4j server matrix, run at the tagged commit before any asset
+  # is built. A called workflow runs with this workflow's github context, so it
+  # checks out the tag.
+  test:
+    uses: ./.github/workflows/yammm_test.yml
   release:
+    needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - name: Test
-        run: go test ./...
-      - name: Lint
-        run: make lint
       - name: Build all platforms
         env:
           VERSION: ${{ github.ref_name }}

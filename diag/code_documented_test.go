@@ -25,10 +25,9 @@ const diagnosticsRefPath = "../claude-plugin/skills/yammm/references/diagnostics
 const specRefPath = "../docs/SPEC.md"
 
 // codePattern matches E_* and W_* diagnostic code identifiers in markdown
-// content. The E_ prefix covers error-severity and sentinel codes (the
-// historical default); the W_ prefix covers warning-severity codes added
-// from v0.3.0 onward. The final [A-Z0-9] ensures wildcard references like
-// "E_IMPORT_*" or "W_FOO_*" are not matched.
+// content. The W_ prefix names a code whose severity is fixed at Warning, and
+// the E_ prefix every other code. The final [A-Z0-9] ensures wildcard
+// references like "E_IMPORT_*" or "W_FOO_*" are not matched.
 var codePattern = regexp.MustCompile(`[EW]_[A-Z][A-Z0-9_]*[A-Z0-9]`)
 
 // TestDocumentedCodesExist verifies that every E_* / W_* diagnostic code

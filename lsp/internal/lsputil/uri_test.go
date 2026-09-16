@@ -1,10 +1,13 @@
 package lsputil
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 )
 
 func TestIsMarkdownURI(t *testing.T) {
@@ -72,13 +75,14 @@ func TestURIToPath(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := URIToPath(tt.uri)
 			if tt.wantErr {
+				_, err := URIToPath(tt.uri)
 				assert.Error(t, err)
-			} else {
-				require.NoError(t, err)
-				assert.Equal(t, tt.want, got)
+				return
 			}
+			got, err := URIToPath(yammmtest.FileURI(strings.TrimPrefix(tt.uri, "file://")))
+			require.NoError(t, err)
+			assert.Equal(t, yammmtest.HostAbs(tt.want), got)
 		})
 	}
 }
@@ -98,8 +102,8 @@ func TestPathToURI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := PathToURI(tt.path)
-			assert.Equal(t, tt.want, got)
+			got := PathToURI(yammmtest.HostAbs(tt.path))
+			assert.Equal(t, yammmtest.FileURI(strings.TrimPrefix(tt.want, "file://")), got)
 		})
 	}
 }
