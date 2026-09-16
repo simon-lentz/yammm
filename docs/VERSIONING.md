@@ -1426,8 +1426,8 @@ does not read this output**, measured at its tree.
   `x\y` loads, where it failed with `E_PATH_ESCAPE`, and an entry named
   `m\main.yammm` resolves its imports, where it failed with `E_IMPORT_RESOLVE`.
   `CanonicalPath.Join` keeps a backslash in an element on Unix; on Windows it
-  is a separator, as before. `docs/SPEC.md` now states the rule for import
-  paths.
+  is a separator, as before. `docs/SPEC.md` now states that `/` alone
+  separates an import path's segments.
 - **A module in a directory whose name holds a decomposed character loads.**
   The loader resolved an import from the importing file's NFC identity against
   the module root's bytes on disk, so such a module failed with
@@ -1869,6 +1869,20 @@ existing declaration.
   so which finding survives a truncation moves for it, and a row with more than
   100 findings is now capped at 500 like the load rather than at 100. None of its
   tests reads either.
+
+### Unit 7, the second fix pass — import paths and the path grammar
+
+**No exported declaration moves.**
+
+- **An import path holding a backslash is refused** with `E_IMPORT_RESOLVE`.
+  `/` is the only separator in an import path, and a backslash names a different
+  file on Windows than on any other host. No tracked schema in this module or in
+  rdata writes one. A schema NAME may still hold a backslash: the rule reaches a
+  path, and `schema.Builder`'s name lookup resolves a name, not a path.
+- **A cyclic file declared twice draws one `E_IMPORT_CYCLE` and one
+  `E_DUPLICATE_IMPORT`**, where it drew `E_IMPORT_CYCLE` twice.
+- **The discovered module root's clause keeps a network share's `//`**:
+  `discovered from //server/share/proj/yammm.mod`.
 
 ## v0.21.0 under this policy
 

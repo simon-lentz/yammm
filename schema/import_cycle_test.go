@@ -1,8 +1,9 @@
 package schema_test
 
 import (
-	"fmt"
+	"cmp"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -12,82 +13,127 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
+// issueSite is a diagnostic reduced to its code and the source line it is on.
+type issueSite struct {
+	Code   string
+	Source string
+	Line   int
+}
+
+func sortIssueSites(sites []issueSite) {
+	slices.SortFunc(sites, func(a, b issueSite) int {
+		return cmp.Or(
+			cmp.Compare(a.Source, b.Source),
+			cmp.Compare(a.Line, b.Line),
+			cmp.Compare(a.Code, b.Code),
+		)
+	})
+}
+
 // TestImportCycle_ReportedOnTheClosingImport holds an import cycle to one
-// diagnostic on the declaration that closes it. a.yammm imports b.yammm, so
-// b.yammm's import of a.yammm is the one that closes the cycle.
+// E_IMPORT_CYCLE on the declaration that closes it, and asserts every
+// diagnostic the load reports. A cycle through another file adds only that
+// file's E_UPSTREAM_FAIL, and a second declaration of a cyclic file adds only
+// its E_DUPLICATE_IMPORT.
 func TestImportCycle_ReportedOnTheClosingImport(t *testing.T) {
 	t.Parallel()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 
-	root := t.TempDir()
-	a := filepath.Join(root, "a.yammm")
-	b := filepath.Join(root, "b.yammm")
-	writeHostPathFile(t, a, "schema \"a\"\n\nimport \"./b\" as b\n\ntype A {\n\tid String primary\n\t--> USES (one) b.B\n}\n")
-	writeHostPathFile(t, b, "schema \"b\"\n\nimport \"./a\" as a\n\ntype B {\n\tid String primary\n\t--> USES (one) a.A\n}\n")
-
-	_, res := schema.Load(t.Context(), a, schema.WithModuleRoot(root))
-
-	fileID := func(p string) location.SourceID {
-		id, err := location.SourceIDFromPath(canonicalPath(t, p))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return id
+	type site struct {
+		code diag.Code
+		file string
+		line int
 	}
-	aID, bID := fileID(a), fileID(b)
-
-	var cycles, upstream []diag.Issue
-	for issue := range res.Issues() {
-		switch issue.Code() {
-		case diag.E_IMPORT_CYCLE:
-			cycles = append(cycles, issue)
-		case diag.E_UPSTREAM_FAIL:
-			upstream = append(upstream, issue)
-		}
-	}
-	on := func(issues []diag.Issue, id location.SourceID) bool {
-		for _, issue := range issues {
-			if issue.HasSpan() && issue.Span().Source == id {
-				return true
-			}
-		}
-		return false
-	}
-	namesNoFile := len(cycles) > 0
-	var messages []string
-	for _, issue := range cycles {
-		messages = append(messages, issue.Message())
-		if strings.Contains(issue.Message(), "a.yammm") || strings.Contains(issue.Message(), "b.yammm") {
-			namesNoFile = false
-		}
-	}
-	var spans []string
-	for _, issue := range cycles {
-		spans = append(spans, issue.Span().String())
-	}
-
 	rows := []struct {
-		name   string
-		ok     bool
-		detail string
+		name  string
+		files map[string]string
+		entry string
+		want  []site
 	}{
-		{"exactly one E_IMPORT_CYCLE", len(cycles) == 1, fmt.Sprintf("%d E_IMPORT_CYCLE issues", len(cycles))},
 		{
-			"it is reported on the closing import",
-			len(cycles) == 1 && cycles[0].HasSpan() && cycles[0].Span().Source == bID && cycles[0].Span().Start.Line == 3,
-			fmt.Sprintf("spans %q, want %s line 3", spans, bID),
+			name: "a two-file cycle is reported on the second file's import",
+			files: map[string]string{
+				"a.yammm": "schema \"a\"\n\nimport \"./b\" as b\n\ntype A {\n\tid String primary\n\t--> USES (one) b.B\n}\n",
+				"b.yammm": "schema \"b\"\n\nimport \"./a\" as a\n\ntype B {\n\tid String primary\n\t--> USES (one) a.A\n}\n",
+			},
+			entry: "a.yammm",
+			want: []site{
+				{diag.E_UPSTREAM_FAIL, "a.yammm", 3},
+				{diag.E_IMPORT_CYCLE, "b.yammm", 3},
+			},
 		},
-		{"its message names no source file", namesNoFile, fmt.Sprintf("messages %q", messages)},
-		{"the closing import draws no E_UPSTREAM_FAIL", !on(upstream, bID), fmt.Sprintf("E_UPSTREAM_FAIL on %s", bID)},
-		{"the import of the schema the cycle failed still draws E_UPSTREAM_FAIL", on(upstream, aID), fmt.Sprintf("no E_UPSTREAM_FAIL on %s", aID)},
+		{
+			name: "a self-import is reported on its declaration",
+			files: map[string]string{
+				"s.yammm": "schema \"s\"\n\nimport \"./s\" as s\n\ntype S {\n\tid String primary\n\t--> USES (one) s.S\n}\n",
+			},
+			entry: "s.yammm",
+			want: []site{
+				{diag.E_IMPORT_CYCLE, "s.yammm", 3},
+			},
+		},
+		{
+			name: "a second declaration of a cyclic file is a duplicate import",
+			files: map[string]string{
+				"a.yammm": "schema \"a\"\n\nimport \"./b\" as b\n\ntype A {\n\tid String primary\n\t--> USES (one) b.B\n}\n",
+				"b.yammm": "schema \"b\"\n\nimport \"./a\" as a\nimport \"./a.yammm\" as a2\n\ntype B {\n\tid String primary\n\t--> USES (one) a.A\n}\n",
+			},
+			entry: "a.yammm",
+			want: []site{
+				{diag.E_UPSTREAM_FAIL, "a.yammm", 3},
+				{diag.E_IMPORT_CYCLE, "b.yammm", 3},
+				{diag.E_DUPLICATE_IMPORT, "b.yammm", 4},
+			},
+		},
+		{
+			name: "a second declaration of a self-import is a duplicate import",
+			files: map[string]string{
+				"t.yammm": "schema \"t\"\n\nimport \"./t\" as t\nimport \"./t.yammm\" as t2\n\ntype T {\n\tid String primary\n\t--> USES (one) t.T\n}\n",
+			},
+			entry: "t.yammm",
+			want: []site{
+				{diag.E_IMPORT_CYCLE, "t.yammm", 3},
+				{diag.E_DUPLICATE_IMPORT, "t.yammm", 4},
+			},
+		},
 	}
 
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			if !row.ok {
-				t.Error(row.detail)
+			root := t.TempDir()
+			for name, content := range row.files {
+				writeHostPathFile(t, filepath.Join(root, name), content)
 			}
+
+			_, res := schema.Load(t.Context(), filepath.Join(root, row.entry), schema.WithModuleRoot(root))
+
+			fileID := func(name string) location.SourceID {
+				id, err := location.SourceIDFromPath(canonicalPath(t, filepath.Join(root, name)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return id
+			}
+			want := make([]issueSite, 0, len(row.want))
+			for _, w := range row.want {
+				want = append(want, issueSite{Code: w.code.String(), Source: fileID(w.file).String(), Line: w.line})
+			}
+			var got []issueSite
+			for issue := range res.Issues() {
+				got = append(got, issueSite{Code: issue.Code().String(), Source: issue.Span().Source.String(), Line: issue.Span().Start.Line})
+				if issue.Code() != diag.E_IMPORT_CYCLE {
+					continue
+				}
+				for name := range row.files {
+					if strings.Contains(issue.Message(), name) {
+						t.Errorf("E_IMPORT_CYCLE message %q names the source file %s", issue.Message(), name)
+					}
+				}
+			}
+			sortIssueSites(want)
+			sortIssueSites(got)
+			yammmtest.Diff(t, want, got)
 		})
 	}
 }

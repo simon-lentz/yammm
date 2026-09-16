@@ -1154,9 +1154,22 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	cycle := l.loadingSchemas[importSourceID]
 	l.mu.Unlock()
 	if cycle {
-		root, origin := l.loaderRoot()
-		l.collector.Collect(importCycleIssue(root, origin, imp))
-		l.markImportFailed(imp)
+		// The binding keeps the file's SourceID, so a second declaration of it
+		// draws validateResolvedImports' duplicate import, not a second cycle.
+		l.mu.Lock()
+		repeated := false
+		for _, b := range l.imports {
+			if b.sourceID == importSourceID {
+				repeated = true
+				break
+			}
+		}
+		l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: importSourceID}
+		l.mu.Unlock()
+		if !repeated {
+			root, origin := l.loaderRoot()
+			l.collector.Collect(importCycleIssue(root, origin, imp))
+		}
 		return nil
 	}
 
@@ -1185,12 +1198,20 @@ func (l *loader) loadImport(ctx context.Context, sourceID location.SourceID, imp
 	return nil
 }
 
+// errImportBackslash refuses an import path holding a backslash, which Windows
+// reads as a separator and every other host as part of a file name, so the path
+// would name a different file on each.
+var errImportBackslash = errors.New("an import path separates its segments with / and holds no backslash")
+
 // errNoHostPath reports a file-backed source the loader never recorded reading,
 // which leaves its relative imports nothing to resolve against.
 var errNoHostPath = errors.New("no host path recorded for the importing source")
 
 // resolveImportToRelative resolves an import path to a path relative to the module root.
 func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath string) (string, error) {
+	if strings.ContainsRune(importPath, '\\') {
+		return "", errImportBackslash
+	}
 	// Relative import (./foo or ../bar)
 	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
 		if !sourceID.IsFilePath() {
