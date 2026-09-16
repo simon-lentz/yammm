@@ -123,7 +123,7 @@ func cloneValue(v Value) any {
 	if v.val == nil {
 		return nil
 	}
-	if w, ok := v.val.(wrapper); ok {
+	if w, ok := asWrapper(v.val); ok {
 		return w.cloneToAny()
 	}
 

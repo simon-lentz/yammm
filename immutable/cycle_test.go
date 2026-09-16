@@ -1,6 +1,7 @@
 package immutable
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -49,12 +50,43 @@ func TestWrap_RefusesACyclicValue(t *testing.T) {
 			m[1] = m
 			_ = Wrap(m, WithClone(true))
 		}},
+		{"a cyclic slice under a non-string-keyed map, cloned", func() {
+			_ = Wrap(map[int]any{1: selfReferencingSlice()}, WithClone(true))
+		}},
 	}
 
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 			wantCyclePanic(t, row.call)
+		})
+	}
+}
+
+// TestValue_Clone_RefusesACyclicValue holds Clone to refusing a cyclic value that
+// Wrap stored as it is. Wrap does not walk such a value, so Clone walks it first.
+func TestValue_Clone_RefusesACyclicValue(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name  string
+		value func() Value
+	}{
+		{"a non-string-keyed cyclic map", func() Value {
+			m := map[int]any{}
+			m[1] = m
+			return Wrap(m)
+		}},
+		{"a cyclic slice under a non-string-keyed map", func() Value {
+			return Wrap(map[int]any{1: selfReferencingSlice()})
+		}},
+	}
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			v := row.value()
+			wantCyclePanic(t, func() { _ = v.Clone() })
 		})
 	}
 }
@@ -92,43 +124,66 @@ func TestWrap_DeepValueIsNotACycle(t *testing.T) {
 	}
 }
 
-// TestWrap_SharedValueIsNotACycle holds the guard to leaving the path as it
-// found it: one map reached twice from different places is a diamond, not a
-// cycle, and it must wrap even when the walk is deep enough to be tracking.
+// TestWrap_SharedValueIsNotACycle holds each walk that tracks its path to
+// leaving the path as it found it: one container reached twice from different
+// places is a diamond, not a cycle, and it must be copied even when the walk is
+// deep enough to be tracking.
 func TestWrap_SharedValueIsNotACycle(t *testing.T) {
 	t.Parallel()
 
-	shared := map[string]any{"leaf": "value"}
 	const depth = startDetectingCyclesAfter + 200
-	current := map[string]any{"left": shared, "right": shared}
-	for range depth {
-		current = map[string]any{"next": current}
+	stringKeyedDiamond := func() any {
+		shared := map[string]any{"leaf": "value"}
+		current := map[string]any{"left": shared, "right": shared}
+		for range depth {
+			current = map[string]any{"next": current}
+		}
+		return current
+	}
+	intKeyedDiamond := func() any {
+		shared := map[int]any{0: "value"}
+		current := map[int]any{0: shared, 1: shared}
+		for range depth {
+			current = map[int]any{0: current}
+		}
+		return current
+	}
+	sliceDiamond := func() any {
+		shared := []any{"value"}
+		current := []any{shared, shared}
+		for range depth {
+			current = []any{current}
+		}
+		return current
 	}
 
-	v := Wrap(current)
-	m, ok := v.Map()
-	if !ok {
-		t.Fatalf("Map() = _, false; want the wrapped map")
+	rows := []struct {
+		name  string
+		value any
+		walk  func(v any) any
+	}{
+		{"a string-keyed map, wrapped", stringKeyedDiamond(), func(v any) any { return Wrap(v).Clone() }},
+		{"a slice, wrapped", sliceDiamond(), func(v any) any { return Wrap(v).Clone() }},
+		{"a non-string-keyed map, wrapped with clone", intKeyedDiamond(), func(v any) any {
+			return Wrap(v, WithClone(true)).Unwrap()
+		}},
+		{"a slice under a non-string-keyed map, cloned", map[int]any{0: sliceDiamond()}, func(v any) any {
+			return Wrap(v).Clone()
+		}},
 	}
-	for range depth {
-		next, _ := m.Get("next")
-		m, ok = next.Map()
-		if !ok {
-			t.Fatal("a level of the wrapped value is not a map")
-		}
-	}
-	for _, side := range []string{"left", "right"} {
-		branch, ok := m.Get(side)
-		if !ok {
-			t.Fatalf("%s: the shared value did not survive the wrap", side)
-		}
-		leaf, ok := branch.Map()
-		if !ok {
-			t.Fatalf("%s: the shared value is not a map", side)
-		}
-		if _, ok := leaf.Get("leaf"); !ok {
-			t.Errorf("%s: the shared value is empty", side)
-		}
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("a container reached twice was refused: %v", r)
+				}
+			}()
+			if got := row.walk(row.value); !reflect.DeepEqual(got, row.value) {
+				t.Error("the copy does not hold the content it was made from")
+			}
+		})
 	}
 }
 

@@ -1,5 +1,7 @@
 package immutable
 
+import "reflect"
+
 // wrapper is what each of this package's containers implements: it clones to
 // plain Go data and reports whether it is nil. A wrapper is a struct, so a
 // reflect kind answers neither question, and Map is generic, so only a method
@@ -7,6 +9,17 @@ package immutable
 type wrapper interface {
 	cloneToAny() any
 	isNil() bool
+}
+
+// asWrapper returns v as one of this package's containers. A pointer to one
+// satisfies wrapper through its value methods, but the package stores a pointer
+// as it is, so a pointer is not a container here, nil or not.
+func asWrapper(v any) (wrapper, bool) {
+	w, ok := v.(wrapper)
+	if !ok || reflect.TypeOf(v).Kind() == reflect.Pointer {
+		return nil, false
+	}
+	return w, true
 }
 
 func (m Map[K]) cloneToAny() any { return m.Clone() }

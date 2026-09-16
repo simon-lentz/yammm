@@ -864,7 +864,7 @@ declaration describes (below).
 
 Condition-1 **unit 7** (the foundation layer) is not merged: its blocks below
 are on the `review` branch and reach `main` at the unit's close. Its fix passes
-move **eleven additions and seven removals**:
+move **twelve additions and seven removals**:
 
 - **pass A** removes `location.ErrUNCPath` and `location.PositionRegistry`;
 - **pass B** adds `location.SourceID.RelativeTo` and `schema.CaptureSources`,
@@ -875,11 +875,11 @@ move **eleven additions and seven removals**:
   `diag.DetailKeyTriggeringCodes`; removes `location.Provenance.AtKey`; and
   renames `diag.E_SNAPSHOT_PATH_FALLBACK` to `diag.W_SNAPSHOT_PATH_FALLBACK`,
   which `gorelease` counts as one removal and one addition;
-- **the second fix pass** adds `location.ResolveSourcePath` and
-  `diag.Collector.MergeRetag`, and removes
+- **the second fix pass** adds `location.ResolveSourcePath`,
+  `diag.Collector.MergeRetag` and `immutable.Value.Clone`, and removes
   `location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute`.
 
-**With unit 6's six additions, `gorelease -base=v0.21.0` reads seventeen
+**With unit 6's six additions, `gorelease -base=v0.21.0` reads eighteen
 compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Each
 block below was written by the pass or group that landed its behaviour.
 
@@ -1886,6 +1886,32 @@ existing declaration.
 - **An error from `location/path.Parse` that names a character quotes an invalid
   byte as a one-byte string**, `"\xff"`, so it reads apart from a real U+FFFD. The
   unknown-escape message reads `unknown escape sequence: a backslash then 'x'`.
+
+### Unit 7, the second fix pass — `immutable` stores a pointer as a pointer, and `graph` orders by content
+
+**One exported declaration is added:** `immutable.Value.Clone`.
+
+- **Added: `immutable.Value.Clone`**, which returns the wrapped value as mutable Go
+  data, as each container's own `Clone` does.
+- **A pointer to one of the package's containers is stored as a pointer.** A
+  pointer satisfied the containers' method set, so a nil `*Map`, `*Slice`,
+  `*Properties` or `*Key` panicked in `IsNil`, in a `Clone` and in `WrapKey`'s
+  canonical string. A nil one now reads as a typed nil, and a non-nil one is stored
+  as it is, as the package documentation says of every pointer.
+- **A `Value` adopted by a constructor is taken as it is:** `WithClone` does not
+  reach a map an earlier constructor stored as it is.
+- **A clone reads a container's content at every depth.** A map with a non-string
+  key is stored as given, so a container placed inside one was never wrapped and
+  was returned by the clone walk unchanged. `Value.Clone` now reads through it, and
+  so do `graph`'s ordering and a `Key`'s canonical string, which rendered such a
+  container as `{}`. Under `WithClone`, a container inside a cloned non-string-keyed
+  map is therefore stored as its content rather than as the container.
+- **`graph` orders property values by content for every value.** A container whose
+  entries include a string-keyed map compared by that nested map's memoised view —
+  its address — so two equal documents could write their edges and instances in
+  different orders; a nil container tied with an empty one, and one string with
+  two. Each is now ordered by its type and its content. A map with a non-string key
+  stored as given always ordered by content and is unchanged.
 
 ## v0.21.0 under this policy
 

@@ -116,3 +116,128 @@ func TestWrap_ArrayIsStoredAsIs(t *testing.T) {
 		t.Errorf("Unwrap() = %v; want the array as given", got)
 	}
 }
+
+// TestWrap_PointerToAContainerIsStoredAsAPointer holds the one rule that keeps
+// a pointer out of the container dispatch. A pointer's method set holds its
+// type's value methods, so *Map, *Slice, *Properties and *Key all satisfy
+// wrapper; taking one as a container calls a value method through the pointer,
+// which panics when it is nil. Every reader that asks whether a value is a
+// container goes through asWrapper, so each is driven here.
+func TestWrap_PointerToAContainerIsStoredAsAPointer(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name string
+		nilp any
+	}{
+		{"a nil *Map[string]", (*Map[string])(nil)},
+		{"a nil *Slice", (*Slice)(nil)},
+		{"a nil *Properties", (*Properties)(nil)},
+		{"a nil *Key", (*Key)(nil)},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			v := Wrap(row.nilp)
+			if !v.IsNil() {
+				t.Errorf("IsNil reports false for %s; a typed nil pointer is nil", row.name)
+			}
+			if got := v.Clone(); got != row.nilp {
+				t.Errorf("Clone returns %#v for %s, want the pointer itself", got, row.name)
+			}
+			if got := v.Unwrap(); got != row.nilp {
+				t.Errorf("Unwrap returns %#v for %s, want the pointer itself", got, row.name)
+			}
+		})
+	}
+
+	t.Run("a non-nil *Map[string] is not the container", func(t *testing.T) {
+		t.Parallel()
+		m := WrapMap(map[string]any{"a": 1})
+		v := Wrap(&m)
+		if _, ok := v.Map(); ok {
+			t.Error("Map reports true for a *Map[string]; only a Map[string] is the container")
+		}
+		if _, isPointer := v.Unwrap().(*Map[string]); !isPointer {
+			t.Errorf("Unwrap returns %T for a *Map[string], want the pointer", v.Unwrap())
+		}
+		if v.IsNil() {
+			t.Error("IsNil reports true for a non-nil *Map[string]")
+		}
+	})
+
+	t.Run("a nil *Key renders as null in a canonical string", func(t *testing.T) {
+		t.Parallel()
+		if got := WrapKey([]any{(*Key)(nil)}).String(); got != "[null]" {
+			t.Errorf("WrapKey over a nil *Key renders %q, want %q", got, "[null]")
+		}
+	})
+}
+
+// TestClone_ReadsANestedContainersContent holds the clone walk to the rule its
+// top level already keeps: a container contributes its content at every depth.
+// A map with a non-string key is stored as given, so a container inside one is
+// the only value the walk reaches without having wrapped it.
+func TestClone_ReadsANestedContainersContent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a clone unwraps a nested container", func(t *testing.T) {
+		t.Parallel()
+		v := Wrap(map[int]any{1: WrapMap(map[string]any{"a": int64(1)})})
+		outer, ok := v.Clone().(map[int]any)
+		if !ok {
+			t.Fatalf("Clone returns %T, want map[int]any", v.Clone())
+		}
+		inner, ok := outer[1].(map[string]any)
+		if !ok {
+			t.Fatalf("the nested container clones to %T, want map[string]any", outer[1])
+		}
+		if inner["a"] != int64(1) {
+			t.Errorf("the nested content reads %#v, want 1", inner["a"])
+		}
+	})
+
+	t.Run("a canonical string reads a nested container", func(t *testing.T) {
+		t.Parallel()
+		got := WrapKey([]any{map[int]any{1: WrapMap(map[string]any{"a": int64(1)})}}).String()
+		if want := `[{"1":{"a":1}}]`; got != want {
+			t.Errorf("a key over a nested container renders %s, want %s", got, want)
+		}
+	})
+}
+
+// TestClone_NilContainerClonesToATypedNil keeps a nil container apart from an
+// empty one through a clone. The type survives, so a reader that ranges over
+// the result sees no entries either way and a reader that compares them by
+// their rendered form still tells them apart. Both depths are driven: the
+// walk's root and a container reached through a map stored as given.
+func TestClone_NilContainerClonesToATypedNil(t *testing.T) {
+	t.Parallel()
+
+	t.Run("at the root", func(t *testing.T) {
+		t.Parallel()
+		got := Wrap(WrapMap[string](nil)).Clone()
+		m, ok := got.(map[string]any)
+		if !ok {
+			t.Fatalf("a nil Map[string] clones to %#v, want a typed nil map[string]any", got)
+		}
+		if m != nil {
+			t.Errorf("a nil Map[string] clones to %#v, want nil", m)
+		}
+	})
+
+	t.Run("nested in a map stored as given", func(t *testing.T) {
+		t.Parallel()
+		outer, ok := Wrap(map[int]any{1: WrapMap[string](nil)}).Clone().(map[int]any)
+		if !ok {
+			t.Fatal("the outer map does not clone to a map[int]any")
+		}
+		m, ok := outer[1].(map[string]any)
+		if !ok {
+			t.Fatalf("a nested nil Map[string] clones to %#v, want a typed nil map[string]any", outer[1])
+		}
+		if m != nil {
+			t.Errorf("a nested nil Map[string] clones to %#v, want nil", m)
+		}
+	})
+}

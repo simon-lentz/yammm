@@ -105,7 +105,10 @@
 // Value ever holds a Value; a [Map], [Slice], [Properties] or [Key] is already
 // immutable and is stored as itself. What reads such a value — [Value.IsNil], a
 // Clone, a [Key]'s canonical string — reads the content rather than an empty
-// struct.
+// struct, at every depth: a container reached through a map stored as given is
+// read through too. An adopted [Value] is taken as it is, so [WithClone] does
+// not reach it: a map the earlier constructor stored as-is is still shared with
+// its original. A pointer to a wrapper is a pointer, and is stored as it is.
 //
 // # Cyclic values
 //
@@ -156,7 +159,7 @@
 // | Wrap(primitive) | O(1), no allocation | Primitives stored directly |
 // | Wrap(map) | O(n) | Iterates map once to wrap values |
 // | Wrap(slice) | O(n) | Iterates slice once to wrap elements |
-// | Wrap(any, WithClone(true)) | O(n) deep | Clones non-string-keyed maps recursively; structs/pointers stored as-is |
+// | Wrap(any, WithClone(true)) | O(n) deep | Clones non-string-keyed maps recursively, a wrapper inside one to its content; other structs and pointers stored as-is |
 // | Get(key) / Get(i) | O(1) | Map/slice lookup |
 // | Keys() / Iter() | O(1) start | Iterator creation is cheap |
 // | Clone() | O(n) deep | Full recursive clone for escape hatch |

@@ -67,6 +67,14 @@ func (v Value) Unwrap() any {
 	return v.val
 }
 
+// Clone returns the wrapped value as mutable Go data: a [Map] or [Properties] as
+// a map, a [Slice] or [Key] as a slice, a map or slice stored as given as a deep
+// copy, and anything else as it is. A nil container clones to a typed nil, so a
+// nil container and an empty one stay apart.
+func (v Value) Clone() any {
+	return cloneValue(v)
+}
+
 // IsNil reports whether the wrapped value is nil.
 //
 // This returns true for:
@@ -78,7 +86,7 @@ func (v Value) IsNil() bool {
 		return true
 	}
 	// A wrapper is a struct, so it answers for itself; a reflect kind cannot.
-	if w, ok := v.val.(wrapper); ok {
+	if w, ok := asWrapper(v.val); ok {
 		return w.isNil()
 	}
 	// Check for typed nils (e.g., var p *int; Wrap(p))
@@ -237,10 +245,10 @@ func wrapValueAt(v any, clone bool, depth int, seen map[cyclePtr]struct{}) any {
 	if v == nil {
 		return nil
 	}
-	switch w := v.(type) {
-	case Value:
+	if w, ok := v.(Value); ok {
 		return w.val
-	case wrapper:
+	}
+	if w, ok := asWrapper(v); ok {
 		return w
 	}
 
@@ -308,9 +316,17 @@ func wrapSliceValue(rv reflect.Value, clone bool, depth int, seen map[cyclePtr]s
 }
 
 // deepCloneAt performs a deep clone of any value on one walk's depth and path.
+//
+// A container contributes its content here as it does at the walk's root: a map
+// with a non-string key is stored as given, so a container inside one reaches
+// this walk without having been wrapped, and a reflect kind reads it as a
+// struct.
 func deepCloneAt(v any, depth int, seen map[cyclePtr]struct{}) any {
 	if v == nil {
 		return nil
+	}
+	if w, ok := asWrapper(v); ok {
+		return w.cloneToAny()
 	}
 
 	rv := reflect.ValueOf(v)
