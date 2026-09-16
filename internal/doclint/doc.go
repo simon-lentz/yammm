@@ -52,7 +52,7 @@
 // camel-case boundaries; a digit run stays on the word before it. A word is a
 // process reference when it is residue, slate, tranche, fixpass or fixdiff; a
 // stage word (tier, group, round, unit, step, phase, wave, pass, batch, stage,
-// sweep) carrying a number, as group3 or group_3; gate followed by fix or fixes,
+// sweep, clause) carrying a number, as group3 or group_3; gate followed by fix or fixes,
 // or fix followed by pass or diff; or a single letter and digits, as g11, p2
 // and a01. Two words of that last shape are legitimate and pass: a version
 // such as v2, and o1 for constant time. An all-lowercase run such as a fuzz

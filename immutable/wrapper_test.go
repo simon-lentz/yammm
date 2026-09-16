@@ -67,7 +67,8 @@ func TestWrap_AdoptsAWrapper(t *testing.T) {
 
 // TestValue_IsNil_ThroughAWrapper holds IsNil to asking the wrapper itself. A
 // wrapper is a struct, so a reflect kind cannot answer for it: without the
-// wrapper's own report, a nil Properties or Key reads as a non-nil value.
+// wrapper's own report, a nil Properties or Key reads as a non-nil value. An
+// empty wrapper is not nil.
 func TestValue_IsNil_ThroughAWrapper(t *testing.T) {
 	t.Parallel()
 
@@ -81,6 +82,11 @@ func TestValue_IsNil_ThroughAWrapper(t *testing.T) {
 		{"a nil string-keyed Map", WrapMap(map[string]any(nil)), true},
 		{"a nil int-keyed Map", WrapMap(map[int]any(nil)), true},
 		{"a nil Slice", WrapSlice(nil), true},
+		{"an empty Properties", WrapProperties(map[string]any{}), false},
+		{"an empty Key", WrapKey([]any{}), false},
+		{"an empty string-keyed Map", WrapMap(map[string]any{}), false},
+		{"an empty int-keyed Map", WrapMap(map[int]any{}), false},
+		{"an empty Slice", WrapSlice([]any{}), false},
 		{"a populated Properties", WrapProperties(map[string]any{"a": 1}), false},
 		{"a populated Key", WrapKey([]any{"a"}), false},
 	}

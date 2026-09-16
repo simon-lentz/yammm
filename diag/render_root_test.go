@@ -98,6 +98,50 @@ func TestModuleRoot_TextLocations(t *testing.T) {
 			},
 		},
 		{
+			name: "a root reached through a symlink",
+			setup: func(t *testing.T) (string, location.SourceID, string) {
+				t.Helper()
+				target := mkdir(t, filepath.Join(base, "target"))
+				link := filepath.Join(base, "link")
+				if err := os.Symlink(target, link); err != nil {
+					t.Skipf("symlinks unavailable: %v", err)
+				}
+				return link, fileID(t, filepath.Join(target, "a.yammm")), "a.yammm"
+			},
+		},
+		{
+			name: "a root typed in another case",
+			setup: func(t *testing.T) (string, location.SourceID, string) {
+				t.Helper()
+				dir := mkdir(t, filepath.Join(base, "cased"))
+				typed := filepath.Join(base, "CASED")
+				onDisk, err := os.Stat(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if other, err := os.Stat(typed); err != nil || !os.SameFile(onDisk, other) {
+					t.Skip("the temporary directory's filesystem is case-sensitive")
+				}
+				return typed, fileID(t, filepath.Join(dir, "a.yammm")), "a.yammm"
+			},
+		},
+		{
+			name: "a relative root",
+			setup: func(t *testing.T) (string, location.SourceID, string) {
+				t.Helper()
+				dir := mkdir(t, filepath.Join(base, "relative"))
+				wd, err := os.Getwd()
+				if err != nil {
+					t.Fatal(err)
+				}
+				rel, err := filepath.Rel(wd, dir)
+				if err != nil {
+					t.Skipf("no relative path from the working directory to %s: %v", dir, err)
+				}
+				return rel, fileID(t, filepath.Join(dir, "a.yammm")), "a.yammm"
+			},
+		},
+		{
 			name: "a root directory with a decomposed name",
 			setup: func(t *testing.T) (string, location.SourceID, string) {
 				t.Helper()

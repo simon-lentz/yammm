@@ -231,27 +231,32 @@ func TestWrite_ReplacesRatherThanTruncates(t *testing.T) {
 					t.Fatalf("seed target: %v", err)
 				}
 			}
-			before, err := os.Stat(out)
-			if err != nil {
-				t.Fatalf("stat before: %v", err)
-			}
-			// Windows reads a stat's file ID only when SameFile first asks for it,
-			// so it is read now, before the command can replace the file.
-			_ = os.SameFile(before, before)
+			before := statFileID(t, out)
 
 			if code, _, errOut := runCLI(t, args...); code != 0 {
 				t.Fatalf("exit %d: %s", code, errOut)
 			}
 
-			after, err := os.Stat(out)
-			if err != nil {
-				t.Fatalf("stat after: %v", err)
-			}
-			if os.SameFile(before, after) {
+			if after := statFileID(t, out); os.SameFile(before, after) {
 				t.Error("the file was written in place; a crash mid-write would leave it truncated")
 			}
 		})
 	}
+}
+
+// statFileID stats path and fails the test unless the file ID is loaded. Windows
+// loads the ID on the first SameFile call and reports false when it cannot, which
+// a check for a replaced file would read as a pass.
+func statFileID(t *testing.T, path string) fs.FileInfo {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if !os.SameFile(info, info) {
+		t.Fatalf("the file ID of %s cannot be read, so a replaced file cannot be told from an unread one", path)
+	}
+	return info
 }
 
 // A symlink the operator named survives every write path, and the file it

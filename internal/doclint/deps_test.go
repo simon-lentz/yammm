@@ -93,10 +93,8 @@ func TestAssertDependencyLines_ReportsAHeadingWithNoRow(t *testing.T) {
 func TestAssertDependencyLines_ReadsAWrappedListWhole(t *testing.T) {
 	t.Parallel()
 	r, _ := runDepGate(t)
-	for _, m := range r.msgs {
-		if strings.Contains(m, "/wrapped/") {
-			t.Errorf("a continuation entry was not read: %s", m)
-		}
+	if r.reports(filepath.FromSlash("/wrapped/")) {
+		t.Errorf("a continuation entry was not read: %v", r.msgs)
 	}
 }
 

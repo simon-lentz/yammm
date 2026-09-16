@@ -103,7 +103,12 @@ func TestImportResolveProvenance_Discovered(t *testing.T) {
 
 	_, res := schema.Load(t.Context(), entry)
 	issue, details := resolutionIssue(t, res, diag.E_IMPORT_RESOLVE)
-	assertProvenance(t, issue, details, rootIdentity(t, root), diag.ModuleRootDiscovered, "discovered from")
+	id := rootIdentity(t, root)
+	assertProvenance(t, issue, details, id, diag.ModuleRootDiscovered,
+		"; module root "+id+", discovered from "+id+"/"+schema.ModuleRootMarker)
+	if !strings.HasSuffix(issue.Message(), id+"/"+schema.ModuleRootMarker) {
+		t.Errorf("message %q does not end with the marker it was discovered from", issue.Message())
+	}
 }
 
 func TestImportResolveProvenance_Explicit(t *testing.T) {

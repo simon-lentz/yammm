@@ -449,14 +449,18 @@ func TestCanonicalPath_Join_AcceptsRelativeElements(t *testing.T) {
 		{"dotdot", []string{"..", "sibling"}},
 		{"dot", []string{".", "same"}},
 		{"backslash relative", []string{"sub\\dir"}}, // Backslash but not absolute
+		{"empty element", []string{"", "file.txt"}},
 	}
 	if runtime.GOOS != "windows" {
-		// On Unix a colon is part of a file name; Windows reads "C:" as a
-		// volume, which TestCanonicalPath_Join_RejectsAbsoluteElements covers.
+		// On Unix a colon and a leading backslash are file-name characters; Windows
+		// refuses both, as TestCanonicalPath_Join_RejectsAbsoluteElements pins.
 		tests = append(tests, struct {
 			name     string
 			elements []string
-		}{"volume-like name", []string{"C:", "notapath"}})
+		}{"volume-like name", []string{"C:", "notapath"}}, struct {
+			name     string
+			elements []string
+		}{"leading backslash", []string{`\notes.yammm`}})
 	}
 
 	for _, tt := range tests {

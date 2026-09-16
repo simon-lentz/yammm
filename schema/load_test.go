@@ -2200,18 +2200,10 @@ func TestSharedRegistry_CacheHitDivergentSourceConflict(t *testing.T) {
 	assert.Contains(t, res.Err().Error(), "dep.yammm")
 }
 
-// TestLoadSources_DiamondClosureRegistrationLinear guards the cost of
-// cache-hit closure registration on diamond-shaped import graphs. Each
-// level's two branch schemas import the same next-level schema, so the
-// graph has 2^depth import paths but only 3*depth+1 schemas; per-path
-// traversal makes Load exponential in depth, per-schema traversal keeps it
-// linear. The generous wall-clock bound only trips when traversal is
-// per-path.
-func TestLoadSources_DiamondClosureRegistrationLinear(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-
-	const depth = 26
+// diamondSources returns a diamond-shaped import graph of the given depth.
+// Each level's two branch schemas import the same next-level schema, so the
+// graph has 2^depth import paths and only 3*depth+1 schemas.
+func diamondSources(depth int) map[string][]byte {
 	sources := make(map[string][]byte, 3*depth+1)
 	level := func(i int) string { return fmt.Sprintf("l_%02d", i) }
 	branch := func(p string, i int) string { return fmt.Sprintf("%s_%02d", p, i) }
@@ -2226,12 +2218,38 @@ func TestLoadSources_DiamondClosureRegistrationLinear(t *testing.T) {
 		}
 	}
 	sources[level(depth)+".yammm"] = fmt.Appendf(nil, "schema %q\n\ntype T {\n\tid String primary\n}\n", level(depth))
+	return sources
+}
 
-	start := time.Now()
-	s, res := schema.LoadSourcesWithEntry(ctx, sources, level(0)+".yammm", t.TempDir())
-	elapsed := time.Since(start)
-	requireOK(t, res)
-	require.NotNil(t, s)
-	require.Less(t, elapsed, 10*time.Second,
-		"diamond closure registration must be per-schema, not per-import-path")
+// TestLoadSources_DiamondClosureRegistrationLinear guards the cost of
+// cache-hit closure registration on diamond-shaped import graphs. Per-path
+// traversal makes Load exponential in depth, per-schema traversal keeps it
+// linear, so doubling the depth about doubles a per-schema load and squares a
+// per-path one. The assertion is that ratio rather than a wall clock: a clock
+// reports the host, and its bound tripped in CI on correct code.
+func TestLoadSources_DiamondClosureRegistrationLinear(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	load := func(depth int) time.Duration {
+		sources := diamondSources(depth)
+		entry := fmt.Sprintf("l_%02d.yammm", 0)
+		start := time.Now()
+		s, res := schema.LoadSourcesWithEntry(ctx, sources, entry, t.TempDir())
+		elapsed := time.Since(start)
+		requireOK(t, res)
+		require.NotNil(t, s)
+		return elapsed
+	}
+
+	// The floor keeps a load too fast to measure from inflating the ratio. 64
+	// sits far above the ~2 a per-schema traversal costs for twice the depth
+	// and far below the 2^12 a per-path one costs.
+	const floor = 10 * time.Millisecond
+	base := max(load(12), floor)
+	doubled := load(24)
+
+	require.Less(t, doubled, 64*base,
+		"diamond closure registration must be per-schema, not per-import-path: depth 24 took %s against depth 12's %s",
+		doubled, base)
 }

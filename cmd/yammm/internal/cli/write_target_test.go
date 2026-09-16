@@ -182,7 +182,7 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 		{
-			name:  "a path under /dev/ is written through",
+			name:  "the null device is written through",
 			setup: func(string) (string, error) { return os.DevNull, nil },
 			check: func(_, target string, err error) string {
 				if err != nil {
@@ -258,7 +258,7 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 		{
-			name:        "an error names the operator's path",
+			name:        "an error from a sealed directory names the operator's path",
 			windowsSkip: noDirPermissionsOnWindows,
 			setup: func(dir string) (string, error) {
 				sub := filepath.Join(dir, "sealed")
@@ -268,13 +268,17 @@ func writeTargetCases() []writeTargetCase {
 				return filepath.Join(sub, "x.json"), sealDir(sub)
 			},
 			check: func(_, target string, err error) string {
-				if err == nil {
-					return "a write into a sealed directory succeeded"
-				}
-				if !strings.Contains(err.Error(), target) || strings.Contains(err.Error(), ".tmp") {
-					return fmt.Sprintf("error %q must name %s and no staging file", err, target)
-				}
-				return ""
+				return expectErrorNames(target, err)
+			},
+		},
+		{
+			name: "an error under a parent that is a file names the operator's path",
+			setup: func(dir string) (string, error) {
+				parent := filepath.Join(dir, "file.txt")
+				return filepath.Join(parent, "x.json"), writeFixture(parent, 0o600)
+			},
+			check: func(_, target string, err error) string {
+				return expectErrorNames(target, err)
 			},
 		},
 	}
@@ -330,11 +334,14 @@ func TestStagedFiles_TargetKinds(t *testing.T) {
 			var failure string
 			switch tc.name {
 			case "a FIFO receives the bytes and stays a FIFO",
-				"a path under /dev/ is written through",
+				"the null device is written through",
 				"a link to a path under /dev/ is written through":
-				if err == nil {
-					failure = "a set staged a target no rename can replace"
+				if !errors.Is(err, errNotReplaceable) {
+					failure = fmt.Sprintf("staging a target no rename can replace: error %v, want %v", err, errNotReplaceable)
 				}
+			case "an error under a parent that is a file names the operator's path":
+				// The set's directory is the operator's path, and creating it fails.
+				failure = expectErrorNames(filepath.Dir(target), err)
 			default:
 				failure = tc.check(dir, target, err)
 			}
@@ -399,6 +406,32 @@ func expectDevice(path string) string {
 	return ""
 }
 
+// earlierOutput is what a held descriptor's file holds before a write reaches it.
+const earlierOutput = "earlier output\n"
+
+// heldDescriptorPath opens a regular file holding earlierOutput and returns it
+// with the /dev/fd path of its descriptor, skipping where that path does not exist.
+func heldDescriptorPath(t *testing.T) (*os.File, string) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "held-*.txt")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close %s: %v", f.Name(), err)
+		}
+	})
+	if _, err := f.WriteString(earlierOutput); err != nil {
+		t.Fatalf("write earlier output: %v", err)
+	}
+	path := fmt.Sprintf("/dev/fd/%d", f.Fd())
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("%s is not available here: %v", path, err)
+	}
+	return f, path
+}
+
 // TestWriteFile_DescriptorPathContinuesItsStream pins the /dev/ rule where it
 // is needed: /dev/fd/N stats as whatever the descriptor holds — a regular file
 // here, as /dev/stdout does under a shell redirect — and the bytes must continue
@@ -406,19 +439,7 @@ func expectDevice(path string) string {
 func TestWriteFile_DescriptorPathContinuesItsStream(t *testing.T) {
 	t.Parallel()
 
-	f, err := os.CreateTemp(t.TempDir(), "held-*.txt")
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	defer f.Close()
-	const earlier = "earlier output\n"
-	if _, err := f.WriteString(earlier); err != nil {
-		t.Fatalf("write earlier output: %v", err)
-	}
-	path := fmt.Sprintf("/dev/fd/%d", f.Fd())
-	if _, err := os.Stat(path); err != nil {
-		t.Skipf("%s is not available here: %v", path, err)
-	}
+	f, path := heldDescriptorPath(t)
 	before, err := os.Stat(f.Name())
 	if err != nil {
 		t.Fatalf("stat: %v", err)
@@ -434,9 +455,36 @@ func TestWriteFile_DescriptorPathContinuesItsStream(t *testing.T) {
 	if !os.SameFile(before, after) {
 		t.Error("the file the descriptor holds was replaced, so the descriptor now names a file no path reaches")
 	}
-	if got, _ := os.ReadFile(f.Name()); string(got) != earlier+targetPayload {
-		t.Errorf("the descriptor's file holds %q, want %q: the payload must continue the stream", got, earlier+targetPayload)
+	if got, _ := os.ReadFile(f.Name()); string(got) != earlierOutput+targetPayload {
+		t.Errorf("the descriptor's file holds %q, want %q: the payload must continue the stream", got, earlierOutput+targetPayload)
 	}
+}
+
+// TestStagedFiles_DescriptorPathIsRefused pins the /dev/ rule for a set:
+// /dev/fd/N stats as the regular file its descriptor holds, and a rename over
+// that file would leave the descriptor writing to a file no path reaches.
+func TestStagedFiles_DescriptorPathIsRefused(t *testing.T) {
+	t.Parallel()
+
+	f, path := heldDescriptorPath(t)
+	if err := stageOne(path, targetPayload); !errors.Is(err, errNotReplaceable) {
+		t.Errorf("staging %s: error %v, want %v", path, err, errNotReplaceable)
+	}
+	if got, _ := os.ReadFile(f.Name()); string(got) != earlierOutput {
+		t.Errorf("the descriptor's file holds %q after a refused set, want %q", got, earlierOutput)
+	}
+}
+
+// expectErrorNames reports a write that succeeded, or an error that does not
+// name path or that names a staging file.
+func expectErrorNames(path string, err error) string {
+	if err == nil {
+		return "the write succeeded"
+	}
+	if !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), ".tmp") {
+		return fmt.Sprintf("error %q must name %s and no staging file", err, path)
+	}
+	return ""
 }
 
 // expectRefused reports a write that did not fail with want, or one that

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -76,30 +77,7 @@ func TestSnapshotInfo_DirEntriesCarryTheDiagnosticWire(t *testing.T) {
 		if err := json.Unmarshal([]byte(out), &entries); err != nil {
 			t.Fatalf("stdout is not a JSON array: %v\n%s", err, out)
 		}
-		var failure string
-		for _, entry := range entries {
-			if entry["name"] != "overflow.ys" {
-				continue
-			}
-			wire, ok := entry["diagnostics"].(map[string]any)
-			if !ok {
-				failure = fmt.Sprintf("the entry carries %#v under diagnostics, want the diagnostic wire object", entry["diagnostics"])
-				break
-			}
-			var missing []string
-			for _, key := range []string{"issues", "limitReached", "droppedCount"} {
-				if _, present := wire[key]; !present {
-					missing = append(missing, key)
-				}
-			}
-			if len(missing) > 0 {
-				failure = "the wire lacks " + strings.Join(missing, ", ")
-			}
-			if _, present := wire["limit"]; present {
-				failure = "the wire carries limit, a collector's setting and not a fact about the entry"
-			}
-		}
-		checkRepairState(t, "snapshot info: a directory entry carries the diagnostic wire", failure)
+		checkRepairState(t, "snapshot info: a directory entry carries the diagnostic wire", dirEntryWireGaps(entries, "overflow.ys", out))
 	})
 
 	t.Run("text names a warned entry's warning", func(t *testing.T) {
@@ -112,4 +90,27 @@ func TestSnapshotInfo_DirEntriesCarryTheDiagnosticWire(t *testing.T) {
 		}
 		checkRepairState(t, "snapshot info: a warned directory row names its warning", failure)
 	})
+}
+
+// dirEntryWireGaps reports how the entry named name departs from the diagnostic
+// wire, or that no entry is named name; it is empty when the entry carries the wire.
+func dirEntryWireGaps(entries []map[string]any, name, out string) string {
+	i := slices.IndexFunc(entries, func(entry map[string]any) bool { return entry["name"] == name })
+	if i < 0 {
+		return "no directory entry is named " + name + ":\n" + out
+	}
+	wire, ok := entries[i]["diagnostics"].(map[string]any)
+	if !ok {
+		return fmt.Sprintf("the entry carries %#v under diagnostics, want the diagnostic wire object", entries[i]["diagnostics"])
+	}
+	var gaps []string
+	for _, key := range []string{"issues", "limitReached", "droppedCount"} {
+		if _, present := wire[key]; !present {
+			gaps = append(gaps, "the wire lacks "+key)
+		}
+	}
+	if _, present := wire["limit"]; present {
+		gaps = append(gaps, "the wire carries limit, a collector's setting and not a fact about the entry")
+	}
+	return strings.Join(gaps, "; ")
 }

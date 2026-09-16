@@ -386,6 +386,12 @@ func TestCompare_ZeroOnlyForEqualSpans(t *testing.T) {
 }
 
 func TestCompare(t *testing.T) {
+	file, err := SourceIDFromPath(filepath.Join(t.TempDir(), "a.yammm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	synthetic := NewSourceID(file.String())
+
 	tests := []struct {
 		name string
 		a    Span
@@ -428,12 +434,63 @@ func TestCompare(t *testing.T) {
 			b:    Range(NewSourceID("bbb://"), 5, 10, 5, 20),
 			want: -1,
 		},
+		{
+			name: "end position decides before the start byte",
+			a:    RangeWithBytes(testSource, 1, 1, 9, 1, 5, 20),
+			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 6, 20),
+			want: -1,
+		},
+		{
+			name: "start byte decides before the end byte",
+			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
+			b:    RangeWithBytes(testSource, 1, 1, 2, 1, 5, 4),
+			want: -1,
+		},
+		{
+			name: "unknown start byte before a known one",
+			a:    Range(testSource, 1, 1, 1, 5),
+			b:    Span{Source: testSource, Start: Position{Line: 1, Column: 1, Byte: 0}, End: Position{Line: 1, Column: 5, Byte: -1}},
+			want: -1,
+		},
+		{
+			name: "smaller start byte first",
+			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
+			b:    RangeWithBytes(testSource, 1, 1, 4, 1, 5, 9),
+			want: -1,
+		},
+		{
+			name: "unknown end byte before a known one",
+			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, -1),
+			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4),
+			want: -1,
+		},
+		{
+			name: "smaller end byte first",
+			a:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 4),
+			b:    RangeWithBytes(testSource, 1, 1, 0, 1, 5, 9),
+			want: -1,
+		},
+		{
+			name: "synthetic source before a file-backed one spelled alike",
+			a:    Point(synthetic, 1, 1),
+			b:    Point(file, 1, 1),
+			want: -1,
+		},
+		{
+			name: "byte offset decides before the source kind",
+			a:    PointWithByte(file, 1, 1, 0),
+			b:    PointWithByte(synthetic, 1, 1, 4),
+			want: -1,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Compare(tt.a, tt.b); got != tt.want {
-				t.Errorf("Compare() = %d; want %d", got, tt.want)
+				t.Errorf("Compare(%v, %v) = %d; want %d", tt.a, tt.b, got, tt.want)
+			}
+			if got := Compare(tt.b, tt.a); got != -tt.want {
+				t.Errorf("Compare(%v, %v) = %d; want %d", tt.b, tt.a, got, -tt.want)
 			}
 		})
 	}

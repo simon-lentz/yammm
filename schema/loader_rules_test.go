@@ -345,8 +345,8 @@ func TestSharedRegistry_AnImportFromARegisteredClosureBindsItsCompiledSchema(t *
 	}
 }
 
-// Entry selection over the sources map is deterministic: the entry key chooses
-// the schema, whatever else the map holds.
+// The entry key chooses the schema, whether or not it is the key an empty entry
+// path would select.
 func TestLoadSourcesWithEntry_EntryKeyChoosesTheSchema(t *testing.T) {
 	t.Parallel()
 
@@ -354,13 +354,36 @@ func TestLoadSourcesWithEntry_EntryKeyChoosesTheSchema(t *testing.T) {
 		"a.yammm": []byte("schema \"alpha\"\n\ntype A {\n    id String primary\n}\n"),
 		"b.yammm": []byte("schema \"bravo\"\n\ntype B {\n    id String primary\n}\n"),
 	}
+	for _, row := range []struct{ entry, want string }{
+		{"a.yammm", "alpha"},
+		{"b.yammm", "bravo"},
+	} {
+		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, row.entry, t.TempDir(), schema.WithSourcesOnly(true))
+		if res.Err() != nil {
+			t.Fatalf("entry %s: %v", row.entry, res.Err())
+		}
+		if s == nil || s.Name() != row.want {
+			t.Errorf("entry %s chose %v; want %q", row.entry, s, row.want)
+		}
+	}
+}
+
+// An empty entry path selects the lexicographically smallest key, on every
+// load, whatever order the map yields its keys in.
+func TestLoadSourcesWithEntry_EmptyEntrySelectsTheSmallestKey(t *testing.T) {
+	t.Parallel()
+
+	sources := map[string][]byte{}
+	for _, name := range []string{"hotel", "delta", "golf", "alpha", "foxtrot", "charlie", "echo", "bravo"} {
+		sources[name+".yammm"] = []byte("schema \"" + name + "\"\n\ntype T {\n    id String primary\n}\n")
+	}
 	for i := range 20 {
-		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "a.yammm", t.TempDir(), schema.WithSourcesOnly(true))
+		s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "", t.TempDir(), schema.WithSourcesOnly(true))
 		if res.Err() != nil {
 			t.Fatalf("run %d: %v", i, res.Err())
 		}
 		if s == nil || s.Name() != "alpha" {
-			t.Fatalf("run %d chose %v; want the schema under the entry key", i, s)
+			t.Fatalf("run %d chose %v; want the schema under alpha.yammm", i, s)
 		}
 	}
 }

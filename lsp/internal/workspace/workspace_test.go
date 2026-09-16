@@ -252,8 +252,11 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 	realProject := tmpDir + "/real/project"
 	require.NoError(t, os.MkdirAll(realProject, 0o750), "failed to create real project dir")
 
-	// Create a file in the real project
-	realFile := realProject + "/schema.yammm"
+	// One level down: a file directly in the project makes FindModuleRoot's
+	// fallback to its own directory equal the root, hiding a missed match.
+	realSub := realProject + "/sub"
+	require.NoError(t, os.MkdirAll(realSub, 0o750), "failed to create sub dir")
+	realFile := realSub + "/schema.yammm"
 	require.NoError(t, os.WriteFile(realFile, []byte("content"), 0o600), "failed to create file")
 
 	linkProject := tmpDir + "/link"
@@ -270,7 +273,7 @@ func TestWorkspace_FindModuleRoot_CrossSymlink(t *testing.T) {
 	ws.AddRoot(lsputil.PathToURI(canonicalProject))
 
 	// File path via symlink should still match (after canonicalization)
-	symlinkFilePath := linkProject + "/schema.yammm"
+	symlinkFilePath := linkProject + "/sub/schema.yammm"
 
 	// Canonicalize the file path as analyzeAndPublish does
 	canonicalFilePath := mustHostPath(t, symlinkFilePath)

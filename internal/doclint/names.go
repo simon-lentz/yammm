@@ -113,9 +113,9 @@ var (
 	processWords = map[string]bool{"residue": true, "slate": true, "tranche": true}
 	stageWords   = map[string]bool{
 		"tier": true, "group": true, "round": true, "unit": true, "step": true, "phase": true,
-		"wave": true, "pass": true, "batch": true, "stage": true, "sweep": true,
+		"wave": true, "pass": true, "batch": true, "stage": true, "sweep": true, "clause": true,
 	}
-	numberedStage = regexp.MustCompile(`^(tier|group|round|unit|step|phase|wave|pass|batch|stage|sweep)[0-9]+$`)
+	numberedStage = regexp.MustCompile(`^(tier|group|round|unit|step|phase|wave|pass|batch|stage|sweep|clause)[0-9]+$`)
 	rowID         = regexp.MustCompile(`^[a-z][0-9]+$`)
 	// A version (v2) and constant time (o1) share the row-identifier shape.
 	legitimateRowShape = regexp.MustCompile(`^(v[0-9]+|o1)$`)

@@ -224,8 +224,15 @@ func TestRenderSymbol_Golden(t *testing.T) {
 		out.WriteString(RenderSymbol(tc.build(t), tc.root))
 		out.WriteString("\n")
 	}
-	// A rendered identity carries the fixtures' drive on Windows; the golden
-	// spells every fixture path the Unix way, and a path on another drive fails.
-	rendered := strings.ReplaceAll(out.String(), filepath.ToSlash(yammmtest.HostAbs("/")), "/")
+	// The golden spells each fixture identity the Unix way. Only the exact host
+	// identity is rewritten, so an identity that lost its volume stays and fails.
+	rendered := out.String()
+	for _, fixture := range []string{"/test/parts.yammm", "/project/person.yammm"} {
+		host := "`" + filepath.ToSlash(yammmtest.HostAbs(fixture)) + "`"
+		if !strings.Contains(rendered, host) {
+			t.Errorf("rendered hover does not name the fixture identity %s", host)
+		}
+		rendered = strings.ReplaceAll(rendered, host, "`"+fixture+"`")
+	}
 	yammmtest.Golden(t, "render_symbol", []byte(rendered))
 }

@@ -1,7 +1,7 @@
 package snapshot
 
 import (
-	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -9,53 +9,64 @@ import (
 
 // TestMergeResults_KeepsTruncation holds what UpdateMetadataOrReMarshal
 // returns when its fallback fails. Both failing fallback legs return
-// mergeResults' result as it is, so a truncated input must stay truncated,
-// with every issue it saw still counted.
+// mergeResults' result as it is, and either argument can arrive truncated: the
+// second is Load's or Marshal's result, capped at an issue limit. A truncated
+// input must stay truncated, with every issue it saw still counted.
 func TestMergeResults_KeepsTruncation(t *testing.T) {
 	t.Parallel()
 
-	codes := []diag.Code{diag.E_SNAPSHOT_MALFORMED, diag.E_SNAPSHOT_IO, diag.E_SNAPSHOT_UNKNOWN_TYPE}
-	c := diag.NewCollector(2)
-	for _, code := range codes {
-		c.Collect(diag.NewIssue(diag.Error, code, "probe").Build())
-	}
-	truncated := c.Result()
-	if !truncated.LimitReached() || truncated.DroppedCount() != 1 {
-		t.Fatalf("the fixture is not truncated: LimitReached %v, DroppedCount %d", truncated.LimitReached(), truncated.DroppedCount())
-	}
-	w := diag.NewCollector(0)
-	w.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED, "probe").Build())
+	firstCodes := []diag.Code{diag.E_SNAPSHOT_MALFORMED, diag.E_SNAPSHOT_IO, diag.E_SNAPSHOT_UNKNOWN_TYPE}
+	secondCodes := []diag.Code{diag.E_SNAPSHOT_TYPE_MISMATCH, diag.E_SNAPSHOT_DANGLING_REFERENCE, diag.E_SNAPSHOT_INVALID_ROOT}
 
-	merged := mergeResults(truncated, w.Result())
-
-	everyCode := true
-	for _, code := range codes {
-		if merged.CodeCounts(diag.Error)[code] != 1 {
-			everyCode = false
-		}
-	}
-
-	rows := []struct {
-		name   string
-		ok     bool
-		detail string
+	cases := []struct {
+		name                    string
+		firstLimit, secondLimit int
+		wantDropped             int
 	}{
-		{"the merged result is still truncated", merged.LimitReached(), fmt.Sprintf("LimitReached %v", merged.LimitReached())},
-		{"the dropped issue is still counted", merged.DroppedCount() == 1, fmt.Sprintf("DroppedCount %d, want 1", merged.DroppedCount())},
-		{
-			"every error the truncated result saw is still counted", merged.SeverityCounts().Errors == len(codes),
-			fmt.Sprintf("%d errors, want %d", merged.SeverityCounts().Errors, len(codes)),
-		},
-		{"every code the truncated result saw is still counted", everyCode, fmt.Sprintf("error codes %v, want one each of %v", merged.CodeCounts(diag.Error), codes)},
-		{"the other result's issue is kept", merged.HasCode(diag.W_SNAPSHOT_VALUE_DROPPED), "the warning is gone"},
+		{"the first result truncated", 2, diag.NoLimit, 1},
+		{"the second result truncated", diag.NoLimit, 1, 2},
+		{"both results truncated", 2, 1, 3},
 	}
 
-	for _, row := range rows {
-		t.Run(row.name, func(t *testing.T) {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if !row.ok {
-				t.Error(row.detail)
+			first := collectErrors(firstCodes, tc.firstLimit)
+			second := collectErrors(secondCodes, tc.secondLimit)
+			if got := first.DroppedCount() + second.DroppedCount(); got != tc.wantDropped {
+				t.Fatalf("the inputs drop %d issues, want %d", got, tc.wantDropped)
+			}
+
+			merged := mergeResults(first, second)
+
+			if !merged.LimitReached() {
+				t.Error("the merged result is not truncated")
+			}
+			if got := merged.DroppedCount(); got != tc.wantDropped {
+				t.Errorf("DroppedCount() = %d, want %d", got, tc.wantDropped)
+			}
+			if got, want := merged.SeverityCounts().Errors, len(firstCodes)+len(secondCodes); got != want {
+				t.Errorf("the merged result counts %d errors, want %d", got, want)
+			}
+			counts := merged.CodeCounts(diag.Error)
+			for _, code := range slices.Concat(firstCodes, secondCodes) {
+				if counts[code] != 1 {
+					t.Errorf("the merged result counts %s %d times, want 1", code, counts[code])
+				}
+			}
+			if got, want := merged.Len(), first.Len()+second.Len(); got != want {
+				t.Errorf("the merged result keeps %d issues, want every surviving issue of both: %d", got, want)
 			}
 		})
 	}
+}
+
+// collectErrors returns the result of collecting one Error per code into a
+// collector capped at limit.
+func collectErrors(codes []diag.Code, limit int) diag.Result {
+	c := diag.NewCollector(limit)
+	for _, code := range codes {
+		c.Collect(diag.NewIssue(diag.Error, code, "probe").Build())
+	}
+	return c.Result()
 }

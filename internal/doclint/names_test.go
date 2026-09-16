@@ -22,9 +22,11 @@ func nameFixture(t *testing.T) string {
 		"pkg/step5_fixes_test.go":                  "package pkg\n",
 		"pkg/roundtrip_p2_test.go":                 "package pkg\n",
 		"pkg/slate_rows_test.go":                   "package pkg\n",
+		"pkg/clause5_validator_test.go":            "package pkg\n",
 		"pkg/testdata/g11_wraps.yammm":             "",
 		"pkg/testdata/cases/a01_empty.yammm":       "",
 		"pkg/testdata/group_3/input.yammm":         "",
+		"pkg/testdata/clause_2/input.yammm":        "",
 		"pkg/hash_v2_test.go":                      "package pkg\n",
 		"pkg/roundtrip_test.go":                    "package pkg\n",
 		"pkg/testdata/fuzz/FuzzX/7fa2d0e7b207d272": "",
@@ -35,6 +37,7 @@ import "testing"
 func TestRoundTripP2_Identity(t *testing.T) {}
 func TestCheck_Group3Rows(t *testing.T)     {}
 func TestFixPass_Repair(t *testing.T)       {}
+func TestClause34_Rows(t *testing.T)        {}
 func TestGetFold_O1Performance(t *testing.T) {}
 func TestWireV3_Table(t *testing.T)          {}
 func TestUTF8Int64Keys(t *testing.T)         {}
@@ -71,6 +74,9 @@ func TestAssertProcessFreeNames_ReportsEveryProcessName(t *testing.T) {
 		`TestRoundTripP2_Identity carries the process reference "p2"`,
 		`TestCheck_Group3Rows carries the process reference "group3"`,
 		`TestFixPass_Repair carries the process reference "fix_pass"`,
+		`"clause5_validator_test.go" carries the process reference "clause5"`,
+		`"clause_2" carries the process reference "clause_2"`,
+		`TestClause34_Rows carries the process reference "clause34"`,
 	} {
 		if !r.reports(want) {
 			t.Errorf("not reported: %s\ngot: %v", want, r.msgs)
@@ -85,8 +91,8 @@ func TestAssertProcessFreeNames_ReportsEveryProcessName(t *testing.T) {
 			t.Errorf("a legitimate name was reported: %s\ngot: %v", quiet, r.msgs)
 		}
 	}
-	if paths != 15 || tests != 7 {
-		t.Errorf("read %d paths and %d test functions; the fixture holds 15 and 7", paths, tests)
+	if paths != 17 || tests != 8 {
+		t.Errorf("read %d paths and %d test functions; the fixture holds 17 and 8", paths, tests)
 	}
 }
 
