@@ -96,22 +96,26 @@ func Parse(s string) (Builder, error) {
 				b = b.PK(fields...)
 				pos = newPos
 			default:
-				return Builder{}, fmt.Errorf("unexpected character %q in bracket", runeAt(s, pos))
+				return Builder{}, fmt.Errorf("unexpected character %s in bracket", charAt(s, pos))
 			}
 
 		default:
-			return Builder{}, fmt.Errorf("unexpected character %q at position %d", runeAt(s, pos), pos)
+			return Builder{}, fmt.Errorf("unexpected character %s at position %d", charAt(s, pos), pos)
 		}
 	}
 
 	return b, nil
 }
 
-// runeAt returns the rune that starts at byte offset pos of s, for an error
-// message: s[pos] alone is one byte of a multi-byte rune.
-func runeAt(s string, pos int) rune {
-	r, _ := utf8.DecodeRuneInString(s[pos:])
-	return r
+// charAt quotes the character that starts at byte offset pos of s for an error
+// message: a rune as Go quotes it, and a byte that starts no valid UTF-8 as a
+// one-byte string, so an invalid byte and a real U+FFFD read apart.
+func charAt(s string, pos int) string {
+	r, size := utf8.DecodeRuneInString(s[pos:])
+	if r == utf8.RuneError && size == 1 {
+		return strconv.Quote(s[pos : pos+1])
+	}
+	return strconv.QuoteRune(r)
 }
 
 // parseIdentifier parses an identifier starting at pos.
@@ -122,7 +126,7 @@ func parseIdentifier(s string, pos int) (string, int, error) {
 		r, size := utf8.DecodeRuneInString(s[pos:])
 		if pos == start {
 			if !isLetter(r) && r != '_' {
-				return "", pos, fmt.Errorf("identifier must start with letter or underscore, got '%c'", r)
+				return "", pos, fmt.Errorf("identifier must start with letter or underscore, got %s", charAt(s, pos))
 			}
 		} else {
 			if !isLetter(r) && !isDigit(r) && r != '_' {
@@ -182,7 +186,7 @@ func parseQuotedString(s string, pos int) (string, int, error) {
 				sb.WriteRune(r)
 				pos = last
 			default:
-				return "", pos, fmt.Errorf("unknown escape sequence: \\%c", runeAt(s, pos))
+				return "", pos, fmt.Errorf("unknown escape sequence: a backslash then %s", charAt(s, pos))
 			}
 			pos++
 		} else {
@@ -320,7 +324,7 @@ func parsePKFields(s string, pos int) ([]PKField, int, error) {
 				}
 			}
 		default:
-			return nil, pos, fmt.Errorf("unexpected character %q in PK value", runeAt(s, pos))
+			return nil, pos, fmt.Errorf("unexpected character %s in PK value", charAt(s, pos))
 		}
 
 		fields = append(fields, PKField{Name: name, Value: value})
@@ -337,7 +341,7 @@ func parsePKFields(s string, pos int) ([]PKField, int, error) {
 			pos++
 			continue
 		}
-		return nil, pos, fmt.Errorf("expected ']' or ',' after PK value, got %q", runeAt(s, pos))
+		return nil, pos, fmt.Errorf("expected ']' or ',' after PK value, got %s", charAt(s, pos))
 	}
 
 	return fields, pos, nil
@@ -350,10 +354,8 @@ func parsePKInteger(numStr string) (any, error) {
 	if err == nil {
 		return i, nil
 	}
-	if !strings.HasPrefix(numStr, "-") {
-		if u, uerr := strconv.ParseUint(numStr, 10, 64); uerr == nil {
-			return u, nil
-		}
+	if u, uerr := strconv.ParseUint(numStr, 10, 64); uerr == nil {
+		return u, nil
 	}
 	return nil, fmt.Errorf("invalid integer: %w", err)
 }

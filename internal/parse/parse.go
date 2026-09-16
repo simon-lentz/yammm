@@ -791,10 +791,39 @@ func (b *builder) tokenSpan(t *lexer.Token) location.Span {
 	return b.spanFromOffsets(t.Pos.Offset, t.Pos.Offset+len(t.Value))
 }
 
+// validRuneStartAt returns the first byte of the valid multibyte rune that
+// strictly contains offset, or -1 when offset starts a rune, is out of range, or
+// falls inside an invalid byte sequence.
+func validRuneStartAt(src string, offset int) int {
+	if offset <= 0 || offset >= len(src) || utf8.RuneStart(src[offset]) {
+		return -1
+	}
+	start := offset
+	for start > 0 && !utf8.RuneStart(src[start]) {
+		start--
+	}
+	// An invalid byte sequence decodes one byte at a time, so the rune found
+	// here ends at or before offset and is not one to snap to. Only a rune that
+	// spans offset is.
+	_, size := utf8.DecodeRuneInString(src[start:])
+	if start+size <= offset {
+		return -1
+	}
+	return start
+}
+
 // positionAt derives a lexer position from a byte offset, counting columns in
 // runes to match what the lexer records for a real token.
 func (b *builder) positionAt(offset int) lexer.Position {
 	offset = min(max(offset, 0), len(b.src))
+	// An offset inside a valid multibyte rune moves to that rune's start, so a
+	// column never decreases as the offset grows. An offset inside an invalid
+	// byte sequence stays put: the lexer gives each invalid byte its own token
+	// and the column counter counts each as one character, so moving one would
+	// put a token's end before its start.
+	if start := validRuneStartAt(b.src, offset); start >= 0 {
+		offset = start
+	}
 	line, atStart := slices.BinarySearch(b.lineStarts, offset)
 	if !atStart {
 		line--

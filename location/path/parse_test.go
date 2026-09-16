@@ -314,6 +314,91 @@ func TestParse_InvalidPaths(t *testing.T) {
 			errMsg: "'\u00e9'",
 		},
 		{
+			name:   "an invalid byte at the top level is quoted as one byte",
+			input:  "$\xff",
+			errMsg: `unexpected character "\xff" at position 1`,
+		},
+		{
+			name:   "a real U+FFFD names its rune, not its first byte",
+			input:  "$\ufffd",
+			errMsg: "unexpected character '\ufffd' at position 1",
+		},
+		{
+			name:   "a non-ASCII character in a bracket names its rune",
+			input:  "$[\u00e9]",
+			errMsg: "unexpected character '\u00e9' in bracket",
+		},
+		{
+			name:   "an invalid byte in a bracket is quoted as one byte",
+			input:  "$[\xff]",
+			errMsg: `unexpected character "\xff" in bracket`,
+		},
+		{
+			name:   "a non-ASCII character in a PK value names its rune",
+			input:  "$[x=\u00e9]",
+			errMsg: "unexpected character '\u00e9' in PK value",
+		},
+		{
+			name:   "an invalid byte in a PK value is quoted as one byte",
+			input:  "$[x=\xff]",
+			errMsg: `unexpected character "\xff" in PK value`,
+		},
+		{
+			name:   "a non-ASCII character after a PK value names its rune",
+			input:  "$[x=1\u00e9]",
+			errMsg: "expected ']' or ',' after PK value, got '\u00e9'",
+		},
+		{
+			name:   "an invalid byte after a PK value is quoted as one byte",
+			input:  "$[x=1\xff]",
+			errMsg: `expected ']' or ',' after PK value, got "\xff"`,
+		},
+		{
+			name:   "an unknown escape of a non-ASCII character names its rune",
+			input:  "$[\"\\\u00e9\"]",
+			errMsg: "unknown escape sequence: a backslash then '\u00e9'",
+		},
+		{
+			name:   "an unknown escape of an invalid byte is quoted as one byte",
+			input:  "$[\"\\\xff\"]",
+			errMsg: `unknown escape sequence: a backslash then "\xff"`,
+		},
+		{
+			name:   "a non-ASCII character starting a key names its rune",
+			input:  "$.\u00e9",
+			errMsg: "identifier must start with letter or underscore, got '\u00e9'",
+		},
+		{
+			name:   "a non-ASCII character starting a later PK field name names its rune",
+			input:  "$[a=1,\u00e9=2]",
+			errMsg: "PK field name: identifier must start with letter or underscore, got '\u00e9'",
+		},
+		{
+			name:   "an invalid byte starting a key is quoted as one byte",
+			input:  "$.\xff",
+			errMsg: `identifier must start with letter or underscore, got "\xff"`,
+		},
+		{
+			name:   "a real U+FFFD starting a key names its rune",
+			input:  "$.\ufffd",
+			errMsg: "identifier must start with letter or underscore, got '\ufffd'",
+		},
+		{
+			name:   "a control character starting a key is escaped, not written raw",
+			input:  "$.\n",
+			errMsg: `identifier must start with letter or underscore, got '\n'`,
+		},
+		{
+			name:   "an invalid byte starting a later PK field name is quoted as one byte",
+			input:  "$[a=1,\xff=2]",
+			errMsg: `PK field name: identifier must start with letter or underscore, got "\xff"`,
+		},
+		{
+			name:   "a high surrogate then a backslash at the end of the path",
+			input:  `$["\ud83d\`,
+			errMsg: `unpaired surrogate \ud83d`,
+		},
+		{
 			name:   "invalid unicode escape",
 			input:  `$["\uGGGG"]`,
 			errMsg: "invalid unicode",

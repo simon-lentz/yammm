@@ -812,3 +812,111 @@ func TestRecovery_MalformedNumberDoesNotSwallowAnEarlierDefect(t *testing.T) {
 		t.Errorf("second diagnostic = %q, want the malformed literal", issues[1].Message())
 	}
 }
+
+// TestRecovery_PositionAtSnapsIntoAValidRune pins the column ladder over a
+// multibyte rune: every offset inside one reports that rune's own start and
+// column, so a column never decreases as the offset grows.
+func TestRecovery_PositionAtSnapsIntoAValidRune(t *testing.T) {
+	src := "€x"
+	b := &builder{
+		src:        src,
+		sourceID:   location.NewSourceID("s.yammm"),
+		lineStarts: lineStarts(src),
+	}
+	want := []struct{ offset, column, at int }{
+		{0, 1, 0}, {1, 1, 0}, {2, 1, 0}, {3, 2, 3}, {4, 3, 4},
+	}
+	for _, w := range want {
+		got := b.positionAt(w.offset)
+		if got.Column != w.column || got.Offset != w.at {
+			t.Errorf("positionAt(%d) = column %d offset %d, want column %d offset %d",
+				w.offset, got.Column, got.Offset, w.column, w.at)
+		}
+	}
+}
+
+// TestRecovery_PositionAtLeavesAnInvalidByteWhereItIs holds the rune walk to
+// valid runes. The lexer gives each invalid byte its own token and the column
+// counter counts each as one character, so moving an offset off an invalid byte
+// puts a token's end before its start and can cross a line break.
+func TestRecovery_PositionAtLeavesAnInvalidByteWhereItIs(t *testing.T) {
+	src := "ab\n\x82\xe2\x82cd"
+	b := &builder{
+		src:        src,
+		sourceID:   location.NewSourceID("s.yammm"),
+		lineStarts: lineStarts(src),
+	}
+	for offset := range len(src) + 1 {
+		if got := b.positionAt(offset); got.Offset != offset {
+			t.Errorf("positionAt(%d).Offset = %d, want %d: no byte here starts a valid multibyte rune",
+				offset, got.Offset, offset)
+		}
+	}
+	if got := b.positionAt(3); got.Line != 2 || got.Column != 1 {
+		t.Errorf("positionAt(3) = %d:%d, want 2:1: an invalid byte opening a line stays on it",
+			got.Line, got.Column)
+	}
+}
+
+// TestRecovery_PositionAtHoldsAtOffsetZero covers the walk's lower guard: byte
+// zero is never left, so the line search cannot index lineStarts at -1.
+func TestRecovery_PositionAtHoldsAtOffsetZero(t *testing.T) {
+	src := "\x82x"
+	b := &builder{
+		src:        src,
+		sourceID:   location.NewSourceID("s.yammm"),
+		lineStarts: lineStarts(src),
+	}
+	got := b.positionAt(0)
+	if got.Offset != 0 || got.Line != 1 || got.Column != 1 {
+		t.Errorf("positionAt(0) = %d:%d offset %d, want 1:1 offset 0", got.Line, got.Column, got.Offset)
+	}
+}
+
+// TestRecovery_ASyntaxErrorOnAnInvalidByteUnderlinesIt pins the span a
+// diagnostic carries when the offending byte is invalid UTF-8: it names the
+// byte's own line and covers it, because a zero-width range highlights no
+// character and a range on the line before underlines the wrong text.
+func TestRecovery_ASyntaxErrorOnAnInvalidByteUnderlinesIt(t *testing.T) {
+	tests := []struct {
+		name                   string
+		src                    string
+		line, column, from, to int
+	}{
+		{
+			name:   "a truncated sequence opening a line",
+			src:    "schema \"s\"\n\xe2\x82\ntype T {\n\tid String primary\n}\n",
+			line:   2,
+			column: 1,
+			from:   11,
+			to:     12,
+		},
+		{
+			name:   "a lone continuation byte opening a line",
+			src:    "schema \"s\"\n\x82\ntype T {\n\tid String primary\n}\n",
+			line:   2,
+			column: 1,
+			from:   11,
+			to:     12,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, issues := Parse([]byte(tt.src), location.NewSourceID("s.yammm"))
+			if len(issues) == 0 {
+				t.Fatal("no issue; want one naming the invalid byte")
+			}
+			span := issues[0].Span()
+			if span.IsPoint() {
+				t.Errorf("span %v is a point; an editor underlines no character", span)
+			}
+			if span.Start.Line != tt.line || span.Start.Column != tt.column {
+				t.Errorf("span starts %d:%d, want %d:%d",
+					span.Start.Line, span.Start.Column, tt.line, tt.column)
+			}
+			if span.Start.Byte != tt.from || span.End.Byte != tt.to {
+				t.Errorf("span bytes [%d,%d), want [%d,%d)", span.Start.Byte, span.End.Byte, tt.from, tt.to)
+			}
+		})
+	}
+}

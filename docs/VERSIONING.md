@@ -1883,6 +1883,9 @@ existing declaration.
   `E_DUPLICATE_IMPORT`**, where it drew `E_IMPORT_CYCLE` twice.
 - **The discovered module root's clause keeps a network share's `//`**:
   `discovered from //server/share/proj/yammm.mod`.
+- **An error from `location/path.Parse` that names a character quotes an invalid
+  byte as a one-byte string**, `"\xff"`, so it reads apart from a real U+FFFD. The
+  unknown-escape message reads `unknown escape sequence: a backslash then 'x'`.
 
 ## v0.21.0 under this policy
 
