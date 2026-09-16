@@ -42,8 +42,11 @@ func defaultLoadConfig() *loadConfig {
 // multiple Load calls is safe and efficient:
 //
 //   - Overlapping transitive imports short-circuit via the registry cache:
-//     when loadImport encounters a SourceID already registered in r, the
-//     existing *Schema pointer is reused and the import is NOT re-parsed.
+//     when loadImport encounters a SourceID already registered in r, or held
+//     inside the import closure of a schema r holds, the existing *Schema
+//     pointer is reused and the import is NOT re-parsed, whatever order the
+//     load meets its imports in. A source two schemas in r compiled from
+//     different bytes is not reused; it is read like any other import.
 //     This is where cross-Load schema caching pays off.
 //   - Re-registering the same source — the same bytes for every source both
 //     carry, the same structural hash — is a no-op (see Registry.Register); a

@@ -1938,6 +1938,26 @@ existing declaration.
   two. Each is now ordered by its type and its content. A map with a non-string key
   stored as given always ordered by content and is unchanged.
 
+### Unit 7, the second fix pass — a shared registry's closures, and a refused document's diagnostic
+
+**No exported declaration moves.**
+
+- **A load that shares a `Registry` binds a schema the registry holds inside
+  another schema's import closure, whatever order it imports them in.** It bound
+  such a schema only after importing the schema whose closure held it. Imported
+  first, the schema was compiled again from its file, and a `WithSourcesOnly` load
+  refused it with `E_IMPORT_RESOLVE`. A source that two registered closures
+  compiled from different bytes is not bound; it is read like any other import.
+- **The language server publishes a refused document's diagnostic under the URI
+  the editor opened it with.** A document at a path the resolver refuses, such as
+  one under a regular file, has no identity, and its one diagnostic went to a URI
+  the server re-spelled from the path. Where the editor spelled that URI
+  differently — a lower-case hex escape, an escaped tilde — the editor never showed
+  the diagnostic.
+- **Consumer reach: none measured.** rdata passes no `Registry` to a load and runs
+  no language server, and its suite against this tree differs from its run against
+  `v0.21.0` by nothing.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:
@@ -2717,4 +2737,4 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **2026-09-06** — **Corrected the unit-4 "Additive API surface" enumeration of `ReceiverKind`.** It named `RecvScalar`, which no declaration in the module carries, and listed four constants where `gorelease -base=v0.20.0` reports ten. The line now names all ten as declared: `RecvAny`, `RecvList`, `RecvOrdered`, `RecvScalarList`, `RecvString`, `RecvNumeric`, `RecvSized`, `RecvListOrArg`, `RecvStringList`, `RecvNumericList`. `RecvScalar` was added and renamed inside the unreleased range, so it leaves no trace for a consumer; the enumeration had kept its old spelling. Prose only; no behaviour changed.
 - **2026-09-10** — **Corrected condition-1 unit 6's Unreleased section against the candidate (A-456).** Retitled it, since unit 6 sits unmerged on `review` (A-417), and gave pass A its own heading; stated the section's whole declaration delta, six compatible additions; added an exit-code table measured against `v0.21.0`, replacing two sentences that said no exit code moves; stated how `W_NEO4J_INDEXES_UNREADABLE` and the one-result rule reach the stream; recorded the 0600 mode of the files `--output-dir` creates; and pointed pass B's `issues` item at its rename.
 - **2026-09-10 (night)** — **Corrected the Unreleased section's heading and preamble, which still said unit 6 sat unmerged on `review` after A-461 closed it and `fb57e99` (PR #107) merged it, and added the A-433 block**: the plugin corpus's load gate retagged and guarded, and the VS Code extension's Markdown injection widened to the whole fence vocabulary with its leak past an unbalanced brace closed.
-- **2026-09-14** — **Wrote condition-1 unit 7's second fix pass into the Unreleased section, and corrected its earlier blocks.** Added four blocks: one resolver mints every file-backed identity, a retagging merge and a terminal-true excerpt, import paths and the path grammar, and `immutable`'s pointers with `graph`'s content order. Restated the unit's declaration delta from `gorelease -base=v0.21.0` over the composed tree, twelve additions and seven removals. Corrected the earlier blocks where the round found them false: the text forms a synthetic or relative module root moves, the excerpts that had an empty mark row rather than none, the cycle's module-root clause and the opening import's `E_UPSTREAM_FAIL`, a uint64 PK that now parses, the non-UTF-8 path refusal that reaches `schema.Load`, the resolver's refusal under a regular file, the deleted LSP canonicalizer's visibility, the CI matrix, the cyclic value stored as it is, and the file mode on Windows.
+- **2026-09-14** — **Wrote condition-1 unit 7's second fix pass into the Unreleased section, and corrected its earlier blocks.** Added five blocks: one resolver mints every file-backed identity, a retagging merge and a terminal-true excerpt, import paths and the path grammar, `immutable`'s pointers with `graph`'s content order, and a shared registry's closures with a refused document's diagnostic. Restated the unit's declaration delta from `gorelease -base=v0.21.0` over the composed tree, twelve additions and seven removals. Corrected the earlier blocks where the round found them false: the text forms a synthetic or relative module root moves, the excerpts that had an empty mark row rather than none, the cycle's module-root clause and the opening import's `E_UPSTREAM_FAIL`, a uint64 PK that now parses, the non-UTF-8 path refusal that reaches `schema.Load`, the resolver's refusal under a regular file, the deleted LSP canonicalizer's visibility, the CI matrix, the cyclic value stored as it is, and the file mode on Windows.

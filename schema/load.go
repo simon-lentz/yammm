@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -503,16 +504,17 @@ type loader struct {
 	disallowImports bool
 
 	// Tracking state
-	mu             sync.Mutex
-	sourceContent  map[location.SourceID][]byte
-	loadedSchemas  map[location.SourceID]*Schema
-	loadingSchemas map[location.SourceID]bool     // For cycle detection
-	imports        map[string]importBinding       // alias -> binding (resolved or failed) for current schema
-	failedCompiles map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
-	closureSeen    map[*Schema]struct{}           // schemas whose cached closures are already registered
-	hostPaths      map[location.SourceID]string   // file-backed source -> the host path its bytes were read from
-	resolveMu      sync.Mutex
-	resolved       map[string]resolvedSource // path -> its one resolution in this load
+	mu              sync.Mutex
+	sourceContent   map[location.SourceID][]byte
+	loadedSchemas   map[location.SourceID]*Schema
+	loadingSchemas  map[location.SourceID]bool     // For cycle detection
+	imports         map[string]importBinding       // alias -> binding (resolved or failed) for current schema
+	failedCompiles  map[location.SourceID]struct{} // sources whose nested compile failed (memo, per Load call)
+	closureSeen     map[*Schema]struct{}           // schemas whose cached closures are already registered
+	registryClosure map[location.SourceID]*Schema  // schemas the shared registry holds inside an import closure; nil until first needed
+	hostPaths       map[location.SourceID]string   // file-backed source -> the host path its bytes were read from
+	resolveMu       sync.Mutex
+	resolved        map[string]resolvedSource // path -> its one resolution in this load
 }
 
 // loadRegistry is the completionRegistry a load completes against: the schemas
@@ -1070,6 +1072,9 @@ func (l *loader) bindIfKnown(imp *importDecl, sourceID location.SourceID) bool {
 	if !ok {
 		loaded, ok = l.registry.LookupBySourceID(sourceID)
 		if !ok {
+			loaded, ok = l.registeredClosureMember(sourceID)
+		}
+		if !ok {
 			l.mu.Unlock()
 			return false
 		}
@@ -1079,6 +1084,56 @@ func (l *loader) bindIfKnown(imp *importDecl, sourceID location.SourceID) bool {
 	l.imports[imp.Alias] = importBinding{sourceID: sourceID, schema: loaded, decl: imp}
 	l.mu.Unlock()
 	return true
+}
+
+// registeredClosureMember returns the compiled schema the shared registry holds
+// for sourceID inside a registered schema's import closure. Without it, whether
+// such an import binds that schema or reads its bytes would depend on whether the
+// load had already bound the schema whose closure holds it. A source held by two
+// compiled schemas whose bytes differ is not bound. Callers hold l.mu.
+func (l *loader) registeredClosureMember(sourceID location.SourceID) (*Schema, bool) {
+	if l.registryClosure == nil {
+		l.registryClosure = make(map[location.SourceID]*Schema)
+		seen := make(map[*Schema]struct{})
+		var walk func(*Schema)
+		walk = func(s *Schema) {
+			if _, ok := seen[s]; ok {
+				return
+			}
+			seen[s] = struct{}{}
+			for _, imp := range s.ImportsSlice() {
+				sub := imp.Schema()
+				if sub == nil {
+					continue
+				}
+				id := sub.SourceID()
+				switch prev, ok := l.registryClosure[id]; {
+				case !ok:
+					l.registryClosure[id] = sub
+				case prev != nil && prev != sub && !sameSourceBytes(prev, sub):
+					l.registryClosure[id] = nil
+				}
+				walk(sub)
+			}
+		}
+		for _, s := range l.registry.All() {
+			walk(s)
+		}
+	}
+	s := l.registryClosure[sourceID]
+	return s, s != nil
+}
+
+// sameSourceBytes reports whether two compiled schemas of one SourceID were
+// compiled from the same bytes. A schema without sources matches only itself.
+func sameSourceBytes(a, b *Schema) bool {
+	as, bs := a.Sources(), b.Sources()
+	if as == nil || bs == nil {
+		return false
+	}
+	ac, aok := as.ContentBySource(a.SourceID())
+	bc, bok := bs.ContentBySource(b.SourceID())
+	return aok && bok && bytes.Equal(ac, bc)
 }
 
 // loadImport loads a single imported schema. A content failure is

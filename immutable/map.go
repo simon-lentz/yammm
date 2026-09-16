@@ -132,8 +132,5 @@ func cloneValue(v Value) any {
 	if rv.Kind() == reflect.Map {
 		return deepCloneMap(rv, 0, nil)
 	}
-	if rv.Kind() == reflect.Slice {
-		return deepCloneSlice(rv, 0, nil)
-	}
 	return v.val
 }

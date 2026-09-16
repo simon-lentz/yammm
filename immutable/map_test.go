@@ -264,7 +264,6 @@ func TestMap_NestedMaps(t *testing.T) {
 }
 
 func TestMap_Clone_WithNestedSlice(t *testing.T) {
-	// Test Clone with nested slices to cover cloneValue slice path
 	input := map[string]any{
 		"items": []any{"a", "b", "c"},
 		"nested": map[string]any{

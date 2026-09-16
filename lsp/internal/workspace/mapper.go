@@ -75,11 +75,13 @@ func (m *uriMapper) buildCanonicalToURIMap(open map[string]*docstate.Document) m
 				continue
 			}
 
-			id, err := location.SourceIDFromPath(path)
-			if err != nil {
-				continue
+			// A path the resolver refuses has no identity, and its diagnostics carry
+			// the path its URI decodes to.
+			if id, err := location.SourceIDFromPath(path); err == nil {
+				canonical = id.String()
+			} else {
+				canonical = filepath.ToSlash(path)
 			}
-			canonical = id.String()
 		}
 
 		// For determinism when multiple URIs resolve to the same canonical path,
