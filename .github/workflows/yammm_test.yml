@@ -70,12 +70,18 @@ jobs:
       # pinned linter's module ships. The pre-commit hook runs the same script.
       - name: Verify the linter config
         run: scripts/lintconfig.sh
+      # The analysis cache is never carried between runs. The action restores a
+      # cache by key prefix when the exact key is absent, so a run inherits
+      # entries a different linter build wrote; one such cache reported 47
+      # staticcheck findings in files that every cache-free lint of the same
+      # tree passes. A cold lint costs under a minute more than a cached one.
       - name: golangci-lint
         if: ${{ !cancelled() }}
         uses: golangci/golangci-lint-action@v9
         with:
           install-mode: none
           verify: false
+          skip-cache: true
           args: --config=.golangci.yml
       - name: Vet
         if: ${{ !cancelled() }}

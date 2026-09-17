@@ -1973,6 +1973,32 @@ existing declaration.
   no language server, and its suite against this tree differs from its run against
   `v0.21.0` by nothing.
 
+### After unit 7 — a file that starts with a byte order mark loads
+
+**No exported declaration moves.** Landed on `main` after unit 7's merge, as
+the repair unit 7's fix-diff round routed to `../plans/backlog.md` §3 (U7-91).
+
+- **A schema file that starts with one UTF-8 byte order mark (U+FEFF) loads.**
+  `yammm validate`, `yammm fmt --check` and every `schema.Load` reported
+  `E_SYNTAX` at 1:1, naming the mark as an unexpected token in the schema
+  header. The lexer now skips one leading mark; every span still counts its
+  bytes, so a diagnostic on line 1 reports one column more than the same text
+  without the mark. A mark anywhere else stays `E_SYNTAX`, at the mark.
+- **The formatter never writes a byte order mark.** `format.TokenStream` on a
+  marked file returns the unmarked text, so `yammm fmt --check` reports a
+  canonical file that starts with a mark as unformatted, and `yammm fmt
+  --write` removes the mark and changes nothing else. Before, both refused the
+  file.
+- **`adapter/json.ParseObject` skips one leading byte order mark**, as the CSV
+  adapter's parse methods already did; it reported `E_ADAPTER_PARSE` ("invalid
+  JSON"). A second mark stays a parse error on both.
+- **The `yammm.mod` marker file's refusal stands**: a marker holding a byte
+  order mark is still `E_LOAD_MODULE_ROOT_MALFORMED`, so the whole format space
+  stays reserved. `docs/SPEC.md` states the rule for a schema file.
+- **Consumer reach: none measured.** rdata's six schemas and its data fixtures
+  carry no mark, and its suite against this tree differs from its run against
+  `v0.21.0` by nothing.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

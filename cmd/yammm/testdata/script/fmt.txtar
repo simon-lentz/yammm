@@ -45,6 +45,22 @@ stderr 'mutually exclusive'
 ! exec yammm fmt --check broken.yammm
 stderr '^broken\.yammm:4:1: error\[E_SYNTAX\]'
 
+# A canonical file that starts with a UTF-8 byte order mark is unformatted:
+# --check names it, and --write removes the mark and nothing else.
+! exec yammm fmt --check marked.yammm
+stdout '^marked\.yammm$'
+! stderr .
+exec yammm fmt --write marked.yammm
+cmp marked.yammm formatted_golden.yammm
+
+-- marked.yammm --
+﻿schema "test"
+
+type Person {
+	id   String primary
+	name String required
+	age  Integer
+}
 -- broken.yammm --
 schema "test"
 type Person {

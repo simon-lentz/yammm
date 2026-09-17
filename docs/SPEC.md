@@ -49,6 +49,8 @@ Inside a production, `"a" ... "z"` is a character range — the closed set from 
 
 Source code is Unicode text encoded in UTF-8. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
 
+A schema file can start with one UTF-8 byte order mark (U+FEFF). The lexer skips it: it is no token, though line 1's columns count it, and the formatter never writes one: `yammm fmt --check` reports a file that starts with one as unformatted, and `yammm fmt --write` removes it. A byte order mark anywhere else is a syntax error (`E_SYNTAX`). The `yammm.mod` marker file is the exception, below.
+
 Each code point is distinct; upper and lower case letters are different characters.
 
 ### Characters
@@ -1837,7 +1839,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 
 - Schema files use the `.yammm` extension
 - Snapshot files use the `.ys` extension
-- UTF-8 encoding is required
+- UTF-8 encoding is required; one leading byte order mark is accepted and never written
 - One schema per file
 - Import paths are case-sensitive on case-sensitive filesystems
 - `/` separates an import path's segments on every host, and only a `./` or `../` prefix makes an import relative. An import path holding a backslash is refused: Windows reads a backslash as a separator and every other host as part of a file name, so the path would name a different file on each
