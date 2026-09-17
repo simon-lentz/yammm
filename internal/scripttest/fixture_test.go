@@ -151,12 +151,14 @@ func (f *fixture) run(script string, args ...string) result {
 }
 
 // fixtureEnv keeps a fixture's go commands inside the fixture module and off
-// the network, whatever the enclosing run sets.
+// the network, whatever the enclosing run sets. MUTATE_BASELINE_CACHE is
+// dropped because a fixture runs mutate.sh, which would otherwise read an
+// enclosing mutation run's recorded baseline.
 func fixtureEnv() []string {
-	pinned := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK"}
+	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "MUTATE_BASELINE_CACHE"}
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
-		return slices.ContainsFunc(pinned, func(p string) bool { return strings.EqualFold(p, name) })
+		return slices.ContainsFunc(dropped, func(p string) bool { return strings.EqualFold(p, name) })
 	})
 	return append(env, "GOFLAGS=-mod=mod", "GOPROXY=off", "GOTOOLCHAIN=local", "GOWORK=off")
 }

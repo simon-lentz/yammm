@@ -19,6 +19,11 @@
 # each mutated file byte for byte, so the key still matches after a mutant, and
 # any edit to the tree changes it.
 #
+# MUTATE_BASELINE_CACHE is dropped from the environment of the suite this script
+# runs. A package that shells out to this script would otherwise inherit the
+# cache directory and take the recorded-baseline path, which is how a run over
+# internal/scripttest read its own unmutated tree as red.
+#
 # Usage:
 #   scripts/mutate.sh <file> <search> <replace> <pkg> [pkg...]
 #   scripts/mutate.sh format/wrap.go 'Threshold = 100' 'Threshold = 1000' ./format/
@@ -86,7 +91,7 @@ fi
 if [ -n "${stamp}" ] && [ -f "${stamp}" ]; then
 	printf 'mutate: baseline green (recorded for this tree in %s)\n' "${MUTATE_BASELINE_CACHE}"
 else
-	if ! go test "${pkgs[@]}" >/dev/null 2>&1; then
+	if ! env -u MUTATE_BASELINE_CACHE go test "${pkgs[@]}" >/dev/null 2>&1; then
 		printf 'mutate: the UNMUTATED tree is already red in %s, so no verdict is possible\n' "${pkgs[*]}" >&2
 		exit 1
 	fi
@@ -127,7 +132,7 @@ fi
 printf 'mutate: build ok\n'
 
 set +e
-test_out=$(go test "${pkgs[@]}" 2>&1)
+test_out=$(env -u MUTATE_BASELINE_CACHE go test "${pkgs[@]}" 2>&1)
 rc=$?
 set -e
 

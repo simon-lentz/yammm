@@ -6,8 +6,13 @@
 # Each <mutants dir>/<id>/ holds file, search and replace, mutate.sh's three
 # arguments, each used byte for byte; spell, the TMPDIR spellings to run under
 # ("asis", "folded" or both); and optionally pkgs, a package list that replaces
-# the computed one. Without pkgs, a mutant runs over the mutated file's package
-# and every tracked package whose code or tests import it directly. Every run sets
+# the computed one. Without pkgs, a mutant runs over the mutated file's package,
+# every tracked package whose code or tests import it directly, and ./docs.
+#
+# ./docs joins every computed set whether or not it imports the target, where the
+# checkout has one. It holds the documentation-conformance gates and imports 12
+# of this module's 54 packages, so an import-graph set alone lets a mutation that
+# breaks a documented claim read as survived. Every run sets
 # -failfast, -p=2 and MUTATE_BASELINE_CACHE, so a copy runs a baseline once per package set,
 # spelling and tree. "folded" is TMPDIR's last component "T" spelled "t", which
 # names the same directory only on a case-insensitive volume.
@@ -60,20 +65,28 @@ tracked=$(cd "$src" && bash scripts/packages.sh 2>/dev/null)
 # shellcheck disable=SC2086 # tracked is a word list of import paths
 (cd "$src" && go list -f '{{.ImportPath}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}' $tracked) >"$out/pkgsets/imports.tsv"
 
-# pkgset prints, one per line, the ./ paths of the package holding file and of
-# every tracked package whose code or tests import it directly.
+docs_pkg=""
+if cut -f1 "$out/pkgsets/imports.tsv" | grep -qx "$module/docs"; then
+	docs_pkg="./docs"
+fi
+
+# pkgset prints the ./ paths of the package holding file, of every tracked
+# package whose code or tests import it directly, and of docs_pkg.
 pkgset() {
 	local target key
 	target=$(cd "$src" && go list -f '{{.ImportPath}}' "./$(dirname "$1")")
 	key=$(printf '%s' "$target" | tr '/' '_')
 	if [ ! -f "$out/pkgsets/$key" ]; then
-		awk -F'\t' -v t="$target" -v m="$module" '
-			{
-				hit = ($1 == t)
-				n = split($2, imports, " ")
-				for (i = 1; i <= n && !hit; i++) if (imports[i] == t) hit = 1
-				if (hit) print ($1 == m) ? "." : "./" substr($1, length(m) + 2)
-			}' "$out/pkgsets/imports.tsv" | LC_ALL=C sort -u >"$out/pkgsets/$key"
+		{
+			awk -F'\t' -v t="$target" -v m="$module" '
+				{
+					hit = ($1 == t)
+					n = split($2, imports, " ")
+					for (i = 1; i <= n && !hit; i++) if (imports[i] == t) hit = 1
+					if (hit) print ($1 == m) ? "." : "./" substr($1, length(m) + 2)
+				}' "$out/pkgsets/imports.tsv"
+			if [ -n "$docs_pkg" ]; then echo "$docs_pkg"; fi
+		} | LC_ALL=C sort -u >"$out/pkgsets/$key"
 	fi
 	cat "$out/pkgsets/$key"
 }

@@ -23,10 +23,14 @@ func runMutantsFixture(t *testing.T) *fixture {
 	return f
 }
 
-// writeMutant writes one mutant directory. Every mutant in this fixture
-// rewrites the same expression in the same file, so only the replacement and
-// the id vary.
+// writeMutant writes one mutant directory rewriting the fixture's sum.
 func (f *fixture) writeMutant(id, replace string) string {
+	return f.writeMutantSearching(id, "a + b", replace)
+}
+
+// writeMutantSearching writes one mutant directory with its own search string,
+// so a caller can build the mutant that matches nothing.
+func (f *fixture) writeMutantSearching(id, search, replace string) string {
 	f.t.Helper()
 	dir := filepath.Join(f.dir, "mutants", id)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
@@ -34,7 +38,7 @@ func (f *fixture) writeMutant(id, replace string) string {
 	}
 	files := map[string]string{
 		"file":    "m/m.go",
-		"search":  "a + b",
+		"search":  search,
 		"replace": replace,
 		"spell":   "asis",
 		"pkgs":    "./m/",
@@ -121,6 +125,11 @@ func TestRunMutantsScript_RefusesADirtyCheckout(t *testing.T) {
 	}
 }
 
+// One row per mutant, each carrying the outcome its run produced. A mutant that
+// does not build and one that matches nothing both leave the suite untouched,
+// so an arm that scored either as a kill would report an unmeasured mutant as
+// measured.
+//
 // The end-to-end run needs rsync, which the Windows job does not carry.
 func TestRunMutantsScript_RecordsOneVerdictPerMutant(t *testing.T) {
 	t.Parallel()
@@ -130,6 +139,8 @@ func TestRunMutantsScript_RecordsOneVerdictPerMutant(t *testing.T) {
 	f := runMutantsFixture(t)
 	f.writeMutant("killed", "a - b")
 	f.writeMutant("survived", "b + a")
+	f.writeMutant("nobuild", "a +")
+	f.writeMutantSearching("nomatch", "a * b", "a - b")
 
 	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
 
@@ -137,10 +148,39 @@ func TestRunMutantsScript_RecordsOneVerdictPerMutant(t *testing.T) {
 		t.Fatalf("exit code %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
 	}
 	got := verdicts(t, filepath.Join(f.dir, "out"))
-	want := map[string]string{"killed": "KILLED", "survived": "SURVIVED"}
+	want := map[string]string{
+		"killed":   "KILLED",
+		"survived": "SURVIVED",
+		"nobuild":  "NOBUILD",
+		"nomatch":  "NOMATCH",
+	}
 	for id, verdict := range want {
 		if got[id] != verdict {
 			t.Errorf("mutant %q read %q, want %q (results.tsv: %v)", id, got[id], verdict, got)
 		}
+	}
+}
+
+// Without a pkgs file the runner computes the package set from the import
+// graph. The fixture module has no docs package, so the computed set is the
+// import graph alone.
+func TestRunMutantsScript_ComputesThePackageSetWithoutPkgs(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	f := runMutantsFixture(t)
+	dir := f.writeMutant("computed", "a - b")
+	if err := os.Remove(filepath.Join(dir, "pkgs")); err != nil {
+		t.Fatal(err)
+	}
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	if r.code != 0 {
+		t.Fatalf("exit code %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
+	}
+	if got := verdicts(t, filepath.Join(f.dir, "out")); got["computed"] != "KILLED" {
+		t.Errorf("mutant read %q, want KILLED (results.tsv: %v)", got["computed"], got)
 	}
 }

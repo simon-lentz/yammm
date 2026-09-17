@@ -1,6 +1,7 @@
 package csv
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -83,7 +84,9 @@ func TestWriteSnapshot_RowFailureIsReported(t *testing.T) {
 	}
 }
 
-// A header wider than the buffer reports before any row is rendered.
+// A header wider than the buffer reports at the header write. That the header
+// precedes the rows is pinned by the round trip, which reads it back as the
+// first record; this test pins only which check reports.
 func TestWriteSnapshot_HeaderFailureIsReported(t *testing.T) {
 	t.Parallel()
 
@@ -105,5 +108,90 @@ func TestWriteSnapshot_HeaderFailureIsReported(t *testing.T) {
 
 	if !strings.Contains(err.Error(), "csv write header") {
 		t.Errorf("a wide header must report at the header write, got %v", err)
+	}
+}
+
+// A nil snapshot is refused by both write entry points, not only by
+// MarshalSnapshot.
+func TestWriteSnapshot_NilSnapshot(t *testing.T) {
+	t.Parallel()
+	err := New().WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
+		t.Fatal("a writer was requested for a nil snapshot")
+		return io.Discard, nil
+	}, nil)
+	if !errors.Is(err, ErrNilSnapshot) {
+		t.Errorf("error is %v, want ErrNilSnapshot", err)
+	}
+}
+
+// Cancellation between the header and the rows flushes what the writer already
+// holds before it reports, so a truncated file still parses as far as it goes.
+func TestWriteSnapshot_CancellationDuringRowsFlushesTheHeader(t *testing.T) {
+	t.Parallel()
+	s := loadTestSchema(t, "basic.yammm")
+	snap := buildSnapshot(t, s, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "Alice"}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var buf bytes.Buffer
+	// Cancelling as the writer is handed over leaves the context live at the
+	// per-type guard and cancelled at the per-instance one.
+	err := New().WriteSnapshot(ctx, func(string) (io.Writer, error) {
+		cancel()
+		return &buf, nil
+	}, snap)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error does not wrap context.Canceled: %v", err)
+	}
+	if !strings.Contains(err.Error(), "csv write:") {
+		t.Errorf("a cancellation among the rows must report at the row guard, got %v", err)
+	}
+	if !strings.Contains(buf.String(), "id") {
+		t.Errorf("the header was not flushed before the refusal, got %q", buf.String())
+	}
+}
+
+// A context already cancelled is refused before any writer is requested.
+func TestWriteSnapshot_CancelledBeforeAnyType(t *testing.T) {
+	t.Parallel()
+	s := loadTestSchema(t, "basic.yammm")
+	snap := buildSnapshot(t, s, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "Alice"}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := New().WriteSnapshot(ctx, func(string) (io.Writer, error) {
+		t.Fatal("a writer was requested under a cancelled context")
+		return io.Discard, nil
+	}, snap)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error does not wrap context.Canceled: %v", err)
+	}
+	if !strings.Contains(err.Error(), "csv write snapshot:") {
+		t.Errorf("want the per-type guard, got %v", err)
+	}
+}
+
+// MarshalSnapshot carries the same per-type guard as WriteSnapshot.
+func TestMarshalSnapshot_CancelledBeforeAnyType(t *testing.T) {
+	t.Parallel()
+	s := loadTestSchema(t, "basic.yammm")
+	snap := buildSnapshot(t, s, map[string][]map[string]any{
+		"Entity": {{"id": "e1", "name": "Alice"}},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := New().MarshalSnapshot(ctx, snap)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error does not wrap context.Canceled: %v", err)
+	}
+	if !strings.Contains(err.Error(), "csv marshal snapshot:") {
+		t.Errorf("want the per-type guard, got %v", err)
 	}
 }
