@@ -86,6 +86,9 @@ readbytes() {
 
 i=0
 for d in "$mutants"/*/; do
+	# An empty directory leaves the pattern unexpanded, and basename would
+	# then report a mutant named "*".
+	[ -d "$d" ] || continue
 	id=$(basename "$d")
 	for f in file search replace spell; do
 		[ -f "$d/$f" ] || { echo "mutant $id has no $f file" >&2; exit 2; }
