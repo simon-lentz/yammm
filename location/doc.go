@@ -36,9 +36,34 @@
 // [ResolveHostPath] answers one question — what does the filesystem call this
 // file — and every file-backed identity is that answer, normalized. The
 // constructors [SourceIDFromPath], [ResolveSourcePath], [NewCanonicalPath],
-// [CanonicalPath.Join] and [CanonicalizePathForSourceID] all resolve, and none
-// derives an identity from a path's text alone. Two spellings that name one
-// file therefore give one identity, and it is the spelling the filesystem holds.
+// [CanonicalPath.Join] and [CanonicalizePathForSourceID] all resolve. Two
+// spellings that name one file therefore give one identity, and it is the
+// spelling the filesystem holds.
+//
+// # A ".." is evaluated on the text, and only a ".."
+//
+// Everything else here is read from disk: case, normalization, and every
+// symbolic link. A ".." is not. It is evaluated on the path's text before
+// anything is looked up, so "dir/link/../x" names "dir/x" whatever "dir/link"
+// resolves to.
+//
+// This is a decision, not an oversight, and it is the same decision on every
+// host. Windows normalizes a Win32 path's ".." textually before the object
+// manager sees it, so the text rule IS the host rule there. A POSIX kernel
+// instead takes the parent of the directory it actually reached, so on Unix
+// this package and the shell can name two different files for one path. That is
+// the one case where they part.
+//
+// The reason is agreement. The schema loader resolves a "../" import through
+// filepath.Join, on the text; an editor resolves the file it is editing through
+// this package; a data file resolves through it too. One rule for all three
+// lands them on one file, and a resolver that followed the kernel here would
+// send the editor to a file the loader does not compile.
+// [TestResolveHostPath_KeepsWhatTheLSPDependsOn] holds the rule.
+//
+// Two consequences follow, and both are intended. A ".." after a symbolic link
+// does not follow it. And a ".." after a component that does not exist is
+// accepted, cancelling that component, where the kernel would refuse the path.
 //
 // On darwin the answer is realpath(3), called through libSystem. It reads each
 // component's name from the directory the lookup passed through, so it answers
