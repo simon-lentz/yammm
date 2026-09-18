@@ -1,6 +1,19 @@
 // Package csv provides a CSV adapter for parsing delimited data into
 // [instance.RawInstance] values and serializing validated instances to CSV.
 //
+// # Delimiter and Header
+//
+// Fields split on ',' unless [WithDelimiter] names another delimiter; a TSV
+// file takes '\t'. The parse side and the write side read one delimiter, so an
+// adapter reads back the file it writes. [encoding/csv]'s quoting holds under
+// every delimiter: a cell that starts with '"' is a quoted field, and the writer
+// quotes a cell holding the delimiter, a quote or a line break, or starting
+// with white space. A TSV file is
+// therefore CSV with tabs, not the quote-free IANA text/tab-separated-values
+// format. The first row is always the header,
+// because its column names are what map a cell to a property: the package has
+// no headerless mode.
+//
 // # Column Mapping
 //
 // Column names map 1:1 to property names. A CSV header row

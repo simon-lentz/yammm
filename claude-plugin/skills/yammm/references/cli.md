@@ -111,7 +111,7 @@ yammm check schema.yammm data.csv --type-column '$type'
 yammm check --from csv schema.yammm data.tsv --type User
 ```
 
-Validates data against a schema without building a full graph. Reports constraint violations, missing fields, and invariant failures.
+Validates data against a schema without building a full graph. Reports constraint violations, missing fields, and invariant failures. Every command that reads data treats a `.tsv` file as CSV input whose fields split on tabs, with CSV quoting still in force; any other CSV file splits on commas.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -212,11 +212,13 @@ yammm export --to cypher schema.yammm data.json > import.cypher
 yammm export --to json --output result.json schema.yammm data.csv --type User
 ```
 
+`--to csv --output` writes tab-delimited fields when the file name ends in `.tsv`, so `check` reads it back; any other name, `--output-dir`'s per-type `.csv` files and stdout take commas.
+
 | Flag | Description |
 | ---- | ----------- |
 | `--to` | Output format: `json`, `csv`, or `cypher` (required) |
 | `--from` | Input format override |
-| `--output` | Output file path (default: stdout) |
+| `--output` | Output file path (default: stdout); with `--to csv`, a `.tsv` name writes tab-delimited fields |
 | `--output-dir` | Output directory (CSV multi-type: one file per type) |
 | `--type` | Type name for single-type CSV input |
 | `--type-column` | Column for multi-type CSV input |

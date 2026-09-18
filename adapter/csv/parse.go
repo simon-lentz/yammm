@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -249,16 +248,15 @@ func (a *Adapter) ParseWithTypeColumn(
 	return results, collector.Result()
 }
 
-// readHeader reads the header row and returns its column names.
-func (a *Adapter) readHeader(reader *csv.Reader) (columns []string, err error) {
-	if a.config.hasHeader {
-		header, err := reader.Read()
-		if err != nil {
-			return nil, fmt.Errorf("reading header: %w", err)
-		}
-		return header, nil
+// readHeader reads the header row and returns its column names. The reader
+// fixes FieldsPerRecord from this row, so a later record of another length
+// comes back only with [csv.ErrFieldCount], which both parse loops skip.
+func (a *Adapter) readHeader(reader *csv.Reader) ([]string, error) {
+	header, err := reader.Read()
+	if err != nil {
+		return nil, fmt.Errorf("reading header: %w", err)
 	}
-	return nil, nil
+	return header, nil
 }
 
 // recordToProps converts a CSV record to a property map with type coercion.
@@ -267,7 +265,8 @@ func (a *Adapter) readHeader(reader *csv.Reader) (columns []string, err error) {
 // when not, so a header that unions several types' columns parses every row.
 // Dotted edge columns (<field>."_target_"<pk>, <field>.<prop>) assemble into
 // the "_target_" objects the validator accepts. With no schema type every
-// cell is kept as its string, the empty one included.
+// cell is kept as its string, the empty one included. The record is never
+// longer than columns: see [Adapter.readHeader].
 func (a *Adapter) recordToProps(
 	record []string,
 	columns []string,
@@ -288,12 +287,7 @@ func (a *Adapter) recordToProps(
 	}
 
 	for i, val := range record {
-		var colName string
-		if i < len(columns) && columns != nil {
-			colName = columns[i]
-		} else {
-			colName = strconv.Itoa(i)
-		}
+		colName := columns[i]
 
 		if schemaType == nil {
 			props[colName] = val

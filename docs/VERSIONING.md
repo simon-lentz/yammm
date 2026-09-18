@@ -885,9 +885,10 @@ payload breaks in a way no declaration describes (below).
 compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Unit
 8's addressability group adds `schema.AddressableTag`, `schema.Addressable` and
 `diag.E_SNAPSHOT_UNNAMEABLE_TYPE`, taking the compatible count to twenty-one; it
-removes and changes no declaration. **Unit 8's other groups so far move no
-declaration**: the instruments group and the provenance group each read
-twenty-one and seven, byte-identical. Each
+removes and changes no declaration. The CSV dialect group adds
+`csv.WithDelimiter`, taking it to twenty-two. **Unit 8's other groups so far
+move no declaration**: the instruments, provenance and CSV value-model groups
+each read twenty-one and seven, byte-identical. Each
 block below was written by the pass or group that landed its behaviour.
 
 ### Unit 8 — one addressability rule, and every root held to it
@@ -942,6 +943,14 @@ block below was written by the pass or group that landed its behaviour.
 - **Behaviour — a single-column row holding `""` is written as `""`.** `csv.Writer` writes that record as a blank line, which `csv.Reader` skips, so the instance vanished on re-import with no diagnostic; the writer now writes a quoted empty field, which reads back as one empty field. No other row's bytes move.
 - **A documented limitation, not a change: an optional property holding `""` or an empty list reads back as null.** It writes the cell null writes, and the schema cannot separate the two for an optional property.
 - **Consumer impact: none, measured.** rdata imports neither `adapter/csv` nor `adapter/json` and runs no `yammm check` or `yammm export`. No exported declaration moves.
+
+### Unit 8 — the CSV delimiter is an option, and a `.tsv` file splits on tabs
+
+- **Additive — `csv.WithDelimiter(r rune) Option`.** The field delimiter for the parse side and the write side alike; the default stays `,`. `encoding/csv`'s quoting holds under every delimiter, so a tab-delimited file is CSV with tabs: a cell that starts with `"` is a quoted field, and the writer quotes a cell holding the delimiter, a quote or a line break, or starting with white space. A delimiter `encoding/csv` refuses — `0`, `"`, `\r`, `\n`, U+FFFD or an invalid rune — is reported where a header is read or written: a parse returns an Error `E_CSV_COERCE` diagnostic carrying `encoding/csv`'s refusal, and a write returns it as an error. The adapter's delimiter was a literal `,` with no option to change it.
+- **Behaviour — `yammm check`, `load`, `export` and `snapshot save` read a `.tsv` data file by tabs.** The CLI has always detected `.tsv` as CSV input, and the plugin's CLI reference shows `yammm check --from csv schema.yammm data.tsv`, but the file was split on commas, so its header read as one column and no row supplied the type's properties: under `--type-column` the type column was not found and no row was read, and under `--type` each row failed in a way its content decided — for example a row holding a comma as `wrong number of fields`, and one holding none as a single column named by the whole header line. The delimiter now follows the data file's extension as the caller spelled it — the spelling format detection reads — so `--from csv` on a `.tsv` file splits on tabs too.
+- **Behaviour — `yammm export --to csv --output <name>.tsv` writes tab-delimited fields.** It wrote commas under that name. Once the read side splits a `.tsv` file on tabs, a comma-delimited file under that name would no longer read back, so the write side follows the same extension rule. Any other `--output` name, `--output-dir`'s per-type `.csv` files and stdout keep `,`.
+- **Unchanged, now stated: the first row is always the header.** The adapter carried an unexported headerless mode that nothing could select; it is deleted, and with it a fallback that named columns `0`, `1`, `2`, names no schema declares.
+- **Consumer impact: none, measured.** rdata imports no `adapter/csv` package and invokes no `yammm check`, `load`, `export` or `snapshot save`; no file in its tree names a `.tsv` file.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 

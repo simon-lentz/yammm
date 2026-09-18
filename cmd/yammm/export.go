@@ -35,7 +35,7 @@ $props, $rows) and is not directly executable in Neo4j Browser or cypher-shell.`
 	cmd.Flags().String("from", "", "input format override: json or csv")
 	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
 	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
-	cmd.Flags().String("output", "", "output file path (default: stdout)")
+	cmd.Flags().String("output", "", "output file path (default: stdout); with --to csv, a .tsv name writes tab-delimited fields")
 	cmd.Flags().String("output-dir", "", "output directory for CSV multi-type export (one file per type)")
 	registerLabelFlags(cmd)
 
@@ -161,7 +161,9 @@ func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string)
 }
 
 func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Snapshot, _ *schema.Schema, outputPath, outputDir string) error {
-	adapter := csv.New()
+	// --output names the one file's delimiter by its extension; --output-dir
+	// writes <type>.csv files, and stdout has no name, so both take ','.
+	adapter := csv.New(csv.WithDelimiter(cli.CSVDelimiter(outputPath)))
 
 	types := snapshot.Types()
 

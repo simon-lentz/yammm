@@ -20,9 +20,16 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
+// dataExtension is the one spelling of a data file's extension that
+// [DetectFormat] and [CSVDelimiter] both read, so a name that selects the CSV
+// format and a name that selects a tab are decided by one fold.
+func dataExtension(path string) string {
+	return strings.ToLower(filepath.Ext(path))
+}
+
 // DetectFormat returns "json" or "csv" based on the file extension.
 func DetectFormat(path string) (string, error) {
-	switch strings.ToLower(filepath.Ext(path)) {
+	switch dataExtension(path) {
 	case ".json", ".jsonc":
 		return "json", nil
 	case ".csv", ".tsv":
@@ -30,6 +37,17 @@ func DetectFormat(path string) (string, error) {
 	default:
 		return "", fmt.Errorf("cannot detect data format for %q: use --from to specify json or csv", path)
 	}
+}
+
+// CSVDelimiter returns the field delimiter a CSV file's extension names: '\t'
+// for ".tsv" and ',' for every other name, the empty one included. The read
+// side and the write side both take it, so a file `export` writes under a
+// ".tsv" name is one `check` reads back.
+func CSVDelimiter(path string) rune {
+	if dataExtension(path) == ".tsv" {
+		return '\t'
+	}
+	return ','
 }
 
 // LoadAndParseJSON reads a JSON file and parses it into raw instances.
@@ -65,6 +83,8 @@ func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.R
 //
 // The identity and the host path come out of one resolution, as
 // [LoadAndParseJSON] takes them; the handle is opened on the path it returns.
+// The delimiter is [CSVDelimiter]'s for path as the caller spelled it, the
+// spelling [DetectFormat] reads.
 //
 // Returns (T, diag.Result, error) because the error return captures I/O
 // failures (file open errors) which are distinct from semantic parse
@@ -82,7 +102,7 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 	defer f.Close()
 
 	if typeColumn != "" {
-		adapter := csv.New(csv.WithTypeColumn(typeColumn), csv.WithSchema(s))
+		adapter := csv.New(csv.WithTypeColumn(typeColumn), csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path)))
 		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) *schema.Type {
 			t, _ := s.ResolveTypeName(name)
 			return t
@@ -96,7 +116,7 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 	if !ok {
 		return nil, diag.Result{}, fmt.Errorf("type %q not found in schema", typeName)
 	}
-	raws, result := csv.New(csv.WithSchema(s)).ParseTyped(ctx, sourceID, typeName, f, schemaType)
+	raws, result := csv.New(csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path))).ParseTyped(ctx, sourceID, typeName, f, schemaType)
 	return map[string][]instance.RawInstance{typeName: raws}, result, nil
 }
 

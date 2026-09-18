@@ -1543,11 +1543,12 @@ adapter := csv.New(opts...)
 
 | Option | Description |
 | ------ | ----------- |
+| `WithDelimiter` | Field delimiter (default `,`; `'\t'` for TSV); read by both the parse and write sides. `encoding/csv`'s quoting still applies, so a tab-delimited cell that starts with `"` is a quoted field. A delimiter `encoding/csv` refuses — `0`, `"`, `\r`, `\n`, U+FFFD or an invalid rune — is reported where a header is read or written: an Error `E_CSV_COERCE` diagnostic from a parse, an error from a write |
 | `WithTypeColumn` | Column name for type tagging (multi-type CSV) |
 | `WithListSeparator` | Separator for list elements, vector elements, and `(many)` relation groups (default `|`); read by both the parse and write sides |
 | `WithSchema` | The schema, so the parser reaches each association's **target** type: it decides an empty foreign-key segment by the target's keys (see Empty Cells), and a Date or Timestamp key component that does not parse draws `E_CSV_COERCE` on parse. The CLI passes it |
 
-The delimiter is `,`, the first row is the header, and list values join on the list separator. A separator or backslash inside an element is backslash-escaped on write and unescaped on parse, so a `|`-bearing element survives the round trip.
+The delimiter is `,` unless `WithDelimiter` sets another, the first row is always the header (there is no headerless mode), and list values join on the list separator. A separator or backslash inside an element is backslash-escaped on write and unescaped on parse, so a `|`-bearing element survives the round trip.
 
 ### Parsing
 

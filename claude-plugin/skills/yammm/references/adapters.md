@@ -57,7 +57,7 @@ adapter := csvAdapter.New(
 )
 ```
 
-The delimiter is `,`, the first row is the header, and list values join on `|`.
+The delimiter is `,` unless `csvAdapter.WithDelimiter` sets another (`'\t'` for TSV), the first row is always the header, and list values join on `|`.
 
 ### Parsing
 

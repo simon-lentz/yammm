@@ -5,7 +5,6 @@ import "github.com/simon-lentz/yammm/schema"
 // adapterConfig holds CSV adapter configuration.
 type adapterConfig struct {
 	delimiter  rune
-	hasHeader  bool
 	typeColumn string // empty = no type column
 	listSep    string // list element separator
 	schema     *schema.Schema
@@ -27,13 +26,23 @@ type Option func(*adapterConfig)
 func New(opts ...Option) *Adapter {
 	cfg := adapterConfig{
 		delimiter: ',',
-		hasHeader: true,
 		listSep:   "|",
 	}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 	return &Adapter{config: cfg}
+}
+
+// WithDelimiter sets the field delimiter for the parse side and the write side
+// alike. The default is ','; a TSV file takes '\t', and keeps [encoding/csv]'s
+// quoting. A delimiter [encoding/csv] refuses — 0, '"', '\r', '\n',
+// U+FFFD or an invalid rune — fails where the header is read or
+// written: a parse reports it as an Error diagnostic, a write returns it.
+func WithDelimiter(r rune) Option {
+	return func(c *adapterConfig) {
+		c.delimiter = r
+	}
 }
 
 // WithTypeColumn sets the column name used for type discrimination

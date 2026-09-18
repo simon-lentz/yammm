@@ -24,6 +24,7 @@ Global flags:
 Data commands (check, load, export, snapshot save) also accept:
   --from         Data input format override: "json" or "csv".
                  Auto-detected from the file extension when not specified.
+                 A .tsv file is CSV whose fields split on tabs.
   --type         Type name for single-type CSV data.
   --type-column  Column naming each row's type, for multi-type CSV.`,
 		Version:       version,
