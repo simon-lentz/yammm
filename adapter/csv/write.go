@@ -37,9 +37,7 @@ func defaultWriteConfig() writeConfig {
 // per type. CSV is inherently single-type-per-file, so the output is a map
 // from type name to CSV bytes.
 //
-// Returns [ErrNilSnapshot] if result is nil. When two types in the snapshot
-// render the same output name, returns an error naming both identities — a
-// name-keyed map cannot separate them.
+// Returns [ErrNilSnapshot] if result is nil.
 func (a *Adapter) MarshalSnapshot(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -47,10 +45,6 @@ func (a *Adapter) MarshalSnapshot(
 	if result == nil {
 		return nil, ErrNilSnapshot
 	}
-	if err := renderedNameCollision(result); err != nil {
-		return nil, err
-	}
-
 	output := make(map[string][]byte, len(result.Types()))
 
 	for _, typeID := range result.Types() {
@@ -58,7 +52,10 @@ func (a *Adapter) MarshalSnapshot(
 			return nil, fmt.Errorf("csv marshal snapshot: %w", err)
 		}
 
-		typeName := schema.TagForm(result.Schema(), typeID)
+		typeName, ok := schema.AddressableTag(result.Schema(), typeID)
+		if !ok {
+			return nil, unnameableDenotedType(typeID)
+		}
 		schemaType, _ := result.Schema().TypeByID(typeID)
 		instances := result.InstancesOf(typeID)
 
@@ -75,10 +72,7 @@ func (a *Adapter) MarshalSnapshot(
 // WriteSnapshot writes a graph snapshot to per-type writers. The writerFor
 // function is called once per type to obtain the destination writer.
 //
-// Returns [ErrNilSnapshot] if result is nil. When two types in the snapshot
-// render the same output name, returns an error naming both identities before
-// any writer is requested — two writers obtained under one name would target
-// one destination.
+// Returns [ErrNilSnapshot] if result is nil.
 func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),
@@ -87,16 +81,15 @@ func (a *Adapter) WriteSnapshot(
 	if result == nil {
 		return ErrNilSnapshot
 	}
-	if err := renderedNameCollision(result); err != nil {
-		return err
-	}
-
 	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("csv write snapshot: %w", err)
 		}
 
-		typeName := schema.TagForm(result.Schema(), typeID)
+		typeName, ok := schema.AddressableTag(result.Schema(), typeID)
+		if !ok {
+			return unnameableDenotedType(typeID)
+		}
 		w, err := writerFor(typeName)
 		if err != nil {
 			return fmt.Errorf("writer for type %q: %w", typeName, err)
@@ -113,21 +106,11 @@ func (a *Adapter) WriteSnapshot(
 	return nil
 }
 
-// renderedNameCollision reports an error when two type identities in the
-// snapshot render one output name. The rendering is lossy where the snapshot
-// is not, so the writer refuses rather than silently merging the pair.
-func renderedNameCollision(snap *graph.Snapshot) error {
-	s := snap.Schema()
-	seen := make(map[string]schema.TypeID)
-	for _, id := range snap.Types() {
-		name := schema.TagForm(s, id)
-		if first, ok := seen[name]; ok {
-			return fmt.Errorf("csv adapter: type %s and type %s both render output name %q, so per-type CSV output cannot separate them",
-				first, id, name)
-		}
-		seen[name] = id
-	}
-	return nil
+// unnameableDenotedType reports a snapshot denoting a type the entry schema
+// cannot name. Every constructor refuses such a snapshot, so reaching this is an
+// invariant violation rather than a caller error.
+func unnameableDenotedType(id schema.TypeID) error {
+	return fmt.Errorf("csv adapter: snapshot denotes type %s, which the entry schema cannot name, so per-type output has no name for it; every constructor refuses such a snapshot, so this is an invariant violation", id)
 }
 
 // writeSnapshotTypeTo writes graph.Instance values from a snapshot as CSV rows.

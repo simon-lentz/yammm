@@ -54,8 +54,10 @@ type Instance struct {
 //
 // The name is a rendering, not an identity: two types in different schemas can
 // render the same name. [Snapshot.Types] returns
-// [github.com/simon-lentz/yammm/schema.TypeID] values for that reason, and
-// [github.com/simon-lentz/yammm/schema.TagForm] renders one as this form.
+// [github.com/simon-lentz/yammm/schema.TypeID] values for that reason.
+// [github.com/simon-lentz/yammm/schema.TagForm] renders any identity as this
+// form, and [github.com/simon-lentz/yammm/schema.AddressableTag] renders only
+// the ones the bound schema can name.
 func (i *Instance) TypeName() string {
 	if i == nil {
 		return ""

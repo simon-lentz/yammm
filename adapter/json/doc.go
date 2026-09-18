@@ -22,11 +22,12 @@
 // validator accept every shape this writer emits. Unresolved edges are not
 // written; persist them in the .ys format when they must survive.
 //
-// Use [WithIndent] for pretty-printed output. Both entry points refuse a
-// snapshot in which two type identities render the same output name (two
-// same-named types from different schemas, or a transitively imported type
-// rendering bare): the object shape keys instances by rendered name, so such
-// a snapshot cannot be written without silently merging types.
+// Use [WithIndent] for pretty-printed output. The object shape keys instances
+// by the name the entry schema addresses each root type by, and two such names
+// never collide: every snapshot root is a type the entry schema can name, so a
+// local type renders bare and an imported one alias-qualified. The graph
+// package doc's "Root type eligibility" section states the rule the
+// constructors hold.
 //
 // # Parsing
 //

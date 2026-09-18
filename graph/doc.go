@@ -105,6 +105,47 @@
 // render alike, a diagnostic naming them falls back to the full identity rather
 // than reading "X does not match X".
 //
+// # Root type eligibility
+//
+// A root instance's type must satisfy four members, and every entry point that
+// installs or asserts a root applies the same four: [Graph.Add],
+// [RebuildSnapshot], and the snapshot reader. A type is ineligible when it
+//
+//   - is abstract, because an abstract type has no instances;
+//   - is a part type, because a part instance is addressed through its parent
+//     composition;
+//   - declares no primary key, because it then has no address at all;
+//   - is one the entry schema cannot name, because a root is keyed by name in
+//     every output document and a type reached only through an intermediate
+//     import has no name form.
+//
+// [schema.Addressable] is the fourth member, and [schema.AddressableTag] is the
+// name it grants. Sharing one rule is what lets a writer read a root's tag
+// without checking for a collision: two types the entry schema can name never
+// render alike, so a name-keyed document can always separate the roots a
+// snapshot holds.
+//
+// A composed child is held to none of the four. It is addressed through its
+// parent, its type comes from a relation the schema already resolved, and it
+// stays legal for any type in the closure — a transitively imported part type
+// included.
+//
+// # Denoted type eligibility
+//
+// A snapshot DENOTES every type in [Snapshot.Types], which is not the same set
+// as the types holding instances: a caller may name a type with an empty group,
+// and the .ys writer emits a row for each, part types included. Denotation is
+// weaker than rootness and takes the fourth member ALONE — a denoted type may be
+// abstract, a part type or keyless, and may not be one the entry schema cannot
+// name.
+//
+// The reason is the writers. Every one of them keys its output by the name of
+// each type the snapshot denotes, empty groups included, so a denoted type
+// without a name has no key. Holding denotation to the rule is what makes
+// [Snapshot.Types]'s contract true and lets a writer read a tag without checking
+// for a collision; the alternative leaves a snapshot able to denote a type no
+// writer can render.
+//
 // # Build Then Commit
 //
 // [Graph.Add] and [Graph.AddComposed] walk an instance ONCE. That walk both
@@ -192,6 +233,11 @@
 // types in different schemas render identically. Keying anything by a rendering
 // therefore merges types that are not the same type, silently and before any
 // diagnostic can see it.
+//
+// A snapshot's ROOTS are the exception, and by construction rather than by
+// coincidence: each is a type the bound schema can name, so no two of them
+// render alike and an output document may key them by name. See "Root type
+// eligibility" above, and [schema.AddressableTag] for the name itself.
 //
 // So every place that must denote a type exactly takes an identity:
 //

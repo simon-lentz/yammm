@@ -855,8 +855,10 @@ Condition-1 **unit 6** (the CLI and the formatter), closed by decision (A-461)
 and merged to `main` as `fb57e99` (PR #107), and condition-1 **unit 7** (the
 foundation layer), closed by decision (A-513) and merged to `main` as `19d67fa`
 (PR #108), are both on `main`, followed by the byte-order-mark repair (A-514,
-`6796714`, PR #109); nothing below is released. Each block was written by the
-pass or group that landed its behaviour, not at the tag (A-227, A-346).
+`6796714`, PR #109); nothing below is released. Condition-1 **unit 8** (the
+generator and writer adapters) is open, and its blocks below are on the `review`
+branch rather than on `main`. Each block was written by the pass or group that
+landed its behaviour, not at the tag (A-227, A-346).
 **Unit 6 adds six exported declarations and removes or changes none:**
 `gorelease -base=v0.21.0` on its candidate reports `diag.E_COMMAND_FAILED`,
 `diag.W_SNAPSHOT_PATH_EXTENSION`, `neo4j.W_NEO4J_INDEXES_UNREADABLE`,
@@ -880,8 +882,29 @@ payload breaks in a way no declaration describes (below).
   `location.SourceIDFromAbsolutePath` and `location.ErrNotAbsolute`.
 
 **With unit 6's six additions, `gorelease -base=v0.21.0` reads eighteen
-compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Each
+compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Unit
+8's first group adds `schema.AddressableTag`, `schema.Addressable` and
+`diag.E_SNAPSHOT_UNNAMEABLE_TYPE`, taking the compatible count to twenty-one; it
+removes and changes no declaration. Each
 block below was written by the pass or group that landed its behaviour.
+
+### Unit 8 — one addressability rule, and every root held to it
+
+- **Additive — `schema.AddressableTag(s *Schema, id TypeID) (string, bool)` and `schema.Addressable(s *Schema, id TypeID) bool`.** One exported rule for the name an entry schema addresses a type by: the bare name for a type it declares, `alias.Name` for one it imports directly, and no name for one it reaches only through an intermediate import. `AddressableTag` is the write half of `Schema.ResolveTypeName`'s contract — an accepted identity's tag resolves back to that same identity, and no entry-relative name denotes a refused one — and a test holds the two together over a whole closure. `schema.TagForm` is unchanged and stays the display form its diagnostic sites use: it renders every identity, lossily and on purpose, where the new rule refuses instead.
+
+- **Additive — `diag.E_SNAPSHOT_UNNAMEABLE_TYPE`** (Error). An instances group denotes a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. Distinct from `E_SNAPSHOT_INVALID_ROOT`, which keeps its three root members and its wording: rootness and nameability are different rules with different remedies, and this one's hint names the remedy, which is to import the declaring schema directly.
+
+- **TIGHTENING — every type a snapshot DENOTES must be one the entry schema can name, not only the ones holding instances.** `Snapshot.Types` is the denoted set, and a caller may name a type in it with an empty group — the `.ys` writer emits a row for each, part types included. Naming a type there was unchecked: `graph.RebuildSnapshot` validated instance groups and copied `SnapshotParts.Types` through untouched, so a snapshot could denote a type no writer can key its output by, and `snapshot.Load`'s reader exempted an empty group from every member. `RebuildSnapshot` now refuses such an entry with Fatal `E_INTERNAL` naming it, and the reader refuses the group with `E_SNAPSHOT_UNNAMEABLE_TYPE`; the empty-group exemption is narrowed rather than removed, so it still exempts the three ROOT members and no longer exempts nameability. Denotation takes the nameability member ALONE — a denoted type may be abstract, a part type or keyless. **A composed child's type is not denoted**: it takes a `.ys` types-table row but never an instances group, so a transitively imported part type stays legal as a child, which is what the composed-child exemption has always promised.
+
+- **Behaviour — a snapshot denoting an unnameable type is refused at the constructor rather than at the writer.** Before this release `adapter/json` emitted `"Beacon": []` for such a type and `adapter/csv` a header-only file. Both then began refusing the whole export, which was a change nothing recorded and not the one intended; the refusal now happens where the snapshot is built, so no writer sees the state at all. The two writers keep an internal-error arm for it, which the invariant makes unreachable and which says so.
+
+- **TIGHTENING — a snapshot root must be a type the entry schema can name, at `Graph.Add`, `graph.RebuildSnapshot` and `snapshot.Load`.** The root-type rule had three members (abstract, a part type, one declaring no primary key) stated privately at each of those three sites and at `adapter/jschema`'s envelope, and each spelled it differently. It now has four, `schema.Addressable` is the fourth, and all three entry points read one predicate. `graph.RebuildSnapshot` refuses such a root with Fatal `E_INTERNAL` naming the rule, as it refuses the other three; `snapshot.Load` refuses it with Error-severity `E_SNAPSHOT_INVALID_ROOT` and a hint to import the declaring schema directly, and the reader's guard runs first so a foreign document draws the Error and not the Fatal. A COMPOSED child is held to none of the four members: it is addressed through its parent, and any type in the closure — a transitively imported part type included — stays legal there. This narrows what `v0.19.0` widened when it deleted `adapter/neo4j`'s collision check, knowingly: that check refused snapshots the identity-keyed path writes correctly, and this refuses the snapshot instead of the write.
+
+- **The two `renderedNameCollision` copies are deleted with no replacement.** `adapter/json`'s `MarshalObject`/`WriteObject` and `adapter/csv`'s `MarshalSnapshot`/`WriteSnapshot` each scanned `Snapshot.Types()` pairwise for two identities rendering one output name and returned an error naming both. The scan is dead under the invariant: two types the entry schema can name never render alike — local names are unique, aliases are unique, and a type name holds no dot — and every snapshot root is now such a type. Each writer reads the root's addressable tag instead, and treats a root with no tag as an internal error beside the ones it already returns for an unresolvable edge target. **The refusal enumerated under `v0.19.0` is therefore unreachable rather than removed**, and that released section stands as written: it records what was true then. A caller that fed a colliding snapshot to a writer now has it refused earlier, at the constructor, with a diagnostic instead of an error string.
+
+- **Behaviour, no declaration moved: `graph.Snapshot.Types`'s godoc said it returns "every type identity in the graph".** It returns every ROOT type identity; a composed child's type is absent unless a root of that type is present too. The godoc now says so, and states that every identity it returns is one the bound schema can name.
+
+- **Consumer impact: none, measured.** rdata declares no `RebuildSnapshot` or `NewFromSnapshot` caller, and every concrete type in its five closures is one its entry schema can name, so no document of its own can hold a root this rule refuses. `StructuralHashVersion` is unchanged, so the tier-2 release adds no second hash invalidation.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 

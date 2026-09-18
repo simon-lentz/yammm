@@ -8,12 +8,13 @@ import (
 	adapterjson "github.com/simon-lentz/yammm/adapter/json"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// The entry schema reaches deep only through mid, so deep is transitively
-// imported and the entry schema holds no alias for it.
+// The entry schema reaches deep only through mid and holds no alias for it.
+// Holder is declared in mid, which CAN name deep, so a Holder root legally
+// carries a deep.Shard composed child — the one position a type the entry
+// schema cannot name still occupies.
 const (
 	transEntry = `schema "entry"
 
@@ -22,21 +23,32 @@ import "mid.yammm" as mid
 	transMid = `schema "mid"
 
 import "deep.yammm" as deep
+
+type Holder {
+	id String primary
+	*-> PIECES (many) deep.Shard
+}
 `
 	transDeep = `schema "deep"
 
-type Hub {
-	id String primary
-	--> LINKS (many) Hub
+part type Crumb {
+	name String primary
+}
+
+part type Shard {
+	name String primary
+	*-> BITS (many) Crumb
 }
 `
 )
 
 // TestMarshalObject_ResolvesATransitivelyImportedType pins the JSON writer's
 // type lookup against the closure. The lookup walked direct imports only, so a
-// transitively imported type — which the v3 wire preserves through Load —
-// resolved to nothing and the writer fell back to guessing cardinality from the
-// edge count. A (many) relation holding one edge then emitted a scalar.
+// transitively imported type resolved to nothing and the writer fell back to
+// the raw relation name where a resolved type supplies the declared field name.
+//
+// Mutation: replacing lookupType's TypeByID with a walk of local types and
+// direct imports turns this red.
 func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -50,35 +62,61 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 		t.Fatalf("load schema: %s", res)
 	}
 
-	if _, ok := s.ResolveType(schema.NewTypeRef("", "Hub", location.Span{})); ok {
-		t.Fatal("fixture is vacuous: Hub resolves locally, so it is not transitively imported")
+	mid, ok := s.ImportByAlias("mid")
+	if !ok || mid.Schema() == nil {
+		t.Fatal("import alias mid did not resolve")
 	}
-	var hubID schema.TypeID
-	for _, sc := range s.Closure() {
-		if t2, ok := sc.Type("Hub"); ok {
-			hubID = t2.ID()
-		}
+	holderType, ok := mid.Schema().Type("Holder")
+	if !ok {
+		t.Fatal("mid.Holder not found")
 	}
-	if hubID.IsZero() {
-		t.Fatal("Hub not found in the import closure")
+	deepImp, ok := mid.Schema().ImportByAlias("deep")
+	if !ok || deepImp.Schema() == nil {
+		t.Fatal("import alias deep did not resolve")
+	}
+	shardType, ok := deepImp.Schema().Type("Shard")
+	if !ok {
+		t.Fatal("deep.Shard not found")
+	}
+	crumbType, ok := deepImp.Schema().Type("Crumb")
+	if !ok {
+		t.Fatal("deep.Crumb not found")
+	}
+	holder, shard, crumb := holderType.ID(), shardType.ID(), crumbType.ID()
+
+	// The fixture is only meaningful while the child's type is one the entry
+	// schema cannot name: that is what a direct-imports-only walk misses.
+	if _, addressable := schema.AddressableTag(s, shard); addressable {
+		t.Fatal("fixture is vacuous: the entry schema can name deep.Shard")
+	}
+	if _, addressable := schema.AddressableTag(s, holder); !addressable {
+		t.Fatal("fixture is vacuous: the root must be a type the entry schema CAN name")
 	}
 
-	node := func(k string) graph.InstanceParts {
-		return graph.InstanceParts{
-			TypeName:   "Hub",
-			TypeID:     hubID,
-			PrimaryKey: immutable.WrapKey([]any{k}),
-			Properties: immutable.WrapProperties(map[string]any{"id": k}),
-		}
-	}
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{hubID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{hubID: {node("h1"), node("h2")}},
-		Edges: []graph.EdgeParts{{
-			Relation:   "LINKS",
-			SourceType: hubID, SourceKey: immutable.WrapKey([]any{"h1"}),
-			TargetType: hubID, TargetKey: immutable.WrapKey([]any{"h2"}),
-		}},
+		Types: []schema.TypeID{holder},
+		Instances: map[schema.TypeID][]graph.InstanceParts{holder: {{
+			TypeName:   schema.TagForm(s, holder),
+			TypeID:     holder,
+			PrimaryKey: immutable.WrapKey([]any{"h1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
+			Composed: map[string][]graph.InstanceParts{
+				"PIECES": {{
+					TypeName:   schema.TagForm(s, shard),
+					TypeID:     shard,
+					PrimaryKey: immutable.WrapKey([]any{"s1"}),
+					Properties: immutable.WrapProperties(map[string]any{"name": "s1"}),
+					Composed: map[string][]graph.InstanceParts{
+						"BITS": {{
+							TypeName:   schema.TagForm(s, crumb),
+							TypeID:     crumb,
+							PrimaryKey: immutable.WrapKey([]any{"c1"}),
+							Properties: immutable.WrapProperties(map[string]any{"name": "c1"}),
+						}},
+					},
+				}},
+			},
+		}}},
 	})
 	if res.HasErrors() {
 		t.Fatalf("assembling: %s", res)
@@ -93,37 +131,39 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		t.Fatalf("output is not an object of arrays: %v\n%s", err, data)
 	}
-	var found bool
-	for _, insts := range doc {
-		for _, inst := range insts {
-			if inst["id"] != "h1" {
-				continue
-			}
-			found = true
-			links, ok := inst["links"]
-			if !ok {
-				t.Fatalf("no links field on h1; got keys %v\n%s", inst, data)
-			}
-			// One edge under a (many) relation must still be an array — of
-			// _target_ objects, whose field names only a resolved type can
-			// supply.
-			outer, ok := links.([]any)
-			if !ok {
-				t.Fatalf("links = %T, want []any", links)
-			}
-			if len(outer) == 0 {
-				t.Fatal("links is empty")
-			}
-			target, ok := outer[0].(map[string]any)
-			if !ok {
-				t.Fatalf("links[0] = %T, want a _target_ object — the type did not resolve", outer[0])
-			}
-			if target["_target_id"] != "h2" {
-				t.Errorf("links[0] = %v, want _target_id h2", target)
-			}
-		}
+
+	// The root's key is the addressable tag; the child's field names come from
+	// the relations its own resolved type declares.
+	roots, ok := doc["mid.Holder"]
+	if !ok || len(roots) != 1 {
+		t.Fatalf("no mid.Holder root in the output: %s", data)
 	}
-	if !found {
-		t.Fatalf("h1 missing from the output:\n%s", data)
+	pieceField, ok := holderType.Relation("PIECES")
+	if !ok {
+		t.Fatal("mid.Holder declares no PIECES relation")
+	}
+	pieces, ok := roots[0][pieceField.FieldName()].([]any)
+	if !ok || len(pieces) != 1 {
+		t.Fatalf("no %q array on the root; got keys %v\n%s", pieceField.FieldName(), roots[0], data)
+	}
+	child, ok := pieces[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the composed child is %T, want an object\n%s", pieces[0], data)
+	}
+
+	bits, ok := shardType.Relation("BITS")
+	if !ok {
+		t.Fatal("deep.Shard declares no BITS relation")
+	}
+	if bits.FieldName() == "BITS" {
+		t.Fatalf("fixture is vacuous: the declared field name %q equals the relation name, so an unresolved type renders the same",
+			bits.FieldName())
+	}
+	if _, ok := child[bits.FieldName()]; !ok {
+		t.Errorf("the composed child carries no %q field, so its transitively imported type did not resolve; got keys %v\n%s",
+			bits.FieldName(), child, data)
+	}
+	if _, raw := child["BITS"]; raw {
+		t.Errorf("the composed child carries the raw relation name, so its type did not resolve\n%s", data)
 	}
 }

@@ -41,19 +41,13 @@ func WithIndent(indent string) WriteOption {
 // Instances include their properties, composed children (inline), and foreign key
 // references for resolved associations.
 //
-// Returns ErrNilResult if result is nil. When two types in the snapshot
-// render the same output name, returns an error naming both identities — a
-// name-keyed object cannot separate them.
+// Returns ErrNilResult if result is nil.
 //
 //nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
 	if result == nil {
 		return nil, ErrNilResult
 	}
-	if err := renderedNameCollision(result); err != nil {
-		return nil, err
-	}
-
 	cfg := &writeConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -95,23 +89,6 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Sn
 	return int64(n), err
 }
 
-// renderedNameCollision reports an error when two type identities in the
-// snapshot render one output name. The rendering is lossy where the snapshot
-// is not, so the writer refuses rather than silently merging the pair.
-func renderedNameCollision(snap *graph.Snapshot) error {
-	s := snap.Schema()
-	seen := make(map[string]schema.TypeID)
-	for _, id := range snap.Types() {
-		name := schema.TagForm(s, id)
-		if first, ok := seen[name]; ok {
-			return fmt.Errorf("json adapter: type %s and type %s both render object key %q, so the output object cannot separate them",
-				first, id, name)
-		}
-		seen[name] = id
-	}
-	return nil
-}
-
 // buildOutput constructs the JSON-serializable output map from a graph snapshot.
 func (a *Adapter) buildOutput(result *graph.Snapshot) (map[string]any, error) {
 	output := make(map[string]any)
@@ -119,7 +96,10 @@ func (a *Adapter) buildOutput(result *graph.Snapshot) (map[string]any, error) {
 
 	// Iterate types in sorted order for deterministic output
 	for _, typeID := range result.Types() {
-		typeName := schema.TagForm(s, typeID)
+		typeName, ok := schema.AddressableTag(s, typeID)
+		if !ok {
+			return nil, fmt.Errorf("json adapter: snapshot denotes type %s, which the entry schema cannot name, so the output object has no key for it; every constructor refuses such a snapshot, so this is an invariant violation", typeID)
+		}
 		instances := result.InstancesOf(typeID)
 		serialized := make([]map[string]any, 0, len(instances))
 

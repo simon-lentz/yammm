@@ -31,12 +31,10 @@ type Graph struct {
 	config graphConfig
 	mu     sync.RWMutex
 
-	// closureSchemas is every schema in the bound schema's import closure, and
-	// ownedSchemas the subset this graph accepts roots from. Both are fixed at
-	// construction: the schema is immutable and its imports are wired before it
-	// is observable.
+	// closureSchemas is every schema in the bound schema's import closure,
+	// fixed at construction: the schema is immutable and its imports are wired
+	// before it is observable.
 	closureSchemas map[location.SourceID]bool
-	ownedSchemas   map[location.SourceID]bool
 
 	// canon rewrites values into the representation their constraint stores.
 	// The graph and [RebuildSnapshot] share one so a graph built through Add
@@ -102,18 +100,10 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 	for _, dep := range s.Closure() {
 		closure[dep.SourceID()] = true
 	}
-	owned := map[location.SourceID]bool{s.SourceID(): true}
-	for imp := range s.Imports() {
-		if dep := imp.Schema(); dep != nil {
-			owned[dep.SourceID()] = true
-		}
-	}
-
 	return &Graph{
 		schema:         s,
 		config:         cfg,
 		closureSchemas: closure,
-		ownedSchemas:   owned,
 		canon:          newCanonicalizer(s),
 		instances:      make(map[schema.TypeID]map[string]*Instance),
 		pending:        make(map[pendingKey][]*pendingEdge),
@@ -812,13 +802,12 @@ func (g *Graph) isKnownSchema(schemaPath location.SourceID) bool {
 	return schemaPath == g.schema.SourceID() || g.closureSchemas[schemaPath]
 }
 
-// ownsType reports whether this graph accepts a root instance of id's type: the
-// bound schema declares it, or directly imports the schema that does. This is a
-// policy, not a resolution rule — [schema.Schema.TypeByID] resolves an identity
-// anywhere in the closure, and a composed child uses that reach.
+// ownsType reports whether this graph accepts a root instance of id's type:
+// the bound schema can name it. [schema.Addressable] is the rule, shared with
+// [RebuildSnapshot] and the snapshot reader. A composed child is not held to
+// it and reaches the whole closure through [schema.Schema.TypeByID].
 func (g *Graph) ownsType(id schema.TypeID) bool {
-	path := id.SchemaPath()
-	return path == g.schema.SourceID() || g.ownedSchemas[path]
+	return schema.Addressable(g.schema, id)
 }
 
 // describeTypePair renders two type identities so a reader can tell them apart.

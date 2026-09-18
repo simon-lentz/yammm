@@ -7,7 +7,8 @@ package schema
 // form, not an identity. A type s reaches only through an intermediate import
 // has no alias to qualify with and renders bare, as does a type from a schema
 // s does not import at all, so two same-named types in different schemas can
-// render identically. Use [TypeID] wherever the answer has to be exact.
+// render identically. Use [TypeID] wherever the answer has to be exact, and
+// [AddressableTag] where a name has to denote one type.
 func TagForm(s *Schema, id TypeID) string {
 	if s == nil || id.IsZero() || id.SchemaPath() == s.SourceID() {
 		return id.Name()

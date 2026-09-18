@@ -137,9 +137,11 @@
 // snapshot's own schema, and refuse one built by hand or from another schema:
 // a shape the adapter did not build carries no key constraints, so merge keys
 // would reach the driver uncoerced while the same properties are coerced from
-// the schema. Two type identities that render one type name are not refused —
-// [GraphShape.Types] is keyed by [schema.TypeID] and each identity gets its own
-// label, so the pair writes correctly.
+// the schema. [GraphShape.Types] is keyed by [schema.TypeID], so two closure
+// types sharing one bare name each get their own label. A snapshot's roots are
+// types the entry schema can name, so a rendered label collision between two of
+// them cannot arise; two SCHEMA names that sanitize alike still can, and
+// [Adapter.ShapeForSchema] refuses that closure.
 //
 // # Composition Ownership
 //

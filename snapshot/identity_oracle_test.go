@@ -60,10 +60,9 @@ type Site {
 	*-> IMPORTED (many) base.Part
 }
 
-// Beacon is declared here and in deep, and both render the bare tag "Beacon"
-// because the entry schema holds no alias for deep. Unlike the two Part
-// declarations it is not a part type, so it can be added to a graph directly —
-// which is the only way to reach the collision through Graph.Snapshot.
+// Beacon is declared here, in base and in deep. The entry and base ones are
+// both addressable and their tags differ; the deep one is addressable from
+// nowhere and cannot hold a root at all.
 type Beacon {
 	id String primary
 	power Float
@@ -94,6 +93,16 @@ type Basin {
 // cannot resolve locally and more than one closure schema declares.
 type Marker {
 	id String primary
+}
+
+// Beacon is declared here and in the entry schema. Both are addressable — the
+// entry schema names this one "base.Beacon" and its own one "Beacon" — so the
+// two tags differ while the bare NAME does not. That is identity keying without
+// a collision: a position keyed by TypeID separates them and one keyed by the
+// bare name merges them.
+type Beacon {
+	id String primary
+	power Float
 }
 `
 
@@ -179,8 +188,7 @@ func mustTypeIDIn(t *testing.T, s *schema.Schema, alias, name string) schema.Typ
 // mustTransitiveTypeID resolves a type the entry schema reaches only through
 // an intermediate import, which is the position tagForm renders as a bare
 // name because the entry schema holds no alias for it.
-func mustTransitiveTypeID(t *testing.T, s *schema.Schema, viaAlias, thenAlias, name string) schema.TypeID { //nolint:unparam // the intermediate hop is an ingredient, kept explicit
-
+func mustTransitiveTypeID(t *testing.T, s *schema.Schema, viaAlias, thenAlias, name string) schema.TypeID {
 	t.Helper()
 	via, ok := s.ImportByAlias(viaAlias)
 	if !ok {
@@ -499,45 +507,53 @@ func identityCases() []identityCase {
 		},
 		{
 			// Reachable only through base, so the entry schema holds no alias
-			// and the tag form falls back to the bare name.
-			name:     "root_transitively_imported",
+			// and no name form. It is legal as a composed child and nowhere
+			// else, and this is the oracle that the child survives the trip.
+			name:     "composed_transitively_imported",
 			origin:   "transitive",
-			position: "root",
+			position: "composed",
 			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
 				t.Helper()
-				id := mustTransitiveTypeID(t, s, "base", "deep", "Probe")
-				tag := tagForm(s, id)
+				siteID := mustTypeIDIn(t, s, "", "Site")
+				childID := mustTransitiveTypeID(t, s, "base", "deep", "Part")
 				return graph.SnapshotParts{
-					Types: []schema.TypeID{id},
+					Types: []schema.TypeID{siteID},
 					Instances: map[schema.TypeID][]graph.InstanceParts{
-						id: {{
-							TypeName:   tag,
-							TypeID:     id,
-							PrimaryKey: immutable.WrapKey([]any{"pr1"}),
-							Properties: immutable.WrapProperties(map[string]any{"id": "pr1", "reading": float64(2)}),
+						siteID: {{
+							TypeName:   tagForm(s, siteID),
+							TypeID:     siteID,
+							PrimaryKey: immutable.WrapKey([]any{"site1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "site1"}),
+							Composed: map[string][]graph.InstanceParts{
+								"PARTS": {{
+									TypeName:   tagForm(s, childID),
+									TypeID:     childID,
+									PrimaryKey: immutable.WrapKey([]any{"dp1"}),
+									Properties: immutable.WrapProperties(map[string]any{"name": "dp1", "density": float64(1)}),
+								}},
+							},
 						}},
 					},
 				}
 			},
 		},
 		{
-			// A local Beacon and a transitively imported one render the same
-			// bare tag, so a name-keyed form cannot tell the two groups apart.
+			// One bare name, two schemas, both addressable: the entry schema's
+			// own Beacon and the one it imports as base. Their tags differ and
+			// their names do not, so a position keyed by the bare name merges
+			// the two groups and one keyed by identity separates them.
 			//
 			// Beacon rather than Part because a root group's type must be able
-			// to hold a root: a part type is addressed through its parent and
-			// both RebuildSnapshot and Load refuse one here. The Part pair
-			// carries the same collision in the position parts belong in —
-			// see composed_collided_name_across_schemas.
-			name:     "root_tag_collision_local_and_transitive",
-			origin:   "transitive",
+			// to hold a root, and a part type is addressed through its parent.
+			name:     "root_one_name_two_schemas",
+			origin:   "collided",
 			position: "root",
 			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				localID := mustTypeIDIn(t, s, "", "Beacon")
-				deepID := mustTransitiveTypeID(t, s, "base", "deep", "Beacon")
+				importedID := mustTypeIDIn(t, s, "base", "Beacon")
 				return graph.SnapshotParts{
-					Types: []schema.TypeID{localID, deepID},
+					Types: []schema.TypeID{localID, importedID},
 					Instances: map[schema.TypeID][]graph.InstanceParts{
 						localID: {{
 							TypeName:   tagForm(s, localID),
@@ -545,11 +561,11 @@ func identityCases() []identityCase {
 							PrimaryKey: immutable.WrapKey([]any{"lb1"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "lb1", "power": float64(1)}),
 						}},
-						deepID: {{
-							TypeName:   tagForm(s, deepID),
-							TypeID:     deepID,
-							PrimaryKey: immutable.WrapKey([]any{"db1"}),
-							Properties: immutable.WrapProperties(map[string]any{"id": "db1", "power": float64(2)}),
+						importedID: {{
+							TypeName:   tagForm(s, importedID),
+							TypeID:     importedID,
+							PrimaryKey: immutable.WrapKey([]any{"ib1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "ib1", "power": float64(2)}),
 						}},
 					},
 				}
@@ -684,11 +700,11 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 	for _, tc := range cases {
 		covered[tc.position+"/"+tc.origin] = true
 	}
-	// The floor is the ingredient matrix: every pair below must have at
-	// least one generated document, so a deleted case names its hole.
+	// The floor is the ingredient matrix: a deleted case names its hole.
 	for _, want := range []string{
-		"root/local", "root/imported", "root/transitive",
+		"root/local", "root/imported", "root/collided",
 		"composed/local", "composed/imported", "composed/collided",
+		"composed/transitive",
 		"nested/local",
 		"duplicate/local", "duplicate/imported",
 		"unresolved/imported",
@@ -696,6 +712,11 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 		if !covered[want] {
 			t.Fatalf("the oracle generates no %s document; the ingredient matrix has a hole", want)
 		}
+	}
+	// Illegal rather than untested: a root is keyed by name and the entry
+	// schema cannot name a transitively imported type.
+	if covered["root/transitive"] {
+		t.Fatal("the oracle generates a root/transitive document, which every constructor refuses")
 	}
 
 	for _, tc := range cases {

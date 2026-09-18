@@ -116,12 +116,15 @@ func (r *Snapshot) Schema() *schema.Schema {
 	return r.schema
 }
 
-// Types returns every type identity in the graph, ordered by TypeID: schema
-// path, then name.
+// Types returns every ROOT type identity in the graph, ordered by TypeID:
+// schema path, then name. A composed child's type is absent unless a root of
+// that type is present too; walk [Instance.ComposedRelations] for the subtree.
 //
-// Use with [Snapshot.InstancesOf] for deterministic iteration, and
-// [schema.TagForm] to render an identity as a name.
-// Returns a defensive copy.
+// Every identity returned is one the bound schema can name, so
+// [schema.AddressableTag] accepts each: [Graph.Add] and [RebuildSnapshot] hold
+// every type a snapshot DENOTES to that rule, not only the ones with instances.
+// Use with [Snapshot.InstancesOf] for deterministic iteration. Returns a
+// defensive copy.
 func (r *Snapshot) Types() []schema.TypeID {
 	if r == nil || len(r.types) == 0 {
 		return nil

@@ -134,6 +134,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	collector := diag.NewCollector(0)
 
 	validatePartsIdentity(parts, collector)
+	validatePartsDenotedTypes(s, parts, collector)
 	validatePartsRootTypes(s, parts, collector)
 	validatePartsCardinality(s, parts, collector)
 	if collector.HasErrors() {
@@ -274,17 +275,28 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 	return snap, diag.OK()
 }
 
-// validatePartsRootTypes rejects an instance group keyed by a type that
-// cannot hold a root instance: an abstract type, a part type, or one
-// declaring no primary key. [Graph.Add] refuses all three, so admitting them
-// here would make the rebuild path the one way to assemble a graph the API
-// cannot build — and the snapshot writer would then emit a document its own
-// reader refuses.
-//
-// The rule is the object model's, not a validation preference: an abstract
-// type has no instances, a part instance is addressed through its parent, and
-// a type with no primary key has no address at all. A store cannot hold any
-// of the three as a node.
+// validatePartsDenotedTypes rejects a types entry the entry schema cannot name.
+// Denotation is not rootness — an entry may name an abstract or part type, which
+// the writer emits an empty group for — so this applies the addressability member
+// alone. The package doc's "Root type eligibility" section states both rules.
+func validatePartsDenotedTypes(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
+	if s == nil {
+		return
+	}
+	for _, typeID := range parts.Types {
+		if typeID.IsZero() || schema.Addressable(s, typeID) {
+			continue
+		}
+		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+			fmt.Sprintf("RebuildSnapshot: types entry %s is reachable only through an intermediate import, so the entry schema cannot name it; import its schema directly",
+				typeID)).Build())
+	}
+}
+
+// validatePartsRootTypes rejects an instance group whose type cannot hold a
+// root instance, applying the four-member rule the package doc's "Root type
+// eligibility" section states. [Graph.Add] refuses the same four, so admitting
+// one here would make the rebuild path the one way to build what the API cannot.
 func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
 	if s == nil {
 		return
@@ -301,6 +313,8 @@ func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *di
 			return "is a part type, addressed through its parent composition"
 		case !t.HasPrimaryKey():
 			return "declares no primary key"
+		case !schema.Addressable(s, id):
+			return "is reachable only through an intermediate import, so the entry schema cannot name it; import its schema directly"
 		}
 		return ""
 	}

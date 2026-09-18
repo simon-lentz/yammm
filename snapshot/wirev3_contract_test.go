@@ -108,14 +108,14 @@ func TestWireV3_ComposedChildWithoutTypeIsReported(t *testing.T) {
 	}
 }
 
-// TestWireV3_TableIsOrderedByIdentity pins the table's ordering. Two types
-// can share a bare name, so ordering on a rendered name is not a total order
-// over the rows; ordering on the identity is.
+// TestWireV3_TableIsOrderedByIdentity pins the table's ordering. Two types can
+// share a bare name, so ordering on the name is not a total order over the
+// rows; ordering on the identity is.
 func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
 
-	built, _, _ := collidingBeacons(t, s)
+	built, _, _ := sameNameBeacons(t, s)
 	data, res := snapshot.Marshal(ctx, built)
 	if res.HasErrors() {
 		t.Fatalf("marshal: %v", res)

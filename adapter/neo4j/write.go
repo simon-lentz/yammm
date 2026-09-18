@@ -119,8 +119,8 @@ func WithEdgeChunkSize(size int) WriteOption {
 // snapshot's schema, and refuses one built by hand or from another: a shape the
 // adapter did not build carries no key constraints, so merge keys would reach
 // the driver uncoerced while the same properties are coerced from the schema.
-// Two identities that render one type NAME are not refused — [GraphShape.Types]
-// is keyed by [schema.TypeID] and each gets its own label.
+// [GraphShape.Types] is keyed by [schema.TypeID], so two closure types sharing
+// one bare name each get their own label.
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
 	result *graph.Snapshot,
@@ -208,9 +208,9 @@ func (a *Adapter) BatchNodeQueries(
 // BatchEdgeQueries generates UNWIND-batched MERGE queries for edges,
 // grouped by (sourceType, relationType, targetType) signature.
 //
-// Returns one [BatchEdgeQuery] per signature per chunk. Two identities that
-// render one type NAME are not refused — [GraphShape.Types] is keyed by
-// [schema.TypeID] and each gets its own label.
+// Returns one [BatchEdgeQuery] per signature per chunk. [GraphShape.Types] is
+// keyed by [schema.TypeID], so two closure types sharing one bare name each get
+// their own label.
 //
 // shapes must come from [Adapter.ShapeForSchema] over this snapshot's schema; a
 // hand-built or foreign one is refused, for the reason [Adapter.BatchNodeQueries]

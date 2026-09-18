@@ -537,7 +537,7 @@ for _, typeID := range snap.Types() {
 }
 ```
 
-**Type resolution.** No lookup in this package takes a rendered type name — a rendering is lossy, so keying a lookup by one merges types that are not the same type. `AddComposed` takes the parent's `schema.TypeID`, the same identity `Snapshot.Types` and `Instance.TypeID` hand you. Two lookups then answer different questions. `Add` resolves a root's type from its identity, restricted to the same set as a matter of *ownership* — a graph bound to a schema holds instances of the types that schema declares or directly imports, and the diagnostic's hint says so. A composed child resolves across the *whole* import closure: its type comes from a relation the schema already resolved, and no ownership question arises because the child arrived inside a parent the graph does own. A schema where an imported type composes a part type from a further import therefore loads, validates and builds. Where two identities render alike, a diagnostic naming them falls back to the full identity rather than reading `"X" does not match "X"`.
+**Type resolution.** No lookup in this package takes a rendered type name — a rendering is lossy, so keying a lookup by one merges types that are not the same type. `AddComposed` takes the parent's `schema.TypeID`, the same identity `Snapshot.Types` and `Instance.TypeID` hand you. Two lookups then answer different questions. `Add` resolves a root's type from its identity, restricted to the same set as a matter of *ownership* — a graph bound to a schema holds instances of the types that schema can name, which are those it declares or directly imports, and the diagnostic's hint says so. `schema.Addressable` is that rule, and `graph.RebuildSnapshot` and `snapshot.Load` apply the same one to every type a snapshot *denotes* — `Snapshot.Types`, whether or not the type holds instances — so every name a writer keys its output by resolves back to one type. A composed child is exempt and reaches the whole closure. A composed child resolves across the *whole* import closure: its type comes from a relation the schema already resolved, and no ownership question arises because the child arrived inside a parent the graph does own. A schema where an imported type composes a part type from a further import therefore loads, validates and builds. Where two identities render alike, a diagnostic naming them falls back to the full identity rather than reading `"X" does not match "X"`.
 
 **A non-OK `Add` leaves the graph unchanged.** `Add` and `AddComposed` walk an instance once. That walk both checks the whole structure — the names and multiplicities of its edges, and every slot and child of its composition tree at any depth — and assembles the tree to install, touching no graph state; only a walk that raised no error reaches the commit. A record that violates one of those rules is refused entire: no instance, no child, no edge and no duplicate record survives it. The check runs for every instance, whatever `ValidInstance.Validated()` reports, because the graph cannot verify that bit and because a validator hole in one of these rules is exactly what the check exists to catch.
 
@@ -1198,7 +1198,7 @@ n, err := adapter.WriteObject(ctx, w, snap, writeOpts...)
 
 ```
 
-The object output is keyed by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — `MarshalObject` and `WriteObject` return an error naming both identities instead of merging the pair under one key.
+The object output is keyed by the name the entry schema addresses each root type by — bare for a local type, `alias.Name` for a directly imported one. Two such names never collide, because every snapshot root is a type the entry schema can name; `graph.RebuildSnapshot` and `snapshot.Load` refuse any other root. So there is no collision for the writers to check.
 
 The writers emit exactly what `ParseObject` and `instance.Validator` accept (v0.15.0): an association renders as a `_target_<pk>`-keyed object with its edge properties beside the key fields — one object for `(one)`, an array of objects for `(many)` — with key components and edge-property values rendered through their constraints' canonical forms. A composition renders as an array of child objects for every multiplicity. Unresolved edges are not written; the round-trip identity is scoped to fully resolved graphs.
 
@@ -1301,7 +1301,7 @@ The walk covers the whole import closure (`Schema.Closure()`): every member sche
 
 ### Write Queries
 
-`BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Both require a `GraphShape` that `Adapter.ShapeForSchema` built from the snapshot's own schema, and refuse one built by hand or from another schema: a shape the adapter did not build carries no key constraints, so merge keys would reach the driver uncoerced while the same properties are coerced from the schema. Two type identities that render one type name are **not** refused — `GraphShape.Types` is keyed by `schema.TypeID` and each identity gets its own label, so the pair writes correctly.
+`BatchNodeQueries` and `BatchEdgeQueries` operate on a complete `graph.Snapshot` for high-throughput batch writes. Both require a `GraphShape` that `Adapter.ShapeForSchema` built from the snapshot's own schema, and refuse one built by hand or from another schema: a shape the adapter did not build carries no key constraints, so merge keys would reach the driver uncoerced while the same properties are coerced from the schema. `GraphShape.Types` is keyed by `schema.TypeID`, so two closure types sharing one bare name each get their own label. A snapshot's roots are types the entry schema can name, so no two of them render one label.
 
 ```go
 shapes, _ := adapter.ShapeForSchema(ctx, s)
@@ -1573,7 +1573,7 @@ byType, err := adapter.MarshalSnapshot(ctx, snap)
 err := adapter.WriteSnapshot(ctx, writerFor, snap)
 ```
 
-Both snapshot writers key their output by rendered type name. When two types in the snapshot render the same name — a transitively imported type beside a same-named local one — they return an error naming both identities instead of merging the pair, and `WriteSnapshot` requests no writer before that check passes.
+Both snapshot writers key their output by the name the entry schema addresses each root type by. Two such names never collide, because every snapshot root is a type the entry schema can name, so neither writer checks for a collision.
 
 ### Type Coercion
 

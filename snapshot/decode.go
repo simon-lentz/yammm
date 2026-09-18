@@ -343,31 +343,37 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 	return idx, nil
 }
 
-// checkRootTypeEligible refuses an instances group whose type cannot hold a
-// root instance. [github.com/simon-lentz/yammm/graph.Graph.Add] refuses an
-// abstract type, a part type and one declaring no primary key, so a document
-// stating any of the three describes a graph no caller could have built — and
-// no option excuses it: WithRevalidation runs the validator over an
-// instance's PROPERTIES, which says nothing about whether its type may stand
-// alone.
-//
-// It is defence in depth rather than the only guard: since
-// [github.com/simon-lentz/yammm/graph.RebuildSnapshot] refuses the same three,
-// this library cannot write such a document — but a foreign writer can, and a
-// reader that admitted one would hand the caller a snapshot no adapter can
-// consume.
-//
-// A schema-less read (Info, HeaderOnly) resolves no types and checks nothing.
+// checkRootTypeEligible refuses an instances group whose type a snapshot must not
+// denote, or must not hold a root instance of. The graph package doc's "Denoted
+// type eligibility" and "Root type eligibility" sections state the two rules, and
+// the split is why an empty group is exempt from one and not the other. Defence in
+// depth against a foreign writer: no load option excuses a member, and a
+// schema-less read checks none.
 func (sd *streamDecoder) checkRootTypeEligible(row, gi, items int) {
-	// An EMPTY group states that the snapshot holds the type, not that it holds
-	// a root instance of it — the writer emits one for every type the snapshot
-	// denotes, part types included, and the format documents that shape.
-	if items == 0 || sd.schema == nil || row >= len(sd.tableIDs) {
+	if sd.schema == nil || row >= len(sd.tableIDs) {
 		return
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
 	if !ok {
 		return // resolveTypeTable already reported the row
+	}
+	// Nameability binds every group, empty or not: the group denotes the type
+	// either way, and every writer keys its output by a denoted type's name.
+	if !schema.Addressable(sd.schema, sd.tableIDs[row]) {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNNAMEABLE_TYPE,
+			fmt.Sprintf("instances entry %d denotes %s, which this schema reaches only through an intermediate import and cannot name",
+				gi, sd.refAt(row))).
+			WithHint("import the schema that declares it directly, then read the document again").
+			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+			WithDetail(diag.DetailKeyTypeSchema, sd.tableIDs[row].SchemaPath().String()).
+			Build())
+		return
+	}
+	// An EMPTY group states that the snapshot holds the type, not that it holds
+	// a root instance of it — the writer emits one for every type the snapshot
+	// denotes, part types included, and the format documents that shape.
+	if items == 0 {
+		return
 	}
 	var rule string
 	switch {

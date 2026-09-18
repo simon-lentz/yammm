@@ -455,6 +455,14 @@ var (
 	// in the provided schema.
 	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE", CategorySnapshot)
 
+	// E_SNAPSHOT_UNNAMEABLE_TYPE indicates the types table names a type the entry
+	// schema cannot name: the import closure declares it, but the schema reaches
+	// it only through an intermediate import and so has no name form for it.
+	// Every writer keys its output by the name of each type a snapshot denotes,
+	// so such a document describes a snapshot no writer can render. The hint
+	// names the remedy, which is to import the declaring schema directly.
+	E_SNAPSHOT_UNNAMEABLE_TYPE = NewCode("E_SNAPSHOT_UNNAMEABLE_TYPE", CategorySnapshot)
+
 	// E_SNAPSHOT_TYPE_MISMATCH indicates the instances section is inconsistent
 	// with the types table (structural malformation).
 	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
@@ -483,7 +491,8 @@ var (
 
 	// E_SNAPSHOT_INVALID_ROOT indicates an instances-section group names a type
 	// that cannot hold a root instance: an abstract type, a part type, or one
-	// declaring no primary key. The graph layer refuses all three at
+	// declaring no primary key. Nameability is a denoted type's rule and draws
+	// [E_SNAPSHOT_UNNAMEABLE_TYPE]. The graph layer refuses all three at
 	// [github.com/simon-lentz/yammm/graph.Graph.Add], so a document stating one
 	// describes a graph that cannot be built. The message names which rule the
 	// type fails.
