@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,21 @@ const fixtureModule = "github.com/simon-lentz/yammm"
 // repoRoot is the repository root relative to this package's directory, where
 // go test runs the package's tests.
 const repoRoot = "../.."
+
+// goDirective returns the running toolchain's version as a go.mod go directive
+// spells it: "1.26.0", never "go1.26.0", and never a devel or beta suffix.
+func goDirective() string {
+	v := strings.TrimPrefix(runtime.Version(), "go")
+	if i := strings.IndexAny(v, "-+ "); i >= 0 {
+		v = v[:i]
+	}
+	// A two-component version is a released toolchain's own spelling; go.mod
+	// wants three.
+	if strings.Count(v, ".") == 1 {
+		v += ".0"
+	}
+	return v
+}
 
 // fromRoot returns a slash-separated repository path relative to this package.
 func fromRoot(rel string) string {
@@ -43,8 +59,11 @@ type result struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{t: t, dir: t.TempDir()}
-	f.write("go.mod", "module "+fixtureModule+"\n\ngo 1.26.0\n")
-	for _, name := range []string{"test.sh", "vet.sh", "packages.sh", "lintconfig.sh"} {
+	// The go directive is the RUNNING toolchain's version, not a literal: the
+	// scripts hold a run to go.mod's toolchain and refuse a mismatch, and a
+	// fixture pinned to one release would refuse every run under another.
+	f.write("go.mod", "module "+fixtureModule+"\n\ngo "+goDirective()+"\n")
+	for _, name := range []string{"test.sh", "vet.sh", "packages.sh", "lintconfig.sh", "toolchain.sh"} {
 		f.copyScript(name)
 	}
 	for _, dir := range []string{"internal/testsummary", "internal/raceskip"} {

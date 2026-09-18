@@ -25,6 +25,7 @@ func newLintFixture(t *testing.T) *fixture {
 	f.copyFile("go.sum")
 	f.copyFile(".golangci.yml")
 	f.copyScript("lint.sh")
+	f.copyScript("toolchain.sh")
 	f.write("ok/ok.go", "package ok\n")
 	// The linter and its module come from the module cache.
 	f.env = []string{"HTTP_PROXY=http://127.0.0.1:9", "HTTPS_PROXY=http://127.0.0.1:9", "NO_PROXY="}

@@ -229,10 +229,12 @@ func TestParseObject_DiagnosticSpansPinTheColumn(t *testing.T) {
 		{"value is not an array", "{\n  \"Person\":\n    42\n}\n", 3, 5},
 		// The element's start, not the end of the token the decoder rejected.
 		{"element of the wrong type", "{\n  \"Person\": [\n    42\n  ]\n}\n", 3, 5},
-		// The offending byte, not the one after it.
-		{"syntax error inside an element", "{\"A\": [{oops}]}", 1, 9},
-		// A syntax error whose offending byte ends a line must not name the next.
-		{"syntax error at a line end", "{\"A\": \"abc\nx\"}", 1, 11},
+		// The element the decoder was reading, not a byte inside it: the
+		// offset encoding/json reports for a syntax error is not the same
+		// position in every Go release, and the element's start is.
+		{"syntax error inside an element", "{\"A\": [{oops}]}", 1, 8},
+		// A fault while reading the VALUE reports where the value began.
+		{"syntax error at a line end", "{\"A\": \"abc\nx\"}", 1, 7},
 		// The trailing token's start, not its end.
 		{"trailing content", "{}\n12345\n", 2, 1},
 		// The root refusal points at the first byte of the document.

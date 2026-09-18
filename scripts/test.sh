@@ -19,6 +19,10 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# The module's toolchain, not the host's: the gate and CI must run one
+# standard library (scripts/toolchain.sh).
+. scripts/toolchain.sh
+
 export CGO_ENABLED=1
 export LC_ALL=C
 

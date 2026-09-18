@@ -21,6 +21,10 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# The module's toolchain, not the host's: the gate and CI must run one
+# standard library (scripts/toolchain.sh).
+. scripts/toolchain.sh
+
 host=$(go env GOOS | tr -d '\r')
 cross=(linux/amd64 windows/amd64 darwin/arm64 aix/ppc64 android/arm64 dragonfly/amd64
 	freebsd/amd64 illumos/amd64 netbsd/amd64 openbsd/amd64 solaris/amd64)

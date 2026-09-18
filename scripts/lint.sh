@@ -14,6 +14,10 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# The module's toolchain, not the host's: the gate and CI must run one
+# standard library (scripts/toolchain.sh).
+. scripts/toolchain.sh
+
 host=$(go env GOOS | tr -d '\r')
 targets=("${host}")
 [ "${host}" = windows ] || targets+=(windows)

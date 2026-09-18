@@ -62,7 +62,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	// Read opening brace
 	tok, err := dec.Token()
 	if err != nil {
-		collector.Collect(*pc.parseError(pc.errSpan(dec, err), "invalid JSON", err.Error()))
+		collector.Collect(*pc.parseError(pc.spanAt(0), "invalid JSON", err.Error()))
 		return nil, collector.Result()
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
@@ -77,7 +77,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 		// Read type name
 		keyTok, err := dec.Token()
 		if err != nil {
-			collector.Collect(*pc.parseError(pc.errSpan(dec, err), "error reading key", err.Error()))
+			collector.Collect(*pc.parseError(keySpan, "error reading key", err.Error()))
 			return result, collector.Result()
 		}
 		typeName, ok := keyTok.(string)
@@ -92,7 +92,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 			// Skip the value
 			var skip any
 			if err := dec.Decode(&skip); err != nil {
-				collector.Collect(*pc.parseError(pc.errSpan(dec, err), "error skipping value", err.Error()))
+				collector.Collect(*pc.parseError(keySpan, "error skipping value", err.Error()))
 			}
 			continue
 		}
@@ -108,8 +108,9 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	}
 
 	// Read closing brace
+	closeSpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 	if _, err := dec.Token(); err != nil {
-		collector.Collect(*pc.parseError(pc.errSpan(dec, err), "error reading closing brace", err.Error()))
+		collector.Collect(*pc.parseError(closeSpan, "error reading closing brace", err.Error()))
 	}
 
 	// Check for trailing content after root object. The offset is taken BEFORE
@@ -142,19 +143,6 @@ func (pc *parseContext) spanAt(bufOffset int) location.Span {
 		return location.Span{}
 	}
 	return location.PointWithByte(pc.source, pos.Line, pos.Column, byteOffset)
-}
-
-// errSpan locates a decoder error at the byte that caused it.
-//
-// [json.SyntaxError]'s Offset counts the bytes read BEFORE the error, so it sits
-// one past the offending byte and can name the next line where that byte ends
-// one. The span backs up by one. Without a reported offset the decoder's current
-// position is the best answer there is.
-func (pc *parseContext) errSpan(dec *json.Decoder, err error) location.Span {
-	if syntaxErr, _ := errors.AsType[*json.SyntaxError](err); syntaxErr != nil {
-		return pc.spanAt(max(int(syntaxErr.Offset)-1, 0))
-	}
-	return pc.spanAt(int(dec.InputOffset()))
 }
 
 // significantFrom returns the offset of the next byte that is neither a
@@ -192,7 +180,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string) ([]instanc
 	arraySpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 	tok, err := dec.Token()
 	if err != nil {
-		issues = append(issues, *pc.parseError(pc.errSpan(dec, err), "error reading array", err.Error()))
+		issues = append(issues, *pc.parseError(arraySpan, "error reading array", err.Error()))
 		return nil, issues
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '[' {
@@ -209,15 +197,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string) ([]instanc
 
 		var obj map[string]any
 		if err := dec.Decode(&obj); err != nil {
-			// A syntax error carries its own offset. Any other failure — an
-			// element of the wrong JSON type — is reported at the element's
-			// start, because the decoder's offset is then the END of the token
-			// it rejected.
-			span := elemSpan
-			if syntaxErr, _ := errors.AsType[*json.SyntaxError](err); syntaxErr != nil {
-				span = pc.errSpan(dec, err)
-			}
-			issues = append(issues, *pc.parseError(span, "error reading array element", err.Error()))
+			issues = append(issues, *pc.parseError(elemSpan, "error reading array element", err.Error()))
 
 			// For syntax errors, the decoder cannot recover - stop parsing
 			if syntaxErr, _ := errors.AsType[*json.SyntaxError](err); syntaxErr != nil || errors.Is(err, io.ErrUnexpectedEOF) {
@@ -246,8 +226,9 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string) ([]instanc
 	}
 
 	// Read closing bracket
+	bracketSpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 	if _, err := dec.Token(); err != nil {
-		issues = append(issues, *pc.parseError(pc.errSpan(dec, err), "error reading closing bracket", err.Error()))
+		issues = append(issues, *pc.parseError(bracketSpan, "error reading closing bracket", err.Error()))
 	}
 
 	return result, issues
