@@ -1,0 +1,120 @@
+{
+  "name": "\"csv_edge_test\"",
+  "span": {
+    "s": 0,
+    "e": 22
+  },
+  "types": [
+    {
+      "name": "Item",
+      "name_span": {
+        "s": 29,
+        "e": 33
+      },
+      "props": [
+        {
+          "name": "item_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 48,
+              "e": 54
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 40,
+            "e": 62
+          }
+        },
+        {
+          "name": "name",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 72,
+              "e": 78
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 67,
+            "e": 87
+          }
+        }
+      ],
+      "span": {
+        "s": 24,
+        "e": 89
+      }
+    },
+    {
+      "name": "Order",
+      "name_span": {
+        "s": 96,
+        "e": 101
+      },
+      "props": [
+        {
+          "name": "order_id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 117,
+              "e": 123
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 108,
+            "e": 131
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "CARRIES",
+          "name_span": {
+            "s": 140,
+            "e": 147
+          },
+          "target": {
+            "name": "Item",
+            "span": {
+              "s": 155,
+              "e": 159
+            }
+          },
+          "optional": true,
+          "many": true,
+          "props": [
+            {
+              "name": "quantity",
+              "constraint": {
+                "kind": "Integer",
+                "span": {
+                  "s": 179,
+                  "e": 186
+                }
+              },
+              "required": true,
+              "span": {
+                "s": 170,
+                "e": 195
+              }
+            }
+          ],
+          "span": {
+            "s": 136,
+            "e": 201
+          }
+        }
+      ],
+      "span": {
+        "s": 91,
+        "e": 203
+      }
+    }
+  ]
+}

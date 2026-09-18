@@ -78,6 +78,29 @@
 // CSV is a flat format. Compositions are not supported in parsing and are
 // silently omitted during serialization.
 //
+// # Provenance
+//
+// Every instance carries a [location.Provenance]: the source the caller named,
+// the instance's path under its own type ($.Entity[0]), and a point span at the
+// start of its record. Every row diagnostic carries that span.
+//
+// The path indexes the instances of that type the parser PRODUCED, not the
+// records it read. CSV has no path language and no stable record address — the
+// ordinal this package no longer reports is not one — and under
+// [Adapter.ParseWithTypeColumn] no other index is well defined: a record the
+// reader refuses carries no type, so it can consume no type's index.
+//
+// No diagnostic names a record ordinal. A record's line comes from the reader,
+// so a quoted newline moves it as the file reads, which an ordinal cannot see.
+// A record the reader refuses is located from the parse error instead, at the
+// start of the line the fault is on; a reader error that is not a parse error
+// carries no position at all. The two refusals that precede every record — a
+// header that cannot be read, and a missing type column — carry line 1.
+//
+// A span's column is always 1. [encoding/csv] counts columns in BYTES and
+// [location.Position] counts them in runes, and this package parses an
+// [io.Reader], so it never holds the line it would need to convert one.
+//
 // # BOM Handling
 //
 // Parse methods strip a UTF-8 BOM if present, handling Windows-generated CSVs.
@@ -89,5 +112,6 @@
 //
 // # Dependencies
 //
-//	adapter/csv  ──imports──▶  instance, diag, location, graph, immutable, schema
+//	adapter/csv  ──imports──▶  instance, diag, location, location/path, graph,
+//	                           immutable, schema
 package csv

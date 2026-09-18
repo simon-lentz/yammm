@@ -46,11 +46,13 @@
 //
 // Adapters depend on library packages; library packages never depend on adapters:
 //
-//	adapter/csv       ──imports──▶  instance, diag, location, graph, immutable, schema
+//	adapter/csv       ──imports──▶  instance, diag, location, location/path, graph,
+//	                                immutable, schema
 //	adapter/gogen     ──imports──▶  schema, location, internal/ident
 //	adapter/jschema   ──imports──▶  schema
-//	adapter/json      ──imports──▶  instance, diag, location, graph, immutable, schema,
-//	                                adapter/json/internal/typetag, github.com/tidwall/jsonc
+//	adapter/json      ──imports──▶  instance, diag, location, location/path, graph,
+//	                                immutable, schema, adapter/json/internal/typetag,
+//	                                github.com/tidwall/jsonc
 //	adapter/markdown  ──imports──▶  schema
 //	adapter/neo4j     ──imports──▶  schema, graph, immutable, diag, location,
 //	                                github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype

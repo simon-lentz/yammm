@@ -3,6 +3,7 @@ package csv
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -21,9 +23,14 @@ import (
 // (no coercion).
 //
 // The first row defines column names.
+//
+// Every instance carries a [location.Provenance] naming source, its path in the
+// document ($.Entity[0]) and the span of its record's first field, and every
+// row diagnostic carries that span. A record's line comes from the reader, so a
+// quoted newline moves it as the file reads.
 func (a *Adapter) ParseTyped(
 	ctx context.Context,
-	source location.SourceID, //nolint:revive // reserved for future provenance tracking
+	source location.SourceID,
 	typeName string,
 	r io.Reader,
 	schemaType *schema.Type,
@@ -33,19 +40,21 @@ func (a *Adapter) ParseTyped(
 	reader.Comma = a.config.delimiter
 	reader.LazyQuotes = true
 
-	columns, startRow, err := a.readHeader(reader)
+	columns, err := a.readHeader(reader)
 	if err != nil {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-			fmt.Sprintf("csv parse: %s", err)).Build())
+			fmt.Sprintf("csv parse: %s", err)).
+			WithSpan(headerSpan(source)).Build())
 		return nil, collector.Result()
 	}
 
 	var results []instance.RawInstance
-	row := startRow
+	var lastSpan location.Span
 	for {
 		if err := ctx.Err(); err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_CONTEXT_CANCELLED,
-				fmt.Sprintf("csv parse cancelled at row %d", row)).Build())
+				fmt.Sprintf("csv parse cancelled after %d records", len(results))).
+				WithSpan(lastSpan).Build())
 			break
 		}
 
@@ -55,18 +64,68 @@ func (a *Adapter) ParseTyped(
 		}
 		if err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-				fmt.Sprintf("row %d: %s", row, err)).
+				fmt.Sprintf("csv parse: %s", err)).
+				WithSpan(parseErrorSpan(source, err)).
 				WithDetail(diag.DetailKeyTypeName, typeName).Build())
-			row++
 			continue
 		}
 
-		props := a.recordToProps(record, columns, schemaType, row, typeName, collector)
-		results = append(results, instance.RawInstance{Properties: props})
-		row++
+		lastSpan = recordSpan(source, reader, record)
+		props := a.recordToProps(record, columns, schemaType, lastSpan, typeName, collector)
+		results = append(results, instance.RawInstance{
+			Properties: props,
+			Provenance: location.NewProvenance(
+				source.String(),
+				path.Root().Key(typeName).Index(len(results)),
+				lastSpan,
+			),
+		})
 	}
 
 	return results, collector.Result()
+}
+
+// recordSpan returns the point span at the start of the record the reader last
+// read.
+//
+// The column is 1, not the reader's: [csv.Reader.FieldPos] counts columns in
+// BYTES and [location.Position] counts them in runes. A record starts at
+// column 1 under both, so the two agree here and nowhere else — this adapter
+// parses an [io.Reader] and never holds the line it would need to convert one.
+//
+// A successful read always records a first field, so FieldPos cannot panic on
+// index 0; the guard keeps that true if the reader's contract ever widens.
+func recordSpan(source location.SourceID, reader *csv.Reader, record []string) location.Span {
+	if len(record) == 0 {
+		return location.Span{}
+	}
+	line, _ := reader.FieldPos(0)
+	return location.Point(source, line, 1)
+}
+
+// parseErrorSpan locates a record the reader refused, at the start of the line
+// the fault is on.
+//
+// [csv.Reader.FieldPos] is not the route: a fault in the first field leaves no
+// recorded field and FieldPos panics on the index. That class is unreachable
+// while LazyQuotes is on — it suppresses both quote faults, leaving a wrong
+// field count as the one refusal, which is raised after the whole record parsed
+// — so this reads the error, which answers for every class instead of one.
+//
+// The error's own column is dropped for the reason [recordSpan] states: it is a
+// byte index and [location.Position] counts runes. A reader error that is not a
+// parse error carries no position at all.
+func parseErrorSpan(source location.SourceID, err error) location.Span {
+	var parseErr *csv.ParseError
+	if !errors.As(err, &parseErr) || parseErr.Line <= 0 {
+		return location.Span{}
+	}
+	return location.Point(source, parseErr.Line, 1)
+}
+
+// headerSpan returns the point span of the header row, which is line 1.
+func headerSpan(source location.SourceID) location.Span {
+	return location.Point(source, 1, 1)
 }
 
 // ParseWithTypeColumn parses CSV data where a designated column contains
@@ -76,9 +135,13 @@ func (a *Adapter) ParseTyped(
 // It may return nil for unknown types, in which case values are kept as strings.
 //
 // Requires [WithTypeColumn] to be set. Returns [ErrNoTypeColumn] otherwise.
+//
+// Every instance carries a [location.Provenance] naming source, its path under
+// its own type ($.Entity[0]) and the span of its record's first field, as
+// [Adapter.ParseTyped] records them.
 func (a *Adapter) ParseWithTypeColumn(
 	ctx context.Context,
-	source location.SourceID, //nolint:revive // reserved for future provenance tracking
+	source location.SourceID,
 	r io.Reader,
 	typeResolver func(string) *schema.Type,
 ) (map[string][]instance.RawInstance, diag.Result) {
@@ -94,10 +157,11 @@ func (a *Adapter) ParseWithTypeColumn(
 	reader.Comma = a.config.delimiter
 	reader.LazyQuotes = true
 
-	columns, startRow, err := a.readHeader(reader)
+	columns, err := a.readHeader(reader)
 	if err != nil {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-			fmt.Sprintf("csv parse: %s", err)).Build())
+			fmt.Sprintf("csv parse: %s", err)).
+			WithSpan(headerSpan(source)).Build())
 		return nil, collector.Result()
 	}
 
@@ -111,16 +175,19 @@ func (a *Adapter) ParseWithTypeColumn(
 	}
 	if typeColIdx == -1 {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-			fmt.Sprintf("type column %q not found in header", a.config.typeColumn)).Build())
+			fmt.Sprintf("type column %q not found in header", a.config.typeColumn)).
+			WithSpan(headerSpan(source)).Build())
 		return nil, collector.Result()
 	}
 
 	results := make(map[string][]instance.RawInstance)
-	row := startRow
+	parsed := 0
+	var lastSpan location.Span
 	for {
 		if err := ctx.Err(); err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_CONTEXT_CANCELLED,
-				fmt.Sprintf("csv parse cancelled at row %d", row)).Build())
+				fmt.Sprintf("csv parse cancelled after %d records", parsed)).
+				WithSpan(lastSpan).Build())
 			break
 		}
 
@@ -130,23 +197,26 @@ func (a *Adapter) ParseWithTypeColumn(
 		}
 		if err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-				fmt.Sprintf("row %d: %s", row, err)).Build())
-			row++
+				fmt.Sprintf("csv parse: %s", err)).
+				WithSpan(parseErrorSpan(source, err)).Build())
 			continue
 		}
 
+		lastSpan = recordSpan(source, reader, record)
+		parsed++
+
 		if typeColIdx >= len(record) {
 			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-				fmt.Sprintf("row %d: too few columns for type column", row)).Build())
-			row++
+				"too few columns for type column").
+				WithSpan(lastSpan).Build())
 			continue
 		}
 
 		typeName := record[typeColIdx]
 		if typeName == "" {
 			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-				fmt.Sprintf("row %d: empty type column", row)).Build())
-			row++
+				"empty type column").
+				WithSpan(lastSpan).Build())
 			continue
 		}
 
@@ -165,25 +235,30 @@ func (a *Adapter) ParseWithTypeColumn(
 			}
 		}
 
-		props := a.recordToProps(filteredVals, filteredCols, schemaType, row, typeName, collector)
-		results[typeName] = append(results[typeName], instance.RawInstance{Properties: props})
-		row++
+		props := a.recordToProps(filteredVals, filteredCols, schemaType, lastSpan, typeName, collector)
+		results[typeName] = append(results[typeName], instance.RawInstance{
+			Properties: props,
+			Provenance: location.NewProvenance(
+				source.String(),
+				path.Root().Key(typeName).Index(len(results[typeName])),
+				lastSpan,
+			),
+		})
 	}
 
 	return results, collector.Result()
 }
 
-// readHeader reads the header row (if configured) and returns column names
-// and the starting row number for data rows.
-func (a *Adapter) readHeader(reader *csv.Reader) (columns []string, startRow int, err error) {
+// readHeader reads the header row and returns its column names.
+func (a *Adapter) readHeader(reader *csv.Reader) (columns []string, err error) {
 	if a.config.hasHeader {
 		header, err := reader.Read()
 		if err != nil {
-			return nil, 0, fmt.Errorf("reading header: %w", err)
+			return nil, fmt.Errorf("reading header: %w", err)
 		}
-		return header, 2, nil // data starts at row 2 (1-indexed, header is row 1)
+		return header, nil
 	}
-	return nil, 1, nil // no header; columns will be generated from indices
+	return nil, nil
 }
 
 // recordToProps converts a CSV record to a property map with type
@@ -195,7 +270,7 @@ func (a *Adapter) recordToProps(
 	record []string,
 	columns []string,
 	schemaType *schema.Type,
-	row int,
+	span location.Span,
 	typeName string,
 	collector *diag.Collector,
 ) map[string]any {
@@ -224,14 +299,16 @@ func (a *Adapter) recordToProps(
 				rel, isAssoc := assocByField[field]
 				if !isAssoc {
 					collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-						fmt.Sprintf("row %d: dotted column %q does not match an association field of %q", row, colName, typeName)).
+						fmt.Sprintf("dotted column %q does not match an association field of %q", colName, typeName)).
+						WithSpan(span).
 						WithDetail(diag.DetailKeyTypeName, typeName).Build())
 					continue
 				}
 				if !strings.HasPrefix(suffix, "_target_") {
 					if _, ok := rel.Property(suffix); !ok {
 						collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-							fmt.Sprintf("row %d: column %q names neither a _target_ component nor an edge property of %q", row, colName, rel.Name())).
+							fmt.Sprintf("column %q names neither a _target_ component nor an edge property of %q", colName, rel.Name())).
+							WithSpan(span).
 							WithDetail(diag.DetailKeyTypeName, typeName).Build())
 						continue
 					}
@@ -260,7 +337,8 @@ func (a *Adapter) recordToProps(
 				coerced, err := a.coerceStringValue(val, prop.Constraint())
 				if err != nil {
 					collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-						fmt.Sprintf("row %d, column %q: %s", row, colName, err)).
+						fmt.Sprintf("column %q: %s", colName, err)).
+						WithSpan(span).
 						WithDetail(diag.DetailKeyTypeName, typeName).Build())
 					props[colName] = val // keep raw string on coercion failure
 					continue
@@ -275,7 +353,7 @@ func (a *Adapter) recordToProps(
 	}
 
 	for field, cells := range groups {
-		a.assembleEdgeGroup(field, cells, assocByField[field], row, typeName, collector, props)
+		a.assembleEdgeGroup(field, cells, assocByField[field], span, typeName, collector, props)
 	}
 
 	return props
@@ -291,7 +369,7 @@ func (a *Adapter) assembleEdgeGroup(
 	field string,
 	cells map[string]string,
 	rel *schema.Relation,
-	row int,
+	span location.Span,
 	typeName string,
 	collector *diag.Collector,
 	props map[string]any,
@@ -307,7 +385,8 @@ func (a *Adapter) assembleEdgeGroup(
 			n = len(segs)
 		} else if len(segs) != n {
 			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-				fmt.Sprintf("row %d: association %q columns disagree on target count (%d vs %d)", row, field, n, len(segs))).
+				fmt.Sprintf("association %q columns disagree on target count (%d vs %d)", field, n, len(segs))).
+				WithSpan(span).
 				WithDetail(diag.DetailKeyTypeName, typeName).Build())
 			return
 		}
@@ -349,7 +428,8 @@ func (a *Adapter) assembleEdgeGroup(
 			coerced, err := a.coerceStringValue(seg, c)
 			if err != nil {
 				collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-					fmt.Sprintf("row %d, column %q.%s: %s", row, field, suffix, err)).
+					fmt.Sprintf("column %q.%s: %s", field, suffix, err)).
+					WithSpan(span).
 					WithDetail(diag.DetailKeyTypeName, typeName).Build())
 				obj[suffix] = seg
 				continue

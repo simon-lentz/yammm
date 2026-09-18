@@ -34,17 +34,26 @@ func DetectFormat(path string) (string, error) {
 
 // LoadAndParseJSON reads a JSON file and parses it into raw instances.
 //
-// Returns (T, diag.Result, error) because the error return captures I/O
-// failures (file not found, permission denied) which are distinct from
-// semantic parse issues reported through the diag.Result. This is an
-// internal CLI helper, not a public API.
+// The identity and the host path come out of one resolution, as the schema
+// loader takes them, so a data diagnostic and a schema diagnostic name one file
+// the same way.
+//
+// Returns (T, diag.Result, error) because the error return captures the
+// failures that stop a read — a path that names no file, one that cannot be
+// read — which are distinct from semantic parse issues reported through the
+// diag.Result. A path the resolver refuses is a usage failure and reaches a
+// different exit code from a file that cannot be read; [ExitForError] decides.
+// This is an internal CLI helper, not a public API.
 func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.RawInstance, diag.Result, error) {
-	data, err := os.ReadFile(path)
+	sourceID, hostPath, err := location.ResolveSourcePath(path)
+	if err != nil {
+		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
+	}
+
+	data, err := os.ReadFile(hostPath)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("read data file: %w", err)
 	}
-
-	sourceID := location.NewSourceID("file://" + path)
 
 	parsed, result := adapterjson.New().ParseObject(ctx, sourceID, data)
 	return parsed, result, nil
@@ -54,17 +63,23 @@ func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.R
 // The typeName parameter specifies the schema type for the rows.
 // If typeColumn is non-empty, it is used instead of typeName for multi-type CSVs.
 //
+// The identity and the host path come out of one resolution, as
+// [LoadAndParseJSON] takes them; the handle is opened on the path it returns.
+//
 // Returns (T, diag.Result, error) because the error return captures I/O
 // failures (file open errors) which are distinct from semantic parse
 // issues reported through the diag.Result.
 func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *schema.Schema) (map[string][]instance.RawInstance, diag.Result, error) {
-	f, err := os.Open(path)
+	sourceID, hostPath, err := location.ResolveSourcePath(path)
+	if err != nil {
+		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
+	}
+
+	f, err := os.Open(hostPath)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("open data file: %w", err)
 	}
 	defer f.Close()
-
-	sourceID := location.NewSourceID("file://" + path)
 
 	if typeColumn != "" {
 		adapter := csv.New(csv.WithTypeColumn(typeColumn))

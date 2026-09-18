@@ -883,9 +883,11 @@ payload breaks in a way no declaration describes (below).
 
 **With unit 6's six additions, `gorelease -base=v0.21.0` reads eighteen
 compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Unit
-8's first group adds `schema.AddressableTag`, `schema.Addressable` and
+8's addressability group adds `schema.AddressableTag`, `schema.Addressable` and
 `diag.E_SNAPSHOT_UNNAMEABLE_TYPE`, taking the compatible count to twenty-one; it
-removes and changes no declaration. Each
+removes and changes no declaration. **Unit 8's other groups so far move no
+declaration**: the instruments group and the provenance group each read
+twenty-one and seven, byte-identical. Each
 block below was written by the pass or group that landed its behaviour.
 
 ### Unit 8 — one addressability rule, and every root held to it
@@ -905,6 +907,28 @@ block below was written by the pass or group that landed its behaviour.
 - **Behaviour, no declaration moved: `graph.Snapshot.Types`'s godoc said it returns "every type identity in the graph".** It returns every ROOT type identity; a composed child's type is absent unless a root of that type is present too. The godoc now says so, and states that every identity it returns is one the bound schema can name.
 
 - **Consumer impact: none, measured.** rdata declares no `RebuildSnapshot` or `NewFromSnapshot` caller, and every concrete type in its five closures is one its entry schema can name, so no document of its own can hold a root this rule refuses. `StructuralHashVersion` is unchanged, so the tier-2 release adds no second hash invalidation.
+
+### Unit 8 — the data parsers record provenance, and the CLI mints a data file's identity
+
+- **Behaviour — every instance `adapter/json` and `adapter/csv` parse now carries a `location.Provenance`. The two halves have different histories.** `adapter/json` recorded provenance through `v0.11.0` and lost it in `v0.12.0`, whose own section below records the removal; what returns is not what went, because the path then indexed the document root (`$[0]`) and now names the type (`$.Person[0]`). `adapter/csv` **never** recorded provenance in any release — its parser was born building `instance.RawInstance{Properties: …}` and nothing else — so for CSV this is a first, not a restoration. Before this release a data-file diagnostic printed with no file, no line and no instance identity. Each instance now carries the source the caller named, a path under its type name, and a point span at its start. The validator already composed property paths on it, so a property diagnostic now locates the cell as well as the instance.
+
+- **The two adapters index that path by different rules, because their formats differ.** `adapter/json` uses the element's position in the document's own array, so `$.Person[2]` addresses the document even where element 1 failed to decode. CSV has no path language and no stable record address — a record ordinal is what this release removes from the diagnostics — so `adapter/csv` uses the instance's position among the instances of its type the parser produced. Under `ParseWithTypeColumn` that is the only well-defined per-type index at all: a record the reader refuses carries no type, so it can consume no type's index.
+
+- **Behaviour — every parse diagnostic carries a span.** `adapter/json` reports the decoder's own offset, converted over the bytes the caller passed rather than over the buffer JSONC preprocessing returns: that buffer replaces each comment BYTE with one space, so a multibyte rune inside a comment would move every later column on its line. Columns count runes, and decompose a malformed UTF-8 sequence exactly as the converter the schema loader reads through does. **A leading UTF-8 byte order mark is trimmed before decoding and its length added back, so it occupies column 1 and every position after it is one column further** — the mark is a character of the file, and positions are measured in the file. (`schema`'s loader refuses a byte order mark outright rather than trimming it, so the two loaders differ on that byte by design.)
+
+- **Behaviour — no `adapter/csv` diagnostic names a record ordinal, and NINE message texts change.** `row %d` was a record counter, so every "row N" was wrong for a file holding a quoted newline, and the count could not name a line at all. A record's position now comes from the reader, which counts lines. Every message that carried the prefix loses it: `row %d: %s` reads `csv parse: %s`; `row %d, column %q: %s` reads `column %q: %s`; `row %d, column %q.%s: %s` reads `column %q.%s: %s`; and the prefix is dropped outright from `too few columns for type column`, `empty type column`, `dotted column %q does not match an association field of %q`, `column %q names neither a _target_ component nor an edge property of %q` and `association %q columns disagree on target count (%d vs %d)`. `csv parse cancelled at row %d` reads `csv parse cancelled after %d records`, a count that is true where the ordinal's line was not. **A caller matching on the text of a CSV diagnostic is affected; a caller matching on `E_CSV_COERCE` or `E_CONTEXT_CANCELLED` is not.**
+
+- **A CSV span carries a line and column 1, never the reader's column.** `csv.Reader.FieldPos` and `csv.ParseError.Column` are 1-based BYTE indices and `location.Position.Column` counts runes; the adapter parses an `io.Reader` and never holds the line it would need to convert one. A record the reader refuses is located from the parse error, at the start of the line the fault is on; a reader error that is not a parse error carries no position at all. The two refusals that happen before any record — a header that cannot be read, and a type column missing from the header — now carry a span on line 1, where they had none.
+
+- **Behaviour — `yammm` mints a data file's identity as it mints a schema file's, and a `.ys` written from a data file gains a populated `provenance` block.** The CLI built `location.NewSourceID("file://" + path)`, a synthetic identity for a real file: two spellings of one path gave two identities, and the identity did not match the one the schema loader mints for a file in the same directory. Both data entry points now take the identity and the host path out of one `location.ResolveSourcePath` call, as `schema.Load` does. Four consequences, each user-visible:
+  - The `.ys` `provenance` key was always written and always `null` (`instanceWire.Provenance` carries no `omitempty`); its VALUE becomes an object. A consumer keying on the key's presence is unaffected; one keying on `null` is.
+  - `source_name` is an absolute canonical path — the same kind of value the header's `schema_source` already carries.
+  - A data file named through a symlink records the TARGET's identity, not the spelling given, so a `.ys` written from `alias.json` names `data.json`.
+  - A text diagnostic prints the path RELATIVE to the renderer's root where the file is under it, and the absolute canonical path where it is not; under `--format json` a data diagnostic's `span.source` and `sourceName` change from `file://<the spelling>` to that canonical path.
+
+- **Exit code — an EMPTY data-file path reports 2 where it reported 3.** `location.ResolveSourcePath` refuses an empty path with `location.ErrEmptyPath`, which is not a filesystem error, so `cli.ExitForError` classifies it as a usage failure; the previous `os.ReadFile("")` produced an `fs.PathError` and a runtime failure. **This makes the data path agree with the schema path**, which has answered 2 for an empty path all along. A missing file, a directory, a dangling symlink and a path descending through a regular file are all unchanged at 3.
+
+- **Consumer impact: none, measured.** rdata imports neither data parser, so no `.ys` file of its own gains a populated provenance block, and it matches diagnostic codes rather than wording. `StructuralHashVersion` is unchanged at 4.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 

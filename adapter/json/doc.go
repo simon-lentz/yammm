@@ -36,6 +36,25 @@
 // Input is preprocessed with [tidwall/jsonc], so comments and trailing commas
 // are tolerated.
 //
+// # Provenance
+//
+// Every instance carries a [location.Provenance]: the source the caller named,
+// the instance's path in the document ($.Person[0]), and a point span at its
+// opening brace. Every parse diagnostic carries a span in that source too.
+//
+// The path indexes the document's own array, so $.Person[2] addresses the
+// document even where element 1 failed to decode. [adapter/csv] indexes by the
+// instances it produced instead, because CSV has no path language.
+//
+// Columns count runes from the line start of the bytes passed in, never of the
+// buffer jsonc returns: jsonc writes one space per comment BYTE, so a multibyte
+// rune inside a comment would move every later column on its line. A malformed
+// UTF-8 sequence decomposes byte by byte, as it does for a schema source.
+//
+// A leading byte order mark is trimmed before decoding and its length added back
+// to every offset, so it occupies column 1 and every position after it sits one
+// column further: positions are measured in the file the caller passed.
+//
 // # Type Tag Resolution
 //
 // Top-level keys are validated as type names. Unqualified type names resolve
@@ -62,8 +81,9 @@
 //
 // # Dependencies
 //
-//	adapter/json  ──imports──▶  instance, diag, location, graph, immutable, schema,
-//	                            adapter/json/internal/typetag, github.com/tidwall/jsonc
+//	adapter/json  ──imports──▶  instance, diag, location, location/path, graph,
+//	                            immutable, schema, adapter/json/internal/typetag,
+//	                            github.com/tidwall/jsonc
 //
 // [tidwall/jsonc]: https://github.com/tidwall/jsonc
 package json

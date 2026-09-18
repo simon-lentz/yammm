@@ -1186,6 +1186,8 @@ byType, result := adapter.ParseObject(ctx, source, data)
 
 `ParseArray`, `ParseTypedArray` and `ParseOne` were removed in v0.12.0.
 
+**Every instance carries provenance.** `source` names the document, and each `RawInstance.Provenance` holds that name, the instance's path in the document (`$.Person[0]`, indexing the array as the document writes it, so a failed element still consumes its index) and a point span at its opening brace. Every parse diagnostic carries a span in `source` too. Columns count runes from the line start of the bytes passed in, not of the buffer JSONC preprocessing returns — that buffer replaces each comment byte with one space, so a multibyte rune inside a comment would move every later column on its line — and a malformed UTF-8 sequence decomposes exactly as it does for schema sources. A leading byte order mark is trimmed before decoding and its length added back, so it occupies column 1 and every position after it sits one column further.
+
 ### Serialization
 
 ```go
@@ -1562,6 +1564,8 @@ byType, result := adapter.ParseWithTypeColumn(ctx, source, reader, typeResolver)
 `ParseTyped` and `ParseWithTypeColumn` are the whole parse surface; `ParseOne` was removed in v0.12.0.
 
 The `typeResolver` parameter is a `func(string) *schema.Type` that maps type column values to schema types.
+
+**Every instance carries provenance.** `source` names the document, and each `RawInstance.Provenance` holds that name, the instance's path under its own type (`$.Entity[0]`, indexing the instances of that type the parser produced), and a point span at the start of its record. Every row diagnostic carries that span, and none names a record ordinal: a record's line comes from the reader, so a quoted newline moves it as the file reads. A span's column is always 1 — `encoding/csv` counts columns in bytes and `location.Position` counts runes, and an adapter reading an `io.Reader` never holds the line it would need to convert one. A record the reader refuses is located from the parse error, at the start of the line the fault is on; a reader error that is not a parse error carries no position. The header refusals carry a span on line 1.
 
 ### Serialization
 
