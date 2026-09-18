@@ -82,7 +82,7 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 	defer f.Close()
 
 	if typeColumn != "" {
-		adapter := csv.New(csv.WithTypeColumn(typeColumn))
+		adapter := csv.New(csv.WithTypeColumn(typeColumn), csv.WithSchema(s))
 		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) *schema.Type {
 			t, _ := s.ResolveTypeName(name)
 			return t
@@ -96,7 +96,7 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 	if !ok {
 		return nil, diag.Result{}, fmt.Errorf("type %q not found in schema", typeName)
 	}
-	raws, result := csv.New().ParseTyped(ctx, sourceID, typeName, f, schemaType)
+	raws, result := csv.New(csv.WithSchema(s)).ParseTyped(ctx, sourceID, typeName, f, schemaType)
 	return map[string][]instance.RawInstance{typeName: raws}, result, nil
 }
 

@@ -364,9 +364,10 @@ func TestParseTyped_DottedColumnDiagnosticsCarryTheRecordSpan(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		header string
+		want   string // the branch's own message, so a case cannot pass on the other
 	}{
-		{"no such association field", "employee_id,name,nosuch._target_company_id"},
-		{"neither a component nor an edge property", "employee_id,name,WORKS_AT.bogus"},
+		{"no such association field", "employee_id,name,nosuch._target_company_id", "does not match an association field"},
+		{"neither a component nor an edge property", "employee_id,name,works_at.bogus", "names neither a _target_ component"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -376,6 +377,9 @@ func TestParseTyped_DottedColumnDiagnosticsCarryTheRecordSpan(t *testing.T) {
 			issue, ok := firstIssue(result)
 			if !ok {
 				t.Fatalf("no diagnostic")
+			}
+			if !strings.Contains(issue.Message(), c.want) {
+				t.Fatalf("diagnostic %q is not the %s branch's", issue.Message(), c.name)
 			}
 			if !issue.HasSpan() {
 				t.Fatalf("diagnostic %q carries no span", issue.Message())

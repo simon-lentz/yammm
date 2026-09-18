@@ -261,11 +261,13 @@ func (a *Adapter) readHeader(reader *csv.Reader) (columns []string, err error) {
 	return nil, nil
 }
 
-// recordToProps converts a CSV record to a property map with type
-// coercion. Dotted edge columns (<field>."_target_"<pk>, <field>.<prop>)
-// classify before the null mapping — an empty cell there means an absent
-// group, never a null property — and assemble into the "_target_" objects
-// the validator accepts.
+// recordToProps converts a CSV record to a property map with type coercion.
+// The schema, not the wire, decides what an empty cell is: see [emptyCell]. A
+// column the row's type does not declare is skipped when empty and reported
+// when not, so a header that unions several types' columns parses every row.
+// Dotted edge columns (<field>."_target_"<pk>, <field>.<prop>) assemble into
+// the "_target_" objects the validator accepts. With no schema type every
+// cell is kept as its string, the empty one included.
 func (a *Adapter) recordToProps(
 	record []string,
 	columns []string,
@@ -293,63 +295,66 @@ func (a *Adapter) recordToProps(
 			colName = strconv.Itoa(i)
 		}
 
-		// Edge columns first: their empty cell is the absent-group marker.
-		if schemaType != nil {
-			if field, suffix, dotted := strings.Cut(colName, "."); dotted {
-				rel, isAssoc := assocByField[field]
-				if !isAssoc {
-					collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-						fmt.Sprintf("dotted column %q does not match an association field of %q", colName, typeName)).
-						WithSpan(span).
-						WithDetail(diag.DetailKeyTypeName, typeName).Build())
-					continue
-				}
-				if !strings.HasPrefix(suffix, "_target_") {
-					if _, ok := rel.Property(suffix); !ok {
-						collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-							fmt.Sprintf("column %q names neither a _target_ component nor an edge property of %q", colName, rel.Name())).
-							WithSpan(span).
-							WithDetail(diag.DetailKeyTypeName, typeName).Build())
-						continue
-					}
-				}
-				if groups == nil {
-					groups = make(map[string]map[string]string)
-				}
-				if groups[field] == nil {
-					groups[field] = make(map[string]string)
-				}
-				groups[field][suffix] = val
-				continue
-			}
-		}
-
-		// Null check.
-		if val == a.config.nullValue {
-			props[colName] = nil
+		if schemaType == nil {
+			props[colName] = val
 			continue
 		}
 
-		// Coerce if schema type available.
-		if schemaType != nil {
-			prop, found := schemaType.Property(colName)
-			if found {
-				coerced, err := a.coerceStringValue(val, prop.Constraint())
-				if err != nil {
-					collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-						fmt.Sprintf("column %q: %s", colName, err)).
-						WithSpan(span).
-						WithDetail(diag.DetailKeyTypeName, typeName).Build())
-					props[colName] = val // keep raw string on coercion failure
-					continue
+		if field, suffix, dotted := strings.Cut(colName, "."); dotted {
+			rel, isAssoc := assocByField[field]
+			if !isAssoc {
+				if val == "" {
+					continue // another type's edge column in a union header
 				}
-				props[colName] = coerced
+				collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+					fmt.Sprintf("dotted column %q does not match an association field of %q", colName, typeName)).
+					WithSpan(span).
+					WithDetail(diag.DetailKeyTypeName, typeName).Build())
 				continue
 			}
+			if !strings.HasPrefix(suffix, "_target_") {
+				if _, ok := rel.Property(suffix); !ok {
+					if val == "" {
+						continue
+					}
+					collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+						fmt.Sprintf("column %q names neither a _target_ component nor an edge property of %q", colName, rel.Name())).
+						WithSpan(span).
+						WithDetail(diag.DetailKeyTypeName, typeName).Build())
+					continue
+				}
+			}
+			if groups == nil {
+				groups = make(map[string]map[string]string)
+			}
+			if groups[field] == nil {
+				groups[field] = make(map[string]string)
+			}
+			groups[field][suffix] = val
+			continue
 		}
 
-		// No schema or unknown property: keep as string.
-		props[colName] = val
+		prop, found := schemaType.Property(colName)
+		if !found {
+			if val != "" {
+				props[colName] = val // the validator reports the unknown field
+			}
+			continue
+		}
+		if val == "" {
+			props[colName] = a.emptyCell(prop)
+			continue
+		}
+		coerced, err := a.coerceStringValue(val, prop.Constraint())
+		if err != nil {
+			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+				fmt.Sprintf("column %q: %s", colName, err)).
+				WithSpan(span).
+				WithDetail(diag.DetailKeyTypeName, typeName).Build())
+			props[colName] = val // keep raw string on coercion failure
+			continue
+		}
+		props[colName] = coerced
 	}
 
 	for field, cells := range groups {
@@ -359,12 +364,36 @@ func (a *Adapter) recordToProps(
 	return props
 }
 
+// emptyCell decides what an empty cell holds for a declared property. The wire
+// cannot: [csv.Writer] writes the empty string and a missing value as the same
+// empty field, and [csv.Reader] reads a quoted empty field as a bare one.
+//
+// A required property's empty cell is the empty rendering of its kind when the
+// kind has one — "" for a String, [] for a List — because a required property
+// cannot be null. Where the kind has none (an Integer, a Date), it is nil, so
+// the validator reports the property missing. An optional property's empty
+// cell is nil, so an optional "" or [] reads back as null.
+func (a *Adapter) emptyCell(p *schema.Property) any {
+	if p.IsOptional() {
+		return nil
+	}
+	v, err := a.coerceStringValue("", p.Constraint())
+	if err != nil {
+		return nil
+	}
+	return v
+}
+
 // assembleEdgeGroup zips one relation's edge cells into the validator's
 // shape: each cell splits into one segment per target on the escaped list
-// separator, segment counts must agree, and an all-empty group means the
-// edge is absent. An empty segment means the optional edge property is
-// absent on that target. Edge properties are scalars by language rule,
-// which is why zipping is well-founded.
+// separator, and segment counts must agree. The group is absent only when
+// every cell in it is empty; inside a present group an empty cell stands for an
+// empty segment on every target, since the writer writes n-1 separators for n
+// empty segments and a hand-written file may leave a column blank. An empty
+// foreign-key segment is decided by the target's key, which [WithSchema]
+// supplies; an empty edge-property segment follows [Adapter.emptyCell]'s rule.
+// Edge properties are scalars by language rule, which is why zipping is
+// well-founded.
 func (a *Adapter) assembleEdgeGroup(
 	field string,
 	cells map[string]string,
@@ -395,6 +424,11 @@ func (a *Adapter) assembleEdgeGroup(
 	if n == -1 {
 		return // every cell empty: the edge is absent
 	}
+	for suffix, cell := range cells {
+		if cell == "" {
+			segsBySuffix[suffix] = make([]string, n)
+		}
+	}
 
 	var targetType *schema.Type
 	if a.config.schema != nil {
@@ -406,17 +440,35 @@ func (a *Adapter) assembleEdgeGroup(
 		obj := make(map[string]any, len(segsBySuffix))
 		for suffix, segs := range segsBySuffix {
 			seg := segs[t]
-			if seg == "" {
-				continue // absent on this target
-			}
 			var c schema.Constraint
 			if pkName, isFK := strings.CutPrefix(suffix, "_target_"); isFK {
+				var key *schema.Property
 				if targetType != nil {
-					if pk, ok := targetType.Property(pkName); ok {
-						c = pk.Constraint()
+					if pk, ok := targetType.Property(pkName); ok && pk.IsPrimaryKey() {
+						key = pk
 					}
 				}
+				if seg == "" {
+					// Without the target's keys an empty segment cannot be told
+					// from another type's column in a union header, so it is
+					// absent; so is one whose key kind has no empty rendering.
+					if key != nil {
+						if v, err := a.coerceStringValue("", key.Constraint()); err == nil {
+							obj[suffix] = v
+						}
+					}
+					continue
+				}
+				if key != nil {
+					c = key.Constraint()
+				}
 			} else if p, ok := rel.Property(suffix); ok {
+				if seg == "" {
+					if v := a.emptyCell(p); v != nil {
+						obj[suffix] = v
+					}
+					continue // an edge property is never null: absent on this target
+				}
 				c = p.Constraint()
 			}
 			if c == nil {

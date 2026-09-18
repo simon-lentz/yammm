@@ -7,7 +7,6 @@ type adapterConfig struct {
 	delimiter  rune
 	hasHeader  bool
 	typeColumn string // empty = no type column
-	nullValue  string // string that represents nil
 	listSep    string // list element separator
 	schema     *schema.Schema
 }
@@ -29,7 +28,6 @@ func New(opts ...Option) *Adapter {
 	cfg := adapterConfig{
 		delimiter: ',',
 		hasHeader: true,
-		nullValue: "",
 		listSep:   "|",
 	}
 	for _, opt := range opts {
@@ -59,11 +57,14 @@ func WithListSeparator(sep string) Option {
 	}
 }
 
-// WithSchema gives the parser the import closure it needs to coerce
-// foreign-key components in edge columns: the component's constraint lives
-// on the association's target type, which the per-call [*schema.Type]
-// cannot reach. Without it, FK components stay strings — sufficient for
-// string-keyed targets, and the validator reports the rest.
+// WithSchema gives the parser the import closure, and with it each
+// association's target type, which the per-call [*schema.Type] cannot reach.
+// The parser needs the target's primary keys to read an empty foreign-key
+// segment: with them, it is the key's empty value where the key's kind has one
+// and is otherwise absent, and an empty column naming no key of the target is
+// skipped. Without it every empty foreign-key segment is absent. A non-empty
+// segment keeps its text either way, except that a Date or Timestamp key that
+// does not parse draws E_CSV_COERCE here rather than a validator error.
 func WithSchema(s *schema.Schema) Option {
 	return func(c *adapterConfig) {
 		c.schema = s

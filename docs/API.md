@@ -1545,7 +1545,7 @@ adapter := csv.New(opts...)
 | ------ | ----------- |
 | `WithTypeColumn` | Column name for type tagging (multi-type CSV) |
 | `WithListSeparator` | Separator for list elements, vector elements, and `(many)` relation groups (default `|`); read by both the parse and write sides |
-| `WithSchema` | The schema, so foreign-key cells coerce through the **target** type's primary-key constraints on parse |
+| `WithSchema` | The schema, so the parser reaches each association's **target** type: it decides an empty foreign-key segment by the target's keys (see Empty Cells), and a Date or Timestamp key component that does not parse draws `E_CSV_COERCE` on parse. The CLI passes it |
 
 The delimiter is `,`, the first row is the header, and list values join on the list separator. A separator or backslash inside an element is backslash-escaped on write and unescaped on parse, so a `|`-bearing element survives the round trip.
 
@@ -1595,7 +1595,15 @@ On the write side the adapter renders `Timestamp`, `Date` and `UUID` through the
 
 ### Relation Columns
 
-An association renders as dotted columns (v0.15.0): one `<field>._target_<pk>` column per target key component and one `<field>.<prop>` column per declared edge property — the same `_target_` shape the JSON adapter and `instance.Validator` exchange. A `(many)` association zips its group across the list separator: segment `i` of every column in the group describes target `i`, and the segment counts must agree (`E_CSV_COERCE` names the relation on a mismatch). An all-empty group means the association is absent; an empty segment means that optional edge property is absent on that target. Edge properties are scalars by language rule — a `List`-typed relation property draws `E_LIST_ON_EDGE` and a `Vector`-typed one draws `E_INVALID_CONSTRAINT` — which is what makes zipping well-founded.
+An association renders as dotted columns (v0.15.0): one `<field>._target_<pk>` column per target key component and one `<field>.<prop>` column per declared edge property — the same `_target_` shape the JSON adapter and `instance.Validator` exchange. A `(many)` association zips its group across the list separator: segment `i` of every column in the group describes target `i`, and the segment counts must agree (`E_CSV_COERCE` names the relation on a mismatch). A group is absent only when every cell in it is empty; inside a present group an empty cell stands for an empty segment on every target. Empty segments are read as Empty Cells states. Edge properties are scalars by language rule — a `List`-typed relation property draws `E_LIST_ON_EDGE` and a `Vector`-typed one draws `E_INVALID_CONSTRAINT` — which is what makes zipping well-founded.
+
+### Empty Cells
+
+The schema decides what an empty cell holds, because `encoding/csv` writes the empty string and a missing value as the same field and reads a quoted empty field as a bare one. For a declared property an empty cell is `nil` where the property is optional. Where it is required it is the empty value of its kind — `""` for a String, UUID, enum or pattern, an empty list for a List or Vector — which the validator checks like any other value, as it checks the JSON adapter's `""` and `[]`; where the kind has none (Integer, Float, Boolean, Date, Timestamp) it is `nil`, and the validator reports the property missing. An empty cell in a column the row's type does not declare is skipped, so a header that unions several types' columns parses every row under `WithTypeColumn`; a value there is still reported. With a nil `*schema.Type`, every cell is kept as its string, the empty one included.
+
+In a relation group, an empty foreign-key segment is the key's empty value where `WithSchema` supplies the target's keys and the key's kind has one (String, UUID); otherwise it is absent, and the validator reports the missing component. An empty edge-property segment follows the property rule, except that an edge property is never null: an optional one, or a required one whose kind has no empty value, is absent on that target.
+
+An optional property holding `""` or an empty list writes the cell null writes and reads back as null; this is a documented limitation. Two values the writer cannot express are refused with an error naming the instance: a list holding one empty element, which writes the cell an empty list writes, and a lone association target whose key components are all `""` and whose edge properties are all absent or `""`, which writes the cell an absent edge writes. A single-column row holding `""` is written as a quoted empty field, since a blank line would be skipped on the way back.
 
 ### Limitations
 

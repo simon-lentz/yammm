@@ -48,12 +48,52 @@
 // (the backslash escapes itself and the separator), so an element
 // containing the separator survives the round trip.
 //
-// # Null Handling
+// # Empty Cells
 //
-// An empty cell in a property column is treated as nil. An edge column is
-// different: an all-empty group means the edge is absent, and an empty
-// segment means the optional edge property is absent on that target —
-// never null, which the validator rejects for edges.
+// The schema, not the wire, decides what an empty cell holds. [encoding/csv]
+// writes the empty string and a missing value as the same empty field, and
+// reads a quoted empty field as a bare one, so no spelling of a cell can say
+// which one it carries.
+//
+// For a property the row's type declares, an empty cell is nil where the
+// property is optional. Where it is required it is the empty value of the
+// property's kind — "" for a String, a UUID, an enum or a pattern, an empty
+// list for a List or a Vector — which the validator then checks like any other
+// value, as it checks the JSON adapter's "" and []: an empty required UUID
+// draws E_CONSTRAINT_FAIL, and a pattern that admits "" accepts it. Where the
+// kind has no empty value (an Integer, a Float, a Boolean, a Date, a
+// Timestamp) the cell is nil, and the validator reports the property missing.
+//
+// An empty cell in a column the row's type does not declare is skipped, so a
+// header that unions several types' columns — the only shape a file read with
+// [WithTypeColumn] can take — parses every row. A value in such a column is
+// still reported: as E_CSV_COERCE for a dotted column that names no
+// association or edge property of the row's type, and by the validator for a
+// plain column or a key component the target does not declare.
+//
+// An edge group is absent only when every cell in it is empty. Inside a present
+// group an empty cell stands for an empty segment on every target. An empty
+// foreign-key segment is the key's empty value where [WithSchema] supplies the
+// target's keys and the key's kind has one (a String or a UUID); otherwise it
+// is absent, and the validator reports the missing component. An empty
+// edge-property segment follows the property rule above, except that an edge
+// property is never null, so an optional one, or a required one whose kind has
+// no empty value, is absent on that target.
+//
+// These values cannot be written so that they read back unchanged:
+//
+//   - An optional property holding "" or an empty list writes the cell null
+//     writes, so it reads back as null. This is a documented limitation: a
+//     null-sentinel option would exist only to express a case the
+//     specification calls a value, and the schema decides every other case.
+//   - A list holding one empty element writes the cell an empty list writes.
+//     A lone association target whose key components are all "" and whose
+//     edge properties are all absent or "" writes the cell an absent edge
+//     writes. The writer refuses both with an error naming the instance,
+//     rather than let an element or an association vanish on the way back.
+//   - A row whose only field is empty — a single-column type whose key is "" —
+//     is written as a quoted empty field, because [encoding/csv.Writer] would
+//     write a blank line, which [encoding/csv.Reader] skips.
 //
 // # Foreign Keys
 //
@@ -63,10 +103,12 @@
 // counts across a group must agree, or the row draws E_CSV_COERCE naming
 // the relation.
 //
-// FK components coerce against the target type's primary-key constraints
-// when the adapter is constructed with [WithSchema]; without it they stay
-// strings, which string-keyed targets accept and the validator reports for
-// the rest.
+// [WithSchema] gives the parser each association's target type. A non-empty
+// key component keeps its text either way: every kind a primary key may take
+// (String, UUID, Date, Timestamp) reads as the text it was written as. A Date
+// or Timestamp component that does not parse draws E_CSV_COERCE with the
+// option and the validator's error without it. What the option decides is an
+// EMPTY segment, under Empty Cells above.
 //
 // During snapshot serialization ([Adapter.MarshalSnapshot], [Adapter.WriteSnapshot]),
 // edge columns are populated from the snapshot's edge index via [graph.Snapshot]

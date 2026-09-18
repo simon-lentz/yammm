@@ -14,9 +14,9 @@ import (
 // coerceStringValue converts a raw CSV string to a typed Go value
 // based on the schema constraint for that property.
 //
-// Returns (nil, nil) for null values (matching the configured null string).
-// Returns (value, nil) on success.
-// Returns ("", error) when the string cannot be parsed as the target type.
+// Returns (value, nil) on success, and (nil, error) when the string cannot be
+// parsed as the target type. It never returns nil for success: an empty string
+// is either the kind's empty rendering ("" or []) or an error.
 //
 // Date and Timestamp values are validated but kept as strings in the output,
 // matching the JSON adapter's behavior. Temporal coercion to driver types
@@ -74,14 +74,23 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 		return raw, nil
 
 	case schema.KindVector:
-		return a.parseVectorValue(raw)
+		// Returned through a nil check: a nil []any in an any is not nil.
+		v, err := a.parseVectorValue(raw)
+		if err != nil {
+			return nil, err
+		}
+		return v, nil
 
 	case schema.KindList:
 		lc, ok := c.(schema.ListConstraint)
 		if !ok {
-			return raw, nil
+			return nil, fmt.Errorf("list constraint of unexpected form %T", c)
 		}
-		return a.parseListValue(raw, lc)
+		v, err := a.parseListValue(raw, lc)
+		if err != nil {
+			return nil, err
+		}
+		return v, nil
 
 	case schema.KindAlias:
 		// Unreachable in a completed schema: c is alias-resolved above. Listed to

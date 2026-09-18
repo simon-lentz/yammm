@@ -16,23 +16,6 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// writeConfig holds the per-call serialization settings. No option constructs
-// one: WithWriteHeader and WithWriteNullString were removed in v0.12.0, so
-// defaultWriteConfig is the only producer and both fields are effectively
-// constant. The struct stays because the write path threads it through
-// instanceToRow, valueToString and sliceToString.
-type writeConfig struct {
-	includeHeader bool
-	nullString    string
-}
-
-func defaultWriteConfig() writeConfig {
-	return writeConfig{
-		includeHeader: true,
-		nullString:    "",
-	}
-}
-
 // MarshalSnapshot serializes a graph snapshot to CSV, returning one byte slice
 // per type. CSV is inherently single-type-per-file, so the output is a map
 // from type name to CSV bytes.
@@ -122,8 +105,6 @@ func (a *Adapter) writeSnapshotTypeTo(
 	snap *graph.Snapshot,
 	schemaType *schema.Type,
 ) error {
-	cfg := defaultWriteConfig()
-
 	columns, err := buildColumnList(schemaType, snap.Schema())
 	if err != nil {
 		return err
@@ -132,10 +113,8 @@ func (a *Adapter) writeSnapshotTypeTo(
 	writer := csv.NewWriter(w)
 	writer.Comma = a.config.delimiter
 
-	if cfg.includeHeader {
-		if err := writer.Write(columns); err != nil {
-			return fmt.Errorf("csv write header: %w", err)
-		}
+	if err := writer.Write(columns); err != nil {
+		return fmt.Errorf("csv write header: %w", err)
 	}
 
 	for _, inst := range instances {
@@ -144,15 +123,42 @@ func (a *Adapter) writeSnapshotTypeTo(
 			return fmt.Errorf("csv write: %w", err)
 		}
 
-		row := a.instanceToRow(inst.Properties(), snapshotEdges(inst, snap), columns, schemaType, snap.Schema(), &cfg)
-		if err := writer.Write(row); err != nil {
-			return fmt.Errorf("csv write row: %w", err)
+		row, err := a.instanceToRow(inst.Properties(), snapshotEdges(inst, snap), columns, schemaType, snap.Schema())
+		if err != nil {
+			// Flushed as the cancellation branch is, so a refused export still
+			// parses as far as it goes.
+			writer.Flush()
+			return fmt.Errorf("instance %s: %w", inst.PrimaryKey(), err)
+		}
+		if err := writeRecord(writer, w, row); err != nil {
+			return err
 		}
 	}
 
 	writer.Flush()
 	if err := writer.Error(); err != nil {
 		return fmt.Errorf("csv flush: %w", err)
+	}
+	return nil
+}
+
+// writeRecord writes one row through writer, whose destination is w. A row
+// whose only field is empty is written as a quoted empty field: [csv.Writer]
+// writes it as a blank line, which [csv.Reader] skips, so the instance would
+// vanish on the way back. A quoted empty field reads back as one empty field.
+func writeRecord(writer *csv.Writer, w io.Writer, row []string) error {
+	if len(row) != 1 || row[0] != "" {
+		if err := writer.Write(row); err != nil {
+			return fmt.Errorf("csv write row: %w", err)
+		}
+		return nil
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return fmt.Errorf("csv write row: %w", err)
+	}
+	if _, err := io.WriteString(w, `""`+"\n"); err != nil {
+		return fmt.Errorf("csv write row: %w", err)
 	}
 	return nil
 }
@@ -217,54 +223,63 @@ func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error
 // instanceToRow converts properties and edge data to a CSV row aligned
 // with columns. Edge columns zip across the relation's targets on the list
 // separator; an absent edge leaves every column of its group empty, which
-// the parser reads as absent, never null.
+// the parser reads as absent, never null. A null or missing property writes
+// an empty cell, which the parser reads through the schema. A non-empty list
+// whose cell renders empty is refused: its one element renders as "", and the
+// list grammar writes [""] and [] alike.
 func (a *Adapter) instanceToRow(
 	props immutable.Properties,
 	edgesByRel map[string][]*graph.Edge,
 	columns []string,
 	schemaType *schema.Type,
 	s *schema.Schema,
-	cfg *writeConfig,
-) []string {
+) ([]string, error) {
 	cells := make(map[string]string)
 	if schemaType != nil {
 		for rel := range schemaType.AllAssociations() {
-			a.relationCells(rel, s, edgesByRel[rel.Name()], cells)
+			if err := a.relationCells(rel, s, edgesByRel[rel.Name()], cells); err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	row := make([]string, len(columns))
 	for i, col := range columns {
 		if val, ok := props.Get(col); ok {
-			row[i] = a.valueToString(val, propertyConstraint(schemaType, col), cfg)
-			continue
-		}
-		if cell, ok := cells[col]; ok {
+			cell := a.valueToString(val, propertyConstraint(schemaType, col))
+			if list, isList := val.Slice(); isList && list.Len() > 0 && cell == "" {
+				return nil, fmt.Errorf("csv adapter: property %q: a list holding one empty element writes the cell an empty list writes, so the element would not survive the round trip", col)
+			}
 			row[i] = cell
 			continue
 		}
-
-		// Column not found: null.
-		row[i] = cfg.nullString
+		row[i] = cells[col]
 	}
 
-	return row
+	return row, nil
 }
 
 // relationCells renders one association's edge columns into cells: per FK
 // component and per edge property, one segment per target, escaped and
 // joined on the list separator. No edges means every cell stays "", the
 // absent-group marker.
-func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []*graph.Edge, cells map[string]string) {
+//
+// An edge whose every cell renders empty is refused: one target whose key
+// components are all "" and whose edge properties are all absent or "" writes
+// the absent-group marker, so it would read back as no edge at all. Two or more
+// targets always write a separator, so only a lone target can collide.
+func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []*graph.Edge, cells map[string]string) error {
 	target, ok := s.TypeByID(rel.TargetID())
 	if !ok {
 		// buildColumnList already refused this shape; nothing to render.
-		return
+		return nil
 	}
 	field := rel.FieldName()
+	var group []string
 
 	for i, pk := range target.PrimaryKeysSlice() {
 		col := field + "._target_" + pk.Name()
+		group = append(group, col)
 		if len(edges) == 0 {
 			cells[col] = ""
 			continue
@@ -281,6 +296,7 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 
 	for _, p := range rel.PropertiesSlice() {
 		col := field + "." + p.Name()
+		group = append(group, col)
 		if len(edges) == 0 {
 			cells[col] = ""
 			continue
@@ -293,6 +309,16 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		}
 		cells[col] = strings.Join(segs, a.config.listSep)
 	}
+
+	if len(edges) == 0 {
+		return nil
+	}
+	for _, col := range group {
+		if cells[col] != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
 }
 
 // scalarCell renders one scalar value as cell text.
@@ -351,38 +377,29 @@ func elementConstraint(c schema.Constraint) schema.Constraint {
 }
 
 // valueToString renders an immutable.Value as a CSV cell string, in the form
-// its constraint stores.
-func (a *Adapter) valueToString(
-	val immutable.Value,
-	c schema.Constraint,
-	cfg *writeConfig,
-) string {
+// its constraint stores. Null renders as the empty cell.
+func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) string {
 	if val.IsNil() {
-		return cfg.nullString
+		return ""
 	}
 
 	// A collection renders elementwise, so the element constraint does the
 	// work rather than the whole value.
 	if s, ok := val.Slice(); ok {
-		return a.sliceToString(s, elementConstraint(c), cfg)
+		return a.sliceToString(s, elementConstraint(c))
 	}
 
-	if v := canonicalOrRaw(val.Unwrap(), c); v != nil {
-		return scalarCell(v)
-	}
-	return cfg.nullString
+	return scalarCell(canonicalOrRaw(val.Unwrap(), c))
 }
 
 // sliceToString renders an immutable.Slice as a list-separated string. Each
 // element renders under elem, so a List<Timestamp> canonicalizes at its
 // elements and not only at its outer level. Elements escape through the
 // shared helper, so a value containing the separator survives the split.
-func (a *Adapter) sliceToString(s immutable.Slice, elem schema.Constraint, cfg *writeConfig) string {
+func (a *Adapter) sliceToString(s immutable.Slice, elem schema.Constraint) string {
 	parts := make([]string, s.Len())
 	for i, v := range s.Iter2() {
-		if v.IsNil() {
-			parts[i] = cfg.nullString
-		} else {
+		if !v.IsNil() {
 			parts[i] = escapeListElem(fmt.Sprint(canonicalOrRaw(v.Unwrap(), elem)), a.config.listSep)
 		}
 	}
