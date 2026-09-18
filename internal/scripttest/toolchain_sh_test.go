@@ -69,3 +69,61 @@ func TestToolchainScript_PinsWhenTheCallerChoseNothing(t *testing.T) {
 		t.Errorf("stdout does not hold %q\nstdout:\n%s\nstderr:\n%s", want, r.stdout, r.stderr)
 	}
 }
+
+// TestToolchainScript_ReadsTheRootItIsGiven pins TOOLCHAIN_ROOT, which
+// scripts/run_mutants.sh needs: it reads one checkout and mutates copies of it,
+// so the module file it must agree with is not its working directory's.
+func TestToolchainScript_ReadsTheRootItIsGiven(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write("elsewhere/go.mod", "module other\n\ngo 1.0.0\n")
+	f.write("scripts/probe.sh", "#!/usr/bin/env bash\nset -euo pipefail\nTOOLCHAIN_ROOT=elsewhere\n. scripts/toolchain.sh\n")
+
+	r := f.run("probe.sh")
+
+	r.wantCode(t, 2)
+	r.wantStderr(t, "elsewhere/go.mod pins go1.0.0")
+}
+
+// TestToolchainScript_RefusesARootWithNoModuleFile pins the other TOOLCHAIN_ROOT
+// arm: a root naming no module file stops the run rather than reading the
+// working directory's by accident.
+func TestToolchainScript_RefusesARootWithNoModuleFile(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write("scripts/probe.sh", "#!/usr/bin/env bash\nset -euo pipefail\nTOOLCHAIN_ROOT=nosuchdir\n. scripts/toolchain.sh\n")
+
+	r := f.run("probe.sh")
+
+	r.wantCode(t, 2)
+	r.wantStderr(t, "no go.mod at nosuchdir/go.mod")
+}
+
+// TestMutateScript_RefusesAToolchainThatIsNotTheModulesOwn pins the reason the
+// mutation harness pins at all: without it a tree red under the module's Go and
+// green under the host's yields a full set of verdicts about a tree CI rejects.
+func TestMutateScript_RefusesAToolchainThatIsNotTheModulesOwn(t *testing.T) {
+	t.Parallel()
+	f, _ := mutateFixture(t, "3")
+	f.write("go.mod", "module "+fixtureModule+"\n\ngo 1.0.0\n")
+
+	r := f.mutate()
+
+	r.wantCode(t, 2)
+	r.wantStderr(t, "pins go1.0.0")
+}
+
+// TestRunMutantsScript_RefusesTheToolchainBeforeAnyWorkerStarts pins that the
+// check runs once, at the top, rather than once per mutant inside each worker.
+func TestRunMutantsScript_RefusesTheToolchainBeforeAnyWorkerStarts(t *testing.T) {
+	t.Parallel()
+	f := runMutantsFixture(t)
+	f.write("go.mod", "module "+fixtureModule+"\n\ngo 1.0.0\n")
+	f.index() // the checkout must be clean, which the rewritten go.mod undid
+	f.writeMutant("m01", "a - b")
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	r.wantCode(t, 2)
+	r.wantStderr(t, "pins go1.0.0")
+}

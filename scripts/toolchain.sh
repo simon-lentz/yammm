@@ -19,11 +19,27 @@
 #     which claims the installed toolchain is already the right one; this is
 #     what checks that claim.
 #
-# Usage: source scripts/toolchain.sh   (from the repository root)
+# The module file is the working directory's, or TOOLCHAIN_ROOT's where a caller
+# works on a checkout that is not its own — scripts/run_mutants.sh reads one
+# checkout and mutates copies of it.
+#
+# TOOLCHAIN_ROOT is an environment variable and NOT a positional parameter, on
+# purpose. A sourced script shares the caller's positional parameters, so
+# `. scripts/toolchain.sh` inside scripts/vet.sh would read that script's own
+# $1 — which is `--host` — as a path.
+#
+# Usage: source scripts/toolchain.sh          (from the repository root)
+#        TOOLCHAIN_ROOT=<dir> source scripts/toolchain.sh
 
-want=$(awk '$1 == "go" { print $2; exit }' go.mod)
+modfile="${TOOLCHAIN_ROOT:-.}/go.mod"
+if [ ! -f "${modfile}" ]; then
+	echo "toolchain: no go.mod at ${modfile}" >&2
+	exit 2
+fi
+
+want=$(awk '$1 == "go" { print $2; exit }' "${modfile}")
 if [ -z "${want}" ]; then
-	echo "toolchain: go.mod names no go directive" >&2
+	echo "toolchain: ${modfile} names no go directive" >&2
 	exit 2
 fi
 
@@ -33,7 +49,7 @@ fi
 
 have=$(go env GOVERSION)
 if [ "${have}" != "go${want}" ]; then
-	echo "toolchain: go.mod pins go${want} and this run is ${have}" >&2
+	echo "toolchain: ${modfile} pins go${want} and this run is ${have}" >&2
 	echo "toolchain: GOTOOLCHAIN=${GOTOOLCHAIN:-<unset>}; unset it to take the pinned toolchain" >&2
 	exit 2
 fi

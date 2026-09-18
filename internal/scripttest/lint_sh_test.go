@@ -22,6 +22,7 @@ func newLintFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{t: t, dir: t.TempDir()}
 	f.copyFile("go.mod")
+	f.pinGoDirective()
 	f.copyFile("go.sum")
 	f.copyFile(".golangci.yml")
 	f.copyScript("lint.sh")

@@ -44,6 +44,12 @@ pkgs=("$@")
 root=$(git rev-parse --show-toplevel)
 cd "${root}"
 
+# A verdict is a statement about the program CI judges, so the suite that
+# produces it runs the module's toolchain (scripts/toolchain.sh). Without the
+# pin a tree red under the module's Go and green under the host's yields a full
+# set of verdicts about a tree CI rejects.
+. scripts/toolchain.sh
+
 if [ ! -f "${file}" ]; then
 	printf 'mutate: %s does not exist\n' "${file}" >&2
 	exit 2

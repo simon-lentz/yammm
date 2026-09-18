@@ -20,6 +20,26 @@ const fixtureModule = "github.com/simon-lentz/yammm"
 // go test runs the package's tests.
 const repoRoot = "../.."
 
+// pinGoDirective rewrites the fixture's copied go.mod to declare the RUNNING
+// toolchain. A fixture that copies the repository's module file inherits its
+// pin, and the scripts refuse a toolchain that is not the module's, so a copy
+// would refuse every run under another release.
+func (f *fixture) pinGoDirective() {
+	f.t.Helper()
+	b, err := os.ReadFile(filepath.Join(f.dir, "go.mod"))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	lines := strings.Split(string(b), "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "go ") {
+			lines[i] = "go " + goDirective()
+			break
+		}
+	}
+	f.write("go.mod", strings.Join(lines, "\n"))
+}
+
 // goDirective returns the running toolchain's version as a go.mod go directive
 // spells it: "1.26.0", never "go1.26.0", and never a devel or beta suffix.
 func goDirective() string {

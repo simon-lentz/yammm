@@ -40,6 +40,17 @@ esac
 
 git -C "$src" diff --quiet || { echo "the checkout's unstaged tree is not clean" >&2; exit 2; }
 
+# The checkout's own toolchain, before any worker starts: the package sets below
+# come from `go list` and every verdict comes from scripts/mutate.sh, and the two
+# must be one Go. Failing here costs one message; failing inside each worker
+# costs one per mutant. TOOLCHAIN_ROOT is not exported, so a worker's mutate.sh
+# resolves its own copy rather than this checkout.
+# This script never changes directory, so the helper is resolved beside it
+# rather than through the caller's working directory.
+TOOLCHAIN_ROOT="$src"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/toolchain.sh"
+unset TOOLCHAIN_ROOT
+
 real_t=$(cd "${TMPDIR:-/tmp}" && pwd -P)
 folded_t=""
 case "$real_t" in
