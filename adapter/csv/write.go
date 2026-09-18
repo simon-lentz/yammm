@@ -20,13 +20,17 @@ import (
 // per type. CSV is inherently single-type-per-file, so the output is a map
 // from type name to CSV bytes.
 //
-// Returns [ErrNilSnapshot] if result is nil.
+// Returns [ErrNilSnapshot] if result is nil, and refuses a snapshot holding a
+// composed child: see [refuseComposedChildren].
 func (a *Adapter) MarshalSnapshot(
 	ctx context.Context,
 	result *graph.Snapshot,
 ) (map[string][]byte, error) {
 	if result == nil {
 		return nil, ErrNilSnapshot
+	}
+	if err := refuseComposedChildren(result); err != nil {
+		return nil, err
 	}
 	output := make(map[string][]byte, len(result.Types()))
 
@@ -55,7 +59,8 @@ func (a *Adapter) MarshalSnapshot(
 // WriteSnapshot writes a graph snapshot to per-type writers. The writerFor
 // function is called once per type to obtain the destination writer.
 //
-// Returns [ErrNilSnapshot] if result is nil.
+// Returns [ErrNilSnapshot] if result is nil, and refuses a snapshot holding a
+// composed child before it requests any writer: see [refuseComposedChildren].
 func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),
@@ -63,6 +68,9 @@ func (a *Adapter) WriteSnapshot(
 ) error {
 	if result == nil {
 		return ErrNilSnapshot
+	}
+	if err := refuseComposedChildren(result); err != nil {
+		return err
 	}
 	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
@@ -86,6 +94,36 @@ func (a *Adapter) WriteSnapshot(
 		}
 	}
 
+	return nil
+}
+
+// refuseComposedChildren returns an error naming the first instance, in type
+// and instance order, that holds a composed child. A CSV row is flat, so the
+// writer has no column for a child and would drop the subtree. It runs before
+// any output is produced, so a refused export writes nothing. A composition
+// with no children loses nothing and is not refused.
+func refuseComposedChildren(snap *graph.Snapshot) error {
+	for _, typeID := range snap.Types() {
+		for _, inst := range snap.InstancesOf(typeID) {
+			// ComposedRelations lists only relations holding a child.
+			rels := inst.ComposedRelations()
+			if len(rels) == 0 {
+				continue
+			}
+			typeName, ok := schema.AddressableTag(snap.Schema(), typeID)
+			if !ok {
+				return unnameableDenotedType(typeID)
+			}
+			children := "composed children"
+			if n := inst.ComposedCount(rels[0]); n == 1 {
+				children = "a composed child"
+			} else {
+				children = strconv.Itoa(n) + " " + children
+			}
+			return fmt.Errorf("csv adapter: type %q instance %s: composition %q holds %s, which a CSV row has no column for, so the export would drop it",
+				typeName, inst.PrimaryKey(), rels[0], children)
+		}
+	}
 	return nil
 }
 

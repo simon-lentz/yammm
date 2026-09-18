@@ -205,8 +205,9 @@ func writeSyncChmodClose(f *os.File, data []byte, mode fs.FileMode) (retErr erro
 // the output directory may hold files the operator put there, and a directory
 // rename deletes them.
 type StagedFiles struct {
-	dir    string
-	staged []stagedFile
+	dir     string
+	staged  []stagedFile
+	created []string // directories NewStagedFiles created, deepest first
 }
 
 type stagedFile struct {
@@ -219,10 +220,22 @@ type stagedFile struct {
 
 // NewStagedFiles prepares a staged write into dir, creating it if needed.
 func NewStagedFiles(dir string) (*StagedFiles, error) {
+	// The directories MkdirAll is about to create, deepest first, so Rollback
+	// can remove them and a refused set leaves no trace.
+	var created []string
+	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
+		if _, err := os.Lstat(d); err == nil || !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		created = append(created, d)
+		if filepath.Dir(d) == d {
+			break
+		}
+	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create output directory: %w", err)
 	}
-	return &StagedFiles{dir: dir}, nil
+	return &StagedFiles{dir: dir, created: created}, nil
 }
 
 // Create stages one file named name inside the set's directory and returns the
@@ -289,11 +302,15 @@ func (s *StagedFiles) Commit() error {
 		}
 		sf.tmp = ""
 	}
+	// The set is in place, so its directory stays, even holding no file.
+	s.created = nil
 	return nil
 }
 
-// Rollback removes every staging file that has not been renamed into place.
-// It is safe to call after [StagedFiles.Commit] and is idempotent.
+// Rollback removes every staging file that has not been renamed into place,
+// then every directory [NewStagedFiles] created that is still empty. It is safe
+// to call after [StagedFiles.Commit], which keeps the directories, and is
+// idempotent.
 func (s *StagedFiles) Rollback() {
 	for i := range s.staged {
 		sf := &s.staged[i]
@@ -306,6 +323,12 @@ func (s *StagedFiles) Rollback() {
 			sf.tmp = ""
 		}
 	}
+	// A directory another writer filled in the meantime is not empty, and
+	// os.Remove leaves it.
+	for _, d := range s.created {
+		os.Remove(d) //nolint:gosec // best-effort cleanup
+	}
+	s.created = nil
 }
 
 // syncChmodClose is [writeSyncChmodClose] for a file something else has already

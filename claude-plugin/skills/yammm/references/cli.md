@@ -212,7 +212,7 @@ yammm export --to cypher schema.yammm data.json > import.cypher
 yammm export --to json --output result.json schema.yammm data.csv --type User
 ```
 
-`--to csv --output` writes tab-delimited fields when the file name ends in `.tsv`, so `check` reads it back; any other name, `--output-dir`'s per-type `.csv` files and stdout take commas.
+`--to csv --output` writes tab-delimited fields when the file name ends in `.tsv`, so `check` reads it back; any other name, `--output-dir`'s per-type `.csv` files and stdout take commas. `--to csv` refuses a graph in which an instance holds composed children, since a CSV row has no column for them, and writes nothing; `--to json` carries them.
 
 | Flag | Description |
 | ---- | ----------- |

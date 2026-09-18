@@ -888,7 +888,8 @@ compatible changes and seven incompatible ones, and suggests `v0.22.0`.** Unit
 removes and changes no declaration. The CSV dialect group adds
 `csv.WithDelimiter`, taking it to twenty-two. **Unit 8's other groups so far
 move no declaration**: the instruments, provenance and CSV value-model groups
-each read twenty-one and seven, byte-identical. Each
+each read twenty-one and seven, byte-identical, and the composition group reads
+twenty-two and seven, as the dialect group does. Each
 block below was written by the pass or group that landed its behaviour.
 
 ### Unit 8 — one addressability rule, and every root held to it
@@ -951,6 +952,12 @@ block below was written by the pass or group that landed its behaviour.
 - **Behaviour — `yammm export --to csv --output <name>.tsv` writes tab-delimited fields.** It wrote commas under that name. Once the read side splits a `.tsv` file on tabs, a comma-delimited file under that name would no longer read back, so the write side follows the same extension rule. Any other `--output` name, `--output-dir`'s per-type `.csv` files and stdout keep `,`.
 - **Unchanged, now stated: the first row is always the header.** The adapter carried an unexported headerless mode that nothing could select; it is deleted, and with it a fallback that named columns `0`, `1`, `2`, names no schema declares.
 - **Consumer impact: none, measured.** rdata imports no `adapter/csv` package and invokes no `yammm check`, `load`, `export` or `snapshot save`; no file in its tree names a `.tsv` file.
+
+### Unit 8 — the CSV writers refuse a composed child
+
+- **Behaviour — `csv.MarshalSnapshot` and `csv.WriteSnapshot` return an error for a snapshot in which any instance holds a composed child.** They wrote the file without the child subtree and reported success, so `yammm export --to csv` of a graph with compositions produced files that silently lacked every child. The error names the type, the instance and the composition, and comes before any output: `WriteSnapshot` requests no writer, and `yammm export --to csv` exits 3 and writes no file, under `--output` and `--output-dir` alike. A composition declared on a type whose instances hold no children loses nothing, and such a snapshot is still written. Another format — `--to json`, or a `.ys` snapshot — carries compositions.
+- **Behaviour — a failed `yammm export --to csv --output-dir <dir>` no longer leaves behind a directory it created.** The command created the directory, and any missing parent, before writing, and a refusal or a write failure removed the staged files but not the directories, so a failed export left an empty `<dir>` where none had been. It now removes every directory it created that is still empty; a directory that existed before, or that holds a file, is kept.
+- **Consumer impact: none, measured.** rdata's schemas declare no composition, and it imports no `adapter/csv` package and runs no `yammm export`.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 

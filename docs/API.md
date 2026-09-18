@@ -1608,7 +1608,7 @@ An optional property holding `""` or an empty list writes the cell null writes a
 
 ### Limitations
 
-CSV is a flat format. Compositions are not supported in parsing and are silently omitted during serialization; the JSON adapter carries them.
+CSV is a flat format, so a row has no column for a composed child. The parser reads no composition. `MarshalSnapshot` and `WriteSnapshot` refuse a snapshot in which any instance holds a composed child, with an error naming the type, the instance and the composition, before they produce any output; `WriteSnapshot` requests no writer. A composition with no children loses nothing and is written. The JSON adapter carries compositions.
 
 ## Go Source Generation
 

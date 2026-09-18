@@ -315,9 +315,12 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 			}
 		}
 		// The caller abandoned the set — what a failure between Create and
-		// Commit does. Nothing staged may outlive it.
+		// Commit does. Nothing staged may outlive it, and neither may the
+		// directory NewStagedFiles created for it.
 		staged.Rollback()
-		assertNoDebris(t, dir)
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("a rolled-back set left %s behind (stat: %v)", dir, err)
+		}
 	})
 
 	t.Run("rollback is safe after commit", func(t *testing.T) {

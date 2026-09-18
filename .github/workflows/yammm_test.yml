@@ -17,9 +17,17 @@ jobs:
   # no asset until every job here has passed. Lint, vet and test each run after
   # an earlier step fails, and fail-fast is off, so one run reports every host's
   # every failure.
+  #
+  # Every job carries a timeout. A hung runner otherwise holds its job for
+  # GitHub's six-hour default, and one wedged Windows runner, cancelled by
+  # hand, uploaded no log at all. Each go test timeout inside a job sits below
+  # the job's by at least the time the job takes to start its last test binary,
+  # measured on CI, so a hung binary prints its own stack before the job is
+  # killed; jobMargins in internal/scripttest's wiring test holds the margins.
   test:
     name: Test ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +115,7 @@ jobs:
   integration:
     name: Neo4j ${{ matrix.label }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       # Every combination runs: knowing that a change breaks the OLD server but
       # not the new one is the whole point, and fail-fast would hide it.

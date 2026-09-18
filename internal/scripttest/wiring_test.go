@@ -1,11 +1,14 @@
 package scripttest
 
 import (
+	"fmt"
+	"maps"
 	"os"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -29,6 +32,7 @@ type job struct {
 	Needs           stringList `yaml:"needs"`
 	If              string     `yaml:"if"`
 	ContinueOnError any        `yaml:"continue-on-error"`
+	TimeoutMinutes  int        `yaml:"timeout-minutes"`
 	Strategy        struct {
 		FailFast *bool `yaml:"fail-fast"`
 		Matrix   struct {
@@ -44,6 +48,7 @@ type step struct {
 	Run             string `yaml:"run"`
 	If              string `yaml:"if"`
 	ContinueOnError any    `yaml:"continue-on-error"`
+	TimeoutMinutes  int    `yaml:"timeout-minutes"`
 }
 
 // stringList decodes a workflow key GitHub accepts as one string or a list.
@@ -164,6 +169,197 @@ func TestTestWorkflow_EveryHostRunsEveryCheck(t *testing.T) {
 		} else if got != cmd {
 			t.Errorf("the %s host vets with %q, want %q", host, got, cmd)
 		}
+	}
+}
+
+// jobMargins holds, per job of the test workflow, how far every go test
+// timeout the job runs must stay below the job's own timeout: at least as long
+// as the job takes to start its last test binary, so a hung binary prints its
+// stack before the job is killed. Measured over 25 CI runs, the test jobs'
+// Test step ended at most 688 s into the job and the integration job's test
+// step started at most 23 s in; each margin adds headroom to its measurement.
+var jobMargins = map[string]time.Duration{
+	"test":        15 * time.Minute,
+	"integration": 5 * time.Minute,
+}
+
+var (
+	goTestCall        = regexp.MustCompile(`\bgo\s+test\b`)
+	goTestTimeoutFlag = regexp.MustCompile(`--?timeout[= ](\S+)`)
+	// A shell comment starts at a word: a # at the line's start or after white
+	// space. `$#` is not one.
+	shellComment = regexp.MustCompile(`(^|\s)#.*$`)
+)
+
+// shellCommands returns text's command lines with backslash continuations
+// joined and comments removed.
+func shellCommands(text string) []string {
+	var out []string
+	var cur strings.Builder
+	for line := range strings.Lines(text) {
+		line = strings.TrimRight(line, "\r\n")
+		if head, ok := strings.CutSuffix(line, "\\"); ok {
+			cur.WriteString(head)
+			cur.WriteByte(' ')
+			continue
+		}
+		cur.WriteString(line)
+		out = append(out, shellComment.ReplaceAllString(cur.String(), ""))
+		cur.Reset()
+	}
+	if cur.Len() > 0 {
+		out = append(out, shellComment.ReplaceAllString(cur.String(), ""))
+	}
+	return out
+}
+
+// goTestTimeouts returns the timeout every go test command in text runs under.
+// The flag package keeps a flag's LAST value, so the last -timeout is the one
+// that applies. A command with none, or with one that is not positive, which
+// switches Go's timeout off, is a finding.
+func goTestTimeouts(where, text string) (timeouts []time.Duration, findings []string) {
+	for _, cmd := range shellCommands(text) {
+		if !goTestCall.MatchString(cmd) {
+			continue
+		}
+		flags := goTestTimeoutFlag.FindAllStringSubmatch(cmd, -1)
+		if flags == nil {
+			findings = append(findings, fmt.Sprintf("%s runs go test with no -timeout: %s", where, strings.TrimSpace(cmd)))
+			continue
+		}
+		last := flags[len(flags)-1][1]
+		d, err := time.ParseDuration(last)
+		switch {
+		case err != nil:
+			findings = append(findings, fmt.Sprintf("%s: -timeout %q: %v", where, last, err))
+		case d <= 0:
+			findings = append(findings, fmt.Sprintf("%s runs go test with -timeout %s, which switches the timeout off", where, last))
+		default:
+			timeouts = append(timeouts, d)
+		}
+	}
+	return timeouts, findings
+}
+
+// timeoutFindings reports every way wf's jobs fail to time out after the go
+// test runs they hold, scripts/test.sh's text being script. A step's own
+// timeout bounds its go test runs too, and is held to the same margin.
+func timeoutFindings(wf workflow, script string, margins map[string]time.Duration) []string {
+	if len(wf.Jobs) == 0 {
+		return []string{"the workflow holds no job"}
+	}
+	var findings []string
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		j := wf.Jobs[name]
+		margin, ok := margins[name]
+		if !ok {
+			findings = append(findings, fmt.Sprintf("jobs.%s has no measured margin", name))
+			continue
+		}
+		if j.TimeoutMinutes <= 0 {
+			findings = append(findings, fmt.Sprintf("jobs.%s sets no timeout-minutes", name))
+			continue
+		}
+		ran := false
+		for _, st := range j.Steps {
+			// Every invocation yields a timeout or a finding, so either one
+			// means the step runs go test.
+			var timeouts []time.Duration
+			var found []string
+			if strings.Contains(st.Run, "scripts/test.sh") {
+				d, f := goTestTimeouts("scripts/test.sh", script)
+				timeouts, found = append(timeouts, d...), append(found, f...)
+			}
+			d, f := goTestTimeouts("jobs."+name, st.Run)
+			timeouts, found = append(timeouts, d...), append(found, f...)
+			if len(timeouts)+len(found) > 0 {
+				ran = true
+			}
+			findings = append(findings, found...)
+			limits := map[string]int{"jobs." + name: j.TimeoutMinutes}
+			if st.TimeoutMinutes > 0 {
+				limits[fmt.Sprintf("jobs.%s step %q", name, st.Name)] = st.TimeoutMinutes
+			}
+			for where, minutes := range limits {
+				limit := time.Duration(minutes) * time.Minute
+				for _, d := range timeouts {
+					if d+margin > limit {
+						findings = append(findings, fmt.Sprintf("%s times out at %v, less than %v past a go test timeout of %v", where, limit, margin, d))
+					}
+				}
+			}
+		}
+		if !ran {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs no go test this check can read", name))
+		}
+	}
+	return findings
+}
+
+// Every job of the test workflow carries a timeout, so a hung runner costs
+// minutes rather than GitHub's six-hour default, and every go test it runs
+// times out at least the job's measured margin earlier, so a hung test binary
+// reports its own stack first.
+func TestTestWorkflow_EveryJobTimesOutAfterItsTests(t *testing.T) {
+	t.Parallel()
+	var wf workflow
+	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
+	script, err := os.ReadFile(fromRoot("scripts/test.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range timeoutFindings(wf, string(script), jobMargins) {
+		t.Error(f)
+	}
+}
+
+// The check itself, against the inputs it exists to refuse.
+func TestTimeoutFindings_RefusesEachWayAJobCanOutliveItsTests(t *testing.T) {
+	t.Parallel()
+	margins := map[string]time.Duration{"test": 15 * time.Minute}
+	const okScript = "#!/usr/bin/env bash\n# go test -json runs the suite\ngo test -json -timeout=10m ./...\n"
+	wfWith := func(jobMinutes, stepMinutes int, run string) workflow {
+		return workflow{Jobs: map[string]job{"test": {
+			TimeoutMinutes: jobMinutes,
+			Steps:          []step{{Name: "Test", Run: run, TimeoutMinutes: stepMinutes}},
+		}}}
+	}
+	for _, c := range []struct {
+		name    string
+		wf      workflow
+		script  string
+		margins map[string]time.Duration
+		want    string // a substring of the one finding expected; "" expects none
+	}{
+		{"a job within its margin", wfWith(30, 0, "scripts/test.sh"), okScript, margins, ""},
+		{"a job exactly at its margin", wfWith(25, 0, "scripts/test.sh"), okScript, margins, ""},
+		{"a job one minute inside its margin", wfWith(24, 0, "scripts/test.sh"), okScript, margins, "less than 15m0s past"},
+		{"a job with no timeout", wfWith(0, 0, "scripts/test.sh"), okScript, margins, "sets no timeout-minutes"},
+		{"a job with no measured margin", wfWith(30, 0, "scripts/test.sh"), okScript, map[string]time.Duration{}, "has no measured margin"},
+		{"a job that runs no go test", wfWith(30, 0, "echo hello"), okScript, margins, "runs no go test"},
+		{"a go test with no -timeout", wfWith(30, 0, "scripts/test.sh"), "go test ./...\n", margins, "no -timeout"},
+		{"a go test spelled with two spaces", wfWith(30, 0, "scripts/test.sh"), okScript + "go  test -run X ./...\n", margins, "no -timeout"},
+		{"a -timeout only in a trailing comment", wfWith(30, 0, "scripts/test.sh"), "go test ./... # -timeout=10m\n", margins, "no -timeout"},
+		{"a -timeout on a continuation line", wfWith(30, 0, "scripts/test.sh"), "go test -json \\\n\t-timeout=10m ./...\n", margins, ""},
+		{"a zero -timeout", wfWith(30, 0, "scripts/test.sh"), "go test -timeout=0 ./...\n", margins, "switches the timeout off"},
+		{"a later -timeout overriding an earlier one", wfWith(30, 0, "scripts/test.sh"), "go test -timeout=10m -timeout=45m ./...\n", margins, "past a go test timeout of 45m0s"},
+		{"a go test inline in the step", wfWith(30, 0, "go test -timeout 20m ./x/"), okScript, margins, "past a go test timeout of 20m0s"},
+		{"a step timeout inside the margin", wfWith(30, 20, "scripts/test.sh"), okScript, margins, `step "Test" times out at 20m0s`},
+		{"no job at all", workflow{}, okScript, margins, "holds no job"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := timeoutFindings(c.wf, c.script, c.margins)
+			if c.want == "" {
+				if len(got) != 0 {
+					t.Errorf("findings %q, want none", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0], c.want) {
+				t.Errorf("findings %q, want one naming %q", got, c.want)
+			}
+		})
 	}
 }
 

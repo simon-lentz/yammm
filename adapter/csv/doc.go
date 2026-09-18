@@ -130,8 +130,11 @@
 //
 // # Compositions
 //
-// CSV is a flat format. Compositions are not supported in parsing and are
-// silently omitted during serialization.
+// CSV is a flat format, so a row has no column for a composed child. The parser
+// reads no composition. Both writers refuse a snapshot in which any instance
+// holds a composed child, naming the type, the instance and the composition,
+// before they produce any output. A composition with no children loses nothing
+// and is written. The JSON adapter carries compositions.
 //
 // # Provenance
 //

@@ -7,6 +7,9 @@
 # CGO_ENABLED is set rather than inherited: a host with no C compiler fails here
 # instead of testing without the detector. -shuffle=on surfaces order coupling
 # between tests, and -count=1 runs every test rather than replaying a cached pass.
+# -timeout states Go's own default of ten minutes per test binary, so the CI
+# job's timeout can be held above it: a hung binary then prints its stack before
+# the job is killed.
 #
 # The suite is scripts/packages.sh's. It runs through `go test -json`, and
 # internal/testsummary judges it: every package must report a result, and the
@@ -40,7 +43,7 @@ go build -o "${summary}" ./internal/testsummary
 
 status=0
 set +e
-go test -json -race -shuffle=on -count=1 "${pkgs[@]}" 2>&1 |
+go test -json -race -shuffle=on -count=1 -timeout=10m "${pkgs[@]}" 2>&1 |
 	"${summary}" -race-skips="${work}/race-skips" "${pkgs[@]}"
 codes=("${PIPESTATUS[@]}")
 set -e
@@ -53,7 +56,7 @@ if [ -s "${work}/race-skips" ]; then
 	while IFS=$'\t' read -r -u 3 pkg names; do
 		printf 'test: %s in %s, again without the race detector\n' "${names}" "${pkg}"
 		set +e
-		go test -json -shuffle=on -count=1 -run "^(${names//,/|})\$" "${pkg}" 2>&1 |
+		go test -json -shuffle=on -count=1 -timeout=10m -run "^(${names//,/|})\$" "${pkg}" 2>&1 |
 			"${summary}" -require="${names}" "${pkg}"
 		codes=("${PIPESTATUS[@]}")
 		set -e
