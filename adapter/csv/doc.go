@@ -105,7 +105,8 @@
 //   - Timestamp properties: validated against the declared layout — the
 //     validator's own rule — or RFC 3339 for the default layout; kept as
 //     string
-//   - List properties: split by the list separator, elements coerced
+//   - List properties: split by the list separator, each element coerced
+//     by the element constraint, a nested list by this same rule
 //
 // Date and Timestamp values remain as strings in [instance.RawInstance],
 // matching the JSON adapter's behavior. Temporal coercion to driver types
@@ -121,9 +122,26 @@
 // # List Properties
 //
 // List values use the list separator — "|" by default, configurable with
-// [WithListSeparator]. Both sides escape through one shared helper pair
-// (the backslash escapes itself and the separator), so an element
-// containing the separator survives the round trip.
+// [WithListSeparator]. Both sides escape through one shared helper pair: the
+// backslash escapes itself and every occurrence of the separator's first
+// byte, so the separator is found only between elements, and an element
+// holding any part of it splits back unchanged. A separator the parser
+// cannot find again is refused: one that begins with the backslash, and one
+// holding a CR LF, which [encoding/csv]'s reader turns into LF.
+//
+// A nested collection — a List of Lists, a List of Vectors — renders by the
+// same rule at every depth: an inner list renders as a list cell does, and the
+// outer list escapes that text as one element, so its escapes are escaped
+// again. The parser splits and unescapes one depth at a time, so it reads every
+// depth back.
+//
+// Every scalar renders one way wherever it sits — a cell, a list element, a
+// Vector element or an edge segment — so a Float is written in positional
+// notation ([strconv.FormatFloat] with 'f' and the shortest precision)
+// everywhere, never with an exponent. A Vector's elements render as Floats, as
+// the validator coerces them, so a float32, which only an instance nothing
+// validated can hold, is widened to float64 in a Float, a List<Float> and a
+// Vector alike.
 //
 // # Empty Cells
 //
@@ -161,11 +179,18 @@
 //     writes, so it reads back as null. This is a documented limitation: a
 //     null-sentinel option would exist only to express a case the
 //     specification calls a value, and the schema decides every other case.
-//   - A list holding one empty element writes the cell an empty list writes.
+//   - A list holding one empty element writes the cell an empty list writes,
+//     and an inner list holding one empty element writes the text an empty
+//     inner list writes.
 //     A lone association target whose key components are all "" and whose
 //     edge properties are all absent or "" writes the cell an absent edge
 //     writes. The writer refuses both with an error naming the instance,
 //     rather than let an element or an association vanish on the way back.
+//   - A cell whose text holds a CR LF: [encoding/csv]'s reader turns every CR
+//     LF into LF, inside a quoted field too. The writer refuses it with an
+//     error naming the column and the instance. A lone CR is written. A file
+//     another program wrote with a CR LF inside a quoted field reads as LF,
+//     since the parser never sees the CR.
 //   - A row whose only field is empty — a single-column type whose key is "" —
 //     is written as a quoted empty field, because [encoding/csv.Writer] would
 //     write a blank line, which [encoding/csv.Reader] skips.

@@ -12,8 +12,9 @@ import (
 )
 
 // The CSV round-trip corpus: write → parse → validate is the identity for a fully
-// resolved graph. CSV has no nested lists and no compositions — both are
-// documented limitations — so its schema declares neither.
+// resolved graph. CSV carries no composition, a documented limitation, so its
+// schema declares none; [TestListRendering_NestedCollectionsSurviveTheRoundTrip]
+// covers nested lists.
 const roundTripCSVSchema = `schema "roundtrip_csv"
 
 type Target {

@@ -1545,11 +1545,11 @@ adapter := csv.New(opts...)
 | ------ | ----------- |
 | `WithDelimiter` | Field delimiter (default `,`; `'\t'` for TSV); read by both the parse and write sides. `encoding/csv`'s quoting still applies, so a tab-delimited cell that starts with `"` is a quoted field. A delimiter `encoding/csv` refuses — `0`, `"`, `\r`, `\n`, U+FFFD or an invalid rune — is reported where a header is read or written: an Error `E_CSV_COERCE` diagnostic from a parse, an error from a write |
 | `WithTypeColumn` | Column name for type tagging (multi-type CSV) |
-| `WithListSeparator` | Separator for list elements, vector elements, and `(many)` relation groups (default `|`); read by both the parse and write sides |
+| `WithListSeparator` | Separator for list elements, vector elements, and `(many)` relation groups (default `|`); read by both the parse and write sides. A separator that begins with a backslash, the escape character, or holds a CR LF, which `encoding/csv` reads back as LF, is refused before any byte is read or written: an Error `E_CSV_COERCE` diagnostic from a parse, an error from a write |
 | `WithSchema` | The schema, so the parser reaches each association's **target** type: it decides an empty foreign-key segment by the target's keys (see Empty Cells), and a Date or Timestamp key component that does not parse draws `E_CSV_COERCE` on parse. The CLI passes it |
 | `WithStrictPropertyNames` | Match column names exactly, as `instance.WithStrictPropertyNames` makes the validator match keys; the default folds them, as the validator's default does. Give the parser the validator's setting — `instance.RecommendedOptions()` sets it |
 
-The delimiter is `,` unless `WithDelimiter` sets another, the first row is always the header (there is no headerless mode), and list values join on the list separator. A separator or backslash inside an element is backslash-escaped on write and unescaped on parse, so a `|`-bearing element survives the round trip.
+The delimiter is `,` unless `WithDelimiter` sets another, the first row is always the header (there is no headerless mode), and list values join on the list separator. A backslash, and every occurrence of the separator's first byte, inside an element is backslash-escaped on write and unescaped on parse, so the separator is found only between elements and an element holding any part of it splits back unchanged. A nested list (`List<List<T>>`, `List<Vector[N]>`) renders by the same rule at every depth: an inner list renders as a list cell does, and the outer list escapes that text as one element.
 
 ### Parsing
 
@@ -1597,7 +1597,7 @@ CSV values are strings. The adapter uses schema constraint metadata to coerce va
 - **List**: split by list separator, elements coerced recursively
 - **Vector**: split by the list separator, each element through `strconv.ParseFloat`
 
-On the write side the adapter renders `Timestamp`, `Date` and `UUID` through their constraint, so a cell carries the same text the validator stores — including foreign-key columns, whose components render through the **target** type's primary-key constraints, and list elements, which render through the element constraint. A value the constraint cannot render is written as it arrived: an export has no diagnostic channel, and one malformed cell must not fail the file.
+On the write side the adapter renders `Timestamp`, `Date` and `UUID` through their constraint, so a cell carries the same text the validator stores — including foreign-key columns, whose components render through the **target** type's primary-key constraints, and list elements, which render through the element constraint at every depth. Every scalar renders one way wherever it sits, so a `Float` is written in positional notation — `strconv.FormatFloat` with `'f'` and the shortest precision — in a cell, a list, a `Vector` and an edge segment alike. A value the constraint cannot render is written as it arrived: an export has no diagnostic channel, and one malformed cell must not fail the file.
 
 ### Relation Columns
 
@@ -1609,7 +1609,7 @@ The schema decides what an empty cell holds, because `encoding/csv` writes the e
 
 In a relation group, an empty foreign-key segment is the key's empty value where `WithSchema` supplies the target's keys and the key's kind has one (String, UUID); otherwise it is absent, and the validator reports the missing component. An empty edge-property segment follows the property rule, except that an edge property is never null: an optional one, or a required one whose kind has no empty value, is absent on that target.
 
-An optional property holding `""` or an empty list writes the cell null writes and reads back as null; this is a documented limitation. Two values the writer cannot express are refused with an error naming the instance: a list holding one empty element, which writes the cell an empty list writes, and a lone association target whose key components are all `""` and whose edge properties are all absent or `""`, which writes the cell an absent edge writes. A single-column row holding `""` is written as a quoted empty field, since a blank line would be skipped on the way back.
+An optional property holding `""` or an empty list writes the cell null writes and reads back as null; this is a documented limitation. Three values the writer cannot express are refused with an error naming the instance: a cell whose text holds a CR LF, which `encoding/csv`'s reader turns into LF inside a quoted field too; a list holding one empty element, which writes the cell an empty list writes, at every depth, since an inner list of one empty element writes the text an empty inner list writes; and a lone association target whose key components are all `""` and whose edge properties are all absent or `""`, which writes the cell an absent edge writes. A single-column row holding `""` is written as a quoted empty field, since a blank line would be skipped on the way back.
 
 ### Limitations
 

@@ -29,6 +29,9 @@ func (a *Adapter) ParseTyped(
 	schemaType *schema.Type,
 ) ([]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollector(0)
+	if a.listSepRefused(collector) {
+		return nil, collector.Result()
+	}
 	reader := a.newReader(r)
 
 	columns, _, ok := a.readHeader(reader, source, collector)
@@ -71,6 +74,17 @@ func (a *Adapter) ParseTyped(
 	}
 
 	return results, collector.Result()
+}
+
+// listSepRefused reports a list separator [listSepError] refuses as an Error
+// and whether it did. The refusal names the configuration, not the input, so it
+// carries no span.
+func (a *Adapter) listSepRefused(collector *diag.Collector) bool {
+	err := listSepError(a.config.listSep)
+	if err != nil {
+		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE, err.Error()).Build())
+	}
+	return err != nil
 }
 
 // newReader returns the reader both entry points parse through. LazyQuotes
@@ -177,6 +191,9 @@ func (a *Adapter) ParseWithTypeColumn(
 	if a.config.typeColumn == "" {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
 			ErrNoTypeColumn.Error()).Build())
+		return nil, collector.Result()
+	}
+	if a.listSepRefused(collector) {
 		return nil, collector.Result()
 	}
 

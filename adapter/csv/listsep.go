@@ -1,20 +1,21 @@
 package csv
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
-// escapeListElem renders one list element or edge segment so the separator
-// can be split unambiguously: the backslash escapes itself and the
-// separator. Escaping the separator alone is not injective — `a\` + sep +
-// `b` would collide with the element `a\` `b` — so both are escaped, and
-// [splitListElems] is the one inverse.
+// escapeListElem escapes the backslash and every occurrence of the separator's
+// first byte, so [splitListElems] finds a separator only between elements.
+// Escaping whole matches fails for "||": "a|" then the separator reads "a|||".
 func escapeListElem(s, sep string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
-	return strings.ReplaceAll(s, sep, `\`+sep)
+	return strings.ReplaceAll(s, sep[:1], `\`+sep[:1])
 }
 
 // splitListElems is the inverse of [escapeListElem]: it splits on the
 // unescaped separator and unescapes each element. The separator is treated
-// as an opaque string; an escape applies to the single character after the
+// as an opaque string; an escape applies to the single byte after the
 // backslash.
 func splitListElems(s, sep string) []string {
 	if s == "" {
@@ -41,4 +42,17 @@ func splitListElems(s, sep string) []string {
 	}
 	elems = append(elems, buf.String())
 	return elems
+}
+
+// listSepError refuses a separator the parser cannot find again: one beginning
+// with the backslash, which the splitter reads as an escape, and one holding a
+// CR LF, which [encoding/csv]'s reader turns into LF.
+func listSepError(sep string) error {
+	switch {
+	case strings.HasPrefix(sep, `\`):
+		return fmt.Errorf("csv adapter: list separator %q begins with the escape character \\, which the parser reads as an escape", sep)
+	case strings.Contains(sep, "\r\n"):
+		return fmt.Errorf("csv adapter: list separator %q holds a CR LF, which encoding/csv reads back as LF, so the parser never finds it", sep)
+	}
+	return nil
 }

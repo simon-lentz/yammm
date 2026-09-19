@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -20,14 +21,18 @@ import (
 // per type. CSV is inherently single-type-per-file, so the output is a map
 // from type name to CSV bytes.
 //
-// Returns [ErrNilSnapshot] if result is nil, and refuses a snapshot holding a
-// composed child: see [refuseComposedChildren].
+// Returns [ErrNilSnapshot] if result is nil, refuses a list separator the
+// parser cannot find again, and refuses a snapshot holding a composed child:
+// see [refuseComposedChildren].
 func (a *Adapter) MarshalSnapshot(
 	ctx context.Context,
 	result *graph.Snapshot,
 ) (map[string][]byte, error) {
 	if result == nil {
 		return nil, ErrNilSnapshot
+	}
+	if err := listSepError(a.config.listSep); err != nil {
+		return nil, err
 	}
 	if err := refuseComposedChildren(result); err != nil {
 		return nil, err
@@ -59,8 +64,9 @@ func (a *Adapter) MarshalSnapshot(
 // WriteSnapshot writes a graph snapshot to per-type writers. The writerFor
 // function is called once per type to obtain the destination writer.
 //
-// Returns [ErrNilSnapshot] if result is nil, and refuses a snapshot holding a
-// composed child before it requests any writer: see [refuseComposedChildren].
+// Returns [ErrNilSnapshot] if result is nil, and refuses a list separator the
+// parser cannot find again and a snapshot holding a composed child before it
+// requests any writer: see [refuseComposedChildren].
 func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),
@@ -68,6 +74,9 @@ func (a *Adapter) WriteSnapshot(
 ) error {
 	if result == nil {
 		return ErrNilSnapshot
+	}
+	if err := listSepError(a.config.listSep); err != nil {
+		return err
 	}
 	if err := refuseComposedChildren(result); err != nil {
 		return err
@@ -262,9 +271,8 @@ func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error
 // with columns. Edge columns zip across the relation's targets on the list
 // separator; an absent edge leaves every column of its group empty, which
 // the parser reads as absent, never null. A null or missing property writes
-// an empty cell, which the parser reads through the schema. A non-empty list
-// whose cell renders empty is refused: its one element renders as "", and the
-// list grammar writes [""] and [] alike.
+// an empty cell, which the parser reads through the schema. A cell holding a
+// CR LF is refused.
 func (a *Adapter) instanceToRow(
 	props immutable.Properties,
 	edgesByRel map[string][]*graph.Edge,
@@ -284,18 +292,27 @@ func (a *Adapter) instanceToRow(
 	row := make([]string, len(columns))
 	for i, col := range columns {
 		if val, ok := props.Get(col); ok {
-			cell := a.valueToString(val, propertyConstraint(schemaType, col))
-			if list, isList := val.Slice(); isList && list.Len() > 0 && cell == "" {
-				return nil, fmt.Errorf("csv adapter: property %q: a list holding one empty element writes the cell an empty list writes, so the element would not survive the round trip", col)
+			cell, err := a.valueToString(val, propertyConstraint(schemaType, col))
+			if err != nil {
+				return nil, fmt.Errorf("csv adapter: property %q: %w", col, err)
 			}
 			row[i] = cell
 			continue
 		}
 		row[i] = cells[col]
 	}
+	for i, cell := range row {
+		if strings.Contains(cell, "\r\n") {
+			return nil, fmt.Errorf("csv adapter: column %q: %w", columns[i], errCRLF)
+		}
+	}
 
 	return row, nil
 }
+
+// errCRLF refuses a cell whose text holds a CR LF: [encoding/csv]'s reader
+// turns every CR LF into LF, inside a quoted field too.
+var errCRLF = errors.New("its text holds a CR LF, which encoding/csv reads back as LF, so the value would not survive the round trip")
 
 // relationCells renders one association's edge columns into cells: per FK
 // component and per edge property, one segment per target, escaped and
@@ -401,45 +418,49 @@ func canonicalOrRaw(raw any, c schema.Constraint) any {
 	return canonical
 }
 
-// elementConstraint returns a list constraint's element constraint, or nil for
-// any other constraint.
+// elementConstraint returns the constraint each element of a collection renders
+// through: a List's element constraint, and Float for a Vector, whose elements
+// the validator coerces as Floats. Any other constraint has none.
 func elementConstraint(c schema.Constraint) schema.Constraint {
 	if c == nil {
 		return nil
 	}
-	lc, ok := schema.ResolveAlias(c).(schema.ListConstraint)
-	if !ok {
-		return nil
+	switch rc := schema.ResolveAlias(c).(type) {
+	case schema.ListConstraint:
+		return rc.Element()
+	case schema.VectorConstraint:
+		return schema.NewFloatConstraint()
 	}
-	return lc.Element()
+	return nil
 }
 
-// valueToString renders an immutable.Value as a CSV cell string, in the form
-// its constraint stores. Null renders as the empty cell.
-func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) string {
+// errListOfOneEmptyElement refuses a list whose one element renders as "": the
+// list grammar writes [""] and [] alike, so the list would read back as an
+// empty list, or as null where it is an optional property's whole value.
+var errListOfOneEmptyElement = errors.New("a list holding one empty element writes what an empty list writes, so the element would not survive the round trip")
+
+// valueToString renders a value as cell text in the form its constraint
+// stores, null as "". A collection renders each element by this same rule and
+// escapes it, which inverts the parser's recursion at every depth.
+func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) (string, error) {
 	if val.IsNil() {
-		return ""
+		return "", nil
 	}
-
-	// A collection renders elementwise, so the element constraint does the
-	// work rather than the whole value.
-	if s, ok := val.Slice(); ok {
-		return a.sliceToString(s, elementConstraint(c))
+	s, ok := val.Slice()
+	if !ok {
+		return scalarCell(canonicalOrRaw(val.Unwrap(), c)), nil
 	}
-
-	return scalarCell(canonicalOrRaw(val.Unwrap(), c))
-}
-
-// sliceToString renders an immutable.Slice as a list-separated string. Each
-// element renders under elem, so a List<Timestamp> canonicalizes at its
-// elements and not only at its outer level. Elements escape through the
-// shared helper, so a value containing the separator survives the split.
-func (a *Adapter) sliceToString(s immutable.Slice, elem schema.Constraint) string {
+	elem := elementConstraint(c)
 	parts := make([]string, s.Len())
 	for i, v := range s.Iter2() {
-		if !v.IsNil() {
-			parts[i] = escapeListElem(fmt.Sprint(canonicalOrRaw(v.Unwrap(), elem)), a.config.listSep)
+		text, err := a.valueToString(v, elem)
+		if err != nil {
+			return "", fmt.Errorf("list element %d: %w", i, err)
 		}
+		parts[i] = escapeListElem(text, a.config.listSep)
 	}
-	return strings.Join(parts, a.config.listSep)
+	if len(parts) == 1 && parts[0] == "" {
+		return "", errListOfOneEmptyElement
+	}
+	return strings.Join(parts, a.config.listSep), nil
 }

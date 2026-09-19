@@ -6,7 +6,7 @@ import "github.com/simon-lentz/yammm/schema"
 type adapterConfig struct {
 	delimiter  rune
 	typeColumn string // empty = no type column
-	listSep    string // list element separator
+	listSep    string // "" only outside New; the zero delimiter refuses before any list
 	schema     *schema.Schema
 	strict     bool // match names exactly, as a strict validator does
 }
@@ -57,8 +57,11 @@ func WithTypeColumn(name string) Option {
 
 // WithListSeparator sets the separator for list elements, vector elements
 // and edge-column segments, on the write side and the parse side alike.
-// The default is "|". A value containing the separator survives either way:
-// both sides escape through one shared helper pair.
+// The default is "|". An element holding any part of the separator splits
+// back unchanged, at every depth of a nested list. A separator that begins
+// with a backslash, the escape character, or holds a CR LF, which
+// [encoding/csv] reads back as LF, is refused before a parse reads or a write
+// writes: as an Error diagnostic, or as an error.
 func WithListSeparator(sep string) Option {
 	return func(c *adapterConfig) {
 		if sep != "" {
