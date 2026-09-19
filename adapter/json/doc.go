@@ -36,6 +36,31 @@
 // Input is preprocessed with [tidwall/jsonc], so comments and trailing commas
 // are tolerated.
 //
+// Every type name whose value is an array is an entry of the result, an empty
+// array included, unless it is read after a fault that stops the parse. Three
+// shapes that a decoder would resolve silently are Error diagnostics instead.
+// Each is reported and nothing the document states is dropped, because what a
+// decoder keeps of them is one reader's convention and not the document's
+// meaning:
+//
+//   - A type name repeated as a key of the root object. Decoding keeps the last
+//     array and drops the first batch whole; here the repeat is reported at its
+//     key and both arrays' instances are in the entry, each indexing its own
+//     array.
+//   - A member name repeated inside one object, at any depth of an instance.
+//     Names compare as the decoder reads them: escapes are resolved, and each
+//     byte of an invalid UTF-8 sequence reads as U+FFFD, which is the key the
+//     decoder keeps. Each repeat is reported where it stands, and the instance
+//     is produced holding the value the decoder kept, which is the value every
+//     other JSON reader keeps.
+//   - Anything but white space and closed comments after the root object,
+//     reported where it starts, whether or not it reads as a JSON value. An
+//     unterminated block comment is content.
+//
+// A fault the decoder cannot read past, such as a syntax error or a truncated
+// document, is reported and parsing stops there: every instance read before it
+// is returned, and nothing after it is read.
+//
 // # Provenance
 //
 // Every instance carries a [location.Provenance]: the source the caller named,

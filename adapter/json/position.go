@@ -1,6 +1,8 @@
 package json
 
 import (
+	"cmp"
+	"slices"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/location"
@@ -11,10 +13,26 @@ import (
 // Build it over the document's own bytes, never over the buffer jsonc returns:
 // jsonc replaces each comment byte with one space, so a multibyte rune inside a
 // comment moves every later rune column on that line.
+//
+// A column is counted from the nearest checkpoint at or before the offset, not
+// from the line start, so a document written on one line costs a bounded scan
+// per position rather than one proportional to the line.
 type positionTable struct {
 	content     []byte
 	lineOffsets []int
+
+	// marks holds, per 0-based line longer than markStride, the checkpoints
+	// marksFor records; a line is decomposed once, on its first long lookup.
+	marks map[int][]columnMark
 }
+
+// columnMark is a rune start on a line and that rune's column.
+type columnMark struct {
+	at, column int
+}
+
+// markStride is the byte distance between a line's checkpoints.
+const markStride = 256
 
 // newPositionTable indexes content's line starts. "\r\n" is one break, and so
 // is a bare "\r".
@@ -52,10 +70,18 @@ func (t *positionTable) positionAt(byteOffset int) location.Position {
 		return location.UnknownPosition()
 	}
 	line := t.lineAt(byteOffset)
-	lineStart := t.lineOffsets[line-1]
-
-	column := 1
-	for i := lineStart; i < byteOffset; {
+	i, column := t.lineOffsets[line-1], 1
+	if byteOffset-i > markStride {
+		marks := t.marksFor(line - 1)
+		// The last checkpoint at or before byteOffset; the line start is one.
+		n, _ := slices.BinarySearchFunc(marks, byteOffset, func(m columnMark, off int) int {
+			return cmp.Compare(m.at, off+1)
+		})
+		if n > 0 {
+			i, column = marks[n-1].at, marks[n-1].column
+		}
+	}
+	for i < byteOffset {
 		_, size := utf8.DecodeRune(t.content[i:])
 		next := i + size
 		if next > byteOffset {
@@ -65,6 +91,36 @@ func (t *positionTable) positionAt(byteOffset int) location.Position {
 		column++
 	}
 	return location.NewPosition(line, column, byteOffset)
+}
+
+// marksFor returns the checkpoints of a 0-based line: the first rune start at
+// or after every markStride bytes from the line start, found by the same
+// decomposition positionAt applies, so counting on from a checkpoint gives the
+// column counting from the line start gives.
+func (t *positionTable) marksFor(line int) []columnMark {
+	if marks, ok := t.marks[line]; ok {
+		return marks
+	}
+	end := len(t.content)
+	if line+1 < len(t.lineOffsets) {
+		end = t.lineOffsets[line+1]
+	}
+	var marks []columnMark
+	start := t.lineOffsets[line]
+	next := start + markStride
+	for i, column := start, 1; i < end; column++ {
+		if i >= next {
+			marks = append(marks, columnMark{at: i, column: column})
+			next = i - (i-start)%markStride + markStride
+		}
+		_, size := utf8.DecodeRune(t.content[i:])
+		i += size
+	}
+	if t.marks == nil {
+		t.marks = make(map[int][]columnMark)
+	}
+	t.marks[line] = marks
+	return marks
 }
 
 // lineAt returns the 1-based line holding byteOffset.
