@@ -193,11 +193,11 @@ func TestMutateScript_NamesTheTestThatKilledTheMutant(t *testing.T) {
 // format string vet reads and a package-level value built at init. Package q
 // is a second package whose test build a mutant can break alone.
 const (
-	extraSource = "package m\n\nimport (\n\t\"fmt\"\n\t\"regexp\"\n)\n\nvar vowels = regexp.MustCompile(\"[aeiou]\")\n\n" +
+	extraSource = "package m\n\nimport (\n\t\"fmt\"\n\t\"regexp\"\n)\n\nvar word = regexp.MustCompile(`vow+el`)\n\n" +
 		"func Double(a int) int { return 2 * a }\n\nfunc Name(s string) string { return fmt.Sprintf(\"n=%s\", s) }\n\n" +
-		"func HasVowel(s string) bool { return vowels.MatchString(s) }\n"
+		"func Matches(s string) bool { return word.MatchString(s) }\n"
 	extraTest = "package m\n\nimport \"testing\"\n\nfunc TestExtra(t *testing.T) {\n" +
-		"\tif Double(2) != 4 || Name(\"x\") != \"n=x\" || !HasVowel(\"a\") {\n\t\tt.Fatal(\"extra\")\n\t}\n}\n"
+		"\tif Double(2) != 4 || Name(\"x\") != \"n=x\" || !Matches(\"vowel\") {\n\t\tt.Fatal(\"extra\")\n\t}\n}\n"
 	qSource = "package q\n\nfunc One() int { return 1 }\n"
 	qTest   = "package q\n\nimport \"testing\"\n\nfunc TestOne(t *testing.T) {\n\tif One() != 1 {\n\t\tt.Fatal(\"one\")\n\t}\n}\n"
 )
@@ -209,6 +209,8 @@ const (
 func TestMutateScript_JudgesAMutantOnlyByTestsThatRan(t *testing.T) {
 	t.Parallel()
 	const refused = "mutate: the mutated tree DOES NOT BUILD its tests or fails their vet, so the suite cannot judge it"
+	// No argument holds a double quote without white space: Go passes such an
+	// argument to bash unquoted, and the Windows job's bash splits it.
 	for _, c := range []struct {
 		name, file, search, replace string
 		pkgs                        []string
@@ -243,7 +245,7 @@ func TestMutateScript_JudgesAMutantOnlyByTestsThatRan(t *testing.T) {
 		},
 		{
 			name: "a panic at init is a kill", file: "m/extra.go",
-			search: `"[aeiou]"`, replace: `"[aeiou"`,
+			search: "vow+el", replace: "vow(el",
 			pkgs: []string{"./m/"}, code: 0, want: []string{"mutate: MUTANT KILLED"}, runs: 1,
 		},
 		{
