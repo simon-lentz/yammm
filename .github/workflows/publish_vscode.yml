@@ -13,10 +13,14 @@ on:
         required: false
         type: boolean
         default: false
+# Every job carries a timeout, so a hung runner costs minutes rather than
+# GitHub's six-hour default. 15 minutes is seven times the slowest job measured,
+# and a publish cut short is safe to dispatch again.
 jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         include:
@@ -93,6 +97,7 @@ jobs:
   publish:
     name: Publish to Marketplace
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: build
     steps:
       - uses: actions/setup-node@v7

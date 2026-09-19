@@ -9,10 +9,13 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: read
+# Every job carries a timeout, so a hung runner costs minutes rather than
+# GitHub's six-hour default. 15 minutes is five times the slowest job measured.
 jobs:
   pre-commit:
     name: Pre-commit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -33,6 +36,7 @@ jobs:
   extension-checks:
     name: Extension Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -72,6 +76,7 @@ jobs:
   build-extension:
     name: Build Extension ${{ matrix.target }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         include:

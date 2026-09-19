@@ -1,9 +1,14 @@
 package scripttest
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
+	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -350,6 +355,142 @@ func TestTimeoutFindings_RefusesEachWayAJobCanOutliveItsTests(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			got := timeoutFindings(c.wf, c.script, c.margins)
+			if c.want == "" {
+				if len(got) != 0 {
+					t.Errorf("findings %q, want none", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0], c.want) {
+				t.Errorf("findings %q, want one naming %q", got, c.want)
+			}
+		})
+	}
+}
+
+// knownWorkflows are the workflows the tracked tree must yield, so a pathspec
+// that stops matching one fails rather than checking less. The CI workflow is
+// the one spelled .yaml.
+var knownWorkflows = []string{"ci.yaml", "publish_vscode.yml", "release.yml", "yammm_test.yml"}
+
+// untimedJobs reports every job of workflows, keyed by file name, that runs
+// steps with no positive timeout-minutes. A job that calls a reusable workflow
+// cannot set one, which actionlint refuses as a syntax error; the called
+// workflow's own jobs carry theirs.
+func untimedJobs(workflows map[string]workflow) []string {
+	if len(workflows) == 0 {
+		return []string{"no workflow was read"}
+	}
+	var findings []string
+	for _, file := range slices.Sorted(maps.Keys(workflows)) {
+		wf := workflows[file]
+		if len(wf.Jobs) == 0 {
+			findings = append(findings, file+" holds no job")
+			continue
+		}
+		for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+			j := wf.Jobs[name]
+			if j.Uses == "" && j.TimeoutMinutes <= 0 {
+				findings = append(findings, fmt.Sprintf("%s: jobs.%s sets no timeout-minutes", file, name))
+			}
+		}
+	}
+	return findings
+}
+
+// trackedWorkflows decodes, keyed by file name, every workflow GitHub reads
+// from root's tracked tree: the .yml and .yaml files directly under
+// .github/workflows. The pathspecs take glob magic because a plain * also
+// matches a slash, and GitHub runs no file in a subdirectory.
+func trackedWorkflows(t *testing.T, root string) map[string]workflow {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z", "--",
+		":(glob).github/workflows/*.yml", ":(glob).github/workflows/*.yaml")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	workflows := map[string]workflow{}
+	for rel := range strings.SplitSeq(strings.TrimSuffix(string(out), "\x00"), "\x00") {
+		if rel == "" {
+			continue
+		}
+		file := filepath.Join(root, filepath.FromSlash(rel))
+		if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
+			// The index still lists a file the working tree has deleted.
+			continue
+		}
+		var wf workflow
+		decodeYAML(t, file, &wf)
+		workflows[path.Base(rel)] = wf
+	}
+	return workflows
+}
+
+func TestTrackedWorkflows_ReadsWhatGitHubRuns(t *testing.T) {
+	t.Parallel()
+	f := &fixture{t: t, dir: t.TempDir()}
+	jobNamed := func(name string) string {
+		return "jobs:\n  " + name + ":\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n"
+	}
+	f.write(".github/workflows/a.yml", jobNamed("top"))
+	f.write(".github/workflows/b.yaml", jobNamed("b"))
+	f.write(".github/workflows/sub/a.yml", jobNamed("nested"))
+	f.write(".github/workflows/sub/c.yaml", jobNamed("nested"))
+	f.write(".github/workflows/gone.yml", jobNamed("gone"))
+	f.write(".github/workflows/notes.txt", "not a workflow\n")
+	f.index()
+	if err := os.Remove(filepath.Join(f.dir, ".github", "workflows", "gone.yml")); err != nil {
+		t.Fatal(err)
+	}
+
+	got := trackedWorkflows(t, f.dir)
+	if names := slices.Sorted(maps.Keys(got)); !slices.Equal(names, []string{"a.yml", "b.yaml"}) {
+		t.Errorf("read %q, want [a.yml b.yaml]: a subdirectory, a deleted file and a non-workflow are not run", names)
+	}
+	if _, ok := got["a.yml"].Jobs["top"]; !ok {
+		t.Errorf("a.yml decoded as jobs %q, want the top-level file's job top", slices.Sorted(maps.Keys(got["a.yml"].Jobs)))
+	}
+}
+
+// Every job of every tracked workflow carries a timeout, so a hung runner
+// costs minutes rather than GitHub's six-hour default.
+func TestWorkflows_EveryJobTimesOut(t *testing.T) {
+	t.Parallel()
+	workflows := trackedWorkflows(t, repoRoot)
+	for _, want := range knownWorkflows {
+		if _, ok := workflows[want]; !ok {
+			t.Errorf("the tracked tree yields no %s", want)
+		}
+	}
+	for _, f := range untimedJobs(workflows) {
+		t.Error(f)
+	}
+}
+
+// The check itself, against the inputs it exists to refuse.
+func TestUntimedJobs_RefusesEachWayAJobCanRunUnbounded(t *testing.T) {
+	t.Parallel()
+	timed := job{TimeoutMinutes: 15, Steps: []step{{Run: "make"}}}
+	for _, c := range []struct {
+		name      string
+		workflows map[string]workflow
+		want      string // a substring of the one finding expected; "" expects none
+	}{
+		{"a timed job", map[string]workflow{"a.yml": {Jobs: map[string]job{"build": timed}}}, ""},
+		{"a job with no timeout", map[string]workflow{"a.yml": {Jobs: map[string]job{"build": {Steps: []step{{Run: "make"}}}}}}, "a.yml: jobs.build sets no timeout-minutes"},
+		{"a negative timeout", map[string]workflow{"a.yml": {Jobs: map[string]job{"build": {TimeoutMinutes: -1, Steps: []step{{Run: "make"}}}}}}, "jobs.build sets no timeout-minutes"},
+		{"a step timeout alone", map[string]workflow{"a.yml": {Jobs: map[string]job{"build": {Steps: []step{{Run: "make", TimeoutMinutes: 15}}}}}}, "jobs.build sets no timeout-minutes"},
+		{"a job that calls a reusable workflow", map[string]workflow{"a.yml": {Jobs: map[string]job{"test": {Uses: "./.github/workflows/t.yml"}, "build": timed}}}, ""},
+		{"an untimed job after a timed one", map[string]workflow{"a.yml": {Jobs: map[string]job{"build": timed, "publish": {Steps: []step{{Run: "vsce"}}}}}}, "a.yml: jobs.publish"},
+		{"an untimed job in a later file", map[string]workflow{"a.yml": {Jobs: map[string]job{"build": timed}}, "b.yaml": {Jobs: map[string]job{"publish": {Steps: []step{{Run: "vsce"}}}}}}, "b.yaml: jobs.publish"},
+		{"a workflow with no job", map[string]workflow{"a.yml": {}}, "a.yml holds no job"},
+		{"no workflow at all", map[string]workflow{}, "no workflow was read"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			got := untimedJobs(c.workflows)
 			if c.want == "" {
 				if len(got) != 0 {
 					t.Errorf("findings %q, want none", got)

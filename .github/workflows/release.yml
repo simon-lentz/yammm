@@ -10,11 +10,16 @@ jobs:
   # suite, and the Neo4j server matrix, run at the tagged commit before any asset
   # is built. A called workflow runs with this workflow's github context, so it
   # checks out the tag.
+  #
+  # A job that calls a workflow cannot set timeout-minutes; each job of the
+  # called test workflow carries its own. The release job times out at 15
+  # minutes, about three times its slowest measured run.
   test:
     uses: ./.github/workflows/yammm_test.yml
   release:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
