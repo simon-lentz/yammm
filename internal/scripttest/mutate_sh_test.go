@@ -189,6 +189,108 @@ func TestMutateScript_NamesTheTestThatKilledTheMutant(t *testing.T) {
 	f.wantRestored()
 }
 
+// extraSource and extraTest give package m a function only a test calls, a
+// format string vet reads and a package-level value built at init. Package q
+// is a second package whose test build a mutant can break alone.
+const (
+	extraSource = "package m\n\nimport (\n\t\"fmt\"\n\t\"regexp\"\n)\n\nvar vowels = regexp.MustCompile(\"[aeiou]\")\n\n" +
+		"func Double(a int) int { return 2 * a }\n\nfunc Name(s string) string { return fmt.Sprintf(\"n=%s\", s) }\n\n" +
+		"func HasVowel(s string) bool { return vowels.MatchString(s) }\n"
+	extraTest = "package m\n\nimport \"testing\"\n\nfunc TestExtra(t *testing.T) {\n" +
+		"\tif Double(2) != 4 || Name(\"x\") != \"n=x\" || !HasVowel(\"a\") {\n\t\tt.Fatal(\"extra\")\n\t}\n}\n"
+	qSource = "package q\n\nfunc One() int { return 1 }\n"
+	qTest   = "package q\n\nimport \"testing\"\n\nfunc TestOne(t *testing.T) {\n\tif One() != 1 {\n\t\tt.Fatal(\"one\")\n\t}\n}\n"
+)
+
+// A verdict comes only from tests that ran. go build compiles no test file and
+// runs no vet, so a mutant that failed go test before any test ran once read as
+// killed; the check that refuses it must build and vet exactly what go test
+// does, run none of it, and come before the verdict run.
+func TestMutateScript_JudgesAMutantOnlyByTestsThatRan(t *testing.T) {
+	t.Parallel()
+	const refused = "mutate: the mutated tree DOES NOT BUILD its tests or fails their vet, so the suite cannot judge it"
+	for _, c := range []struct {
+		name, file, search, replace string
+		pkgs                        []string
+		code                        int
+		want                        []string // substrings of stdout and stderr together
+		runs                        int      // TestAdd runs, the baseline's included
+	}{
+		{
+			name: "a test file that no longer builds", file: "m/extra_test.go",
+			search: `import "testing"`, replace: "import (\n\t\"strings\"\n\t\"testing\"\n)",
+			pkgs: []string{"./m/"}, code: 1, want: []string{refused, `"strings" imported and not used`}, runs: 1,
+		},
+		{
+			name: "a production symbol only a test calls", file: "m/extra.go",
+			search: "func Double(a int) int", replace: "func Double(a, b int) int",
+			pkgs: []string{"./m/"}, code: 1, want: []string{refused, "not enough arguments in call to Double"}, runs: 1,
+		},
+		{
+			name: "a production mutant go test's vet refuses", file: "m/extra.go",
+			search: `"n=%s", s`, replace: `"n=%d", s`,
+			pkgs: []string{"./m/"}, code: 1, want: []string{refused, "format %d has arg s of wrong type string"}, runs: 1,
+		},
+		{
+			name: "another named package's test build, refused before the verdict run", file: "q/q_test.go",
+			search: `import "testing"`, replace: "import (\n\t\"strings\"\n\t\"testing\"\n)",
+			pkgs: []string{"./m/", "./q/"}, code: 1, want: []string{refused}, runs: 1,
+		},
+		{
+			name: "a production mutant that does not build", file: "m/extra.go",
+			search: "return 2 * a", replace: "return 2 *",
+			pkgs: []string{"./m/"}, code: 1, want: []string{"mutate: the mutated tree DOES NOT BUILD, so the suite cannot judge it"}, runs: 1,
+		},
+		{
+			name: "a panic at init is a kill", file: "m/extra.go",
+			search: `"[aeiou]"`, replace: `"[aeiou"`,
+			pkgs: []string{"./m/"}, code: 0, want: []string{"mutate: MUTANT KILLED"}, runs: 1,
+		},
+		{
+			name: "a vet check go test does not run is no refusal", file: "m/extra.go",
+			search: "{ return 2 * a }", replace: "{ a = a; return 2 * a }",
+			pkgs: []string{"./m/"}, code: 1, want: []string{"mutate: MUTANT SURVIVED"}, runs: 2,
+		},
+		{
+			name: "a test build outside the named packages is no refusal", file: "m/extra_test.go",
+			search: `import "testing"`, replace: "import (\n\t\"strings\"\n\t\"testing\"\n)",
+			pkgs: []string{"./ok/"}, code: 1, want: []string{"mutate: MUTANT SURVIVED"}, runs: 0,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f, runLog := mutateFixture(t, "3")
+			f.write("m/extra.go", extraSource)
+			f.write("m/extra_test.go", extraTest)
+			f.write("q/q.go", qSource)
+			f.write("q/q_test.go", qTest)
+			f.index()
+			before, err := os.ReadFile(filepath.Join(f.dir, filepath.FromSlash(c.file)))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			r := f.run("mutate.sh", append([]string{c.file, c.search, c.replace}, c.pkgs...)...)
+			r.wantCode(t, c.code)
+			for _, w := range c.want {
+				if !strings.Contains(r.stdout+r.stderr, w) {
+					t.Errorf("output does not hold %q\nstdout:\n%s\nstderr:\n%s", w, r.stdout, r.stderr)
+				}
+			}
+			if got := testRuns(t, runLog); got != c.runs {
+				t.Errorf("%d runs of TestAdd, want %d", got, c.runs)
+			}
+			after, err := os.ReadFile(filepath.Join(f.dir, filepath.FromSlash(c.file)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(before) {
+				t.Errorf("%s holds %q after the run, want %q", c.file, after, before)
+			}
+		})
+	}
+}
+
 func TestMutateScript_RecordsNoRedBaseline(t *testing.T) {
 	t.Parallel()
 	f, runLog := mutateFixture(t, "4")

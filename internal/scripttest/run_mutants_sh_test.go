@@ -126,7 +126,8 @@ func TestRunMutantsScript_RefusesADirtyCheckout(t *testing.T) {
 }
 
 // One row per mutant, each carrying the outcome its run produced. A mutant that
-// does not build and one that matches nothing both leave the suite untouched,
+// does not build, one whose tests do not build and one that matches nothing all
+// leave the suite untouched,
 // so an arm that scored either as a kill would report an unmeasured mutant as
 // measured.
 //
@@ -141,6 +142,10 @@ func TestRunMutantsScript_RecordsOneVerdictPerMutant(t *testing.T) {
 	f.writeMutant("survived", "b + a")
 	f.writeMutant("nobuild", "a +")
 	f.writeMutantSearching("nomatch", "a * b", "a - b")
+	testBuild := f.writeMutantSearching("testbuild", `import "testing"`, "import (\n\t\"strings\"\n\t\"testing\"\n)")
+	if err := os.WriteFile(filepath.Join(testBuild, "file"), []byte("m/m_test.go"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
 
@@ -149,10 +154,11 @@ func TestRunMutantsScript_RecordsOneVerdictPerMutant(t *testing.T) {
 	}
 	got := verdicts(t, filepath.Join(f.dir, "out"))
 	want := map[string]string{
-		"killed":   "KILLED",
-		"survived": "SURVIVED",
-		"nobuild":  "NOBUILD",
-		"nomatch":  "NOMATCH",
+		"killed":    "KILLED",
+		"survived":  "SURVIVED",
+		"nobuild":   "NOBUILD",
+		"nomatch":   "NOMATCH",
+		"testbuild": "NOBUILD",
 	}
 	for id, verdict := range want {
 		if got[id] != verdict {

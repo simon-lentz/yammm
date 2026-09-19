@@ -10,7 +10,12 @@
 # pattern matching nothing rewrites nothing, and "nothing red" then reads as
 # "mutant killed" when no mutant existed. The build MUST succeed: a mutation
 # that does not compile makes go test exit non-zero for an unrelated reason,
-# and that also reads as "killed".
+# and that also reads as "killed". The build includes the named packages' test
+# binaries and the vet checks go test runs, which `go build` does not reach: a
+# mutant that breaks only a test build, or fails that vet, fails go test before
+# any of the package's code runs. The check executes none of the binaries it
+# builds: a mutant that panics in init or fails in a TestMain is a kill for the
+# verdict run to report, and a TestMain that writes files runs only there.
 #
 # The named packages must pass before the mutation. When MUTATE_BASELINE_CACHE
 # names a directory, a passing baseline is recorded there under a key over the
@@ -132,6 +137,12 @@ printf 'mutate: applied to %s (%s occurrence(s) matched)\n' "${file}" "${hits}"
 
 if ! build_out=$(go build ./... 2>&1); then
 	printf 'mutate: the mutated tree DOES NOT BUILD, so the suite cannot judge it\n' >&2
+	printf '%s\n' "${build_out}" >&2
+	exit 1
+fi
+# -exec=true builds and vets each test binary, then runs `true` in its place.
+if ! build_out=$(env -u MUTATE_BASELINE_CACHE go test -exec=true "${pkgs[@]}" 2>&1); then
+	printf 'mutate: the mutated tree DOES NOT BUILD its tests or fails their vet, so the suite cannot judge it\n' >&2
 	printf '%s\n' "${build_out}" >&2
 	exit 1
 fi
