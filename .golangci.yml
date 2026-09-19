@@ -164,7 +164,7 @@ linters:
       - path: "^adapter/json/(adapter|write)_test\\.go$"
         linters:
           - depguard
-      - path: "^adapter/json/internal/typetag/(validate)_test\\.go$"
+      - path: "^adapter/internal/typetag/(validate)_test\\.go$"
         linters:
           - depguard
       - path: "^adapter/neo4j/(diff|infer|introspect)_test\\.go$"

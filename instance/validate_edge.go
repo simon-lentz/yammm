@@ -219,7 +219,7 @@ func (v *Validator) resolveEdgeObject(rel *schema.Relation, targetType *schema.T
 	folded := make(map[member][]string)
 	var order []member
 	for _, name := range unclaimed {
-		lower, ok := foldKey(name)
+		lower, ok := FoldKey(name)
 		if !ok {
 			eo.unknown = append(eo.unknown, name)
 			continue

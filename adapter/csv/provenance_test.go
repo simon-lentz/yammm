@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -353,9 +354,11 @@ func TestParseTyped_HeaderDiagnosticsCarryASpan(t *testing.T) {
 	}
 }
 
-// TestParseTyped_DottedColumnDiagnosticsCarryTheRecordSpan pins the two
-// diagnostics recordToProps raises for a dotted column it cannot place.
-func TestParseTyped_DottedColumnDiagnosticsCarryTheRecordSpan(t *testing.T) {
+// TestParseTyped_UnplacedDottedColumnsAreReportedAtTheRecord pins where a
+// dotted column the row's type cannot place is reported: the parser carries it
+// to the validator, as a JSON key, and the validator's diagnostic carries the
+// record's span through the instance's provenance.
+func TestParseTyped_UnplacedDottedColumnsAreReportedAtTheRecord(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "with_relations.yammm")
 	st, _ := s.Type("Employee")
@@ -364,32 +367,29 @@ func TestParseTyped_DottedColumnDiagnosticsCarryTheRecordSpan(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		header string
-		want   string // the branch's own message, so a case cannot pass on the other
+		code   diag.Code
+		key    string
 	}{
-		{"no such association field", "employee_id,name,nosuch._target_company_id", "does not match an association field"},
-		{"neither a component nor an edge property", "employee_id,name,works_at.bogus", "names neither a _target_ component"},
+		{"no such association field", "employee_id,name,nosuch._target_company_id", instance.ErrUnknownField, "nosuch"},
+		{"neither a component nor an edge property", "employee_id,name,works_at.bogus", instance.ErrUnknownEdgeField, "bogus"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			input := c.header + "\ne1,Ada,x\n"
-			_, result := New().ParseTyped(t.Context(), id, "Employee", strings.NewReader(input), st)
-
-			issue, ok := firstIssue(result)
-			if !ok {
-				t.Fatalf("no diagnostic")
+			raws, result := New().ParseTyped(t.Context(), id, "Employee", strings.NewReader(c.header+"\ne1,Ada,x\n"), st)
+			if !result.OK() {
+				t.Fatalf("the parser judges no name: %s", result)
 			}
-			if !strings.Contains(issue.Message(), c.want) {
-				t.Fatalf("diagnostic %q is not the %s branch's", issue.Message(), c.name)
+			_, vres := instance.NewValidator(s).ValidateOne(t.Context(), "Employee", raws[0])
+			for issue := range vres.Issues() {
+				if issue.Code() != c.code || !strings.Contains(issue.Message(), c.key) {
+					continue
+				}
+				if !issue.HasSpan() || issue.Span().Start.Line != 2 || issue.Span().Source != id {
+					t.Errorf("diagnostic %q: span %+v, want line 2 of %s", issue.Message(), issue.Span(), id)
+				}
+				return
 			}
-			if !issue.HasSpan() {
-				t.Fatalf("diagnostic %q carries no span", issue.Message())
-			}
-			if got := issue.Span().Start.Line; got != 2 {
-				t.Errorf("span on line %d, want 2 (%s)", got, issue.Message())
-			}
-			if strings.Contains(issue.Message(), "row ") {
-				t.Errorf("message names a record ordinal: %q", issue.Message())
-			}
+			t.Errorf("no %s naming %q: %s", c.code, c.key, vres)
 		})
 	}
 }

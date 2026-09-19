@@ -72,6 +72,8 @@ parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, reader, typeResolve
 
 Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, timestamps, UUIDs, lists). Coercion failures produce `E_CSV_COERCE` diagnostics.
 
+Column names resolve as the validator resolves JSON keys: exact first, then case-insensitively (ASCII), with each key kept as the header spells it; pass `csvAdapter.WithStrictPropertyNames(true)` when the validator is strict (`instance.RecommendedOptions()` is). A name the schema does not declare reaches the validator, which reports it. A header that repeats a name or leaves a column unnamed is refused. A malformed record is reported and skipped; a reader that fails stops the parse with a Fatal diagnostic.
+
 BOM stripping: UTF-8 BOM bytes at the start of input are automatically stripped.
 
 ### Writing

@@ -22,11 +22,25 @@ repos:
       - id: yamlfmt
   # --- GHA linting ---
   - repo: https://github.com/rhysd/actionlint
-    rev: v1.7.11
+    rev: v1.7.12
     hooks:
       - id: actionlint
         name: actionlint (GHA)
         files: ^\.github/workflows/.*\.ya?ml$
+  # --- shell scripts ---
+  #
+  # The gate's scripts and the Claude plugin's hooks. shellcheck-py pins the
+  # shellcheck binary by its rev, so the local hook and CI's pre-commit job run
+  # one version. --external-sources follows each
+  # `. scripts/toolchain.sh`, so a variable one script sets for another is
+  # checked across the pair. The hook runs from the repository root, which is
+  # where every script resolves the helper it sources.
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        files: ^(scripts|claude-plugin/hooks)/
+        args: [--external-sources]
   # --- Go formatting, imports & modules ---
   #
   # Every tool is a `tool` directive in go.mod and is run through `go tool`, so

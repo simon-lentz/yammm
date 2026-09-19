@@ -47,11 +47,11 @@
 // Adapters depend on library packages; library packages never depend on adapters:
 //
 //	adapter/csv       ──imports──▶  instance, diag, location, location/path, graph,
-//	                                immutable, schema
+//	                                immutable, schema, adapter/internal/typetag
 //	adapter/gogen     ──imports──▶  schema, location, internal/ident
 //	adapter/jschema   ──imports──▶  schema
 //	adapter/json      ──imports──▶  instance, diag, location, location/path, graph,
-//	                                immutable, schema, adapter/json/internal/typetag,
+//	                                immutable, schema, adapter/internal/typetag,
 //	                                github.com/tidwall/jsonc
 //	adapter/markdown  ──imports──▶  schema
 //	adapter/neo4j     ──imports──▶  schema, graph, immutable, diag, location,
@@ -67,8 +67,9 @@
 // library applies elsewhere (e.g. JSON field names), so generated Go identifiers
 // stay consistent with the rest of yammm instead of duplicating that logic.
 //
-// An adapter's own nested internal package (adapter/json/internal/typetag) is not
-// an exception to this rule — it is the adapter's, not the core's.
+// The adapter layer's own internal package (adapter/internal/typetag), which
+// the JSON and CSV parsers share, is not an exception to this rule — it is the
+// adapters', not the core's.
 //
 // # Subpackages
 //

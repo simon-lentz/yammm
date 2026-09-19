@@ -48,6 +48,7 @@ git -C "$src" diff --quiet || { echo "the checkout's unstaged tree is not clean"
 # This script never changes directory, so the helper is resolved beside it
 # rather than through the caller's working directory.
 TOOLCHAIN_ROOT="$src"
+# shellcheck source=scripts/toolchain.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/toolchain.sh"
 unset TOOLCHAIN_ROOT
 

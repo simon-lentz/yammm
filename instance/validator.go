@@ -597,19 +597,20 @@ func (v *Validator) indexInput(props map[string]any) inputKeys {
 	}
 	in.byFold = make(map[string][]string, len(props))
 	for _, name := range in.names {
-		if lower, ok := foldKey(name); ok {
+		if lower, ok := FoldKey(name); ok {
 			in.byFold[lower] = append(in.byFold[lower], name)
 		}
 	}
 	return in
 }
 
-// foldKey returns the case-fold of an input key, or false for a key no schema
-// name can match under the fold. Identifiers are ASCII by the language's
-// grammar, so the fold is ASCII lowercasing and a key carrying any non-ASCII
-// byte folds to nothing: strings.ToLower would map a KELVIN SIGN onto "k" and
-// match a field the caller never wrote.
-func foldKey(key string) (string, bool) {
+// FoldKey returns the case-fold the validator matches an input key by, or
+// false for a key no schema name can match under the fold. It is the rule
+// [WithStrictPropertyNames] switches off, and a parser that resolves names
+// before validation reads it so the two agree. Identifiers are ASCII, so a key
+// with a non-ASCII byte folds to nothing: [strings.ToLower] would map a KELVIN
+// SIGN onto "k" and match a field the caller never wrote.
+func FoldKey(key string) (string, bool) {
 	var b []byte
 	for i := range len(key) {
 		c := key[i]
@@ -737,7 +738,7 @@ func (v *Validator) buildPropertyMapping(ctx context.Context, typ *schema.Type, 
 		if accounted[inputName] {
 			continue
 		}
-		lower, ok := foldKey(inputName)
+		lower, ok := FoldKey(inputName)
 		if !ok {
 			continue
 		}
@@ -814,7 +815,7 @@ func (v *Validator) exactMatchShadowing(typ *schema.Type, inputName string, mapp
 	if v.cfg.strictPropertyNames {
 		return "", false
 	}
-	lower, ok := foldKey(inputName)
+	lower, ok := FoldKey(inputName)
 	if !ok {
 		return "", false
 	}

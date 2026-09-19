@@ -14,9 +14,31 @@
 // because its column names are what map a cell to a property: the package has
 // no headerless mode.
 //
+// # Header and Records
+//
+// The header must name every column, and name each one once: a header with an
+// unnamed column or a name that repeats is refused at the header's line, with
+// one diagnostic for each unnamed column and each repeated name, and no record
+// is read. A name is matched as written; it is never trimmed.
+//
+// A record the reader refuses — one whose field count differs from the
+// header's, a bare quote in an unquoted field, a character after a quoted
+// field's closing quote — is reported as an Error at the line the fault is on,
+// and the parse goes on with the next record. A quoted field that is never
+// closed runs to the end of the input, so its record is the last one
+// reported. [encoding/csv]'s LazyQuotes is off, so a malformed quoted field is
+// a diagnostic, never a value the file did not state.
+//
+// Any other error the reader returns is the [io.Reader] failing, an error that
+// only wraps [io.EOF] included. It stops the parse with a Fatal diagnostic, as
+// the diag package documents for an I/O failure, and the records read before it
+// are kept. A header the reader cannot read is an Error for a fault in the
+// input or a delimiter [encoding/csv] refuses, and a Fatal for the reader
+// failing.
+//
 // # Column Mapping
 //
-// Column names map 1:1 to property names. A CSV header row
+// A column maps to the property whose name it spells. A CSV header row
 //
 //	id,name,age,created_at
 //
@@ -28,6 +50,48 @@
 // separator. No declared name can contain a dot or a leading underscore,
 // so the grammar is unambiguous; with [WithTypeColumn], the type column is
 // extracted before dotted classification.
+//
+// The parser owns the CSV — its quoting, its records, its header and the
+// coercion of each cell — and the validator owns every name, as it does for
+// the JSON adapter. So a row parses as the JSON object that holds the same keys
+// and values does, and the validator answers the two alike.
+//
+// A column name resolves by the rule [instance.Validator] applies to a JSON
+// object's keys, applied to the object a row makes: each row, and each target
+// of an edge group, is its own object, and a key it holds is one whose cell
+// the parser writes. The rule holds at four places: a property, an
+// association's field, an edge property and a key component. A name that
+// spells a member exactly claims it when the object holds it. Otherwise a name
+// whose [instance.FoldKey] matches the member resolves to it, when it is the
+// member's one such name the object holds, or the member's one candidate in the
+// header. The resolved member decides the cell's coercion, what an empty cell
+// holds and how an edge group assembles. Every key keeps the header's spelling.
+//
+// [WithStrictPropertyNames] matches names exactly instead, as
+// [instance.WithStrictPropertyNames] makes the validator match them. Give the
+// parser the validator's setting: [instance.RecommendedOptions] sets it. A
+// parser that folds for a strict validator writes a mis-cased column's empty
+// value under the header's spelling, so the row draws the validator's unknown
+// field where the file means no value.
+//
+// A name the object holds that resolves to no member is carried as its text, as
+// a JSON key is, for the validator to report as unknown, shadowed or colliding,
+// or to ignore under [instance.WithAllowUnknownFields]; its empty cell is
+// skipped. That holds at every position: a column naming no property, a suffix
+// naming neither a key component nor an edge property, a key component the
+// target does not declare, and a dotted field naming no association, whose
+// cells are carried as one object under the field's spelling.
+//
+// Two values for one key are refused, as a JSON object that repeats a member
+// is: where a plain column and the dotted columns of the same field both write
+// a value in one row, the row draws E_CSV_COERCE naming both, and the group is
+// kept, since it is the field's only valid form.
+//
+// Each row type of a [WithTypeColumn] file reads the header against its own
+// members, once per type. A type-column value must be a type name by the
+// grammar's rule, which the JSON adapter applies to a document's top-level
+// keys; one that is not, the empty one included, draws E_INVALID_TYPE_TAG, and
+// its record is skipped.
 //
 // # Type Coercion
 //
@@ -80,9 +144,7 @@
 // An empty cell in a column the row's type does not declare is skipped, so a
 // header that unions several types' columns — the only shape a file read with
 // [WithTypeColumn] can take — parses every row. A value in such a column is
-// still reported: as E_CSV_COERCE for a dotted column that names no
-// association or edge property of the row's type, and by the validator for a
-// plain column or a key component the target does not declare.
+// still reported, by the validator, for a plain column and a dotted one alike.
 //
 // An edge group is absent only when every cell in it is empty. Inside a present
 // group an empty cell stands for an empty segment on every target. An empty
@@ -152,8 +214,9 @@
 // so a quoted newline moves it as the file reads, which an ordinal cannot see.
 // A record the reader refuses is located from the parse error instead, at the
 // start of the line the fault is on; a reader error that is not a parse error
-// carries no position at all. The two refusals that precede every record — a
-// header that cannot be read, and a missing type column — carry line 1.
+// carries no position, unless the header could not be read at all, which is
+// reported at line 1. A header refusal and a missing type column carry the
+// header's own line: blank lines before the header are skipped.
 //
 // A span's column is always 1. [encoding/csv] counts columns in BYTES and
 // [location.Position] counts them in runes, and this package parses an
@@ -171,5 +234,5 @@
 // # Dependencies
 //
 //	adapter/csv  ──imports──▶  instance, diag, location, location/path, graph,
-//	                           immutable, schema
+//	                           immutable, schema, adapter/internal/typetag
 package csv

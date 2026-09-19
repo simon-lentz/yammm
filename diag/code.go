@@ -368,7 +368,8 @@ var (
 	// instance is always one a snapshot can carry.
 	E_COMPOSITION_DEPTH_EXCEEDED = NewCode("E_COMPOSITION_DEPTH_EXCEEDED", CategoryInstance)
 
-	// E_INVALID_TYPE_TAG indicates a $type tag has an invalid format.
+	// E_INVALID_TYPE_TAG indicates a type tag that is not a type name by the
+	// grammar's rule: a JSON document's top-level key or a CSV type-column value.
 	E_INVALID_TYPE_TAG = NewCode("E_INVALID_TYPE_TAG", CategoryInstance)
 
 	// E_CASE_FOLD_COLLISION indicates multiple input fields collide after case-folding.

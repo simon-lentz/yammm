@@ -11,7 +11,7 @@ import (
 
 	"github.com/tidwall/jsonc"
 
-	"github.com/simon-lentz/yammm/adapter/json/internal/typetag"
+	"github.com/simon-lentz/yammm/adapter/internal/typetag"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"

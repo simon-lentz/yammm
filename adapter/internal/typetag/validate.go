@@ -1,11 +1,3 @@
-// Package typetag provides validation for JSON $type field values.
-//
-// Type names in instance data must conform to DSL grammar syntax:
-//   - Unqualified: "Person" (UC_WORD pattern)
-//   - Qualified: "common.Entity" (alias.UC_WORD pattern)
-//
-// This package avoids importing internal/* to maintain adapter layer
-// independence per (Adapter Separation).
 package typetag
 
 import (

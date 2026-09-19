@@ -275,8 +275,8 @@ func TestEmptyCell_UnionHeaderParsesEveryRow(t *testing.T) {
 }
 
 // Skipping is for EMPTY cells only: a value in a column the row's type does not
-// declare is still reported, by the validator for a plain column and by the
-// parser for an edge column.
+// declare is still reported, by the validator, for a plain column and an edge
+// column alike.
 func TestEmptyCell_ValueInAnUndeclaredColumnIsStillReported(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), unionSchema, "union.yammm")
@@ -290,12 +290,14 @@ func TestEmptyCell_ValueInAnUndeclaredColumnIsStillReported(t *testing.T) {
 			typ, _ := s.Type(name)
 			return typ
 		})
-	if !hasIssue(pres, E_CSV_COERCE, "ref._target_id") {
-		t.Errorf("want E_CSV_COERCE naming the stray edge column, got %s", pres.String())
+	if pres.HasErrors() {
+		t.Errorf("the parser judges no name; the validator does: %s", pres.String())
 	}
 	_, vres := instance.NewValidator(s).ValidateOne(context.Background(), "A", byType["A"][0])
-	if !hasIssue(vres, diag.E_UNKNOWN_FIELD, "beta") {
-		t.Errorf("want E_UNKNOWN_FIELD naming beta, got %s", vres.String())
+	for _, name := range []string{"beta", "ref"} {
+		if !hasIssue(vres, diag.E_UNKNOWN_FIELD, name) {
+			t.Errorf("want E_UNKNOWN_FIELD naming %s, got %s", name, vres.String())
+		}
 	}
 }
 
@@ -804,7 +806,8 @@ type Log {
 }
 
 // An empty column naming an edge property the association does not declare is
-// skipped, as an empty undeclared plain column is; a value there is reported.
+// skipped, as an empty undeclared plain column is; a value there reaches the
+// validator, which reports it as it reports the JSON object's key.
 func TestEmptyCell_UndeclaredEdgePropertyColumnIsSkippedWhenEmpty(t *testing.T) {
 	t.Parallel()
 	s := loadEmptyCellSchema(t)
@@ -814,10 +817,14 @@ func TestEmptyCell_UndeclaredEdgePropertyColumnIsSkippedWhenEmpty(t *testing.T) 
 		wantIssue bool
 	}{{"", false}, {"x", true}} {
 		in := "id,note,tags,many._target_key,many.label,many.bogus\nh1,n,t,t1,l," + c.cell + "\n"
-		_, pres := New(WithSchema(s)).ParseTyped(context.Background(), location.NewSourceID("h.csv"), "Holder",
+		raws, pres := New(WithSchema(s)).ParseTyped(context.Background(), location.NewSourceID("h.csv"), "Holder",
 			strings.NewReader(in), typ)
-		if got := hasIssue(pres, E_CSV_COERCE, "many.bogus"); got != c.wantIssue {
-			t.Errorf("cell %q: E_CSV_COERCE naming many.bogus = %v, want %v (%s)", c.cell, got, c.wantIssue, pres.String())
+		if pres.HasErrors() {
+			t.Fatalf("cell %q: the parser judges no name: %s", c.cell, pres.String())
+		}
+		_, vres := instance.NewValidator(s).ValidateOne(context.Background(), "Holder", raws[0])
+		if got := hasIssue(vres, diag.E_UNKNOWN_EDGE_FIELD, "bogus"); got != c.wantIssue {
+			t.Errorf("cell %q: E_UNKNOWN_EDGE_FIELD naming bogus = %v, want %v (%s)", c.cell, got, c.wantIssue, vres.String())
 		}
 	}
 }

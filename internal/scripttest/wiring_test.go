@@ -48,12 +48,13 @@ type job struct {
 }
 
 type step struct {
-	Name            string `yaml:"name"`
-	Uses            string `yaml:"uses"`
-	Run             string `yaml:"run"`
-	If              string `yaml:"if"`
-	ContinueOnError any    `yaml:"continue-on-error"`
-	TimeoutMinutes  int    `yaml:"timeout-minutes"`
+	Name            string            `yaml:"name"`
+	Uses            string            `yaml:"uses"`
+	Run             string            `yaml:"run"`
+	Env             map[string]string `yaml:"env"`
+	If              string            `yaml:"if"`
+	ContinueOnError any               `yaml:"continue-on-error"`
+	TimeoutMinutes  int               `yaml:"timeout-minutes"`
 }
 
 // stringList decodes a workflow key GitHub accepts as one string or a list.
@@ -607,5 +608,87 @@ func TestPreCommitHooks_RunTheGateScripts(t *testing.T) {
 				t.Errorf("hook %s does not fire when %s changes (files %q)", row.id, path, h.files)
 			}
 		}
+	}
+}
+
+// shellcheck reads every file under scripts/ and every shell script of the
+// Claude plugin's hooks, at commit and in CI's pre-commit job, which skips only
+// the hooks the host jobs run.
+func TestPreCommitHooks_ShellcheckReadsEveryScript(t *testing.T) {
+	t.Parallel()
+	var config struct {
+		Repos []struct {
+			Repo  string `yaml:"repo"`
+			Rev   string `yaml:"rev"`
+			Hooks []struct {
+				ID      string   `yaml:"id"`
+				Files   string   `yaml:"files"`
+				Exclude string   `yaml:"exclude"`
+				Args    []string `yaml:"args"`
+				Stages  []string `yaml:"stages"`
+			} `yaml:"hooks"`
+		} `yaml:"repos"`
+	}
+	decodeYAML(t, fromRoot(".pre-commit-config.yaml"), &config)
+	found := false
+	for _, repo := range config.Repos {
+		for _, h := range repo.Hooks {
+			if h.ID != "shellcheck" {
+				continue
+			}
+			found = true
+			if repo.Repo != "https://github.com/shellcheck-py/shellcheck-py" || repo.Rev == "" {
+				t.Errorf("shellcheck comes from %s at %q, want the pinned shellcheck-py", repo.Repo, repo.Rev)
+			}
+			if !slices.Contains(h.Args, "--external-sources") {
+				t.Errorf("shellcheck args %q do not follow sourced files", h.Args)
+			}
+			if len(h.Stages) != 0 || h.Exclude != "" {
+				t.Errorf("shellcheck is narrowed by stages %q or exclude %q", h.Stages, h.Exclude)
+			}
+			files, err := regexp.Compile(h.Files)
+			if err != nil {
+				t.Fatalf("shellcheck files pattern %q: %v", h.Files, err)
+			}
+			scripts, err := filepath.Glob(fromRoot("scripts/*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			hooks, err := filepath.Glob(fromRoot("claude-plugin/hooks/*.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(scripts) == 0 || len(hooks) == 0 {
+				t.Fatalf("found %d scripts and %d plugin hook scripts; the globs read nothing", len(scripts), len(hooks))
+			}
+			for _, abs := range append(scripts, hooks...) {
+				rel, err := filepath.Rel(fromRoot("."), abs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if rel = filepath.ToSlash(rel); !files.MatchString(rel) {
+					t.Errorf("shellcheck does not read %s (files %q)", rel, h.Files)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no shellcheck hook")
+	}
+
+	var ci workflow
+	decodeYAML(t, fromRoot(".github/workflows/ci.yaml"), &ci)
+	ran := false
+	for _, s := range ci.Jobs["pre-commit"].Steps {
+		if !strings.Contains(s.Run, "pre-commit run") {
+			continue
+		}
+		ran = true
+		if slices.Contains(strings.Split(s.Env["SKIP"], ","), "shellcheck") {
+			t.Errorf("CI's pre-commit job skips shellcheck (SKIP=%s)", s.Env["SKIP"])
+		}
+	}
+	if !ran {
+		t.Error("CI's pre-commit job runs no pre-commit")
 	}
 }

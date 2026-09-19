@@ -165,7 +165,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_NOT_FOUND` | Referenced composition not found |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
-| `E_INVALID_TYPE_TAG` | `$type` tag has invalid format |
+| `E_INVALID_TYPE_TAG` | A JSON top-level key or CSV type-column value is not a type name |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 
 ### Graph

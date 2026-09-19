@@ -8,6 +8,7 @@ type adapterConfig struct {
 	typeColumn string // empty = no type column
 	listSep    string // list element separator
 	schema     *schema.Schema
+	strict     bool // match names exactly, as a strict validator does
 }
 
 // Adapter parses CSV data into RawInstance values and serializes
@@ -66,14 +67,25 @@ func WithListSeparator(sep string) Option {
 	}
 }
 
+// WithStrictPropertyNames matches column names exactly, as
+// [instance.WithStrictPropertyNames] makes the validator match keys; the
+// default folds them, as the validator's default does. Give the parser the
+// validator's setting: a column the parser resolves and the validator does not
+// is reported as an unknown field.
+func WithStrictPropertyNames(strict bool) Option {
+	return func(c *adapterConfig) {
+		c.strict = strict
+	}
+}
+
 // WithSchema gives the parser the import closure, and with it each
 // association's target type, which the per-call [*schema.Type] cannot reach.
 // The parser needs the target's primary keys to read an empty foreign-key
 // segment: with them, it is the key's empty value where the key's kind has one
 // and is otherwise absent, and an empty column naming no key of the target is
 // skipped. Without it every empty foreign-key segment is absent. A non-empty
-// segment keeps its text either way, except that a Date or Timestamp key that
-// does not parse draws E_CSV_COERCE here rather than a validator error.
+// segment keeps its text either way, except that with it a Date or Timestamp
+// key that does not parse draws E_CSV_COERCE.
 func WithSchema(s *schema.Schema) Option {
 	return func(c *adapterConfig) {
 		c.schema = s

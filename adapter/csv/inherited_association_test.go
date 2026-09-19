@@ -3,8 +3,11 @@ package csv
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
@@ -56,14 +59,8 @@ func TestInheritedAssociation_IsWritten(t *testing.T) {
 	}
 }
 
-// The parse side refused the same columns, and it did so LOUDLY: a dotted
-// column whose field was not in the own-body set drew E_CSV_COERCE. So a
-// hand-written file carrying an inherited edge was rejected with a wrong
-// diagnostic while the writer silently omitted it — the two sides had to move
-// together or the round trip would fail noisily instead of quietly.
-//
-// Mutation: reverting recordToProps to Associations() turns this red with
-// "does not match an association field".
+// The writer's own output for a subtype carrying an inherited edge parses
+// cleanly, with the edge in the row.
 func TestInheritedAssociation_IsParsed(t *testing.T) {
 	snap, a := inheritedSnapshot(t)
 	ctx := context.Background()
@@ -132,5 +129,45 @@ func TestInheritedAssociation_RoundTripIsTheIdentity(t *testing.T) {
 		if !bytes.Equal(want, second[typeName]) {
 			t.Errorf("%s round trip is not the identity\nfirst:\n%s\nsecond:\n%s", typeName, want, second[typeName])
 		}
+	}
+}
+
+const inheritedManySchema = `schema "inherit_many"
+
+type Company {
+	company_id String primary
+}
+
+abstract type Worker {
+	worker_id String primary
+	--> SHIFTS (_:many) Company {
+		hours Integer
+	}
+}
+
+type Employee extends Worker {
+	grade String
+}
+`
+
+// An inherited association resolves as an own one does: its group assembles as
+// the association's cardinality says and its edge values coerce. A parser that
+// read own associations alone would carry the group as text under an unknown
+// field, one object and no Integer.
+func TestInheritedAssociation_ResolvesAsAnOwnOneDoes(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadString(t.Context(), inheritedManySchema, "inherit_many.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res.String())
+	}
+	typ, _ := s.Type("Employee")
+	raws, pres := New(WithSchema(s)).ParseTyped(t.Context(), location.NewSourceID("e.csv"), "Employee",
+		strings.NewReader("worker_id,grade,shifts._target_company_id,shifts.hours\ne1,g,c1,8\n"), typ)
+	if pres.HasErrors() {
+		t.Fatalf("parse: %s", pres)
+	}
+	want := []any{map[string]any{"_target_company_id": "c1", "hours": int64(8)}}
+	if got := raws[0].Properties["shifts"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("shifts = %#v, want %#v", got, want)
 	}
 }

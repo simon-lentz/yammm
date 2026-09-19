@@ -8,8 +8,9 @@ import (
 
 // Diagnostic codes for CSV adapter errors.
 var (
-	// E_CSV_COERCE indicates a CSV cell value could not be coerced
-	// to the expected type based on schema constraints.
+	// E_CSV_COERCE indicates a CSV fault the adapter reports: a cell that does
+	// not coerce to its member's type, a header or record the reader refuses,
+	// two values for one key, or the reader failing.
 	E_CSV_COERCE = diag.NewCode("E_CSV_COERCE", diag.CategoryAdapter)
 )
 
