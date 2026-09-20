@@ -43,8 +43,6 @@ func WithIndent(indent string) WriteOption {
 // references for resolved associations.
 //
 // Returns ErrNilResult if result is nil.
-//
-//nolint:revive // ctx reserved for future use (cancellation, tracing)
 func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
 	if result == nil {
 		return nil, ErrNilResult
@@ -54,7 +52,7 @@ func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opt
 		opt(cfg)
 	}
 
-	output, err := a.buildOutput(result)
+	output, err := a.buildOutput(ctx, result)
 	if err != nil {
 		return nil, err
 	}
@@ -82,6 +80,13 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Sn
 	if err != nil {
 		return 0, err
 	}
+	// A cancellation during the build already returned above, from
+	// [Adapter.buildOutput]. This covers the remaining window — the encode
+	// itself — so a run cancelled there writes nothing rather than a whole
+	// document nobody waited for.
+	if err := ctx.Err(); err != nil {
+		return 0, fmt.Errorf("json write object: %w", err)
+	}
 
 	n, err := w.Write(data)
 	if err == nil && n < len(data) {
@@ -91,12 +96,20 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Sn
 }
 
 // buildOutput constructs the JSON-serializable output map from a graph snapshot.
-func (a *Adapter) buildOutput(result *graph.Snapshot) (map[string]any, error) {
+// Cancellation is checked per type group, the unit of work the loop walks, as
+// [snapshot.Marshal] checks per group during emission. The CSV writers are
+// finer: writeSnapshotTypeTo checks per instance, so a single very large type
+// group stops sooner there than here.
+func (a *Adapter) buildOutput(ctx context.Context, result *graph.Snapshot) (map[string]any, error) {
 	output := make(map[string]any)
 	s := result.Schema()
 
 	// Iterate types in sorted order for deterministic output
 	for _, typeID := range result.Types() {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("json marshal object: %w", err)
+		}
+
 		typeName, ok := schema.AddressableTag(s, typeID)
 		if !ok {
 			return nil, fmt.Errorf("json adapter: snapshot denotes type %s, which the entry schema cannot name, so the output object has no key for it; every constructor refuses such a snapshot, so this is an invariant violation", typeID)

@@ -44,7 +44,7 @@ func (a *Adapter) ParseTyped(
 	var lastSpan location.Span
 	for {
 		if err := ctx.Err(); err != nil {
-			collector.Collect(diag.NewIssue(diag.Error, diag.E_CONTEXT_CANCELLED,
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 				fmt.Sprintf("csv parse cancelled after %d records", len(results))).
 				WithSpan(lastSpan).Build())
 			break
@@ -233,7 +233,7 @@ func (a *Adapter) ParseWithTypeColumn(
 	var lastSpan location.Span
 	for {
 		if err := ctx.Err(); err != nil {
-			collector.Collect(diag.NewIssue(diag.Error, diag.E_CONTEXT_CANCELLED,
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 				fmt.Sprintf("csv parse cancelled after %d records", parsed)).
 				WithSpan(lastSpan).Build())
 			break

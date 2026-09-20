@@ -4,11 +4,14 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -177,4 +180,88 @@ func TestParseTyped_FewerColumnsThanHeader(t *testing.T) {
 
 	assert.False(t, result.OK(), "mismatched column count should produce a diagnostic")
 	assert.Empty(t, results, "malformed row should be skipped")
+}
+
+// cancelAfterPolls reports itself cancelled from its n-th Err poll on, so a
+// parse can be stopped after it has read records rather than before it starts.
+// Nothing here selects on Done. It mirrors the stub of the same name in
+// snapshot's tests; each package keeps its own, since neither is exported.
+type cancelAfterPolls struct {
+	mu    sync.Mutex
+	polls int
+	after int
+}
+
+func (c *cancelAfterPolls) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c *cancelAfterPolls) Done() <-chan struct{}       { return nil }
+func (c *cancelAfterPolls) Value(any) any               { return nil }
+
+func (c *cancelAfterPolls) Err() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.polls++
+	if c.polls >= c.after {
+		return context.Canceled
+	}
+	return nil
+}
+
+// A parse cancelled partway RETURNS the records it already read. Cancelling
+// before the parse cannot show this: it returns an empty slice, which an empty
+// file also returns.
+func TestParseTyped_CancellationKeepsTheRecordsItRead(t *testing.T) {
+	t.Parallel()
+	// One live poll: the check sits at the top of the record loop, so the
+	// first pass reads e1 and the second stops.
+	ctx := &cancelAfterPolls{after: 2}
+
+	got, result := New().ParseTyped(ctx, location.SourceID{}, "Entity",
+		strings.NewReader("id,name\ne1,Alice\ne2,Bob\n"), nil)
+
+	assert.True(t, result.HasFatal(), "a cancelled parse must report HasFatal")
+	require.Len(t, got, 1, "a cancelled parse must return the records it read")
+	assert.Equal(t, "e1", got[0].Properties["id"])
+}
+
+// A cancelled parse is Fatal, not Error. graph/doc.go and docs/VERSIONING.md
+// both state that HasFatal covers cancellation, so a caller testing it to mean
+// "the run did not finish" must not read false for an abandoned parse. These
+// were the module's only two E_CONTEXT_CANCELLED emissions below Fatal.
+func TestParseTyped_CancellationIsFatal(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, result := New().ParseTyped(ctx, location.SourceID{}, "Entity",
+		strings.NewReader("id,name\ne1,Alice\ne2,Bob\n"), nil)
+
+	assert.True(t, result.HasFatal(), "a cancelled parse must report HasFatal")
+	found := false
+	for issue := range result.Issues() {
+		if issue.Code() == diag.E_CONTEXT_CANCELLED {
+			found = true
+			assert.Equal(t, diag.Fatal, issue.Severity(), "E_CONTEXT_CANCELLED must be Fatal")
+		}
+	}
+	assert.True(t, found, "expected E_CONTEXT_CANCELLED diagnostic")
+}
+
+func TestParseWithTypeColumn_CancellationIsFatal(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, result := New(WithTypeColumn("_type_")).ParseWithTypeColumn(
+		ctx, location.SourceID{},
+		strings.NewReader("_type_,id\nEntity,e1\n"), nil)
+
+	assert.True(t, result.HasFatal(), "a cancelled parse must report HasFatal")
+	found := false
+	for issue := range result.Issues() {
+		if issue.Code() == diag.E_CONTEXT_CANCELLED {
+			found = true
+			assert.Equal(t, diag.Fatal, issue.Severity(), "E_CONTEXT_CANCELLED must be Fatal")
+		}
+	}
+	assert.True(t, found, "expected E_CONTEXT_CANCELLED diagnostic")
 }

@@ -32,8 +32,6 @@ var byteOrderMark = []byte("\uFEFF")
 // the document ($.Person[0]) and the span of its opening brace, and every
 // diagnostic carries a span in source. Positions count runes from the line
 // start of the bytes passed in.
-//
-//nolint:revive // ctx is reserved for a cancellation contract
 func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 	result := make(map[string][]instance.RawInstance)
@@ -78,6 +76,15 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	// the value that failed, and would name a fault the document does not have.
 	seen := make(map[string]struct{})
 	for dec.More() {
+		// Checked per top-level key, the unit of work this loop reads, as the
+		// CSV parser checks per record. Fatal because HasFatal is documented to
+		// mean the run did not finish.
+		if err := ctx.Err(); err != nil {
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+				fmt.Sprintf("json parse cancelled after %d type keys", len(result))).Build())
+			return result, collector.Result()
+		}
+
 		keySpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 
 		// Read type name
