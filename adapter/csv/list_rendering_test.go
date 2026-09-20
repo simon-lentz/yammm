@@ -395,13 +395,13 @@ func TestListRendering_ASeparatorTheParserCannotFindIsRefused(t *testing.T) {
 
 		input := &countingReader{r: strings.NewReader("id,tags\ng1,a|b\n")}
 		raws, res := a.ParseTyped(context.Background(), location.NewSourceID("g.csv"), "Grid", input, typ)
-		if len(raws) != 0 || !hasSeverity(res, diag.Error, E_CSV_COERCE, "list separator") || input.reads != 0 {
-			t.Errorf("%q: ParseTyped: got %d instances, %d reads and %s, want none, no read and an Error E_CSV_COERCE naming the list separator", sep, len(raws), input.reads, res.String())
+		if len(raws) != 0 || !hasSeverity(res, diag.Error, E_CSV_CONFIG, "list separator") || input.reads != 0 {
+			t.Errorf("%q: ParseTyped: got %d instances, %d reads and %s, want none, no read and an Error E_CSV_CONFIG naming the list separator", sep, len(raws), input.reads, res.String())
 		}
 		byType, res := New(WithSchema(s), WithListSeparator(sep), WithTypeColumn("type")).ParseWithTypeColumn(context.Background(), location.NewSourceID("g.csv"),
 			strings.NewReader("type,id,tags\nGrid,g1,a|b\n"), func(string) *schema.Type { return typ })
-		if len(byType) != 0 || !hasSeverity(res, diag.Error, E_CSV_COERCE, "list separator") {
-			t.Errorf("%q: ParseWithTypeColumn: got %v and %s, want none and an Error E_CSV_COERCE naming the list separator", sep, byType, res.String())
+		if len(byType) != 0 || !hasSeverity(res, diag.Error, E_CSV_CONFIG, "list separator") {
+			t.Errorf("%q: ParseWithTypeColumn: got %v and %s, want none and an Error E_CSV_CONFIG naming the list separator", sep, byType, res.String())
 		}
 	}
 }
@@ -455,7 +455,7 @@ func TestListRendering_TheEmptySeparatorIsNeverUsed(t *testing.T) {
 		t.Errorf("zero Adapter: WriteSnapshot: got %v, want the delimiter's refusal", err)
 	}
 	raws, res := zero.ParseTyped(context.Background(), location.NewSourceID("g.csv"), "Grid", strings.NewReader("id,tags\ng1,a|b\n"), typ)
-	if len(raws) != 0 || !hasSeverity(res, diag.Error, E_CSV_COERCE, "delimiter") {
+	if len(raws) != 0 || !hasSeverity(res, diag.Error, E_CSV_CONFIG, "delimiter") {
 		t.Errorf("zero Adapter: ParseTyped: got %d instances and %s, want none and the delimiter's Error", len(raws), res.String())
 	}
 }

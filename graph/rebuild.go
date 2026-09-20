@@ -133,7 +133,7 @@ type UnresolvedParts struct {
 func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Result) {
 	collector := diag.NewCollector(0)
 
-	validatePartsIdentity(parts, collector)
+	validatePartsIdentity(s, parts, collector)
 	validatePartsDenotedTypes(s, parts, collector)
 	validatePartsRootTypes(s, parts, collector)
 	validatePartsCardinality(s, parts, collector)
@@ -304,7 +304,7 @@ func validatePartsRootTypes(s *schema.Schema, parts SnapshotParts, collector *di
 	ineligible := func(id schema.TypeID) string {
 		t, ok := s.TypeByID(id)
 		if !ok {
-			return "" // an unknown identity is validatePartsIdentity's to report
+			return "" // validatePartsIdentity reports an unresolvable identity
 		}
 		switch {
 		case t.IsAbstract():
@@ -383,27 +383,49 @@ func validatePartsCardinality(s *schema.Schema, parts SnapshotParts, collector *
 	}
 }
 
-// validatePartsIdentity rejects a zero [schema.TypeID] at every parts
-// position. Zero means unresolved: accepting one would file data under an
-// identity no schema type owns, so nothing downstream re-resolves a name.
-func validatePartsIdentity(parts SnapshotParts, collector *diag.Collector) {
-	zero := func(position, key string) {
+// validatePartsIdentity rejects a [schema.TypeID] no type of the schema owns,
+// at every parts position: the zero identity, and one the import closure
+// cannot resolve. Either would file data under an identity no schema type
+// owns, so nothing downstream re-resolves a name — a writer asked for such a
+// type's name has none to give, and [Snapshot.Types] does not report a group
+// keyed by one, so the instances leave no trace.
+func validatePartsIdentity(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
+	// A nil schema resolves nothing, so only the zero identity is judged.
+	unknown := func(id schema.TypeID) bool {
+		if s == nil || id.IsZero() {
+			return false
+		}
+		_, ok := s.TypeByID(id)
+		return !ok
+	}
+	refuse := func(what, position, key string) {
 		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-			fmt.Sprintf("RebuildSnapshot: zero type identity at %s position, key %s", position, key)).Build())
+			fmt.Sprintf("RebuildSnapshot: %s type identity at %s position, key %s", what, position, key)).Build())
+	}
+	zero := func(position, key string) { refuse("zero", position, key) }
+	check := func(id schema.TypeID, position, key string) {
+		switch {
+		case id.IsZero():
+			zero(position, key)
+		case unknown(id):
+			refuse("unresolvable", position, key)
+		}
 	}
 
 	for i, id := range parts.Types {
-		if id.IsZero() {
+		switch {
+		case id.IsZero():
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("RebuildSnapshot: zero type identity at types entry %d", i)).Build())
+		case unknown(id):
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+				fmt.Sprintf("RebuildSnapshot: unresolvable type identity %s at types entry %d", id, i)).Build())
 		}
 	}
 
 	var checkInstance func(position string, ip InstanceParts)
 	checkInstance = func(position string, ip InstanceParts) {
-		if ip.TypeID.IsZero() {
-			zero(position, ip.PrimaryKey.String())
-		}
+		check(ip.TypeID, position, ip.PrimaryKey.String())
 		for _, children := range ip.Composed {
 			for _, child := range children {
 				checkInstance("composed child", child)
@@ -412,9 +434,13 @@ func validatePartsIdentity(parts SnapshotParts, collector *diag.Collector) {
 	}
 
 	for typeID, instParts := range parts.Instances {
-		if typeID.IsZero() {
+		switch {
+		case typeID.IsZero():
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("RebuildSnapshot: zero type identity keys an instance group of %d instances", len(instParts))).Build())
+		case unknown(typeID):
+			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
+				fmt.Sprintf("RebuildSnapshot: unresolvable type identity %s keys an instance group of %d instances", typeID, len(instParts))).Build())
 		}
 		for _, ip := range instParts {
 			checkInstance("instance", ip)
@@ -422,12 +448,8 @@ func validatePartsIdentity(parts SnapshotParts, collector *diag.Collector) {
 	}
 
 	for _, ep := range parts.Edges {
-		if ep.SourceType.IsZero() {
-			zero("edge source", ep.SourceKey.String())
-		}
-		if ep.TargetType.IsZero() {
-			zero("edge target", ep.TargetKey.String())
-		}
+		check(ep.SourceType, "edge source", ep.SourceKey.String())
+		check(ep.TargetType, "edge target", ep.TargetKey.String())
 	}
 
 	for _, dp := range parts.Duplicates {

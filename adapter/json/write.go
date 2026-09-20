@@ -241,16 +241,24 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 // with the edge properties beside them. The target type supplies the field
 // names, so an unresolvable target is an error rather than a shape this
 // adapter's own parser rejects.
+//
+// The two arms differ in what a caller can do about them. An unresolvable
+// target type cannot be reached: every type a snapshot denotes is one the
+// entry schema can name, which every constructor holds, so that arm is an
+// invariant violation and carries no refusal class. A target key of the wrong
+// arity IS reachable — [graph.RebuildSnapshot] checks identity, denoted types,
+// root types and cardinality, and no key arity — so that arm carries
+// [ErrUnrepresentable]. Any differing arity reaches it, not only a short key.
 func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (map[string]any, error) {
 	target, ok := lookupType(s, e.Target().TypeID())
 	if !ok {
-		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable",
+		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable; every constructor refuses such a snapshot, so this is an invariant violation",
 			e.Relation(), e.Target().TypeID())
 	}
 	pks := target.PrimaryKeysSlice()
 	key := e.Target().PrimaryKey()
 	if key.Len() != len(pks) {
-		return nil, fmt.Errorf("json adapter: edge %q target key has %d components; type %s declares %d",
+		return nil, refuse(ErrUnrepresentable, "json adapter: edge %q target key has %d components; type %s declares %d",
 			e.Relation(), key.Len(), e.Target().TypeID(), len(pks))
 	}
 

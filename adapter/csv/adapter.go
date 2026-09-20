@@ -39,7 +39,8 @@ func New(opts ...Option) *Adapter {
 // alike. The default is ','; a TSV file takes '\t', and keeps [encoding/csv]'s
 // quoting. A delimiter [encoding/csv] refuses — 0, '"', '\r', '\n',
 // U+FFFD or an invalid rune — fails where the header is read or
-// written: a parse reports it as an Error diagnostic, a write returns it.
+// written: a parse reports it as an Error [E_CSV_CONFIG] diagnostic, and a
+// write returns [encoding/csv]'s own refusal marked [ErrConfig].
 func WithDelimiter(r rune) Option {
 	return func(c *adapterConfig) {
 		c.delimiter = r
@@ -61,7 +62,8 @@ func WithTypeColumn(name string) Option {
 // back unchanged, at every depth of a nested list. A separator that begins
 // with a backslash, the escape character, or holds a CR LF, which
 // [encoding/csv] reads back as LF, is refused before a parse reads or a write
-// writes: as an Error diagnostic, or as an error.
+// writes: as an Error [E_CSV_CONFIG] diagnostic, or as an error marked
+// [ErrConfig].
 func WithListSeparator(sep string) Option {
 	return func(c *adapterConfig) {
 		if sep != "" {

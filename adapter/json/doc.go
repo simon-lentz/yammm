@@ -22,6 +22,12 @@
 // validator accept every shape this writer emits. Unresolved edges are not
 // written; persist them in the .ys format when they must survive.
 //
+// A snapshot holding a shape this writer cannot render — an edge naming its
+// target by fewer key components than the target type declares, which
+// [graph.RebuildSnapshot] does not check — is refused with an error marked
+// [ErrUnrepresentable], so a caller separates it from an encoding failure and
+// from an I/O failure without matching the message text.
+//
 // Use [WithIndent] for pretty-printed output. The object shape keys instances
 // by the name the entry schema addresses each root type by, and two such names
 // never collide: every snapshot root is a type the entry schema can name, so a

@@ -78,11 +78,11 @@ func (a *Adapter) ParseTyped(
 
 // listSepRefused reports a list separator [listSepError] refuses as an Error
 // and whether it did. The refusal names the configuration, not the input, so it
-// carries no span.
+// carries no span and takes [E_CSV_CONFIG].
 func (a *Adapter) listSepRefused(collector *diag.Collector) bool {
 	err := listSepError(a.config.listSep)
 	if err != nil {
-		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE, err.Error()).Build())
+		collector.Collect(diag.NewIssue(diag.Error, E_CSV_CONFIG, err.Error()).Build())
 	}
 	return err != nil
 }
@@ -102,7 +102,7 @@ func (a *Adapter) newReader(r io.Reader) *csv.Reader {
 // documents an I/O failure.
 func (a *Adapter) reportReadError(err error, source location.SourceID, typeName string, records int, collector *diag.Collector) (stop bool) {
 	if a.readFailure(err) {
-		issue := diag.NewIssue(diag.Fatal, E_CSV_COERCE,
+		issue := diag.NewIssue(diag.Fatal, diag.E_ADAPTER_PARSE,
 			fmt.Sprintf("csv read failed after %d records: %s", records, err))
 		if typeName != "" {
 			issue.WithDetail(diag.DetailKeyTypeName, typeName)
@@ -110,7 +110,7 @@ func (a *Adapter) reportReadError(err error, source location.SourceID, typeName 
 		collector.Collect(issue.Build())
 		return true
 	}
-	issue := diag.NewIssue(diag.Error, E_CSV_COERCE, fmt.Sprintf("csv parse: %s", err)).
+	issue := diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE, fmt.Sprintf("csv parse: %s", err)).
 		WithSpan(parseErrorSpan(source, err))
 	if typeName != "" {
 		issue.WithDetail(diag.DetailKeyTypeName, typeName)
@@ -178,8 +178,9 @@ func parseErrorSpan(source location.SourceID, err error) location.Span {
 // The typeResolver function looks up a [*schema.Type] by name for coercion.
 // It may return nil for unknown types, in which case values are kept as strings.
 // A value that is not a type name by the grammar draws E_INVALID_TYPE_TAG and
-// its row is skipped. Requires [WithTypeColumn] to be set. Returns
-// [ErrNoTypeColumn] otherwise. Faults and provenance are as [Adapter.ParseTyped].
+// its row is skipped. Requires [WithTypeColumn] to be set; without it the
+// result carries [ErrNoTypeColumn]'s text under [E_CSV_CONFIG] and no record is
+// read. Faults and provenance are as [Adapter.ParseTyped].
 func (a *Adapter) ParseWithTypeColumn(
 	ctx context.Context,
 	source location.SourceID,
@@ -189,7 +190,7 @@ func (a *Adapter) ParseWithTypeColumn(
 	collector := diag.NewCollector(0)
 
 	if a.config.typeColumn == "" {
-		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+		collector.Collect(diag.NewIssue(diag.Error, E_CSV_CONFIG,
 			ErrNoTypeColumn.Error()).Build())
 		return nil, collector.Result()
 	}
@@ -213,7 +214,7 @@ func (a *Adapter) ParseWithTypeColumn(
 		}
 	}
 	if typeColIdx == -1 {
-		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+		collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE,
 			fmt.Sprintf("type column %q not found in header", a.config.typeColumn)).
 			WithSpan(header).Build())
 		return nil, collector.Result()
@@ -307,15 +308,20 @@ func (a *Adapter) ParseWithTypeColumn(
 func (a *Adapter) readHeader(reader *csv.Reader, source location.SourceID, collector *diag.Collector) ([]string, location.Span, bool) {
 	header, err := reader.Read()
 	if err != nil {
-		severity := diag.Error
-		if a.readFailure(err) {
+		severity, code := diag.Error, diag.E_ADAPTER_PARSE
+		switch {
+		case delimiterRefused(a.config.delimiter):
+			// The delimiter is the caller's setting rather than the file's
+			// content, and it is the one header fault whose remedy is in code.
+			code = E_CSV_CONFIG
+		case a.readFailure(err):
 			severity = diag.Fatal
 		}
 		span := parseErrorSpan(source, err)
 		if span.IsZero() {
 			span = location.Point(source, 1, 1)
 		}
-		collector.Collect(diag.NewIssue(severity, E_CSV_COERCE,
+		collector.Collect(diag.NewIssue(severity, code,
 			fmt.Sprintf("csv parse: reading header: %s", err)).
 			WithSpan(span).Build())
 		return nil, location.Span{}, false
@@ -329,12 +335,12 @@ func (a *Adapter) readHeader(reader *csv.Reader, source location.SourceID, colle
 		seen[name]++
 		switch {
 		case name == "":
-			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE,
 				fmt.Sprintf("header column %d has no name", i+1)).
 				WithSpan(span).Build())
 			ok = false
 		case seen[name] == 2:
-			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE,
 				fmt.Sprintf("header names column %q more than once", name)).
 				WithSpan(span).Build())
 			ok = false
@@ -412,7 +418,7 @@ func (a *Adapter) recordToProps(
 
 	for s := range p.spellings {
 		if shapes[s].clash != "" {
-			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE, shapes[s].clash).
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE, shapes[s].clash).
 				WithSpan(span).
 				WithDetail(diag.DetailKeyTypeName, typeName).Build())
 		}
@@ -422,7 +428,7 @@ func (a *Adapter) recordToProps(
 		if _, taken := props[p.spellings[s].field]; taken {
 			// Two values for one key, as a repeated JSON member; the group is
 			// the field's only valid form, so it is kept.
-			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE,
 				fmt.Sprintf("column %[1]q and the dotted columns %[1]s.* both write the key %[1]q", p.spellings[s].field)).
 				WithSpan(span).
 				WithDetail(diag.DetailKeyTypeName, typeName).Build())

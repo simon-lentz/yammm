@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -129,7 +128,7 @@ func refuseComposedChildren(snap *graph.Snapshot) error {
 			} else {
 				children = strconv.Itoa(n) + " " + children
 			}
-			return fmt.Errorf("csv adapter: type %q instance %s: composition %q holds %s, which a CSV row has no column for, so the export would drop it",
+			return refuse(ErrUnrepresentable, "csv adapter: type %q instance %s: composition %q holds %s, which a CSV row has no column for, so the export would drop it",
 				typeName, inst.PrimaryKey(), rels[0], children)
 		}
 	}
@@ -138,7 +137,9 @@ func refuseComposedChildren(snap *graph.Snapshot) error {
 
 // unnameableDenotedType reports a snapshot denoting a type the entry schema
 // cannot name. Every constructor refuses such a snapshot, so reaching this is an
-// invariant violation rather than a caller error.
+// invariant violation rather than a caller error, and it carries no refusal
+// class: [ErrUnrepresentable] names data a caller can act on, and no caller can
+// reach this.
 func unnameableDenotedType(id schema.TypeID) error {
 	return fmt.Errorf("csv adapter: snapshot denotes type %s, which the entry schema cannot name, so per-type output has no name for it; every constructor refuses such a snapshot, so this is an invariant violation", id)
 }
@@ -161,6 +162,12 @@ func (a *Adapter) writeSnapshotTypeTo(
 	writer.Comma = a.config.delimiter
 
 	if err := writer.Write(columns); err != nil {
+		if delimiterRefused(a.config.delimiter) {
+			// The setting [E_CSV_CONFIG] reports on the parse side, and the one
+			// header-write fault whose remedy is in the caller's code rather
+			// than in the destination. The message is [encoding/csv]'s own.
+			return refuse(ErrConfig, "csv write header: %s", err)
+		}
 		return fmt.Errorf("csv write header: %w", err)
 	}
 
@@ -229,7 +236,9 @@ func snapshotEdges(inst *graph.Instance, snap *graph.Snapshot) map[string][]*gra
 // leading underscore, so the dotted grammar is unambiguous. The target
 // type supplies the component names; an unresolvable target is an error,
 // because the writer would otherwise emit columns its own parser cannot
-// name.
+// name. Both [schema.Load] and [schema.NewBuilder] refuse a schema whose
+// association target does not resolve, so no snapshot reaches that arm and it
+// carries no refusal class.
 func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error) {
 	if schemaType == nil {
 		return nil, nil
@@ -249,7 +258,7 @@ func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error
 	for _, rel := range rels {
 		target, ok := s.TypeByID(rel.TargetID())
 		if !ok {
-			return nil, fmt.Errorf("csv adapter: association %q: target type %s does not resolve, so its _target_ column names are unknowable",
+			return nil, fmt.Errorf("csv adapter: association %q: target type %s does not resolve, so its _target_ column names are unknowable; every schema constructor refuses such a schema, so this is an invariant violation",
 				rel.Name(), rel.TargetID())
 		}
 		for _, pk := range target.PrimaryKeysSlice() {
@@ -311,8 +320,9 @@ func (a *Adapter) instanceToRow(
 }
 
 // errCRLF refuses a cell whose text holds a CR LF: [encoding/csv]'s reader
-// turns every CR LF into LF, inside a quoted field too.
-var errCRLF = errors.New("its text holds a CR LF, which encoding/csv reads back as LF, so the value would not survive the round trip")
+// turns every CR LF into LF, inside a quoted field too. It carries
+// [ErrUnrepresentable] and keeps its own text, so a caller matches either.
+var errCRLF = refuse(ErrUnrepresentable, "its text holds a CR LF, which encoding/csv reads back as LF, so the value would not survive the round trip")
 
 // relationCells renders one association's edge columns into cells: per FK
 // component and per edge property, one segment per target, escaped and
@@ -373,7 +383,7 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 			return nil
 		}
 	}
-	return fmt.Errorf("csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
+	return refuse(ErrUnrepresentable, "csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
 }
 
 // scalarCell renders one scalar value as cell text.
@@ -436,8 +446,10 @@ func elementConstraint(c schema.Constraint) schema.Constraint {
 
 // errListOfOneEmptyElement refuses a list whose one element renders as "": the
 // list grammar writes [""] and [] alike, so the list would read back as an
-// empty list, or as null where it is an optional property's whole value.
-var errListOfOneEmptyElement = errors.New("a list holding one empty element writes what an empty list writes, so the element would not survive the round trip")
+// empty list, or as null where it is an optional property's whole value. It
+// carries [ErrUnrepresentable] and keeps its own text, so a caller matches
+// either.
+var errListOfOneEmptyElement = refuse(ErrUnrepresentable, "a list holding one empty element writes what an empty list writes, so the element would not survive the round trip")
 
 // valueToString renders a value as cell text in the form its constraint
 // stores, null as "". A collection renders each element by this same rule and

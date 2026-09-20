@@ -14,6 +14,29 @@
 // because its column names are what map a cell to a property: the package has
 // no headerless mode.
 //
+// # Diagnostic Codes
+//
+// Three codes divide every fault this package reports, by what the caller must
+// do about it. A cell whose text does not coerce to the type its member
+// declares draws [E_CSV_COERCE]: the data needs cleaning, the cell keeps its
+// text and the row is still produced. A setting the adapter cannot use draws
+// [E_CSV_CONFIG] — a list separator the parser could not find again, a
+// delimiter [encoding/csv] refuses, [Adapter.ParseWithTypeColumn] with no
+// [WithTypeColumn] — and no record is read. Everything else is the input not
+// being well formed, or the input failing to arrive at all, and draws
+// [diag.E_ADAPTER_PARSE] — the code the JSON adapter reports a malformed
+// document under, so one code answers that question for both data parsers. A
+// failing [io.Reader] takes it too, at Fatal, since severity is what says the
+// run did not finish. A type-column value that is not a type name draws
+// E_INVALID_TYPE_TAG and a cancelled parse E_CONTEXT_CANCELLED, as they do
+// there.
+//
+// The line falls on what the caller must change, not on who is at fault. A
+// type column the header does not name is [diag.E_ADAPTER_PARSE] and not
+// [E_CSV_CONFIG], although a caller chose the name: the file can be given the
+// column, so the input is what does not match. [E_CSV_CONFIG] is for a setting
+// no file could satisfy.
+//
 // # Header and Records
 //
 // The header must name every column, and name each one once: a header with an
@@ -84,8 +107,9 @@
 //
 // Two values for one key are refused, as a JSON object that repeats a member
 // is: where a plain column and the dotted columns of the same field both write
-// a value in one row, the row draws E_CSV_COERCE naming both, and the group is
-// kept, since it is the field's only valid form.
+// a value in one row, the row draws [diag.E_ADAPTER_PARSE] naming both — the
+// code that adapter reports its repeated member under — and the group is kept,
+// since it is the field's only valid form.
 //
 // Each row type of a [WithTypeColumn] file reads the header against its own
 // members, once per type. A type-column value must be a type name by the
@@ -127,7 +151,9 @@
 // byte, so the separator is found only between elements, and an element
 // holding any part of it splits back unchanged. A separator the parser
 // cannot find again is refused: one that begins with the backslash, and one
-// holding a CR LF, which [encoding/csv]'s reader turns into LF.
+// holding a CR LF, which [encoding/csv]'s reader turns into LF. A parse reports
+// it as [E_CSV_CONFIG] and a write returns it marked [ErrConfig], because the
+// separator is the adapter's own setting and no snapshot can satisfy it.
 //
 // A nested collection — a List of Lists, a List of Vectors — renders by the
 // same rule at every depth: an inner list renders as a list cell does, and the
@@ -173,7 +199,12 @@
 // property is never null, so an optional one, or a required one whose kind has
 // no empty value, is absent on that target.
 //
-// These values cannot be written so that they read back unchanged:
+// These values cannot be written so that they read back unchanged. The writer
+// refuses the two that would lose data, with an error marked
+// [ErrUnrepresentable] so a caller separates a refusal of the data from an I/O
+// failure and from [ErrConfig] without matching the message text; it writes the
+// other two, which are documented limitations rather than losses the writer can
+// prevent:
 //
 //   - An optional property holding "" or an empty list writes the cell null
 //     writes, so it reads back as null. This is a documented limitation: a
@@ -200,8 +231,8 @@
 // The writer emits each association as its dotted column group, and the
 // parser assembles the group back into the _target_-keyed objects the
 // instance validator accepts — identical to the JSON adapter path. Segment
-// counts across a group must agree, or the row draws E_CSV_COERCE naming
-// the relation.
+// counts across a group must agree, or the row draws [diag.E_ADAPTER_PARSE]
+// naming the relation.
 //
 // [WithSchema] gives the parser each association's target type. A non-empty
 // key component keeps its text either way: every kind a primary key may take
@@ -219,9 +250,10 @@
 //
 // CSV is a flat format, so a row has no column for a composed child. The parser
 // reads no composition. Both writers refuse a snapshot in which any instance
-// holds a composed child, naming the type, the instance and the composition,
-// before they produce any output. A composition with no children loses nothing
-// and is written. The JSON adapter carries compositions.
+// holds a composed child with an [ErrUnrepresentable] error naming the type,
+// the instance and the composition, before they produce any output. A
+// composition with no children loses nothing and is written. The JSON adapter
+// carries compositions.
 //
 // # Provenance
 //

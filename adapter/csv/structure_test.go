@@ -96,7 +96,7 @@ func TestParse_ARefusedRecordIsReportedAndTheNextOneIsRead(t *testing.T) {
 			}
 			var lines []int
 			for issue := range got.result.Issues() {
-				if issue.Code() != E_CSV_COERCE || issue.Severity() != diag.Error {
+				if issue.Code() != diag.E_ADAPTER_PARSE || issue.Severity() != diag.Error {
 					t.Errorf("unexpected diagnostic %s %v: %s", issue.Code(), issue.Severity(), issue.Message())
 					continue
 				}
@@ -374,8 +374,8 @@ func TestParseTyped_APlainColumnAndADottedGroupWritingOneKeyIsRefused(t *testing
 		if refused != c.refused {
 			t.Errorf("%s: refused = %v, want %v: %s", c.name, refused, c.refused, result)
 		}
-		if refused && (issue.Code() != E_CSV_COERCE || issue.Span().Start.Line != 2) {
-			t.Errorf("%s: want E_CSV_COERCE on line 2, got %s on line %d", c.name, issue.Code(), issue.Span().Start.Line)
+		if refused && (issue.Code() != diag.E_ADAPTER_PARSE || issue.Span().Start.Line != 2) {
+			t.Errorf("%s: want E_ADAPTER_PARSE on line 2, got %s on line %d", c.name, issue.Code(), issue.Span().Start.Line)
 		}
 		if got := raws[0].Properties["works_at"]; !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: works_at = %#v, want %#v", c.name, got, c.want)

@@ -1826,7 +1826,8 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 **Adapter** — format-specific errors. These are registered by the adapter packages, so they appear in `diag.AllCodes()` only once the package is linked:
 
 - `E_ADAPTER_PARSE` — parsing error in adapter input
-- `E_CSV_COERCE` — a CSV cell could not be coerced to its declared type
+- `E_CSV_COERCE` — a CSV cell's text does not coerce to the type its member declares
+- `E_CSV_CONFIG` — the CSV adapter holds a setting the parse cannot use: a list separator it could not find again, a delimiter `encoding/csv` refuses, or `ParseWithTypeColumn` with no type column set. No record is read
 - `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
 - `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
 - `E_NEO4J_UNSUPPORTED_TYPE` — a property kind the adapter cannot express

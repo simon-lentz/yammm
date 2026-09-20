@@ -147,14 +147,14 @@ func TestWithDelimiter_RefusedDelimiterIsReportedAtUse(t *testing.T) {
 	requireRefusal := func(t *testing.T, result diag.Result) {
 		t.Helper()
 		for issue := range result.Issues() {
-			if issue.Code() == E_CSV_COERCE && strings.Contains(issue.Message(), refusal) {
+			if issue.Code() == E_CSV_CONFIG && strings.Contains(issue.Message(), refusal) {
 				if issue.Severity() != diag.Error {
 					t.Errorf("the refusal is %v, want Error", issue.Severity())
 				}
 				return
 			}
 		}
-		t.Errorf("no %s diagnostic carrying the refusal: %s", E_CSV_COERCE, result)
+		t.Errorf("no %s diagnostic carrying the refusal: %s", E_CSV_CONFIG, result)
 	}
 	requireWriteRefusal := func(t *testing.T, err error) {
 		t.Helper()
