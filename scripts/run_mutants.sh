@@ -21,6 +21,9 @@
 # node_modules) and runs its mutants one at a time; its unstaged tree must be
 # clean before and after every run. The checkout's unstaged tree must be clean.
 # Writes <out dir>/results.tsv and one log per run under <out dir>/logs.
+#
+# A run no test was judged by reads NOBUILD, whether mutate.sh refused the
+# mutant before the verdict run or found that no named package ran one.
 set -euo pipefail
 
 usage() {
@@ -173,7 +176,7 @@ worker() {
 			case "$output" in
 			*"MUTANT KILLED"*) verdict=KILLED ;;
 			*"MUTANT SURVIVED"*) verdict=SURVIVED ;;
-			*"DOES NOT BUILD"*) verdict=NOBUILD ;;
+			*"DOES NOT BUILD"* | *"NO TEST RAN"*) verdict=NOBUILD ;;
 			*"already red"*) verdict=RED ;;
 			*"matched NOTHING"* | *"did not apply"*) verdict=NOMATCH ;;
 			*) verdict="OTHER(rc=$rc)" ;;

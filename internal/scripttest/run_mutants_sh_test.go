@@ -190,3 +190,30 @@ func TestRunMutantsScript_ComputesThePackageSetWithoutPkgs(t *testing.T) {
 		t.Errorf("mutant read %q, want KILLED (results.tsv: %v)", got["computed"], got)
 	}
 }
+
+// A mutant no test was judged by reads NOBUILD whichever check caught it. The
+// pre-build already refuses a mutant whose tests do not build, so the verdict
+// run is shimmed to produce what only a tree that moved under it could: a
+// package reporting a build failure after the pre-build passed.
+//
+// The end-to-end run needs rsync, which the Windows job does not carry.
+func TestRunMutantsScript_ReadsAVerdictRunThatRanNoTestAsNoBuild(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	f := runMutantsFixture(t)
+	f.writeMutant("norun", "a - b")
+	// The worker's baseline is the first go test run and its verdict is the
+	// second, so the shim replaces the verdict of this single mutant.
+	f.shimVerdictRun("FAIL\t" + fixtureModule + "/m [build failed]\nFAIL\n")
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	if r.code != 0 {
+		t.Fatalf("exit code %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
+	}
+	if got := verdicts(t, filepath.Join(f.dir, "out")); got["norun"] != "NOBUILD" {
+		t.Errorf("mutant read %q, want NOBUILD (results.tsv: %v)", got["norun"], got)
+	}
+}

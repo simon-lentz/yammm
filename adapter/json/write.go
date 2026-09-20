@@ -301,17 +301,20 @@ func propertyConstraint(t *schema.Type, name string) schema.Constraint {
 	return p.Constraint()
 }
 
-// elementConstraint returns a list constraint's element constraint, or nil for
-// any other constraint.
+// elementConstraint returns the constraint each element of a collection
+// renders through: a List's element constraint, and Float for a Vector, whose
+// elements are floats the constraint does not name one by one.
 func elementConstraint(c schema.Constraint) schema.Constraint {
 	if c == nil {
 		return nil
 	}
-	lc, ok := schema.ResolveAlias(c).(schema.ListConstraint)
-	if !ok {
-		return nil
+	switch rc := schema.ResolveAlias(c).(type) {
+	case schema.ListConstraint:
+		return rc.Element()
+	case schema.VectorConstraint:
+		return schema.NewFloatConstraint()
 	}
-	return lc.Element()
+	return nil
 }
 
 // canonicalOrRaw renders raw in the form its constraint stores, and returns it

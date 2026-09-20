@@ -160,6 +160,36 @@ if [ "${rc}" -eq 0 ]; then
 	exit 1
 fi
 
+# A non-zero exit is not a kill. go test gives each named package one line: the
+# package and a duration when its test binary RAN — a failing test, a panic in
+# init or in a test, a TestMain exit, a timeout — and the package and a
+# bracketed reason ([build failed], [setup failed]) when nothing ran there.
+# The pre-build above judged these same packages, so a bracketed reason here
+# means the tree or the environment moved under the verdict run.
+#
+# One package that ran is not enough, because go test prints both forms in one
+# run: a genuine failure beside a package that never built still judges a tree
+# the pre-build never saw.
+#
+# Limit: a test binary killed from outside prints a duration like any other
+# run that started, and this reads that as a kill.
+ran_re='^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9]+\.[0-9]+s$'
+notrun=$(printf '%s\n' "${test_out}" | grep -E '^FAIL[[:space:]]' | grep -vE "${ran_re}" || true)
+ran=$(printf '%s\n' "${test_out}" | grep -cE "${ran_re}" || true)
+
+if [ -n "${notrun}" ]; then
+	printf 'mutate: NO TEST RAN in a named package, so this is not a kill\n' >&2
+	printf '%s\n' "${notrun}" >&2
+	printf '  a package line carries a duration when its test binary ran; a bracketed reason means it did not\n' >&2
+	printf '  the pre-build passed, so the tree moved under the verdict run\n' >&2
+	exit 1
+fi
+if [ "${ran}" -eq 0 ]; then
+	printf 'mutate: NO TEST RAN — the verdict run named no package that ran, so this is not a kill\n' >&2
+	printf '%s\n' "${test_out}" >&2
+	exit 1
+fi
+
 printf 'mutate: MUTANT KILLED (exit %d)\n' "${rc}"
 printf '%s\n' "${test_out}" | grep -E '^[[:space:]]*--- FAIL|^FAIL' || true
 exit 0

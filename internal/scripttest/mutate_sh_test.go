@@ -3,6 +3,7 @@ package scripttest
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -310,5 +311,108 @@ func TestMutateScript_RecordsNoRedBaseline(t *testing.T) {
 		if got := stamps(t, cache); got != 0 {
 			t.Errorf("after call %d: %d recorded baselines, want none for a red tree", i, got)
 		}
+	}
+}
+
+// goShim is a go that replaces one `go test` run's output and leaves every
+// other run to the real toolchain. It counts the runs that are not the
+// pre-build, so GO_SHIM_FAIL_ON=2 names the verdict run.
+const goShim = `#!/usr/bin/env bash
+for a in "$@"; do
+	if [ "$a" = "-exec=true" ]; then exec "$GO_SHIM_REAL" "$@"; fi
+done
+if [ "${1:-}" = "test" ]; then
+	n=0
+	if [ -f "$GO_SHIM_COUNT" ]; then n=$(cat "$GO_SHIM_COUNT"); fi
+	n=$((n + 1))
+	printf '%s\n' "$n" >"$GO_SHIM_COUNT"
+	if [ "$n" = "$GO_SHIM_FAIL_ON" ]; then
+		cat "$GO_SHIM_OUT"
+		exit 1
+	fi
+fi
+exec "$GO_SHIM_REAL" "$@"
+`
+
+// shimVerdictRun puts a go on the fixture's PATH that prints out in place of
+// the verdict run and fails. The baseline and both builds run the real go.
+func (f *fixture) shimVerdictRun(out string) {
+	f.t.Helper()
+	real, err := exec.LookPath("go")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	dir := f.t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go"), []byte(goShim), 0o700); err != nil { //nolint:gosec // a test shim the fixture executes
+		f.t.Fatal(err)
+	}
+	outFile := filepath.Join(dir, "verdict.txt")
+	if err := os.WriteFile(outFile, []byte(out), 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+	f.env = append(f.env,
+		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"GO_SHIM_REAL="+real,
+		"GO_SHIM_COUNT="+filepath.Join(dir, "count"),
+		"GO_SHIM_OUT="+outFile,
+		"GO_SHIM_FAIL_ON=2",
+	)
+}
+
+// A non-zero verdict exit is not a kill. go test gives a package a duration
+// when its test binary ran and a bracketed reason when nothing ran there, and
+// it reports both forms in one run, so one package that ran does not make the
+// run judgeable.
+func TestMutateScript_NeedsAPackageThatRanItsTests(t *testing.T) {
+	t.Parallel()
+	const pkg = fixtureModule + "/m"
+	for _, c := range []struct {
+		name, verdict string
+		code          int
+		want          string
+	}{
+		{
+			name:    "a package that did not build is not a kill",
+			verdict: "FAIL\t" + pkg + " [build failed]\nFAIL\n",
+			code:    1, want: "mutate: NO TEST RAN",
+		},
+		{
+			name:    "a package whose setup failed is not a kill",
+			verdict: "FAIL\t./m [setup failed]\nFAIL\n",
+			code:    1, want: "mutate: NO TEST RAN",
+		},
+		{
+			name:    "a package that ran beside one that did not is not a kill",
+			verdict: "FAIL\t" + fixtureModule + "/q [build failed]\nFAIL\n--- FAIL: TestAdd (0.00s)\nFAIL\t" + pkg + "\t0.31s\nFAIL\n",
+			code:    1, want: "mutate: NO TEST RAN",
+		},
+		{
+			name:    "a verdict run naming no package is not a kill",
+			verdict: "go: internal error\n",
+			code:    1, want: "mutate: NO TEST RAN",
+		},
+		{
+			name:    "a package that ran and failed is a kill",
+			verdict: "--- FAIL: TestAdd (0.00s)\n    m_test.go:31: Add(1, 2) is wrong\nFAIL\nFAIL\t" + pkg + "\t0.31s\nFAIL\n",
+			code:    0, want: "mutate: MUTANT KILLED",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f, runLog := mutateFixture(t, "3")
+			f.shimVerdictRun(c.verdict)
+
+			r := f.mutate()
+			r.wantCode(t, c.code)
+			if !strings.Contains(r.stdout+r.stderr, c.want) {
+				t.Errorf("output does not hold %q\nstdout:\n%s\nstderr:\n%s", c.want, r.stdout, r.stderr)
+			}
+			// The baseline ran for real and the verdict run was replaced, so
+			// the mutated tree's tests never ran.
+			if got := testRuns(t, runLog); got != 1 {
+				t.Errorf("%d runs of TestAdd, want 1 (the baseline alone)", got)
+			}
+			f.wantRestored()
+		})
 	}
 }

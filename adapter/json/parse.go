@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"unicode/utf8"
 
 	"github.com/tidwall/jsonc"
 
 	"github.com/simon-lentz/yammm/adapter/internal/typetag"
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
@@ -496,30 +496,26 @@ func skipValue(dec *json.Decoder, firstTok json.Token) error {
 	return nil
 }
 
-// normalizeNumbers recursively converts json.Number values to int64 or float64.
+// normalizeNumbers rewrites every json.Number in m through the module's
+// canonical number rule.
 func normalizeNumbers(m map[string]any) {
 	for k, v := range m {
 		m[k] = normalizeValue(v)
 	}
 }
 
-// normalizeValue converts json.Number and recurses into nested structures.
+// normalizeValue applies [immutable.NormalizeNumber] to each number and
+// recurses into nested structures.
+//
+// The walk is not depth-capped because the decoder above it is:
+// encoding/json refuses a document nested past 10,000 levels, and this runs
+// only on what that decoder accepted. [immutable.NormalizeValue] would cap it
+// at 64, which leaves a number below 10,000 levels and above 64 a json.Number
+// with no diagnostic saying so.
 func normalizeValue(v any) any {
 	switch val := v.(type) {
 	case json.Number:
-		// Try int64 first
-		if i, err := val.Int64(); err == nil {
-			// Check if it was really an integer (no decimal point)
-			if !strings.Contains(val.String(), ".") {
-				return i
-			}
-		}
-		// Fall back to float64
-		if f, err := val.Float64(); err == nil {
-			return f
-		}
-		// Return as string if conversion fails (shouldn't happen for valid JSON)
-		return val.String()
+		return immutable.NormalizeNumber(val)
 
 	case map[string]any:
 		normalizeNumbers(val)
