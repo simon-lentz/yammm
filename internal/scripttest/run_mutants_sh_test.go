@@ -1,6 +1,9 @@
 package scripttest
 
 import (
+	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -215,5 +218,77 @@ func TestRunMutantsScript_ReadsAVerdictRunThatRanNoTestAsNoBuild(t *testing.T) {
 	}
 	if got := verdicts(t, filepath.Join(f.dir, "out")); got["norun"] != "NOBUILD" {
 		t.Errorf("mutant read %q, want NOBUILD (results.tsv: %v)", got["norun"], got)
+	}
+}
+
+// cacheEntriesNaming returns the files under cache whose bytes hold path. A
+// compiled package archive holds the directory it was built from, which is how
+// an entry written in a temporary tree is told from one written in a checkout.
+func cacheEntriesNaming(t *testing.T, cache, path string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.WalkDir(cache, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(b, []byte(path)) {
+			found = append(found, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", cache, err)
+	}
+	return found
+}
+
+// A run owns its build cache and its worker trees, removes both at exit and
+// keeps its evidence. Every entry a worker's build writes is keyed by a copy
+// the run then deletes, so an entry left in the caller's cache is one nothing
+// reads again.
+//
+// The end-to-end run needs rsync, which the Windows job does not carry.
+func TestRunMutantsScript_RemovesItsCacheAndWorkerTrees(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	f := runMutantsFixture(t)
+	f.writeMutant("killed", "a - b")
+	ambient := t.TempDir()
+	f.env = append(f.env, "GOCACHE="+ambient)
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	r.wantCode(t, 0)
+	// The script resolves its arguments with pwd -P, and a temporary directory
+	// on darwin is reached through a symlink, so the trees it built in carry
+	// the resolved name.
+	dir, err := filepath.EvalSymlinks(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	work := filepath.Join(out, "work")
+	for _, gone := range []string{"gocache", "w1"} {
+		if _, err := os.Stat(filepath.Join(work, gone)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("work/%s survives the run: stat says %v", gone, err)
+		}
+	}
+	for _, kept := range []string{
+		filepath.Join(out, "results.tsv"),
+		filepath.Join(out, "logs", "killed.asis.log"),
+		filepath.Join(work, "worker.1.out"),
+	} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("the removal took the run's evidence: %v", err)
+		}
+	}
+	if naming := cacheEntriesNaming(t, ambient, filepath.Join(work, "w1")); len(naming) > 0 {
+		t.Errorf("%d entries of the caller's cache name the worker tree, the first %s", len(naming), naming[0])
 	}
 }

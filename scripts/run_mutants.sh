@@ -22,6 +22,12 @@
 # clean before and after every run. The checkout's unstaged tree must be clean.
 # Writes <out dir>/results.tsv and one log per run under <out dir>/logs.
 #
+# A run owns its build cache and removes it with the worker trees at exit,
+# leaving results.tsv, logs/, pkgsets/ and work/worker.N.out. Every entry a
+# worker's build writes is keyed by the copy's path, so a run that kept them
+# would leave a cache nothing reads again: 1,931 mutant runs over five days
+# grew the shared cache to 163 GB and filled the disk.
+#
 # A run no test was judged by reads NOBUILD, whether mutate.sh refused the
 # mutant before the verdict run or found that no named package ran one.
 set -euo pipefail
@@ -74,6 +80,30 @@ esac
 
 mkdir -p "$out/logs" "$out/work" "$out/pkgsets"
 rm -f "$out"/work/queue.* "$out"/work/results.w*.tsv "$out"/work/worker.*.out
+
+pids=()
+
+# The workers stop before the removal: one that still builds writes back what
+# the removal takes. A worker's own child outlives the signal path, so a run
+# killed mid-build can leave part of the cache behind.
+# shellcheck disable=SC2329 # the EXIT trap below is what invokes it
+cleanup() {
+	local p d
+	for p in ${pids[@]+"${pids[@]}"}; do
+		kill "$p" 2>/dev/null || true
+	done
+	wait 2>/dev/null || true
+	rm -rf -- "$out/work/gocache"
+	for d in "$out"/work/w[0-9]*/; do
+		[ -d "$d" ] || continue
+		rm -rf -- "$d"
+	done
+}
+trap cleanup EXIT
+# Without these the exit trap never runs on a signal, which is how a cancelled
+# run left its trees behind.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 module=$(cd "$src" && go list -m)
 tracked=$(cd "$src" && bash scripts/packages.sh 2>/dev/null)
@@ -163,6 +193,7 @@ worker() {
 			set +e
 			# shellcheck disable=SC2086 # pkgs is a word list
 			output=$(cd "$tree" && TMPDIR="$tdir" GOFLAGS="-failfast=true -timeout=300s -p=2" \
+				GOCACHE="$out/work/gocache" \
 				MUTATE_BASELINE_CACHE="$out/work/baselines.w$w" \
 				bash scripts/mutate.sh "$file" "$search" "$replace" $pkgs 2>&1 </dev/null)
 			rc=$?
@@ -191,7 +222,6 @@ worker() {
 }
 
 began=$(date +%s)
-pids=()
 for w in $(seq 1 "$workers"); do
 	[ -f "$out/work/queue.$w" ] || continue
 	worker "$w" >"$out/work/worker.$w.out" 2>&1 &

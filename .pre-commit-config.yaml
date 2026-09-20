@@ -78,8 +78,8 @@ repos:
   #
   # The same four checks each CI host's job runs: the linter config against its
   # schema, the pinned linter, vet, and scripts/test.sh. vet.sh also vets the
-  # Windows build and every unix member's, as only CI's Linux job does. The CI
-  # pre-commit job skips these four hooks because the host jobs run them.
+  # Windows build and every unix member's, which CI gives a job of its own. The
+  # CI pre-commit job skips these four hooks because the host jobs run them.
   - repo: local
     hooks:
       - id: golangci-lint-config

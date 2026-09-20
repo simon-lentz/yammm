@@ -12,9 +12,9 @@
 # tag are vetted too. The package set is scripts/packages.sh's. Every target runs
 # even after an earlier one fails, and the summary names each failure.
 #
-# With --host, only this host's build is vetted, plain and under -race: the
-# Windows and macOS jobs vet their own build, and the Linux job vets every
-# target.
+# With --host, only this host's build is vetted, plain and under -race: each
+# host job of the test workflow vets its own build, and one job of that
+# workflow vets every target.
 #
 # Usage: scripts/vet.sh [--host]
 set -euo pipefail

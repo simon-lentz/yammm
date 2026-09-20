@@ -34,13 +34,10 @@ jobs:
         include:
           - name: Linux
             os: ubuntu-latest
-            vet_args: ""
           - name: Windows
             os: windows-latest
-            vet_args: --host
           - name: macOS
             os: macos-latest
-            vet_args: --host
     defaults:
       run:
         # bash on every host: pwsh reports only the last command's exit status.
@@ -93,12 +90,38 @@ jobs:
           args: --config=.golangci.yml
       - name: Vet
         if: ${{ !cancelled() }}
-        # The Linux job vets every target the module's build constraints select;
-        # the other hosts vet their own build.
-        run: scripts/vet.sh ${{ matrix.vet_args }}
+        # Each host vets its own build; the cross-vet job vets every other
+        # target the module's build constraints select.
+        run: scripts/vet.sh --host
       - name: Test
         if: ${{ !cancelled() }}
         run: scripts/test.sh
+  # Every target the module's build constraints select, in a job of its own.
+  # scripts/vet.sh with no argument type-checks eleven targets where --host
+  # checks two: inside a host job that step ran 255 to 382 s against the other
+  # hosts' under 30 s, and made the Linux job the longest of the workflow in
+  # two of three measured runs. Beside the host jobs it costs the workflow its
+  # own runtime alone, and the release calls this workflow whole, so a tag
+  # still waits for it. The job runs no test: internal/scripttest's
+  # testlessJobs records that, and untimedJobs holds it to its timeout.
+  #
+  # 20 minutes is 2.9 times the slowest Vet step measured plus its setup.
+  cross-vet:
+    name: Vet every target
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: scripts/vet.sh
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
