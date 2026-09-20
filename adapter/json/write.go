@@ -1,6 +1,7 @@
 package json
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -317,8 +318,10 @@ func elementConstraint(c schema.Constraint) schema.Constraint {
 	return nil
 }
 
-// canonicalOrRaw renders raw in the form its constraint stores, and returns it
-// untouched when the constraint cannot render it. MarshalObject returns an
+// canonicalOrRaw renders raw in the form its constraint stores, then marks a
+// float-bearing value through [withFloatIndicator], so a Float returns as a
+// json.RawMessage rather than as the float64 it is stored as. It returns raw
+// untouched when the constraint cannot render it: MarshalObject returns an
 // error rather than a diag.Result, so failing here would fail a whole export
 // over one malformed value.
 func canonicalOrRaw(raw any, c schema.Constraint) any {
@@ -326,5 +329,40 @@ func canonicalOrRaw(raw any, c schema.Constraint) any {
 	if err != nil {
 		return raw
 	}
-	return canonical
+	return withFloatIndicator(canonical, c)
+}
+
+// withFloatIndicator renders a value the schema declares float-bearing with a
+// float indicator (".", "e" or "E") — the set [immutable.NormalizeNumber]
+// reads as float64. Without it a whole float emits int-shaped and narrows to
+// int64 across this package's own round trip, and the sign of a negative zero
+// is lost with it.
+//
+// The digits come from encoding/json itself, so this cannot drift from the
+// encoder that writes every other number in the document. A value under any
+// other constraint passes through.
+//
+// A non-finite float never arrives: [instance.CanonicalValue] refuses one, so
+// [canonicalOrRaw] returns it raw and the document's own Marshal fails the
+// export. The Marshal error below is therefore unreachable through that
+// caller, and returns the value to the path it would have taken anyway.
+//
+// A Vector's elements arrive under a Float constraint that [elementConstraint]
+// supplies, so they are rendered by this same rule.
+func withFloatIndicator(v any, c schema.Constraint) any {
+	if c == nil || schema.ResolveAlias(c).Kind() != schema.KindFloat {
+		return v
+	}
+	f, ok := v.(float64)
+	if !ok {
+		return v
+	}
+	b, err := json.Marshal(f)
+	if err != nil {
+		return v
+	}
+	if !bytes.ContainsAny(b, ".eE") {
+		b = append(b, '.', '0')
+	}
+	return json.RawMessage(b)
 }

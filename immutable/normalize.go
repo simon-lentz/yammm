@@ -37,10 +37,9 @@ import (
 // Classification is by lexical form alone: a float indicator ('.', 'e', 'E')
 // means float64, an int-shaped literal means int64 — the reader sees only the
 // text, never a schema. A writer that wants a whole float to survive the round
-// trip therefore has to emit the indicator itself, as snapshot.Marshal does for
-// KindFloat values; a writer that does not (adapter/json) round-trips such a
-// value as int64. The Value typed accessors (Int(), Float()) read both
-// representations transparently.
+// trip therefore has to emit the indicator itself, as snapshot.Marshal and
+// adapter/json both do for a value under a float-bearing constraint. The Value
+// typed accessors (Int(), Float()) read both representations transparently.
 func NormalizeNumber(n json.Number) any {
 	s := n.String()
 
