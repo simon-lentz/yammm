@@ -51,9 +51,14 @@ type Sensor {
 }
 
 // marshalBypassBuilt builds a graph through instance.NewValidInstance, which
-// receives no schema and runs no validation. It is the only way a
-// non-canonical value reaches this writer, and therefore the only thing that
-// can prove the writer's own arm runs.
+// receives no schema and runs no validation, from native Go values.
+//
+// It does not prove the writer's canonicalization arm runs for these kinds:
+// Graph.Add rewrites a Timestamp, a Date and a UUID to its stored form before
+// any writer sees it, so discarding the writer's canonical form leaves every
+// test below green. They pin the END-TO-END text a native value exports as. The
+// writer's own arm is load-bearing for numbers alone, which Add leaves as they
+// arrived, and [TestMarshalObject_RendersAVectorElementThroughFloat] pins it.
 func marshalBypassBuilt(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
@@ -98,9 +103,9 @@ func marshalBypassBuilt(t *testing.T) string {
 	return string(data)
 }
 
-// TestMarshalObject_CanonicalizesBypassBuiltProperties kills the property arm.
-// A uuid.UUID is [16]byte, so without the arm encoding/json writes it as an
-// array of sixteen numbers rather than a string.
+// TestMarshalObject_CanonicalizesBypassBuiltProperties pins the text a native
+// property exports as. A uuid.UUID is [16]byte, which encoding/json would write
+// as an array of sixteen numbers rather than a string.
 func TestMarshalObject_CanonicalizesBypassBuiltProperties(t *testing.T) {
 	t.Parallel()
 	got := marshalBypassBuilt(t)
@@ -119,8 +124,8 @@ func TestMarshalObject_CanonicalizesBypassBuiltProperties(t *testing.T) {
 	}
 }
 
-// TestMarshalObject_CanonicalizesListElements kills the list-element
-// recursion. A suite with only scalar cases cannot tell it from dead code.
+// TestMarshalObject_CanonicalizesListElements pins the same for a list's
+// elements, which a suite of scalar cases would not reach.
 func TestMarshalObject_CanonicalizesListElements(t *testing.T) {
 	t.Parallel()
 	got := marshalBypassBuilt(t)
@@ -131,10 +136,10 @@ func TestMarshalObject_CanonicalizesListElements(t *testing.T) {
 	}
 }
 
-// TestMarshalObject_CanonicalizesForeignKeyComponents kills the foreign-key
-// arm. The value lives on the association's TARGET type, so the row's own type
-// cannot reach its constraint — and encoding/json renders a time.Time as
-// RFC 3339, which is the wrong text under a declared layout.
+// TestMarshalObject_CanonicalizesForeignKeyComponents pins the same for a
+// foreign key. The value lives on the association's TARGET type, so the row's
+// own type cannot reach its constraint — and encoding/json renders a time.Time
+// as RFC 3339, which is the wrong text under a declared layout.
 func TestMarshalObject_CanonicalizesForeignKeyComponents(t *testing.T) {
 	t.Parallel()
 	got := marshalBypassBuilt(t)

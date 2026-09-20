@@ -6,10 +6,12 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
@@ -37,9 +39,10 @@ func (a *Adapter) MarshalSnapshot(
 	if err := refuseComposedChildren(result); err != nil {
 		return nil, err
 	}
-	output := make(map[string][]byte, len(result.Types()))
+	types := result.Types()
+	output := make(map[string][]byte, len(types))
 
-	for _, typeID := range result.Types() {
+	for _, typeID := range types {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("csv marshal snapshot: %w", err)
 		}
@@ -287,9 +290,26 @@ func (a *Adapter) instanceToRow(
 ) ([]string, error) {
 	cells := make(map[string]string)
 	if schemaType != nil {
+		declared := 0
 		for rel := range schemaType.AllAssociations() {
-			if err := a.relationCells(rel, s, edgesByRel[rel.Name()], cells); err != nil {
+			edges := edgesByRel[rel.Name()]
+			if len(edges) > 0 {
+				declared++
+			}
+			if err := a.relationCells(rel, s, edges, cells); err != nil {
 				return nil, err
+			}
+		}
+		// Every column comes from a declared association, so an edge under any
+		// other name has none and the row would be written without it.
+		if declared != len(edgesByRel) {
+			// In name order, so the relation a refusal names is the same on
+			// every run.
+			for _, relName := range slices.Sorted(maps.Keys(edgesByRel)) {
+				if rel, ok := schemaType.Relation(relName); !ok || !rel.IsAssociation() {
+					return nil, refusal.New(ErrUnrepresentable, "csv adapter: edge under %q, which type %s declares no association for, so it has no column",
+						relName, schemaType.ID())
+				}
 			}
 		}
 	}
@@ -297,7 +317,7 @@ func (a *Adapter) instanceToRow(
 	row := make([]string, len(columns))
 	for i, col := range columns {
 		if val, ok := props.Get(col); ok {
-			cell, err := a.valueToString(val, propertyConstraint(schemaType, col))
+			cell, err := a.valueToString(val, constraintof.Property(schemaType, col))
 			if err != nil {
 				return nil, fmt.Errorf("csv adapter: property %q: %w", col, err)
 			}
@@ -322,8 +342,8 @@ var errCRLF = refusal.New(ErrUnrepresentable, "its text holds a CR LF, which enc
 
 // relationCells renders one association's edge columns into cells: per FK
 // component and per edge property, one segment per target, escaped and
-// joined on the list separator. No edges means every cell stays "", the
-// absent-group marker.
+// joined on the list separator. No edges leaves every cell of the group unset,
+// which a row reads as "", the absent-group marker.
 //
 // An edge whose every cell renders empty is refused: one target whose key
 // components are all "" and whose edge properties are all absent or "" writes
@@ -335,22 +355,42 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		// buildColumnList already refused this shape; nothing to render.
 		return nil
 	}
+	// No edges leaves every column of the group unset, which a row reads as "".
+	if len(edges) == 0 {
+		return nil
+	}
+	// A (one) association reads back as ONE object, and the validator refuses
+	// the array two zipped targets make, so several edges have no shape.
+	if !rel.IsMany() && len(edges) > 1 {
+		return refusal.New(ErrUnrepresentable, "csv adapter: (one) association %q carries %d edges, and a (one) association reads back as one target",
+			rel.Name(), len(edges))
+	}
 	field := rel.FieldName()
 	var group []string
 
-	for i, pk := range target.PrimaryKeysSlice() {
+	pks := target.PrimaryKeysSlice()
+	for _, e := range edges {
+		// The group's columns are the DECLARED target's keys, so an edge that
+		// points elsewhere would be written as a target of that type and read
+		// back as one. graph.Add resolves every edge to the declared target;
+		// only a rebuilt snapshot holds one that does not.
+		if e.Target().TypeID() != rel.TargetID() {
+			return refusal.New(ErrUnrepresentable, "csv adapter: association %q targets type %s; the association declares the target %s",
+				rel.Name(), e.Target().TypeID(), rel.TargetID())
+		}
+		// A short key would write empty segments for its missing components,
+		// which read back as a partial foreign key; a long one has no column.
+		if key := e.Target().PrimaryKey(); key.Len() != len(pks) {
+			return refusal.New(ErrUnrepresentable, "csv adapter: association %q target key has %d components; type %s declares %d",
+				rel.Name(), key.Len(), e.Target().TypeID(), len(pks))
+		}
+	}
+	for i, pk := range pks {
 		col := field + "._target_" + pk.Name()
 		group = append(group, col)
-		if len(edges) == 0 {
-			cells[col] = ""
-			continue
-		}
 		segs := make([]string, len(edges))
 		for j, e := range edges {
-			key := e.Target().PrimaryKey()
-			if i < key.Len() {
-				segs[j] = escapeListElem(scalarCell(canonicalOrRaw(key.Get(i).Unwrap(), pk.Constraint())), a.config.listSep)
-			}
+			segs[j] = escapeListElem(scalarCell(canonicalOrRaw(e.Target().PrimaryKey().Get(i).Unwrap(), pk.Constraint())), a.config.listSep)
 		}
 		cells[col] = strings.Join(segs, a.config.listSep)
 	}
@@ -358,10 +398,6 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 	for _, p := range rel.PropertiesSlice() {
 		col := field + "." + p.Name()
 		group = append(group, col)
-		if len(edges) == 0 {
-			cells[col] = ""
-			continue
-		}
 		segs := make([]string, len(edges))
 		for j, e := range edges {
 			if v, ok := e.Properties().Get(p.Name()); ok && !v.IsNil() {
@@ -371,9 +407,6 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		cells[col] = strings.Join(segs, a.config.listSep)
 	}
 
-	if len(edges) == 0 {
-		return nil
-	}
 	for _, col := range group {
 		if cells[col] != "" {
 			return nil
@@ -400,19 +433,6 @@ func scalarCell(v any) string {
 	}
 }
 
-// propertyConstraint returns a declared property's constraint, or nil for a
-// column the type does not declare.
-func propertyConstraint(t *schema.Type, name string) schema.Constraint {
-	if t == nil {
-		return nil
-	}
-	p, ok := t.Property(name)
-	if !ok {
-		return nil
-	}
-	return p.Constraint()
-}
-
 // canonicalOrRaw renders raw in the form its constraint stores, and returns it
 // untouched when the constraint cannot render it. An export has no diagnostic
 // channel, so one malformed cell must not fail the whole file.
@@ -422,22 +442,6 @@ func canonicalOrRaw(raw any, c schema.Constraint) any {
 		return raw
 	}
 	return canonical
-}
-
-// elementConstraint returns the constraint each element of a collection renders
-// through: a List's element constraint, and Float for a Vector, whose elements
-// the validator coerces as Floats. Any other constraint has none.
-func elementConstraint(c schema.Constraint) schema.Constraint {
-	if c == nil {
-		return nil
-	}
-	switch rc := schema.ResolveAlias(c).(type) {
-	case schema.ListConstraint:
-		return rc.Element()
-	case schema.VectorConstraint:
-		return schema.NewFloatConstraint()
-	}
-	return nil
 }
 
 // errListOfOneEmptyElement refuses a list whose one element renders as "": the
@@ -458,7 +462,7 @@ func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) (strin
 	if !ok {
 		return scalarCell(canonicalOrRaw(val.Unwrap(), c)), nil
 	}
-	elem := elementConstraint(c)
+	elem := constraintof.Element(c)
 	parts := make([]string, s.Len())
 	for i, v := range s.Iter2() {
 		text, err := a.valueToString(v, elem)

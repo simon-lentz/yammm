@@ -47,13 +47,13 @@
 // Adapters depend on library packages; library packages never depend on adapters:
 //
 //	adapter/csv       ──imports──▶  instance, diag, location, location/path, graph,
-//	                                immutable, schema, adapter/internal/refusal,
-//	                                adapter/internal/typetag
+//	                                immutable, schema, adapter/internal/constraintof,
+//	                                adapter/internal/refusal, adapter/internal/typetag
 //	adapter/gogen     ──imports──▶  schema, location, internal/ident
 //	adapter/jschema   ──imports──▶  schema
 //	adapter/json      ──imports──▶  instance, diag, location, location/path, graph,
-//	                                immutable, schema, adapter/internal/refusal,
-//	                                adapter/internal/typetag,
+//	                                immutable, schema, adapter/internal/constraintof,
+//	                                adapter/internal/refusal, adapter/internal/typetag,
 //	                                github.com/tidwall/jsonc
 //	adapter/markdown  ──imports──▶  schema
 //	adapter/neo4j     ──imports──▶  schema, graph, immutable, diag, location,
@@ -70,8 +70,9 @@
 // stay consistent with the rest of yammm instead of duplicating that logic.
 //
 // The adapter layer's own internal packages, which the JSON and CSV adapters
-// share — adapter/internal/typetag for a type tag's syntax and
-// adapter/internal/refusal for a refusal's class — are not an exception to this
+// share — adapter/internal/typetag for a type tag's syntax,
+// adapter/internal/refusal for a refusal's class and adapter/internal/constraintof
+// for the constraint a value renders through — are not an exception to this
 // rule: they are the adapters', not the core's.
 //
 // # Subpackages

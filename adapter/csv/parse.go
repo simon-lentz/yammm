@@ -27,7 +27,7 @@ func (a *Adapter) ParseTyped(
 	r io.Reader,
 	schemaType *schema.Type,
 ) ([]instance.RawInstance, diag.Result) {
-	collector := diag.NewCollector(0)
+	collector := diag.NewCollectorUnlimited()
 	if a.configRefused(collector) {
 		return nil, collector.Result()
 	}
@@ -178,7 +178,7 @@ func (a *Adapter) ParseWithTypeColumn(
 	r io.Reader,
 	typeResolver func(string) *schema.Type,
 ) (map[string][]instance.RawInstance, diag.Result) {
-	collector := diag.NewCollector(0)
+	collector := diag.NewCollectorUnlimited()
 
 	if a.config.typeColumn == "" {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_CONFIG,

@@ -22,11 +22,15 @@
 // validator accept every shape this writer emits. Unresolved edges are not
 // written; persist them in the .ys format when they must survive.
 //
-// A snapshot holding a shape this writer cannot render — an edge naming its
-// target by fewer key components than the target type declares, which
-// [graph.RebuildSnapshot] does not check — is refused with an error marked
-// [ErrUnrepresentable], so a caller separates it from an encoding failure and
-// from an I/O failure without matching the message text.
+// [graph.RebuildSnapshot] reconstructs a document and does not validate one,
+// so a .ys document can carry shapes this writer cannot render as an object its
+// own parser and the validator accept: an edge whose target key has another
+// arity than its target type's, a (one) association carrying several edges, an
+// edge to a type its association does not declare, and an edge or composed
+// children under a name the type declares no relation of that kind for. Each
+// is refused with an error marked [ErrUnrepresentable], so a caller separates
+// it from an encoding failure and from an I/O failure without matching the
+// message text.
 //
 // Use [WithIndent] for pretty-printed output. The object shape keys instances
 // by the name the entry schema addresses each root type by, and two such names
@@ -66,6 +70,18 @@
 // A fault the decoder cannot read past, such as a syntax error or a truncated
 // document, is reported and parsing stops there: every instance read before it
 // is returned, and nothing after it is read.
+//
+// # Cancellation
+//
+// Every entry point observes its context at each unit of work it has.
+// [Adapter.ParseObject] checks once per
+// top-level key and returns the types read so far beside a Fatal
+// E_CONTEXT_CANCELLED, Fatal because [diag.Result.HasFatal] is documented to
+// mean the run did not finish. [Adapter.MarshalObject] checks once per type
+// group and returns an error wrapping the context's; [Adapter.WriteObject]
+// checks again after the document is built and writes nothing if it is
+// cancelled by then. The CSV adapter's writers are finer, checking per
+// instance, so one very large type group stops sooner there than here.
 //
 // # Provenance
 //
@@ -113,8 +129,8 @@
 // # Dependencies
 //
 //	adapter/json  ──imports──▶  instance, diag, location, location/path, graph,
-//	                            immutable, schema, adapter/internal/refusal,
-//	                            adapter/internal/typetag,
+//	                            immutable, schema, adapter/internal/constraintof,
+//	                            adapter/internal/refusal, adapter/internal/typetag,
 //	                            github.com/tidwall/jsonc
 //
 // [tidwall/jsonc]: https://github.com/tidwall/jsonc

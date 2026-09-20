@@ -119,7 +119,7 @@ func TestMarshalObject_NegativeZeroKeepsItsSign(t *testing.T) {
 
 // Every collection whose elements are floats carries the indicator at its
 // elements, whether it names the collection directly or through an alias.
-// The Vector arms reach the Float constraint through [elementConstraint].
+// The Vector arms reach the Float constraint through [constraintof.Element].
 func TestMarshalObject_FloatBearingCollectionsCarryTheIndicator(t *testing.T) {
 	t.Parallel()
 	doc := indicatorDoc(t, map[string]any{

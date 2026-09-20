@@ -67,8 +67,9 @@ func WithTypeColumn(name string) Option {
 
 // WithListSeparator sets the separator for list elements, vector elements
 // and edge-column segments, on the write side and the parse side alike.
-// The default is "|". An element holding any part of the separator splits
-// back unchanged, at every depth of a nested list. A separator that begins
+// The default is "|", and an empty separator is ignored, so the separator
+// already set is kept. An element holding any part of the separator splits back unchanged, at
+// every depth of a nested list. A separator that begins
 // with a backslash, the escape character, or holds a CR LF, which
 // [encoding/csv] reads back as LF, is refused before a parse reads or a write
 // requests a writer: as an Error [E_CSV_CONFIG] diagnostic, or as an error
@@ -99,7 +100,9 @@ func WithStrictPropertyNames(strict bool) Option {
 // and is otherwise absent, and an empty column naming no key of the target is
 // skipped. Without it every empty foreign-key segment is absent. A non-empty
 // segment keeps its text either way, except that with it a Date or Timestamp
-// key that does not parse draws E_CSV_COERCE.
+// key that does not parse draws E_CSV_COERCE. s must be the schema that owns the
+// [*schema.Type] the parse methods are given: a target is resolved in s by the
+// association's identity, and another schema's type of that name is another type.
 func WithSchema(s *schema.Schema) Option {
 	return func(c *adapterConfig) {
 		c.schema = s

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
@@ -43,7 +44,8 @@ func WithIndent(indent string) WriteOption {
 // Instances include their properties, composed children (inline), and foreign key
 // references for resolved associations.
 //
-// Returns ErrNilResult if result is nil.
+// Returns ErrNilResult if result is nil. MarshalObject checks ctx once per type
+// group and returns an error wrapping ctx.Err(), and nothing else.
 func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
 	if result == nil {
 		return nil, ErrNilResult
@@ -105,7 +107,8 @@ func (a *Adapter) buildOutput(ctx context.Context, result *graph.Snapshot) (map[
 	output := make(map[string]any)
 	s := result.Schema()
 
-	// Iterate types in sorted order for deterministic output
+	// encoding/json sorts an object's keys, so the order the types are walked
+	// in does not reach the output.
 	for _, typeID := range result.Types() {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("json marshal object: %w", err)
@@ -153,12 +156,17 @@ func lookupType(s *schema.Schema, id schema.TypeID) (*schema.Type, bool) {
 func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schema) (map[string]any, error) {
 	obj := make(map[string]any)
 
-	// Lookup the type for schema-based serialization
-	schemaType, hasType := lookupType(s, inst.TypeID())
+	// The field names every relation renders under come from the type.
+	schemaType, ok := lookupType(s, inst.TypeID())
+	if !ok {
+		return nil, fmt.Errorf("json adapter: instance %s: type %s does not resolve, so its relations' field names are unknowable; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract",
+			inst.PrimaryKey(), inst.TypeID())
+	}
 
-	// 1. Add properties in sorted order for deterministic output
+	// 1. Add properties. encoding/json sorts an object's keys, so the order
+	// they are added in does not reach the output.
 	for name, val := range inst.Properties().SortedRange() {
-		obj[name] = unwrapValue(val, propertyConstraint(schemaType, name))
+		obj[name] = unwrapValue(val, constraintof.Property(schemaType, name))
 	}
 
 	// 2. Add association targets using the snapshot edge index.
@@ -179,14 +187,21 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 		for _, relName := range relOrder {
 			edges := byRel[relName]
 
-			fieldName := relName // fallback
-			var rel *schema.Relation
-			if hasType {
-				if r, ok := schemaType.Relation(relName); ok {
-					rel = r
-					fieldName = r.FieldName()
-				}
+			// An edge under a name the type declares no association for has
+			// no field to render under: its relation name is not one, and the
+			// validator refuses it as an unknown field.
+			rel, ok := schemaType.Relation(relName)
+			if !ok || !rel.IsAssociation() {
+				return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: edge under %q, which type %s declares no association for",
+					inst.PrimaryKey(), relName, inst.TypeID())
 			}
+			// A (one) association renders as ONE object, and the validator
+			// refuses an array there, so several edges have no shape.
+			if !rel.IsMany() && len(edges) > 1 {
+				return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: (one) association %q carries %d edges, and a (one) association renders as one object",
+					inst.PrimaryKey(), relName, len(edges))
+			}
+			fieldName := rel.FieldName()
 
 			objs := make([]any, len(edges))
 			for i, e := range edges {
@@ -197,12 +212,9 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 				objs[i] = target
 			}
 
-			// A resolvable (one) relation carrying one edge emits the single
-			// object the parser expects. Everything else — (many), an
-			// unresolvable relation name, or a (one) carrying several edges
-			// (a bypass-built graph) — emits the array, the shape that does
-			// not invent a multiplicity the schema cannot confirm.
-			if rel != nil && !rel.IsMany() && len(objs) == 1 {
+			// A (one) association emits the single object the parser expects,
+			// and a (many) the array.
+			if !rel.IsMany() {
 				obj[fieldName] = objs[0]
 			} else {
 				obj[fieldName] = objs
@@ -210,18 +222,18 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 		}
 	}
 
-	// 3. Add composed children in sorted order, always as an array — the
+	// 3. Add composed children, always as an array — the
 	// parser requires one for every composition, (one) included.
 	// ComposedRelations returns sorted relation names; Composed returns a defensive copy.
 	for _, relName := range inst.ComposedRelations() {
 		children := inst.Composed(relName)
 
-		fieldName := relName // fallback
-		if hasType {
-			if rel, ok := schemaType.Relation(relName); ok {
-				fieldName = rel.FieldName()
-			}
+		rel, ok := schemaType.Relation(relName)
+		if !ok || rel.IsAssociation() {
+			return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: composed children under %q, which type %s declares no composition for",
+				inst.PrimaryKey(), relName, inst.TypeID())
 		}
+		fieldName := rel.FieldName()
 
 		arr := make([]map[string]any, len(children))
 		for i, child := range children {
@@ -252,6 +264,14 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 // root types and cardinality, and no key arity — so that arm carries
 // [ErrUnrepresentable]. Any differing arity reaches it, not only a short key.
 func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (map[string]any, error) {
+	// An edge reads back as a target of the association's DECLARED type, so one
+	// that points elsewhere would carry another type's keys as its _target_
+	// fields. graph.Add resolves every edge to the declared target; only a
+	// rebuilt snapshot holds one that does not.
+	if e.Target().TypeID() != rel.TargetID() {
+		return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q targets type %s; the association declares the target %s",
+			e.Relation(), e.Target().TypeID(), rel.TargetID())
+	}
 	target, ok := lookupType(s, e.Target().TypeID())
 	if !ok {
 		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract",
@@ -272,10 +292,8 @@ func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (ma
 	}
 	for name, val := range e.Properties().SortedRange() {
 		var c schema.Constraint
-		if rel != nil {
-			if p, ok := rel.Property(name); ok {
-				c = p.Constraint()
-			}
+		if p, ok := rel.Property(name); ok {
+			c = p.Constraint()
 		}
 		out[name] = unwrapValue(val, c)
 	}
@@ -300,7 +318,7 @@ func unwrapValue(v immutable.Value, c schema.Constraint) any {
 		return result
 	}
 	if s, ok := v.Slice(); ok {
-		elem := elementConstraint(c)
+		elem := constraintof.Element(c)
 		result := make([]any, s.Len())
 		for i, val := range s.Iter2() {
 			result[i] = unwrapValue(val, elem)
@@ -310,35 +328,6 @@ func unwrapValue(v immutable.Value, c schema.Constraint) any {
 
 	// Primitives: rendered through the constraint.
 	return canonicalOrRaw(v.Unwrap(), c)
-}
-
-// propertyConstraint returns a declared property's constraint, or nil for a
-// name the type does not declare or a type that did not resolve.
-func propertyConstraint(t *schema.Type, name string) schema.Constraint {
-	if t == nil {
-		return nil
-	}
-	p, ok := t.Property(name)
-	if !ok {
-		return nil
-	}
-	return p.Constraint()
-}
-
-// elementConstraint returns the constraint each element of a collection
-// renders through: a List's element constraint, and Float for a Vector, whose
-// elements are floats the constraint does not name one by one.
-func elementConstraint(c schema.Constraint) schema.Constraint {
-	if c == nil {
-		return nil
-	}
-	switch rc := schema.ResolveAlias(c).(type) {
-	case schema.ListConstraint:
-		return rc.Element()
-	case schema.VectorConstraint:
-		return schema.NewFloatConstraint()
-	}
-	return nil
 }
 
 // canonicalOrRaw renders raw in the form its constraint stores, then marks a
@@ -370,7 +359,7 @@ func canonicalOrRaw(raw any, c schema.Constraint) any {
 // export. The Marshal error below is therefore unreachable through that
 // caller, and returns the value to the path it would have taken anyway.
 //
-// A Vector's elements arrive under a Float constraint that [elementConstraint]
+// A Vector's elements arrive under a Float constraint that [constraintof.Element]
 // supplies, so they are rendered by this same rule.
 func withFloatIndicator(v any, c schema.Constraint) any {
 	if c == nil || schema.ResolveAlias(c).Kind() != schema.KindFloat {

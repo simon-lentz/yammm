@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -66,10 +65,10 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 			}
 			return raw, nil
 		}
+		// RFC3339 reads a fractional second too: time.Parse accepts one after
+		// the seconds field whether or not the layout carries it.
 		if _, err := time.Parse(time.RFC3339, raw); err != nil {
-			if _, err2 := time.Parse(time.RFC3339Nano, raw); err2 != nil {
-				return nil, fmt.Errorf("cannot parse %q as Timestamp (expected RFC 3339): %w", raw, err)
-			}
+			return nil, fmt.Errorf("cannot parse %q as Timestamp (expected RFC 3339): %w", raw, err)
 		}
 		return raw, nil
 
@@ -134,7 +133,7 @@ func (a *Adapter) parseVectorValue(raw string) ([]any, error) {
 	parts := splitListElems(raw, a.config.listSep)
 	result := make([]any, len(parts))
 	for i, part := range parts {
-		v, err := strconv.ParseFloat(strings.TrimSpace(part), 64)
+		v, err := strconv.ParseFloat(part, 64)
 		if err != nil {
 			return nil, fmt.Errorf("vector element %d: cannot parse %q as Float: %w", i, part, err)
 		}

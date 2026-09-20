@@ -7,7 +7,8 @@ var ErrNilResult = errors.New("json adapter: nil graph result")
 
 // ErrUnrepresentable marks a write refused because the snapshot holds a shape
 // this adapter cannot render as the object its own parser accepts. It is the
-// class, matched with errors.Is; the message names the edge and the type. It
+// class, matched with errors.Is; the message names the instance or the edge,
+// and the relation or the type. It
 // separates a refusal of the data from an [encoding/json] failure and from an
 // I/O failure, which no message text can.
 var ErrUnrepresentable = errors.New("json adapter: the snapshot holds a shape JSON cannot represent")

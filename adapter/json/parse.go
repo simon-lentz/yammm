@@ -32,6 +32,9 @@ var byteOrderMark = []byte("\uFEFF")
 // the document ($.Person[0]) and the span of its opening brace, and every
 // diagnostic carries a span in source. Positions count runes from the line
 // start of the bytes passed in.
+//
+// ParseObject checks ctx once per top-level key, the unit it reads, and returns
+// the types read so far beside a Fatal E_CONTEXT_CANCELLED.
 func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 	result := make(map[string][]instance.RawInstance)
@@ -63,11 +66,11 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	// Read opening brace
 	tok, err := dec.Token()
 	if err != nil {
-		collector.Collect(*pc.parseError(pc.spanAt(0), "invalid JSON", err.Error()))
+		collector.Collect(pc.parseError(pc.spanAt(0), "invalid JSON", err.Error()))
 		return nil, collector.Result()
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		collector.Collect(*pc.parseError(pc.spanAt(0), "expected object at root", "expected object"))
+		collector.Collect(pc.parseError(pc.spanAt(0), "expected object at root", "expected object"))
 		return nil, collector.Result()
 	}
 
@@ -90,19 +93,19 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 		// Read type name
 		keyTok, err := dec.Token()
 		if err != nil {
-			collector.Collect(*pc.parseError(keySpan, "error reading key", err.Error()))
+			collector.Collect(pc.parseError(keySpan, "error reading key", err.Error()))
 			return result, collector.Result()
 		}
 		// The decoder returns a member name as a string or fails; the arm holds
 		// that contract rather than trusting it.
 		typeName, ok := keyTok.(string)
 		if !ok {
-			collector.Collect(*pc.parseError(keySpan, "expected string key", "expected string"))
+			collector.Collect(pc.parseError(keySpan, "expected string key", "expected string"))
 			return result, collector.Result()
 		}
 
 		if err := typetag.Validate(typeName); err != nil {
-			collector.Collect(*typeTagError(keySpan, typeName, err))
+			collector.Collect(typeTagError(keySpan, typeName, err))
 			if !pc.skipMember(dec, keySpan, collector) {
 				return result, collector.Result()
 			}
@@ -113,7 +116,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 		// last value, which drops a whole batch silently, and the instances of
 		// both arrays are what the document states.
 		if _, repeated := seen[typeName]; repeated {
-			collector.Collect(*pc.parseError(keySpan, fmt.Sprintf("repeated type key %q", typeName),
+			collector.Collect(pc.parseError(keySpan, fmt.Sprintf("repeated type key %q", typeName),
 				"a type name is a key of the root object once"))
 		}
 		seen[typeName] = struct{}{}
@@ -133,7 +136,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	// Read closing brace
 	closeSpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 	if _, err := dec.Token(); err != nil {
-		collector.Collect(*pc.parseError(closeSpan, "error reading closing brace", err.Error()))
+		collector.Collect(pc.parseError(closeSpan, "error reading closing brace", err.Error()))
 		return result, collector.Result()
 	}
 
@@ -143,7 +146,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	// tail is read in the original bytes: jsonc blanks a comma before any
 	// closing bracket, the root object's own tail included.
 	if rest := trailingFrom(pc.src, int(dec.InputOffset())); rest < len(pc.src) {
-		collector.Collect(*pc.parseError(pc.spanAt(rest),
+		collector.Collect(pc.parseError(pc.spanAt(rest),
 			"unexpected content after root object", "found "+describeByte(pc.src[rest:])))
 	}
 
@@ -156,7 +159,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 func (pc *parseContext) skipMember(dec *json.Decoder, keySpan location.Span, collector *diag.Collector) bool {
 	var skip json.RawMessage
 	if err := dec.Decode(&skip); err != nil {
-		collector.Collect(*pc.parseError(keySpan, "error skipping value", err.Error()))
+		collector.Collect(pc.parseError(keySpan, "error skipping value", err.Error()))
 		return false
 	}
 	return true
@@ -259,14 +262,14 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 	arraySpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 	tok, err := dec.Token()
 	if err != nil {
-		collector.Collect(*pc.parseError(arraySpan, "error reading array", err.Error()))
+		collector.Collect(pc.parseError(arraySpan, "error reading array", err.Error()))
 		return nil, false
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '[' {
-		collector.Collect(*pc.parseError(arraySpan, "expected array", "expected array"))
+		collector.Collect(pc.parseError(arraySpan, "expected array", "expected array"))
 		// Skip the remainder of the value to keep decoder synchronized
 		if err := skipValue(dec, tok); err != nil {
-			collector.Collect(*pc.parseError(arraySpan, "error skipping value", err.Error()))
+			collector.Collect(pc.parseError(arraySpan, "error skipping value", err.Error()))
 			return nil, false
 		}
 		return nil, true
@@ -280,7 +283,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 
 		var obj map[string]any
 		if err := dec.Decode(&obj); err != nil {
-			collector.Collect(*pc.parseError(elemSpan, "error reading array element", err.Error()))
+			collector.Collect(pc.parseError(elemSpan, "error reading array element", err.Error()))
 
 			// Decode reads the whole value before it converts it, so only a
 			// conversion failure leaves the decoder past the element.
@@ -292,7 +295,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 
 		// Reject null values - json.Decode into map yields nil without error
 		if obj == nil {
-			collector.Collect(*pc.parseError(elemSpan, "expected object", "got null"))
+			collector.Collect(pc.parseError(elemSpan, "expected object", "got null"))
 			continue
 		}
 
@@ -302,7 +305,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 		// states over a fault the diagnostic already names.
 		for _, r := range pc.repeatedMembers(elemStart, int(dec.InputOffset())) {
 			first := pc.spanAt(r.first).Start
-			collector.Collect(*pc.parseError(pc.spanAt(r.at), fmt.Sprintf("repeated member %q", r.name),
+			collector.Collect(pc.parseError(pc.spanAt(r.at), fmt.Sprintf("repeated member %q", r.name),
 				fmt.Sprintf("first at %d:%d; a member name is used once per object", first.Line, first.Column)))
 		}
 
@@ -322,7 +325,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 	// Read closing bracket
 	bracketSpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 	if _, err := dec.Token(); err != nil {
-		collector.Collect(*pc.parseError(bracketSpan, "error reading closing bracket", err.Error()))
+		collector.Collect(pc.parseError(bracketSpan, "error reading closing bracket", err.Error()))
 		return result, false
 	}
 
@@ -457,24 +460,22 @@ func decodeName(quoted []byte) []byte {
 
 // parseError creates an E_ADAPTER_PARSE issue at span.
 // msg is the human-readable message; detail is the machine-oriented parse detail.
-func (pc *parseContext) parseError(span location.Span, msg, detail string) *diag.Issue {
-	issue := diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE, msg).
+func (pc *parseContext) parseError(span location.Span, msg, detail string) diag.Issue {
+	return diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE, msg).
 		WithSpan(span).
 		WithDetail(diag.DetailKeyFormat, "json").
 		WithDetail(diag.DetailKeyDetail, detail).
 		Build()
-	return &issue
 }
 
 // typeTagError creates an E_INVALID_TYPE_TAG issue for type name validation errors.
-func typeTagError(span location.Span, typeName string, err error) *diag.Issue {
+func typeTagError(span location.Span, typeName string, err error) diag.Issue {
 	msg := fmt.Sprintf("invalid type name %q: %s", typeName, err.Error())
-	issue := diag.NewIssue(diag.Error, diag.E_INVALID_TYPE_TAG, msg).
+	return diag.NewIssue(diag.Error, diag.E_INVALID_TYPE_TAG, msg).
 		WithSpan(span).
 		WithDetail(diag.DetailKeyGot, typeName).
 		WithDetail(diag.DetailKeyDetail, err.Error()).
 		Build()
-	return &issue
 }
 
 // skipValue consumes the remainder of a JSON value from the decoder after

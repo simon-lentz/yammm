@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"testing"
 	"time"
 
@@ -160,6 +161,31 @@ func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 // testSchemaTemporal carries every kind that canonicalizes — Timestamp
 // (default and declared layout), UUID and Date — plus a List<Date>, so the
 // writer's rendering of each stored form has a fixture.
+// testSchemaFloats declares a Float as a property, under an alias, as a List's
+// elements and as a Vector's, beside an Integer that must NOT take the
+// indicator.
+func testSchemaFloats(t *testing.T) *schema.Schema {
+	t.Helper()
+	s, res := schema.LoadString(t.Context(), `schema "floats"
+
+type Ratio = Float
+
+type Reading {
+	id String primary
+	ratio Float
+	scaled Ratio
+	ratios List<Float>
+	at Vector[2]
+	narrow Float
+	count Integer
+}
+`, "floats.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	return s
+}
+
 func testSchemaTemporal(t *testing.T) *schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
@@ -264,9 +290,9 @@ func TestWriteObject_NilResult(t *testing.T) {
 }
 
 // TestMarshalObject_Golden pins the complete marshalled output per graph
-// shape: key order, FK encoding (single = key array, many = array of key
-// arrays — even with one target), composition inlining (one = object,
-// many = array), field naming, and the $diagnostics section.
+// shape: key order, an association as a _target_-keyed object ((one) = one
+// object, (many) = an array of them, even with one target), a composition as an
+// array of child objects for every multiplicity, and field naming.
 func TestMarshalObject_Golden(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -412,8 +438,9 @@ func TestMarshalObject_Golden(t *testing.T) {
 			schema: testSchemaTemporal,
 			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
 				t.Helper()
-				// Bypass-built from native Go values, so the golden pins the
-				// writer's own rendering arm rather than the validator's.
+				// Bypass-built from native Go values, which Graph.Add rewrites to
+				// their stored form before the writer sees them: the golden pins
+				// the text a native value exports as, end to end.
 				plusTwo := time.FixedZone("", 2*60*60)
 				mustAdd(
 					t, g,
@@ -435,6 +462,31 @@ func TestMarshalObject_Golden(t *testing.T) {
 						"occurred_at": time.Date(2026, 8, 19, 14, 0, 0, 0, plusTwo),
 						"logged_at":   time.Date(2026, 8, 19, 12, 0, 0, 0, plusTwo),
 						"installed":   time.Date(2026, 8, 19, 0, 30, 0, 0, plusTwo),
+					}),
+				)
+			},
+		},
+		{
+			// A Float as a property, under an alias, in a List and in a Vector — an
+			// edge property's is pinned by its own test — and every spelling that
+			// decides what the indicator has to do: a whole value, a fraction, a negative
+			// zero, and exponents encoding/json writes in both notations. Bypass-
+			// built, because a float32 and a Vector element at its own width reach
+			// the writer no other way, and Graph.Add leaves a number as it arrived.
+			name:   "float_kinds",
+			schema: testSchemaFloats,
+			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+				t.Helper()
+				mustAdd(
+					t, g,
+					mustValidInstance(t, s, "Reading", []any{"r1"}, map[string]any{
+						"id":     "r1",
+						"ratio":  float64(1),
+						"scaled": float64(2), // whole, so the alias must resolve for the indicator to appear
+						"ratios": []any{float64(3), float64(-0.25), math.Copysign(0, -1)},
+						"at":     []any{float64(1e21), float64(1e-7)},
+						"narrow": float32(0.1),
+						"count":  int64(4),
 					}),
 				)
 			},

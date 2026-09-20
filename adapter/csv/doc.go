@@ -59,6 +59,17 @@
 // the records read before it are kept. A header the reader cannot read is an
 // Error for a fault in the input and that same Fatal for the reader failing.
 //
+// # Cancellation
+//
+// Every entry point observes its context at each unit of work it has. Both parse
+// methods check before each record is read and stop with a Fatal
+// E_CONTEXT_CANCELLED carrying the span of the last record the reader returned,
+// or none before the first, keeping the records read before it; Fatal because [diag.Result.HasFatal] is
+// documented to mean the run did not finish. Both writers check once per type
+// and again once per instance and return an error wrapping the context's:
+// [Adapter.MarshalSnapshot] returns no output, and [Adapter.WriteSnapshot]
+// flushes what it wrote first, so a destination still parses as far as it goes.
+//
 // # Column Mapping
 //
 // A column maps to the property whose name it spells. A CSV header row
@@ -246,6 +257,15 @@
 // edge lookup. An association whose target type does not resolve is refused:
 // the writer will not emit columns its own parser cannot name.
 //
+// An association has shapes a row cannot carry back either, which a snapshot
+// rebuilt from a document can hold although [graph.Graph.Add] never builds
+// them: a (one) association carrying several edges, whose zipped targets the
+// validator refuses as an array; a target key of another arity than its type's;
+// an edge to a type the association does not declare, whose key would be
+// written into the declared target's columns and read back as a target of that
+// type; and an edge under a name the type declares no association for, which
+// has no column at all. Each is refused with an [ErrUnrepresentable] error.
+//
 // # Compositions
 //
 // CSV is a flat format, so a row has no column for a composed child. The parser
@@ -291,6 +311,6 @@
 // # Dependencies
 //
 //	adapter/csv  ──imports──▶  instance, diag, location, location/path, graph,
-//	                           immutable, schema, adapter/internal/refusal,
-//	                           adapter/internal/typetag
+//	                           immutable, schema, adapter/internal/constraintof,
+//	                           adapter/internal/refusal, adapter/internal/typetag
 package csv
