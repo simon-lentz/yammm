@@ -408,8 +408,10 @@ func TestParseWithTypeColumn_AValueThatIsNoTypeNameIsRefused(t *testing.T) {
 		"entity,e2\n" + // line 4: a type name starts upper case
 		"a.b.C,e3\n" + // line 5: one dot at most
 		"Integer,e4\n" + // line 6: a reserved datatype
-		"Ghost,e5\n" + // a type name no schema declares: the resolver's to answer
-		"base.Entity,e6\n"
+		"List,e5\n" + // line 7: the eleventh datatype name
+		"type.Person,e6\n" + // line 8: a reserved word cannot be an alias
+		"Ghost,e7\n" + // a type name no schema declares: the resolver's to answer
+		"base.Entity,e8\n"
 	var resolved []string
 	byType, result := New(WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(), id, strings.NewReader(input),
 		func(name string) *schema.Type {
@@ -434,7 +436,7 @@ func TestParseWithTypeColumn_AValueThatIsNoTypeNameIsRefused(t *testing.T) {
 		}
 		lines = append(lines, issue.Span().Start.Line)
 	}
-	if want := []int{2, 3, 4, 5, 6}; !slices.Equal(lines, want) {
+	if want := []int{2, 3, 4, 5, 6, 7, 8}; !slices.Equal(lines, want) {
 		t.Errorf("E_INVALID_TYPE_TAG on lines %v, want %v", lines, want)
 	}
 }

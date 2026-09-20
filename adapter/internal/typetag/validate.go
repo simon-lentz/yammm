@@ -8,7 +8,6 @@ import (
 // Error represents a type tag validation failure with structured detail.
 // The Detail field contains a canonical reason string for programmatic inspection.
 type Error struct {
-	Tag    string // The invalid tag value
 	Detail string // Canonical reason string
 }
 
@@ -28,10 +27,12 @@ const (
 	DetailReservedDatatype  = "reserved datatype keyword"
 	DetailAliasInvalidChars = "alias contains invalid characters"
 	DetailAliasStartLetter  = "alias must start with letter"
+	DetailAliasReserved     = "alias is a reserved keyword"
 )
 
-// datatypeKeywords are reserved datatype names that cannot be used as type names.
-// These correspond to the built-in types defined in the DSL grammar.
+// datatypeKeywords are the eleven built-in type names. The grammar refuses
+// them wherever a type name is written, so a tag naming one names a type no
+// schema can declare.
 var datatypeKeywords = map[string]bool{
 	"Integer":   true,
 	"Float":     true,
@@ -43,6 +44,18 @@ var datatypeKeywords = map[string]bool{
 	"Date":      true,
 	"UUID":      true,
 	"Vector":    true,
+	"List":      true,
+}
+
+// reservedLC are the seventeen lowercase spellings the grammar treats as
+// keywords or literals rather than names. They reach only the alias half of a
+// qualified tag: the type half refuses anything not starting with an uppercase
+// ASCII letter before it consults a vocabulary.
+var reservedLC = map[string]bool{
+	"schema": true, "type": true, "datatype": true, "required": true,
+	"primary": true, "extends": true, "includes": true, "abstract": true,
+	"one": true, "many": true, "import": true, "as": true, "part": true,
+	"in": true, "nil": true, "true": true, "false": true,
 }
 
 // Validate checks that typeName matches DSL grammar syntax for type names.
@@ -51,10 +64,14 @@ var datatypeKeywords = map[string]bool{
 //   - Unqualified: "Person" (starts with uppercase)
 //   - Qualified: "common.Entity" (alias.TypeName)
 //
-// Returns nil if valid, or *Error with Tag and Detail describing the failure.
+// Neither half may spell a reserved word: the alias refuses every spelling the
+// grammar refuses where either case is admitted, and the type name refuses the
+// built-in datatype names.
+//
+// Returns nil if valid, or *Error with Detail describing the failure.
 func Validate(typeName string) error {
 	if typeName == "" {
-		return &Error{Tag: typeName, Detail: DetailEmptyTag}
+		return &Error{Detail: DetailEmptyTag}
 	}
 
 	// Check for qualified form (contains a dot)
@@ -63,27 +80,29 @@ func Validate(typeName string) error {
 	}
 
 	// Unqualified form
-	return validateUnqualified(typeName)
+	return validateTypeName(typeName)
 }
 
-// validateUnqualified validates an unqualified type name (no dot).
-func validateUnqualified(typeName string) error {
+// validateTypeName validates a type name: the whole of an unqualified tag, or
+// the half after the dot of a qualified one. Both halves read this one copy, so
+// a test of either covers the rule for both.
+func validateTypeName(typeName string) error {
 	// First rune must be uppercase ASCII letter
 	first, size := utf8.DecodeRuneInString(typeName)
-	if first == utf8.RuneError || !isUpperASCII(first) {
-		return &Error{Tag: typeName, Detail: DetailMustStartUpper}
+	if !isUpperASCII(first) {
+		return &Error{Detail: DetailMustStartUpper}
 	}
 
 	// Remaining characters must be ASCII alphanumeric or underscore
 	for _, r := range typeName[size:] {
 		if !isWordChar(r) {
-			return &Error{Tag: typeName, Detail: DetailInvalidChars}
+			return &Error{Detail: DetailInvalidChars}
 		}
 	}
 
 	// Check for reserved datatype keywords
-	if IsDatatypeKeyword(typeName) {
-		return &Error{Tag: typeName, Detail: DetailReservedDatatype}
+	if isDatatypeKeyword(typeName) {
+		return &Error{Detail: DetailReservedDatatype}
 	}
 
 	return nil
@@ -93,17 +112,17 @@ func validateUnqualified(typeName string) error {
 func validateQualified(typeName string, dotIdx int) error {
 	// Leading dot check
 	if dotIdx == 0 {
-		return &Error{Tag: typeName, Detail: DetailLeadingDot}
+		return &Error{Detail: DetailLeadingDot}
 	}
 
 	// Trailing dot check
 	if dotIdx == len(typeName)-1 {
-		return &Error{Tag: typeName, Detail: DetailTrailingDot}
+		return &Error{Detail: DetailTrailingDot}
 	}
 
 	// Multiple dots check
 	if strings.Contains(typeName[dotIdx+1:], ".") {
-		return &Error{Tag: typeName, Detail: DetailMultipleDots}
+		return &Error{Detail: DetailMultipleDots}
 	}
 
 	alias := typeName[:dotIdx]
@@ -111,65 +130,35 @@ func validateQualified(typeName string, dotIdx int) error {
 
 	// Validate alias: must start with ASCII letter
 	firstAlias, sizeAlias := utf8.DecodeRuneInString(alias)
-	if firstAlias == utf8.RuneError || !isASCIILetter(firstAlias) {
-		return &Error{Tag: typeName, Detail: DetailAliasStartLetter}
+	if !isASCIILetter(firstAlias) {
+		return &Error{Detail: DetailAliasStartLetter}
 	}
 
 	// Remaining alias characters must be ASCII alphanumeric or underscore
 	for _, r := range alias[sizeAlias:] {
 		if !isWordChar(r) {
-			return &Error{Tag: typeName, Detail: DetailAliasInvalidChars}
+			return &Error{Detail: DetailAliasInvalidChars}
 		}
 	}
 
-	// Validate type name part: must start with uppercase ASCII letter
-	firstType, sizeType := utf8.DecodeRuneInString(typeNamePart)
-	if firstType == utf8.RuneError || !isUpperASCII(firstType) {
-		return &Error{Tag: typeName, Detail: DetailMustStartUpper}
+	// An import alias admits either case, so the alias half refuses the whole
+	// reserved vocabulary where the type half refuses the datatype names alone.
+	if isReservedName(alias) {
+		return &Error{Detail: DetailAliasReserved}
 	}
 
-	// Remaining type characters must be ASCII alphanumeric or underscore
-	for _, r := range typeNamePart[sizeType:] {
-		if !isWordChar(r) {
-			return &Error{Tag: typeName, Detail: DetailInvalidChars}
-		}
-	}
-
-	// Check for reserved datatype keywords in type name part
-	if IsDatatypeKeyword(typeNamePart) {
-		return &Error{Tag: typeName, Detail: DetailReservedDatatype}
-	}
-
-	return nil
+	return validateTypeName(typeNamePart)
 }
 
-// IsValidUnqualified checks if name matches the UC_WORD pattern.
-// UC_WORD: [A-Z][A-Za-z0-9_]*
-//
-// Returns true if valid, false otherwise.
-func IsValidUnqualified(name string) bool {
-	return validateUnqualified(name) == nil
+// isReservedName reports whether name is a spelling the grammar refuses in a
+// position that admits either case, which is what an import alias is.
+func isReservedName(name string) bool {
+	return isDatatypeKeyword(name) || reservedLC[name]
 }
 
-// IsValidQualified checks if name matches the qualified pattern.
-// Qualified: alias.TypeName where alias is LC_WORD|UC_WORD and TypeName is UC_WORD.
-//
-// Valid examples: "common.Entity", "Common.Entity", "parts.Wheel"
-// Invalid: ".Entity", "common.", "common.entity", "a.b.c"
-func IsValidQualified(name string) bool {
-	if name == "" {
-		return false
-	}
-	dotIdx := strings.Index(name, ".")
-	if dotIdx == -1 {
-		return false
-	}
-	return validateQualified(name, dotIdx) == nil
-}
-
-// IsDatatypeKeyword checks if name is a reserved datatype keyword.
+// isDatatypeKeyword reports whether name is a reserved datatype keyword.
 // Datatype keywords are case-sensitive (PascalCase per grammar).
-func IsDatatypeKeyword(name string) bool {
+func isDatatypeKeyword(name string) bool {
 	return datatypeKeywords[name]
 }
 

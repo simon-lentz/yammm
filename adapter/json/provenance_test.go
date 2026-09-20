@@ -171,8 +171,10 @@ func TestParseObject_DiagnosticCodesAreStable(t *testing.T) {
 	}{
 		{"malformed document", "not json", diag.E_ADAPTER_PARSE},
 		{"root is an array", "[]", diag.E_ADAPTER_PARSE},
-		{"reserved type name", `{"type": []}`, diag.E_INVALID_TYPE_TAG},
+		{"lower case type name", `{"type": []}`, diag.E_INVALID_TYPE_TAG},
 		{"type name with a space", `{"a b": []}`, diag.E_INVALID_TYPE_TAG},
+		{"reserved datatype name", `{"List": []}`, diag.E_INVALID_TYPE_TAG},
+		{"reserved alias", `{"type.Person": []}`, diag.E_INVALID_TYPE_TAG},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
