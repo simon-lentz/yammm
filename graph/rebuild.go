@@ -127,8 +127,9 @@ type UnresolvedParts struct {
 // Returns a diag.Result with Fatal-severity E_INTERNAL diagnostics if
 // internal consistency checks fail (e.g., edge references to missing
 // instances, two instances of one type whose keys canonicalize to one
-// address, or a zero [schema.TypeID] at any parts position — identity is
-// total at this boundary). snapshot.Load validates these invariants before
+// address, or a [schema.TypeID] at any parts position that is zero or that s
+// cannot resolve — identity is total at this boundary, and every identity
+// names a type of s). snapshot.Load validates these invariants before
 // calling RebuildSnapshot; failures here indicate a bug in the caller.
 func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Result) {
 	collector := diag.NewCollector(0)
@@ -287,6 +288,9 @@ func validatePartsDenotedTypes(s *schema.Schema, parts SnapshotParts, collector 
 		if typeID.IsZero() || schema.Addressable(s, typeID) {
 			continue
 		}
+		if _, ok := s.TypeByID(typeID); !ok {
+			continue // validatePartsIdentity reports an unresolvable identity
+		}
 		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 			fmt.Sprintf("RebuildSnapshot: types entry %s is reachable only through an intermediate import, so the entry schema cannot name it; import its schema directly",
 				typeID)).Build())
@@ -392,7 +396,7 @@ func validatePartsCardinality(s *schema.Schema, parts SnapshotParts, collector *
 func validatePartsIdentity(s *schema.Schema, parts SnapshotParts, collector *diag.Collector) {
 	// A nil schema resolves nothing, so only the zero identity is judged.
 	unknown := func(id schema.TypeID) bool {
-		if s == nil || id.IsZero() {
+		if s == nil {
 			return false
 		}
 		_, ok := s.TypeByID(id)
@@ -402,11 +406,10 @@ func validatePartsIdentity(s *schema.Schema, parts SnapshotParts, collector *dia
 		collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 			fmt.Sprintf("RebuildSnapshot: %s type identity at %s position, key %s", what, position, key)).Build())
 	}
-	zero := func(position, key string) { refuse("zero", position, key) }
 	check := func(id schema.TypeID, position, key string) {
 		switch {
 		case id.IsZero():
-			zero(position, key)
+			refuse("zero", position, key)
 		case unknown(id):
 			refuse("unresolvable", position, key)
 		}
@@ -453,25 +456,18 @@ func validatePartsIdentity(s *schema.Schema, parts SnapshotParts, collector *dia
 	}
 
 	for _, dp := range parts.Duplicates {
-		if dp.Type.IsZero() {
-			zero("duplicate", dp.Key.String())
-		}
-		if dp.ConflictType.IsZero() {
-			zero("duplicate conflict", dp.ConflictKey.String())
-		}
-		if dp.Relation != "" && dp.ParentType.IsZero() {
-			zero("duplicate parent", dp.ParentKey.String())
+		check(dp.Type, "duplicate", dp.Key.String())
+		check(dp.ConflictType, "duplicate conflict", dp.ConflictKey.String())
+		// A root duplicate names no parent, so its ParentType is zero by right.
+		if dp.Relation != "" {
+			check(dp.ParentType, "duplicate parent", dp.ParentKey.String())
 		}
 		checkInstance("duplicate instance", dp.Instance)
 	}
 
 	for _, up := range parts.Unresolved {
-		if up.SourceType.IsZero() {
-			zero("unresolved source", up.SourceKey.String())
-		}
-		if up.TargetType.IsZero() {
-			zero("unresolved target", up.TargetKey.String())
-		}
+		check(up.SourceType, "unresolved source", up.SourceKey.String())
+		check(up.TargetType, "unresolved target", up.TargetKey.String())
 	}
 }
 

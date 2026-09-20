@@ -383,6 +383,14 @@ var (
 var (
 	// E_ADAPTER_PARSE indicates a format-specific parsing error.
 	E_ADAPTER_PARSE = NewCode("E_ADAPTER_PARSE", CategoryAdapter)
+
+	// E_ADAPTER_IO indicates an adapter's input failed to arrive: the
+	// io.Reader a parse reads from returned an error that is neither the
+	// input's end nor a fault in its content. Raised at Fatal, since the run
+	// did not finish; what was read before the failure is kept. It is the
+	// per-category I/O code for CategoryAdapter, as E_LOAD_IO_FAILURE is for
+	// CategorySchema and E_SNAPSHOT_IO for CategorySnapshot.
+	E_ADAPTER_IO = NewCode("E_ADAPTER_IO", CategoryAdapter)
 )
 
 // Graph codes.

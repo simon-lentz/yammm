@@ -70,7 +70,7 @@ parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, reader, typeResolve
 
 ```
 
-Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, timestamps, UUIDs, lists). Coercion failures produce `E_CSV_COERCE` diagnostics. A fault in the file's structure — a header the parser cannot use, a record the reader refuses, an edge group whose columns disagree — produces `E_ADAPTER_PARSE`, the code the JSON adapter reports a malformed document under; a setting the adapter cannot use produces `E_CSV_CONFIG`.
+Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, timestamps, UUIDs, lists). Coercion failures produce `E_CSV_COERCE` diagnostics. A fault in the file's structure — a header the parser cannot use, a record the reader refuses, an edge group whose columns disagree — produces `E_ADAPTER_PARSE`, the code the JSON adapter reports a malformed document under; a setting the adapter cannot use produces `E_CSV_CONFIG`, before any byte is read; and a reader that fails produces a Fatal `E_ADAPTER_IO`, on which the CLI exits 3.
 
 Column names resolve as the validator resolves JSON keys: exact first, then case-insensitively (ASCII), with each key kept as the header spells it; pass `csvAdapter.WithStrictPropertyNames(true)` when the validator is strict (`instance.RecommendedOptions()` is). A name the schema does not declare reaches the validator, which reports it. A header that repeats a name or leaves a column unnamed is refused. A malformed record is reported and skipped; a reader that fails stops the parse with a Fatal diagnostic.
 
@@ -294,7 +294,7 @@ A write reports through an `error`, not a `diag.Result`, so the adapters carry s
 | Sentinel | Adapter | Meaning |
 | -------- | ------- | ------- |
 | `csv.ErrUnrepresentable` | CSV | The snapshot holds a value CSV cannot write so that its own parser reads it back unchanged: a composed child, a lone all-empty association, a cell holding a CR LF, a list of one empty element |
-| `csv.ErrConfig` | CSV | The adapter holds a setting it cannot use: a list separator the parser could not find again, or a delimiter `encoding/csv` refuses. The parse-side twin is `E_CSV_CONFIG` |
+| `csv.ErrConfig` | CSV | The adapter holds a setting it cannot use: a list separator the parser could not find again, or a delimiter `encoding/csv` refuses. Refused before any writer is requested. The parse-side twin is `E_CSV_CONFIG` |
 | `csv.ErrNilSnapshot`, `json.ErrNilResult` | CSV, JSON | A write method received a nil snapshot |
 | `json.ErrUnrepresentable` | JSON | The snapshot holds a shape the writer cannot render as the object its own parser accepts: an edge whose target key arity differs from the target type's |
 
@@ -305,6 +305,7 @@ An I/O failure and a cancellation match none of these classes.
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
 | `E_ADAPTER_PARSE` | All | Format-specific parsing error |
+| `E_ADAPTER_IO` | CSV | The reader a streamed parse reads from failed; Fatal, and the CLI exits 3 as for any I/O failure. Module-wide by name, as `E_ADAPTER_PARSE` is, but the CSV adapter is the one parser that streams: the JSON adapter takes bytes |
 | `E_CSV_COERCE` | CSV | A cell's text does not coerce to the type its member declares |
 | `E_CSV_CONFIG` | CSV | The adapter holds a setting this parse cannot use; no record is read |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |

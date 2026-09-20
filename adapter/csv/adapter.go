@@ -1,6 +1,14 @@
 package csv
 
-import "github.com/simon-lentz/yammm/schema"
+import (
+	"encoding/csv"
+	"errors"
+	"io"
+	"strings"
+
+	"github.com/simon-lentz/yammm/adapter/internal/refusal"
+	"github.com/simon-lentz/yammm/schema"
+)
 
 // adapterConfig holds CSV adapter configuration.
 type adapterConfig struct {
@@ -38,9 +46,10 @@ func New(opts ...Option) *Adapter {
 // WithDelimiter sets the field delimiter for the parse side and the write side
 // alike. The default is ','; a TSV file takes '\t', and keeps [encoding/csv]'s
 // quoting. A delimiter [encoding/csv] refuses — 0, '"', '\r', '\n',
-// U+FFFD or an invalid rune — fails where the header is read or
-// written: a parse reports it as an Error [E_CSV_CONFIG] diagnostic, and a
-// write returns [encoding/csv]'s own refusal marked [ErrConfig].
+// U+FFFD or an invalid rune — is refused before a parse reads or a write
+// requests a writer, as a refused list separator is: as an Error
+// [E_CSV_CONFIG] diagnostic, or as an error marked [ErrConfig], each carrying
+// [encoding/csv]'s own refusal.
 func WithDelimiter(r rune) Option {
 	return func(c *adapterConfig) {
 		c.delimiter = r
@@ -62,8 +71,8 @@ func WithTypeColumn(name string) Option {
 // back unchanged, at every depth of a nested list. A separator that begins
 // with a backslash, the escape character, or holds a CR LF, which
 // [encoding/csv] reads back as LF, is refused before a parse reads or a write
-// writes: as an Error [E_CSV_CONFIG] diagnostic, or as an error marked
-// [ErrConfig].
+// requests a writer: as an Error [E_CSV_CONFIG] diagnostic, or as an error
+// marked [ErrConfig].
 func WithListSeparator(sep string) Option {
 	return func(c *adapterConfig) {
 		if sep != "" {
@@ -95,4 +104,27 @@ func WithSchema(s *schema.Schema) Option {
 	return func(c *adapterConfig) {
 		c.schema = s
 	}
+}
+
+// configError refuses a setting this adapter cannot use, before a parse reads a
+// byte and before a write requests a writer: a list separator the parser could
+// not find again, or a delimiter [encoding/csv] refuses. It carries [ErrConfig];
+// a parse reports the same text under [E_CSV_CONFIG]. A setting is knowable
+// before any input or output, so both sides ask here and nowhere later.
+func (a *Adapter) configError() error {
+	if err := listSepError(a.config.listSep); err != nil {
+		return err
+	}
+	return delimiterError(a.config.delimiter)
+}
+
+// delimiterError refuses a delimiter [encoding/csv] refuses, asked of the
+// package itself so this adapter never restates its rule, and carrying its text.
+func delimiterError(delim rune) error {
+	probe := csv.NewReader(strings.NewReader(""))
+	probe.Comma = delim
+	if _, err := probe.Read(); !errors.Is(err, io.EOF) {
+		return refusal.New(ErrConfig, "csv adapter: delimiter %q: %s", delim, err)
+	}
+	return nil
 }

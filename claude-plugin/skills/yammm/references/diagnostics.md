@@ -73,7 +73,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 5. **Invariant error** -- `E_INVARIANT_FAIL` (expression returned false) or `E_EVAL_ERROR` (expression bug).
 6. **Graph error** -- `E_DUPLICATE_PK` (duplicate key) or `E_UNRESOLVED_REQUIRED` (missing required association).
 7. **Snapshot error** -- See the Snapshot section. Corrupt, incompatible, or dangling references.
-8. **Adapter error** -- `E_ADAPTER_PARSE` (the input is not well formed, in either data format), `E_CSV_COERCE` (a CSV cell), `E_CSV_CONFIG` (the CSV adapter's own settings), or Neo4j-specific codes in the Adapter section.
+8. **Adapter error** -- `E_ADAPTER_PARSE` (the input is not well formed, in either data format), `E_ADAPTER_IO` (the input could not be read; exit 3), `E_CSV_COERCE` (a CSV cell), `E_CSV_CONFIG` (the CSV adapter's own settings), or Neo4j-specific codes in the Adapter section.
 
 ---
 
@@ -217,6 +217,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
 | `E_ADAPTER_PARSE` | All | Format-specific parsing error |
+| `E_ADAPTER_IO` | CSV | The reader a streamed parse reads from failed; Fatal, and the CLI exits 3 as for any I/O failure. Module-wide by name, as `E_ADAPTER_PARSE` is, but the CSV adapter is the one parser that streams: the JSON adapter takes bytes |
 | `E_CSV_COERCE` | CSV | A cell's text does not coerce to the type its member declares |
 | `E_CSV_CONFIG` | CSV | The adapter holds a setting this parse cannot use; no record is read |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |

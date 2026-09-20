@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/simon-lentz/yammm/adapter/internal/typetag"
 	"github.com/simon-lentz/yammm/diag"
@@ -29,7 +28,7 @@ func (a *Adapter) ParseTyped(
 	schemaType *schema.Type,
 ) ([]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollector(0)
-	if a.listSepRefused(collector) {
+	if a.configRefused(collector) {
 		return nil, collector.Result()
 	}
 	reader := a.newReader(r)
@@ -76,11 +75,11 @@ func (a *Adapter) ParseTyped(
 	return results, collector.Result()
 }
 
-// listSepRefused reports a list separator [listSepError] refuses as an Error
-// and whether it did. The refusal names the configuration, not the input, so it
+// configRefused reports a setting [Adapter.configError] refuses as an Error and
+// whether it did. The refusal names the configuration, not the input, so it
 // carries no span and takes [E_CSV_CONFIG].
-func (a *Adapter) listSepRefused(collector *diag.Collector) bool {
-	err := listSepError(a.config.listSep)
+func (a *Adapter) configRefused(collector *diag.Collector) bool {
+	err := a.configError()
 	if err != nil {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_CONFIG, err.Error()).Build())
 	}
@@ -101,8 +100,8 @@ func (a *Adapter) newReader(r io.Reader) *csv.Reader {
 // [io.Reader] again: its failure stops the parse, Fatal as the diag package
 // documents an I/O failure.
 func (a *Adapter) reportReadError(err error, source location.SourceID, typeName string, records int, collector *diag.Collector) (stop bool) {
-	if a.readFailure(err) {
-		issue := diag.NewIssue(diag.Fatal, diag.E_ADAPTER_PARSE,
+	if readFailure(err) {
+		issue := diag.NewIssue(diag.Fatal, diag.E_ADAPTER_IO,
 			fmt.Sprintf("csv read failed after %d records: %s", records, err))
 		if typeName != "" {
 			issue.WithDetail(diag.DetailKeyTypeName, typeName)
@@ -120,26 +119,18 @@ func (a *Adapter) reportReadError(err error, source location.SourceID, typeName 
 }
 
 // readFailure reports whether err came from the [io.Reader] rather than from
-// the input's end, a fault in the input, or a refused delimiter. The end is
-// [io.EOF] itself, as both loops test it: an error that only wraps it is the
-// reader failing, and treating it as the end of a record would loop.
-func (a *Adapter) readFailure(err error) bool {
+// the input's end or a fault in the input. The end is [io.EOF] itself, as both
+// loops test it: an error that only wraps it is the reader failing, and
+// treating it as the end of a record would loop. A refused delimiter never
+// arrives here: [Adapter.configError] refuses it before the first read.
+func readFailure(err error) bool {
 	if err == io.EOF { //nolint:errorlint // only the bare io.EOF ends the input; a wrapped one is a failure
 		return false
 	}
 	if _, ok := errors.AsType[*csv.ParseError](err); ok { //nolint:errcheck // type check only, value unused
 		return false
 	}
-	return !delimiterRefused(a.config.delimiter)
-}
-
-// delimiterRefused reports whether [encoding/csv] refuses delim, asked of the
-// package itself so this adapter never restates its rule.
-func delimiterRefused(delim rune) bool {
-	probe := csv.NewReader(strings.NewReader(""))
-	probe.Comma = delim
-	_, err := probe.Read()
-	return !errors.Is(err, io.EOF)
+	return true
 }
 
 // recordSpan returns the point span at the start of the record the reader last
@@ -179,8 +170,8 @@ func parseErrorSpan(source location.SourceID, err error) location.Span {
 // It may return nil for unknown types, in which case values are kept as strings.
 // A value that is not a type name by the grammar draws E_INVALID_TYPE_TAG and
 // its row is skipped. Requires [WithTypeColumn] to be set; without it the
-// result carries [ErrNoTypeColumn]'s text under [E_CSV_CONFIG] and no record is
-// read. Faults and provenance are as [Adapter.ParseTyped].
+// result carries an Error [E_CSV_CONFIG] and no record is read. Faults and
+// provenance are as [Adapter.ParseTyped].
 func (a *Adapter) ParseWithTypeColumn(
 	ctx context.Context,
 	source location.SourceID,
@@ -191,10 +182,10 @@ func (a *Adapter) ParseWithTypeColumn(
 
 	if a.config.typeColumn == "" {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_CONFIG,
-			ErrNoTypeColumn.Error()).Build())
+			"csv adapter: ParseWithTypeColumn requires WithTypeColumn to be set").Build())
 		return nil, collector.Result()
 	}
-	if a.listSepRefused(collector) {
+	if a.configRefused(collector) {
 		return nil, collector.Result()
 	}
 
@@ -254,13 +245,6 @@ func (a *Adapter) ParseWithTypeColumn(
 		lastSpan = recordSpan(source, reader, record)
 		parsed++
 
-		if typeColIdx >= len(record) {
-			collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-				"too few columns for type column").
-				WithSpan(lastSpan).Build())
-			continue
-		}
-
 		typeName := record[typeColIdx]
 		if err := typetag.Validate(typeName); err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_TYPE_TAG,
@@ -283,9 +267,7 @@ func (a *Adapter) ParseWithTypeColumn(
 			if i == typeColIdx {
 				continue
 			}
-			if i < len(record) {
-				filteredVals = append(filteredVals, record[i])
-			}
+			filteredVals = append(filteredVals, record[i])
 		}
 
 		props := a.recordToProps(filteredVals, typePlan, lastSpan, typeName, collector)
@@ -309,13 +291,8 @@ func (a *Adapter) readHeader(reader *csv.Reader, source location.SourceID, colle
 	header, err := reader.Read()
 	if err != nil {
 		severity, code := diag.Error, diag.E_ADAPTER_PARSE
-		switch {
-		case delimiterRefused(a.config.delimiter):
-			// The delimiter is the caller's setting rather than the file's
-			// content, and it is the one header fault whose remedy is in code.
-			code = E_CSV_CONFIG
-		case a.readFailure(err):
-			severity = diag.Fatal
+		if readFailure(err) {
+			severity, code = diag.Fatal, diag.E_ADAPTER_IO
 		}
 		span := parseErrorSpan(source, err)
 		if span.IsZero() {

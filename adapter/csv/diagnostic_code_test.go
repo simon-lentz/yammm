@@ -11,15 +11,11 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Every fault this package reports carries one of three codes, and which one
-// says what the caller must do about it: fix the data, fix the file, or fix the
-// call. The table drives every live emission site — the site count is measured
-// rather than inherited, because three groups of this unit added sites and two
-// retired them — so a site that moves between classes fails here.
-//
-// The dead "too few columns for type column" site is not in the table: a record
-// shorter than the header draws encoding/csv's own field-count refusal first,
-// so nothing reaches it.
+// Every fault this package reports carries one of four codes, and which one
+// says what the caller must do about it: fix the data, fix the file, fix the
+// call, or fix the device. The table drives every emission site, and the
+// header's own read twice, since it chooses between two codes at run time — so
+// a site that moves between classes fails here.
 func TestParse_CodeSaysWhichFaultItIs(t *testing.T) {
 	t.Parallel()
 
@@ -111,12 +107,12 @@ func TestParse_CodeSaysWhichFaultItIs(t *testing.T) {
 		{
 			name: "a reader that fails before the header", schemaFile: "basic.yammm", typeName: "Entity",
 			reader:   &failingReader{err: errDeviceGone},
-			wantCode: diag.E_ADAPTER_PARSE, wantSev: diag.Fatal, mentions: "reading header",
+			wantCode: diag.E_ADAPTER_IO, wantSev: diag.Fatal, mentions: "reading header",
 		},
 		{
 			name: "a reader that fails after a record", schemaFile: "basic.yammm", typeName: "Entity",
 			reader:   &failingReader{data: "id,name\ne1,Ann\n", err: errDeviceGone},
-			wantCode: diag.E_ADAPTER_PARSE, wantSev: diag.Fatal, mentions: "csv read failed after",
+			wantCode: diag.E_ADAPTER_IO, wantSev: diag.Fatal, mentions: "csv read failed after",
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -211,5 +207,99 @@ func TestConfigCode_IsRegisteredAsAnAdapterCode(t *testing.T) {
 	}
 	if got := E_CSV_COERCE.Category(); got != diag.CategoryAdapter {
 		t.Errorf("E_CSV_COERCE category = %v, want %v", got, diag.CategoryAdapter)
+	}
+}
+
+// A setting the adapter cannot use is refused before the parse reads a byte,
+// and the refusal names the configuration rather than the input, so it carries
+// no span. That holds for every such setting alike: the list separator and the
+// delimiter are one question, and encoding/csv answering the second at the
+// header read would give one class two shapes.
+func TestParse_ARefusedSettingIsReportedBeforeAnyRead(t *testing.T) {
+	t.Parallel()
+	s := loadTestSchema(t, "basic.yammm")
+	st, _ := s.Type("Entity")
+	id := location.MustNewSourceID("test://data/settings.csv")
+
+	// Every documented text is pinned whole: docs/VERSIONING.md quotes the
+	// delimiter's, and the type-column text lives in one literal now that the
+	// sentinel that carried it is gone.
+	for _, c := range []struct {
+		name    string
+		opt     Option
+		message string
+	}{
+		{
+			"a list separator the parser cannot find again", WithListSeparator(`\|`),
+			`csv adapter: list separator "\\|" begins with the escape character \, which the parser reads as an escape`,
+		},
+		{
+			"a delimiter encoding/csv refuses", WithDelimiter('"'),
+			`csv adapter: delimiter '"': csv: invalid field or comment delimiter`,
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			typed := &countingReader{r: strings.NewReader("id,name\ne1,Ann\n")}
+			raws, res := New(c.opt).ParseTyped(t.Context(), id, "Entity", typed, st)
+			byCol := &countingReader{r: strings.NewReader("kind,id,name\nEntity,e1,Ann\n")}
+			byType, colRes := New(c.opt, WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(), id, byCol,
+				func(string) *schema.Type { return st })
+			for _, result := range []diag.Result{res, colRes} {
+				if _, ok := issueContaining(result, c.message); !ok {
+					t.Errorf("want the message %q: %s", c.message, result)
+				}
+			}
+
+			if len(raws) != 0 || len(byType) != 0 {
+				t.Errorf("a refused setting produced instances: %d and %d", len(raws), len(byType))
+			}
+			if typed.reads != 0 || byCol.reads != 0 {
+				t.Errorf("a refused setting read the input: %d and %d reads", typed.reads, byCol.reads)
+			}
+			for _, result := range []diag.Result{res, colRes} {
+				n := 0
+				for issue := range result.Issues() {
+					n++
+					if issue.Code() != E_CSV_CONFIG || issue.Severity() != diag.Error {
+						t.Errorf("got %s %v, want an Error E_CSV_CONFIG: %s", issue.Code(), issue.Severity(), issue.Message())
+					}
+					if !issue.Span().IsZero() {
+						t.Errorf("the refusal names the configuration, not the input, and carries a span: %v", issue.Span())
+					}
+				}
+				if n != 1 {
+					t.Errorf("want one refusal, got %d: %s", n, result)
+				}
+			}
+		})
+	}
+}
+
+// ParseWithTypeColumn with no type column set is the third member of that
+// class, and the only one a settings option cannot express: it is the ABSENCE
+// of one. It is refused like the others — before any read, with no span — and
+// its text is the one the deleted sentinel carried.
+func TestParseWithTypeColumn_NoTypeColumnIsRefusedBeforeAnyRead(t *testing.T) {
+	t.Parallel()
+	s := loadTestSchema(t, "basic.yammm")
+	st, _ := s.Type("Entity")
+	input := &countingReader{r: strings.NewReader("kind,id,name\nEntity,e1,Ann\n")}
+
+	byType, res := New().ParseWithTypeColumn(t.Context(), location.MustNewSourceID("test://data/nocol.csv"), input,
+		func(string) *schema.Type { return st })
+
+	if len(byType) != 0 || input.reads != 0 {
+		t.Errorf("got %d types and %d reads, want none", len(byType), input.reads)
+	}
+	issue, ok := issueContaining(res, "csv adapter: ParseWithTypeColumn requires WithTypeColumn to be set")
+	if !ok {
+		t.Fatalf("the refusal's text moved: %s", res)
+	}
+	if issue.Message() != "csv adapter: ParseWithTypeColumn requires WithTypeColumn to be set" {
+		t.Errorf("message = %q", issue.Message())
+	}
+	if issue.Code() != E_CSV_CONFIG || issue.Severity() != diag.Error || !issue.Span().IsZero() {
+		t.Errorf("got %s %v span %v, want a spanless Error E_CSV_CONFIG", issue.Code(), issue.Severity(), issue.Span())
 	}
 }

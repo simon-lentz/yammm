@@ -90,15 +90,67 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 // A separator the parser cannot find again is the adapter's own configuration,
 // not the snapshot's data, and the write side says so with the class whose
 // parse-side twin is E_CSV_CONFIG.
-func TestWriters_ARefusedListSeparatorIsAConfigurationRefusal(t *testing.T) {
+func TestWriters_ARefusedSettingIsAConfigurationRefusal(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 	snap := buildSnapshot(t, s, map[string][]map[string]any{
 		"Entity": {{"id": "e1", "name": "Ann"}},
 	})
 
-	if _, err := New(WithSchema(s), WithDelimiter('"')).MarshalSnapshot(context.Background(), snap); !errors.Is(err, ErrConfig) {
-		t.Errorf("a refused delimiter: %v does not match ErrConfig", err)
+	// Every setting the adapter cannot use is refused before a writer is
+	// requested: a caller that creates a file per type must not be left with an
+	// empty one for a fault that was knowable before any output.
+	for _, c := range []struct {
+		name string
+		opt  Option
+	}{
+		{`the separator \|`, WithListSeparator(`\|`)},
+		{"the separator a CR LF b", WithListSeparator("a\r\nb")},
+		{"the delimiter a quote", WithDelimiter('"')},
+		{"the delimiter NUL", WithDelimiter(0)},
+		{"the delimiter CR", WithDelimiter('\r')},
+		{"the delimiter LF", WithDelimiter('\n')},
+		{"the delimiter U+FFFD", WithDelimiter('\uFFFD')},
+		{"the delimiter beyond Unicode", WithDelimiter(0x110000)},
+	} {
+		requested := 0
+		err := New(WithSchema(s), c.opt).WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
+			requested++
+			return io.Discard, nil
+		}, snap)
+		if !errors.Is(err, ErrConfig) {
+			t.Errorf("%s: WriteSnapshot: %v does not match ErrConfig", c.name, err)
+		}
+		if requested != 0 {
+			t.Errorf("%s: %d writers requested before the refusal", c.name, requested)
+		}
+		if _, err := New(WithSchema(s), c.opt).MarshalSnapshot(context.Background(), snap); !errors.Is(err, ErrConfig) {
+			t.Errorf("%s: MarshalSnapshot: %v does not match ErrConfig", c.name, err)
+		}
+
+		// A snapshot denoting no type walks no per-type loop, so a check that
+		// lived inside one would let a refused setting through here.
+		empty := buildSnapshot(t, s, nil)
+		if _, err := New(WithSchema(s), c.opt).MarshalSnapshot(context.Background(), empty); !errors.Is(err, ErrConfig) {
+			t.Errorf("%s: MarshalSnapshot of an empty snapshot: %v does not match ErrConfig", c.name, err)
+		}
+		err = New(WithSchema(s), c.opt).WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
+			return io.Discard, nil
+		}, empty)
+		if !errors.Is(err, ErrConfig) {
+			t.Errorf("%s: WriteSnapshot of an empty snapshot: %v does not match ErrConfig", c.name, err)
+		}
+	}
+
+	// Where the adapter's setting and the snapshot's data are both at fault the
+	// setting is reported: it is knowable before the data is looked at, and
+	// fixing it is what lets the data's fault be seen at all.
+	composed, cs := compositionSnapshot(t, map[string][]map[string]any{
+		"Order": {{"order_id": "o1", "lines": lines("a")}},
+	})
+	_, err := New(WithSchema(cs), WithListSeparator(`\|`)).MarshalSnapshot(context.Background(), composed)
+	if !errors.Is(err, ErrConfig) || errors.Is(err, ErrUnrepresentable) {
+		t.Errorf("both faults: %v, want ErrConfig alone", err)
 	}
 
 	for _, sep := range []string{`\|`, "a\r\nb"} {

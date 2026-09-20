@@ -19,12 +19,13 @@ const (
 	ExitRuntime    = 3 // Runtime error (connection failure, I/O error)
 )
 
-// ioCodes are the diagnostic codes that report a filesystem failure.
+// ioCodes are the diagnostic codes that report an I/O failure: a filesystem
+// failure, or the reader a streamed parse reads from failing.
 //
 // diag/code.go introduces one per category by a stated convention rather than a
 // CategoryIO constant, so membership is this list and not a category test. A new
 // per-category I/O code belongs here.
-var ioCodes = [...]diag.Code{diag.E_LOAD_IO_FAILURE, diag.E_SNAPSHOT_IO}
+var ioCodes = [...]diag.Code{diag.E_LOAD_IO_FAILURE, diag.E_SNAPSHOT_IO, diag.E_ADAPTER_IO}
 
 // ExitForResult returns the exit code a diagnostic result earns.
 //

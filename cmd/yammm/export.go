@@ -93,8 +93,10 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 
 	sink.Add(graphResult)
 	sink.Flush()
+	// The data file's own read failure rides this result for a streamed format,
+	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
 	}
 
 	return writeExport(cmd, sink, g.Snapshot(), s, target, outputPath, outputDir)

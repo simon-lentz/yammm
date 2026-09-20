@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -112,7 +113,7 @@ func (a *Adapter) buildOutput(ctx context.Context, result *graph.Snapshot) (map[
 
 		typeName, ok := schema.AddressableTag(s, typeID)
 		if !ok {
-			return nil, fmt.Errorf("json adapter: snapshot denotes type %s, which the entry schema cannot name, so the output object has no key for it; every constructor refuses such a snapshot, so this is an invariant violation", typeID)
+			return nil, fmt.Errorf("json adapter: snapshot denotes type %s, which the entry schema cannot name, so the output object has no key for it; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract", typeID)
 		}
 		instances := result.InstancesOf(typeID)
 		serialized := make([]map[string]any, 0, len(instances))
@@ -243,22 +244,23 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 // adapter's own parser rejects.
 //
 // The two arms differ in what a caller can do about them. An unresolvable
-// target type cannot be reached: every type a snapshot denotes is one the
-// entry schema can name, which every constructor holds, so that arm is an
-// invariant violation and carries no refusal class. A target key of the wrong
+// target type is not data a caller can act on: no constructor builds one from
+// data bound to this schema, so reaching that arm is a broken invariant or a
+// snapshot imported from another schema against [graph.NewFromSnapshot]'s
+// contract, and it carries no refusal class. A target key of the wrong
 // arity IS reachable — [graph.RebuildSnapshot] checks identity, denoted types,
 // root types and cardinality, and no key arity — so that arm carries
 // [ErrUnrepresentable]. Any differing arity reaches it, not only a short key.
 func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (map[string]any, error) {
 	target, ok := lookupType(s, e.Target().TypeID())
 	if !ok {
-		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable; every constructor refuses such a snapshot, so this is an invariant violation",
+		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract",
 			e.Relation(), e.Target().TypeID())
 	}
 	pks := target.PrimaryKeysSlice()
 	key := e.Target().PrimaryKey()
 	if key.Len() != len(pks) {
-		return nil, refuse(ErrUnrepresentable, "json adapter: edge %q target key has %d components; type %s declares %d",
+		return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q target key has %d components; type %s declares %d",
 			e.Relation(), key.Len(), e.Target().TypeID(), len(pks))
 	}
 

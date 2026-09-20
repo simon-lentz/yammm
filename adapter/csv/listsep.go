@@ -1,6 +1,10 @@
 package csv
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/simon-lentz/yammm/adapter/internal/refusal"
+)
 
 // escapeListElem escapes the backslash and every occurrence of the separator's
 // first byte, so [splitListElems] finds a separator only between elements.
@@ -49,9 +53,9 @@ func splitListElems(s, sep string) []string {
 func listSepError(sep string) error {
 	switch {
 	case strings.HasPrefix(sep, `\`):
-		return refuse(ErrConfig, "csv adapter: list separator %q begins with the escape character \\, which the parser reads as an escape", sep)
+		return refusal.New(ErrConfig, "csv adapter: list separator %q begins with the escape character \\, which the parser reads as an escape", sep)
 	case strings.Contains(sep, "\r\n"):
-		return refuse(ErrConfig, "csv adapter: list separator %q holds a CR LF, which encoding/csv reads back as LF, so the parser never finds it", sep)
+		return refusal.New(ErrConfig, "csv adapter: list separator %q holds a CR LF, which encoding/csv reads back as LF, so the parser never finds it", sep)
 	}
 	return nil
 }

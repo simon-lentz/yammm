@@ -16,18 +16,19 @@
 //
 // # Diagnostic Codes
 //
-// Three codes divide every fault this package reports, by what the caller must
+// Four codes divide every fault this package reports, by what the caller must
 // do about it. A cell whose text does not coerce to the type its member
 // declares draws [E_CSV_COERCE]: the data needs cleaning, the cell keeps its
 // text and the row is still produced. A setting the adapter cannot use draws
 // [E_CSV_CONFIG] — a list separator the parser could not find again, a
 // delimiter [encoding/csv] refuses, [Adapter.ParseWithTypeColumn] with no
-// [WithTypeColumn] — and no record is read. Everything else is the input not
-// being well formed, or the input failing to arrive at all, and draws
-// [diag.E_ADAPTER_PARSE] — the code the JSON adapter reports a malformed
-// document under, so one code answers that question for both data parsers. A
-// failing [io.Reader] takes it too, at Fatal, since severity is what says the
-// run did not finish. A type-column value that is not a type name draws
+// [WithTypeColumn] — before the parse reads a byte, and carries no span, since
+// it names the configuration and not the input. Input that is not well formed
+// draws [diag.E_ADAPTER_PARSE], the code the JSON adapter reports a malformed
+// document under, so one code answers that question for both data parsers. An
+// [io.Reader] that fails draws [diag.E_ADAPTER_IO] at Fatal, the adapter
+// category's I/O code, which the CLI exits 3 on as it does for any I/O
+// failure. A type-column value that is not a type name draws
 // E_INVALID_TYPE_TAG and a cancelled parse E_CONTEXT_CANCELLED, as they do
 // there.
 //
@@ -53,11 +54,10 @@
 // a diagnostic, never a value the file did not state.
 //
 // Any other error the reader returns is the [io.Reader] failing, an error that
-// only wraps [io.EOF] included. It stops the parse with a Fatal diagnostic, as
-// the diag package documents for an I/O failure, and the records read before it
-// are kept. A header the reader cannot read is an Error for a fault in the
-// input or a delimiter [encoding/csv] refuses, and a Fatal for the reader
-// failing.
+// only wraps [io.EOF] included. It stops the parse with a Fatal
+// [diag.E_ADAPTER_IO], as the diag package documents for an I/O failure, and
+// the records read before it are kept. A header the reader cannot read is an
+// Error for a fault in the input and that same Fatal for the reader failing.
 //
 // # Column Mapping
 //
@@ -291,5 +291,6 @@
 // # Dependencies
 //
 //	adapter/csv  ──imports──▶  instance, diag, location, location/path, graph,
-//	                           immutable, schema, adapter/internal/typetag
+//	                           immutable, schema, adapter/internal/refusal,
+//	                           adapter/internal/typetag
 package csv

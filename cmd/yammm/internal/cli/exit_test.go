@@ -125,6 +125,7 @@ func TestExitForResult_IOCodeOutranksValidation(t *testing.T) {
 	}{
 		{"a schema load I/O failure", diag.E_LOAD_IO_FAILURE, ExitRuntime},
 		{"a snapshot I/O failure", diag.E_SNAPSHOT_IO, ExitRuntime},
+		{"an adapter I/O failure", diag.E_ADAPTER_IO, ExitRuntime},
 		{"an ordinary error", diag.E_MISSING_REQUIRED, ExitValidation},
 	}
 	for _, tt := range tests {

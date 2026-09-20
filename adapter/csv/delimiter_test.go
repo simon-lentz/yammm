@@ -133,9 +133,9 @@ func TestWriteSnapshot_WithDelimiterWritesTabs(t *testing.T) {
 }
 
 // encoding/csv refuses some runes as a delimiter. The option cannot return an
-// error, so the refusal must surface wherever a header is read or written: an
-// Error diagnostic from either parse entry point and an error from either write
-// entry point, never a panic and never a silent default.
+// error, so the refusal must surface at use, before a parse reads or a write
+// requests a writer: an Error diagnostic from either parse entry point and an
+// error from either write entry point, never a panic and never a silent default.
 func TestWithDelimiter_RefusedDelimiterIsReportedAtUse(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")

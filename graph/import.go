@@ -13,6 +13,11 @@ import (
 // NewFromSnapshot must be used instead of calling importSnapshot on an existing
 // graph — it enforces the precondition that the graph is fresh.
 //
+// snap must originate from s, as [NewBatchAssemblerFromSnapshot] requires: taken
+// from a [Graph] bound to s, or loaded against s. Import consults no schema, so
+// a snapshot built against a different schema is neither detected nor filtered,
+// and its type identities are installed whether or not s can resolve them.
+//
 // Panics if s or snap is nil (programmer error).
 func NewFromSnapshot(s *schema.Schema, snap *Snapshot, opts ...Option) *Graph {
 	if snap == nil {

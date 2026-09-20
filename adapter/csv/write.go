@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -20,8 +21,8 @@ import (
 // per type. CSV is inherently single-type-per-file, so the output is a map
 // from type name to CSV bytes.
 //
-// Returns [ErrNilSnapshot] if result is nil, refuses a list separator the
-// parser cannot find again, and refuses a snapshot holding a composed child:
+// Returns [ErrNilSnapshot] if result is nil, refuses a setting the adapter
+// cannot use with [ErrConfig], and refuses a snapshot holding a composed child:
 // see [refuseComposedChildren].
 func (a *Adapter) MarshalSnapshot(
 	ctx context.Context,
@@ -30,7 +31,7 @@ func (a *Adapter) MarshalSnapshot(
 	if result == nil {
 		return nil, ErrNilSnapshot
 	}
-	if err := listSepError(a.config.listSep); err != nil {
+	if err := a.configError(); err != nil {
 		return nil, err
 	}
 	if err := refuseComposedChildren(result); err != nil {
@@ -63,9 +64,9 @@ func (a *Adapter) MarshalSnapshot(
 // WriteSnapshot writes a graph snapshot to per-type writers. The writerFor
 // function is called once per type to obtain the destination writer.
 //
-// Returns [ErrNilSnapshot] if result is nil, and refuses a list separator the
-// parser cannot find again and a snapshot holding a composed child before it
-// requests any writer: see [refuseComposedChildren].
+// Returns [ErrNilSnapshot] if result is nil, and refuses a setting the adapter
+// cannot use, with [ErrConfig], and a snapshot holding a composed child before
+// it requests any writer: see [refuseComposedChildren].
 func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),
@@ -74,7 +75,7 @@ func (a *Adapter) WriteSnapshot(
 	if result == nil {
 		return ErrNilSnapshot
 	}
-	if err := listSepError(a.config.listSep); err != nil {
+	if err := a.configError(); err != nil {
 		return err
 	}
 	if err := refuseComposedChildren(result); err != nil {
@@ -128,7 +129,7 @@ func refuseComposedChildren(snap *graph.Snapshot) error {
 			} else {
 				children = strconv.Itoa(n) + " " + children
 			}
-			return refuse(ErrUnrepresentable, "csv adapter: type %q instance %s: composition %q holds %s, which a CSV row has no column for, so the export would drop it",
+			return refusal.New(ErrUnrepresentable, "csv adapter: type %q instance %s: composition %q holds %s, which a CSV row has no column for, so the export would drop it",
 				typeName, inst.PrimaryKey(), rels[0], children)
 		}
 	}
@@ -136,12 +137,13 @@ func refuseComposedChildren(snap *graph.Snapshot) error {
 }
 
 // unnameableDenotedType reports a snapshot denoting a type the entry schema
-// cannot name. Every constructor refuses such a snapshot, so reaching this is an
-// invariant violation rather than a caller error, and it carries no refusal
-// class: [ErrUnrepresentable] names data a caller can act on, and no caller can
-// reach this.
+// cannot name. No constructor builds one from data bound to this schema, so
+// reaching this is a broken invariant or a snapshot imported from another
+// schema against [graph.NewFromSnapshot]'s contract. It carries no refusal
+// class: [ErrUnrepresentable] names data a caller can act on, and neither of
+// those is that.
 func unnameableDenotedType(id schema.TypeID) error {
-	return fmt.Errorf("csv adapter: snapshot denotes type %s, which the entry schema cannot name, so per-type output has no name for it; every constructor refuses such a snapshot, so this is an invariant violation", id)
+	return fmt.Errorf("csv adapter: snapshot denotes type %s, which the entry schema cannot name, so per-type output has no name for it; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract", id)
 }
 
 // writeSnapshotTypeTo writes graph.Instance values from a snapshot as CSV rows.
@@ -162,12 +164,6 @@ func (a *Adapter) writeSnapshotTypeTo(
 	writer.Comma = a.config.delimiter
 
 	if err := writer.Write(columns); err != nil {
-		if delimiterRefused(a.config.delimiter) {
-			// The setting [E_CSV_CONFIG] reports on the parse side, and the one
-			// header-write fault whose remedy is in the caller's code rather
-			// than in the destination. The message is [encoding/csv]'s own.
-			return refuse(ErrConfig, "csv write header: %s", err)
-		}
 		return fmt.Errorf("csv write header: %w", err)
 	}
 
@@ -322,7 +318,7 @@ func (a *Adapter) instanceToRow(
 // errCRLF refuses a cell whose text holds a CR LF: [encoding/csv]'s reader
 // turns every CR LF into LF, inside a quoted field too. It carries
 // [ErrUnrepresentable] and keeps its own text, so a caller matches either.
-var errCRLF = refuse(ErrUnrepresentable, "its text holds a CR LF, which encoding/csv reads back as LF, so the value would not survive the round trip")
+var errCRLF = refusal.New(ErrUnrepresentable, "its text holds a CR LF, which encoding/csv reads back as LF, so the value would not survive the round trip")
 
 // relationCells renders one association's edge columns into cells: per FK
 // component and per edge property, one segment per target, escaped and
@@ -383,7 +379,7 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 			return nil
 		}
 	}
-	return refuse(ErrUnrepresentable, "csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
+	return refusal.New(ErrUnrepresentable, "csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
 }
 
 // scalarCell renders one scalar value as cell text.
@@ -449,7 +445,7 @@ func elementConstraint(c schema.Constraint) schema.Constraint {
 // empty list, or as null where it is an optional property's whole value. It
 // carries [ErrUnrepresentable] and keeps its own text, so a caller matches
 // either.
-var errListOfOneEmptyElement = refuse(ErrUnrepresentable, "a list holding one empty element writes what an empty list writes, so the element would not survive the round trip")
+var errListOfOneEmptyElement = refusal.New(ErrUnrepresentable, "a list holding one empty element writes what an empty list writes, so the element would not survive the round trip")
 
 // valueToString renders a value as cell text in the form its constraint
 // stores, null as "". A collection renders each element by this same rule and

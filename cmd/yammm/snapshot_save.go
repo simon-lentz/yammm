@@ -126,8 +126,10 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	sink.Add(parseResult, validateResult, graphResult)
+	// The data file's own read failure rides this result for a streamed format,
+	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
 	}
 
 	// Create snapshot and marshal.

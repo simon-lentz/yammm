@@ -113,7 +113,8 @@
 // # Dependencies
 //
 //	adapter/json  ──imports──▶  instance, diag, location, location/path, graph,
-//	                            immutable, schema, adapter/internal/typetag,
+//	                            immutable, schema, adapter/internal/refusal,
+//	                            adapter/internal/typetag,
 //	                            github.com/tidwall/jsonc
 //
 // [tidwall/jsonc]: https://github.com/tidwall/jsonc
