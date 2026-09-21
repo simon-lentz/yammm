@@ -3,7 +3,6 @@ package gogen
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -301,28 +300,27 @@ func (g *generator) emitEdgeStructs() error {
 }
 
 // emitSerializedModel embeds every source in the closure plus the schema's
-// structural hash: an unexported package-level map keyed by
-// MODULE-ROOT-RELATIVE source path (via sourceKey against the schema's recorded
-// ModuleRoot), and the SerializedSources/SerializedEntry pair a caller re-loads
-// through. Relative keys (never absolute SourceID strings) keep the .go output
-// reproducible across checkouts/CI.
+// structural hash: an unexported package-level map keyed by each source's
+// embedded key (embeddedKeys), and the SerializedSources/SerializedEntry pair a caller
+// re-loads through. It records what it embeds in g.embedded and g.entryKey,
+// which is what finish re-loads, so the check reads the emitted store rather
+// than a second derivation of it.
 //
 // One shape whatever the source count. The store is unexported because it is
 // the pair's backing rather than a surface of its own, so the identifiers a
 // consumer sees do not vary with how many files a schema happens to span.
-//
-// This MUST stay paired with verifyRoundTrip: the keys and the entry are
-// derived there the same way (every key routes through sourceKey with the same
-// root and g.schema.SourceID()), so a change to the shape here needs the mirror
-// change there.
 func (g *generator) emitSerializedModel() error {
 	srcs := g.schema.Sources()
 	ids := srcs.SourceIDs()
-	entry := g.schema.SourceID()
-	root := g.schema.ModuleRoot()
 	if len(ids) == 0 {
-		return errors.New("gogen: schema is not source-backed")
+		return errors.New("gogen: schema is not source-backed; Marshal requires a schema loaded via Load/LoadString/LoadSourcesWithEntry")
 	}
+	keys, err := g.embeddedKeys(ids)
+	if err != nil {
+		return err
+	}
+	g.entryKey = keys[g.schema.SourceID()]
+	g.embedded = make(map[string][]byte, len(ids))
 
 	g.buf.WriteString("// serializedSources holds every source in the import closure, keyed by\n")
 	g.buf.WriteString("// module-root-relative path, as verbatim .yammm text. Read it through\n")
@@ -333,24 +331,26 @@ func (g *generator) emitSerializedModel() error {
 		if !ok {
 			return fmt.Errorf("gogen: source %s content unavailable", id)
 		}
-		fmt.Fprintf(g.buf, "%s: %s,\n", strconv.Quote(sourceKey(root, entry, id)), strconv.Quote(string(content)))
+		key := keys[id]
+		g.embedded[key] = content
+		fmt.Fprintf(g.buf, "%s: %s,\n", strconv.Quote(key), strconv.Quote(string(content)))
 	}
 	g.buf.WriteString("}\n\n")
 
-	g.emitUniformSources(sourceKey(root, entry, entry))
+	g.emitUniformSources(g.entryKey)
 
 	fmt.Fprintf(g.buf, "const SchemaHash = %q\n", schema.StructuralHash(g.schema))
 	return nil
 }
 
 // emitUniformSources writes the SerializedSources/SerializedEntry pair, the one
-// re-load surface a generated package exposes. entryKey is the sourceKey of the
-// entry schema.
+// re-load surface a generated package exposes. entryKey is the entry schema's
+// key in the store.
 //
 // The returned map is built fresh per call rather than handing back the
 // package-level store, which a caller could otherwise mutate; no generated
-// package has a hot path. Only builtin types appear, because generated output
-// must stay stdlib-free (typeCheck resolves nothing but "time").
+// package has a hot path. Only builtin types appear, so the pair adds no
+// import to the file.
 func (g *generator) emitUniformSources(entryKey string) {
 	g.buf.WriteString("// SerializedEntry is the entry-point key into SerializedSources.\n")
 	fmt.Fprintf(g.buf, "const SerializedEntry = %s\n\n", strconv.Quote(entryKey))
@@ -359,7 +359,7 @@ func (g *generator) emitUniformSources(entryKey string) {
 	g.buf.WriteString("// module-root-relative path. Re-load with:\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("//\tschema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, \"\",\n")
-	g.buf.WriteString("//\t\tschema.WithSourcesOnly(true), schema.WithSyntheticRoot(\"embedded://your-app\"))\n")
+	g.buf.WriteString("//\t\tschema.WithSourcesOnly(true), schema.WithSyntheticRoot(" + strconv.Quote(recipeRoot) + "))\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("// The synthetic root is what keeps the loaded type identities stable. Passing\n")
 	g.buf.WriteString("// module root \".\" instead also re-loads, but \".\" canonicalizes against the\n")
@@ -373,44 +373,132 @@ func (g *generator) emitUniformSources(entryKey string) {
 	g.buf.WriteString("}\n\n")
 }
 
-// sourceKey returns id's path relative to moduleRoot (the schema's recorded
-// ModuleRoot — the root the load actually resolved module-style imports
-// against), forward-slashed — so the embedded source keys are
-// machine-independent AND match the import statements inside the sources:
-// a module-style `import "a/b/x"` re-resolves to the key "a/b/x.yammm" on
-// re-load, hitting the pre-registered source with no filesystem fallback.
-// An absolute generation-machine path baked into the output would make the
-// .go.golden files non-reproducible across checkouts/CI. The root may be one
-// the caller supplied, one discovered from a yammm.mod marker, or a synthetic
-// root — the last is trimmed rather than relativized, because it is not a
-// path. When moduleRoot is empty (a LoadString-backed or Builder-built
-// schema; imports are impossible there), keys
-// fall back to entry-directory-relative — for the single source that exists
-// in that case, its own base name. A source outside the module root (a legal
-// entry layout; imports are sandboxed but the entry is not) yields a
-// "../"-prefixed key, which still registers and re-loads consistently —
-// merely an unusual-looking key. Falls back to the absolute id only when
-// relativization is impossible (e.g. a different Windows volume) — still
-// re-loadable on the generation machine, merely non-portable in that rare
-// case, which verifyRoundTrip would surface.
-func sourceKey(moduleRoot string, entry, id location.SourceID) string {
-	root := moduleRoot
-	if root == "" {
-		root = filepath.Dir(entry.String())
+// embeddedKeys assigns every source its embedded key, one key per source and
+// one source per key, because a re-load reads the store as that map. The entry
+// keys by its place under the root (keyRoot.key). Each imported source keys by
+// the text that imports it, resolved against its importer's key by
+// schema.SyntheticImportKey, the key the re-load recipe looks it up by: its
+// identity can differ from that text, since an import through a symlinked
+// directory resolves to the link's target. A source the closure does not
+// import keys by its place under the root. Two keys for one source, or one key
+// for two sources, is an error naming both.
+func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID]string, error) {
+	keys := map[location.SourceID]string{}
+	owners := map[string]location.SourceID{}
+	via := map[location.SourceID]string{}
+	assign := func(id location.SourceID, key, how string) error {
+		if other, taken := owners[key]; taken {
+			return fmt.Errorf("gogen: sources %s (%s) and %s (%s) both take the embedded key %q; an embedded model holds one source per key", other, via[other], id, how, key)
+		}
+		keys[id], owners[key], via[id] = key, id, how
+		return nil
 	}
-	// A synthetic root is not a filesystem path, so it is trimmed rather than
-	// relativized. filepath.Rel returns the right answer on these inputs only
-	// because filepath.Clean collapses the scheme's "//" identically on both
-	// arguments — an accident of Clean, not a rule, and one a different scheme
-	// spelling would break. ValidateSyntheticSourceID is the loader's own
-	// absoluteness predicate, so both sides agree on what "not a path" means.
-	if location.ValidateSyntheticSourceID(root) == nil {
-		return strings.TrimPrefix(id.String(), root+"/")
+	entry := g.schema.SourceID()
+	k, err := g.keys.key(entry)
+	if err != nil {
+		return nil, err
 	}
-	if rel, err := filepath.Rel(root, id.String()); err == nil {
-		return filepath.ToSlash(rel)
+	if err := assign(entry, k, "the entry"); err != nil {
+		return nil, err
 	}
-	return id.String()
+	for queue := []*schema.Schema{g.schema}; len(queue) > 0; queue = queue[1:] {
+		sch := queue[0]
+		for _, imp := range sch.ImportsSlice() {
+			target := imp.ResolvedSourceID()
+			ik, err := schema.SyntheticImportKey(keys[sch.SourceID()], imp.Path())
+			if err != nil {
+				return nil, fmt.Errorf("gogen: import %q in %s: %w", imp.Path(), sch.SourceID(), err)
+			}
+			how := fmt.Sprintf("imported as %q by %s", imp.Path(), sch.SourceID())
+			if have, seen := keys[target]; seen {
+				if have != ik {
+					return nil, fmt.Errorf("gogen: source %s is %s under the key %q and %s under the key %q; an embedded model re-loads a source under one key, so import it by one path", target, via[target], have, how, ik)
+				}
+				continue
+			}
+			if err := assign(target, ik, how); err != nil {
+				return nil, err
+			}
+			if imp.Schema() != nil {
+				queue = append(queue, imp.Schema())
+			}
+		}
+	}
+	for _, id := range ids {
+		if _, ok := keys[id]; ok {
+			continue
+		}
+		k, err := g.keys.key(id)
+		if err != nil {
+			return nil, err
+		}
+		if err := assign(id, k, "under the root"); err != nil {
+			return nil, err
+		}
+	}
+	return keys, nil
+}
+
+// keyRoot is the root embedded source keys are written against, resolved
+// once per Marshal from the schema's recorded module root: a synthetic root, a
+// file root as an identity, or — for a load with no root — the file-backed
+// entry's directory. A synthetic entry with no root keys by its base name, or
+// by fallback where the name has none.
+type keyRoot struct {
+	synthetic string
+	dir       location.CanonicalPath
+	fallback  string
+}
+
+// resolveKeyRoot reads the root from s. A file root is recorded as a host
+// path, so it is re-derived as an identity: the keys compare identities, and a
+// host path's bytes can differ from its identity's (NFC, separators).
+func resolveKeyRoot(s *schema.Schema) (keyRoot, error) {
+	root := s.ModuleRoot()
+	switch {
+	case root != "" && location.ValidateSyntheticSourceID(root) == nil:
+		return keyRoot{synthetic: root}, nil
+	case root != "":
+		cp, err := location.NewCanonicalPath(root)
+		if err != nil {
+			return keyRoot{}, fmt.Errorf("gogen: module root %q: %w", root, err)
+		}
+		return keyRoot{dir: cp}, nil
+	}
+	if cp, ok := s.SourceID().CanonicalPath(); ok {
+		return keyRoot{dir: cp.Dir()}, nil
+	}
+	return keyRoot{fallback: s.Name() + ".yammm"}, nil
+}
+
+// key returns id's key: its identity past a synthetic root, its path relative
+// to the root directory with ".." segments where it lies outside it, or, for a
+// synthetic source loaded with no root, which can import nothing and so is
+// the only source, its base name under either separator. A base the loader
+// refuses as a key (".", "..", empty) gives k.fallback. Keys are never
+// generation-machine paths: where no relative form exists, key returns an
+// error.
+func (k keyRoot) key(id location.SourceID) (string, error) {
+	switch {
+	case k.synthetic != "":
+		if key, ok := strings.CutPrefix(id.String(), k.synthetic+"/"); ok {
+			return key, nil
+		}
+	case !k.dir.IsZero():
+		if key, ok := id.Rel(k.dir); ok {
+			return key, nil
+		}
+	case !id.IsFilePath():
+		name := id.String()
+		base := name[strings.LastIndexAny(name, `/\`)+1:]
+		if base != "" && base != "." && base != ".." && location.ValidateSyntheticSourceID(base) == nil {
+			return base, nil
+		}
+		if k.fallback != "" {
+			return k.fallback, nil
+		}
+	}
+	return "", fmt.Errorf("gogen: source %s has no key relative to the schema's root; generated keys are never generation-machine paths", id)
 }
 
 func (g *generator) emitType(t *schema.Type) error {

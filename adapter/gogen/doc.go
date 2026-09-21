@@ -136,8 +136,8 @@
 // surface carries it, emitted identically whatever the source count:
 //
 //   - func SerializedSources() map[string][]byte returns every source in the
-//     closure keyed by module-root-relative path, and const SerializedEntry names
-//     the entry. The recommended re-load is
+//     closure by its key, and const SerializedEntry names the entry's key. The
+//     recommended re-load is
 //     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with an empty
 //     module root, [github.com/simon-lentz/yammm/schema.WithSourcesOnly] and
 //     [github.com/simon-lentz/yammm/schema.WithSyntheticRoot], which gives type
@@ -146,21 +146,35 @@
 // The backing store is an unexported package-level map, so the identifiers a
 // consumer sees do not vary with how many files a schema happens to span.
 //
-// Keys are relative to the load's recorded module root
+// A key is the name the re-load looks a source up by, never an absolute
+// generation-machine path, so the output is byte-reproducible across checkouts
+// and CI. The entry keys by its path under the load's recorded module root
 // ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — supplied by the
-// caller, discovered from a yammm.mod marker, or a synthetic root, with this
-// package falling back to the entry file's directory when that is empty),
-// never absolute generation-machine
-// paths, so the output is byte-reproducible across checkouts and CI and the keys
-// match the module-style import statements inside the sources on re-load. const
-// SchemaHash carries the schema's
-// [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning, [Marshal]
-// re-loads both embedded surfaces and confirms each produces the input's
-// StructuralHash — hermetically, under
-// [github.com/simon-lentz/yammm/schema.WithSourcesOnly], so a mis-keyed source
-// fails generation rather than being silently satisfied by an on-disk file —
-// making the embedded provenance a guaranteed re-loadable model rather than an
-// unverified claim.
+// caller, discovered from a yammm.mod marker, or a synthetic root), compared as
+// an identity, with ".." segments when the entry lies outside it. A file entry
+// loaded with no root keys against its own directory. A
+// [github.com/simon-lentz/yammm/schema.LoadString] source has no root and keys
+// by its base name, or by its schema's name where the name it was given has
+// no base.
+// Every imported source keys by the text that imports it, resolved against its
+// importer's key by [github.com/simon-lentz/yammm/schema.SyntheticImportKey],
+// the loader's own rule, so an import through a symlinked directory keys by
+// the path the import names, not by where the link resolves.
+//
+// Two layouts a load accepts have no store the re-load can read, and [Marshal]
+// refuses both, naming the paths: one source imported by two paths under two
+// keys (a store holding both fails to re-load as one schema name registered
+// twice), and two sources
+// taking one key (a relative import through a symlink reads the link target's
+// neighbour on load and resolves by the key's text on re-load).
+// A source with no path relative to the root, such as one on another drive, is
+// refused too. const SchemaHash carries the schema's
+// [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning,
+// [Marshal] re-loads the store exactly as emitted, through the recipe the
+// generated file prints, and confirms it produces the input's StructuralHash —
+// hermetically, under [github.com/simon-lentz/yammm/schema.WithSourcesOnly], so
+// a mis-keyed source fails generation rather than being silently satisfied by
+// an on-disk file. [Marshal] returns only bytes that check passed.
 //
 // # Output Guarantees
 //
@@ -211,8 +225,10 @@
 //     ([ErrInvalidPackageName]);
 //   - two entities of one schema map to one Go name, which schema-qualification
 //     cannot separate;
-//   - the generated source fails to format, fails to type-check, or either
-//     embedded surface fails its round-trip hash check (each a generator bug).
+//   - a source is imported by two paths under two keys, two sources take one
+//     key, or a source has no path relative to the root (see Embedded Source);
+//   - the generated source fails to format, fails to type-check, or the
+//     embedded store fails its round-trip hash check (each a generator bug).
 //
 // # Thread Safety
 //

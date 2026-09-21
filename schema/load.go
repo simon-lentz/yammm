@@ -1336,8 +1336,13 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 	}
 	// Relative import (./foo or ../bar)
 	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
+		// Under a synthetic root a source's key is its identity past the root,
+		// so a relative import resolves against the key's directory, as text.
+		if key, ok := l.syntheticKey(sourceID); ok {
+			return importKeyText(key, importPath), nil
+		}
 		if !sourceID.IsFilePath() {
-			return "", errors.New("relative imports require a file-based source")
+			return "", errors.New("relative imports require a file-based source or a synthetic root")
 		}
 		// The importer's host path, never its identity: NFC and the separator
 		// rewrite can leave the identity's bytes naming no file.
@@ -1364,13 +1369,43 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 	}
 
 	// Module-style import (just a path like "common/types"). A synthetic root
-	// stands in for the module root here; the relative branch above cannot,
-	// because it needs the path the importing source was read from.
+	// stands in for the module root here.
 	if !l.hasImportRoot() {
 		return "", errors.New("module-style imports require a module root")
 	}
 
 	return importPath, nil
+}
+
+// SyntheticImportKey returns the key a load under [WithSyntheticRoot] looks
+// an import up by: importPath resolved as text against importerKey, the key of
+// the source declaring it — from the importer's directory for "./" and "../",
+// from the root otherwise — with ".yammm" added when absent. A key climbing
+// above the root keeps its leading "..". It is the loader's own rule, so a
+// generator writing embedded sources keys each one exactly as the re-load
+// will ask for it.
+func SyntheticImportKey(importerKey, importPath string) (string, error) {
+	if strings.ContainsRune(importPath, '\\') {
+		return "", errImportBackslash
+	}
+	return syntheticSourceKey(importCandidates(importKeyText(importerKey, importPath))[0])
+}
+
+// importKeyText resolves an import path against its importer's key as text.
+func importKeyText(importerKey, importPath string) string {
+	if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
+		return path.Join(path.Dir(importerKey), importPath)
+	}
+	return importPath
+}
+
+// syntheticKey returns the key a synthetic-root load registered id under: its
+// identity past the root. It reports false for every other identity.
+func (l *loader) syntheticKey(id location.SourceID) (string, bool) {
+	if l.syntheticRoot == "" || id.IsFilePath() {
+		return "", false
+	}
+	return strings.CutPrefix(id.String(), l.syntheticRoot+"/")
 }
 
 // importCandidates returns the file names an import path may resolve to.
@@ -1648,8 +1683,8 @@ func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 // The joined identity is never cleaned: path.Clean collapses "//" to "/", so
 // cleaning "embedded://app/x.yammm" would eat the scheme separator. The key is
 // therefore cleaned here instead. A cleaned key keeps a leading "..", so a
-// source outside the root — a layout sourceKey in adapter/gogen calls legal —
-// yields a ".."-bearing identity that is still stable and still distinct.
+// source outside the root — the key adapter/gogen writes for an entry outside
+// the module root — yields a ".."-bearing identity that is still stable and still distinct.
 func syntheticSourceKey(key string) (string, error) {
 	slashed := filepath.ToSlash(key)
 	// ValidateSyntheticSourceID is the absoluteness predicate rather than

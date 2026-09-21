@@ -168,10 +168,9 @@ func WithSourcesOnly(only bool) LoadOption {
 //
 // Keys must be relative and must not resolve to the root itself. A key that
 // escapes the root is permitted and yields a ".."-bearing identity, which stays
-// stable and distinct. Relative imports ("./x", "../x") are NOT supported under
-// a synthetic root: they resolve through the path the importing file was read
-// from, which a synthetic source does not have, so the load reports "relative
-// imports require a file-based source". [Schema.ModuleRoot] reports the
+// stable and distinct. A relative import ("./x", "../x") resolves against the
+// importing source's key, as text, and one climbing above the root keeps its
+// ".."; [SyntheticImportKey] states the rule. [Schema.ModuleRoot] reports the
 // synthetic root, because the root is the one this load resolved imports
 // against; a schema loaded this way is a supported input to
 // [github.com/simon-lentz/yammm/adapter/gogen.Marshal], whose embedded keys

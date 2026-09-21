@@ -3,7 +3,6 @@ package gogen
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -13,7 +12,6 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -86,6 +84,20 @@ func mergedInitialisms(extra []string) map[string]bool {
 // Sources(); Marshal returns an error for it, because the embedded source
 // and its round-trip self-check require the source.
 func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
+	g, err := newGenerator(s, opts...)
+	if err != nil {
+		return nil, err
+	}
+	data, err := g.generate()
+	if err != nil {
+		return nil, err
+	}
+	return g.finish(data)
+}
+
+// newGenerator resolves the package name, the name table and the embedded-key
+// root, which the rest of generation reads.
+func newGenerator(s *schema.Schema, opts ...Option) (*generator, error) {
 	cfg := config{}
 	for _, o := range opts {
 		o(&cfg)
@@ -102,79 +114,41 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	g := &generator{
+	keys, err := resolveKeyRoot(s)
+	if err != nil {
+		return nil, err
+	}
+	return &generator{
 		schema:       s,
 		pkg:          pkg,
 		names:        names,
 		initialisms:  inits,
+		keys:         keys,
 		buf:          &bytes.Buffer{},
 		edgeNames:    map[*schema.Relation]string{},
 		dtFieldNames: map[*schema.Property]string{},
+	}, nil
+}
+
+// recipeRoot is the synthetic root the re-load recipe in every generated file
+// names, and the one finish re-loads the embedded sources under.
+const recipeRoot = "embedded://your-app"
+
+// finish re-loads the embedded sources exactly as emitted, through the recipe
+// the generated file prints, and returns data only when that load succeeds and
+// reproduces the input's StructuralHash. Marshal returns only what finish
+// returns, so the check cannot be bypassed without losing the output. A
+// failure is a generator bug surfaced as an error.
+func (g *generator) finish(data []byte) ([]byte, error) {
+	got, res := schema.LoadSourcesWithEntry(context.Background(), g.embedded, g.entryKey, "",
+		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(recipeRoot))
+	if res.HasErrors() {
+		return nil, fmt.Errorf("gogen: embedded SerializedSources does not re-load: %w", res.Err())
 	}
-	data, err := g.generate()
-	if err != nil {
-		return nil, err
-	}
-	if err := verifyRoundTrip(s); err != nil { // guarantee the embedded model re-loads
-		return nil, err
+	if h, want := schema.StructuralHash(got), schema.StructuralHash(g.schema); h != want {
+		return nil, fmt.Errorf("gogen: SerializedSources round-trip hash mismatch (got %s, want %s)", h, want)
 	}
 	return data, nil
-}
-
-// verifyRoundTrip re-loads the embedded sources and confirms they produce a
-// schema with the same StructuralHash, making the embedded provenance a
-// guaranteed re-loadable model rather than an unverified claim.
-//
-// It re-loads EXACTLY what emitSerializedModel embeds — the SAME
-// module-root-relative keys, via sourceKey against the schema's recorded
-// ModuleRoot — through LoadSourcesWithEntry with moduleRoot "." and
-// WithSourcesOnly. Module root "." because a bare `import "x.yammm"` is
-// module-style and requires one; the keys are root-relative, so registration
-// and import resolution join them against the same canonicalized "." whatever
-// cwd is. WithSourcesOnly makes the re-load HERMETIC by construction: an
-// import that misses the embedded map fails the load rather than being
-// silently satisfied by a same-named file on disk.
-//
-// StructuralHash is path-independent, so the re-load's SourceIDs do not affect
-// the comparison — but the canonicalized "." is what lands in every TypeID of a
-// schema re-loaded that way, which is why the emitted recipe recommends
-// WithSyntheticRoot instead. The check carries no synthetic root itself:
-// relative imports need the importing source's canonical path, which no
-// synthetic identity has, so a synthetic root here would fail generation for a
-// schema shape the DSL supports. Coverage of the recommended root lives in this
-// package's tests instead.
-//
-// A failure is a generator bug surfaced as an error.
-func verifyRoundTrip(s *schema.Schema) error {
-	srcs := s.Sources()
-	ids := srcs.SourceIDs()
-	if len(ids) == 0 {
-		return errors.New("gogen: schema is not source-backed; Marshal requires a schema loaded via Load/LoadString/LoadSourcesWithEntry")
-	}
-	return verifyUniformRoundTrip(context.Background(), srcs, ids, s.SourceID(), s.ModuleRoot(), schema.StructuralHash(s))
-}
-
-// verifyUniformRoundTrip re-loads the emitted SerializedSources map under its
-// emitted SerializedEntry, so the one emitted re-load surface is not a surface
-// with no self-check. Module root "." and hermetic, because that is what the
-// emitted accessor's own keys join against.
-func verifyUniformRoundTrip(ctx context.Context, srcs *schema.Sources, ids []location.SourceID, entry location.SourceID, root, want string) error {
-	m := make(map[string][]byte, len(ids))
-	for _, id := range ids {
-		content, ok := srcs.ContentBySource(id)
-		if !ok {
-			return fmt.Errorf("gogen: source %s content unavailable", id)
-		}
-		m[sourceKey(root, entry, id)] = content
-	}
-	got, res := schema.LoadSourcesWithEntry(ctx, m, sourceKey(root, entry, entry), ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		return fmt.Errorf("gogen: embedded SerializedSources does not re-load: %w", res.Err())
-	}
-	if h := schema.StructuralHash(got); h != want {
-		return fmt.Errorf("gogen: SerializedSources round-trip hash mismatch (got %s, want %s)", h, want)
-	}
-	return nil
 }
 
 // generator accumulates emitted declarations into buf, then assembles and
@@ -183,7 +157,10 @@ type generator struct {
 	schema       *schema.Schema
 	pkg          string
 	names        *nameTable
-	initialisms  map[string]bool // effective acronym set (default golint + injected)
+	initialisms  map[string]bool   // effective acronym set (default golint + injected)
+	keys         keyRoot           // the root embedded source keys are written against
+	embedded     map[string][]byte // the embedded sources as emitted, by key
+	entryKey     string            // the entry schema's key in embedded
 	buf          *bytes.Buffer
 	temporal     temporalTypes               // the Date and per-layout Timestamp types, assigned by registerTemporalTypes
 	collect      *temporalDemand             // non-nil while registerTemporalTypes dry-runs type resolution

@@ -58,7 +58,7 @@ Patch releases never introduce breaking changes: no removed or renamed exported 
 
 For an unchanged schema, unchanged `Marshal` options, an unchanged module root, and an unchanged yammm version, generated output is byte-identical (all walks and name assignments are deterministic).
 
-The module root is an input because the embedded source keys and `SerializedEntry` are relative to it. It is the root the caller supplied, the directory of the nearest ancestor holding a `yammm.mod` marker, the synthetic root under `WithSyntheticRoot`, or the entry file's own directory — so committing a marker above a schema changes those keys for an otherwise unchanged generation. A generator that passes the root explicitly sees no change. Across versions, changes to the output classify as:
+The module root is an input because `SerializedEntry`, and every key that is not an import's text, is relative to it; an imported source keys by the text that imports it, and a `LoadString` source, which has no root, by its base name. The root is the one the caller supplied, the directory of the nearest ancestor holding a `yammm.mod` marker, the synthetic root under `WithSyntheticRoot`, or the entry file's own directory — so committing a marker above a schema changes those keys for an otherwise unchanged generation. A generator that passes the root explicitly sees no change. Across versions, changes to the output classify as:
 
 ### Breaking (major post-1.0; pre-1.0 minor under the standard subtractive rules)
 
@@ -920,8 +920,13 @@ incompatible count to **eight**. **Unit 8's other groups so far
 move no declaration**: the instruments, provenance and CSV value-model groups
 each read twenty-one and seven, byte-identical, and the composition group reads
 twenty-two and seven, as the dialect group does. Pass B's instruments,
-Markdown and generator groups each read twenty-nine and eight, as the diagnostics group does. Each
-block below was written by the pass or group that landed its behaviour.
+Markdown and generator groups each read twenty-nine and eight, as the
+diagnostics group does. The gogen names group adds
+`gogen.ErrInvalidPackageName`, taking the compatible count to thirty, and the
+temporal group moves no declaration. The embedded-source group adds
+`schema.SyntheticImportKey` and `location.SourceID.Rel`, taking it to
+**thirty-two**. Each block below was written by the pass or group that landed
+its behaviour.
 
 ### Unit 8 — one addressability rule, and every root held to it
 
@@ -1137,6 +1142,16 @@ block below was written by the pass or group that landed its behaviour.
 - **Additive on the generated-output surface — a List DataType over a default-layout `Timestamp` generates.** `type Stamps = List<Timestamp>` emitted `type Stamps []time.Time` with no `import "time"`, so `Marshal` failed its own type-check. The import is now decided where the generator's type resolution produces `time.Time`, which every emitted position reads.
 - **No emitted byte moves for a schema that generated before**, measured over the golden corpus. Every name the generator reserves keeps its order.
 - **Consumer impact: none, measured.** rdata's schemas declare no such shape, and its five generated Go files are byte-identical. No exported declaration moves, so `gorelease -base=v0.21.0` still reads thirty compatible and eight incompatible.
+
+### Unit 8 — gogen keys every embedded source by the name its re-load asks for
+
+- **Breaking on the generated-output surface — embedded keys move for three input classes, and a fourth generates for the first time; all but one of the three failed generation or emitted a store its own recipe could not re-load.** `SerializedSources`' keys and `SerializedEntry` were each source's path relative to the module root, computed with `filepath.Rel` over an identity and the root's host bytes, with the absolute identity as a fallback. (1) An import through a symlinked directory (`lib -> real`, `import "lib/dep"`), or through a symlinked file, keyed by where the link resolves, `real/dep.yammm`, which the recipe's re-load never asks for: generated from the module root, the file's store did not re-load; from any other directory `Marshal` refused a schema `yammm validate` accepts. It keys `lib/dep.yammm` now, because every imported source keys by the text that imports it, resolved against its importer's key by `schema.SyntheticImportKey`. (2) A module root spelled with a decomposed character keyed the entry `../café/main.yammm` and failed generation; the root is now compared as an identity, and the entry keys `main.yammm`. (3) A `LoadString` source named `person.yammm` keyed `/person.yammm`, an absolute key the recipe refuses; one named `dir/person.yammm` keyed `string://dir/person.yammm`, which re-loads but carries the load's own scheme into every re-loaded identity (`embedded://app/string:/dir/person.yammm`). Both key by the base name now, `person.yammm`, taken under either separator, so `C:\schemas\person.yammm` keys the same; a name with no base, such as `.`, keys by the schema's name. (4) A schema loaded under a synthetic root with a relative import could not be loaded at all (below); it generates now. Apart from that `LoadString` name, every schema that generated a store its recipe re-loads keeps its bytes: the golden corpus is unchanged. `SerializedEntry`'s value is part of the documented recipe, so a moved key is this surface's Breaking tier, a minor release before 1.0.
+- **Behaviour — three layouts a load accepts are refused, each naming its paths.** One source imported by two paths under two keys (`import "lib/dep"` and `import "real/dep"` through `lib -> real`) generated from the module root a store keyed `real/dep.yammm` that its recipe could not re-load, and failed generation from any other directory; it is refused. Two sources taking one key — a relative import through a symlink reads the link target's neighbour on load and the key's text on re-load — generated from the module root a store its recipe could not re-load, and failed generation elsewhere; it is refused by name. A source with no path relative to the root, such as one on another drive, was keyed by its absolute identity; it is refused, so a key is never a generation-machine path. `yammm gen --to go` reports each as a generator failure, exit 3.
+- **Behaviour — the round-trip check re-loads the store the file emits, through the recipe it prints.** It re-derived the keys a second time and re-loaded them under module root `"."`; it now re-loads the emitted store under the recipe's synthetic root, and `Marshal` returns only bytes that check passed.
+- **Behaviour — a relative import resolves under `schema.WithSyntheticRoot`.** It failed with "relative imports require a file-based source". It now resolves against the importing source's key, as text, and one climbing above the root keeps its `..`; `WithSyntheticRoot`'s godoc and `docs/API.md`'s "Synthetic source identities" state the rule.
+- **Additions — `schema.SyntheticImportKey` and `location.SourceID.Rel`.** `SyntheticImportKey(importerKey, importPath)` returns the key a synthetic-root load looks an import up by, from the loader's own pieces. `SourceID.Rel(dir)` writes an identity relative to a directory identity with `..` segments, and reports false on another drive or network share.
+- **Documentation — `adapter/gogen`'s "Embedded Source" section named two embedded surfaces and two round-trip checks where there is one of each.** It names one, and states every key rule and refusal above.
+- **Consumer impact: none, measured.** rdata's five generated Go files are byte-identical. `gorelease -base=v0.21.0` reads thirty-two compatible and eight incompatible; the two new compatible declarations are `SyntheticImportKey` and `SourceID.Rel`.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 

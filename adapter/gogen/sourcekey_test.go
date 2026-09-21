@@ -1,6 +1,7 @@
 package gogen
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/simon-lentz/yammm/location"
@@ -17,8 +18,6 @@ import (
 func TestSourceKey_SyntheticRoot(t *testing.T) {
 	t.Parallel()
 
-	entry := location.NewSourceID("embedded://app/assets/main.yammm")
-
 	for name, tc := range map[string]struct {
 		root string
 		id   string
@@ -32,9 +31,35 @@ func TestSourceKey_SyntheticRoot(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got := sourceKey(tc.root, entry, location.NewSourceID(tc.id))
-			if got != tc.want {
-				t.Errorf("sourceKey(%q, %q) = %q, want %q", tc.root, tc.id, got, tc.want)
+			got, err := keyRoot{synthetic: tc.root}.key(location.NewSourceID(tc.id))
+			if err != nil || got != tc.want {
+				t.Errorf("keyRoot{%q}.key(%q) = %q, want %q", tc.root, tc.id, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestKeyRoot_NoRelativeFormIsAnError pins that a key is never a
+// generation-machine path: where a source has no form relative to the root,
+// key refuses rather than writing its identity.
+func TestKeyRoot_NoRelativeFormIsAnError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for name, tc := range map[string]struct {
+		root keyRoot
+		id   location.SourceID
+	}{
+		"a synthetic source outside a synthetic root": {keyRoot{synthetic: "embedded://app"}, location.NewSourceID("embedded://other/a.yammm")},
+		"a file source under a synthetic root":        {keyRoot{synthetic: "embedded://app"}, location.MustSourceIDFromPath(filepath.Join(t.TempDir(), "a.yammm"))},
+		"a synthetic source under a file root":        {keyRoot{dir: location.MustCanonicalPath(t.TempDir())}, location.NewSourceID("string://a.yammm")},
+		"the root directory itself":                   {keyRoot{dir: location.MustCanonicalPath(dir)}, location.MustSourceIDFromPath(dir)},
+		"a zero source":                               {keyRoot{dir: location.MustCanonicalPath(dir)}, location.SourceID{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got, err := tc.root.key(tc.id); err == nil {
+				t.Errorf("key(%s) = %q, want an error", tc.id, got)
 			}
 		})
 	}

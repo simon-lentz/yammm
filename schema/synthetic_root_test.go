@@ -138,24 +138,38 @@ func TestWithSyntheticRoot_ModuleStyleImportResolves(t *testing.T) {
 	}
 }
 
-// TestWithSyntheticRoot_RelativeImportRejected pins the documented limitation:
-// a relative import resolves through the importing source's canonical path,
-// which no synthetic identity has.
-func TestWithSyntheticRoot_RelativeImportRejected(t *testing.T) {
+// TestWithSyntheticRoot_RelativeImportResolvesByKey pins that a relative
+// import under a synthetic root resolves against the importing source's key,
+// as text: "./dep" from "main.yammm" is "dep.yammm", "../dep" from
+// "sub/main.yammm" is "dep.yammm", and one climbing above the root keeps its
+// "..".
+func TestWithSyntheticRoot_RelativeImportResolvesByKey(t *testing.T) {
 	t.Parallel()
 
-	sources := map[string][]byte{
-		"dep.yammm": []byte("schema \"core\"\n\ntype Region {\n\tcode String primary\n}\n"),
-		"main.yammm": []byte("schema \"app\"\n\nimport \"./dep\" as core\n\n" +
-			"type County {\n\tfips String primary\n\t--> IN_REGION (one) core.Region\n}\n"),
+	dep := []byte("schema \"core\"\n\ntype Region {\n\tcode String primary\n}\n")
+	main := func(imp string) []byte {
+		return []byte("schema \"app\"\n\nimport \"" + imp + "\" as core\n\n" +
+			"type County {\n\tfips String primary\n\t--> IN_REGION (one) core.Region\n}\n")
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", "",
-		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
-	if !res.HasErrors() {
-		t.Fatal("expected a relative import under a synthetic root to fail")
-	}
-	if msg := firstError(res); !strings.Contains(msg, "relative imports require a file-based source") {
-		t.Errorf("expected the file-based-source error, got: %s", msg)
+	for _, tc := range []struct {
+		name, entry, imp, depKey, wantID string
+	}{
+		{"sibling", "main.yammm", "./dep", "dep.yammm", "embedded://app/dep.yammm"},
+		{"parent", "sub/main.yammm", "../dep", "dep.yammm", "embedded://app/dep.yammm"},
+		{"above the root", "main.yammm", "../dep", "../dep.yammm", "embedded://app/../dep.yammm"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sources := map[string][]byte{tc.depKey: dep, tc.entry: main(tc.imp)}
+			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, tc.entry, "",
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
+			if res.HasErrors() {
+				t.Fatalf("load: %s", firstError(res))
+			}
+			if got := s.ImportsSlice()[0].ResolvedSourceID().String(); got != tc.wantID {
+				t.Errorf("import resolved to %q, want %q", got, tc.wantID)
+			}
+		})
 	}
 }
 
@@ -221,8 +235,8 @@ func TestWithSyntheticRoot_DotSlashKeyMatchesBareKey(t *testing.T) {
 }
 
 // TestWithSyntheticRoot_KeyEscapingRootResolves pins the decision to permit a
-// key outside the root: adapter/gogen's sourceKey emits one for an entry that
-// sits outside the module root, a layout it documents as legal. The identity
+// key outside the root: adapter/gogen writes one for an entry that sits
+// outside the module root, a layout it documents as legal. The identity
 // keeps the "..", because the joined string is never cleaned.
 func TestWithSyntheticRoot_KeyEscapingRootResolves(t *testing.T) {
 	t.Parallel()
@@ -352,5 +366,70 @@ func TestWithSyntheticRoot_EmptyRootIsNotSilentlyIgnored(t *testing.T) {
 		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(""))
 	if !res.HasErrors() {
 		t.Fatal("expected an empty synthetic root to be rejected")
+	}
+}
+
+// TestSyntheticImportKey_IsTheLoadersLookup holds SyntheticImportKey to the
+// loader it states: for each import, a load under a synthetic root registers
+// the imported source under exactly the key the function returns, and where the
+// function refuses, the load refuses too, although a source is registered under
+// the literal key the refused text names.
+func TestSyntheticImportKey_IsTheLoadersLookup(t *testing.T) {
+	t.Parallel()
+
+	if got, err := schema.SyntheticImportKey("a/main.yammm", "./x.yammm/.."); err != nil || got != "a.yammm" {
+		t.Errorf(`SyntheticImportKey("a/main.yammm", "./x.yammm/..") = (%q, %v), want "a.yammm"`, got, err)
+	}
+
+	const root = "embedded://app"
+	dep := []byte("schema \"core\"\n\ntype Region {\n\tcode String primary\n}\n")
+	for _, tc := range []struct {
+		name, importer, imp, want string
+	}{
+		{"module-style", "main.yammm", "dep", "dep.yammm"},
+		{"module-style with the extension", "main.yammm", "lib/dep.yammm", "lib/dep.yammm"},
+		{"module-style from a nested importer", "a/b/main.yammm", "lib/dep", "lib/dep.yammm"},
+		{"a sibling", "a/b/main.yammm", "./dep", "a/b/dep.yammm"},
+		{"a parent", "a/b/main.yammm", "../dep", "a/dep.yammm"},
+		{"above the root", "a/main.yammm", "../../dep", "../dep.yammm"},
+		{"from an importer above the root", "../x/main.yammm", "./dep", "../x/dep.yammm"},
+		{"cleaned", "main.yammm", "lib/./x/../dep", "lib/dep.yammm"},
+		{"a decomposed name", "main.yammm", "café/dep", "café/dep.yammm"},
+		{"a backslash", "main.yammm", `lib\dep`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := schema.SyntheticImportKey(tc.importer, tc.imp)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("SyntheticImportKey = %q, want an error", got)
+				}
+			} else if err != nil || got != tc.want {
+				t.Fatalf("SyntheticImportKey = (%q, %v), want %q", got, err, tc.want)
+			}
+
+			main := []byte("schema \"app\"\n\nimport \"" + strings.ReplaceAll(tc.imp, `\`, `\\`) + "\" as core\n\n" +
+				"type County {\n\tfips String primary\n\t--> IN_REGION (one) core.Region\n}\n")
+			sources := map[string][]byte{tc.importer: main}
+			if tc.want != "" {
+				sources[tc.want] = dep
+			} else {
+				sources[tc.imp+".yammm"] = dep
+			}
+			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, tc.importer, "",
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
+			if tc.want == "" {
+				if !res.HasErrors() {
+					t.Fatal("the loader accepted an import SyntheticImportKey refuses")
+				}
+				return
+			}
+			if res.HasErrors() {
+				t.Fatalf("load: %s", firstError(res))
+			}
+			if id := s.ImportsSlice()[0].ResolvedSourceID().String(); id != root+"/"+tc.want {
+				t.Errorf("the loader resolved %q to %q, want %q", tc.imp, id, root+"/"+tc.want)
+			}
+		})
 	}
 }

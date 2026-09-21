@@ -130,6 +130,62 @@ func (s SourceID) RelativeTo(root CanonicalPath) (string, bool) {
 	return rel, true
 }
 
+// Rel returns s written relative to the directory dir, climbing with ".."
+// segments where s is not under dir, and true. Both are identities, so they are
+// compared segment by segment, never through the host. A synthetic or zero
+// source, a zero dir, s equal to dir or to one of its ancestors, and a source
+// on another drive or network share than dir return false. Under dir it
+// returns what [SourceID.RelativeTo] returns.
+func (s SourceID) Rel(dir CanonicalPath) (string, bool) {
+	if s.cp.IsZero() || dir.IsZero() {
+		return "", false
+	}
+	sv, srest := splitVolume(s.cp.path)
+	dv, drest := splitVolume(dir.path)
+	if sv != dv {
+		return "", false
+	}
+	from, to := segments(drest), segments(srest)
+	common := 0
+	for common < len(from) && common < len(to) && from[common] == to[common] {
+		common++
+	}
+	if common == len(to) {
+		return "", false
+	}
+	parts := make([]string, 0, len(from)-common+len(to)-common)
+	for range from[common:] {
+		parts = append(parts, "..")
+	}
+	parts = append(parts, to[common:]...)
+	return strings.Join(parts, "/"), true
+}
+
+// splitVolume splits an identity into its volume — a network share
+// "//server/share", a drive "C:", or "" — and the rest of the path.
+func splitVolume(p string) (volume, rest string) {
+	if strings.HasPrefix(p, "//") {
+		i := strings.IndexByte(p[2:], '/')
+		if i < 0 {
+			return p, ""
+		}
+		j := strings.IndexByte(p[2+i+1:], '/')
+		if j < 0 {
+			return p, ""
+		}
+		return p[:2+i+1+j], p[2+i+1+j:]
+	}
+	if len(p) >= 2 && isLetter(p[0]) && p[1] == ':' {
+		return p[:2], p[2:]
+	}
+	return "", p
+}
+
+// segments splits a path's non-empty segments.
+func segments(p string) []string {
+	return strings.FieldsFunc(p, func(r rune) bool { return r == '/' })
+}
+
 // IsZero reports whether this is a zero-value SourceID.
 // The zero value is invalid and should not be used.
 func (s SourceID) IsZero() bool {
