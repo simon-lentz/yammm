@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
@@ -326,6 +327,71 @@ part type Wheel {
 	if got := spare["minItems"]; got != float64(1) {
 		t.Errorf("required (one) composition minItems = %v, want 1", got)
 	}
+}
+
+// TestFinish_RefusesADanglingRef drives the self-check over a document Marshal's
+// own pipeline built, with the key one of its $refs names withdrawn from the
+// emitted-keys set.
+func TestFinish_RefusesADanglingRef(t *testing.T) {
+	s := loadSchema(t, "named")
+	table, err := buildDefsTable(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, defKeys, err := buildDocument(s, table, config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := renderDocument(doc)
+	if got, err := finish(out, defKeys); err != nil || !bytes.Equal(got, out) {
+		t.Fatalf("finish over the built document = %d bytes, %v; want the document and nil", len(got), err)
+	}
+
+	var decoded any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	key, ok := firstRefKey(decoded)
+	if !ok {
+		t.Fatal("the fixture's document holds no $ref")
+	}
+	if !defKeys[key] {
+		t.Fatalf("the $ref key %q is not an emitted key, so withdrawing it proves nothing", key)
+	}
+	delete(defKeys, key)
+
+	got, err := finish(out, defKeys)
+	if err == nil {
+		t.Error("finish = nil, want the dangling $ref refused")
+	}
+	if got != nil {
+		t.Errorf("finish returned %d bytes beside its error, want none", len(got))
+	}
+}
+
+// firstRefKey returns the $defs key one "$ref" in a decoded document names,
+// unescaped as checkRefs unescapes it.
+func firstRefKey(v any) (string, bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		if ref, ok := x["$ref"].(string); ok {
+			if key, ok := strings.CutPrefix(ref, "#/$defs/"); ok {
+				return strings.ReplaceAll(strings.ReplaceAll(key, "~1", "/"), "~0", "~"), true
+			}
+		}
+		for _, member := range x {
+			if key, ok := firstRefKey(member); ok {
+				return key, true
+			}
+		}
+	case []any:
+		for _, elem := range x {
+			if key, ok := firstRefKey(elem); ok {
+				return key, true
+			}
+		}
+	}
+	return "", false
 }
 
 func TestSelfCheck(t *testing.T) {

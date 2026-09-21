@@ -47,7 +47,13 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := renderDocument(doc)
+	return finish(renderDocument(doc), defKeys)
+}
+
+// finish runs selfCheck over the rendered document and returns it. Marshal
+// returns only what finish returns, so the check cannot be bypassed without
+// losing the output.
+func finish(out []byte, defKeys map[string]bool) ([]byte, error) {
 	if err := selfCheck(out, defKeys); err != nil {
 		return nil, err
 	}
