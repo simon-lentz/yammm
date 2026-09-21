@@ -288,9 +288,6 @@ func (g *generator) emitEdgeStructs() error {
 			if err != nil {
 				return err
 			}
-			if strings.Contains(typ, "time.Time") {
-				g.needsTime = true
-			}
 			fmt.Fprintf(g.buf, "%s %s %s\n", goField("Target"+goExportedIdent(pk.Name(), g.initialisms), used, g.initialisms), typ, jsonTag("_target_"+pk.Name(), false))
 		}
 		for _, p := range e.rel.PropertiesSlice() {
@@ -453,9 +450,6 @@ func (g *generator) emitField(owner *schema.Type, p *schema.Property, used map[s
 	if err != nil {
 		return fmt.Errorf("type %q property %q: %w", ownerName(owner), p.Name(), err)
 	}
-	if strings.Contains(typ, "time.Time") {
-		g.needsTime = true
-	}
 	g.emitDoc(p.Documentation()) // property / edge-property doc-comment -> Go field doc-comment, where present
 	fmt.Fprintf(g.buf, "%s %s %s\n", goField(p.Name(), used, g.initialisms), typ, jsonTag(p.Name(), p.IsOptional()))
 	return nil
@@ -491,6 +485,11 @@ func (g *generator) goFieldType(owner *schema.Type, p *schema.Property) (string,
 		}
 		typ = name
 	case owner != nil && resolved.Kind() == schema.KindEnum:
+		if g.collect != nil {
+			// An inline enum names no temporal type, and reserving its name here
+			// would move it ahead of the layouts in the shared namespace.
+			return "", nil
+		}
 		typ = g.names.goInlineEnum(owner, p, g.initialisms) // <OwnerType><Field>, memoized + reserved
 	case resolved.Kind() == schema.KindList:
 		// Faithful list: List<DataType> renders []<Name>, not []<primitive>.

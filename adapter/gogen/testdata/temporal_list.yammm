@@ -1,0 +1,14 @@
+schema "temporallist"
+
+type Day   = Date
+type Wall  = Timestamp["2006-01-02 15:04:05"]
+type Days  = List<Date>
+type Dates = List<Day>
+type Walls = List<Wall>
+
+type Calendar {
+	id     String primary
+	days   Days
+	grid   List<List<Day>>
+	shifts List<List<Wall>>
+}

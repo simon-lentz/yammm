@@ -1,0 +1,7 @@
+schema "temporalmain"
+
+import "temporal_dep.yammm" as dep
+
+type Log {
+	id String primary
+}

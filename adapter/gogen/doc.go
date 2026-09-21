@@ -22,10 +22,10 @@
 //     when the DataType resolves to an Enum.
 //   - A per-owner named type for every inline-enum property
 //     (type <Owner><Field> string), plus its value constants.
-//   - A Date type when any Date position exists, and one type per distinct
-//     custom Timestamp layout, each a struct embedding time.Time with a JSON
-//     codec that exchanges the value in the string form the library stores
-//     (see Type Mapping).
+//   - A Date type when a position emits Date, and one type per distinct
+//     custom Timestamp layout a position emits, each a struct embedding
+//     time.Time with a JSON codec that exchanges the value in the string form
+//     the library stores (see Type Mapping).
 //   - One struct per type in the closure. Concrete, abstract, and part types are all
 //     emitted — part types because compositions reference them, abstract types
 //     because they document the schema even though inheritance is flattened into

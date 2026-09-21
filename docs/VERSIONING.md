@@ -1131,6 +1131,13 @@ block below was written by the pass or group that landed its behaviour.
 - **CLI — `yammm gen --to go --package <name>` with such a name exits 2, not 3.** The command answers `ErrInvalidPackageName` as a usage error naming `--package`, where it reported a generator failure naming neither the flag nor the rule.
 - **Consumer impact: none, measured.** rdata passes `WithPackageName("gen")`, and its five generated Go files are byte-identical. `gorelease -base=v0.21.0` reads thirty compatible and eight incompatible; the one new compatible declaration is `ErrInvalidPackageName`.
 
+### Unit 8 — gogen generates every temporal position inside a List
+
+- **Additive on the generated-output surface — four legal schema shapes generate where `Marshal` refused them.** The pass that registers the generated `Date` and per-layout types walked the schema by its own rule, which stopped at a DataType reference, while emission resolves one. So `type Day = Date` with `type Dates = List<Day>`, and a property `List<List<Day>>`, failed with "a Date position reached emission without the Date type registered", and the same shapes over `Timestamp["<layout>"]` failed on the layout. That pass now runs emission's own type resolution over every position emission renders, so it registers a type exactly when emission names it. The four shapes generate `type Dates []Date` and `[][]Date`, or the per-layout type in place of `Date`.
+- **Additive on the generated-output surface — a List DataType over a default-layout `Timestamp` generates.** `type Stamps = List<Timestamp>` emitted `type Stamps []time.Time` with no `import "time"`, so `Marshal` failed its own type-check. The import is now decided where the generator's type resolution produces `time.Time`, which every emitted position reads.
+- **No emitted byte moves for a schema that generated before**, measured over the golden corpus. Every name the generator reserves keeps its order.
+- **Consumer impact: none, measured.** rdata's schemas declare no such shape, and its five generated Go files are byte-identical. No exported declaration moves, so `gorelease -base=v0.21.0` still reads thirty compatible and eight incompatible.
+
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
 Measured through binaries built from `v0.21.0`'s tree and from the candidate,

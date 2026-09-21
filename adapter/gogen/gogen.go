@@ -186,6 +186,7 @@ type generator struct {
 	initialisms  map[string]bool // effective acronym set (default golint + injected)
 	buf          *bytes.Buffer
 	temporal     temporalTypes               // the Date and per-layout Timestamp types, assigned by registerTemporalTypes
+	collect      *temporalDemand             // non-nil while registerTemporalTypes dry-runs type resolution
 	needsTime    bool                        // set when any emitted declaration names time.Time
 	needsJSON    bool                        // set when any emitted declaration calls encoding/json
 	edges        []edgeRec                   // one per DECLARED association (each emitted as one EDGE_ struct)
@@ -209,11 +210,13 @@ type edgeRec struct {
 // type-checks. A format or type-check failure is a generator bug, surfaced as an
 // error rather than emitted as broken Go.
 func (g *generator) generate() ([]byte, error) {
-	g.registerTemporalTypes()
 	if err := g.registerDataTypeFields(); err != nil {
 		return nil, err
 	}
 	if err := g.registerEdges(); err != nil {
+		return nil, err
+	}
+	if err := g.registerTemporalTypes(); err != nil {
 		return nil, err
 	}
 	if err := g.emitNamedTypes(); err != nil {

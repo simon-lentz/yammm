@@ -10,7 +10,8 @@ import (
 // goBaseType maps a constraint to its Go type: the primitive for most kinds,
 // and for a Date or custom-layout Timestamp the generated type
 // registerTemporalTypes assigned. Named Enum/DataType types are applied by
-// the field emitter, not here.
+// the field emitter, not here. In collect mode it records the temporal type
+// it would name and returns an empty name for it.
 func (g *generator) goBaseType(c schema.Constraint) (string, error) {
 	c = schema.ResolveAlias(c)
 	//exhaustive:enforce
@@ -26,7 +27,16 @@ func (g *generator) goBaseType(c schema.Constraint) (string, error) {
 	case schema.KindTimestamp:
 		tc, ok := c.(schema.TimestampConstraint)
 		if !ok || tc.Format() == "" {
+			// The import is decided where time.Time is written, so no
+			// emitter can name it without importing it.
+			if g.collect == nil {
+				g.needsTime = true
+			}
 			return "time.Time", nil
+		}
+		if g.collect != nil {
+			g.collect.layouts[tc.Format()] = true
+			return "", nil
 		}
 		name, ok := g.temporal.layouts[tc.Format()]
 		if !ok {
@@ -34,6 +44,10 @@ func (g *generator) goBaseType(c schema.Constraint) (string, error) {
 		}
 		return name, nil
 	case schema.KindDate:
+		if g.collect != nil {
+			g.collect.date = true
+			return "", nil
+		}
 		if g.temporal.date == "" {
 			return "", errors.New("gogen: a Date position reached emission without the Date type registered")
 		}

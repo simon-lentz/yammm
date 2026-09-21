@@ -262,7 +262,7 @@ func TestMarshal_Initialisms(t *testing.T) {
 // Marshal's hermetic timeImporter stub by confirming the output type-checks against the
 // actual time, not only the stub's opaque Time.
 func TestMarshal_TypeChecks(t *testing.T) {
-	for _, name := range []string{"full", "temporal", "temporal_edge"} {
+	for _, name := range []string{"full", "temporal", "temporal_edge", "temporal_list"} {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)
 			got, err := gogen.Marshal(s)
@@ -341,6 +341,182 @@ func TestMarshal_TemporalEdge(t *testing.T) {
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestMarshal_TemporalInsideList pins that a temporal position reached only
+// inside a List generates what it names — the Date or layout type, or the time
+// import — under a List DataType, a List of a temporal DataType, and a nested
+// List property. A temporal DataType named directly is its own carrier and
+// supplies the time import itself, so its cases pin the rendering alone.
+func TestMarshal_TemporalInsideList(t *testing.T) {
+	t.Parallel()
+
+	const wall = `type Wall = Timestamp["2006-01-02 15:04:05"]` + "\n"
+	for name, tc := range map[string]struct {
+		body         string
+		want, absent []string
+	}{
+		"list datatype over date": {
+			body: "type Days = List<Date>\ntype Doc {\n\tid String primary\n\td Days\n}\n",
+			want: []string{"type Days []Date", "type Date struct{ time.Time }"},
+		},
+		"list datatype over a date datatype": {
+			body: "type Day = Date\ntype Dates = List<Day>\ntype Doc {\n\tid String primary\n}\n",
+			want: []string{"type Dates []Date", "type Date struct{ time.Time }"},
+		},
+		"list datatype over a layout datatype": {
+			body: wall + "type Walls = List<Wall>\ntype Doc {\n\tid String primary\n}\n",
+			want: []string{"type Walls []Timestamp20060102150405", "type Timestamp20060102150405 struct{ time.Time }"},
+		},
+		"nested list property over date": {
+			body: "type Doc {\n\tid String primary\n\tgrid List<List<Date>>\n}\n",
+			want: []string{"Grid [][]Date ", "type Date struct{ time.Time }"},
+		},
+		"nested list property over a date datatype": {
+			body: "type Day = Date\ntype Doc {\n\tid String primary\n\tgrid List<List<Day>>\n}\n",
+			want: []string{"Grid [][]Date ", "type Date struct{ time.Time }"},
+		},
+		"nested list property over a layout datatype": {
+			body: wall + "type Doc {\n\tid String primary\n\tshifts List<List<Wall>>\n}\n",
+			want: []string{"Shifts [][]Timestamp20060102150405 ", "type Timestamp20060102150405 struct{ time.Time }"},
+		},
+		"list datatype over timestamp": {
+			body: "type Stamps = List<Timestamp>\ntype Doc {\n\tid String primary\n}\n",
+			want: []string{"type Stamps []time.Time", "import \"time\""},
+		},
+		"list datatype over a timestamp datatype": {
+			body: "type At = Timestamp\ntype Ats = List<At>\ntype Doc {\n\tid String primary\n}\n",
+			want: []string{"type Ats []time.Time", "type At struct{ time.Time }"},
+		},
+		"layout datatype property": {
+			body:   "type Clock = Timestamp[\"15:04\"]\ntype Doc {\n\tid String primary\n\tc Clock\n}\n",
+			want:   []string{"C  *Clock ", "type Clock struct{ time.Time }"},
+			absent: []string{"type Timestamp1504 struct"},
+		},
+		"list property over a date datatype": {
+			body:   "type Day = Date\ntype Doc {\n\tid String primary\n\tdays List<Day>\n}\n",
+			want:   []string{"Days []Day ", "type Day struct{ time.Time }"},
+			absent: []string{"type Date struct"},
+		},
+		"date datatype property": {
+			body:   "type Day = Date\ntype Doc {\n\tid String primary\n\td Day\n}\n",
+			want:   []string{"D  *Day ", "type Day struct{ time.Time }"},
+			absent: []string{"type Date struct"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s, res := schema.LoadString(context.Background(), "schema \"cal\"\n\n"+tc.body, "cal.yammm")
+			if res.HasErrors() {
+				t.Fatalf("load: %v", res.Err())
+			}
+			got, err := gogen.Marshal(s)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			for _, want := range tc.want {
+				if !bytes.Contains(got, []byte(want)) {
+					t.Errorf("output missing %q:\n%s", want, got)
+				}
+			}
+			for _, absent := range tc.absent {
+				if bytes.Contains(got, []byte(absent)) {
+					t.Errorf("output holds %q:\n%s", absent, got)
+				}
+			}
+		})
+	}
+}
+
+// TestMarshal_LayoutNameReservedBeforeInlineEnum pins the shared namespace's
+// order: a per-layout type takes its name before an inline enum that derives
+// the same one, so the enum takes the suffix.
+func TestMarshal_LayoutNameReservedBeforeInlineEnum(t *testing.T) {
+	t.Parallel()
+
+	s, res := schema.LoadString(context.Background(), `schema "order"
+
+type TimestampMon {
+	id  String primary
+	jan Enum["a", "b"]
+	at  Timestamp["Mon Jan"]
+}
+`, "order.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, want := range []string{
+		"type TimestampMonJan struct{ time.Time }",
+		"type TimestampMonJan2 string",
+		"TimestampMonJan2 `json:\"jan,omitempty\"`",
+		"TimestampMonJan  `json:\"at,omitempty\"`",
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestMarshal_TemporalOnlyInAnImport pins that registration walks the whole
+// closure: the entry declares no temporal position, and the one import declares
+// a List DataType over Date and a nested List property over a layout, so each
+// is the only position that registers its type.
+func TestMarshal_TemporalOnlyInAnImport(t *testing.T) {
+	t.Parallel()
+
+	got, err := gogen.Marshal(loadSchema(t, "imports/temporal_main"))
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, want := range []string{
+		"type Date struct{ time.Time }",
+		"type Days []Date",
+		"type Timestamp1504MST struct{ time.Time }",
+		"On [][]Timestamp1504MST ",
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestMarshal_CollidingLayoutBasesSuffixInSortedOrder pins that layouts sharing
+// one derived base take their suffixes in sorted-layout order on every run, so
+// a name never depends on the order the positions are found.
+func TestMarshal_CollidingLayoutBasesSuffixInSortedOrder(t *testing.T) {
+	t.Parallel()
+
+	s, res := schema.LoadString(context.Background(), `schema "bases"
+
+type Doc {
+	id String primary
+	a  Timestamp["2006-01-02"]
+	b  Timestamp["20060102"]
+	c  Timestamp["2006_01_02"]
+}
+`, "bases.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	for range 32 {
+		got, err := gogen.Marshal(s)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		for _, want := range []string{
+			"A  *Timestamp20060102  ",
+			"B  *Timestamp200601022 ",
+			"C  *Timestamp200601023 ",
+		} {
+			if !bytes.Contains(got, []byte(want)) {
+				t.Fatalf("output missing %q:\n%s", want, got)
+			}
 		}
 	}
 }
@@ -516,7 +692,7 @@ func TestMarshal_SerializedEntryReserved(t *testing.T) {
 }
 
 func TestMarshal_Golden(t *testing.T) {
-	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "imports/rel_main", "imports/tagform_collision_main", "imports/qualified_name_main", "reserved_name", "full", "temporal", "temporal_edge"}
+	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "imports/rel_main", "imports/tagform_collision_main", "imports/qualified_name_main", "imports/temporal_main", "reserved_name", "full", "temporal", "temporal_edge", "temporal_list"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)
