@@ -782,8 +782,7 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 	}
 
 	// Attach sources for diagnostics rendering and record the load's
-	// module root (the basis for module-root-relative source keys, e.g.
-	// gogen's embedded SerializedModel).
+	// module root (the basis for gogen's embedded source keys).
 	//
 	// A synthetic root IS the root this load resolved module-style imports
 	// against — hasImportRoot already treats the two as one — so it is what
@@ -1474,7 +1473,7 @@ func (l *loader) candidateImportSourceIDs(relativePath string) []location.Source
 // schema and its transitive imports into this load's source registries, so the
 // load's Sources() carries the whole import closure even when the cross-Load
 // short-circuit skipped the read+parse pipeline; diagnostics rendered across
-// imports and gogen's embedded SerializedModel read that content. One load
+// imports and gogen's embedded store read that content. One load
 // holds one content per SourceID: a member compiled from different bytes than a
 // compile this load already holds, or whose bytes differ from the content this
 // load already holds, is a conflict, which the walk returns and the caller

@@ -154,8 +154,8 @@
 // an identity, with ".." segments when the entry lies outside it. A file entry
 // loaded with no root keys against its own directory. A
 // [github.com/simon-lentz/yammm/schema.LoadString] source has no root and keys
-// by its base name, or by its schema's name where the name it was given has
-// no base.
+// by the base name it was loaded under, split at either separator; a name with
+// no base, such as ".", names no file and is refused.
 // Every imported source keys by the text that imports it, resolved against its
 // importer's key by [github.com/simon-lentz/yammm/schema.SyntheticImportKey],
 // the loader's own rule, so an import through a symlinked directory keys by
@@ -168,7 +168,8 @@
 // taking one key (a relative import through a symlink reads the link target's
 // neighbour on load and resolves by the key's text on re-load).
 // A source with no path relative to the root, such as one on another drive, is
-// refused too. const SchemaHash carries the schema's
+// refused too, because a key is never a generation-machine path, and so is a
+// LoadString name with no base, which names no file. const SchemaHash carries the schema's
 // [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning,
 // [Marshal] re-loads the store exactly as emitted, through the recipe the
 // generated file prints, and confirms it produces the input's StructuralHash —
@@ -226,7 +227,8 @@
 //   - two entities of one schema map to one Go name, which schema-qualification
 //     cannot separate;
 //   - a source is imported by two paths under two keys, two sources take one
-//     key, or a source has no path relative to the root (see Embedded Source);
+//     key, a source has no path relative to the root, or a LoadString name has
+//     no base (see Embedded Source);
 //   - the generated source fails to format, fails to type-check, or the
 //     embedded store fails its round-trip hash check (each a generator bug).
 //

@@ -8,7 +8,6 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -754,37 +753,6 @@ func TestMarshal_ModuleRoot_CwdIndependent(t *testing.T) {
 	}
 	if !bytes.Equal(want, got) {
 		t.Error("Marshal output differs across working directories")
-	}
-}
-
-// TestMarshal_ModuleRoot_HermeticReload pins the documented consumer recipe
-// for the embedded model: LoadSourcesWithEntry over the root-relative keys
-// with module root "." and WithSourcesOnly re-loads the schema from a
-// directory containing no .yammm files at all — the embedded map is
-// self-contained and the filesystem never participates.
-func TestMarshal_ModuleRoot_HermeticReload(t *testing.T) {
-	s := loadModrootSchema(t)
-	want := schema.StructuralHash(s)
-
-	entrySrc, err := os.ReadFile(filepath.Join("testdata", "modroot", "a", "b", "entry.yammm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	depSrc, err := os.ReadFile(filepath.Join("testdata", "modroot", "lib", "dep.yammm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Chdir(t.TempDir())
-	got, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
-		"a/b/entry.yammm": entrySrc,
-		"lib/dep.yammm":   depSrc,
-	}, "a/b/entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("hermetic re-load: %v", res.Err())
-	}
-	if h := schema.StructuralHash(got); h != want {
-		t.Errorf("hermetic re-load hash mismatch: got %s, want %s", h, want)
 	}
 }
 

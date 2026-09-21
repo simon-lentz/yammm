@@ -385,7 +385,7 @@ func TestMarshal_EntryOutsideTheModuleRoot(t *testing.T) {
 
 // TestMarshal_LoadStringKeysByBaseName pins the key of a source LoadString
 // minted: it has no root and imports nothing, so it keys by its base name
-// under either separator, or by its schema's name where the name has no base.
+// under either separator, and a name with no base is refused.
 func TestMarshal_LoadStringKeysByBaseName(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"person.yammm", "dir/person.yammm", `C:\schemas\person.yammm`, `\\srv\share\person.yammm`} {
@@ -401,8 +401,8 @@ func TestMarshal_LoadStringKeysByBaseName(t *testing.T) {
 			t.Errorf("LoadString(%q) keys as %q, want person.yammm", name, entry)
 		}
 	}
-	// A name with no usable base keys by the schema's name.
-	for _, name := range []string{".", "x/.", "..", "/"} {
+	// A base with no extension, or of one character, is still a file name.
+	for _, name := range []string{"person", "a", "dir/a"} {
 		s, res := schema.LoadString(context.Background(), "schema \"p\"\n\ntype Person {\n\tid String primary\n}\n", name)
 		if res.HasErrors() {
 			t.Fatalf("load %q: %v", name, res.Err())
@@ -411,8 +411,19 @@ func TestMarshal_LoadStringKeysByBaseName(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Marshal %q: %v", name, err)
 		}
-		if _, entry := reloadEmitted(t, got, s); entry != "p.yammm" {
-			t.Errorf("LoadString(%q) keys as %q, want p.yammm", name, entry)
+		if _, entry := reloadEmitted(t, got, s); entry != name[strings.LastIndex(name, "/")+1:] {
+			t.Errorf("LoadString(%q) keys as %q", name, entry)
+		}
+	}
+	// A name with no base names no file, so it has no key.
+	for _, name := range []string{".", "x/.", "..", "/"} {
+		s, res := schema.LoadString(context.Background(), "schema \"p\"\n\ntype Person {\n\tid String primary\n}\n", name)
+		if res.HasErrors() {
+			t.Fatalf("load %q: %v", name, res.Err())
+		}
+		_, err := gogen.Marshal(s)
+		if err == nil || !strings.Contains(err.Error(), "names no file") || !strings.Contains(err.Error(), strconv.Quote("string://"+name)) {
+			t.Errorf("Marshal(LoadString %q) = %v, want the refusal naming the name", name, err)
 		}
 	}
 }

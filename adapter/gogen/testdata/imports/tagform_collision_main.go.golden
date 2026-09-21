@@ -48,8 +48,8 @@ type Graph struct {
 }
 
 // serializedSources holds every source in the import closure, keyed by
-// module-root-relative path, as verbatim .yammm text. Read it through
-// SerializedSources below.
+// the name the re-load looks it up by, as verbatim .yammm text. Read it
+// through SerializedSources below.
 var serializedSources = map[string]string{
 	"tagform_collision_main.yammm": "schema \"tcmain\"\n\nimport \"tc_left.yammm\" as left\nimport \"tc_right.yammm\" as right\n\ntype Main {\n\tid String primary\n\t--> TO_LEFT  (one) left.Left\n\t--> TO_RIGHT (one) right.Right\n}\n",
 	"tc_left.yammm":                "schema \"tcleft\"\n\nimport \"tc_leftbase.yammm\" as base\n\ntype Left {\n\tid String primary\n\t--> TO_NODE (one) base.Node\n}\n",
@@ -62,14 +62,14 @@ var serializedSources = map[string]string{
 const SerializedEntry = "tagform_collision_main.yammm"
 
 // SerializedSources returns every source in the import closure, keyed by
-// module-root-relative path. Re-load with:
+// the name the re-load looks it up by. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
 //
-// The synthetic root is what keeps the loaded type identities stable. Passing
-// module root "." instead also re-loads, but "." canonicalizes against the
-// process working directory, which then lands inside every TypeID.
+// The synthetic root keeps the loaded type identities stable: no working
+// directory, checkout or mount point enters them. Any root of that form
+// serves; generation verified this one.
 func SerializedSources() map[string][]byte {
 	m := make(map[string][]byte, len(serializedSources))
 	for k, v := range serializedSources {

@@ -323,8 +323,8 @@ func (g *generator) emitSerializedModel() error {
 	g.embedded = make(map[string][]byte, len(ids))
 
 	g.buf.WriteString("// serializedSources holds every source in the import closure, keyed by\n")
-	g.buf.WriteString("// module-root-relative path, as verbatim .yammm text. Read it through\n")
-	g.buf.WriteString("// SerializedSources below.\n")
+	g.buf.WriteString("// the name the re-load looks it up by, as verbatim .yammm text. Read it\n")
+	g.buf.WriteString("// through SerializedSources below.\n")
 	g.buf.WriteString("var serializedSources = map[string]string{\n")
 	for _, id := range ids { // SourceIDs() is sorted/deterministic
 		content, ok := srcs.ContentBySource(id)
@@ -356,14 +356,14 @@ func (g *generator) emitUniformSources(entryKey string) {
 	fmt.Fprintf(g.buf, "const SerializedEntry = %s\n\n", strconv.Quote(entryKey))
 
 	g.buf.WriteString("// SerializedSources returns every source in the import closure, keyed by\n")
-	g.buf.WriteString("// module-root-relative path. Re-load with:\n")
+	g.buf.WriteString("// the name the re-load looks it up by. Re-load with:\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("//\tschema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, \"\",\n")
 	g.buf.WriteString("//\t\tschema.WithSourcesOnly(true), schema.WithSyntheticRoot(" + strconv.Quote(recipeRoot) + "))\n")
 	g.buf.WriteString("//\n")
-	g.buf.WriteString("// The synthetic root is what keeps the loaded type identities stable. Passing\n")
-	g.buf.WriteString("// module root \".\" instead also re-loads, but \".\" canonicalizes against the\n")
-	g.buf.WriteString("// process working directory, which then lands inside every TypeID.\n")
+	g.buf.WriteString("// The synthetic root keeps the loaded type identities stable: no working\n")
+	g.buf.WriteString("// directory, checkout or mount point enters them. Any root of that form\n")
+	g.buf.WriteString("// serves; generation verified this one.\n")
 	g.buf.WriteString("func SerializedSources() map[string][]byte {\n")
 	g.buf.WriteString("m := make(map[string][]byte, len(serializedSources))\n")
 	g.buf.WriteString("for k, v := range serializedSources {\n")
@@ -442,12 +442,10 @@ func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID
 // keyRoot is the root embedded source keys are written against, resolved
 // once per Marshal from the schema's recorded module root: a synthetic root, a
 // file root as an identity, or — for a load with no root — the file-backed
-// entry's directory. A synthetic entry with no root keys by its base name, or
-// by fallback where the name has none.
+// entry's directory. A synthetic entry with no root keys by its base name.
 type keyRoot struct {
 	synthetic string
 	dir       location.CanonicalPath
-	fallback  string
 }
 
 // resolveKeyRoot reads the root from s. A file root is recorded as a host
@@ -468,14 +466,15 @@ func resolveKeyRoot(s *schema.Schema) (keyRoot, error) {
 	if cp, ok := s.SourceID().CanonicalPath(); ok {
 		return keyRoot{dir: cp.Dir()}, nil
 	}
-	return keyRoot{fallback: s.Name() + ".yammm"}, nil
+	return keyRoot{}, nil
 }
 
 // key returns id's key: its identity past a synthetic root, its path relative
 // to the root directory with ".." segments where it lies outside it, or, for a
 // synthetic source loaded with no root, which can import nothing and so is
-// the only source, its base name under either separator. A base the loader
-// refuses as a key (".", "..", empty) gives k.fallback. Keys are never
+// the only source, its base name under either separator, as a file entry with
+// no root keys by its name in its own directory. A name with no base (".",
+// "..", empty) names no file and is an error. Keys are never
 // generation-machine paths: where no relative form exists, key returns an
 // error.
 func (k keyRoot) key(id location.SourceID) (string, error) {
@@ -491,12 +490,10 @@ func (k keyRoot) key(id location.SourceID) (string, error) {
 	case !id.IsFilePath():
 		name := id.String()
 		base := name[strings.LastIndexAny(name, `/\`)+1:]
-		if base != "" && base != "." && base != ".." && location.ValidateSyntheticSourceID(base) == nil {
+		if base != "" && base != "." && base != ".." {
 			return base, nil
 		}
-		if k.fallback != "" {
-			return k.fallback, nil
-		}
+		return "", fmt.Errorf("gogen: source %q names no file, so it has no key; load it under a name ending in a file name", name)
 	}
 	return "", fmt.Errorf("gogen: source %s has no key relative to the schema's root; generated keys are never generation-machine paths", id)
 }

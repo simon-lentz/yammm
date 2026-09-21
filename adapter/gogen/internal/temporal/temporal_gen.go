@@ -120,8 +120,8 @@ type Graph struct {
 }
 
 // serializedSources holds every source in the import closure, keyed by
-// module-root-relative path, as verbatim .yammm text. Read it through
-// SerializedSources below.
+// the name the re-load looks it up by, as verbatim .yammm text. Read it
+// through SerializedSources below.
 var serializedSources = map[string]string{
 	"temporal.yammm": "schema \"temporal\"\n\ntype Day   = Date\ntype Stamp = Timestamp\ntype Wall  = Timestamp[\"2006-01-02 15:04:05\"]\n\npart type Reading {\n\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\ton Date\n}\n\npart type Casing {\n\tserial String primary\n}\n\ntype Sensor {\n\tid             String primary\n\tinstalled      Date required\n\tdecommissioned Date\n\tcreated_at     Timestamp required\n\tseen_wall      Timestamp[\"2006-01-02 15:04:05\"]\n\tseen_at        Timestamp[\"2006-01-02T15:04:05.000000000Z07:00\"] required\n\tday            Day\n\tstamp          Stamp\n\twall           Wall\n\tdays           List<Date>\n\twalls          List<Timestamp[\"2006-01-02 15:04:05\"]>\n\t*-> HAS_READING (many) Reading\n\t*-> IN_CASING (one) Casing\n\t--> FEEDS (one) Sensor {\n\t\tsince Timestamp[\"2006-01-02 15:04:05\"]\n\t}\n}\n",
 }
@@ -130,14 +130,14 @@ var serializedSources = map[string]string{
 const SerializedEntry = "temporal.yammm"
 
 // SerializedSources returns every source in the import closure, keyed by
-// module-root-relative path. Re-load with:
+// the name the re-load looks it up by. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
 //
-// The synthetic root is what keeps the loaded type identities stable. Passing
-// module root "." instead also re-loads, but "." canonicalizes against the
-// process working directory, which then lands inside every TypeID.
+// The synthetic root keeps the loaded type identities stable: no working
+// directory, checkout or mount point enters them. Any root of that form
+// serves; generation verified this one.
 func SerializedSources() map[string][]byte {
 	m := make(map[string][]byte, len(serializedSources))
 	for k, v := range serializedSources {
