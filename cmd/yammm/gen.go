@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 
@@ -141,6 +142,10 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 		data, err = markdown.Marshal(s,
 			markdown.WithClassDiagram(!noDiagram),
 			markdown.WithClassMembers(!noMembers))
+	}
+	if errors.Is(err, gogen.ErrInvalidPackageName) {
+		pkgName, _ := cmd.Flags().GetString("package")
+		return cli.Usagef("invalid --package %q: a Go package name is an identifier that is not a keyword and not \"_\"", pkgName)
 	}
 	if err != nil {
 		return cli.Runtimef("generate %s: %v", target, err)

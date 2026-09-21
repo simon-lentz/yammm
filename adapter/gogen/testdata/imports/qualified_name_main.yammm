@@ -1,0 +1,16 @@
+schema "main"
+
+import "qualified_name_a.yammm" as a
+import "qualified_name_b.yammm" as b
+
+type Bar {
+	id String primary
+}
+
+type Holder {
+	id String primary
+	--> HAS_A_FOO (one) a.Foo
+	--> HAS_B_FOO (one) b.Foo
+	--> HAS_A_FOO_TYPE (one) b.AFoo
+	--> HAS_MAIN_BAR (one) b.MainBar
+}

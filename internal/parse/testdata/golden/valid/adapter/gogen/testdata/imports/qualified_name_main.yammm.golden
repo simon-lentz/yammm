@@ -1,0 +1,165 @@
+{
+  "name": "\"main\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "imports": [
+    {
+      "path": "\"qualified_name_a.yammm\"",
+      "alias": "a",
+      "span": {
+        "s": 15,
+        "e": 51
+      }
+    },
+    {
+      "path": "\"qualified_name_b.yammm\"",
+      "alias": "b",
+      "span": {
+        "s": 52,
+        "e": 88
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Bar",
+      "name_span": {
+        "s": 95,
+        "e": 98
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 105,
+              "e": 111
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 102,
+            "e": 119
+          }
+        }
+      ],
+      "span": {
+        "s": 90,
+        "e": 121
+      }
+    },
+    {
+      "name": "Holder",
+      "name_span": {
+        "s": 128,
+        "e": 134
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 141,
+              "e": 147
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 138,
+            "e": 155
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "HAS_A_FOO",
+          "name_span": {
+            "s": 161,
+            "e": 170
+          },
+          "target": {
+            "qualifier": "a",
+            "name": "Foo",
+            "span": {
+              "s": 177,
+              "e": 182
+            }
+          },
+          "span": {
+            "s": 157,
+            "e": 182
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "HAS_B_FOO",
+          "name_span": {
+            "s": 188,
+            "e": 197
+          },
+          "target": {
+            "qualifier": "b",
+            "name": "Foo",
+            "span": {
+              "s": 204,
+              "e": 209
+            }
+          },
+          "span": {
+            "s": 184,
+            "e": 209
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "HAS_A_FOO_TYPE",
+          "name_span": {
+            "s": 215,
+            "e": 229
+          },
+          "target": {
+            "qualifier": "b",
+            "name": "AFoo",
+            "span": {
+              "s": 236,
+              "e": 242
+            }
+          },
+          "span": {
+            "s": 211,
+            "e": 242
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "HAS_MAIN_BAR",
+          "name_span": {
+            "s": 248,
+            "e": 260
+          },
+          "target": {
+            "qualifier": "b",
+            "name": "MainBar",
+            "span": {
+              "s": 267,
+              "e": 276
+            }
+          },
+          "span": {
+            "s": 244,
+            "e": 276
+          }
+        }
+      ],
+      "span": {
+        "s": 123,
+        "e": 278
+      }
+    }
+  ]
+}

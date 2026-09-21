@@ -246,7 +246,7 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 | Flag | Description |
 | ---- | ----------- |
 | `--to` | Target: `go`, `jsonschema`, or `md` (required) |
-| `--package` | go target: generated package name (default: derived from schema name) |
+| `--package` | go target: generated package name (default: derived from schema name). Once the schema loads, a value that is not a Go identifier, or is a keyword or `_`, is a usage error (exit 2) |
 | `--output` | Output file path (default: stdout) |
 | `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
 | `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes` |

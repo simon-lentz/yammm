@@ -25,6 +25,9 @@ adapter/gogen/testdata/imports/entry_shadow_mid.yammm
 adapter/gogen/testdata/imports/inherit_common.yammm
 adapter/gogen/testdata/imports/inherit_main.yammm
 adapter/gogen/testdata/imports/main.yammm
+adapter/gogen/testdata/imports/qualified_name_a.yammm
+adapter/gogen/testdata/imports/qualified_name_b.yammm
+adapter/gogen/testdata/imports/qualified_name_main.yammm
 adapter/gogen/testdata/imports/rel_dep.yammm
 adapter/gogen/testdata/imports/rel_main.yammm
 adapter/gogen/testdata/imports/tagform_collision_main.yammm

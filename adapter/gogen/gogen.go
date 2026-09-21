@@ -28,7 +28,9 @@ type config struct {
 }
 
 // WithPackageName overrides the generated package name (default: derived from
-// the schema name).
+// the schema name). The name must be a Go identifier that is not a keyword and
+// not "_"; [Marshal] refuses any other with [ErrInvalidPackageName]. "main" is
+// accepted, for generating into a program's own directory.
 func WithPackageName(name string) Option {
 	return func(c *config) { c.packageName = name }
 }
@@ -89,8 +91,11 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 		o(&cfg)
 	}
 	pkg := cfg.packageName
-	if pkg == "" {
+	switch {
+	case pkg == "":
 		pkg = goPackageName(s.Name())
+	case !validPackageName(pkg):
+		return nil, fmt.Errorf("%w: WithPackageName(%q) must be a Go identifier that is not a keyword and not \"_\"", ErrInvalidPackageName, pkg)
 	}
 	inits := mergedInitialisms(cfg.initialisms) // default golint set + injected
 	names, err := buildNameTable(s, inits)

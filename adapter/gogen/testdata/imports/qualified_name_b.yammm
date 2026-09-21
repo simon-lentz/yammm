@@ -1,0 +1,13 @@
+schema "b"
+
+type Foo {
+	code String primary
+}
+
+type AFoo {
+	key String primary
+}
+
+type MainBar {
+	id String primary
+}

@@ -60,7 +60,9 @@ func goField(name string, used map[string]int, inits map[string]bool) string {
 // goPackageName sanitizes a schema name into a valid lowercase package identifier,
 // falling back to "schema" when the input yields nothing usable. Unlike exported
 // identifiers, a lower-case package name CAN collide with a Go keyword (e.g. a
-// schema named "type"), so guard with go/token.
+// schema named "type"), so guard with go/token. "main" names a program, which a
+// file of declarations alone cannot build as, and a package named "init" cannot
+// be imported without an alias, so both take the keyword's suffix.
 func goPackageName(name string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(name) {
@@ -72,10 +74,16 @@ func goPackageName(name string) string {
 	if out == "" || unicode.IsDigit([]rune(out)[0]) {
 		return "schema"
 	}
-	if token.IsKeyword(out) {
+	if token.IsKeyword(out) || out == "main" || out == "init" {
 		return out + "_"
 	}
 	return out
+}
+
+// validPackageName reports whether name can head a package clause: a Go
+// identifier that is not a keyword and not the blank identifier.
+func validPackageName(name string) bool {
+	return token.IsIdentifier(name) && name != "_"
 }
 
 // nameTable holds the resolved, collision-free Go names for every entity that
@@ -138,9 +146,11 @@ var reservedNames = []string{
 // assigned together because yammm permits a type and a datatype to share a name
 // (separate loader indices — indexTypes/indexDataTypes in schema/complete.go), and
 // both become top-level Go declarations. Unqualified where unique; schema-qualified
-// on collision (or when the bare name is reserved). A clash that survives
-// qualification is a hard error (mirrors DetectLabelCollisions in
-// adapter/neo4j/labels.go).
+// on collision (or when the bare name is reserved). Every bare name is assigned
+// before any qualified one, so a qualified name never takes an entity's unique
+// bare name; a qualified name another entity holds takes the table's numeric
+// suffix. Two entities of one schema sharing a candidate cannot be separated by
+// qualification, and are a hard error.
 func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error) {
 	schemas := s.Closure()
 
@@ -158,6 +168,7 @@ func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error)
 	// datatypes — grouped so cross-kind collisions are detected, not just same-kind.
 	type origin struct {
 		kind       string // "type" | "datatype"
+		name       string // the entity's name as declared
 		schemaName string
 		id         schema.TypeID    // kind == "type"
 		dt         *schema.DataType // kind == "datatype"
@@ -166,11 +177,11 @@ func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error)
 	for _, sc := range schemas {
 		for _, t := range sc.TypesSlice() {
 			cand := goExportedIdent(t.Name(), inits)
-			byCandidate[cand] = append(byCandidate[cand], origin{kind: "type", schemaName: sc.Name(), id: t.ID()})
+			byCandidate[cand] = append(byCandidate[cand], origin{kind: "type", name: t.Name(), schemaName: sc.Name(), id: t.ID()})
 		}
 		for _, dt := range sc.DataTypesSlice() {
 			cand := goExportedIdent(dt.Name(), inits)
-			byCandidate[cand] = append(byCandidate[cand], origin{kind: "datatype", schemaName: sc.Name(), dt: dt})
+			byCandidate[cand] = append(byCandidate[cand], origin{kind: "datatype", name: dt.Name(), schemaName: sc.Name(), dt: dt})
 		}
 	}
 
@@ -183,26 +194,30 @@ func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error)
 		}
 	}
 
-	// Pass 2: assign in deterministic (sorted-candidate) order. Use the bare
-	// candidate only when it is the sole claimant AND not reserved/taken; otherwise
-	// schema-qualify every claimant. A qualified name that is STILL taken (two
-	// entities in the same schema mapping to one Go name — e.g. a type and a
-	// datatype both named Region) cannot be separated by qualification: hard error.
+	// Pass 2: every sole claimant of an unreserved candidate takes it bare.
+	var shared []string
 	for _, cand := range slices.Sorted(maps.Keys(byCandidate)) {
 		origins := byCandidate[cand]
 		if len(origins) == 1 && !nt.taken[cand] {
 			assign(origins[0], cand)
 			continue
 		}
-		for _, o := range origins {
-			qualified := goExportedIdent(o.schemaName, inits) + cand
-			if nt.taken[qualified] {
+		shared = append(shared, cand)
+	}
+
+	// Pass 3: schema-qualify every claimant of a shared or reserved candidate, in
+	// sorted-candidate order.
+	for _, cand := range shared {
+		seen := map[string]origin{}
+		for _, o := range byCandidate[cand] {
+			if first, dup := seen[o.schemaName]; dup {
 				return nil, fmt.Errorf(
-					"gogen: Go name collision that schema-qualification cannot resolve: %q (%s %q in schema %q); rename one entity",
-					qualified, o.kind, cand, o.schemaName,
+					"gogen: %s %q and %s %q in schema %q map to one Go name, which schema-qualification cannot separate; rename one entity",
+					first.kind, first.name, o.kind, o.name, o.schemaName,
 				)
 			}
-			assign(o, qualified)
+			seen[o.schemaName] = o
+			assign(o, nt.reserve(goExportedIdent(o.schemaName, inits)+cand))
 		}
 	}
 
@@ -222,9 +237,9 @@ func (nt *nameTable) goDataType(dt *schema.DataType) (string, bool) {
 }
 
 // reserve returns the first free name in "<base>", "<base>2", … and records it in
-// the shared namespace. Used for synthesized names (inline enums, enum value
-// consts) that must not collide with an already-assigned type / datatype / enum /
-// reserved name.
+// the shared namespace. Used for schema-qualified names and for synthesized names
+// (inline enums, enum value consts, temporal types) that must not collide with an
+// already-assigned type / datatype / enum / reserved name.
 func (nt *nameTable) reserve(base string) string {
 	cand := base
 	for i := 2; nt.taken[cand]; i++ {

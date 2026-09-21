@@ -1,0 +1,93 @@
+{
+  "name": "\"b\"",
+  "span": {
+    "s": 0,
+    "e": 10
+  },
+  "types": [
+    {
+      "name": "Foo",
+      "name_span": {
+        "s": 17,
+        "e": 20
+      },
+      "props": [
+        {
+          "name": "code",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 29,
+              "e": 35
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 24,
+            "e": 43
+          }
+        }
+      ],
+      "span": {
+        "s": 12,
+        "e": 45
+      }
+    },
+    {
+      "name": "AFoo",
+      "name_span": {
+        "s": 52,
+        "e": 56
+      },
+      "props": [
+        {
+          "name": "key",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 64,
+              "e": 70
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 60,
+            "e": 78
+          }
+        }
+      ],
+      "span": {
+        "s": 47,
+        "e": 80
+      }
+    },
+    {
+      "name": "MainBar",
+      "name_span": {
+        "s": 87,
+        "e": 94
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 101,
+              "e": 107
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 98,
+            "e": 115
+          }
+        }
+      ],
+      "span": {
+        "s": 82,
+        "e": 117
+      }
+    }
+  ]
+}

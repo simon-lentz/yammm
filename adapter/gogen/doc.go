@@ -11,8 +11,8 @@
 // imports neither instance nor graph. It maps a completed schema to Go source,
 // nothing more. It also returns a plain error rather than the
 // [github.com/simon-lentz/yammm/diag.Result] the rest of the library threads
-// through, because its only failures are generator-internal (see Error Conditions),
-// not data diagnostics with source locations.
+// through, because its failures are refusals of its inputs and generator bugs (see
+// Error Conditions), not data diagnostics with source locations.
 //
 // # Generated Declarations
 //
@@ -120,12 +120,14 @@
 // The entire import closure — the entry schema plus every transitively imported
 // schema, walked deterministically and deduped by source — is flattened into one
 // self-contained package. Go names are unqualified where they are unique across the
-// closure and schema-qualified (<Schema><Name>) on collision; inherited properties,
-// associations, and compositions resolve against their declaring schema, so a
-// member inherited from a cross-schema parent maps to the correct type. A collision
-// that qualification cannot resolve — two entities in one schema mapping to a single
-// Go name — is a hard error, mirroring the label-collision handling in
-// adapter/neo4j.
+// closure and schema-qualified (<Schema><Name>) on collision. Every unique name is
+// assigned before any qualified one, so a qualified name already taken — by another
+// type or data type, or by a reserved name such as SchemaHash — takes a numeric
+// suffix (AFoo2) rather than the other declaration's name.
+// Inherited properties, associations, and compositions resolve against their
+// declaring schema, so a member inherited from a cross-schema parent maps to the
+// correct type. A collision that qualification cannot resolve — two entities in
+// one schema mapping to a single Go name — is a hard error.
 //
 // # Embedded Source
 //
@@ -189,7 +191,10 @@
 //
 //   - [WithPackageName]: override the generated package name. The default is derived
 //     from the schema name, sanitized to a valid lowercase identifier (falling back
-//     to "schema").
+//     to "schema"); a keyword, "main" or "init" takes a "_" suffix, since a file of
+//     declarations alone cannot build as package main and a package named init
+//     cannot be imported without an alias. An explicit name must be a Go identifier
+//     that is not a keyword and not "_", and may be "main" or "init".
 //   - [WithInitialisms]: register extra acronyms (e.g. "GUID", "JWT") the name mapper
 //     upper-cases wholesale in exported identifiers. They merge with gogen's default
 //     golint acronym set and are matched case-insensitively. This is how a downstream
@@ -202,7 +207,10 @@
 //
 //   - the schema is not source-backed (e.g. built via
 //     [github.com/simon-lentz/yammm/schema.NewBuilder] without retained source);
-//   - a Go name collision cannot be resolved by schema-qualification;
+//   - the [WithPackageName] value cannot head a package clause
+//     ([ErrInvalidPackageName]);
+//   - two entities of one schema map to one Go name, which schema-qualification
+//     cannot separate;
 //   - the generated source fails to format, fails to type-check, or either
 //     embedded surface fails its round-trip hash check (each a generator bug).
 //
