@@ -350,13 +350,13 @@ var errCRLF = refusal.New(ErrUnrepresentable, "its text holds a CR LF, which enc
 // the absent-group marker, so it would read back as no edge at all. Two or more
 // targets always write a separator, so only a lone target can collide.
 func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []*graph.Edge, cells map[string]string) error {
+	// No edges leaves every column of the group unset, which a row reads as "".
+	if len(edges) == 0 {
+		return nil
+	}
 	target, ok := s.TypeByID(rel.TargetID())
 	if !ok {
 		// buildColumnList already refused this shape; nothing to render.
-		return nil
-	}
-	// No edges leaves every column of the group unset, which a row reads as "".
-	if len(edges) == 0 {
 		return nil
 	}
 	// A (one) association reads back as ONE object, and the validator refuses

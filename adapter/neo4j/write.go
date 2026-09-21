@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -422,21 +423,20 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // validated node path this never fires (instance validation already enforced each
 // element's type); it guards the direct-Cypher path, where the param map is
 // hand-built. A []any value under a scalar (non-List, non-Vector) constraint is a
-// shape mismatch — a scalar property cannot hold a list — and is an error too. A
+// shape mismatch — a scalar property cannot hold a list — and is an error too, as
+// is a List constraint built by hand with no element constraint. A
 // nested-collection element kind (a List or Vector element, e.g. List<Vector>) has
 // no concrete driver slice type at this level and returns the []any unchanged. The
 // element switch is exhaustiveness-guarded, so a newly-added ConstraintKind fails
 // the build here rather than silently passing a []any to the driver.
 func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	c = schema.ResolveAlias(c)
-	var elem schema.Constraint
-	switch cc := c.(type) {
-	case schema.ListConstraint:
-		elem = schema.ResolveAlias(cc.Element())
-	case schema.VectorConstraint:
-		// A Vector's elements are floats; coerce them as a List<Float>'s.
-		elem = schema.NewFloatConstraint()
-	default:
+	elem := schema.ResolveAlias(constraintof.Element(c))
+	if elem == nil {
+		// Only a hand-built constraint holds no element; every loaded List has one.
+		if c.Kind() == schema.KindList {
+			return nil, errors.New("cannot coerce a list value against a List constraint that holds no element constraint")
+		}
 		return nil, fmt.Errorf("cannot coerce a list value against a scalar %s constraint", c.Kind())
 	}
 	//exhaustive:enforce

@@ -382,5 +382,6 @@
 // # Dependencies
 //
 //	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, location,
+//	                             adapter/internal/constraintof,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j
