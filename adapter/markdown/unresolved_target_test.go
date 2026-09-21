@@ -47,10 +47,7 @@ type Unrelated {
 	if result.HasErrors() {
 		t.Fatalf("elsewhere fixture must load: %v", result.Err())
 	}
-	g, err := newGenerator(other)
-	if err != nil {
-		t.Fatalf("newGenerator: %v", err)
-	}
+	g := newTestGenerator(t, other)
 
 	thing, ok := owner.Type("Thing")
 	if !ok {
@@ -72,10 +69,7 @@ type Unrelated {
 
 	// The control: over its own document both resolve to links, so the
 	// assertions above pin the fallback and not a renderer that never links.
-	gOwn, err := newGenerator(owner)
-	if err != nil {
-		t.Fatalf("newGenerator(owner): %v", err)
-	}
+	gOwn := newTestGenerator(t, owner)
 	if got := gOwn.relationTarget(rel); got == "Other" {
 		t.Error("relationTarget did not link a target its own document contains")
 	}

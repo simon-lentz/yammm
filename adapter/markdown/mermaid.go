@@ -17,9 +17,7 @@ import (
 // Mermaid class identifiers, so those classes emit the sanitized-id form
 // with a display label; namespace grouping is deliberately not used — some
 // Markdown renderers do not support classDiagram namespaces.
-func (g *generator) emitClassDiagram() {
-	g.anchors["class-diagram"] = true
-
+func (g *generator) emitClassDiagram(h outlineEntry) {
 	var b strings.Builder
 	b.WriteString("classDiagram\n")
 	b.WriteString("    direction TB\n")
@@ -34,7 +32,7 @@ func (g *generator) emitClassDiagram() {
 		}
 	}
 
-	g.buf.WriteString("## Class Diagram\n\n")
+	g.buf.WriteString("## " + h.md + "\n\n")
 	if g.labelled {
 		g.buf.WriteString(mermaidFloorSentence + "\n\n")
 	}
@@ -54,10 +52,11 @@ const mermaidFloorSentence = "This diagram uses Mermaid's labelled class form an
 // in the compact single-line form.
 func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 	e := g.types[t.ID()]
-	id := mermaidID(e.display)
-	head := "class " + id
-	if e.display != id {
-		head += `["` + e.display + `"]`
+	head := "class " + e.mermaidID
+	if e.display != e.mermaidID {
+		// A class label holds no double quote; Mermaid's entity code stands
+		// in for one.
+		head += `["` + strings.ReplaceAll(e.display, `"`, "#quot;") + `"]`
 		g.labelled = true
 	}
 
@@ -70,7 +69,7 @@ func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 	}
 
 	var props []*schema.Property
-	if g.classMembers {
+	if g.cfg.classMembers {
 		props = t.PropertiesSlice()
 	}
 	if annotation == "" && len(props) == 0 {
@@ -95,10 +94,10 @@ func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 // association and composition edges. Inherited relations are not redrawn
 // on subtypes — the inheritance edge conveys them.
 func (g *generator) writeEdges(b *strings.Builder, t *schema.Type) {
-	id := mermaidID(g.types[t.ID()].display)
+	id := g.types[t.ID()].mermaidID
 	for _, ref := range t.InheritsSlice() {
 		if parent, ok := g.resolveSuper(t, ref); ok {
-			b.WriteString("    " + mermaidID(parent.display) + " <|-- " + id + "\n")
+			b.WriteString("    " + parent.mermaidID + " <|-- " + id + "\n")
 		}
 	}
 	for _, rel := range t.AssociationsSlice() {
@@ -118,7 +117,7 @@ func (g *generator) writeRelationEdge(b *strings.Builder, ownerID string, rel *s
 		return
 	}
 	label := rel.Name() + " (" + multiplicity(rel.IsOptional(), rel.IsMany()) + ")"
-	b.WriteString("    " + ownerID + " " + arrow + " " + mermaidID(target.display) + " : " + label + "\n")
+	b.WriteString("    " + ownerID + " " + arrow + " " + target.mermaidID + " : " + label + "\n")
 }
 
 // kindLabel returns the diagram member label for a constraint: named

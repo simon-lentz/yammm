@@ -33,7 +33,7 @@ part type Wheel {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	want := "## Class Diagram\n" +
 		"\n" +
 		"```mermaid\n" +
@@ -83,8 +83,8 @@ type Truck extends Vehicle {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.classMembers = false
-	g.emitClassDiagram()
+	g.cfg.classMembers = false
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	want := "## Class Diagram\n" +
 		"\n" +
 		"```mermaid\n" +
@@ -121,7 +121,7 @@ type Truck extends Vehicle {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	want := "## Class Diagram\n" +
 		"\n" +
 		"```mermaid\n" +
@@ -169,7 +169,7 @@ abstract type Located {
 `),
 	})
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	want := "## Class Diagram\n" +
 		"\n" +
 		mermaidFloorSentence + "\n" +
@@ -209,7 +209,7 @@ type Car {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	if got := g.buf.String(); strings.Contains(got, "Mermaid 10.1.0") {
 		t.Errorf("an import-free diagram carries the floor sentence:\n%s", got)
 	}
@@ -228,9 +228,9 @@ type Person {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
-	if !g.anchors["class-diagram"] {
-		t.Errorf("anchors = %v, want %q registered", g.anchors, "class-diagram")
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
+	if h := g.outline[1]; h.kind != kindClassDiagram || h.anchor != "class-diagram" {
+		t.Errorf("outline[1] = %+v, want the class diagram at #class-diagram", h)
 	}
 	got := g.buf.String()
 	if n := strings.Count(got, "```"); n != 2 {

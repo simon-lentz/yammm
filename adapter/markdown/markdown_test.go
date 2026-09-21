@@ -190,11 +190,11 @@ func TestMarshal_NonSourceBacked(t *testing.T) {
 	}
 }
 
-// TestMarshal_AnchorCollisionErrors pins that two type headings whose display
-// names slug to the same anchor are rejected rather than silently colliding —
-// a link to one would otherwise resolve to the other's section. Here entry
+// TestMarshal_SlugCollisionTakesGitHubSuffix pins that two type headings
+// whose display names slug alike each keep a working link: GitHub gives the
+// second heading the suffix -1, and the link to it says so. Here entry
 // "County" and imported "co.Unty" both slug to "county".
-func TestMarshal_AnchorCollisionErrors(t *testing.T) {
+func TestMarshal_SlugCollisionTakesGitHubSuffix(t *testing.T) {
 	t.Parallel()
 
 	s := loadSources(t, map[string][]byte{
@@ -215,66 +215,191 @@ type Unty {
 `),
 	})
 
-	if _, err := Marshal(s); err == nil {
-		t.Fatal("Marshal = nil error, want an anchor-collision error")
-	} else if !strings.Contains(err.Error(), "anchor") {
-		t.Errorf("Marshal error = %v, want an anchor-collision message", err)
+	out, err := Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	doc := string(out)
+	if !strings.Contains(doc, "[co.Unty](#county-1)") {
+		t.Errorf("link to co.Unty does not target #county-1:\n%s", doc)
 	}
 }
 
-// TestSelfCheck exercises the structural output guard directly on
-// hand-authored documents.
+// TestSelfCheck drives the structural guard over the state the generator
+// records, through finish, which is the one path to Marshal's output.
 func TestSelfCheck(t *testing.T) {
 	t.Parallel()
 
-	anchors := map[string]bool{"person": true}
+	s := loadSchema(t, `schema "people"
 
-	t.Run("valid document passes", func(t *testing.T) {
+type Person {
+	id UUID primary
+}
+`)
+	fresh := func() *generator {
+		g := newTestGenerator(t, s)
+		g.emitDocument()
+		return g
+	}
+
+	t.Run("emitted document passes", func(t *testing.T) {
 		t.Parallel()
-		doc := "# T\n\n```mermaid\nclassDiagram\n```\n\n### Person\n\n" +
-			"| A | B |\n| --- | --- |\n| 1 | 2 |\n\n[Person](#person)\n"
-		if err := selfCheck([]byte(doc), anchors); err != nil {
-			t.Errorf("selfCheck = %v, want nil", err)
+		if _, err := fresh().finish(); err != nil {
+			t.Errorf("finish = %v, want nil", err)
 		}
 	})
 
-	t.Run("unclosed fence fails", func(t *testing.T) {
+	t.Run("link to an anchor no heading holds fails", func(t *testing.T) {
 		t.Parallel()
-		doc := "```mermaid\nclassDiagram\n"
-		if err := selfCheck([]byte(doc), anchors); err == nil {
-			t.Error("selfCheck = nil, want unclosed-fence error")
+		g := fresh()
+		g.links = append(g.links, "ghost")
+		if _, err := g.finish(); err == nil {
+			t.Error("finish = nil, want unresolved-link error")
 		}
 	})
 
-	t.Run("heading inside open fence fails", func(t *testing.T) {
+	t.Run("unclosed generator fence fails", func(t *testing.T) {
 		t.Parallel()
-		doc := "```mermaid\n## Types\n```\n"
-		if err := selfCheck([]byte(doc), anchors); err == nil {
-			t.Error("selfCheck = nil, want heading-inside-fence error")
+		g := fresh()
+		g.buf.WriteString("```mermaid\nclassDiagram\n")
+		if _, err := g.finish(); err == nil {
+			t.Error("finish = nil, want unclosed-fence error")
 		}
 	})
 
-	t.Run("link to unknown anchor fails", func(t *testing.T) {
+	t.Run("heading inside an open fence fails", func(t *testing.T) {
 		t.Parallel()
-		doc := "[Ghost](#ghost)\n"
-		if err := selfCheck([]byte(doc), anchors); err == nil {
-			t.Error("selfCheck = nil, want unresolved-link error")
+		g := fresh()
+		g.buf.WriteString("```mermaid\n")
+		g.outline = append(g.outline, outlineEntry{anchor: "swallowed", offset: g.buf.Len()})
+		g.buf.WriteString("## Swallowed\n```\n")
+		if _, err := g.finish(); err == nil {
+			t.Error("finish = nil, want heading-inside-fence error")
 		}
 	})
 
-	t.Run("separator column mismatch fails", func(t *testing.T) {
+	t.Run("table cell holding a line break fails", func(t *testing.T) {
 		t.Parallel()
-		doc := "| A | B | C |\n| --- | --- |\n"
-		if err := selfCheck([]byte(doc), anchors); err == nil {
-			t.Error("selfCheck = nil, want column-mismatch error")
+		g := fresh()
+		var b bytes.Buffer
+		g.newTable(&b, "A", "B").row("1", "2\n3")
+		if _, err := g.finish(); err == nil {
+			t.Error("finish = nil, want line-break error")
 		}
 	})
 
-	t.Run("escaped pipes do not affect column count", func(t *testing.T) {
+	t.Run("a link the generator wrote to a missing anchor fails", func(t *testing.T) {
 		t.Parallel()
-		doc := "| A | B |\n| --- | --- |\n| a\\|b | c |\n"
-		if err := selfCheck([]byte(doc), anchors); err != nil {
-			t.Errorf("selfCheck = %v, want nil", err)
+		g := newTestGenerator(t, loadSchema(t, "schema \"s\"\ntype A {\n  id String primary\n  --> TO (one) B\n}\ntype B {\n  id String primary\n}\n"))
+		g.types[findType(t, g, "B").ID()].anchor = "ghost"
+		g.emitDocument()
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "#ghost") {
+			t.Errorf("finish = %v, want the link to #ghost refused", err)
 		}
 	})
+
+	t.Run("a heading the generator wrote inside its own fence fails", func(t *testing.T) {
+		t.Parallel()
+		g := newTestGenerator(t, s)
+		g.outline[0].md += "\n```"
+		g.emitDocument()
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "inside an open code fence") {
+			t.Errorf("finish = %v, want a heading-inside-fence error", err)
+		}
+	})
+
+	t.Run("table row of the wrong width fails", func(t *testing.T) {
+		t.Parallel()
+		g := fresh()
+		var b bytes.Buffer
+		g.newTable(&b, "A", "B", "C").row("1", "2")
+		if _, err := g.finish(); err == nil {
+			t.Error("finish = nil, want column-mismatch error")
+		}
+	})
+}
+
+// TestSealFences pins the seal against CommonMark's fence rules: a doc
+// comment's fence is closed only when a Markdown parser reads it as open, and
+// the closing line repeats the opener's indent and run.
+func TestSealFences(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name, in, want string
+	}{
+		{"balanced", "```\nx\n```", "```\nx\n```"},
+		{"open backticks", "```go\nx", "```go\nx\n```"},
+		{"open tildes", "~~~~\nx", "~~~~\nx\n~~~~"},
+		{"a tilde fence's info string may hold a backtick", "~~~a`b\nx", "~~~a`b\nx\n~~~"},
+		{"a backtick in a backtick info string opens nothing", "```a`b\nx", "```a`b\nx"},
+		{"four spaces is indented code, not a fence", "    ```\nx", "    ```\nx"},
+		{"an opener indented three spaces", "   ```\nx", "   ```\nx\n   ```"},
+		{"a closer indented four spaces is content", "```\nx\n    ```", "```\nx\n    ```\n```"},
+		{"a closer indented three spaces closes", "```\nx\n   ```", "```\nx\n   ```"},
+		{"a shorter run does not close", "````\nx\n```", "````\nx\n```\n````"},
+		{"text after a closing run does not close", "```\nx\n``` y", "```\nx\n``` y\n```"},
+		{"a tab after a closing run closes", "```\nx\n```\t", "```\nx\n```\t"},
+		{"inline code at a line's start opens nothing", "```x``` is code", "```x``` is code"},
+		{"two backticks open nothing", "``\nx", "``\nx"},
+		{"a closer of the other character does not close", "```\n~~~\nx", "```\n~~~\nx\n```"},
+		{"a tab-indented opener is indented code", "\t```\nx", "\t```\nx"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := sealFences(tt.in); got != tt.want {
+				t.Errorf("sealFences(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMarshal_AuthorFenceUnderABulletIsReadInItsItem pins that the self-check
+// reads a relation's doc comment relative to the bullet that holds it: a
+// closer indented three spaces inside the item closes the fence, as it does
+// for a Markdown parser, although the line sits five spaces in.
+func TestMarshal_AuthorFenceUnderABulletIsReadInItsItem(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, "schema \"s\"\ntype T {\n  id String primary\n  /* Example:\n```\nx\n   ```\n*/\n  --> TO (one) U\n}\ntype U {\n  id String primary\n}\n")
+	out, err := Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal = %v, want nil", err)
+	}
+	if !strings.Contains(string(out), "\n  ```\n  x\n     ```\n") {
+		t.Errorf("the doc comment is not written unsealed under its bullet:\n%s", out)
+	}
+}
+
+// TestMarshal_AuthorTextIsNotAGeneratorFault pins that a doc comment's own
+// Markdown never fails generation: a link to an anchor the document lacks, a
+// fence the comment leaves open, and a line shaped like a table separator.
+// The open fence is closed at the end of the comment's block, right before
+// the property table.
+func TestMarshal_AuthorTextIsNotAGeneratorFault(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name, doc, want string
+	}{
+		{"link", "See [the glossary](#glossary) for terms.", "See [the glossary](#glossary) for terms.\n\n| Property"},
+		{"fence", "Example:\n```\nunclosed", "unclosed\n```\n\n| Property"},
+		{"tildes", "Example:\n~~~~\nunclosed", "unclosed\n~~~~\n\n| Property"},
+		{"separator", "|---|---|", "|---|---|\n\n| Property"},
+		{"comment line in a fence", "Example:\n```yaml\n# a comment\nx: 1\n```", "x: 1\n```\n\n| Property"},
+		{"heading line in a fence", "Example:\n```\n### T\n```", "### T\n```\n\n| Property"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := loadSchema(t, "schema \"s\"\n/* "+tt.doc+" */\ntype T {\n  id String primary\n}\n")
+			out, err := Marshal(s)
+			if err != nil {
+				t.Fatalf("Marshal = %v, want nil", err)
+			}
+			if !strings.Contains(string(out), tt.want) {
+				t.Errorf("output does not hold %q:\n%s", tt.want, out)
+			}
+		})
+	}
 }

@@ -97,7 +97,7 @@ grep '## Class Diagram' county.md
 # schemas get their own section with schema-qualified type headings.
 exec yammm gen --to md --module-root registry registry/a/b/entry.yammm
 stdout '## Schema deplib \(imported as dep\)'
-stdout '### deplib\.Vendor'
+stdout '### dep\.Vendor'
 
 # Per-target flag rejection covers the md target in both directions.
 ! exec yammm gen --to md --package foo county.yammm

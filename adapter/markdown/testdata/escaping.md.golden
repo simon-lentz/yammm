@@ -28,4 +28,4 @@ classDiagram
 
 | Name | Definition | Description |
 | --- | --- | --- |
-| `Grade` | <code>Enum["A\|B", "C&#96;D"]</code> |  |
+| `Grade` | <code>Enum&#91;"A\|B", "C&#96;D"&#93;</code> |  |

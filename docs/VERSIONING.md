@@ -4,11 +4,12 @@ This document codifies yammm's versioning commitments — both API and wire-form
 
 ## Scope
 
-yammm's versioning covers two surfaces that evolve on related but distinct cadences:
+yammm's versioning covers four surfaces that evolve on related but distinct cadences:
 
 1. **Go API surface** — exported types, functions, methods, constants, options, and their documented behavior under the `github.com/simon-lentz/yammm` module.
 2. **`.ys` wire format** — the on-disk shape of snapshots produced by `snapshot.Marshal` and consumed by `snapshot.Load` / `snapshot.Info` / `snapshot.HeaderOnly` / `snapshot.Verify`. The wire format carries its own `version` field in the header (currently `4`, first tagged by v0.19.0; `3` from v0.12.0 through v0.18.0).
 3. **Generated Go output (`adapter/gogen`)** — the shape of the Go source `gogen.Marshal` emits for a given schema and options. Promoted to a committed surface in v0.6.0 (the v0.5.0 notes anticipated promotion "if a downstream consumer comes to depend on that shape"; a downstream consumer now byte-pins committed generated packages against it). Its tier rules are in "Generated-output surface" below.
+4. **Emitted Markdown (`adapter/markdown`)** — the shape of the reference document `markdown.Marshal` emits for a given schema and options. Promoted to a versioned surface in the first release after v0.21.0 (the v0.8.0 notes named the trigger, "if a consumer comes to depend on byte-stable documents"; a downstream consumer now commits a generated document and drift-checks it in CI). Its tier rules are in "Emitted-Markdown surface" below.
 
 The surfaces share a semver tag but have independent version-bump triggers, documented below.
 
@@ -77,6 +78,30 @@ The module root is an input because the embedded source keys and `SerializedEntr
 - Declaration order beyond "deterministic for a given yammm version".
 
 The golden corpus under `adapter/gogen/testdata/` is this contract's executable form: a golden may change only in a release whose notes account for the change under the tiers above.
+
+## Emitted-Markdown surface (`adapter/markdown`)
+
+For an unchanged schema, unchanged `Marshal` options and an unchanged yammm version, the emitted document is byte-identical. No path, module root or source identity reaches the document, so it has no input beyond the schema and the options. Across versions, changes to the output classify as:
+
+### Breaking (major post-1.0; pre-1.0 minor under the standard subtractive rules)
+
+- Changing the text of a heading an unchanged schema produces, or the anchor that heading takes: the title, a schema heading, the fixed section headings, and a type's display name (its bare name, the entry schema's `alias.Name` tag, or `Name (schema)`). A link into the document targets an anchor, so an anchor that moves breaks the link.
+- Removing a section, a table or a table column an unchanged schema produces, or changing a table's columns or their order.
+- Changing the rule a Type or Definition cell renders a constraint by: the constraint's DSL form, byte for byte.
+
+### Additive / behavioral (minor or patch, release-noted)
+
+- New sections, rows, bullets or diagram elements for a schema feature the document did not render before, and new options whose default leaves the output unchanged.
+- Corrections: a byte change that makes the document state the schema as written where it stated something else — an escape added so text renders literally, a reference resolved to the type it names. Consumers that byte-pin will see these and regenerate; the release notes must call them out.
+- Byte-level changes that move no heading, anchor, column or cell rule (layout inside the diagram, whitespace between blocks). Release-noted on the same terms.
+
+### Explicitly uncommitted
+
+- Doc-comment text, which the document carries as Markdown the author wrote. A link, heading or table inside it is the author's, and a heading inside it takes an anchor as any heading does.
+- The sentences the generator writes (badge wording, the Mermaid renderer-floor sentence).
+- Mermaid class ids, and the order of the diagram's lines beyond "deterministic for a given yammm version".
+
+The golden corpus under `adapter/markdown/testdata/` is this contract's executable form: a golden may change only in a release whose notes account for the change under the tiers above.
 
 ## Post-1.0 policy (future)
 
@@ -894,7 +919,8 @@ taking it to **twenty-nine**, and removes `csv.ErrNoTypeColumn`, taking the
 incompatible count to **eight**. **Unit 8's other groups so far
 move no declaration**: the instruments, provenance and CSV value-model groups
 each read twenty-one and seven, byte-identical, and the composition group reads
-twenty-two and seven, as the dialect group does. Each
+twenty-two and seven, as the dialect group does. Pass B's instruments and
+Markdown groups each read twenty-nine and eight, as the diagnostics group does. Each
 block below was written by the pass or group that landed its behaviour.
 
 ### Unit 8 — one addressability rule, and every root held to it
@@ -1066,6 +1092,26 @@ block below was written by the pass or group that landed its behaviour.
 - **No golden held a `Float`.** `adapter/json`'s twelve goldens declared none at all, so the indicator was pinned by literal assertions alone; a thirteenth holds a `Float` as a property, under an alias, in a `List` and in a `Vector`, and is the only golden the indicator's removal fails. A CSV test holds the exact text of a whole written file, beside the per-cell assertions that already pinned positional notation. Six tests in the two adapters claimed to "kill" a writer arm they cannot: `Graph.Add` rewrites a Timestamp, a Date and a UUID to its stored form before any writer sees it, so the writers' canonicalization is load-bearing for numbers alone. Their comments now say what they pin.
 
 - **Consumer impact: none, measured.** rdata imports neither data adapter, and it imports `adapter/neo4j` without building a `List` constraint by hand, so the one input that moves there is one it never makes. No exported declaration moves, so `gorelease -base=v0.21.0` still reads twenty-nine compatible and eight incompatible.
+
+### Unit 8 — the emitted Markdown becomes a versioned surface, and names every type as the entry schema does
+
+- **Policy — the emitted Markdown is the fourth versioned surface.** Scope item 4 and the "Emitted-Markdown surface" tier rules above are new. The v0.8.0 section named the trigger — a consumer that depends on byte-stable documents — and it has fired: rdata commits `pipelines/wyrth_graph.md`, written by `markdown.Marshal`, and its `TestGeneratedDocMatchesSchemas` fails when a fresh regeneration differs by one byte. Before 1.0 a Breaking change on this surface is a minor release; after 1.0 it is a major one. The changes below are classified under the new tiers.
+
+- **Breaking on the emitted-Markdown surface — a type is named by the entry schema's own tag (consumer-visible).** A type the entry schema imports directly was written `schemaName.Name`, a spelling no data file, validator or other generator uses when the import alias differs from the schema name. It is now `alias.Name`, the tag `schema.AddressableTag` returns, which is how a data file names it. A type the entry reaches only through another import has no tag and was written `schemaName.Name` too, which reads as a tag that does not resolve; it is now `Name (schema)`. The rule reaches every place a type is named: its heading and anchor, every link to it, the `from <Owner>` markers, and its Mermaid class id and label. rdata's `wyrth_graph.md` moves at every type heading, link and diagram class, `msrb_emma.Issuer` to `emma.Issuer` and so on for each import, and its drift test fails from the pin move until `go generate` rewrites the file.
+
+- **Breaking on the emitted-Markdown surface — headings take anchors as GitHub allocates them, and no schema is refused for its names.** An anchor is the heading's slug, suffixed `-1`, `-2`, … when an earlier heading took it. `Marshal` refused a schema whose two type headings slugged alike ("both anchor to #…; rename one type"), and it linked a type whose heading slugged like a section heading to that section: a type named `Types` was linked as `#types`, the `## Types` heading, where GitHub gives the type's own heading `#types-1`. Both now link to the heading GitHub gives the type, and the refusal is withdrawn. The generator allocates anchors without reading doc comments, and a heading inside one takes an anchor on GitHub too: it can move a later heading's suffix, and when it takes a type's anchor first, a link to that type lands on the doc comment's heading. That text is the author's and is uncommitted under the tier rules.
+
+- **Behaviour — a Type or Definition cell shows the constraint byte for byte (consumer-visible).** A code span processes no backslash escape, and the cell rule escaped backslashes anyway, so `Pattern["^\\d+$"]` rendered as `Pattern["^\\\\d+$"]` and `Enum["a\"b"]` as `Enum["a\\"b"]`. A code span now escapes pipes alone. A value a code span cannot carry exactly — one holding a backtick, a backslash before a pipe or a line break — takes a `<code>` element whose Markdown-significant characters are entities; that element escaped HTML metacharacters and the backtick but no inline Markdown syntax, so emphasis, link and strikethrough characters in it rendered as Markdown. rdata's `wyrth_graph.md` moves at its seven `Pattern` lines.
+
+- **Behaviour — an extends reference resolves in the schema that declares the type.** The reference was matched against the displayed names by spelling, so where the entry schema and an import each declared a `Shared`, a type extending the entry's `Shared` was linked to, and drawn under, the import's.
+
+- **Behaviour — a schema name and an invariant message render as written.** Markdown syntax in a schema name was written raw into the title, schema headings, displays and links, so `[z](w)` rendered as a link; it is escaped now, a control character in it is written as its Go escape, so a name holding a line break no longer splits a heading, a link or a table row, and a double quote in a Mermaid class label is `#quot;`. An invariant's message was written as a quoted Go string literal with no Markdown escaping, so `a*b*c` lost its asterisks and raw HTML passed through; the literal is escaped now.
+
+- **Behaviour — Mermaid class ids are unique.** A class id is the display sanitized to letters, digits and underscores, so an entry type `A_B` and an imported `A.B` shared one id and the diagram drew one class for both. The later class takes `A_B_2`.
+
+- **Behaviour — author text no longer fails generation.** The self-check read the whole document, doc comments included, so `Marshal` refused a legal schema whose doc comment held a link to an anchor the document lacks (`[terms](#glossary)`), a fence it left open, a line shaped like a table separator, or a fenced example with a `#` line in it; an `Enum` value holding `](#` was refused the same way. The check now reads what the generator recorded: every link it wrote, every table row against its header, and every heading it wrote against the fences around it. A fence a doc comment leaves open, as CommonMark's fence rules read it — at most three spaces of indent, no backtick in a backtick fence's info string — is closed at the end of that comment's block, so it cannot swallow the rest of the document. The seal reads fences alone, so a fence inside an HTML block or a list the author wrote can still leave the document inside a fence.
+
+- **Consumer impact, measured.** rdata's `pipelines/wyrth_graph.md` moves by the two consumer-visible changes above and nothing else, 99 lines replaced; its five generated Go files do not move. In rdata's suite `TestGeneratedDocMatchesSchemas` fails on the candidate and passes on the last tag, and no other test moves. No exported declaration moves, so `gorelease -base=v0.21.0` still reads twenty-nine compatible and eight incompatible.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
@@ -2963,3 +3009,4 @@ Minor tier: breaking DSL, hash and Go-API changes under the pre-1.0 subtractive 
 - **2026-09-10** — **Corrected condition-1 unit 6's Unreleased section against the candidate (A-456).** Retitled it, since unit 6 sits unmerged on `review` (A-417), and gave pass A its own heading; stated the section's whole declaration delta, six compatible additions; added an exit-code table measured against `v0.21.0`, replacing two sentences that said no exit code moves; stated how `W_NEO4J_INDEXES_UNREADABLE` and the one-result rule reach the stream; recorded the 0600 mode of the files `--output-dir` creates; and pointed pass B's `issues` item at its rename.
 - **2026-09-10 (night)** — **Corrected the Unreleased section's heading and preamble, which still said unit 6 sat unmerged on `review` after A-461 closed it and `fb57e99` (PR #107) merged it, and added the A-433 block**: the plugin corpus's load gate retagged and guarded, and the VS Code extension's Markdown injection widened to the whole fence vocabulary with its leak past an unbalanced brace closed.
 - **2026-09-14** — **Wrote condition-1 unit 7's second fix pass into the Unreleased section, and corrected its earlier blocks.** Added five blocks: one resolver mints every file-backed identity, a retagging merge and a terminal-true excerpt, import paths and the path grammar, `immutable`'s pointers with `graph`'s content order, and a shared registry's closures with a refused document's diagnostic. Restated the unit's declaration delta from `gorelease -base=v0.21.0` over the composed tree, twelve additions and seven removals. Corrected the earlier blocks where the round found them false: the text forms a synthetic or relative module root moves, the excerpts that had an empty mark row rather than none, the cycle's module-root clause and the opening import's `E_UPSTREAM_FAIL`, a uint64 PK that now parses, the non-UTF-8 path refusal that reaches `schema.Load`, the resolver's refusal under a regular file, the deleted LSP canonicalizer's visibility, the CI matrix, the cyclic value stored as it is, and the file mode on Windows.
+- **2026-09-21** — **Promoted the emitted Markdown (`adapter/markdown`) to the fourth versioned surface**: Scope item 4 and the "Emitted-Markdown surface" tier rules. The trigger the v0.8.0 section named has fired: the single external consumer commits a generated document and drift-checks it in CI. Scope's count of surfaces is corrected from two to four; it had not moved when generated Go output became the third. The Unreleased section gains the unit-8 block that classifies the Markdown group's changes under the new tiers.

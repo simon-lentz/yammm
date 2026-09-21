@@ -95,7 +95,12 @@ func TestCodeCell(t *testing.T) {
 		{"backtick falls back to code tag", "a`b", "<code>a&#96;b</code>"},
 		{"backtick with html metacharacters", "a`<&>", "<code>a&#96;&lt;&amp;&gt;</code>"},
 		{"backtick with pipe", "a`|b", "<code>a&#96;\\|b</code>"},
-		{"backslash before pipe stays table-safe", `a\|b`, "`" + `a\\\|b` + "`"},
+		{"backslash before pipe takes the code tag", `a\|b`, "<code>a&#92;\\|b</code>"},
+		{"backslash stays single in a code span", `Pattern["^\\d+$"]`, "`Pattern[\"^\\\\d+$\"]`"},
+		{"inline syntax in a code tag is entities", `a\|*_~!`, "<code>a&#92;\\|&#42;&#95;&#126;&#33;</code>"},
+		{"a line break takes the code tag", "a\nb", "<code>a<br>b</code>"},
+		{"a CRLF is one break", "a\r\nb", "<code>a<br>b</code>"},
+		{"a lone CR is a break", "a\rb", "<code>a<br>b</code>"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -104,6 +109,102 @@ func TestCodeCell(t *testing.T) {
 				t.Errorf("codeCell(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestEscapeInline pins every character escapeInline escapes, and the
+// underscore rule: an underscore between two letters or digits opens no
+// emphasis and is left alone; any other underscore is escaped.
+func TestEscapeInline(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in, want string
+	}{
+		{"plain", "plain"},
+		{"a_b", "a_b"},
+		{"1_2", "1_2"},
+		{"é_é", "é_é"},
+		{"_x", `\_x`},
+		{"x_", `x\_`},
+		{"_", `\_`},
+		{"x _a_ y", `x \_a\_ y`},
+		{"a__b", `a\_\_b`},
+		{`x\(y`, `x\\(y`},
+		{"a `d`", "a \\`d\\`"},
+		{"*[]<>&~|!#", `\*\[\]\<\>\&\~\|\!\#`},
+		{"a (b) c.d", "a (b) c.d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			t.Parallel()
+			if got := escapeInline(tt.in); got != tt.want {
+				t.Errorf("escapeInline(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPrintableName pins that a schema name's control characters take their
+// Go escapes and every other character is kept.
+func TestPrintableName(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in, want string
+	}{
+		{"plain name", "plain name"},
+		{"a\nb", `a\nb`},
+		{"a\r\tb", `a\r\tb`},
+		{"a\x00b", `a\x00b`},
+		{"a\u0085b", `a\u0085b`},
+		{`a\"b`, `a\"b`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			if got := printableName(tt.in); got != tt.want {
+				t.Errorf("printableName(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAnchorAllocator pins GitHub's allocation: a repeated slug takes the next
+// free suffix, skipping a suffixed form an earlier heading holds as its own
+// slug.
+func TestAnchorAllocator(t *testing.T) {
+	t.Parallel()
+
+	var a anchorAllocator
+	for i, tt := range []struct{ heading, want string }{
+		{"X", "x"},
+		{"X 1", "x-1"},
+		{"X", "x-2"},
+		{"X", "x-3"},
+		{"Y", "y"},
+	} {
+		if got := a.allocate(tt.heading); got != tt.want {
+			t.Errorf("allocation %d of %q = %q, want %q", i, tt.heading, got, tt.want)
+		}
+	}
+}
+
+// TestUniqueMermaidID pins that a taken id takes the first free _N suffix of
+// its own base.
+func TestUniqueMermaidID(t *testing.T) {
+	t.Parallel()
+
+	taken := map[string]bool{}
+	for i, tt := range []struct{ base, want string }{
+		{"A_B", "A_B"},
+		{"A_B_2", "A_B_2"},
+		{"A_B", "A_B_3"},
+		{"A_B", "A_B_4"},
+	} {
+		if got := uniqueMermaidID(tt.base, taken); got != tt.want {
+			t.Errorf("id %d from %q = %q, want %q", i, tt.base, got, tt.want)
+		}
 	}
 }
 
@@ -133,10 +234,11 @@ func TestWriteTableHeader(t *testing.T) {
 	t.Parallel()
 
 	var b bytes.Buffer
-	writeTableHeader(&b, "Property", "Type", "Modifiers", "Description")
+	var g generator
+	g.newTable(&b, "Property", "Type", "Modifiers", "Description")
 	want := "| Property | Type | Modifiers | Description |\n| --- | --- | --- | --- |\n"
 	if got := b.String(); got != want {
-		t.Errorf("writeTableHeader = %q, want %q", got, want)
+		t.Errorf("newTable = %q, want %q", got, want)
 	}
 }
 

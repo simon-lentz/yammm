@@ -34,11 +34,27 @@
 //   - One "## Schema <Name> (imported as <alias>)" section per imported
 //     schema in closure order — a transitively imported schema (one the
 //     entry does not import directly) has no alias and heads as plain
-//     "## Schema <Name>". Its types render as "### <schemaName>.<TypeName>"
-//     (collision-proof headings and anchors), its DataTypes under a
-//     "### Data Types" table.
+//     "## Schema <Name>". Its types render under their display names (below),
+//     its DataTypes under a "### Data Types" table.
 //
 // Sections with nothing to say are omitted entirely — no empty headings.
+//
+// A type is named the way the entry schema names it, in its heading, in every
+// link to it, in "from <Owner>" markers and in the diagram: the bare name for a
+// type the entry declares, the entry's own tag "<alias>.<TypeName>" for one it
+// imports directly, and "<TypeName> (<schemaName>)" for one it reaches only
+// through another import, which has no tag. The tag is the one
+// [github.com/simon-lentz/yammm/schema.AddressableTag] returns, which is how a
+// data file names the type.
+//
+// Every heading the generator writes takes the anchor GitHub gives it: the
+// heading's slug, suffixed -1, -2, … when an earlier heading took it. So two
+// such headings that slug alike each keep a working link, and a type whose
+// heading slugs like a section heading — a type named Types — links to its own
+// heading. The generator allocates anchors without reading doc comments, and a
+// heading inside one takes an anchor on GitHub too: it can move a later
+// heading's suffix, and when it takes a type's anchor first, a link to that
+// type lands on the doc comment's heading.
 //
 // # Tables Own Detail; the Diagram Owns Shape
 //
@@ -59,8 +75,10 @@
 // many, one:many, _) — rather than Mermaid cardinality notation, so the
 // whole document speaks one vocabulary. Mermaid namespaces are deliberately
 // not used (some Markdown renderers do not support them in class
-// diagrams); qualified type names render as sanitized class ids
-// with a display label instead. That labelled form needs Mermaid 10.1.0 or
+// diagrams); an imported type's display renders as a sanitized class id
+// with the display as its label instead. Two displays that sanitize to one id
+// stay two classes: the later takes the id suffixed _2, _3, and so on. That
+// labelled form needs Mermaid 10.1.0 or
 // later, and only an imported type takes it, so a schema with imports is in
 // scope and an import-free one renders on Mermaid 9. When the diagram holds
 // a labelled class the document says so in one sentence under the "## Class
@@ -78,8 +96,10 @@
 //
 // # Invariants
 //
-// Each invariant renders its failure message as a bullet — with a
-// "— from <Owner>" marker when inherited — its doc-comment beneath, then the
+// Each invariant renders its failure message as a bullet, written as a quoted
+// Go string literal and escaped for Markdown — with a "— from <Owner>" marker
+// when inherited —
+// its doc-comment beneath, then the
 // declaration source ("! \"message\" expression",
 // exactly as written, doc comment stripped) in a yammm code fence,
 // extracted from the schema source via the invariant's span. When no
@@ -93,16 +113,32 @@
 // Output is deterministic — byte-identical across runs, machines, and
 // checkouts (no absolute paths, all walks ordered) — so generated
 // documents can be committed and drift-checked in CI by regenerating and
-// diffing. Before returning, [Marshal] structurally verifies its own
-// output: every code fence closes (fences are sized past any backtick run
-// in their body, so embedded backticks cannot terminate them early), every
-// internal link resolves to a heading emitted in this document, and every
-// table separator row matches its header's column count. A failure there
-// is a generator bug surfaced as an error, never emitted output. Table
-// cells escape backslashes and pipes and fold newlines so arbitrary
-// doc-comment and enum text cannot break table structure; a value
-// containing a backtick renders through an entity-escaped <code> element
-// instead of a code span.
+// diffing. The document is a versioned surface; docs/VERSIONING.md states
+// its tiers.
+//
+// Before returning, [Marshal] verifies the structure it wrote itself: every
+// code fence closes and no heading it wrote sits inside an open fence (its
+// own fences are sized past any backtick run in their body), every internal
+// link it wrote resolves to a heading of this document, and every table row it
+// wrote has its header's column count on one line. A failure there is a
+// generator bug surfaced as an error, never emitted output.
+//
+// Doc-comment text is written as the Markdown its author wrote, so a link, a
+// table or a heading inside it is the author's own and is not checked. A code
+// fence a doc comment leaves open, as CommonMark's fence rules read it, is
+// closed at the end of that comment's block, so it cannot swallow the rest of
+// the document. The seal reads fences alone: a fence inside an HTML block or
+// inside a list the author wrote is read as if it stood at the top level, so
+// such a doc comment can still leave the document inside a fence. Every other
+// text the schema supplies renders literally. A code cell — a property's name and
+// Type, a DataType's name and Definition — shows its text byte for byte: a
+// code span with each pipe escaped, or, for text holding a backtick, a
+// backslash before a pipe or a line break, a <code> element whose
+// Markdown-significant characters are entities. A description cell escapes
+// backslashes and pipes and folds newlines to <br>. A schema name and an
+// invariant message are escaped for Markdown, a control character in a schema
+// name is written as its Go escape (\n), and a double quote in a Mermaid class
+// label is written #quot;.
 //
 // # Preconditions
 //
@@ -121,12 +157,11 @@
 //
 // # Error Conditions
 //
-// [Marshal] returns an error (never partial or broken output) when two type
-// headings slug to the same anchor — a rename-able input collision (slug
-// normalization strips the dots that qualify an imported name), since a link
-// to one type would otherwise resolve to the other's section — or when the
-// emitted document fails the structural self-check (an unclosed fence, an
-// unresolvable internal link, or a malformed table, each a generator bug).
+// [Marshal] returns an error, and no output, only when the emitted document
+// fails the structural self-check: an unclosed fence, a heading inside an open
+// fence, an unresolvable internal link, or a table row of the wrong width or
+// split by a line break. Each is a generator bug, so no schema is refused for
+// its names or its doc-comment text.
 //
 // # Thread Safety
 //

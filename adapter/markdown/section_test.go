@@ -31,15 +31,10 @@ func loadSources(t *testing.T, sources map[string][]byte) *schema.Schema {
 	return s
 }
 
-// newTestGenerator builds a generator, failing the test on an anchor-collision
-// error (the corpus fixtures never collide).
+// newTestGenerator builds a generator with Marshal's default options.
 func newTestGenerator(t *testing.T, s *schema.Schema) *generator {
 	t.Helper()
-	g, err := newGenerator(s)
-	if err != nil {
-		t.Fatalf("newGenerator: %v", err)
-	}
-	return g
+	return newGenerator(s, config{classDiagram: true, classMembers: true})
 }
 
 // sectionFor renders the named type's section and returns it.
@@ -349,6 +344,28 @@ type Person {
 	}
 }
 
+// TestEmitTypeSection_InvariantMessageIsLiteral pins that an invariant's
+// message renders as the string it is: emphasis, raw HTML and a link inside
+// it are escaped, not rendered.
+func TestEmitTypeSection_InvariantMessageIsLiteral(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, `schema "people"
+
+type Person {
+	id UUID primary
+	age Integer
+
+	! "a*b*c and <b>x</b> [l](#person)" age >= 0
+}
+`)
+	got := sectionFor(t, s, "Person")
+	want := "\n- \"a\\*b\\*c and \\<b\\>x\\</b\\> \\[l\\](\\#person)\"\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("section %q does not contain the bullet %q", got, want)
+	}
+}
+
 func TestEmitTypeSection_BuilderInvariantDegradesToMessage(t *testing.T) {
 	t.Parallel()
 
@@ -520,8 +537,8 @@ type Person {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitTypeSection(findType(t, g, "Person"))
-	if !g.anchors["person"] {
-		t.Errorf("anchors = %v, want %q registered", g.anchors, "person")
+	person := findType(t, g, "Person")
+	if got := g.types[person.ID()].anchor; got != "person" {
+		t.Errorf("Person's anchor = %q, want %q", got, "person")
 	}
 }
