@@ -238,33 +238,26 @@ func (g *generator) emitAssociation(rel *schema.Relation, used map[string]int) e
 	return nil
 }
 
-// emitGraph writes the Graph aggregate: one slice field per CONCRETE type across the
-// closure, keyed by the schema.TagForm name adapter/json keys its object by. Two
-// same-named transitive imports render one TagForm name, so a two-pass emit falls
-// back to the unique Go type name on that collision and keys stay unique.
+// emitGraph writes the Graph aggregate: one slice field per concrete type the entry
+// schema can name, keyed by its [schema.AddressableTag], the name adapter/json keys
+// its object by. A type reached only through another import has no tag, so no
+// document can hold it at top level and it takes no field. Two addressable types
+// never share a tag, so the keys are unique.
 func (g *generator) emitGraph() error {
-	type field struct{ goName, key string }
-	var fields []field
-	keyCount := map[string]int{}
+	g.buf.WriteString("type Graph struct {\n")
 	for _, t := range g.closureTypes() {
 		if t.IsAbstract() || t.IsPart() {
+			continue
+		}
+		key, ok := schema.AddressableTag(g.schema, t.ID())
+		if !ok {
 			continue
 		}
 		name, ok := g.names.goType(t.ID())
 		if !ok {
 			return fmt.Errorf("gogen: no Go name for type %q", t.Name())
 		}
-		key := schema.TagForm(g.schema, t.ID())
-		keyCount[key]++
-		fields = append(fields, field{goName: name, key: key})
-	}
-	g.buf.WriteString("type Graph struct {\n")
-	for _, f := range fields {
-		key := f.key
-		if keyCount[f.key] > 1 {
-			key = f.goName // the TagForm rendering collided; the unique Go name keeps keys unique
-		}
-		fmt.Fprintf(g.buf, "%s []*%s %s\n", f.goName, f.goName, jsonTag(key, true))
+		fmt.Fprintf(g.buf, "%s []*%s %s\n", name, name, jsonTag(key, true))
 	}
 	g.buf.WriteString("}\n\n")
 	return nil

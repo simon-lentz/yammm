@@ -10,6 +10,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -208,17 +209,11 @@ func TestMarshal_DiamondImport(t *testing.T) {
 	}
 }
 
-// TestMarshal_EdgeWhereKeyCollision pins the fix for an edge property named "where"
-// colliding with the synthesized Where block's JSON key. Two struct fields sharing a
-// JSON key make encoding/json drop BOTH at marshal time, and go/types does not catch
-// duplicate struct tags — so the block's wire key must fall back to its unique Go field
-// name (the lossy-collision strategy emitGraph uses), while the edge property's own
-// "where" key stays canonical.
+// TestMarshal_EdgeWhereKeyCollision pins that an edge property named "where" keeps
+// its wire key. Two struct fields sharing a JSON key make encoding/json drop both,
+// and go/types does not catch duplicate struct tags. The _target_ fields flatten
+// beside the properties, and the underscore rule keeps the namespaces apart.
 func TestMarshal_EdgeWhereKeyCollision(t *testing.T) {
-	// The nested Where block and its clash fallback are gone: _target_
-	// fields flatten beside the properties, and the underscore rule keeps
-	// the namespaces apart, so a property named "where" keeps its wire key
-	// with no collision handling at all.
 	s := loadSchema(t, "edge_where_collision")
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -350,29 +345,58 @@ func TestMarshal_TemporalEdge(t *testing.T) {
 	}
 }
 
-// TestMarshal_GraphKeysAreTagForm pins the Graph aggregate's json keys as the
-// names adapter/json writes: bare for the entry schema's types, alias-qualified
-// for a direct import, and the unique Go name where two transitive imports
-// would otherwise render one bare name.
-func TestMarshal_GraphKeysAreTagForm(t *testing.T) {
-	cases := map[string][]string{
-		"imports/main":                   {"`json:\"County,omitempty\"`", "`json:\"common.Region,omitempty\"`"},
-		"imports/tagform_collision_main": {"`json:\"LeftbaseNode,omitempty\"`", "`json:\"RightbaseNode,omitempty\"`", "`json:\"Main,omitempty\"`"},
-		"graph_collision":                {"`json:\"ABCDef,omitempty\"`", "`json:\"AbcDef,omitempty\"`"},
+// TestMarshal_GraphKeysAreAddressableTags pins the Graph aggregate's json keys
+// as the names adapter/json writes: bare for the entry schema's types and
+// alias-qualified for a direct import. A type the entry schema reaches only
+// through another import has no such name and no Graph field, though its
+// struct is still emitted; and an entry type that shares its name with one
+// keeps its bare key rather than its schema-qualified Go name.
+func TestMarshal_GraphKeysAreAddressableTags(t *testing.T) {
+	cases := map[string]struct{ keys, absent, structs []string }{
+		"imports/main": {
+			keys:   []string{"County", "common.Region"},
+			absent: []string{"county"},
+		},
+		"graph_collision": {
+			keys: []string{"ABCDef", "AbcDef"},
+		},
+		"imports/tagform_collision_main": {
+			keys:    []string{"Main", "left.Left", "right.Right"},
+			absent:  []string{"LeftbaseNode", "RightbaseNode"},
+			structs: []string{"LeftbaseNode", "RightbaseNode"},
+		},
+		"imports/entry_shadow_main": {
+			keys:    []string{"Node", "mid.Mid"},
+			absent:  []string{"EmainNode", "EleafNode"},
+			structs: []string{"EmainNode", "EleafNode"},
+		},
+		"imports/diamond_main": {
+			keys:    []string{"Top", "left.Left", "right.Right"},
+			absent:  []string{"Shared"},
+			structs: []string{"Shared"},
+		},
 	}
-	for name, wants := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			got, err := gogen.Marshal(loadSchema(t, name))
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range wants {
-				if !bytes.Contains(got, []byte(want)) {
-					t.Errorf("output missing %s:\n%s", want, got)
+			keys := graphKeys(t, got)
+			for _, want := range tc.keys {
+				if !slices.Contains(keys, want) {
+					t.Errorf("Graph keys %q lack %q", keys, want)
 				}
 			}
-			if bytes.Contains(got, []byte("`json:\"county,omitempty\"`")) {
-				t.Error("Graph still keyed by the lower_snake Go name")
+			for _, bad := range tc.absent {
+				if slices.Contains(keys, bad) {
+					t.Errorf("Graph keys %q hold %q", keys, bad)
+				}
+			}
+			for _, name := range tc.structs {
+				if !bytes.Contains(got, []byte("type "+name+" struct {")) {
+					t.Errorf("output lacks the struct %s:\n%s", name, got)
+				}
 			}
 		})
 	}

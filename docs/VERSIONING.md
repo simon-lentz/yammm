@@ -919,8 +919,8 @@ taking it to **twenty-nine**, and removes `csv.ErrNoTypeColumn`, taking the
 incompatible count to **eight**. **Unit 8's other groups so far
 move no declaration**: the instruments, provenance and CSV value-model groups
 each read twenty-one and seven, byte-identical, and the composition group reads
-twenty-two and seven, as the dialect group does. Pass B's instruments and
-Markdown groups each read twenty-nine and eight, as the diagnostics group does. Each
+twenty-two and seven, as the dialect group does. Pass B's instruments,
+Markdown and generator groups each read twenty-nine and eight, as the diagnostics group does. Each
 block below was written by the pass or group that landed its behaviour.
 
 ### Unit 8 — one addressability rule, and every root held to it
@@ -1116,6 +1116,12 @@ block below was written by the pass or group that landed its behaviour.
 - **Behaviour — an anchor keeps the characters GitHub keeps.** A heading's slug kept letters, decimal digits, the underscore and the hyphen alone, so a combining mark — a decomposed accent, a Devanagari vowel sign, a Hebrew point — a letter number, a circled letter, or connector punctuation other than the underscore was dropped where GitHub keeps it, and a heading holding one was linked by an anchor GitHub does not give it. The slug now keeps Unicode's word class less the join controls — letters and every other alphabetic character, marks, decimal digits and connector punctuation — and lowercases U+0130 to `i` and a combining dot, as GitHub does. Measured over every code point against github-slugger 2.0.0, the reference implementation of GitHub's rule, whose tables are Unicode 13: the two differ only on characters later Unicode versions added — this slug keeps the ones Unicode 15 added, which the reference drops, and drops two that Unicode 16 added, which Go 1.26's Unicode 15 tables do not hold. The type, alias and data-type names a schema holds are ASCII and slug as before; a schema name or a doc-comment heading holding such a character moves its anchor.
 
 - **Consumer impact, measured.** rdata's `pipelines/wyrth_graph.md` moves by the two consumer-visible changes above and nothing else, 99 lines replaced; its five generated Go files do not move. In rdata's suite `TestGeneratedDocMatchesSchemas` fails on the candidate and passes on the last tag, and no other test moves. No exported declaration moves, so `gorelease -base=v0.21.0` still reads twenty-nine compatible and eight incompatible.
+
+### Unit 8 — the generated `Graph` aggregate holds only the types a document can hold
+
+- **Breaking on the generated-output surface — a type the entry schema reaches only through another import takes no `Graph` field.** The aggregate had one field per concrete type in the closure, keyed by `schema.TagForm`. For a type reached only through an intermediate import that key was the bare type name, which the validator does not resolve to that type, and where its name collided with another type's — a second such type, or an entry-schema type — every field of that name was keyed by its Go type name, which names no type at all. So where schema `main` declares a `Node` and reaches another `Node` through an import, the entry's field was keyed `MainNode`, and a document holding `"Node"` did not decode into it. Since the addressability group, `adapter/json` never writes such a type at top level and `graph.RebuildSnapshot` and `snapshot.Load` refuse one, so the field could hold nothing a valid document carries. `emitGraph` now emits a field only for a type `schema.AddressableTag` names, keyed by that tag, and the Go-name fallback is deleted, so the entry type's field in such a collision is keyed by its bare name and its json tag moves. The type's struct is still emitted, as every type in the closure is. Removing a `Graph` field and moving its json tag are this surface's Breaking tier, a minor release before 1.0.
+- **Behaviour, no byte moved — `adapter/jschema`'s envelope reads the same rule.** `topLevelProperties` decided the same question by its own alias lookup; it now reads `schema.AddressableTag`, and no emitted document changes. Over both packages' fixtures the `Graph` keys now equal the envelope keys; before, they differed on every fixture that holds a type the entry schema cannot name.
+- **Consumer impact: none, measured.** Every concrete type in rdata's five closures is one its entry schema can name, so its five generated Go files are byte-identical, and its `wyrth_graph.md` does not move. No exported declaration moves, so `gorelease -base=v0.21.0` still reads twenty-nine compatible and eight incompatible.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 

@@ -42,11 +42,9 @@ type EDGE_Right_to_node_RightbaseNode struct {
 }
 
 type Graph struct {
-	Main          []*Main          `json:"Main,omitempty"`
-	Left          []*Left          `json:"left.Left,omitempty"`
-	Right         []*Right         `json:"right.Right,omitempty"`
-	LeftbaseNode  []*LeftbaseNode  `json:"LeftbaseNode,omitempty"`
-	RightbaseNode []*RightbaseNode `json:"RightbaseNode,omitempty"`
+	Main  []*Main  `json:"Main,omitempty"`
+	Left  []*Left  `json:"left.Left,omitempty"`
+	Right []*Right `json:"right.Right,omitempty"`
 }
 
 // serializedSources holds every source in the import closure, keyed by

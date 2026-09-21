@@ -19,6 +19,9 @@ adapter/gogen/testdata/imports/diamond_base.yammm
 adapter/gogen/testdata/imports/diamond_left.yammm
 adapter/gogen/testdata/imports/diamond_main.yammm
 adapter/gogen/testdata/imports/diamond_right.yammm
+adapter/gogen/testdata/imports/entry_shadow_leaf.yammm
+adapter/gogen/testdata/imports/entry_shadow_main.yammm
+adapter/gogen/testdata/imports/entry_shadow_mid.yammm
 adapter/gogen/testdata/imports/inherit_common.yammm
 adapter/gogen/testdata/imports/inherit_main.yammm
 adapter/gogen/testdata/imports/main.yammm

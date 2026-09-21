@@ -47,34 +47,29 @@ func buildDocument(s *schema.Schema, table *defsTable, cfg config) (val, map[str
 	return object(pairs...), defKeys, nil
 }
 
-// topLevelProperties emits one envelope key per addressable concrete non-part
-// type: entry-schema types under their bare name and directly imported types
-// under their alias-qualified name — the two forms the instance validator
-// resolves as type tags. Types in transitively imported schemas have no
-// addressable tag from the entry file's perspective, so they appear in $defs
-// only. Each key holds the array-of-instances shape the object envelope
-// requires.
+// topLevelProperties emits one envelope key per concrete non-part type, keyed by
+// its [schema.AddressableTag]: the bare name for an entry-schema type and the
+// alias-qualified name for a directly imported one — the two forms the instance
+// validator resolves as type tags. A type the entry schema reaches only through
+// another import has no tag, so it appears in $defs only. Each key holds the array-of-instances
+// shape the object envelope requires.
 func topLevelProperties(s *schema.Schema, table *defsTable) (val, error) {
 	var props []kv
-	for i, sc := range table.orderedSchemas {
-		prefix := ""
-		if i > 0 {
-			alias := s.FindImportAlias(sc.SourceID())
-			if alias == "" {
-				continue // transitively imported: $defs-only
-			}
-			prefix = alias + "."
-		}
+	for _, sc := range table.orderedSchemas {
 		for _, t := range sc.TypesSlice() {
 			if t.IsAbstract() || t.IsPart() {
 				continue
+			}
+			tag, ok := schema.AddressableTag(s, t.ID())
+			if !ok {
+				continue // transitively imported: $defs-only
 			}
 			key, ok := table.defName(t.ID())
 			if !ok {
 				return val{}, fmt.Errorf("jschema: no $defs key for type %q", t.Name())
 			}
 			props = append(props, kv{
-				K: prefix + t.Name(),
+				K: tag,
 				V: object(kv{K: "type", V: scalar("array")}, kv{K: "items", V: refTo(key)}),
 			})
 		}

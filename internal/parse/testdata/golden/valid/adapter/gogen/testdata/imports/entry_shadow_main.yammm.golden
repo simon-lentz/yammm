@@ -1,0 +1,69 @@
+{
+  "name": "\"emain\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "imports": [
+    {
+      "path": "\"entry_shadow_mid.yammm\"",
+      "alias": "mid",
+      "span": {
+        "s": 16,
+        "e": 54
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Node",
+      "name_span": {
+        "s": 61,
+        "e": 65
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 72,
+              "e": 78
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 69,
+            "e": 86
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "TO_MID",
+          "name_span": {
+            "s": 92,
+            "e": 98
+          },
+          "target": {
+            "qualifier": "mid",
+            "name": "Mid",
+            "span": {
+              "s": 105,
+              "e": 112
+            }
+          },
+          "span": {
+            "s": 88,
+            "e": 112
+          }
+        }
+      ],
+      "span": {
+        "s": 56,
+        "e": 114
+      }
+    }
+  ]
+}

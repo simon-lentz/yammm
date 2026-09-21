@@ -100,13 +100,14 @@
 // struct.
 //
 // The Graph aggregate is the top-level envelope: one slice field per concrete type
-// in the closure (abstract and part types are excluded), each keyed by the
-// [github.com/simon-lentz/yammm/schema.TagForm] name adapter/json keys its
-// object by — the bare type name for the entry schema's own types and the
-// alias-qualified name for a directly imported one — so a document that
-// adapter writes decodes into the aggregate. A transitively imported type
-// renders bare too; when two of them share a name the field falls back to its
-// unique Go type name as the key.
+// the entry schema can name (abstract and part types are excluded), each keyed by
+// its [github.com/simon-lentz/yammm/schema.AddressableTag], the name adapter/json
+// keys its object by — the bare type name for the entry schema's own types and
+// the alias-qualified name for a directly imported one — so a document that
+// adapter writes decodes into the aggregate. A type the entry schema reaches only
+// through another import has no such name, so no document can hold it at top
+// level, and it takes no Graph field. Its struct is still emitted, as every type
+// in the closure is. The keys are the envelope keys adapter/jschema emits.
 //
 //	type Graph struct {
 //		Person []*Person `json:"Person,omitempty"`
