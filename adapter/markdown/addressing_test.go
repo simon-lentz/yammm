@@ -302,6 +302,40 @@ type Named {
 	)
 }
 
+// TestMarshal_SchemaNameTrailingSpaceReadsAsWritten pins that a schema name
+// ending in a space generates, and its heading keeps the space: an ATX heading
+// drops trailing spaces, so the generator writes them as character references.
+func TestMarshal_SchemaNameTrailingSpaceReadsAsWritten(t *testing.T) {
+	t.Parallel()
+
+	doc := marshalSources(t, map[string]string{
+		"entry.yammm": `schema "app "
+
+import "mid.yammm" as m
+
+type Car extends m.Hub {
+	id String primary
+}
+`,
+		"mid.yammm": `schema "mid"
+
+import "base.yammm" as b
+
+abstract type Hub extends b.P {
+	note String
+}
+`,
+		"base.yammm": `schema "base  "
+
+abstract type P {
+	tag String
+}
+`,
+	})
+
+	assertLines(t, doc, "# Schema app&#32;", "## Schema base&#32;&#32;")
+}
+
 // TestMarshal_PipeInASchemaNameKeepsTheRow pins that a schema name holding a
 // pipe, written in a property row's provenance marker, is escaped so the row
 // keeps its four cells.

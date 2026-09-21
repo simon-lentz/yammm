@@ -47,14 +47,16 @@
 // [github.com/simon-lentz/yammm/schema.AddressableTag] returns, which is how a
 // data file names the type.
 //
-// Every heading the generator writes takes the anchor GitHub gives it: the
-// heading's slug, suffixed -1, -2, … when an earlier heading took it. So two
-// such headings that slug alike each keep a working link, and a type whose
-// heading slugs like a section heading — a type named Types — links to its own
-// heading. The generator allocates anchors without reading doc comments, and a
-// heading inside one takes an anchor on GitHub too: it can move a later
-// heading's suffix, and when it takes a type's anchor first, a link to that
-// type lands on the doc comment's heading.
+// Every heading takes the anchor GitHub gives it: the heading's slug — its
+// text lowercased, every character but letters and other alphabetic
+// characters, marks, decimal digits, connector punctuation and hyphens
+// removed, spaces made hyphens — suffixed -1, -2, …
+// when an earlier heading took it. The generator reads the emitted document
+// with a CommonMark parser and allocates over every heading the parser finds,
+// the headings inside doc comments included, so each link lands on the heading
+// it names: two headings that slug alike each keep a working link, and a type
+// whose heading slugs like a section heading — a type named Types — links to
+// its own heading.
 //
 // # Tables Own Detail; the Diagram Owns Shape
 //
@@ -116,21 +118,22 @@
 // diffing. The document is a versioned surface; docs/VERSIONING.md states
 // its tiers.
 //
-// Before returning, [Marshal] verifies the structure it wrote itself: every
-// code fence closes and no heading it wrote sits inside an open fence (its
-// own fences are sized past any backtick run in their body), every internal
-// link it wrote resolves to a heading of this document, and every table row it
-// wrote has its header's column count on one line. A failure there is a
+// Before returning, [Marshal] reads the document with a CommonMark parser, with
+// GitHub's extensions, and verifies the structure it wrote: no block is left
+// open at the end; every heading it wrote is a top-level heading of its level
+// whose text reads as the text it meant, holding the anchor the parser's
+// headings allocate it; outside doc comments, the internal links the parser
+// reads are exactly the links the generator wrote, each to such a heading; and
+// every table it wrote reads with its columns and rows. Its own
+// fences are sized past any backtick run in their body. A failure there is a
 // generator bug surfaced as an error, never emitted output.
 //
 // Doc-comment text is written as the Markdown its author wrote, so a link, a
-// table or a heading inside it is the author's own and is not checked. A code
-// fence a doc comment leaves open, as CommonMark's fence rules read it, is
-// closed at the end of that comment's block, so it cannot swallow the rest of
-// the document. The seal reads fences alone: a fence inside an HTML block or
-// inside a list the author wrote is read as if it stood at the top level, so
-// such a doc comment can still leave the document inside a fence. Every other
-// text the schema supplies renders literally. A code cell — a property's name and
+// table or a heading inside it is the author's own and is not checked. A block
+// a doc comment leaves open — a fenced code block, or an HTML block that a
+// blank line does not end — is closed at the end of that comment's block with
+// the line the parser reads as its end, so it cannot swallow the rest of the
+// document. Every other text the schema supplies renders literally. A code cell — a property's name and
 // Type, a DataType's name and Definition — shows its text byte for byte: a
 // code span with each pipe escaped, or, for text holding a backtick, a
 // backslash before a pipe or a line break, a <code> element whose
@@ -158,10 +161,12 @@
 // # Error Conditions
 //
 // [Marshal] returns an error, and no output, only when the emitted document
-// fails the structural self-check: an unclosed fence, a heading inside an open
-// fence, an unresolvable internal link, or a table row of the wrong width or
-// split by a line break. Each is a generator bug, so no schema is refused for
-// its names or its doc-comment text.
+// fails the structural self-check: a block left open at the end, a heading the
+// parser does not read as the generator wrote it or with the anchor the
+// generator linked, internal links that do not read as the generator wrote them
+// or name no heading, or a table that does not read with the columns and rows
+// written. Each is a generator bug, so no schema is refused for its names
+// or its doc-comment text.
 //
 // # Thread Safety
 //
@@ -188,11 +193,15 @@
 //
 // # Dependencies
 //
-//	adapter/markdown  ──imports──▶  schema
+//	adapter/markdown  ──imports──▶  schema, github.com/yuin/goldmark,
+//	                                github.com/yuin/goldmark/ast,
+//	                                github.com/yuin/goldmark/extension,
+//	                                github.com/yuin/goldmark/extension/ast,
+//	                                github.com/yuin/goldmark/text
 //
-// markdown imports only public yammm packages and the standard library —
-// no internal/* (the adapter-layer carve-out documented in adapter/doc.go
-// stays gogen-only), no instance/graph, no diag, and no third-party
-// modules or Mermaid tooling: the golden corpus plus the structural
-// self-check carry output verification.
+// markdown imports public yammm packages, the standard library and goldmark,
+// a CommonMark parser with GitHub's extensions and no dependencies of its own.
+// No internal/* (the adapter-layer carve-out documented in adapter/doc.go
+// stays gogen-only), no instance/graph, no diag, and no Mermaid tooling: the
+// golden corpus plus the parser-backed self-check carry output verification.
 package markdown

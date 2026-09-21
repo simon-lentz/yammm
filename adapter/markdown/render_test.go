@@ -41,6 +41,17 @@ func TestSlug(t *testing.T) {
 		{"Schema Common (imported as common)", "schema-common-imported-as-common"},
 		{"Class Diagram", "class-diagram"},
 		{"Data Types", "data-types"},
+		{"Cafe\u0301 decomposed", "cafe\u0301-decomposed"},
+		{"\u0928\u092e\u0938\u094d\u0924\u0947", "\u0928\u092e\u0938\u094d\u0924\u0947"},
+		{"\u0130stanbul", "i\u0307stanbul"},
+		{"\u24b6 circled", "\u24d0-circled"},
+		{"\u16ee rune", "\u16ee-rune"},
+		{"a\u203fb", "a\u203fb"},
+		{"x\u00b2 squared", "x-squared"},
+		{"a\u200cb\u200dc", "abc"},
+		{"a (b) c.d!?", "a-b-cd"},
+		{"a-b c", "a-b-c"},
+		{"B-", "b-"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.heading, func(t *testing.T) {

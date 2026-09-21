@@ -28,23 +28,30 @@ func multiplicity(optional, many bool) string {
 	}
 }
 
-// slug derives the GitHub-style anchor for a heading: lowercase, spaces
-// become hyphens, and every other character outside letters, digits,
-// hyphens, and underscores is stripped (dots in qualified type names
-// disappear entirely). The self-check resolves emitted internal links
-// against anchors computed by this function.
+// slug derives a heading's anchor as GitHub does: the text lowercased, every
+// character outside \p{Word}, the hyphen and the space removed, and each space
+// made a hyphen. \p{Word} here is letters and every other alphabetic
+// character, marks, decimal digits and connector punctuation, read from the Go
+// release's Unicode tables; the join controls are removed, as GitHub removes
+// them. Lowercasing maps U+0130 to "i" and a combining dot, as GitHub's full
+// case mapping does.
 func slug(heading string) string {
 	var b strings.Builder
 	b.Grow(len(heading))
-	for _, r := range strings.ToLower(heading) {
+	for _, r := range strings.ToLower(strings.ReplaceAll(heading, "\u0130", "i\u0307")) {
 		switch {
 		case r == ' ':
 			b.WriteByte('-')
-		case r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r):
+		case r == '-' || isWordRune(r):
 			b.WriteRune(r)
 		}
 	}
 	return b.String()
+}
+
+// isWordRune reports whether r is a character GitHub keeps in an anchor.
+func isWordRune(r rune) bool {
+	return unicode.In(r, unicode.L, unicode.M, unicode.Nd, unicode.Nl, unicode.Pc, unicode.Other_Alphabetic)
 }
 
 // escapeCell returns s made safe for use inside a Markdown table cell:
@@ -134,6 +141,14 @@ func escapeInline(s string) string {
 
 func isAlnum(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
 
+// keepTrailingSpaces writes a heading's trailing spaces as character
+// references. An ATX heading drops trailing spaces from its text, so a schema
+// name that ends in one would otherwise not read as written.
+func keepTrailingSpaces(md string) string {
+	trimmed := strings.TrimRight(md, " ")
+	return trimmed + strings.Repeat("&#32;", len(md)-len(trimmed))
+}
+
 // printableName writes each control character of a schema name as its Go
 // escape (\n, \t, \x00), so a name holding a line break stays on one line in
 // a heading, a link, a table cell or a diagram label. The escape is text, so
@@ -221,7 +236,7 @@ func (g *generator) emitTypeSection(t *schema.Type) {
 	}
 	if tbl := g.propertyTable(t); tbl != "" {
 		block()
-		g.buf.WriteString(tbl)
+		g.writeTable(tbl, 0)
 	}
 	// Associations and compositions share one relation namespace, so one
 	// resolver marks inherited relations of either kind.
@@ -406,7 +421,8 @@ func (g *generator) writeRelationList(label string, rels []*schema.Relation, ori
 			g.buf.WriteString("\n")
 		}
 		if props := rel.PropertiesSlice(); len(props) > 0 {
-			g.buf.WriteString("\n" + indentUnderBullet(g.edgePropertyTable(props)))
+			g.buf.WriteString("\n")
+			g.writeTable(g.edgePropertyTable(props), bulletIndent)
 		}
 	}
 }

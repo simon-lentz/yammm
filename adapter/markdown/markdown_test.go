@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -283,8 +285,45 @@ type Person {
 		g := fresh()
 		var b bytes.Buffer
 		g.newTable(&b, "A", "B").row("1", "2\n3")
-		if _, err := g.finish(); err == nil {
-			t.Error("finish = nil, want line-break error")
+		g.buf.WriteString("\n")
+		g.writeTable(b.String(), 0)
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "is read with") {
+			t.Errorf("finish = %v, want the split row refused", err)
+		}
+	})
+
+	t.Run("a doc comment's link does not stand in for a generator link", func(t *testing.T) {
+		t.Parallel()
+		g := newTestGenerator(t, loadSchema(t, "schema \"s\"\ntype A {\n  id String primary\n  --> TO (one) B\n}\n/* see [b](#b) */\ntype B {\n  id String primary\n}\n"))
+		g.emitDocument()
+		before, after, ok := strings.Cut(g.buf.String(), "[B](#b)")
+		if !ok {
+			t.Fatalf("no generator link to B:\n%s", g.buf.String())
+		}
+		g.buf.Reset()
+		g.buf.WriteString(before + "[B]#b()" + after)
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "read 0") {
+			t.Errorf("finish = %v, want the lost link refused", err)
+		}
+	})
+
+	t.Run("a table the generator never wrote fails", func(t *testing.T) {
+		t.Parallel()
+		g := fresh()
+		var b bytes.Buffer
+		g.newTable(&b, "A", "B").row("1", "2")
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "not read as a table") {
+			t.Errorf("finish = %v, want the unwritten table refused", err)
+		}
+	})
+
+	t.Run("a heading whose text does not render as written fails", func(t *testing.T) {
+		t.Parallel()
+		g := newTestGenerator(t, s)
+		g.outline[0].md = "Schema *people"
+		g.emitDocument()
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "is read as") {
+			t.Errorf("finish = %v, want the heading's text refused", err)
 		}
 	})
 
@@ -303,8 +342,8 @@ type Person {
 		g := newTestGenerator(t, s)
 		g.outline[0].md += "\n```"
 		g.emitDocument()
-		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "inside an open code fence") {
-			t.Errorf("finish = %v, want a heading-inside-fence error", err)
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "not read as a top-level heading") {
+			t.Errorf("finish = %v, want the swallowed heading refused", err)
 		}
 	})
 
@@ -313,16 +352,83 @@ type Person {
 		g := fresh()
 		var b bytes.Buffer
 		g.newTable(&b, "A", "B", "C").row("1", "2")
-		if _, err := g.finish(); err == nil {
-			t.Error("finish = nil, want column-mismatch error")
+		g.buf.WriteString("\n")
+		g.writeTable(b.String(), 0)
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "has 2 cells") {
+			t.Errorf("finish = %v, want the short row refused although the parser fills it", err)
+		}
+	})
+
+	t.Run("an outline heading inside a container fails", func(t *testing.T) {
+		t.Parallel()
+		g := fresh()
+		doc := g.buf.String()
+		g.buf.Reset()
+		g.buf.WriteString("> # Schema peop" + doc[len("# Schema people"):])
+		g.outline[0].text, g.outline[0].anchor = "Schema peop", "schema-peop"
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "top-level") {
+			t.Errorf("finish = %v, want the quoted heading refused", err)
+		}
+	})
+
+	t.Run("an outline heading of another level fails", func(t *testing.T) {
+		t.Parallel()
+		g := fresh()
+		doc := g.buf.String()
+		g.buf.Reset()
+		g.buf.WriteString("## Schema peopl" + doc[len("# Schema people"):])
+		g.outline[0].text, g.outline[0].anchor = "Schema peopl", "schema-peopl"
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "level 2") {
+			t.Errorf("finish = %v, want the level-2 heading refused", err)
+		}
+	})
+
+	t.Run("an outline heading holding another anchor fails", func(t *testing.T) {
+		t.Parallel()
+		g := fresh()
+		g.outline[0].anchor = "elsewhere"
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "takes anchor") {
+			t.Errorf("finish = %v, want the anchor mismatch refused", err)
+		}
+	})
+
+	t.Run("a link written more often than read fails", func(t *testing.T) {
+		t.Parallel()
+		g := newTestGenerator(t, loadSchema(t, "schema \"s\"\ntype A {\n  id String primary\n  --> TO (one) B\n}\ntype B {\n  id String primary\n}\n"))
+		g.emitDocument()
+		g.links = append(g.links, "b")
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "written 2 times and read 1") {
+			t.Errorf("finish = %v, want the missing link refused", err)
+		}
+	})
+
+	t.Run("a link read more often than written fails", func(t *testing.T) {
+		t.Parallel()
+		g := newTestGenerator(t, loadSchema(t, "schema \"s\"\ntype A {\n  id String primary\n  --> TO (one) B\n  --> ALSO (one) B\n}\ntype B {\n  id String primary\n}\n"))
+		g.emitDocument()
+		i := slices.Index(g.links, "b")
+		g.links = slices.Delete(g.links, i, i+1)
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "written 1 times and read 2") {
+			t.Errorf("finish = %v, want the unrecorded link refused", err)
+		}
+	})
+
+	t.Run("a link no emitter wrote fails", func(t *testing.T) {
+		t.Parallel()
+		g := newTestGenerator(t, loadSchema(t, "schema \"s\"\ntype A {\n  id String primary\n  --> TO (one) B\n}\ntype B {\n  id String primary\n}\n"))
+		g.emitDocument()
+		g.links = nil
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "written by no emitter") {
+			t.Errorf("finish = %v, want the unrecorded link refused", err)
 		}
 	})
 }
 
-// TestSealFences pins the seal against CommonMark's fence rules: a doc
-// comment's fence is closed only when a Markdown parser reads it as open, and
-// the closing line repeats the opener's indent and run.
-func TestSealFences(t *testing.T) {
+// TestCloseAuthorText pins that a doc comment's open block is closed exactly
+// when a CommonMark parser reads it as open: a fenced code block, and an HTML
+// block of a type a blank line does not end. A block inside the author's own
+// list or quote is closed by its container and needs nothing.
+func TestCloseAuthorText(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -333,25 +439,95 @@ func TestSealFences(t *testing.T) {
 		{"open tildes", "~~~~\nx", "~~~~\nx\n~~~~"},
 		{"a tilde fence's info string may hold a backtick", "~~~a`b\nx", "~~~a`b\nx\n~~~"},
 		{"a backtick in a backtick info string opens nothing", "```a`b\nx", "```a`b\nx"},
+		{"inline code at a line's start opens nothing", "```x``` is code", "```x``` is code"},
+		{"two backticks open nothing", "``\nx", "``\nx"},
 		{"four spaces is indented code, not a fence", "    ```\nx", "    ```\nx"},
-		{"an opener indented three spaces", "   ```\nx", "   ```\nx\n   ```"},
+		{"a tab-indented opener is indented code", "\t```\nx", "\t```\nx"},
+		{"an opener indented three spaces", "   ```\nx", "   ```\nx\n```"},
 		{"a closer indented four spaces is content", "```\nx\n    ```", "```\nx\n    ```\n```"},
 		{"a closer indented three spaces closes", "```\nx\n   ```", "```\nx\n   ```"},
 		{"a shorter run does not close", "````\nx\n```", "````\nx\n```\n````"},
 		{"text after a closing run does not close", "```\nx\n``` y", "```\nx\n``` y\n```"},
-		{"a tab after a closing run closes", "```\nx\n```\t", "```\nx\n```\t"},
-		{"inline code at a line's start opens nothing", "```x``` is code", "```x``` is code"},
-		{"two backticks open nothing", "``\nx", "``\nx"},
 		{"a closer of the other character does not close", "```\n~~~\nx", "```\n~~~\nx\n```"},
-		{"a tab-indented opener is indented code", "\t```\nx", "\t```\nx"},
+		{"a fence in the author's list closes with the item", "- step:\n  ```sh\n  run", "- step:\n  ```sh\n  run"},
+		{"a fence in the author's quote closes with the quote", "> ```\n> x", "> ```\n> x"},
+		{"an open HTML comment", "note <!-- no\n<!-- open", "note <!-- no\n<!-- open\n-->"},
+		{"an open pre element", "<pre>\nx", "<pre>\nx\n</pre>"},
+		{"an open script element takes its own end tag", "<script>\nx", "<script>\nx\n</script>"},
+		{"an upper-case opening tag takes its own end tag", "<SCRIPT>\nx", "<SCRIPT>\nx\n</script>"},
+		{"an open processing instruction", "<?php\nx", "<?php\nx\n?>"},
+		{"an open declaration", "<!DOCTYPE html\nx", "<!DOCTYPE html\nx\n>"},
+		{"an open CDATA section", "<![CDATA[\nx", "<![CDATA[\nx\n]]>"},
+		{"a div ends at the blank line", "<div>\nx", "<div>\nx"},
 	}
+	md := newParser()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := sealFences(tt.in); got != tt.want {
-				t.Errorf("sealFences(%q) = %q, want %q", tt.in, got, tt.want)
+			if got := closeAuthorText(md, tt.in); got != tt.want {
+				t.Errorf("closeAuthorText(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestMarshal_DocCommentHeadingTakesItsAnchor pins that a heading inside a doc
+// comment takes its anchor in document order, as GitHub allocates it, so a
+// link to a type whose heading slugs alike still lands on the type: here A's
+// doc comment and a relation's doc comment each hold a heading "B", so type
+// B's own heading takes #b-2. A "#" line inside a fence is no heading.
+func TestMarshal_DocCommentHeadingTakesItsAnchor(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, "schema \"s\"\n/* Intro\n\n### *B*\n\n```\n# B\n``` */\ntype A {\n  id String primary\n  /* Setext\n\nB\n--- */\n  --> TO (one) B\n}\ntype B {\n  id String primary\n}\n")
+	out, err := Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal = %v, want nil", err)
+	}
+	doc := string(out)
+	if !strings.Contains(doc, "- `--> TO (one)` [B](#b-2)\n") {
+		t.Errorf("the link to B does not target #b-2:\n%s", doc)
+	}
+	if strings.Contains(doc, "](#b)") || strings.Contains(doc, "](#b-1)") {
+		t.Errorf("a link lands on a doc comment's heading:\n%s", doc)
+	}
+}
+
+// TestMarshal_ReemissionForgetsTheFirstEmissionsDocComments pins that the
+// second emission reads its own doc comments alone: six links to B grow by
+// "-1" each when a doc-comment heading moves B's anchor, which shifts the last
+// relation's doc comment by twelve bytes, far enough that the first emission's
+// span of it would cover the link to C on the bullet above it.
+func TestMarshal_ReemissionForgetsTheFirstEmissionsDocComments(t *testing.T) {
+	t.Parallel()
+
+	var rels strings.Builder
+	for i := range 6 {
+		rels.WriteString("  --> R" + strconv.Itoa(i) + " (one) B\n")
+	}
+	s := loadSchema(t, "schema \"s\"\n/* ### B */\ntype A {\n  id String primary\n"+rels.String()+"  /* note */\n  --> TO (one) C\n}\ntype B {\n  id String primary\n}\ntype C {\n  id String primary\n}\n")
+	out, err := Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal = %v, want nil", err)
+	}
+	if !strings.Contains(string(out), "- `--> TO (one)` [C](#c)\n\n  note\n") {
+		t.Errorf("the link to C and its doc comment are not written:\n%s", out)
+	}
+}
+
+// TestMarshal_OpenHTMLCommentIsClosed pins that a doc comment's unclosed HTML
+// comment is closed at the end of the comment's block, so the type after it
+// keeps its heading.
+func TestMarshal_OpenHTMLCommentIsClosed(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, "schema \"s\"\n/* Note:\n<!-- draft */\ntype A {\n  id String primary\n}\ntype B {\n  id String primary\n}\n")
+	out, err := Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal = %v, want nil", err)
+	}
+	if !strings.Contains(string(out), "<!-- draft\n-->\n\n| Property") {
+		t.Errorf("the HTML comment is not closed before the table:\n%s", out)
 	}
 }
 

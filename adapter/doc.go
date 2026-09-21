@@ -55,7 +55,11 @@
 //	                                immutable, schema, adapter/internal/constraintof,
 //	                                adapter/internal/refusal, adapter/internal/typetag,
 //	                                github.com/tidwall/jsonc
-//	adapter/markdown  ──imports──▶  schema
+//	adapter/markdown  ──imports──▶  schema, github.com/yuin/goldmark,
+//	                                github.com/yuin/goldmark/ast,
+//	                                github.com/yuin/goldmark/extension,
+//	                                github.com/yuin/goldmark/extension/ast,
+//	                                github.com/yuin/goldmark/text
 //	adapter/neo4j     ──imports──▶  schema, graph, immutable, diag, location,
 //	                                adapter/internal/constraintof,
 //	                                github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype

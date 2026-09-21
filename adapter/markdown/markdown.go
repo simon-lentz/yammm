@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/yuin/goldmark"
 )
 
 // Option configures Marshal.
@@ -50,18 +49,79 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	}
 	g := newGenerator(s, cfg)
 	g.emitDocument()
+	moved, err := g.reanchor()
+	if err != nil {
+		return nil, err
+	}
+	if moved {
+		g.reset()
+		g.emitDocument()
+	}
 	return g.finish()
+}
+
+// reanchor allocates every anchor over the headings the parser reads in the
+// emitted document, doc-comment headings included, as GitHub allocates them,
+// and reports whether an outline anchor moved. A heading in a doc comment is
+// invisible to the outline, so it can take an anchor the outline gave a later
+// heading; the links written to that heading are then wrong and the document
+// is emitted again. Heading text does not depend on anchors, so a second pass
+// allocates the same anchors.
+func (g *generator) reanchor() (bool, error) {
+	read := g.read()
+	parsed, err := headings(g.md, read.root, read.src)
+	if err != nil {
+		return false, fmt.Errorf("markdown: reading the emitted document: %w", err)
+	}
+	at := make(map[int]int, len(g.outline))
+	for i, h := range g.outline {
+		at[h.offset] = i
+	}
+	var alloc anchorAllocator
+	moved := false
+	for _, p := range parsed {
+		anchor := alloc.allocate(p.text)
+		if i, ok := at[p.offset]; ok && p.offset >= 0 && g.outline[i].anchor != anchor {
+			g.outline[i].anchor = anchor
+			moved = true
+		}
+	}
+	for _, h := range g.outline {
+		if h.kind == kindTypeSection {
+			g.types[h.typ.ID()].anchor = h.anchor
+		}
+	}
+	return moved, nil
+}
+
+// read returns the emitted document as the parser reads it, parsed once per
+// emission and shared by reanchor and the self-check.
+func (g *generator) read() probe {
+	if g.parsed == nil {
+		p := probeText(g.md, g.buf.Bytes())
+		g.parsed = &p
+	}
+	return *g.parsed
+}
+
+// reset discards the emitted document and the state emitting it recorded.
+func (g *generator) reset() {
+	g.parsed = nil
+	g.authored = nil
+	g.buf.Reset()
+	g.links = nil
+	g.tables = nil
+	g.labelled = false
 }
 
 // finish runs the self-check over the emitted document and returns it. Marshal
 // returns only what finish returns, so the check cannot be bypassed without
 // losing the output.
 func (g *generator) finish() ([]byte, error) {
-	out := g.buf.Bytes()
-	if err := g.selfCheck(out); err != nil {
+	if err := g.selfCheck(); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return g.buf.Bytes(), nil
 }
 
 // outlineKind names what an outline entry's section holds.
@@ -119,7 +179,7 @@ func (g *generator) emitDocument() {
 				hashes = "###"
 			}
 			g.buf.WriteString(hashes + " " + h.md + "\n\n")
-			g.buf.WriteString(g.dataTypeTable(h.schema.DataTypesSlice()))
+			g.writeTable(g.dataTypeTable(h.schema.DataTypesSlice()), 0)
 		case kindImportedSchema:
 			g.buf.WriteString("## " + h.md + "\n")
 			if doc := h.schema.Documentation(); doc != "" {
@@ -146,148 +206,146 @@ func (g *generator) dataTypeTable(dts []*schema.DataType) string {
 	return b.String()
 }
 
-// selfCheck verifies the structure the generator itself wrote: every code
-// fence closes and no outline heading sits inside one, every internal link the
-// generator emitted targets an anchor of the outline, and every table row it
-// wrote has its header's column count on one line. Author text is not a
-// subject: its fences are sealed where it is written, and a link, a table or a
-// "#" line inside it is the author's own Markdown. A failure is a generator
-// bug.
-func (g *generator) selfCheck(out []byte) error {
+// selfCheck reads the emitted document with a CommonMark parser and verifies
+// the structure the generator wrote: nothing is left open at the end; every
+// outline heading is a top-level heading of its level whose text is the text
+// the generator meant, holding the anchor GitHub allocates it; every internal
+// link the generator wrote is read as a link to an outline heading; and every
+// table it wrote is read as a table of its columns and rows. Doc-comment text
+// is the author's Markdown and is not a subject. A failure is a generator bug.
+func (g *generator) selfCheck() error {
+	doc := g.read()
+	if _, open := doc.open(); open {
+		return errors.New("markdown: self-check: the document ends inside an open block")
+	}
+	root, out := doc.root, doc.src
+	type allocated struct {
+		heading parsedHeading
+		anchor  string
+	}
+	at := map[int]allocated{}
+	var alloc anchorAllocator
+	parsed, err := headings(g.md, root, out)
+	if err != nil {
+		return fmt.Errorf("markdown: self-check: %w", err)
+	}
+	for _, p := range parsed {
+		anchor := alloc.allocate(p.text)
+		if p.offset >= 0 {
+			at[p.offset] = allocated{p, anchor}
+		}
+	}
 	anchors := make(map[string]bool, len(g.outline))
-	headings := make(map[int]bool, len(g.outline))
 	for _, h := range g.outline {
+		got, ok := at[h.offset]
+		switch {
+		case !ok || !got.heading.topLevel:
+			return fmt.Errorf("markdown: self-check: heading %q is not read as a top-level heading", h.text)
+		case got.heading.level != h.level || got.heading.text != h.text:
+			return fmt.Errorf("markdown: self-check: heading %q is read as level %d %q", h.text, got.heading.level, got.heading.text)
+		case got.anchor != h.anchor:
+			return fmt.Errorf("markdown: self-check: heading %q takes anchor #%s where the generator gave it #%s", h.text, got.anchor, h.anchor)
+		}
 		anchors[h.anchor] = true
-		headings[h.offset] = true
 	}
-	if err := checkFences(out, headings, g.authored); err != nil {
-		return err
-	}
+	written := map[string]int{}
 	for _, a := range g.links {
+		written[a]++
+	}
+	read, err := linkTargets(root, g.inAuthorText)
+	if err != nil {
+		return fmt.Errorf("markdown: self-check: %w", err)
+	}
+	for a, n := range read {
+		if written[a] == 0 {
+			return fmt.Errorf("markdown: self-check: internal link #%s is read %d times outside doc comments and written by no emitter", a, n)
+		}
+	}
+	for a, n := range written {
 		if !anchors[a] {
 			return fmt.Errorf("markdown: self-check: internal link #%s resolves to no emitted heading", a)
 		}
+		if read[a] != n {
+			return fmt.Errorf("markdown: self-check: internal link #%s is written %d times and read %d", a, n, read[a])
+		}
+	}
+	shapes, err := tables(root, out)
+	if err != nil {
+		return fmt.Errorf("markdown: self-check: %w", err)
 	}
 	for _, tw := range g.tables {
 		if tw.bad != "" {
 			return fmt.Errorf("markdown: self-check: %s", tw.bad)
 		}
+		got, ok := shapes[tw.offset]
+		if !ok {
+			return errors.New("markdown: self-check: a table the generator wrote is not read as a table")
+		}
+		if got.cols != tw.cols || got.rows != tw.rows {
+			return fmt.Errorf("markdown: self-check: a table written with %d columns and %d rows is read with %d and %d", tw.cols, tw.rows, got.cols, got.rows)
+		}
 	}
 	return nil
 }
 
-// authorSpan is where a doc comment was written into the document, and the
-// indent of the container that holds it: 0 at the top level, bulletIndent
-// under a relation's or an invariant's bullet.
-type authorSpan struct {
-	start, end int
-	indent     int
-}
-
-// writeAuthorText writes a doc comment, sealed and indented by indent, and
-// records its span so the self-check reads its lines relative to their
-// container, as a Markdown parser does.
+// writeAuthorText writes a doc comment, indented by indent, with the block it
+// leaves open closed.
 func (g *generator) writeAuthorText(doc string, indent int) {
-	text := sealFences(doc)
+	text := closeAuthorText(g.md, doc)
 	if indent > 0 {
 		text = indentUnderBullet(text)
 	}
 	start := g.buf.Len()
 	g.buf.WriteString(text)
-	g.authored = append(g.authored, authorSpan{start: start, end: g.buf.Len(), indent: indent})
+	g.authored = append(g.authored, span{start: start, end: g.buf.Len()})
 }
 
-// checkFences verifies that every opened code fence closes and that no
-// outline heading, named by the offset its line starts at, sits inside an open
-// fence — the symptom of a fence swallowing the rest of the document. A "#"
-// line inside an author's own fence is that fence's content. A line inside an
-// authored span is read relative to that span's container indent.
-func checkFences(out []byte, headings map[int]bool, authored []authorSpan) error {
-	var f fenceScanner
-	offset, next := 0, 0
-	for line := range strings.SplitSeq(string(out), "\n") {
-		if f.open() && headings[offset] {
-			return fmt.Errorf("markdown: self-check: heading %q inside an open code fence", line)
+// span is a byte range of the emitted document.
+type span struct{ start, end int }
+
+// inAuthorText reports whether pos falls inside a doc comment the generator
+// wrote.
+func (g *generator) inAuthorText(pos int) bool {
+	for _, s := range g.authored {
+		if pos >= s.start && pos < s.end {
+			return true
 		}
-		for next < len(authored) && authored[next].end <= offset {
-			next++
+	}
+	return false
+}
+
+// writeTable writes text, which holds the one table last built by newTable,
+// indented by indent, and records where the table starts.
+func (g *generator) writeTable(text string, indent int) {
+	start := g.buf.Len()
+	if indent > 0 {
+		text = indentUnderBullet(text)
+	}
+	g.buf.WriteString(text)
+	for _, tw := range g.tables {
+		if tw.offset < 0 {
+			tw.offset = start
 		}
-		indent := 0
-		if next < len(authored) && authored[next].start <= offset {
-			indent = authored[next].indent
-		}
-		f.scan(strings.TrimPrefix(line, strings.Repeat(" ", indent)))
-		offset += len(line) + 1
-	}
-	if f.open() {
-		return errors.New("markdown: self-check: unclosed code fence at end of document")
-	}
-	return nil
-}
-
-// fenceScanner tracks code-fence state line by line under CommonMark's fence
-// rules. A fence opens on a run of three or more backticks or tildes indented
-// at most three spaces; a backtick fence's info string holds no backtick. It
-// closes on a run of the same character at least as long, indented at most
-// three spaces, with nothing after it but spaces and tabs. checkFences and
-// sealFences share it, so text sealFences has closed never trips checkFences.
-// The scanner reads fences alone: a fence inside an HTML block or inside a list
-// the author wrote is read as if it stood at the top level.
-type fenceScanner struct {
-	char   byte
-	run    int
-	indent int // the opener's indent, which the seal repeats
-}
-
-func (f *fenceScanner) open() bool { return f.run > 0 }
-
-func (f *fenceScanner) scan(line string) {
-	trimmed := strings.TrimLeft(line, " ")
-	indent := len(line) - len(trimmed)
-	if indent > 3 || trimmed == "" || (trimmed[0] != '`' && trimmed[0] != '~') {
-		return
-	}
-	c := trimmed[0]
-	run := 0
-	for run < len(trimmed) && trimmed[run] == c {
-		run++
-	}
-	rest := trimmed[run:]
-	switch {
-	case !f.open() && run >= 3 && (c == '~' || !strings.ContainsRune(rest, '`')):
-		f.char, f.run, f.indent = c, run, indent
-	case f.open() && c == f.char && run >= f.run && strings.Trim(rest, " \t") == "":
-		f.run = 0
 	}
 }
 
-// sealFences closes a code fence author text leaves open, so a doc comment
-// cannot swallow the rest of the document. The closing line repeats the
-// opener's indent and run, the shortest closer CommonMark accepts for it.
-func sealFences(text string) string {
-	var f fenceScanner
-	for line := range strings.SplitSeq(text, "\n") {
-		f.scan(line)
-	}
-	if !f.open() {
-		return text
-	}
-	return text + "\n" + strings.Repeat(" ", f.indent) + strings.Repeat(string(f.char), f.run)
-}
-
-// tableWriter writes one table and records a row whose cell count differs
-// from its header's, or whose cell holds a line break and so splits the row,
-// which the self-check reports.
+// tableWriter writes one table and records its shape: its column and row
+// counts, the offset writeTable placed it at, and a row whose cell count
+// differs from its header's, which the self-check reports. The parser cannot
+// see such a row, because GitHub's tables drop a surplus cell and fill a
+// missing one.
 type tableWriter struct {
-	b    *bytes.Buffer
-	cols int
-	bad  string
+	b      *bytes.Buffer
+	cols   int
+	rows   int
+	offset int
+	bad    string
 }
 
 // newTable writes a table's header and separator rows and returns the writer
 // for its body rows.
 func (g *generator) newTable(b *bytes.Buffer, cols ...string) *tableWriter {
-	tw := &tableWriter{b: b, cols: len(cols)}
+	tw := &tableWriter{b: b, cols: len(cols), offset: -1}
 	g.tables = append(g.tables, tw)
 	writeTableRow(b, cols...)
 	sep := make([]string, len(cols))
@@ -299,13 +357,10 @@ func (g *generator) newTable(b *bytes.Buffer, cols ...string) *tableWriter {
 }
 
 func (tw *tableWriter) row(cells ...string) {
-	if tw.bad == "" {
-		if len(cells) != tw.cols {
-			tw.bad = fmt.Sprintf("table row has %d cells, its header %d", len(cells), tw.cols)
-		} else if i := slices.IndexFunc(cells, func(c string) bool { return strings.ContainsAny(c, "\r\n") }); i >= 0 {
-			tw.bad = fmt.Sprintf("table cell %q holds a line break", cells[i])
-		}
+	if len(cells) != tw.cols && tw.bad == "" {
+		tw.bad = fmt.Sprintf("table row has %d cells, its header %d", len(cells), tw.cols)
 	}
+	tw.rows++
 	writeTableRow(tw.b, cells...)
 }
 
@@ -332,9 +387,11 @@ type generator struct {
 	sources    *schema.Sources
 	cfg        config
 
-	links    []string       // the anchor of every internal link emitted
-	tables   []*tableWriter // every table emitted
-	authored []authorSpan   // every doc comment written, in document order
+	md       goldmark.Markdown // the parser the self-check and the closing of doc comments read with
+	parsed   *probe            // the emitted document as md reads it; nil until read
+	links    []string          // the anchor of every internal link emitted
+	authored []span            // every doc comment written, in document order
+	tables   []*tableWriter    // every table emitted
 
 	// labelled records that writeClass emitted a labelled class, which is
 	// what the floor sentence is about.
@@ -354,6 +411,7 @@ func newGenerator(s *schema.Schema, cfg config) *generator {
 		types:      make(map[schema.TypeID]*typeEntry),
 		sources:    s.Sources(),
 		cfg:        cfg,
+		md:         newParser(),
 	}
 	mermaidIDs := map[string]bool{}
 	for _, sch := range g.closure {
@@ -390,6 +448,7 @@ func (g *generator) displayName(sch *schema.Schema, t *schema.Type) (string, str
 func (g *generator) buildOutline() {
 	var alloc anchorAllocator
 	add := func(e outlineEntry) {
+		e.md = keepTrailingSpaces(e.md)
 		e.anchor = alloc.allocate(e.text)
 		g.outline = append(g.outline, e)
 	}

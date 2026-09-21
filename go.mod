@@ -16,6 +16,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/neo4j v0.44.0
 	github.com/tidwall/jsonc v0.3.3
+	github.com/yuin/goldmark v1.8.5
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	golang.org/x/text v0.41.0
