@@ -68,7 +68,9 @@
 // List<FipsCode>) and the Modifiers column carries primary / required plus
 // a "from <Owner>" marker on inherited rows — the property table is
 // flattened over the full inheritance chain so a type's complete shape
-// reads in one place, with provenance preserved.
+// reads in one place, with provenance preserved. When the diagram is still
+// too large, [WithClassMembers] with false drops the member lines and keeps
+// every class, stereotype and edge.
 //
 // The diagram draws each type's OWN members and relation edges only;
 // inheritance edges (Parent <|-- Child) convey the rest. Abstract and part
@@ -157,6 +159,10 @@
 //
 //   - [WithClassDiagram]: include or omit the Mermaid class-diagram
 //     section (default true).
+//   - [WithClassMembers]: include or omit the member lines inside each
+//     diagram class (default true). With false, the classes keep their
+//     stereotypes and edges, and the per-type tables still carry every
+//     property.
 //
 // # Error Conditions
 //

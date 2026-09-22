@@ -70,6 +70,14 @@ linters:
       - std-error-handling
       - common-false-positives
     rules:
+      # depguard matches its own `files` globs against the absolute path, so a
+      # tree negation there turns the rule off for a checkout under any
+      # directory named adapter, cmd or lsp. The exclusion path is
+      # module-relative.
+      - path: "^(adapter|cmd|lsp)/"
+        linters:
+          - depguard
+        text: "library-imports-no-adapter"
       # VS Code extension embeds npm packages that may contain Go files.
       - path: "node_modules/"
         text: ".*"
@@ -248,6 +256,12 @@ linters:
   settings:
     depguard:
       rules:
+        library-imports-no-adapter:
+          files:
+            - "!$test"
+          deny:
+            - pkg: github.com/simon-lentz/yammm/adapter
+              desc: "library packages never depend on adapters (doc.go, Package Structure)"
         testify-freeze:
           deny:
             - pkg: github.com/stretchr/testify

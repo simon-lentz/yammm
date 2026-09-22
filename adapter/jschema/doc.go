@@ -45,8 +45,8 @@
 //   - A composition is ALWAYS an array of child instance objects, regardless
 //     of multiplicity. A required composition is listed in required and gets
 //     minItems 1 (absent or empty is an instance-layer error); a to-one
-//     composition gets maxItems 1 (a second child is rejected at graph
-//     assembly as a duplicate composed primary key).
+//     composition gets maxItems 1 (instance validation refuses a second
+//     child, E_DUPLICATE_COMPOSED_PK).
 //
 // Schema doc-comments flow through: a type's documentation becomes its def's
 // description, a property's (or edge property's, or DataType's) becomes its
@@ -96,27 +96,67 @@
 //
 // # Fidelity Caveats
 //
-// Three places where the emitted schema and yammm validation intentionally
-// diverge, always in the safe direction (the editor may under- or over-flag;
-// `yammm check` remains the authority):
+// The emitted schema does not reproduce yammm's validation; it diverges in
+// the classes below, and each divergence changes only what the editor flags.
+// `yammm check` runs the parse and instance validation. The checks named as
+// graph assembly run in the commands that build a graph — `yammm load`,
+// `yammm export` and `yammm snapshot save` — and `yammm check` does not run
+// them.
 //
-//   - Canonical-name authoring. The instance layer matches property names
-//     case-insensitively by default, which JSON Schema cannot express. The
-//     emitted schema targets canonical spellings: a case-variant file still
-//     validates under yammm, and the editor nudges it toward the canonical
-//     form.
+// The emitted schema judges each value by its own shape, so no check that
+// compares instances, counts depth or evaluates an expression reaches it. In
+// each case below the editor accepts the file:
+//
+//   - Primary-key uniqueness. Graph assembly refuses the second of two
+//     instances that share a primary key (E_DUPLICATE_PK). Instance
+//     validation refuses two children of one (many) composition that share
+//     one (E_DUPLICATE_COMPOSED_PK).
+//   - Association resolution. Graph assembly refuses a required association
+//     that is absent, that is an empty array, or whose _target_<pk_name>
+//     fields name no instance (E_UNRESOLVED_REQUIRED).
+//   - Invariants. A type's invariants are not emitted; instance validation
+//     refuses an instance that fails one (E_INVARIANT_FAIL).
+//   - Composition depth. Instance validation refuses composed children nested
+//     deeper than [github.com/simon-lentz/yammm/instance.MaxComposedDepth]
+//     (E_COMPOSITION_DEPTH_EXCEEDED); the emitted $refs nest without limit.
+//
+// The other divergences are in how one value or one name is read:
+//
+//   - Numbers. JSON Schema reads a number exactly; yammm reads a plain
+//     integer literal that fits as an int64 and any other number as a
+//     float64. So the editor accepts a number yammm cannot hold — 1e400 on a
+//     Float, 9223372036854775808 on an Integer — and yammm refuses it
+//     (E_TYPE_MISMATCH). A decimal or exponent literal on an Integer is read
+//     through float64, so the two can disagree in both directions near the
+//     limits of that precision.
+//   - Formats. The uuid, date and date-time keywords are annotations by
+//     default under draft 2020-12, so an editor that does not assert formats
+//     accepts a malformed UUID, Date or Timestamp that instance validation
+//     refuses (E_CONSTRAINT_FAIL). A validator that asserts formats reads each
+//     by its own grammar, which differs from yammm's parsers in both
+//     directions: it flags a UUID without hyphens, which yammm accepts.
+//   - Null for an optional property. yammm reads a null value as an absent
+//     one. The emitted schema gives each property its value's type alone, so
+//     the editor flags the null.
+//   - Field-name case. The instance layer matches property names, relation
+//     field names and _target_<pk_name> fields case-insensitively by default.
+//     The emitted schema targets canonical spellings: a case-variant file
+//     still validates under yammm, and the editor flags it toward the
+//     canonical form.
+//   - A repeated member name. adapter/json refuses an object — the envelope
+//     or an instance — that names one member twice (E_ADAPTER_PARSE); a JSON
+//     Schema validator reads one of the two values and accepts the object.
+//   - An empty array under a key the envelope does not name. yammm accepts
+//     an empty array under a part type's or an abstract type's name; the
+//     envelope names neither, so the editor flags the key.
 //   - Pattern dialects. yammm compiles patterns as Go/RE2; JSON Schema
 //     validators assume ECMA-262. Patterns pass through verbatim — the
-//     shared subset covers common cases, and a divergent pattern degrades to
-//     editor-side false results only.
+//     shared subset covers common cases, and a divergent pattern can make the
+//     editor flag a valid value or accept an invalid one.
 //   - Custom Timestamp layouts. A Timestamp["layout"] constraint is not
 //     expressible as a JSON Schema assertion; the emitted fragment is a
 //     plain string whose description carries the source form. The editor
 //     accepts what yammm may reject, never the reverse.
-//
-// The format keywords the generator emits (uuid, date, date-time) are
-// annotations by default under draft 2020-12; validators assert them only
-// when configured to (as this package's own contract tests do).
 //
 // # Editor Wiring
 //
@@ -125,9 +165,13 @@
 //
 //	# yaml-language-server: $schema=./fleet.schema.json
 //
-// For JSON data files, either a "$schema" member in the file (when the
-// editor supports it) or a json.schemas mapping in VS Code settings
-// associating the document with a file glob.
+// yammm reads no YAML data file — its data commands read JSON, JSONC and
+// CSV — so a YAML file wired this way gets the editor's checks alone.
+//
+// For JSON data files, a json.schemas mapping in VS Code settings that
+// associates the document with a file glob. Do not add a "$schema" member to
+// a JSON data file: the envelope admits no member but a type name, and
+// adapter/json refuses the key as a type tag (E_INVALID_TYPE_TAG).
 //
 // # Output Guarantees
 //

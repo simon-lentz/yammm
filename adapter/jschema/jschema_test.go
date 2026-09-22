@@ -285,9 +285,8 @@ func TestMarshal_RequiredContract(t *testing.T) {
 }
 
 // TestMarshal_ToOneCompositionMaxItems pins maxItems 1 on a (one)
-// composition: the instance layer accepts any array, and graph assembly
-// rejects a second child (duplicate composed primary key), so the schema
-// mirrors real end-to-end enforcement.
+// composition: instance validation refuses a second child
+// (E_DUPLICATE_COMPOSED_PK), so the schema mirrors that enforcement.
 func TestMarshal_ToOneCompositionMaxItems(t *testing.T) {
 	s, res := schema.LoadString(context.Background(), `schema "fleet"
 

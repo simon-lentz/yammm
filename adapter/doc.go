@@ -66,13 +66,17 @@
 //
 // # Layering Discipline
 //
-// Every adapter but one imports no core internal/* package, keeping a clean
-// separation between core library internals and the adapter layer: the data
-// adapters (csv, json, neo4j) and two of the three generators (jschema, markdown)
-// reach only for the public API. The gogen adapter is the sole exception: it
-// imports internal/ident to reuse the canonical identifier-casing transform the
-// library applies elsewhere (e.g. JSON field names), so generated Go identifiers
-// stay consistent with the rest of yammm instead of duplicating that logic.
+// The production code of every adapter but one imports no core internal/*
+// package, keeping a clean separation between core library internals and the
+// adapter layer: the data adapters (csv, json, neo4j) and two of the three
+// generators (jschema, markdown) reach only for the public API. The gogen
+// adapter is the sole exception: it imports internal/ident to reuse the
+// canonical identifier-casing transform the library applies elsewhere (e.g.
+// JSON field names), so generated Go identifiers stay consistent with the rest
+// of yammm instead of duplicating that logic. The rule binds production code
+// alone: adapter tests import the module's test support (internal/yammmtest,
+// internal/instancetest) and the internals a test checks against
+// (internal/source, internal/parse).
 //
 // The adapter layer's own internal packages, which the JSON and CSV adapters
 // share — adapter/internal/typetag for a type tag's syntax,

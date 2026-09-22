@@ -31,9 +31,11 @@ Targets:
 
   --to jsonschema  A JSON Schema draft 2020-12 document describing the
                    instance-data JSON accepted by 'yammm check': one key per
-                   concrete type, each an array of instances. Wire it into an
-                   editor (e.g. a yaml-language-server or JSON $schema header)
-                   for completion and validation while authoring data files.
+                   type a data file can hold at its top level, each an array
+                   of instances. Wire it into an editor through a
+                   json.schemas mapping in VS Code settings for completion
+                   and validation while authoring data files; a JSON data
+                   file cannot carry a "$schema" member.
                    Use --schema-id to set the document's "$id" (omitted when
                    unset).
 

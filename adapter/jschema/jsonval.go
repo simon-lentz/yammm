@@ -48,7 +48,7 @@ func array(vs ...val) val { return val{kind: kindArray, arr: vs} }
 
 // scalar renders x as a JSON scalar with HTML escaping disabled, so text like
 // "endDate > startDate" survives into the output verbatim rather than as
-// > escapes. Inputs are generator-controlled (strings, int64s, float64s,
+// \u003e escapes. Inputs are generator-controlled (strings, int64s, float64s,
 // bools); anything unmarshalable is a generator bug and panics rather than
 // producing broken output.
 func scalar(x any) val {
