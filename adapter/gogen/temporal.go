@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -39,8 +40,8 @@ type temporalDemand struct {
 
 // registerTemporalTypes dry-runs emission's own type resolution in collect
 // mode over every position emission renders, so a Date or layout is registered
-// exactly when emission reaches it. Layouts take their Go names in sorted order,
-// never in the order the positions are found.
+// exactly when emission reaches it. A layout's name depends on no order; the
+// package doc's Type Mapping section states the rule.
 func (g *generator) registerTemporalTypes() error {
 	g.collect = &temporalDemand{layouts: map[string]bool{}}
 	defer func() { g.collect = nil }()
@@ -54,36 +55,52 @@ func (g *generator) registerTemporalTypes() error {
 			if isDefaultTimestamp(dt.Constraint()) {
 				continue
 			}
-			if _, err := g.goBaseType(dt.Constraint()); err != nil {
+			if _, err := g.dataTypeBase(sc, dt); err != nil {
 				return fmt.Errorf("gogen: datatype %q: %w", dt.Name(), err)
 			}
 		}
 	}
 	for _, t := range g.closureTypes() {
+		owner := g.typeOwner(t)
 		for _, p := range t.AllPropertiesSlice() {
-			if _, err := g.goFieldType(t, p); err != nil {
-				return fmt.Errorf("type %q property %q: %w", t.Name(), p.Name(), err)
+			if _, err := g.goFieldType(owner, p); err != nil {
+				return fmt.Errorf("%s property %q: %w", owner.label, p.Name(), err)
 			}
 		}
 	}
 	for _, e := range g.edges {
+		targetOwner := g.typeOwner(e.target)
 		for _, pk := range e.target.PrimaryKeysSlice() {
-			if _, err := g.goFieldType(e.target, pk); err != nil {
+			if _, err := g.goFieldType(targetOwner, pk); err != nil {
 				return err
 			}
 		}
+		owner := g.edgeOwner(e.rel)
 		for _, p := range e.rel.PropertiesSlice() {
-			if _, err := g.goFieldType(nil, p); err != nil {
-				return fmt.Errorf("type %q property %q: %w", ownerName(nil), p.Name(), err)
+			if _, err := g.goFieldType(owner, p); err != nil {
+				return fmt.Errorf("%s property %q: %w", owner.label, p.Name(), err)
 			}
 		}
 	}
 	if g.collect.date {
 		g.temporal.date = dateGoName
 	}
-	g.temporal.layouts = make(map[string]string, len(g.collect.layouts))
-	for _, layout := range slices.Sorted(maps.Keys(g.collect.layouts)) {
-		g.temporal.layouts[layout] = g.names.reserve(layoutTypeBase(layout))
+	layouts := slices.Sorted(maps.Keys(g.collect.layouts))
+	claimants := map[string]int{}
+	for _, layout := range layouts {
+		claimants[layoutTypeBase(layout)]++
+	}
+	g.temporal.layouts = make(map[string]string, len(layouts))
+	for _, layout := range layouts {
+		name := layoutTypeBase(layout)
+		if claimants[name] > 1 || g.names.taken[name] {
+			name = layoutTypeExact(layout)
+		}
+		if g.names.taken[name] {
+			return fmt.Errorf("gogen: layout %q derived the Go name %q, which another declaration holds", layout, name)
+		}
+		g.names.taken[name] = true
+		g.temporal.layouts[layout] = name
 	}
 	if g.temporal.date != "" || len(g.temporal.layouts) > 0 {
 		g.temporal.helpers = true
@@ -114,11 +131,8 @@ func isDefaultTimestamp(c schema.Constraint) bool {
 	return ok && tc.Format() == ""
 }
 
-// layoutTypeBase derives a per-layout type name from the layout alone:
-// "Timestamp" followed by every letter and digit of the layout, so the name
-// is a legal exported identifier that no unrelated schema edit can move.
-// The caller reserves it, so a schema type of the same name keeps the bare
-// identifier and the synthesized one takes the numbered suffix.
+// layoutTypeBase is a per-layout type's name when nothing else claims it:
+// "Timestamp" and every letter and digit of the layout.
 func layoutTypeBase(layout string) string {
 	var b strings.Builder
 	b.WriteString("Timestamp")
@@ -126,6 +140,28 @@ func layoutTypeBase(layout string) string {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(r)
 		}
+	}
+	return b.String()
+}
+
+// layoutTypeExact is a per-layout type's name when its base is claimed:
+// "Timestamp_", then the layout with each other rune written "_<hex>_" and each
+// invalid UTF-8 byte "_x<hex>_", so no two layouts share it. No base, schema
+// name or reserved name can equal it, since those never hold "_" after a letter.
+func layoutTypeExact(layout string) string {
+	var b strings.Builder
+	b.WriteString("Timestamp_")
+	for i := 0; i < len(layout); {
+		r, size := utf8.DecodeRuneInString(layout[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			fmt.Fprintf(&b, "_x%02X_", layout[i])
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+		default:
+			fmt.Fprintf(&b, "_%X_", r)
+		}
+		i += size
 	}
 	return b.String()
 }

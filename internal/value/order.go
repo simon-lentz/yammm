@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -133,6 +134,9 @@ func Order(left, right any) (int, error) {
 		}
 		return -1, nil
 	case NumericStrata:
+		if isWideInteger(left) || isWideInteger(right) {
+			return compareExact(left, right)
+		}
 		li, liok := GetInt64(left)
 		lu, luok := GetUint64(left)
 		lf, lfok := GetFloat64(left)
@@ -219,6 +223,73 @@ func Order(left, right any) (int, error) {
 		return -1, nil
 	}
 	return 0, fmt.Errorf("value: unknown strata for comparison between %T and %T", left, right)
+}
+
+// isWideInteger reports whether v is a json.Number holding a decimal integer
+// neither int64 nor uint64 holds. Its nearest float64 can be a different
+// integer, so [Order] compares it exactly rather than through that float.
+func isWideInteger(v any) bool {
+	n, ok := v.(json.Number)
+	if !ok {
+		return false
+	}
+	_, err := strconv.ParseInt(string(n), 10, 64)
+	if !errors.Is(err, strconv.ErrRange) {
+		return false
+	}
+	_, err = strconv.ParseUint(string(n), 10, 64)
+	return err != nil
+}
+
+// compareExact orders two numbers of which one is a wide integer, as rationals.
+// A float operand keeps its place in the float order: -Inf below every number,
+// +Inf above, and NaN above +Inf.
+func compareExact(left, right any) (int, error) {
+	l, lrank, err := exactOf(left)
+	if err != nil {
+		return 0, err
+	}
+	r, rrank, err := exactOf(right)
+	if err != nil {
+		return 0, err
+	}
+	if lrank != rrank {
+		return cmp.Compare(lrank, rrank), nil
+	}
+	if l == nil {
+		return 0, nil
+	}
+	return l.Cmp(r), nil
+}
+
+// exactOf returns v as a rational, or nil with a rank for a non-finite float:
+// -1 for -Inf, 1 for +Inf, 2 for NaN; a finite number ranks 0.
+func exactOf(v any) (*big.Rat, int, error) {
+	if n, ok := v.(json.Number); ok && isWideInteger(n) {
+		r, ok := new(big.Rat).SetString(string(n))
+		if !ok {
+			return nil, 0, fmt.Errorf("value: %q is not a number", n)
+		}
+		return r, 0, nil
+	}
+	if i, ok := GetInt64(v); ok {
+		return new(big.Rat).SetInt64(i), 0, nil
+	}
+	if u, ok := GetUint64(v); ok {
+		return new(big.Rat).SetUint64(u), 0, nil
+	}
+	if f, ok := GetFloat64(v); ok {
+		switch {
+		case math.IsNaN(f):
+			return nil, 2, nil
+		case math.IsInf(f, -1):
+			return nil, -1, nil
+		case math.IsInf(f, 1):
+			return nil, 1, nil
+		}
+		return new(big.Rat).SetFloat64(f), 0, nil
+	}
+	return nil, 0, fmt.Errorf("value: expected numeric value, got %T", v)
 }
 
 // GetInt64 extracts an int64 from any integer type.

@@ -545,8 +545,8 @@ var (
 	// continues to the next file rather than aborting; dir-level
 	// emissions surface on the outer Result returned by ScanDirSlice.
 	// The underlying os error is preserved as a detail entry so the
-	// operator can recover the concrete cause. Named E_SNAPSHOT_IO (not
-	// E_IO) to match the E_SNAPSHOT_* convention under CategorySnapshot;
+	// operator can recover the concrete cause. Named E_SNAPSHOT_IO, not a
+	// bare I/O name, to match the E_SNAPSHOT_* convention under CategorySnapshot;
 	// the precedent for a per-category I/O code is E_LOAD_IO_FAILURE
 	// under CategorySchema. No new CategoryIO constant is introduced.
 	E_SNAPSHOT_IO = NewCode("E_SNAPSHOT_IO", CategorySnapshot)

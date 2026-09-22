@@ -3,7 +3,7 @@ package registry
 
 type Contract struct {
 	ContractID string                            `json:"contract_id"`
-	SuppliedBy *EDGE_Contract_supplied_by_Vendor `json:"supplied_by"`
+	SuppliedBy *EDGE_Contract_supplied_by_Vendor `json:"supplied_by,omitempty"`
 }
 
 type Vendor struct {

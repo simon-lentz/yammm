@@ -14,8 +14,8 @@ import (
 // Bounds on a Vector's dimension count. Below the first is meaningless and
 // above the second is refused rather than allowed to exhaust memory downstream.
 const (
-	minVectorDimensions = 1
-	maxVectorDimensions = 65536
+	MinVectorDimensions = 1
+	MaxVectorDimensions = 65536
 )
 
 // unbounded is the spelling that leaves one side of a bound pair open.
@@ -339,12 +339,12 @@ func (b *builder) vectorConstraint(c *vecC, span location.Span) *Constraint {
 		return out
 	}
 	switch {
-	case dim < minVectorDimensions:
+	case dim < MinVectorDimensions:
 		b.reportf(diag.E_INVALID_CONSTRAINT, dimSpan,
-			"vector dimensions must be at least %d (got %d)", minVectorDimensions, dim)
-	case dim > maxVectorDimensions:
+			"vector dimensions must be at least %d (got %d)", MinVectorDimensions, dim)
+	case dim > MaxVectorDimensions:
 		b.reportf(diag.E_INVALID_CONSTRAINT, dimSpan,
-			"vector dimensions exceed maximum of %d (got %d)", maxVectorDimensions, dim)
+			"vector dimensions exceed maximum of %d (got %d)", MaxVectorDimensions, dim)
 	default:
 		out.VectorDims = &dim
 	}

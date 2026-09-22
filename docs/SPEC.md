@@ -730,7 +730,7 @@ index Integer[_, 99]         // no minimum, maximum 99
 temperature Integer[-40, 50] // negative lower bound
 ```
 
-Validation accepts signed and unsigned integers, including named/alias types and pointer values. Unsigned inputs larger than `int64` are rejected before bound checks.
+Validation accepts signed and unsigned integers, including named/alias types and pointer values. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal in a data document outside the `int64` range: it is never read as its nearest float, which for a literal just below the minimum is the minimum itself.
 
 #### Float
 

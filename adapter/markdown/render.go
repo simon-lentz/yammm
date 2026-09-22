@@ -2,11 +2,14 @@ package markdown
 
 import (
 	"bytes"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -169,20 +172,71 @@ func printableName(s string) string {
 	return b.String()
 }
 
-// mermaidID sanitizes a display name into a Mermaid class identifier:
-// characters outside letters, digits, and underscores (notably the dots in
-// qualified type names) become underscores. uniqueMermaidID makes the result
-// unique. When the id differs from the display name, the diagram emits the
-// display-label form `class id["display"]` so the rendered name keeps its
+// mermaidID sanitizes a display name into a Mermaid class identifier: every
+// character outside ASCII letters, digits and underscores (notably the dots in
+// qualified type names) becomes an underscore. Mermaid's class-diagram lexer
+// reads an id as \w+, which is ASCII, and its table of other letters is partial,
+// so a non-ASCII letter or digit can fail to lex. uniqueMermaidID makes the
+// result unique. When the id differs from the display name, the diagram emits
+// the display-label form `class id["display"]` so the rendered name keeps its
 // original spelling.
 func mermaidID(name string) string {
 	return strings.Map(func(r rune) rune {
-		if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if r == '_' || 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' {
 			return r
 		}
 		return '_'
 	}, name)
 }
+
+// mermaidText writes text for a class label or an edge label: mermaidChars's
+// escapes, and the white space after "direction" as an entity code where a
+// direction keyword follows it. Outside a class body Mermaid reads a line
+// holding "direction", white space and TB, BT, RL or LR as a direction
+// statement wherever the word stands, which swallows the line.
+func mermaidText(s string) string {
+	s = mermaidChars(s)
+	var b strings.Builder
+	for {
+		loc := mermaidDirection.FindStringIndex(s)
+		if loc == nil {
+			b.WriteString(s)
+			return b.String()
+		}
+		i := loc[0] + len("direction")
+		r, n := utf8.DecodeRuneInString(s[i:])
+		b.WriteString(s[:i] + "#" + strconv.Itoa(int(r)) + ";")
+		s = s[i+n:]
+	}
+}
+
+// mermaidChars writes each character Mermaid reads as syntax in a diagram as
+// an entity code, which Mermaid decodes when it renders: the quote that ends a
+// class label, the colon and semicolon that end an edge label, the percent
+// sign that starts a comment or a directive, the number sign that starts an
+// entity code, and the characters a rendered label reads as HTML.
+func mermaidChars(s string) string {
+	return mermaidTextEscaper.Replace(s)
+}
+
+// jsSpace is the set a JavaScript regular expression's \s matches, which is
+// how Mermaid's lexer reads white space.
+const jsSpace = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+
+// mermaidDirection matches what Mermaid's lexer reads as a direction
+// statement: "direction", JavaScript white space, and a direction keyword.
+var mermaidDirection = regexp.MustCompile(`direction[` + jsSpace + `]+(TB|BT|RL|LR)`)
+
+var mermaidTextEscaper = strings.NewReplacer(
+	`"`, "#quot;",
+	"#", "#35;",
+	":", "#58;",
+	";", "#59;",
+	"%", "#37;",
+	"<", "#60;",
+	">", "#62;",
+	"&", "#38;",
+)
 
 // writeTableRow writes one table row; cells must already be escaped (via
 // escapeCell, codeCell or escapeInline). An empty cell renders as the
@@ -266,7 +320,8 @@ func (g *generator) emitTypeSection(t *schema.Type) {
 // provenance marker. own extracts a type's own members of the relevant kind;
 // members the type declares itself belong to no ancestor and are absent from
 // the result. Merge only pulls inherited members from resolved, closure-present
-// ancestors, so every inherited member resolves to a display name here.
+// ancestors, so every inherited member resolves to a display name here, and
+// each member has one declaring ancestor, which the linearization lists once.
 func inheritedOwners[T comparable](g *generator, t *schema.Type, own func(*schema.Type) []T) map[T]string {
 	owners := make(map[T]string)
 	for _, super := range t.SuperTypesSlice() {
@@ -275,9 +330,7 @@ func inheritedOwners[T comparable](g *generator, t *schema.Type, own func(*schem
 			continue
 		}
 		for _, m := range own(se.typ) {
-			if _, exists := owners[m]; !exists {
-				owners[m] = se.displayMD
-			}
+			owners[m] = se.displayMD
 		}
 	}
 	return owners
@@ -364,11 +417,7 @@ func (g *generator) propertyTable(t *schema.Type) string {
 			mods = append(mods, "required")
 		}
 		if !own[p.Origin()] {
-			owner, ok := ownerOf[p.Origin()]
-			if !ok {
-				owner = escapeInline(p.DeclaringScope().String())
-			}
-			mods = append(mods, "from "+owner)
+			mods = append(mods, "from "+ownerOf[p.Origin()])
 		}
 		writePropertyRow(tw, p, strings.Join(mods, ", "))
 	}
@@ -394,11 +443,7 @@ func (g *generator) edgePropertyTable(props []*schema.Property) string {
 // the constraint's DSL form (named DataTypes display their name). mods is
 // Markdown already, its owner names escaped by escapeInline.
 func writePropertyRow(tw *tableWriter, p *schema.Property, mods string) {
-	typeCell := ""
-	if c := p.Constraint(); c != nil {
-		typeCell = c.String()
-	}
-	tw.row(codeCell(p.Name()), codeCell(typeCell), mods, escapeCell(p.Documentation()))
+	tw.row(codeCell(p.Name()), codeCell(p.Constraint().String()), mods, escapeCell(p.Documentation()))
 }
 
 // writeRelationList writes a labeled bullet list of relations in DSL notation
@@ -471,7 +516,7 @@ func (g *generator) invariantSource(inv *schema.Invariant) (string, bool) {
 	if g.sources == nil || !span.Start.HasByte() || !span.End.HasByte() {
 		return "", false
 	}
-	content, ok := g.sources.ContentBySource(span.Source)
+	content, ok := g.sourceContent(span.Source)
 	if !ok {
 		return "", false
 	}
@@ -487,6 +532,20 @@ func (g *generator) invariantSource(inv *schema.Invariant) (string, bool) {
 	}
 	text = strings.TrimRight(dedent(text), " \t\r\n")
 	return text, text != ""
+}
+
+// sourceContent returns a source's content, read from the schema once per
+// source: each read copies the whole source, and a source holds many
+// invariants.
+func (g *generator) sourceContent(id location.SourceID) ([]byte, bool) {
+	if content, ok := g.contents[id]; ok {
+		return content, true
+	}
+	content, ok := g.sources.ContentBySource(id)
+	if ok {
+		g.contents[id] = content
+	}
+	return content, ok
 }
 
 // dedent strips the longest common leading-whitespace prefix from every

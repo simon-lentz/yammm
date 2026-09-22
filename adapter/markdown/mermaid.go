@@ -1,6 +1,9 @@
 package markdown
 
 import (
+	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -36,6 +39,7 @@ func (g *generator) emitClassDiagram(h outlineEntry) {
 	if g.labelled {
 		g.buf.WriteString(mermaidFloorSentence + "\n\n")
 	}
+	g.diagramAt = g.buf.Len()
 	writeFence(&g.buf, "mermaid", b.String())
 }
 
@@ -54,9 +58,7 @@ func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 	e := g.types[t.ID()]
 	head := "class " + e.mermaidID
 	if e.display != e.mermaidID {
-		// A class label holds no double quote; Mermaid's entity code stands
-		// in for one.
-		head += `["` + strings.ReplaceAll(e.display, `"`, "#quot;") + `"]`
+		head += `["` + mermaidText(e.display) + `"]`
 		g.labelled = true
 	}
 
@@ -81,11 +83,7 @@ func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 		b.WriteString("        " + annotation + "\n")
 	}
 	for _, p := range props {
-		member := p.Name()
-		if label := kindLabel(p.Constraint()); label != "" {
-			member += " " + label
-		}
-		b.WriteString("        " + member + "\n")
+		b.WriteString("        " + mermaidChars(p.Name()+" "+kindLabel(p.Constraint())) + "\n")
 	}
 	b.WriteString("    }\n")
 }
@@ -116,7 +114,7 @@ func (g *generator) writeRelationEdge(b *strings.Builder, ownerID string, rel *s
 	if !ok {
 		return
 	}
-	label := rel.Name() + " (" + multiplicity(rel.IsOptional(), rel.IsMany()) + ")"
+	label := mermaidText(rel.Name() + " (" + multiplicity(rel.IsOptional(), rel.IsMany()) + ")")
 	b.WriteString("    " + ownerID + " " + arrow + " " + target.mermaidID + " : " + label + "\n")
 }
 
@@ -124,11 +122,59 @@ func (g *generator) writeRelationEdge(b *strings.Builder, ownerID string, rel *s
 // DataTypes display their name, everything else the bare ConstraintKind
 // word.
 func kindLabel(c schema.Constraint) string {
-	if c == nil {
-		return ""
-	}
 	if alias, ok := c.(schema.AliasConstraint); ok {
 		return alias.String()
 	}
 	return c.Kind().String()
+}
+
+// The line forms the emitter writes, each read by Mermaid's class-diagram
+// lexer as the emitter means it (Mermaid 10.1.0 and later): an id lexes as
+// \w+, which is ASCII; a class label is a string, which ends at the next
+// double quote; an edge label is a colon and then text up to the next colon,
+// semicolon or line break; and a member line inside a class body is text up to
+// the next brace or line break. The forms are a subset of the grammar, stricter
+// than it. Mermaid's render replaces each entity code with placeholder
+// characters none of these forms reads as syntax, so the check replaces each
+// code with a letter before it matches.
+var (
+	mermaidEntity     = regexp.MustCompile(`#\w+;`)
+	diagramClassLine  = regexp.MustCompile(`^    class [A-Za-z0-9_]+(\["[^"]*"\])?( \{)?$`)
+	diagramEdgeLine   = regexp.MustCompile(`^    [A-Za-z0-9_]+ (<\|--|-->|\*--) [A-Za-z0-9_]+( : [^:;]+)?$`)
+	diagramMemberLine = regexp.MustCompile(`^        [^{}]+$`)
+)
+
+// checkDiagram reports a line of the class diagram's body that is not one of
+// the forms the emitter writes, or a class body left open. Two rules are
+// stricter than the grammar: no line holds "%%", since Mermaid's render reads
+// "%%{" anywhere in the text as a directive and a token starting "%%" outside
+// a string as a comment; and no line outside a class body holds a direction
+// statement, which Mermaid reads wherever it stands on such a line.
+func checkDiagram(body string) error {
+	lines := strings.Split(strings.TrimSuffix(mermaidEntity.ReplaceAllString(body, "e"), "\n"), "\n")
+	if len(lines) < 2 || lines[0] != "classDiagram" || lines[1] != "    direction TB" {
+		return errors.New("the class diagram does not open with its header lines")
+	}
+	inClass := false
+	for _, line := range lines[2:] {
+		ok := false
+		switch {
+		case strings.Contains(line, "%%"), !inClass && mermaidDirection.MatchString(line):
+		case inClass && line == "    }":
+			inClass, ok = false, true
+		case inClass:
+			ok = diagramMemberLine.MatchString(line)
+		case diagramClassLine.MatchString(line):
+			inClass, ok = strings.HasSuffix(line, " {"), true
+		default:
+			ok = diagramEdgeLine.MatchString(line)
+		}
+		if !ok {
+			return fmt.Errorf("class diagram line %q is not a form the emitter writes", line)
+		}
+	}
+	if inClass {
+		return errors.New("the class diagram leaves a class body open")
+	}
+	return nil
 }

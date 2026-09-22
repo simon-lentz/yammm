@@ -75,6 +75,8 @@ func TestClassify_JSONNumber(t *testing.T) {
 		{"integer negative", json.Number("-10"), value.IntKind, int64(-10)},
 		{"integer zero", json.Number("0"), value.IntKind, int64(0)},
 		{"integer large", json.Number("9007199254740993"), value.IntKind, int64(9007199254740993)},
+		{"integer above int64", json.Number("9223372036854775808"), value.IntKind, json.Number("9223372036854775808")},
+		{"integer below int64", json.Number("-9223372036854775809"), value.IntKind, json.Number("-9223372036854775809")},
 
 		// Float json.Numbers (has decimal) -> FloatKind
 		{"float", json.Number("3.14"), value.FloatKind, float64(3.14)},

@@ -198,6 +198,77 @@ func TestCheckInteger_OutOfRangeWholeFloatIsATypeMismatch(t *testing.T) {
 	}
 }
 
+// An integer literal no int64 holds is a type mismatch at an Integer, with
+// the check and the coercion agreeing. Its nearest float64 is not a stand-in:
+// for -9223372036854775809 that float is exactly -2^63, a different integer.
+func TestIntegerLiteralOutsideInt64_IsATypeMismatchAtAnInteger(t *testing.T) {
+	t.Parallel()
+	for _, n := range []json.Number{"9223372036854775808", "-9223372036854775809", "-9223372036854776832"} {
+		t.Run(string(n), func(t *testing.T) {
+			t.Parallel()
+			err := eval.CheckValue(n, schema.NewIntegerConstraint())
+			var ce *eval.CheckError
+			if !errors.As(err, &ce) {
+				t.Fatalf("CheckValue err = %v, want a *CheckError", err)
+			}
+			if ce.Kind != eval.KindTypeMismatch || !strings.Contains(ce.Msg, "outside the int64 range") {
+				t.Errorf("kind=%v msg=%q; want KindTypeMismatch naming the range", ce.Kind, ce.Msg)
+			}
+			if got, err := eval.CoerceValue(n, schema.NewIntegerConstraint()); err == nil {
+				t.Errorf("CoerceValue(%s) = %#v, want an error", n, got)
+			}
+		})
+	}
+}
+
+// An integer literal no float64 holds is refused at a Vector element by the
+// check, as the coercion refuses it: the two agree on every value.
+func TestIntegerLiteralNoFloatHolds_IsRefusedAtAVectorElement(t *testing.T) {
+	t.Parallel()
+	huge := json.Number("1" + strings.Repeat("0", 400))
+	c := schema.NewVectorConstraint(2)
+	if err := eval.CheckValue([]any{huge, int64(1)}, c); err == nil {
+		t.Error("CheckValue accepted a vector element no float64 holds")
+	}
+	if _, err := eval.CoerceValue([]any{huge, int64(1)}, c); err == nil {
+		t.Error("CoerceValue accepted a vector element no float64 holds")
+	}
+	big := json.Number("99999999999999999999")
+	if err := eval.CheckValue([]any{big, int64(1)}, c); err != nil {
+		t.Errorf("CheckValue refused an integer a float64 holds: %v", err)
+	}
+}
+
+// A json.Number that is no number at all keeps the coercion's generic
+// message: only a decimal integer outside int64 is named as out of range.
+func TestCoerceInteger_ANonNumberIsNotCalledOutOfRange(t *testing.T) {
+	t.Parallel()
+	_, err := eval.CoerceValue(json.Number("abc"), schema.NewIntegerConstraint())
+	if err == nil {
+		t.Fatal("CoerceValue accepted json.Number(\"abc\")")
+	}
+	if strings.Contains(err.Error(), "outside the int64 range") {
+		t.Errorf("CoerceValue(\"abc\") = %v, which names a range for a value that is no integer", err)
+	}
+}
+
+// At a Float the same literal is its nearest float64, as the check and the
+// coercion both read it.
+func TestIntegerLiteralOutsideInt64_IsItsNearestFloatAtAFloat(t *testing.T) {
+	t.Parallel()
+	n := json.Number("99999999999999999999")
+	if err := eval.CheckValue(n, schema.NewFloatConstraint()); err != nil {
+		t.Fatalf("CheckValue: %v", err)
+	}
+	got, err := eval.CoerceValue(n, schema.NewFloatConstraint())
+	if err != nil {
+		t.Fatalf("CoerceValue: %v", err)
+	}
+	if got != float64(1e20) {
+		t.Errorf("CoerceValue = %#v, want float64(1e20)", got)
+	}
+}
+
 // The trace op ends with the panic: a crashed evaluation is logged as one,
 // and the panic still propagates to the recover that owns it.
 func TestEvaluate_EndsTheTraceOpWithThePanic(t *testing.T) {

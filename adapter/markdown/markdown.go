@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/yuin/goldmark"
 )
@@ -112,6 +113,7 @@ func (g *generator) reset() {
 	g.links = nil
 	g.tables = nil
 	g.labelled = false
+	g.diagramAt = -1
 }
 
 // finish runs the self-check over the emitted document and returns it. Marshal
@@ -197,11 +199,7 @@ func (g *generator) dataTypeTable(dts []*schema.DataType) string {
 	var b bytes.Buffer
 	tw := g.newTable(&b, "Name", "Definition", "Description")
 	for _, dt := range dts {
-		def := ""
-		if c := dt.Constraint(); c != nil {
-			def = c.String()
-		}
-		tw.row(codeCell(dt.Name()), codeCell(def), escapeCell(dt.Documentation()))
+		tw.row(codeCell(dt.Name()), codeCell(dt.Constraint().String()), escapeCell(dt.Documentation()))
 	}
 	return b.String()
 }
@@ -211,8 +209,10 @@ func (g *generator) dataTypeTable(dts []*schema.DataType) string {
 // outline heading is a top-level heading of its level whose text is the text
 // the generator meant, holding the anchor GitHub allocates it; every internal
 // link the generator wrote is read as a link to an outline heading; and every
-// table it wrote is read as a table of its columns and rows. Doc-comment text
-// is the author's Markdown and is not a subject. A failure is a generator bug.
+// table it wrote is read as a table of its columns and rows; and the class
+// diagram is read as a fenced code block whose every line is a form the
+// emitter writes, a subset of Mermaid's class-diagram grammar. Doc-comment text is the author's Markdown and is
+// not a subject. A failure is a generator bug.
 func (g *generator) selfCheck() error {
 	doc := g.read()
 	if _, open := doc.open(); open {
@@ -283,6 +283,15 @@ func (g *generator) selfCheck() error {
 		}
 		if got.cols != tw.cols || got.rows != tw.rows {
 			return fmt.Errorf("markdown: self-check: a table written with %d columns and %d rows is read with %d and %d", tw.cols, tw.rows, got.cols, got.rows)
+		}
+	}
+	if g.diagramAt >= 0 {
+		body, ok := fencedCodeAt(root, out, g.diagramAt)
+		if !ok {
+			return errors.New("markdown: self-check: the class diagram is not read as a fenced code block")
+		}
+		if err := checkDiagram(body); err != nil {
+			return fmt.Errorf("markdown: self-check: %w", err)
 		}
 	}
 	return nil
@@ -385,6 +394,7 @@ type generator struct {
 	types      map[schema.TypeID]*typeEntry
 	outline    []outlineEntry
 	sources    *schema.Sources
+	contents   map[location.SourceID][]byte // each source's content, read once
 	cfg        config
 
 	md       goldmark.Markdown // the parser the self-check and the closing of doc comments read with
@@ -396,6 +406,9 @@ type generator struct {
 	// labelled records that writeClass emitted a labelled class, which is
 	// what the floor sentence is about.
 	labelled bool
+	// diagramAt is where the class diagram's fence starts, or -1 when the
+	// document has none.
+	diagramAt int
 }
 
 // newGenerator builds the generator for a schema and its import closure: each
@@ -410,8 +423,10 @@ func newGenerator(s *schema.Schema, cfg config) *generator {
 		declaredIn: map[schema.TypeID]*schema.Schema{},
 		types:      make(map[schema.TypeID]*typeEntry),
 		sources:    s.Sources(),
+		contents:   map[location.SourceID][]byte{},
 		cfg:        cfg,
 		md:         newParser(),
+		diagramAt:  -1,
 	}
 	mermaidIDs := map[string]bool{}
 	for _, sch := range g.closure {

@@ -313,6 +313,25 @@ type Person {
 	}
 }
 
+// TestEmitTypeSection_InvariantDedentsToTheCommonIndent pins that a
+// multi-line invariant's continuation lines lose only the indentation they all
+// share: the second line is indented deeper than the third, so it keeps the
+// difference and the third keeps none.
+func TestEmitTypeSection_InvariantDedentsToTheCommonIndent(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, "schema \"people\"\n\ntype Person {\n\tid UUID primary\n\tage Integer\n\n\t! \"age in bounds\" age >= 0 &&\n\t\t\tage <= 150 &&\n\t\tage != 99\n}\n")
+	got := sectionFor(t, s, "Person")
+	want := "  ```yammm\n" +
+		"  ! \"age in bounds\" age >= 0 &&\n" +
+		"  \tage <= 150 &&\n" +
+		"  age != 99\n" +
+		"  ```\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("section %q does not contain the dedented fence %q", got, want)
+	}
+}
+
 func TestEmitTypeSection_InvariantDocStrippedFromFence(t *testing.T) {
 	t.Parallel()
 

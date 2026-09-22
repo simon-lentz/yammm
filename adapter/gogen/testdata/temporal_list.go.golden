@@ -38,19 +38,6 @@ func (v Date) MarshalJSON() ([]byte, error) { return marshalTemporal(v.Time, dat
 
 func (v *Date) UnmarshalJSON(b []byte) error { return unmarshalTemporal(b, dateLayout, &v.Time) }
 
-// Timestamp20060102150405 is exchanged as a JSON string in the layout "2006-01-02 15:04:05".
-type Timestamp20060102150405 struct{ time.Time }
-
-const timestamp20060102150405Layout = "2006-01-02 15:04:05"
-
-func (v Timestamp20060102150405) MarshalJSON() ([]byte, error) {
-	return marshalTemporal(v.Time, timestamp20060102150405Layout)
-}
-
-func (v *Timestamp20060102150405) UnmarshalJSON(b []byte) error {
-	return unmarshalTemporal(b, timestamp20060102150405Layout, &v.Time)
-}
-
 // Day is exchanged as a JSON string in the layout "2006-01-02".
 type Day struct{ time.Time }
 
@@ -71,15 +58,15 @@ func (v *Wall) UnmarshalJSON(b []byte) error { return unmarshalTemporal(b, wallL
 
 type Days []Date
 
-type Dates []Date
+type Dates []Day
 
-type Walls []Timestamp20060102150405
+type Walls []Wall
 
 type Calendar struct {
-	ID     string                      `json:"id"`
-	Days   Days                        `json:"days,omitempty"`
-	Grid   [][]Date                    `json:"grid,omitempty"`
-	Shifts [][]Timestamp20060102150405 `json:"shifts,omitempty"`
+	ID     string   `json:"id"`
+	Days   Days     `json:"days,omitzero"`
+	Grid   [][]Day  `json:"grid,omitzero"`
+	Shifts [][]Wall `json:"shifts,omitzero"`
 }
 
 type Graph struct {

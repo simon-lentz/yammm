@@ -10,24 +10,15 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// loadFixture loads a testdata schema from disk, optionally under an explicit
-// module root, the way Marshal's callers do.
-func loadFixture(t *testing.T, name, moduleRoot string) *schema.Schema {
+// loadFixture loads a testdata schema from disk the way Marshal's callers do.
+func loadFixture(t *testing.T, name string) *schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	path, err := filepath.Abs(filepath.Join("testdata", name+".yammm"))
 	if err != nil {
 		t.Fatalf("abs path: %v", err)
 	}
-	var opts []schema.LoadOption
-	if moduleRoot != "" {
-		root, err := filepath.Abs(filepath.Join("testdata", moduleRoot))
-		if err != nil {
-			t.Fatalf("abs module root: %v", err)
-		}
-		opts = append(opts, schema.WithModuleRoot(root))
-	}
-	s, res := schema.Load(t.Context(), path, opts...)
+	s, res := schema.Load(t.Context(), path)
 	if res.HasErrors() {
 		t.Fatalf("load %s: %v", name, res.Err())
 	}
@@ -41,7 +32,7 @@ func loadFixture(t *testing.T, name, moduleRoot string) *schema.Schema {
 func TestSerializedEntry_SingleSourceMatchesSourceKey(t *testing.T) {
 	t.Parallel()
 
-	s := loadFixture(t, "scalars", "")
+	s := loadFixture(t, "scalars")
 	ids := s.Sources().SourceIDs()
 	if len(ids) != 1 {
 		t.Fatalf("expected a single-source fixture, got %d sources", len(ids))

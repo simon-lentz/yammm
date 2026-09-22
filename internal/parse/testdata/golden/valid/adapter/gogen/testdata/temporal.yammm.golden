@@ -323,6 +323,27 @@
             "s": 575,
             "e": 628
           }
+        },
+        {
+          "name": "labels",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "String",
+              "span": {
+                "s": 650,
+                "e": 656
+              }
+            },
+            "span": {
+              "s": 645,
+              "e": 657
+            }
+          },
+          "span": {
+            "s": 630,
+            "e": 657
+          }
         }
       ],
       "rels": [
@@ -330,54 +351,54 @@
           "kind": "comp",
           "name": "HAS_READING",
           "name_span": {
-            "s": 634,
-            "e": 645
+            "s": 663,
+            "e": 674
           },
           "target": {
             "name": "Reading",
             "span": {
-              "s": 653,
-              "e": 660
+              "s": 682,
+              "e": 689
             }
           },
           "optional": true,
           "many": true,
           "span": {
-            "s": 630,
-            "e": 660
+            "s": 659,
+            "e": 689
           }
         },
         {
           "kind": "comp",
           "name": "IN_CASING",
           "name_span": {
-            "s": 666,
-            "e": 675
+            "s": 695,
+            "e": 704
           },
           "target": {
             "name": "Casing",
             "span": {
-              "s": 682,
-              "e": 688
+              "s": 711,
+              "e": 717
             }
           },
           "span": {
-            "s": 662,
-            "e": 688
+            "s": 691,
+            "e": 717
           }
         },
         {
           "kind": "assoc",
           "name": "FEEDS",
           "name_span": {
-            "s": 694,
-            "e": 699
+            "s": 723,
+            "e": 728
           },
           "target": {
             "name": "Sensor",
             "span": {
-              "s": 706,
-              "e": 712
+              "s": 735,
+              "e": 741
             }
           },
           "props": [
@@ -389,25 +410,46 @@
                   "\"2006-01-02 15:04:05\""
                 ],
                 "span": {
-                  "s": 723,
-                  "e": 755
+                  "s": 752,
+                  "e": 784
                 }
               },
               "span": {
-                "s": 717,
-                "e": 755
+                "s": 746,
+                "e": 784
               }
             }
           ],
           "span": {
-            "s": 690,
-            "e": 758
+            "s": 719,
+            "e": 787
+          }
+        },
+        {
+          "kind": "assoc",
+          "name": "NEIGHBOURS",
+          "name_span": {
+            "s": 793,
+            "e": 803
+          },
+          "target": {
+            "name": "Sensor",
+            "span": {
+              "s": 811,
+              "e": 817
+            }
+          },
+          "optional": true,
+          "many": true,
+          "span": {
+            "s": 789,
+            "e": 817
           }
         }
       ],
       "span": {
         "s": 230,
-        "e": 760
+        "e": 819
       }
     }
   ]

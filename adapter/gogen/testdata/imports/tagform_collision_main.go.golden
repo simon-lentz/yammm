@@ -3,18 +3,18 @@ package tcmain
 
 type Main struct {
 	ID      string                    `json:"id"`
-	ToLeft  *EDGE_Main_to_left_Left   `json:"to_left"`
-	ToRight *EDGE_Main_to_right_Right `json:"to_right"`
+	ToLeft  *EDGE_Main_to_left_Left   `json:"to_left,omitempty"`
+	ToRight *EDGE_Main_to_right_Right `json:"to_right,omitempty"`
 }
 
 type Left struct {
 	ID     string                          `json:"id"`
-	ToNode *EDGE_Left_to_node_LeftbaseNode `json:"to_node"`
+	ToNode *EDGE_Left_to_node_LeftbaseNode `json:"to_node,omitempty"`
 }
 
 type Right struct {
 	ID     string                            `json:"id"`
-	ToNode *EDGE_Right_to_node_RightbaseNode `json:"to_node"`
+	ToNode *EDGE_Right_to_node_RightbaseNode `json:"to_node,omitempty"`
 }
 
 type LeftbaseNode struct {

@@ -191,8 +191,8 @@ func TestChecks_VectorDimensionBoundariesAreAccepted(t *testing.T) {
 		dims string
 		want int
 	}{
-		{"1", minVectorDimensions},
-		{"65536", maxVectorDimensions},
+		{"1", MinVectorDimensions},
+		{"65536", MaxVectorDimensions},
 	}
 	for _, tc := range tests {
 		t.Run(tc.dims, func(t *testing.T) {

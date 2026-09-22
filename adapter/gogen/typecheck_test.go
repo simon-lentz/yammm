@@ -52,3 +52,25 @@ func (v *Date) UnmarshalJSON(b []byte) error {
 		t.Fatalf("typeCheck: %v", err)
 	}
 }
+
+// TestGenerate_RefusesSourceThatDoesNotTypeCheck drives generate's own
+// type-check: two types given one Go name format cleanly and declare it twice,
+// which generate must return as an error rather than as source.
+func TestGenerate_RefusesSourceThatDoesNotTypeCheck(t *testing.T) {
+	t.Parallel()
+
+	g, err := newGenerator(loadFixture(t, "relations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id := range g.names.types {
+		g.names.types[id] = "Dup"
+	}
+	data, err := g.generate()
+	if err == nil || !strings.Contains(err.Error(), "did not type-check") {
+		t.Errorf("generate = %v, want the type-check refusal", err)
+	}
+	if data != nil {
+		t.Errorf("generate returned %d bytes with its error", len(data))
+	}
+}

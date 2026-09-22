@@ -2,6 +2,7 @@ package jschema
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -123,7 +124,7 @@ func buildDefs(table *defsTable) (val, map[string]bool, error) {
 		if !ok {
 			return val{}, nil, fmt.Errorf("jschema: no $defs key for datatype %q", d.Name())
 		}
-		v, err := dataTypeDef(d)
+		v, err := dataTypeDef(d, table)
 		if err != nil {
 			return val{}, nil, err
 		}
@@ -154,7 +155,9 @@ func typeDef(t *schema.Type, table *defsTable) (val, error) {
 			return val{}, fmt.Errorf("jschema: type %q: %w", t.Name(), err)
 		}
 		if doc := p.Documentation(); doc != "" {
-			frag = withDescription(frag, doc)
+			if frag, err = withDescription(frag, doc); err != nil {
+				return val{}, fmt.Errorf("jschema: type %q property %q: %w", t.Name(), p.Name(), err)
+			}
 		}
 		props = append(props, kv{K: p.Name(), V: frag})
 		if p.IsRequired() {
@@ -191,8 +194,8 @@ func typeDef(t *schema.Type, table *defsTable) (val, error) {
 // instance objects regardless of multiplicity (the wire shape the instance
 // layer expects), with minItems 1 when required (an absent or empty required
 // composition is an instance-layer error) and maxItems 1 for to-one (a
-// second child under a to-one composition is rejected at graph assembly as a
-// duplicate composed primary key). The child is named by its resolved
+// second child under a to-one composition is refused by instance validation,
+// E_DUPLICATE_COMPOSED_PK). The child is named by its resolved
 // identity, so a composition inherited from a cross-schema parent still
 // references the correct part type.
 func compositionFrag(rel *schema.Relation, table *defsTable) (val, error) {
@@ -249,7 +252,7 @@ func associationFrag(rel *schema.Relation, table *defsTable) (val, error) {
 			kv{K: "description", V: scalar(desc)},
 		), nil
 	}
-	return withDescription(refTo(edgeKey), desc), nil
+	return withDescription(refTo(edgeKey), desc)
 }
 
 // edgeDef emits one edge-object schema: the _target_* foreign-key block
@@ -278,7 +281,9 @@ func edgeDef(er edgeRec, table *defsTable) (val, error) {
 			return val{}, fmt.Errorf("jschema: edge %q: %w", er.rel.Name(), err)
 		}
 		if doc := ep.Documentation(); doc != "" {
-			frag = withDescription(frag, doc)
+			if frag, err = withDescription(frag, doc); err != nil {
+				return val{}, fmt.Errorf("jschema: edge %q property %q: %w", er.rel.Name(), ep.Name(), err)
+			}
 		}
 		props = append(props, kv{K: ep.Name(), V: frag})
 		if ep.IsRequired() {
@@ -293,19 +298,31 @@ func edgeDef(er edgeRec, table *defsTable) (val, error) {
 	), nil
 }
 
-// dataTypeDef emits a named DataType's $defs entry: its resolved constraint
-// fragment (a nested DataType reference inside the constraint resolves to
-// structure, which validates identically to a $ref) with the DataType's
+// dataTypeDef emits a named DataType's $defs entry: its constraint fragment,
+// with a datatype its constraint lists kept as a $ref at any List depth
+// (Codes = List<FipsCode> emits items $ref FipsCode), and the DataType's
 // documentation as description.
-func dataTypeDef(d *schema.DataType) (val, error) {
-	frag, err := schemaForConstraint(schema.ResolveAlias(d.Constraint()))
+func dataTypeDef(d *schema.DataType, table *defsTable) (val, error) {
+	frag, err := dataTypeFragment(d, table)
 	if err != nil {
 		return val{}, fmt.Errorf("jschema: datatype %q: %w", d.Name(), err)
 	}
 	if doc := d.Documentation(); doc != "" {
-		frag = withDescription(frag, doc)
+		return withDescription(frag, doc)
 	}
 	return frag, nil
+}
+
+func dataTypeFragment(d *schema.DataType, table *defsTable) (val, error) {
+	lists, ac, ok := aliasInLists(d.Constraint())
+	if !ok {
+		return schemaForConstraint(d.Constraint())
+	}
+	name, ok := table.innerDataTypeName(d)
+	if !ok {
+		return val{}, fmt.Errorf("no registered $defs key for the datatype it references (%s)", ac.DataTypeName())
+	}
+	return wrapInLists(lists, refTo(name)), nil
 }
 
 // withDescription attaches desc as the fragment's "description", MERGING with
@@ -317,23 +334,25 @@ func dataTypeDef(d *schema.DataType) (val, error) {
 // into map[string]any — then dropped the layout the section promises.
 //
 // The separator matches compositionFrag and associationFrag: generated text
-// first, doc-comment appended after a single space.
-//
-// All call sites pass freshly built objects, so the append cannot alias another
-// value's member slice.
-func withDescription(v val, desc string) val {
-	for i, member := range v.obj {
+// first, doc-comment appended after a single space. The result holds its own
+// member slice, so v is unchanged. Only an object carries members; any other
+// fragment is a generator bug, surfaced as an error.
+func withDescription(v val, desc string) (val, error) {
+	if v.kind != kindObject {
+		return val{}, fmt.Errorf("jschema: description %q attached to a fragment that is not an object", desc)
+	}
+	members := slices.Clone(v.obj)
+	for i, member := range members {
 		if member.K != "description" {
 			continue
 		}
 		if existing, ok := member.V.stringValue(); ok && existing != "" {
 			desc = existing + " " + desc
 		}
-		v.obj[i] = kv{K: "description", V: scalar(desc)}
-		return v
+		members[i] = kv{K: "description", V: scalar(desc)}
+		return object(members...), nil
 	}
-	v.obj = append(v.obj, kv{K: "description", V: scalar(desc)})
-	return v
+	return object(append(members, kv{K: "description", V: scalar(desc)})...), nil
 }
 
 // multiplicity renders a relation's forward multiplicity in its DSL source

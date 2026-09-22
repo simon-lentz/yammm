@@ -128,6 +128,41 @@ abstract type A extends Shared {
 	assertAbsent(t, doc, "b_Shared <|-- T")
 }
 
+// TestMarshal_ExtendsLinksAQualifiedAncestorAParentAlsoReaches pins that an
+// extends reference written with the entry's tag links to its type's section
+// when the type is also an ancestor of another parent: b.Shared is A's parent,
+// and T names it again beside b.A.
+func TestMarshal_ExtendsLinksAQualifiedAncestorAParentAlsoReaches(t *testing.T) {
+	t.Parallel()
+
+	doc := marshalSources(t, map[string]string{
+		"entry.yammm": `schema "main"
+
+import "b.yammm" as b
+
+type T extends b.A, b.Shared {
+	id String primary
+}
+`,
+		"b.yammm": `schema "b"
+
+abstract type Shared {
+	z String
+}
+
+abstract type A extends Shared {
+	y String
+}
+`,
+	})
+
+	assertLines(t, doc,
+		"Extends: [b.A](#ba), [b.Shared](#bshared).",
+		"    b_A <|-- T",
+		"    b_Shared <|-- T",
+	)
+}
+
 // TestMarshal_TypeNamedLikeASectionLinksItsOwnHeading pins that a type whose
 // heading slugs like a section heading of the document is linked by the
 // anchor GitHub gives its own heading: "## Types" comes first and takes
@@ -194,6 +229,52 @@ type Person {
 		`### Person (co"m \[z\](w)\*)`,
 		"- `--> OWNER (one)` [Person (co\"m \\[z\\](w)\\*)](#person-com-zw)",
 		`    class Person__co_m__z__w___["Person (co#quot;m [z](w)*)"] {`,
+	)
+}
+
+// TestMarshal_DiagramTextIsMermaidText pins that schema-supplied text reaches
+// the class diagram only in forms Mermaid's classDiagram lexer reads: a class
+// id is ASCII letters, digits and underscores, since Mermaid's \w is ASCII and
+// its table of other letters is partial, and a class label writes each
+// character Mermaid reads as syntax, a directive or an entity as an entity
+// code, as it does the white space in "direction LR", which Mermaid reads as a
+// direction statement anywhere on a line outside a class body. An edge label
+// writes the
+// multiplicity colon as an entity, because Mermaid's label token ends at a
+// colon.
+func TestMarshal_DiagramTextIsMermaidText(t *testing.T) {
+	t.Parallel()
+
+	doc := marshalSources(t, map[string]string{
+		"entry.yammm": `schema "app"
+
+import "mid.yammm" as m
+
+type Car {
+	id String primary
+	--> AT (one) m.Hub
+}
+`,
+		"mid.yammm": `schema "mid"
+
+import "odd.yammm" as o
+
+type Hub {
+	id String primary
+	--> OWNERS (one:many) o.Person
+}
+`,
+		"odd.yammm": `schema "x\"y:z;#35;%%{init}%%<b>&é٣ direction LR"
+
+type Person {
+	id String primary
+}
+`,
+	})
+
+	assertLines(t, doc,
+		"    class Person__x_y_z__35____init____b_____direction_LR_[\"Person (x#quot;y#58;z#59;#35;35#59;#37;#37;{init}#37;#37;#60;b#62;#38;é٣ direction#32;LR)\"] {",
+		"    m_Hub --> Person__x_y_z__35____init____b_____direction_LR_ : OWNERS (one#58;many)",
 	)
 }
 

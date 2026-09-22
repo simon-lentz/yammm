@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -169,6 +170,13 @@ func coerceInteger(val any) (any, error) {
 	if i, ok := value.GetInt64(val); ok {
 		return i, nil
 	}
+	// A decimal integer no int64 holds: its nearest float64 can be a
+	// different integer, so the float path below must not see it.
+	if kind, norm := value.Classify(val); kind == value.IntKind {
+		if n, ok := norm.(json.Number); ok {
+			return nil, fmt.Errorf("cannot coerce integer %s outside the int64 range to int64", n)
+		}
+	}
 	// Try float64 whole number extraction
 	if f, ok := value.GetFloat64(val); ok {
 		if i, ok := value.GetInt64FromFloat(f); ok {
@@ -302,7 +310,7 @@ func checkString(val any, c schema.Constraint) error {
 // checkInteger validates that val is an integer with optional bounds.
 // Per spec, accepts integer types and float64 whole numbers (math.Trunc(f) == f).
 func checkInteger(val any, c schema.Constraint) error {
-	kind, _ := value.Classify(val)
+	kind, norm := value.Classify(val)
 
 	var i int64
 	var ok bool
@@ -311,6 +319,9 @@ func checkInteger(val any, c schema.Constraint) error {
 	case value.IntKind:
 		i, ok = value.GetInt64(val)
 		if !ok {
+			if n, isNumber := norm.(json.Number); isNumber {
+				return typeMismatch("expected integer, got an integer outside the int64 range: %s", n)
+			}
 			return typeMismatch("cannot convert %T to int64", val)
 		}
 	case value.FloatKind:
@@ -533,10 +544,16 @@ func checkVector(val any, c schema.Constraint) error {
 		if kind != value.FloatKind && kind != value.IntKind {
 			return typeMismatch("vector element [%d]: expected number, got %T", i, elem)
 		}
-		// Check for NaN/Inf in float elements (integers are always finite)
+		// Check for NaN/Inf in float elements. An integer is finite unless it is
+		// a json.Number no float64 holds, which coerceFloat refuses too.
 		if kind == value.FloatKind {
 			if fv, ok := value.GetFloat64(elem); ok && !value.IsFinite(fv) {
 				return constraintFail("vector element [%d]: value is not finite (NaN or Inf)", i)
+			}
+		}
+		if n, isNumber := elem.(json.Number); isNumber && kind == value.IntKind {
+			if _, ok := value.GetFloat64(n); !ok {
+				return typeMismatch("vector element [%d]: expected number, got %T", i, elem)
 			}
 		}
 	}

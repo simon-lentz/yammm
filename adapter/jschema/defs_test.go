@@ -40,13 +40,14 @@ func loadFixture(t *testing.T, src, name string) *schema.Schema {
 	return s
 }
 
-func loadMulti(t *testing.T, sources map[string]string, entry string) *schema.Schema {
+// loadMulti loads sources hermetically with "main.yammm" as the entry.
+func loadMulti(t *testing.T, sources map[string]string) *schema.Schema {
 	t.Helper()
 	m := make(map[string][]byte, len(sources))
 	for k, v := range sources {
 		m[k] = []byte(v)
 	}
-	s, res := schema.LoadSourcesWithEntry(t.Context(), m, entry, ".", schema.WithSourcesOnly(true))
+	s, res := schema.LoadSourcesWithEntry(t.Context(), m, "main.yammm", ".", schema.WithSourcesOnly(true))
 	if res.HasErrors() {
 		t.Fatalf("load multi: %v", res.Err())
 	}
@@ -191,7 +192,7 @@ type Region {
 	name String required
 }
 `,
-	}, "main.yammm")
+	})
 
 	table, err := buildDefsTable(s)
 	if err != nil {
@@ -249,7 +250,7 @@ abstract type Located {
 	*-> HAS_MARKER (many) Marker
 }
 `,
-	}, "main.yammm")
+	})
 
 	table, err := buildDefsTable(s)
 	if err != nil {
@@ -340,24 +341,36 @@ type Person extends Member {
 	}
 }
 
-func TestBuildDefsTable_SameSchemaTypeDataTypeCollisionErrors(t *testing.T) {
+// A type and a datatype sharing a name in one schema is a legal schema, and
+// qualification cannot separate them, so the datatype takes a suffix.
+func TestBuildDefsTable_SameSchemaTypeAndDataTypeTakeASuffix(t *testing.T) {
 	src := `schema "geo"
 
 type Region = String [2, 2]
 
 type Region {
 	id String primary
+	code Region
 }
 `
 	s := loadFixture(t, src, "test://type_dt_collision.yammm")
-	if _, err := buildDefsTable(s); err == nil {
-		t.Error("a type and datatype sharing a name in one schema cannot be separated by qualification; buildDefsTable must error")
-	} else if !strings.Contains(err.Error(), "rename") {
-		t.Errorf("collision error should instruct a rename, got: %v", err)
+	table, err := buildDefsTable(s)
+	if err != nil {
+		t.Fatalf("buildDefsTable: %v", err)
+	}
+	if got := mustDefName(t, table, mustType(t, s, "Region")); got != "geo.Region" {
+		t.Errorf("the type's key = %q, want geo.Region", got)
+	}
+	d, ok := s.DataType("Region")
+	if !ok {
+		t.Fatal("no datatype Region")
+	}
+	if got := table.dataTypes[d]; got != "geo.Region2" {
+		t.Errorf("the datatype's key = %q, want geo.Region2", got)
 	}
 }
 
-func TestBuildDefsTable_EdgeKeyCollisionWithTypeErrors(t *testing.T) {
+func TestBuildDefsTable_EdgeKeyTakenByATypeTakesASuffix(t *testing.T) {
 	src := `schema "fleet"
 
 type EDGE_Car_owner_Person {
@@ -374,9 +387,49 @@ type Car {
 }
 `
 	s := loadFixture(t, src, "test://edge_key_collision.yammm")
-	if _, err := buildDefsTable(s); err == nil {
-		t.Error("a type whose name equals a generated EDGE_ key must be a hard error")
+	table, err := buildDefsTable(s)
+	if err != nil {
+		t.Fatalf("buildDefsTable: %v", err)
 	}
+	if got := mustDefName(t, table, mustType(t, s, "EDGE_Car_owner_Person")); got != "EDGE_Car_owner_Person" {
+		t.Errorf("the declared type's key = %q, want its own name", got)
+	}
+	car := mustType(t, s, "Car")
+	if got, _ := table.edgeDefName(car.AssociationsSlice()[0]); got != "EDGE_Car_owner_Person2" {
+		t.Errorf("the edge key = %q, want EDGE_Car_owner_Person2", got)
+	}
+}
+
+// "_" joins an edge key's parts and may occur inside them, so two declared
+// associations can spell one key.
+func TestMarshal_EdgeKeysSpelledAlikeStayDistinct(t *testing.T) {
+	src := `schema "p"
+
+type C {
+	id String primary
+}
+
+type A {
+	id String primary
+	--> B_X (one) C
+}
+
+type A_b {
+	id String primary
+	--> X (one) C
+}
+`
+	s := loadFixture(t, src, "test://edge_keys_alike.yammm")
+	table, err := buildDefsTable(s)
+	if err != nil {
+		t.Fatalf("buildDefsTable: %v", err)
+	}
+	first, _ := table.edgeDefName(mustType(t, s, "A").AssociationsSlice()[0])
+	second, _ := table.edgeDefName(mustType(t, s, "A_b").AssociationsSlice()[0])
+	if first != "EDGE_A_b_x_C" || second != "EDGE_A_b_x_C2" {
+		t.Errorf("edge keys = %q, %q; want EDGE_A_b_x_C, EDGE_A_b_x_C2", first, second)
+	}
+	compileEmitted(t, s)
 }
 
 func TestRefTo_JSONPointerEscaping(t *testing.T) {

@@ -263,6 +263,24 @@ func firstTextStart(n ast.Node) int {
 	return -1
 }
 
+// fencedCodeAt returns the body of the top-level fenced code block whose
+// opening line starts at offset.
+func fencedCodeAt(root ast.Node, src []byte, offset int) (string, bool) {
+	for n := root.FirstChild(); n != nil; n = n.NextSibling() {
+		f, ok := n.(*ast.FencedCodeBlock)
+		if !ok || f.Info == nil || lineStart(src, f.Info.Segment.Start) != offset {
+			continue
+		}
+		var b strings.Builder
+		for i := range f.Lines().Len() {
+			line := f.Lines().At(i)
+			b.Write(line.Value(src))
+		}
+		return b.String(), true
+	}
+	return "", false
+}
+
 // parsedTable is one table as the parser reads it: the line its header starts
 // on, its header's cell count and its body's row count.
 type parsedTable struct {

@@ -9,7 +9,7 @@ type Region struct {
 
 type Sensor struct {
 	ID        string                         `json:"id"`
-	LocatedIn *EDGE_Sensor_located_in_Region `json:"located_in"`
+	LocatedIn *EDGE_Sensor_located_in_Region `json:"located_in,omitempty"`
 }
 
 type EDGE_Sensor_located_in_Region struct {

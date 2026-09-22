@@ -413,6 +413,26 @@ type Person {
 		}
 	})
 
+	t.Run("a class diagram line Mermaid cannot read fails", func(t *testing.T) {
+		t.Parallel()
+		g := fresh()
+		doc := strings.Replace(g.buf.String(), "        id UUID\n", "        id{UUID\n", 1)
+		g.buf.Reset()
+		g.buf.WriteString(doc)
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), `line "        id{UUID"`) {
+			t.Errorf("finish = %v, want the member line refused", err)
+		}
+	})
+
+	t.Run("a class diagram not read as a fence fails", func(t *testing.T) {
+		t.Parallel()
+		g := fresh()
+		g.diagramAt = 0
+		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "not read as a fenced code block") {
+			t.Errorf("finish = %v, want the missing diagram refused", err)
+		}
+	})
+
 	t.Run("a link no emitter wrote fails", func(t *testing.T) {
 		t.Parallel()
 		g := newTestGenerator(t, loadSchema(t, "schema \"s\"\ntype A {\n  id String primary\n  --> TO (one) B\n}\ntype B {\n  id String primary\n}\n"))

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/tidwall/jsonc"
@@ -513,7 +514,11 @@ func normalizeNumbers(m map[string]any) {
 }
 
 // normalizeValue applies [immutable.NormalizeNumber] to each number and
-// recurses into nested structures.
+// recurses into nested structures. A decimal integer outside the int64 range
+// keeps its text as a json.Number: NormalizeNumber would round it to a float64,
+// and for a literal just below math.MinInt64 that float is -2^63, which the
+// Integer check would accept as MinInt64. The validator decides the kind: an
+// Integer refuses it, a Float reads it as its nearest float64.
 //
 // The walk is not depth-capped because the decoder above it is:
 // encoding/json refuses a document nested past 10,000 levels, and this runs
@@ -523,6 +528,9 @@ func normalizeNumbers(m map[string]any) {
 func normalizeValue(v any) any {
 	switch val := v.(type) {
 	case json.Number:
+		if _, err := strconv.ParseInt(string(val), 10, 64); errors.Is(err, strconv.ErrRange) {
+			return val
+		}
 		return immutable.NormalizeNumber(val)
 
 	case map[string]any:

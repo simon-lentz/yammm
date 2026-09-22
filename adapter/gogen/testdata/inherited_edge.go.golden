@@ -7,13 +7,13 @@ type Org struct {
 
 type Member struct {
 	ID        string                      `json:"id"`
-	BelongsTo *EDGE_Member_belongs_to_Org `json:"belongs_to"`
+	BelongsTo *EDGE_Member_belongs_to_Org `json:"belongs_to,omitempty"`
 }
 
 type Person struct {
 	Name      string                      `json:"name"`
 	ID        string                      `json:"id"`
-	BelongsTo *EDGE_Member_belongs_to_Org `json:"belongs_to"`
+	BelongsTo *EDGE_Member_belongs_to_Org `json:"belongs_to,omitempty"`
 }
 
 type EDGE_Member_belongs_to_Org struct {

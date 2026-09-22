@@ -6,8 +6,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
-	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -15,7 +13,7 @@ func newCheckCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check <schema.yammm> <data-file>",
 		Short: "Validate data against a schema",
-		Long:  "Validate JSON or CSV data against a yammm schema. Input format is auto-detected from file extension.",
+		Long:  "Validate JSON or CSV data against a yammm schema: every instance, primary-key uniqueness, and every association's target, as load does. Nothing is written. Input format is auto-detected from file extension.",
 		Args:  cobra.ExactArgs(2),
 		RunE:  withDiagnostics(runCheck),
 	}
@@ -51,37 +49,11 @@ func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error
 		return err
 	}
 
-	// Detect format
-	if fromFormat == "" {
-		fromFormat, err = cli.DetectFormat(dataPath)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Parse data
-	var parsed map[string][]instance.RawInstance
-	var parseResult diag.Result
-
-	switch fromFormat {
-	case "json":
-		parsed, parseResult, err = cli.LoadAndParseJSON(cmd.Context(), dataPath)
-	case "csv":
-		if typeName == "" && typeColumn == "" {
-			return cli.Usagef("CSV data requires --type or --type-column flag")
-		}
-		parsed, parseResult, err = cli.LoadAndParseCSV(cmd.Context(), dataPath, typeName, typeColumn, s)
-	default:
-		return cli.Usagef("unsupported format %q", fromFormat)
-	}
-
+	result, _, _, err := assembleGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
 	if err != nil {
 		return err
 	}
-
-	// Validate instances
-	_, validateResult := cli.ValidateInstances(cmd.Context(), s, parsed)
-	sink.Add(parseResult, validateResult)
+	sink.Add(result)
 
 	exitCode := cli.ExitForResult(sink.Result())
 	if exitCode != cli.ExitOK {

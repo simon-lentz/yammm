@@ -13,7 +13,7 @@ type District struct {
 type County struct {
 	Fips        string                      `json:"fips"`
 	HasDistrict []*District                 `json:"has_district,omitempty"`
-	InState     *EDGE_County_in_state_State `json:"in_state"`
+	InState     *EDGE_County_in_state_State `json:"in_state,omitempty"`
 }
 
 type EDGE_County_in_state_State struct {

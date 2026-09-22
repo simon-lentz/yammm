@@ -11,7 +11,7 @@ import (
 func TestFinish_RefusesAnEmbeddedStoreThatDoesNotReload(t *testing.T) {
 	t.Parallel()
 
-	g, err := newGenerator(loadFixture(t, "imports/main", ""))
+	g, err := newGenerator(loadFixture(t, "imports/main"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,5 +30,25 @@ func TestFinish_RefusesAnEmbeddedStoreThatDoesNotReload(t *testing.T) {
 	}
 	if _, err := g.finish(data); err == nil || !strings.Contains(err.Error(), "does not re-load") {
 		t.Errorf("finish = %v, want the store refused", err)
+	}
+}
+
+// TestFinish_RefusesAStoreThatReloadsToAnotherSchema drives the hash half of
+// the check: the entry's embedded text gains a type, so the store re-loads
+// cleanly and hashes unlike the SchemaHash the file emits.
+func TestFinish_RefusesAStoreThatReloadsToAnotherSchema(t *testing.T) {
+	t.Parallel()
+
+	g, err := newGenerator(loadFixture(t, "scalars"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := g.generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.embedded[g.entryKey] = append(g.embedded[g.entryKey], []byte("\ntype Extra {\n\tid String primary\n}\n")...)
+	if _, err := g.finish(data); err == nil || !strings.Contains(err.Error(), "hash mismatch") {
+		t.Errorf("finish = %v, want the store refused for its hash", err)
 	}
 }

@@ -79,9 +79,10 @@
 // many, one:many, _) — rather than Mermaid cardinality notation, so the
 // whole document speaks one vocabulary. Mermaid namespaces are deliberately
 // not used (some Markdown renderers do not support them in class
-// diagrams); an imported type's display renders as a sanitized class id
-// with the display as its label instead. Two displays that sanitize to one id
-// stay two classes: the later takes the id suffixed _2, _3, and so on. That
+// diagrams); an imported type's display renders as a class id sanitized to
+// ASCII letters, digits and underscores, with the display as its label
+// instead. Two displays that sanitize to one id stay two classes: the later
+// takes the id suffixed _2, _3, and so on. That
 // labelled form needs Mermaid 10.1.0 or
 // later, and only an imported type takes it, so a schema with imports is in
 // scope and an import-free one renders on Mermaid 9. When the diagram holds
@@ -126,7 +127,10 @@
 // whose text reads as the text it meant, holding the anchor the parser's
 // headings allocate it; outside doc comments, the internal links the parser
 // reads are exactly the links the generator wrote, each to such a heading; and
-// every table it wrote reads with its columns and rows. Its own
+// every table it wrote reads with its columns and rows; and the class diagram
+// reads as a fenced code block each of whose lines is one of the forms the
+// emitter writes, a subset of Mermaid's class-diagram grammar and stricter
+// than it. Its own
 // fences are sized past any backtick run in their body. A failure there is a
 // generator bug surfaced as an error, never emitted output.
 //
@@ -141,9 +145,16 @@
 // backslash before a pipe or a line break, a <code> element whose
 // Markdown-significant characters are entities. A description cell escapes
 // backslashes and pipes and folds newlines to <br>. A schema name and an
-// invariant message are escaped for Markdown, a control character in a schema
-// name is written as its Go escape (\n), and a double quote in a Mermaid class
-// label is written #quot;.
+// invariant message are escaped for Markdown, and a control character in a
+// schema name is written as its Go escape (\n). A Mermaid class label or edge label
+// writes each character Mermaid reads as syntax as an entity code, which
+// Mermaid decodes when it renders: a double quote as #quot;, and the number
+// sign, colon, semicolon, percent sign, <, > and & as #35;, #58;, #59;, #37;,
+// #60;, #62; and #38;, so the multiplicity one:many labels an edge as
+// one#58;many. So is the first white space of a direction statement —
+// "direction", white space and TB, BT, RL or LR — which Mermaid reads anywhere
+// on a line outside a class body. A member line is a property name and a type
+// name, which Mermaid reads as text.
 //
 // # Preconditions
 //
@@ -170,9 +181,11 @@
 // fails the structural self-check: a block left open at the end, a heading the
 // parser does not read as the generator wrote it or with the anchor the
 // generator linked, internal links that do not read as the generator wrote them
-// or name no heading, or a table that does not read with the columns and rows
-// written. Each is a generator bug, so no schema is refused for its names
-// or its doc-comment text.
+// or name no heading, a table that does not read with the columns and rows
+// written, or a class-diagram line that is not a form the emitter writes. Each
+// is a generator bug: the escapes above keep every schema-supplied text in a
+// form the check accepts, so no schema is refused for its names or its
+// doc-comment text.
 //
 // # Thread Safety
 //
@@ -199,7 +212,7 @@
 //
 // # Dependencies
 //
-//	adapter/markdown  ──imports──▶  schema, github.com/yuin/goldmark,
+//	adapter/markdown  ──imports──▶  location, schema, github.com/yuin/goldmark,
 //	                                github.com/yuin/goldmark/ast,
 //	                                github.com/yuin/goldmark/extension,
 //	                                github.com/yuin/goldmark/extension/ast,

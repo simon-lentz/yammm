@@ -19,7 +19,7 @@ classDiagram
         position Enum
     }
     Car --> Person : OWNER (one)
-    Car *-- Wheel : WHEELS (one:many)
+    Car *-- Wheel : WHEELS (one#58;many)
 ```
 
 ## Types

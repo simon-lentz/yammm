@@ -2,7 +2,9 @@ package value
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
+	"strconv"
 )
 
 // Kind identifies the semantic type of a runtime value.
@@ -44,6 +46,9 @@ func (k Kind) String() string {
 // expectations.
 //
 // For json.Number: attempts Int64() first, then Float64() to determine kind.
+// A decimal integer outside the int64 range is IntKind and stays the
+// json.Number: it is an integer no int64 holds, and its nearest float64 can
+// be a different integer that an Integer check would accept.
 // A slice of any element type is UnspecifiedKind: a list's shape is the
 // constraint's to judge, elementwise.
 //
@@ -66,8 +71,12 @@ func Classify(val any) (Kind, any) {
 
 	switch v := val.(type) {
 	case json.Number:
-		if n, err := v.Int64(); err == nil {
+		n, err := v.Int64()
+		if err == nil {
 			return IntKind, n
+		}
+		if errors.Is(err, strconv.ErrRange) {
+			return IntKind, val
 		}
 		if n, err := v.Float64(); err == nil {
 			return FloatKind, n

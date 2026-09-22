@@ -63,8 +63,8 @@
 //	Float[min, max]       →  {"type":"number"} + minimum/maximum
 //	Boolean               →  {"type":"boolean"}
 //	Enum[...]             →  {"type":"string","enum":[...]}   (inline, no def)
-//	Pattern[p]            →  {"type":"string","pattern":p}
-//	Pattern[p1, p2]       →  {"type":"string","allOf":[{"pattern":p1},{"pattern":p2}]}
+//	Pattern[p]            →  {"type":"string","pattern":p'}   (p' rewritten; see below)
+//	Pattern[p1, p2]       →  {"type":"string","allOf":[{"pattern":p1'},{"pattern":p2'}]}
 //	UUID                  →  {"type":"string","format":"uuid"}
 //	Date                  →  {"type":"string","format":"date"}
 //	Timestamp             →  {"type":"string","format":"date-time"}
@@ -74,11 +74,24 @@
 //	named DataType        →  {"$ref":"#/$defs/<Name>"}
 //
 // Named DataTypes are rendered faithfully as $refs in every position —
-// scalar property, list element (List<FipsCode> emits items $ref), edge
-// property, and _target_* foreign-key field — so the named constraint is
-// stated once and hover shows its name and documentation. Inline enums are
-// inlined (JSON Schema needs no synthesized names). A yammm value must match
-// EVERY declared pattern, hence allOf, not anyOf.
+// scalar property, list element at any depth (List<List<FipsCode>> emits
+// items of items $ref), edge property, _target_* foreign-key field, and
+// inside another DataType's constraint (Codes = List<FipsCode>) — so the
+// named constraint is stated once and hover shows its name and
+// documentation. Inline enums are inlined (JSON Schema needs no synthesized
+// names). A yammm value must match EVERY declared pattern, hence allOf, not
+// anyOf.
+//
+// yammm compiles a pattern as Go's regexp (RE2) does. JSON Schema reads a
+// pattern as ECMA-262, and a validator built on Go's regexp reads it as RE2,
+// so each pattern is rewritten into syntax both read the same way, with the
+// "u" flag ECMA-262 validators such as ajv apply: case folding becomes
+// explicit classes, "." becomes [^\n], \s becomes its five ASCII characters,
+// POSIX and Unicode classes become ranges, and \d and \w become their ASCII
+// ranges. A string of code points matches the rewrite exactly when it matches
+// the source. A line anchor under the "m" flag has
+// no such form: that pattern is not asserted, and the fragment's description
+// carries it in source form.
 //
 // # Names, $defs, and Imports
 //
@@ -86,10 +99,16 @@
 // imported schema — is flattened into one self-contained document. $defs
 // keys are raw schema names: unqualified where unique across the closure,
 // <schemaName>.<Name>-qualified on collision; a collision qualification
-// cannot separate (a type and a DataType sharing one name in one schema) is
-// a hard error instructing a rename. Each declared association gets one
+// cannot separate (a type and a DataType sharing one name in one schema)
+// gives the later claimant, types before DataTypes in declaration order, the
+// first free numeric suffix (geo.Region2), as adapter/gogen does. A suffixed
+// key can be another entity's natural spelling, which then takes the next
+// suffix in turn (a type Region2 beside it becomes geo.Region22). Each declared association gets one
 // EDGE_<ownerKey>_<field>_<targetKey> entry, shared by every subtype that
-// inherits it. Abstract types get no $defs entry — associations must target
+// inherits it; when that key is already taken — by a type so named, or by
+// another association whose parts join to the same text — it takes the
+// first free numeric suffix (EDGE_A_b_x_C2). A $ref percent-encodes every
+// key character a URI fragment cannot hold. Abstract types get no $defs entry — associations must target
 // concrete non-part types and compositions must target part types, so
 // nothing can ever $ref an abstract type; its members reach the document
 // flattened into each subtype.
@@ -98,10 +117,9 @@
 //
 // The emitted schema does not reproduce yammm's validation; it diverges in
 // the classes below, and each divergence changes only what the editor flags.
-// `yammm check` runs the parse and instance validation. The checks named as
-// graph assembly run in the commands that build a graph — `yammm load`,
-// `yammm export` and `yammm snapshot save` — and `yammm check` does not run
-// them.
+// Every yammm data command — `yammm check`, `load`, `export` and
+// `snapshot save` — runs all three stages the cases below name: the parse,
+// instance validation and graph assembly.
 //
 // The emitted schema judges each value by its own shape, so no check that
 // compares instances, counts depth or evaluates an expression reaches it. In
@@ -123,12 +141,13 @@
 // The other divergences are in how one value or one name is read:
 //
 //   - Numbers. JSON Schema reads a number exactly; yammm reads a plain
-//     integer literal that fits as an int64 and any other number as a
-//     float64. So the editor accepts a number yammm cannot hold — 1e400 on a
-//     Float, 9223372036854775808 on an Integer — and yammm refuses it
-//     (E_TYPE_MISMATCH). A decimal or exponent literal on an Integer is read
-//     through float64, so the two can disagree in both directions near the
-//     limits of that precision.
+//     integer literal as an integer and any other number as a float64. So
+//     the editor accepts a number yammm cannot hold — 1e400 on a Float, an
+//     integer outside int64 such as 9223372036854775808 or
+//     -9223372036854775809 on an Integer — and yammm refuses it
+//     (E_TYPE_MISMATCH). A decimal or exponent literal on an Integer, and any
+//     integer on a Float, is read through float64, so the two can disagree in
+//     both directions near the limits of that precision.
 //   - Formats. The uuid, date and date-time keywords are annotations by
 //     default under draft 2020-12, so an editor that does not assert formats
 //     accepts a malformed UUID, Date or Timestamp that instance validation
@@ -149,10 +168,19 @@
 //   - An empty array under a key the envelope does not name. yammm accepts
 //     an empty array under a part type's or an abstract type's name; the
 //     envelope names neither, so the editor flags the key.
-//   - Pattern dialects. yammm compiles patterns as Go/RE2; JSON Schema
-//     validators assume ECMA-262. Patterns pass through verbatim — the
-//     shared subset covers common cases, and a divergent pattern can make the
-//     editor flag a valid value or accept an invalid one.
+//   - Patterns. Each pattern is rewritten into syntax RE2 and ECMA-262 read
+//     alike (see Constraint Mapping). A pattern holding a line anchor under
+//     the "m" flag is not asserted, so the editor accepts what yammm may
+//     reject, never the reverse. The rewrite needs the "u" flag, which a
+//     validator such as ajv applies by default. A validator without it reads
+//     every class by UTF-16 code unit: it refuses a pattern whose class holds
+//     a range above U+FFFF (a Unicode class such as \p{L} rewrites to one),
+//     and a class, [^\n] or [\s\S] matches half of a character above U+FFFF.
+//     No form states such a range to RE2 and to both ECMA-262 modes, since
+//     RE2 has no surrogate code units. A JSON string may also hold a lone
+//     surrogate ("\ud800"): yammm's reader decodes it to U+FFFD and an
+//     ECMA-262 validator keeps the surrogate, so the two can disagree on that
+//     value.
 //   - Custom Timestamp layouts. A Timestamp["layout"] constraint is not
 //     expressible as a JSON Schema assertion; the emitted fragment is a
 //     plain string whose description carries the source form. The editor
@@ -203,10 +231,14 @@
 //
 // [Marshal] returns an error (never partial or invalid output) when:
 //
-//   - a $defs key collision cannot be resolved by schema-qualification
-//     (including a generated EDGE_ key colliding with a literal type name);
-//   - the emitted document fails the self-check — invalid JSON or an
-//     unresolvable $ref (each a generator bug).
+//   - the schema is not completed as Preconditions requires: an association
+//     target or a datatype reference does not resolve;
+//   - a generator bug: a member with no registered $defs key, a constraint
+//     the mapper cannot render, or an emitted document that fails the
+//     self-check (invalid JSON or an unresolvable $ref).
+//
+// No name collision fails: every $defs key that is already taken takes a
+// numeric suffix.
 //
 // # Thread Safety
 //

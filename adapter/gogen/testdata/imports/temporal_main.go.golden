@@ -59,7 +59,7 @@ type Log struct {
 
 type Event struct {
 	ID string               `json:"id"`
-	On [][]Timestamp1504MST `json:"on,omitempty"`
+	On [][]Timestamp1504MST `json:"on,omitzero"`
 }
 
 type Graph struct {

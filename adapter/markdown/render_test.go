@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"bytes"
+	"strconv"
 	"testing"
 )
 
@@ -230,6 +231,10 @@ func TestMermaidID(t *testing.T) {
 		{"common.Region", "common_Region"},
 		{"Fuel_Type", "Fuel_Type"},
 		{"a.b.c", "a_b_c"},
+		{"a.B9", "a_B9"},
+		{"a.Z0z", "a_Z0z"},
+		{"Person (R\u00e9gion)", "Person__R_gion_"},
+		{"Person (\u0663\U0001D49C)", "Person_____"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -288,5 +293,70 @@ func TestWriteFence(t *testing.T) {
 				t.Errorf("writeFence(%q, %q) = %q, want %q", tt.lang, tt.body, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestMermaidText pins the characters a diagram label writes as entity codes:
+// the quote that ends a class label, the colon and semicolon that end an edge
+// label, the percent sign that opens a comment or directive, the number sign
+// that opens an entity, the characters a rendered label reads as HTML, and the
+// first white space of a direction statement.
+func TestMermaidText(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ in, want string }{
+		{"common.Region", "common.Region"},
+		{"WHEELS (one:many)", "WHEELS (one#58;many)"},
+		{`a"b`, "a#quot;b"},
+		{"a;b", "a#59;b"},
+		{"%%{init}%%", "#37;#37;{init}#37;#37;"},
+		{"#quot;", "#35;quot#59;"},
+		{"<b>&amp;", "#60;b#62;#38;amp#59;"},
+		{"R\u00e9gion (x)", "R\u00e9gion (x)"},
+		{"P (a direction LR)", "P (a direction#32;LR)"},
+		{"xdirection\u00a0TB direction", "xdirection#160;TB direction"},
+		{"directions LR", "directions LR"},
+		{"P (direction String)", "P (direction String)"},
+		{"P (direction lr)", "P (direction lr)"},
+		{"P (direction  LR)", "P (direction#32; LR)"},
+		{"direction RL, direction BT", "direction#32;RL, direction#32;BT"},
+	} {
+		if got := mermaidText(tt.in); got != tt.want {
+			t.Errorf("mermaidText(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// TestMermaidTextEscapesEveryDirectionSpace pins that each character
+// JavaScript's \s matches, which is what Mermaid's lexer reads between
+// "direction" and a direction keyword, is written as its entity code there.
+// The list is ECMAScript's WhiteSpace and LineTerminator sets, written out
+// here rather than read from jsSpace.
+func TestMermaidTextEscapesEveryDirectionSpace(t *testing.T) {
+	t.Parallel()
+
+	for _, r := range []rune{'\u0009', '\u000a', '\u000b', '\u000c', '\u000d', '\u0020', '\u00a0', '\u1680', '\u2000', '\u2001', '\u2002', '\u2003', '\u2004', '\u2005', '\u2006', '\u2007', '\u2008', '\u2009', '\u200a', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000', '\ufeff'} {
+		in := "P (direction" + string(r) + "TB)"
+		want := "P (direction#" + strconv.Itoa(int(r)) + ";TB)"
+		if got := mermaidText(in); got != want {
+			t.Errorf("mermaidText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestCommonPrefix pins the shared leading bytes of two indents, empty when
+// they differ from the first byte.
+func TestCommonPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ a, b, want string }{
+		{"\t\t", "  ", ""},
+		{"\t\t", "\t ", "\t"},
+		{"\t\t\t", "\t\t", "\t\t"},
+		{"\t", "\t\t", "\t"},
+	} {
+		if got := commonPrefix(tt.a, tt.b); got != tt.want {
+			t.Errorf("commonPrefix(%q, %q) = %q, want %q", tt.a, tt.b, got, tt.want)
+		}
 	}
 }

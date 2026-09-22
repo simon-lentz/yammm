@@ -51,13 +51,13 @@ func FormatKey(values ...any) string {
 // Components come back as the types a snapshot round trip produces: string,
 // int64, float64, bool, and nil. Numbers are classified by lexical form, the
 // same rule the .ys reader applies — a literal carrying '.', 'e', or 'E' is
-// float64, an int-shaped literal is int64. Two consequences follow, and neither
-// is reachable from FormatKey output:
+// float64, an int-shaped literal is int64. Two consequences follow:
 //
 //   - An int-shaped literal beyond the int64 range comes back as float64, with
-//     the precision loss that implies.
+//     the precision loss that implies. FormatKey writes one for a whole float64
+//     from 2^63 up to 1e21 and for a uint64 above math.MaxInt64.
 //   - A literal that is valid JSON but has no finite Go value, such as 1e999,
-//     is an error naming the component's index.
+//     is an error naming the component's index. FormatKey never writes one.
 //
 // The round-trip law holds over normalized components — string, int64, bool,
 // nil, and non-whole float64: ParseKey(FormatKey(vs...)) returns vs, and

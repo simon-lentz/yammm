@@ -54,7 +54,8 @@
 // [Classify] normalizes a runtime scalar to a semantic [Kind] constant, with
 // the value transformed where the kind requires it:
 //
-//   - [IntKind]: Integer values (returns normalized int64 for json.Number)
+//   - [IntKind]: Integer values (returns normalized int64 for json.Number, or
+//     the json.Number itself for a decimal integer no int64 holds)
 //   - [FloatKind]: Float values (returns normalized float64 for json.Number)
 //   - [BoolKind]: Boolean values
 //   - [StringKind]: String values
@@ -69,6 +70,8 @@
 //   - json.Number("42") → IntKind (no decimal point)
 //   - json.Number("3.0") → FloatKind (has decimal point)
 //   - json.Number("3.14") → FloatKind
+//   - json.Number("-9223372036854775809") → IntKind, kept as the json.Number:
+//     an integer no int64 holds, which an Integer check refuses
 //
 // Strict rejection of "3.0" for Integer schema types happens at instance
 // validation time, not in this classification layer.
@@ -101,11 +104,14 @@
 //
 // An integer takes the exact path whatever carries it: a json.Number that
 // parses as an int64 or a uint64 is compared as that integer, and only a
-// json.Number with a fraction is compared as a float. The order is therefore
+// json.Number with a fraction is compared as a float. A json.Number holding a
+// decimal integer neither int64 nor uint64 holds is compared exactly, as a
+// rational, so it never equals the float64 it rounds to. The order is therefore
 // transitive across every supported value:
 //   - Order(uint64(2^53+1), float64(2^53)) returns 1 (greater), not 0
 //   - Order(int64(2^53+1), float64(2^53)) returns 1 (greater), not 0
 //   - Order(json.Number("18446744073709551615"), float64(2^64)) returns -1, not 0
+//   - Order(json.Number("-9223372036854775809"), int64(math.MinInt64)) returns -1, not 0
 //
 // # Thread Safety
 //

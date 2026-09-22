@@ -60,6 +60,8 @@ func TestAssertNoDanglingLinks_ReportsEveryDanglingShape(t *testing.T) {
 		"[Gadget.Vanished]",    // member of a declared type
 		"[TestGadget_Deleted]", // regression anchor whose test is gone
 		"clean.Absent",         // qualified at an in-module package
+		"[doclintfixture/moved] resolves to nothing (the module has no package doclintfixture/moved)",        // a package under the module's path that does not exist
+		"[doclintfixture/moved.Gadget] resolves to nothing (the module has no package doclintfixture/moved)", // a name in one
 	} {
 		if !r.reports(want) {
 			t.Errorf("no report naming %s; got %v", want, r.msgs)
@@ -69,6 +71,15 @@ func TestAssertNoDanglingLinks_ReportsEveryDanglingShape(t *testing.T) {
 
 // The directory, not the package, is the resolution unit: the anchor lives in
 // package clean's doc and the test it names lives in package clean_test.
+// A path that extends the module's path without a slash names another module.
+func TestAssertNoDanglingLinks_SkipsAModuleThatSharesThePathPrefix(t *testing.T) {
+	t.Parallel()
+	r, _ := runGate(t)
+	if r.reports("doclintfixturemore") {
+		t.Errorf("a link into another module was resolved against this one: %v", r.msgs)
+	}
+}
+
 func TestAssertNoDanglingLinks_ResolvesAcrossTestFiles(t *testing.T) {
 	t.Parallel()
 	r, _ := runGate(t)
@@ -141,5 +152,28 @@ func TestAssertNoDanglingLinks_HonoursBuildConstraints(t *testing.T) {
 	}
 	if r.reports("[NeverAnywhere]") {
 		t.Errorf("a link inside a tag-only file was checked: %v", r.msgs)
+	}
+}
+
+// A package can exist only under another build, a directory with its own
+// go.mod is another module, and a major-version element names another module
+// unless this one has a directory by that name.
+func TestAssertNoDanglingLinks_ReadsTheModuleLayout(t *testing.T) {
+	t.Parallel()
+	r := &recorder{}
+	doclint.AssertNoDanglingLinks(r, "testdata/layoutfixture")
+	for _, want := range []string{
+		"[example.com/lp] resolves to nothing (the module has no package example.com/lp)",
+		"[example.com/lp/gone] resolves to nothing (the module has no package example.com/lp/gone)",
+		"[example.com/lp/v1/gone] resolves to nothing (the module has no package example.com/lp/v1/gone)",
+		`[example.com/lp/winonly.Ignored] resolves to nothing (looked for "Ignored" in example.com/lp/winonly)`,
+		`[example.com/lp/v4/pkg.Absent] resolves to nothing (looked for "Absent" in example.com/lp/v4/pkg)`,
+	} {
+		if !r.reports(want) {
+			t.Errorf("no report %q; got %v", want, r.msgs)
+		}
+	}
+	if len(r.msgs) != 5 {
+		t.Errorf("got %d reports, want 5: %v", len(r.msgs), r.msgs)
 	}
 }

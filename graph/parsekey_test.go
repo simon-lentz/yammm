@@ -98,20 +98,20 @@ func TestParseKey_WholeFloatReturnsAsInt64(t *testing.T) {
 	}
 }
 
-// An int-shaped literal past the int64 range falls back to float64 with the
-// precision loss that implies, rather than failing.
+// FormatKey writes a large whole float64 as an int-shaped literal past the
+// int64 range, so ParseKey reads one as float64: its inverse for keys holds
+// even where the Integer check refuses the same literal.
 func TestParseKey_IntegerBeyondInt64ReturnsFloat(t *testing.T) {
 	t.Parallel()
-	got, err := graph.ParseKey(`[99999999999999999999]`)
-	if err != nil {
-		t.Fatalf("graph.ParseKey error: %v", err)
-	}
-	f, ok := got[0].(float64)
-	if !ok {
-		t.Fatalf("component 0 is %T, want float64", got[0])
-	}
-	if f != 1e20 {
-		t.Errorf("component 0 = %v, want 1e20", f)
+	for _, f := range []float64{1e20, 1 << 63, -1e20} {
+		key := graph.FormatKey(f)
+		got, err := graph.ParseKey(key)
+		if err != nil {
+			t.Fatalf("graph.ParseKey(%s) error: %v", key, err)
+		}
+		if g, ok := got[0].(float64); !ok || g != f {
+			t.Errorf("graph.ParseKey(%s) = %#v, want float64(%v)", key, got[0], f)
+		}
 	}
 }
 

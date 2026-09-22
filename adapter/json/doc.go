@@ -120,11 +120,13 @@
 //
 // # Numeric Precision
 //
-// JSON numbers are parsed as int64 when possible, otherwise float64. This follows
-// standard JSON semantics (RFC 8259). Large integers exceeding int64 range
-// (> 9,223,372,036,854,775,807) will fall back to float64, which loses precision
-// for values exceeding 2^53. This is inherent to JSON and not specific to this
-// adapter.
+// JSON numbers are read by lexical form: a literal with '.', 'e' or 'E' is a
+// float64 when a finite float64 holds it, and an integer literal is an int64.
+// A literal no finite float64 holds, such as 1e400, stays a json.Number that
+// validation refuses. An integer literal outside the
+// int64 range keeps its exact text as a json.Number: validation refuses it at
+// an Integer property (E_TYPE_MISMATCH) and reads it as its nearest float64 at
+// a Float property. A float64 holds integers exactly only up to 2^53.
 //
 // # Dependencies
 //

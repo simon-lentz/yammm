@@ -55,7 +55,7 @@
 //	                                immutable, schema, adapter/internal/constraintof,
 //	                                adapter/internal/refusal, adapter/internal/typetag,
 //	                                github.com/tidwall/jsonc
-//	adapter/markdown  ──imports──▶  schema, github.com/yuin/goldmark,
+//	adapter/markdown  ──imports──▶  location, schema, github.com/yuin/goldmark,
 //	                                github.com/yuin/goldmark/ast,
 //	                                github.com/yuin/goldmark/extension,
 //	                                github.com/yuin/goldmark/extension/ast,

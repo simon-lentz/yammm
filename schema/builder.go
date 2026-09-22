@@ -2,12 +2,14 @@ package schema
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -412,7 +414,8 @@ func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
 //
 // Uses semantic diagnostic codes per:
 //   - E_INVALID_NAME for empty/invalid identifiers
-//   - E_INVALID_CONSTRAINT for nil constraints
+//   - E_INVALID_CONSTRAINT for nil constraints and for any argument no .yammm
+//     source can state (see [constraintFault])
 //   - E_INVALID_INVARIANT for invalid invariant declarations
 func (b *Builder) validateInput(collector *diag.Collector) bool {
 	hasErrors := false
@@ -451,6 +454,12 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 			if p.Constraint == nil {
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
 					fmt.Sprintf("property %q in type %q has nil constraint", p.Name, t.name)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyPropertyName, p.Name).Build())
+				hasErrors = true
+			} else if fault, found := constraintFault(p.Constraint); found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+					fmt.Sprintf("property %q in type %q: %s", p.Name, t.name, fault)).
 					WithDetail(diag.DetailKeyTypeName, t.name).
 					WithDetail(diag.DetailKeyPropertyName, p.Name).Build())
 				hasErrors = true
@@ -527,10 +536,96 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 				fmt.Sprintf("datatype %q has nil constraint", dt.Name)).
 				WithDetail(diag.DetailKeyName, dt.Name).Build())
 			hasErrors = true
+		} else if fault, found := constraintFault(dt.Constraint); found {
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+				fmt.Sprintf("datatype %q: %s", dt.Name, fault)).
+				WithDetail(diag.DetailKeyName, dt.Name).Build())
+			hasErrors = true
 		}
 	}
 
 	return !hasErrors
+}
+
+// constraintFault describes the first argument of c, or of a List element at
+// any depth, that no .yammm source can state — the DSL refuses each one, as
+// E_INVALID_CONSTRAINT or, for a negative length, E_SYNTAX — so the Builder
+// refuses it too and a built schema stays expressible in the DSL.
+func constraintFault(c Constraint) (string, bool) {
+	switch c := c.(type) {
+	case IntegerConstraint:
+		lo, hasLo := c.Min()
+		hi, hasHi := c.Max()
+		if hasLo && hasHi && lo > hi {
+			return fmt.Sprintf("integer bounds inverted: min %d > max %d", lo, hi), true
+		}
+	case FloatConstraint:
+		lo, hasLo := c.Min()
+		hi, hasHi := c.Max()
+		for _, b := range [...]struct {
+			v   float64
+			has bool
+		}{{lo, hasLo}, {hi, hasHi}} {
+			if b.has && (math.IsInf(b.v, 0) || math.IsNaN(b.v)) {
+				return fmt.Sprintf("non-finite float bound %v; a Float bound is a finite number", b.v), true
+			}
+		}
+		if hasLo && hasHi && lo > hi {
+			return fmt.Sprintf("float bounds inverted: min %v > max %v", lo, hi), true
+		}
+	case StringConstraint:
+		return lengthFault("string", c.MinLen, c.MaxLen)
+	case ListConstraint:
+		if fault, found := lengthFault("list", c.MinLen, c.MaxLen); found {
+			return fault, true
+		}
+		return constraintFault(c.Element())
+	case EnumConstraint:
+		values := c.Values()
+		seen := make(map[string]bool, len(values))
+		for _, v := range values {
+			switch {
+			case v == "":
+				return "enum value cannot be empty", true
+			case seen[v]:
+				return fmt.Sprintf("duplicate enum value %q", v), true
+			}
+			seen[v] = true
+		}
+		if len(values) < 2 {
+			return fmt.Sprintf("enum must have at least two values (got %d)", len(values)), true
+		}
+	case PatternConstraint:
+		if c.PatternCount() == 0 {
+			return "pattern constraint needs at least one pattern", true
+		}
+	case AliasConstraint:
+		if c.Resolved() != nil {
+			return constraintFault(c.Resolved())
+		}
+	case VectorConstraint:
+		if d := c.Dimension(); d < parse.MinVectorDimensions || d > parse.MaxVectorDimensions {
+			return fmt.Sprintf("vector dimensions must be between %d and %d (got %d)",
+				parse.MinVectorDimensions, parse.MaxVectorDimensions, d), true
+		}
+	}
+	return "", false
+}
+
+// lengthFault reports a negative or inverted length pair; kind names the
+// constraint as the DSL's diagnostics do.
+func lengthFault(kind string, minLen, maxLen func() (int64, bool)) (string, bool) {
+	lo, hasLo := minLen()
+	hi, hasHi := maxLen()
+	switch {
+	case hasLo && lo < 0:
+		return fmt.Sprintf("%s minimum length cannot be negative: %d", kind, lo), true
+	case hasHi && hi < 0:
+		return fmt.Sprintf("%s maximum length cannot be negative: %d", kind, hi), true
+	case hasLo && hasHi && lo > hi:
+		return fmt.Sprintf("%s length bounds inverted: min %d > max %d", kind, lo, hi), true
+	}
+	return "", false
 }
 
 // resolveImportPath resolves an import path to a SourceID.

@@ -42,17 +42,9 @@ func WithInitialisms(names ...string) Option {
 	return func(c *config) { c.initialisms = append(c.initialisms, names...) }
 }
 
-// defaultInitialisms is gogen's base acronym set: the canonical golint
-// commonInitialisms list (github.com/golang/lint), lower-cased for the
-// case-insensitive lookup ToUpperCamelInitialisms performs. yammm owns only this
-// neutral, domain-free set; consumer-specific acronyms arrive via WithInitialisms
-// and never live in yammm source.
-//
-// Caveat: ToUpperCamelInitialisms splits on letter/digit boundaries, so a
-// digit-bearing initialism ("utf8" tokenizes to "utf","8") cannot match as a unit.
-// "utf8" is listed for golint parity but only letter-only initialisms are
-// effective. ("db" is intentionally absent — it is not in golint's canonical list;
-// a consumer that wants it adds it via WithInitialisms.)
+// defaultInitialisms is golint's commonInitialisms list, lower-cased. "utf8"
+// never matches, because the tokenizer splits it at the digit; it stays for
+// parity with golint.
 //
 //nolint:gochecknoglobals // Intentional: static lookup table for name mapping.
 var defaultInitialisms = map[string]bool{
@@ -66,8 +58,8 @@ var defaultInitialisms = map[string]bool{
 	"xmpp": true, "xsrf": true, "xss": true,
 }
 
-// mergedInitialisms returns defaultInitialisms + extra (each extra lower-cased) as
-// a fresh map, so the package-level default is never mutated.
+// mergedInitialisms returns a new map holding defaultInitialisms and each
+// extra lower-cased; the package-level set is never written.
 func mergedInitialisms(extra []string) map[string]bool {
 	out := maps.Clone(defaultInitialisms)
 	for _, e := range extra {
@@ -109,11 +101,7 @@ func newGenerator(s *schema.Schema, opts ...Option) (*generator, error) {
 	case !validPackageName(pkg):
 		return nil, fmt.Errorf("%w: WithPackageName(%q) must be a Go identifier that is not a keyword and not \"_\"", ErrInvalidPackageName, pkg)
 	}
-	inits := mergedInitialisms(cfg.initialisms) // default golint set + injected
-	names, err := buildNameTable(s, inits)
-	if err != nil {
-		return nil, err
-	}
+	names := buildNameTable(s, mergedInitialisms(cfg.initialisms))
 	keys, err := resolveKeyRoot(s)
 	if err != nil {
 		return nil, err
@@ -122,7 +110,6 @@ func newGenerator(s *schema.Schema, opts ...Option) (*generator, error) {
 		schema:       s,
 		pkg:          pkg,
 		names:        names,
-		initialisms:  inits,
 		keys:         keys,
 		buf:          &bytes.Buffer{},
 		edgeNames:    map[*schema.Relation]string{},
@@ -134,19 +121,17 @@ func newGenerator(s *schema.Schema, opts ...Option) (*generator, error) {
 // names, and the one finish re-loads the embedded sources under.
 const recipeRoot = "embedded://your-app"
 
-// finish re-loads the embedded sources exactly as emitted, through the recipe
-// the generated file prints, and returns data only when that load succeeds and
-// reproduces the input's StructuralHash. Marshal returns only what finish
-// returns, so the check cannot be bypassed without losing the output. A
-// failure is a generator bug surfaced as an error.
+// finish re-loads the embedded store as emitted, through the recipe the file
+// prints, and returns data only when the re-load succeeds and hashes to the
+// emitted SchemaHash. A failure is a generator bug surfaced as an error.
 func (g *generator) finish(data []byte) ([]byte, error) {
 	got, res := schema.LoadSourcesWithEntry(context.Background(), g.embedded, g.entryKey, "",
 		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(recipeRoot))
 	if res.HasErrors() {
 		return nil, fmt.Errorf("gogen: embedded SerializedSources does not re-load: %w", res.Err())
 	}
-	if h, want := schema.StructuralHash(got), schema.StructuralHash(g.schema); h != want {
-		return nil, fmt.Errorf("gogen: SerializedSources round-trip hash mismatch (got %s, want %s)", h, want)
+	if h := schema.StructuralHash(got); h != g.schemaHash {
+		return nil, fmt.Errorf("gogen: SerializedSources round-trip hash mismatch (got %s, want %s)", h, g.schemaHash)
 	}
 	return data, nil
 }
@@ -157,27 +142,21 @@ type generator struct {
 	schema       *schema.Schema
 	pkg          string
 	names        *nameTable
-	initialisms  map[string]bool   // effective acronym set (default golint + injected)
 	keys         keyRoot           // the root embedded source keys are written against
 	embedded     map[string][]byte // the embedded sources as emitted, by key
 	entryKey     string            // the entry schema's key in embedded
+	schemaHash   string            // SchemaHash as emitted
 	buf          *bytes.Buffer
 	temporal     temporalTypes               // the Date and per-layout Timestamp types, assigned by registerTemporalTypes
 	collect      *temporalDemand             // non-nil while registerTemporalTypes dry-runs type resolution
 	needsTime    bool                        // set when any emitted declaration names time.Time
 	needsJSON    bool                        // set when any emitted declaration calls encoding/json
-	edges        []edgeRec                   // one per DECLARED association (each emitted as one EDGE_ struct)
-	edgeNames    map[*schema.Relation]string // association -> owner-qualified EDGE_ Go name (shared via relation ptr)
-	dtFieldNames map[*schema.Property]string // DataType-typed field (type or edge prop) -> its DataType Go name
+	edges        []edgeRec                   // one per declared association
+	edgeNames    map[*schema.Relation]string // association -> its EDGE_ struct's Go name
+	dtFieldNames map[*schema.Property]string // DataType-typed property -> its DataType's Go name
 }
 
-// edgeRec carries what emitEdgeStructs needs to emit one EDGE_ struct: the
-// association (for its edge properties and FieldName) and the resolved target type
-// (for the Where primary-key block). The EDGE_ Go name lives in generator.edgeNames,
-// and the Go type of every DataType-typed field lives in generator.dtFieldNames —
-// both keyed by pointer and resolved in their DECLARING schema by the pre-passes
-// (registerEdges / registerDataTypeFields), so emission itself needs no notion of a
-// "current schema".
+// edgeRec is one declared association and its resolved target type.
 type edgeRec struct {
 	rel    *schema.Relation
 	target *schema.Type
@@ -250,10 +229,9 @@ func typeCheck(src []byte) error {
 	return nil
 }
 
-// stubImporter is a hermetic types.Importer for the two imports gogen can
-// emit, declaring only what generated code references; any other path is a
-// generator bug. The stub Time carries no JSON methods, so the shadowing a
-// generated codec performs is checked by tests against the real importer.
+// stubImporter serves the two imports gogen emits, declaring only what
+// generated code calls; any other path is a generator bug. Its Time has no JSON
+// methods, so tests check the generated codecs against the real importer.
 type stubImporter struct{}
 
 func (stubImporter) Import(path string) (*types.Package, error) {

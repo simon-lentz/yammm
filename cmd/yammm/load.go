@@ -15,7 +15,7 @@ func newLoadCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "load <schema.yammm> <data-file>",
 		Short: "Load data into an in-memory graph and validate",
-		Long:  "Load JSON or CSV data into a schema-validated graph. Reports diagnostics and a summary. Useful for validation-only workflows.",
+		Long:  "Load JSON or CSV data into a schema-validated graph. Reports diagnostics and a summary; 'yammm check' runs the same validation and prints none.",
 		Args:  cobra.ExactArgs(2),
 		RunE:  withDiagnostics(runLoad),
 	}

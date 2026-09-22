@@ -33,14 +33,29 @@ func TestGen_InvalidPackageExitsUsage(t *testing.T) {
 }
 
 // TestGen_GeneratorFailureExitsRuntime pins that only the package-name refusal
-// becomes a usage error: a schema gogen refuses for its names is still a
-// generation failure.
+// becomes a usage error: a schema gogen refuses is still a generation failure.
+// One source reached by two import paths, through a symlinked directory, has
+// no embedded store the re-load can read.
 func TestGen_GeneratorFailureExitsRuntime(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "clash.yammm")
-	if err := os.WriteFile(path, []byte("schema \"geo\"\n\ntype Region = String\n\ntype Region {\n\tid String primary\n}\n"), 0o600); err != nil {
-		t.Fatal(err)
+	root := t.TempDir()
+	for name, body := range map[string]string{
+		"main.yammm":     "schema \"main\"\n\nimport \"a\" as a\nimport \"b\" as b\n\ntype M {\n\tid String primary\n\t--> TO_A (one) a.A\n\t--> TO_B (one) b.B\n}\n",
+		"a.yammm":        "schema \"a\"\n\nimport \"lib/dep\" as dep\n\ntype A {\n\tid String primary\n\t--> TO_D (one) dep.D\n}\n",
+		"b.yammm":        "schema \"b\"\n\nimport \"real/dep\" as dep\n\ntype B {\n\tid String primary\n\t--> TO_D (one) dep.D\n}\n",
+		"real/dep.yammm": "schema \"dep\"\n\ntype D {\n\tid String primary\n}\n",
+	} {
+		p := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	code, _, errOut := runCLI(t, "gen", "--to", "go", "--package", "geo", path)
+	if err := os.Symlink("real", filepath.Join(root, "lib")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	code, _, errOut := runCLI(t, "gen", "--to", "go", "--package", "geo", "--module-root", root, filepath.Join(root, "main.yammm"))
 	if code != cli.ExitRuntime {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitRuntime)
 	}

@@ -2,6 +2,7 @@ package doclint
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/build"
@@ -33,6 +34,10 @@ type Package struct {
 	fset  *token.FileSet
 	files []*ast.File
 	names map[string]struct{}
+	// otherBuildNames holds the names of a directory whose every non-test
+	// file the pinned context excludes. Such a package exists only under
+	// another build, so a link into it resolves against that build's names.
+	otherBuildNames map[string]struct{}
 }
 
 // Module is a parsed module: every package under the walk root, indexed for
@@ -41,8 +46,12 @@ type Module struct {
 	Path     string
 	Packages []*Package
 
+	root     string
 	byImport map[string]*Package
 	byName   map[string][]*Package
+	// nested holds the slash-separated directories under root that carry
+	// their own go.mod: each is another module, and none of it is loaded.
+	nested []string
 }
 
 // Load parses the module's Go files under root, skipping directories that hold
@@ -69,6 +78,7 @@ func Load(root string) (*Module, error) {
 	}
 	m := &Module{
 		Path:     modPath,
+		root:     root,
 		byImport: make(map[string]*Package),
 		byName:   make(map[string][]*Package),
 	}
@@ -90,6 +100,20 @@ func Load(root string) (*Module, error) {
 		}
 		if p != root && skipDir(d.Name()) {
 			return fs.SkipDir
+		}
+		if p != root {
+			nested, err := holdsGoMod(p)
+			if err != nil {
+				return err
+			}
+			if nested {
+				rel, err := filepath.Rel(root, p)
+				if err != nil {
+					return fmt.Errorf("relativizing %s: %w", p, err)
+				}
+				m.nested = append(m.nested, filepath.ToSlash(rel))
+				return fs.SkipDir
+			}
 		}
 		pkg, found, err := loadDir(fset, root, p, tracked)
 		if err != nil {
@@ -113,6 +137,19 @@ func Load(root string) (*Module, error) {
 		m.byName[pkg.Name] = append(m.byName[pkg.Name], pkg)
 	}
 	return m, nil
+}
+
+// holdsGoMod reports whether dir carries a go.mod, which makes it the root of
+// another module.
+func holdsGoMod(dir string) (bool, error) {
+	info, err := os.Stat(filepath.Join(dir, "go.mod"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading %s: %w", dir, err)
+	}
+	return !info.IsDir(), nil
 }
 
 func skipDir(name string) bool {
@@ -196,7 +233,9 @@ func loadDir(fset *token.FileSet, root, dir string, tracked map[string]bool) (pk
 	}
 	bctx := buildContext()
 	pkg = &Package{fset: fset, names: make(map[string]struct{})}
-	var testName string
+	var testName, otherName string
+	var inBuild bool
+	otherNames := make(map[string]struct{})
 	for _, e := range ents {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
 			continue
@@ -211,8 +250,17 @@ func loadDir(fset *token.FileSet, root, dir string, tracked map[string]bool) (pk
 				return nil, false, fmt.Errorf("reading the build constraints of %s: %w", full, err)
 			}
 			if !included {
+				f, err := parser.ParseFile(fset, full, nil, parser.ParseComments|parser.SkipObjectResolution)
+				if err != nil {
+					return nil, false, fmt.Errorf("parsing %s: %w", full, err)
+				}
+				if !isIgnored(f) {
+					collectNames(f, otherNames)
+					otherName = f.Name.Name
+				}
 				continue
 			}
+			inBuild = true
 		}
 		f, err := parser.ParseFile(fset, full, nil, parser.ParseComments)
 		if err != nil {
@@ -229,7 +277,13 @@ func loadDir(fset *token.FileSet, root, dir string, tracked map[string]bool) (pk
 		}
 		pkg.Name = name
 	}
-	if len(pkg.files) == 0 {
+	if !inBuild && otherName != "" {
+		pkg.otherBuildNames = otherNames
+		if pkg.Name == "" {
+			pkg.Name = otherName
+		}
+	}
+	if len(pkg.files) == 0 && pkg.otherBuildNames == nil {
 		return nil, false, nil
 	}
 	if pkg.Name == "" {

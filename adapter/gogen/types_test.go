@@ -60,3 +60,25 @@ func TestGoBaseType_UnregisteredTemporalIsAGeneratorBug(t *testing.T) {
 		}
 	}
 }
+
+// TestGoFieldType_UnregisteredListElementDataTypeIsAnError pins that a List
+// property whose element names a DataType the pre-pass did not record fails,
+// as the scalar DataType position does, rather than degrading to the
+// primitive.
+func TestGoFieldType_UnregisteredListElementDataTypeIsAnError(t *testing.T) {
+	g, err := newGenerator(loadFixture(t, "named"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	county, ok := g.schema.Type("County")
+	if !ok {
+		t.Fatal("the fixture declares no County")
+	}
+	codes, ok := county.Property("codes")
+	if !ok {
+		t.Fatal("County declares no codes")
+	}
+	if _, err := g.goFieldType(g.typeOwner(county), codes); err == nil {
+		t.Error("goFieldType over an unregistered List<FipsCode> returned no error")
+	}
+}

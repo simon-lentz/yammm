@@ -28,7 +28,7 @@ func AssertNoDanglingLinks(t TB, root string) (checked int) {
 	}
 	dangling, checked := m.Dangling()
 	for _, l := range dangling {
-		t.Errorf("%s: doc link [%s] resolves to nothing%s", l.Pos, l.Text, suffix(l))
+		t.Errorf("%s: doc link [%s] resolves to nothing%s", l.Pos, l.Text, m.suffix(l))
 	}
 	return checked
 }
@@ -36,9 +36,12 @@ func AssertNoDanglingLinks(t TB, root string) (checked int) {
 // suffix names the package a link was resolved against, when it is not the
 // referencing one — without it a report on a qualified link says nothing about
 // where the name was looked for.
-func suffix(l Link) string {
+func (m *Module) suffix(l Link) string {
 	if l.ImportPath == "" {
 		return ""
+	}
+	if _, ok := m.byImport[l.ImportPath]; !ok {
+		return fmt.Sprintf(" (the module has no package %s)", l.ImportPath)
 	}
 	return fmt.Sprintf(" (looked for %q in %s)", key(l), l.ImportPath)
 }

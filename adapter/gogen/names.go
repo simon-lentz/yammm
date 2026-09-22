@@ -1,7 +1,6 @@
 package gogen
 
 import (
-	"fmt"
 	"go/token"
 	"maps"
 	"slices"
@@ -13,17 +12,10 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// goExportedIdent converts a yammm identifier to an exported Go identifier via
-// ident.ToUpperCamelInitialisms with the effective initialism set (golint-idiomatic
-// id->ID, url->URL, json->JSON, plus any injected through WithInitialisms). It
-// GUARANTEES an exported result. The transform upper-cases the first letter segment,
-// so a letter-leading name is exported and never a keyword (every Go keyword is
-// lower-case). But an all-separator input yields "" and a digit-leading input yields
-// a "_"-prefixed (unexported) string — reachable for an arbitrary schema name (e.g.
-// "2020census") used as a collision qualifier, since schema names are unconstrained
-// STRING literals (type/datatype/property/relation names are UC_WORD/LC_WORD and
-// cannot start with a digit). Prefix "X" in those cases so the result always begins
-// with an upper-/title-case letter.
+// goExportedIdent converts a yammm name to an exported Go identifier through
+// ident.ToUpperCamelInitialisms. An all-separator name yields "" and a
+// digit-leading one (a schema name such as "2020census") an unexported
+// "_"-prefixed string, so both take an "X" prefix.
 func goExportedIdent(name string, inits map[string]bool) string {
 	out := ident.ToUpperCamelInitialisms(name, inits)
 	if out == "" {
@@ -35,34 +27,10 @@ func goExportedIdent(name string, inits map[string]bool) string {
 	return out
 }
 
-// goField returns a struct-field Go name, disambiguated within a single struct's
-// field namespace. The loader already rejects case-insensitive field collisions
-// (checkPropertyCaseCollisions / checkPropertyRelationCollisions /
-// checkRelationCollisions in schema/collision.go), so the residuals are names that
-// ident merges to one identifier despite differing in the source — separators
-// ("foo_bar" and "foo__bar" both -> "FooBar") or letter/digit boundaries ("foo_1"
-// and "foo1" both -> "Foo1"). goField returns the first free "<base>", "<base>2",
-// … and REGISTERS the chosen name in used, so a later natural "<base>2" cannot
-// silently re-collide with an earlier disambiguated one (a bug the naive
-// increment-only form has). used is a per-struct set (value > 0 means taken);
-// caller passes one used map per struct (a struct's properties and relations share
-// one field namespace).
-func goField(name string, used map[string]int, inits map[string]bool) string {
-	base := goExportedIdent(name, inits)
-	cand := base
-	for i := 2; used[cand] > 0; i++ {
-		cand = base + strconv.Itoa(i)
-	}
-	used[cand]++ // register the chosen name (base or disambiguated)
-	return cand
-}
-
-// goPackageName sanitizes a schema name into a valid lowercase package identifier,
-// falling back to "schema" when the input yields nothing usable. Unlike exported
-// identifiers, a lower-case package name CAN collide with a Go keyword (e.g. a
-// schema named "type"), so guard with go/token. "main" names a program, which a
-// file of declarations alone cannot build as, and a package named "init" cannot
-// be imported without an alias, so both take the keyword's suffix.
+// goPackageName sanitizes a schema name into a lowercase package identifier,
+// falling back to "schema" when nothing usable remains. A keyword, "main" (a
+// file of declarations cannot build as a program) and "init" (no file can
+// import it without an alias) take a "_" suffix.
 func goPackageName(name string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(name) {
@@ -86,48 +54,20 @@ func validPackageName(name string) bool {
 	return token.IsIdentifier(name) && name != "_"
 }
 
-// nameTable holds the resolved, collision-free Go names for every entity that
-// becomes a top-level declaration: types, datatypes, and inline enums. They share
-// ONE Go package-block namespace (with the Graph aggregate and the
-// SerializedSources/SerializedEntry/SchemaHash declarations), so the table tracks a
-// single `taken` set seeded with those reserved names. Types are keyed by their
-// stable TypeID; datatypes by pointer (DataType has no exported identity, and the
-// same *schema.DataType the closure walk sees is exactly what ResolveDataType
-// returns from the loaded graph — verified: DataTypesSlice clones the same pointers
-// DataType()/ResolveDataType() return). Inline-enum names are resolved on demand and
-// memoized in inlineEnum.
-//
-// EDGE_ names are deliberately NOT in this set: they always contain underscores,
-// while goExportedIdent only ever emits underscore-free CamelCase, so an EDGE_ name
-// can never collide with a type/datatype/enum name. Each EDGE_ name is owner-qualified
-// (EDGE_<OwnerGoName>_<edge>_<TargetGoName>, built from the table's collision-resolved
-// Go names), so EDGE_ names are unique by construction — no emitter dedup is needed.
+// nameTable holds the Go names of every top-level declaration, all in the one
+// package-block namespace that taken records. It keeps the initialism set its
+// names were derived with, so every later derivation uses the same set.
 type nameTable struct {
-	taken      map[string]bool             // every assigned top-level Go identifier
-	types      map[schema.TypeID]string    // resolved type -> Go type name
-	dataTypes  map[*schema.DataType]string // resolved datatype -> Go type name (pointer-keyed)
-	inlineEnum map[string]string           // "<typeID>\x00<rawField>" -> Go enum-type name
+	inits      map[string]bool
+	taken      map[string]bool
+	types      map[schema.TypeID]string
+	dataTypes  map[*schema.DataType]string
+	inlineEnum map[string]string // memo key -> Go enum type name
 }
 
-// reservedNames are the package-level identifiers gogen always emits; no schema
-// entity may take them (Go has one package block namespace shared by types, consts,
-// and vars). Without the reservation a schema type of the same name takes the Go
-// name, format.Source succeeds, and the collision surfaces as a type-check failure.
-//
-// SerializedModel and SerializedModelEntry stay reserved although nothing emits
-// them any more. Freeing a name is not a no-op: a schema declaring a type of
-// that name derives a schema-qualified Go name today and would derive the bare
-// one after, which moves an emitted identifier — the one thing the
-// generated-output contract's Breaking tier names. Keeping them costs nothing;
-// a schema type called "SerializedModelEntry" is absurd either way.
-//
-// Date is a DSL keyword no schema entity can claim; reserving it keeps that
-// true by construction. Per-layout Timestamp names are reserved later by
-// registerTemporalTypes, after the schema's own names, so a schema type
-// keeps the bare identifier and the synthesized one takes the suffix.
-//
-// The unexported store the accessor reads is not listed: name derivation only
-// ever emits exported CamelCase, so a lowercase identifier cannot be taken.
+// reservedNames are the package-level identifiers gogen emits or once emitted.
+// A schema entity of one of these names takes a qualified name, and freeing
+// one would move that entity's emitted identifier.
 //
 //nolint:gochecknoglobals // Intentional: static reserved-name list.
 var reservedNames = []string{
@@ -140,21 +80,13 @@ var reservedNames = []string{
 	dateGoName,
 }
 
-// buildNameTable walks the closure (entry + transitively imported schemas) and
-// assigns each type and datatype a collision-free exported Go name in ONE shared
-// namespace (seeded with the reserved structural names). Types and datatypes are
-// assigned together because yammm permits a type and a datatype to share a name
-// (separate loader indices — indexTypes/indexDataTypes in schema/complete.go), and
-// both become top-level Go declarations. Unqualified where unique; schema-qualified
-// on collision (or when the bare name is reserved). Every bare name is assigned
-// before any qualified one, so a qualified name never takes an entity's unique
-// bare name; a qualified name another entity holds takes the table's numeric
-// suffix. Two entities of one schema sharing a candidate cannot be separated by
-// qualification, and are a hard error.
-func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error) {
-	schemas := s.Closure()
-
+// buildNameTable assigns every type and data type in the closure its Go name;
+// the package doc's Imports section states the rule. Every unique candidate is
+// assigned before any shared one is qualified, so a qualified name never takes
+// another entity's bare name.
+func buildNameTable(s *schema.Schema, inits map[string]bool) *nameTable {
 	nt := &nameTable{
+		inits:      inits,
 		taken:      map[string]bool{},
 		types:      map[schema.TypeID]string{},
 		dataTypes:  map[*schema.DataType]string{},
@@ -164,64 +96,68 @@ func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error)
 		nt.taken[r] = true
 	}
 
-	// Pass 1: candidate (unqualified) names for every declared entity — types AND
-	// datatypes — grouped so cross-kind collisions are detected, not just same-kind.
+	// A type and a data type may share a name, and both become top-level
+	// declarations, so the two kinds are grouped under one candidate.
 	type origin struct {
-		kind       string // "type" | "datatype"
-		name       string // the entity's name as declared
 		schemaName string
-		id         schema.TypeID    // kind == "type"
-		dt         *schema.DataType // kind == "datatype"
+		id         schema.TypeID    // set for a type
+		dt         *schema.DataType // set for a data type
 	}
 	byCandidate := map[string][]origin{}
-	for _, sc := range schemas {
+	for _, sc := range s.Closure() {
 		for _, t := range sc.TypesSlice() {
-			cand := goExportedIdent(t.Name(), inits)
-			byCandidate[cand] = append(byCandidate[cand], origin{kind: "type", name: t.Name(), schemaName: sc.Name(), id: t.ID()})
+			cand := nt.ident(t.Name())
+			byCandidate[cand] = append(byCandidate[cand], origin{schemaName: sc.Name(), id: t.ID()})
 		}
 		for _, dt := range sc.DataTypesSlice() {
-			cand := goExportedIdent(dt.Name(), inits)
-			byCandidate[cand] = append(byCandidate[cand], origin{kind: "datatype", name: dt.Name(), schemaName: sc.Name(), dt: dt})
+			cand := nt.ident(dt.Name())
+			byCandidate[cand] = append(byCandidate[cand], origin{schemaName: sc.Name(), dt: dt})
 		}
 	}
-
 	assign := func(o origin, name string) {
 		nt.taken[name] = true
-		if o.kind == "type" {
+		if o.dt == nil {
 			nt.types[o.id] = name
 		} else {
 			nt.dataTypes[o.dt] = name
 		}
 	}
 
-	// Pass 2: every sole claimant of an unreserved candidate takes it bare.
 	var shared []string
 	for _, cand := range slices.Sorted(maps.Keys(byCandidate)) {
-		origins := byCandidate[cand]
-		if len(origins) == 1 && !nt.taken[cand] {
+		if origins := byCandidate[cand]; len(origins) == 1 && !nt.taken[cand] {
 			assign(origins[0], cand)
 			continue
 		}
 		shared = append(shared, cand)
 	}
-
-	// Pass 3: schema-qualify every claimant of a shared or reserved candidate, in
-	// sorted-candidate order.
+	// Two claimants in one schema qualify to one name, and reserve's numeric
+	// suffix separates them in closure order, types before data types.
 	for _, cand := range shared {
-		seen := map[string]origin{}
 		for _, o := range byCandidate[cand] {
-			if first, dup := seen[o.schemaName]; dup {
-				return nil, fmt.Errorf(
-					"gogen: %s %q and %s %q in schema %q map to one Go name, which schema-qualification cannot separate; rename one entity",
-					first.kind, first.name, o.kind, o.name, o.schemaName,
-				)
-			}
-			seen[o.schemaName] = o
-			assign(o, nt.reserve(goExportedIdent(o.schemaName, inits)+cand))
+			assign(o, nt.reserve(nt.ident(o.schemaName)+cand))
 		}
 	}
+	return nt
+}
 
-	return nt, nil
+// ident is goExportedIdent under the table's initialism set.
+func (nt *nameTable) ident(name string) string {
+	return goExportedIdent(name, nt.inits)
+}
+
+// field returns name's Go field name, the first of "<base>", "<base>2", …
+// that used does not hold, and records it in used, one struct's namespace.
+// Names the identifier transform merges ("foo_1" and "foo1") reach the suffix,
+// and so does an edge property that derives a key field's name (target_id).
+func (nt *nameTable) field(name string, used map[string]bool) string {
+	base := nt.ident(name)
+	cand := base
+	for i := 2; used[cand]; i++ {
+		cand = base + strconv.Itoa(i)
+	}
+	used[cand] = true
+	return cand
 }
 
 // goType returns the resolved Go type name for a type identity.
@@ -236,10 +172,8 @@ func (nt *nameTable) goDataType(dt *schema.DataType) (string, bool) {
 	return n, ok
 }
 
-// reserve returns the first free name in "<base>", "<base>2", … and records it in
-// the shared namespace. Used for schema-qualified names and for synthesized names
-// (inline enums, enum value consts, temporal types) that must not collide with an
-// already-assigned type / datatype / enum / reserved name.
+// reserve returns the first free name in "<base>", "<base>2", … and records it
+// in the shared namespace.
 func (nt *nameTable) reserve(base string) string {
 	cand := base
 	for i := 2; nt.taken[cand]; i++ {
@@ -249,15 +183,21 @@ func (nt *nameTable) reserve(base string) string {
 	return cand
 }
 
-// goInlineEnum returns the memoized Go type name for an inline-enum property —
-// "<OwnerGoType><FieldGoName>", reserved in the shared namespace. The owner type is
-// already named (types/datatypes are assigned before any emission).
-func (nt *nameTable) goInlineEnum(owner *schema.Type, p *schema.Property, inits map[string]bool) string {
-	key := owner.ID().String() + "\x00" + p.Name()
+// goInlineEnum returns the memoized Go type name of an inline-enum field:
+// "<ownerGoName><FieldGoName>", reserved in the shared namespace on first use.
+func (nt *nameTable) goInlineEnum(owner enumOwner, p *schema.Property) string {
+	key := owner.key + "\x00" + p.Name()
 	if n, ok := nt.inlineEnum[key]; ok {
 		return n
 	}
-	name := nt.reserve(nt.types[owner.ID()] + goExportedIdent(p.Name(), inits))
+	name := nt.reserve(owner.goName + nt.ident(p.Name()))
 	nt.inlineEnum[key] = name
 	return name
+}
+
+// enumOwner names the struct an inline-enum field belongs to: its Go name, and
+// a key unique among every struct the file emits.
+type enumOwner struct {
+	goName string
+	key    string
 }

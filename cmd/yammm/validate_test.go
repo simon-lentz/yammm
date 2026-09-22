@@ -75,6 +75,8 @@ func TestExitCodes(t *testing.T) {
 		{"validate missing file", []string{"validate", "testdata/nonexistent.yammm"}, cli.ExitRuntime},
 		{"check missing data file", []string{"check", "testdata/valid.yammm", "testdata/nonexistent.json"}, cli.ExitRuntime},
 		{"check csv without type", []string{"check", "testdata/valid.yammm", "testdata/data.csv"}, cli.ExitUsage},
+		{"check unknown format", []string{"check", "--from", "xml", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
+		{"load unknown format", []string{"load", "--from", "xml", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
 		{"gen unsupported target", []string{"gen", "--to", "rust", "testdata/county.yammm"}, cli.ExitUsage},
 		{"gen go-only flag with jsonschema target", []string{"gen", "--to", "jsonschema", "--package", "foo", "testdata/county.yammm"}, cli.ExitUsage},
 		{"gen jsonschema-only flag with go target", []string{"gen", "--to", "go", "--schema-id", "https://example.com/x.json", "testdata/county.yammm"}, cli.ExitUsage},

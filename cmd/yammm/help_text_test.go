@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -96,5 +97,32 @@ func TestSnapshotVerifyHelp_DoesNotPromiseMemoryTheLibraryDisclaims(t *testing.T
 	}
 	if !strings.Contains(out, "without materialising the snapshot") {
 		t.Errorf("the help no longer states what verify actually avoids building:\n%s", out)
+	}
+}
+
+// TestGenHelp_JSONSchemaWiringMatchesWhatCheckReads pins the jsonschema
+// target's wiring advice against `yammm check` itself. A data file that names
+// its schema in a "$schema" member fails check, because every top-level key is
+// read as a type name, so the help must not recommend one.
+func TestGenHelp_JSONSchemaWiringMatchesWhatCheckReads(t *testing.T) {
+	t.Parallel()
+
+	out := helpText(t, "gen")
+	if !strings.Contains(out, `file cannot carry a "$schema" member`) {
+		t.Errorf("the help no longer states that a data file cannot carry a \"$schema\" member:\n%s", out)
+	}
+	if strings.Contains(out, "$schema header") {
+		t.Errorf("the help recommends a \"$schema\" header, which check refuses:\n%s", out)
+	}
+
+	data := filepath.Join(t.TempDir(), "data.json")
+	doc := `{"$schema": "./valid.schema.json", "Person": [{"id": "alice", "name": "Alice"}]}`
+	if err := os.WriteFile(data, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := executeCmdOutput(t, "check", "testdata/valid.yammm", data)
+	if code != cli.ExitValidation || !strings.Contains(errOut, "E_INVALID_TYPE_TAG") {
+		t.Errorf("check on a data file with a \"$schema\" member: exit %d, stderr:\n%s\nwant exit %d and E_INVALID_TYPE_TAG; if check now accepts the member, the help's advice is due to change",
+			code, errOut, cli.ExitValidation)
 	}
 }

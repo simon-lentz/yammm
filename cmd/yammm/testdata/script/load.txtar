@@ -8,6 +8,13 @@ exec yammm load --from csv --type Person valid.yammm data.csv
 
 ! exec yammm load valid.yammm nonexistent.json
 
+# The summary line reports a load that succeeded, so a refused one prints none.
+exec yammm load valid.yammm data.json
+stderr 'loaded 2 instances of 1 types'
+! exec yammm load valid.yammm dup.json
+stderr 'E_DUPLICATE_PK'
+! stderr 'loaded'
+
 -- valid.yammm --
 schema "test"
 
@@ -27,3 +34,5 @@ type Person {
 id,name,age
 carol,Carol,28
 dave,Dave,35
+-- dup.json --
+{"Person": [{"id": "a", "name": "A"}, {"id": "a", "name": "B"}]}

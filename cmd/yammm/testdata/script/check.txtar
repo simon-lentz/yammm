@@ -13,6 +13,10 @@ exec yammm check --type Person valid.yammm data.csv
 # CSV without --type is rejected.
 ! exec yammm check valid.yammm data.csv
 
+# An unknown --from is a usage error, exit 2.
+! exec yammm check --from xml valid.yammm data.json
+stderr 'unsupported format "xml"'
+
 # Missing data file is rejected.
 ! exec yammm check valid.yammm nonexistent.json
 
@@ -21,6 +25,17 @@ exec yammm check --type Person valid.yammm data.csv
 ! exec yammm check --format json valid.yammm bad.json
 stderr '"severity"'
 stderr '"error"'
+
+# check assembles the graph as load does, so a duplicate primary key and an
+# unresolved required association fail it too.
+! exec yammm check linked.yammm dup.json
+stderr 'E_DUPLICATE_PK'
+! exec yammm check linked.yammm unresolved.json
+stderr 'E_UNRESOLVED_REQUIRED'
+! exec yammm check linked.yammm absent.json
+stderr 'E_UNRESOLVED_REQUIRED'
+exec yammm check linked.yammm linked.json
+! stderr .
 
 # --module-root reaches every schema-loading command, not only gen.
 ! exec yammm check sub/entry.yammm empty.json
@@ -72,3 +87,22 @@ carol,Carol,28
 dave,Dave,35
 -- bad.json --
 {"Person": [{"id": "x"}]}
+-- linked.yammm --
+schema "linked"
+
+type Person {
+	id   String primary
+	name String required
+	--> MANAGER (one) Person
+}
+-- linked.json --
+{"Person": [{"id": "a", "name": "A", "manager": {"_target_id": "a"}}]}
+-- dup.json --
+{"Person": [
+  {"id": "a", "name": "A", "manager": {"_target_id": "a"}},
+  {"id": "a", "name": "B", "manager": {"_target_id": "a"}}
+]}
+-- unresolved.json --
+{"Person": [{"id": "a", "name": "A", "manager": {"_target_id": "zz"}}]}
+-- absent.json --
+{"Person": [{"id": "a", "name": "A"}]}

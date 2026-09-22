@@ -45,7 +45,8 @@ func TestParseObject_ReadsANumberByTheModuleRule(t *testing.T) {
 		{name: "a whole value with a point is float64", literal: "7.0", want: 7.0},
 		{name: "an exponent means float64 even when the value is whole", literal: "1e2", want: 100.0},
 		{name: "a capital exponent means float64", literal: "1E2", want: 100.0},
-		{name: "past int64 falls back to float64", literal: "99999999999999999999", want: 1e20},
+		{name: "past int64 keeps its exact text", literal: "99999999999999999999", want: json.Number("99999999999999999999")},
+		{name: "below int64 keeps its exact text", literal: "-9223372036854775809", want: json.Number("-9223372036854775809")},
 		{name: "zero is int64", literal: "0", want: int64(0)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -172,5 +173,73 @@ func TestMarshalObject_RendersAVectorElementThroughFloat(t *testing.T) {
 	const widened = "0.10000000149011612"
 	if got := strings.Count(doc, widened); got != 4 {
 		t.Errorf("0.1 renders widened %d times, want 4 (Vector, List<Float>, and each through an alias):\n%s", got, doc)
+	}
+}
+
+const integerRangeSchema = `schema "r"
+
+type T {
+	id String primary
+	n Integer
+	f Float
+}
+`
+
+// An integer literal outside int64 is refused at an Integer property, on both
+// sides of the range. The nearest float64 of a literal just below MinInt64 is
+// exactly -2^63, so reading the literal through float64 would store MinInt64,
+// a different integer from the one the document wrote.
+func TestParseObject_IntegerLiteralOutsideInt64IsRefusedAtAnInteger(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, res := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
+	if err := res.Err(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for _, literal := range []string{
+		"9223372036854775808",
+		"-9223372036854775809",
+		"-9223372036854776832",
+		"99999999999999999999",
+	} {
+		t.Run(literal, func(t *testing.T) {
+			t.Parallel()
+			doc := fmt.Sprintf(`{"T":[{"id":"a","n":%s,"f":1.5}]}`, literal)
+			parsed, pres := New().ParseObject(ctx, location.NewSourceID("r.json"), []byte(doc))
+			if err := pres.Err(); err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			_, vres := instance.NewValidator(s).Validate(ctx, "T", parsed["T"])
+			if !vres.HasErrors() {
+				t.Fatalf("%s validated at an Integer property", literal)
+			}
+			if !strings.Contains(vres.String(), "E_TYPE_MISMATCH") || !strings.Contains(vres.String(), "outside the int64 range") {
+				t.Errorf("%s drew %s, want E_TYPE_MISMATCH naming the int64 range", literal, vres.String())
+			}
+		})
+	}
+}
+
+// At a Float property the same literal is read as its nearest float64, as any
+// number without a float indicator is.
+func TestParseObject_IntegerLiteralOutsideInt64IsAFloatAtAFloat(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, res := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
+	if err := res.Err(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	parsed, pres := New().ParseObject(ctx, location.NewSourceID("r.json"),
+		[]byte(`{"T":[{"id":"a","n":1,"f":99999999999999999999}]}`))
+	if err := pres.Err(); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	valid, vres := instance.NewValidator(s).Validate(ctx, "T", parsed["T"])
+	if vres.HasErrors() {
+		t.Fatalf("validate: %s", vres.String())
+	}
+	got, _ := valid[0].Property("f")
+	if f, ok := got.Unwrap().(float64); !ok || f != 1e20 {
+		t.Errorf("f = %#v, want float64(1e20)", got.Unwrap())
 	}
 }

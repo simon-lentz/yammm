@@ -22,7 +22,7 @@ type County struct {
 	Fips   FipsCode     `json:"fips"`
 	Tier   Tier         `json:"tier"`
 	Status CountyStatus `json:"status"`
-	Codes  []FipsCode   `json:"codes,omitempty"`
+	Codes  []FipsCode   `json:"codes,omitzero"`
 }
 
 type Graph struct {

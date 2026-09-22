@@ -38,12 +38,12 @@ type County struct {
 	Tier       Tier                        `json:"tier"`
 	Status     CountyStatus                `json:"status"`
 	Population int64                       `json:"population"`
-	Centroid   []float64                   `json:"centroid,omitempty"`
-	Aliases    []FipsCode                  `json:"aliases,omitempty"`
+	Centroid   []float64                   `json:"centroid,omitzero"`
+	Aliases    []FipsCode                  `json:"aliases,omitzero"`
 	CreatedAt  time.Time                   `json:"created_at"`
 	UpdatedAt  *time.Time                  `json:"updated_at,omitempty"`
 	HasDetail  []*Detail                   `json:"has_detail,omitempty"`
-	InState    *EDGE_County_in_state_State `json:"in_state"`
+	InState    *EDGE_County_in_state_State `json:"in_state,omitempty"`
 }
 
 type EDGE_County_in_state_State struct {

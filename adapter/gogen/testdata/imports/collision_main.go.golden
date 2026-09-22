@@ -7,7 +7,7 @@ type GeoRegion struct {
 
 type County struct {
 	Fips     string                              `json:"fips"`
-	InRegion *EDGE_County_in_region_CommonRegion `json:"in_region"`
+	InRegion *EDGE_County_in_region_CommonRegion `json:"in_region,omitempty"`
 }
 
 type CommonRegion struct {

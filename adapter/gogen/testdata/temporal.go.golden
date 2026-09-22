@@ -103,16 +103,22 @@ type Sensor struct {
 	Day            *Day                                   `json:"day,omitempty"`
 	Stamp          *Stamp                                 `json:"stamp,omitempty"`
 	Wall           *Wall                                  `json:"wall,omitempty"`
-	Days           []Date                                 `json:"days,omitempty"`
-	Walls          []Timestamp20060102150405              `json:"walls,omitempty"`
+	Days           []Date                                 `json:"days,omitzero"`
+	Walls          []Timestamp20060102150405              `json:"walls,omitzero"`
+	Labels         []string                               `json:"labels,omitzero"`
 	HasReading     []*Reading                             `json:"has_reading,omitempty"`
-	InCasing       []*Casing                              `json:"in_casing"`
-	Feeds          *EDGE_Sensor_feeds_Sensor              `json:"feeds"`
+	InCasing       []*Casing                              `json:"in_casing,omitempty"`
+	Feeds          *EDGE_Sensor_feeds_Sensor              `json:"feeds,omitempty"`
+	Neighbours     []*EDGE_Sensor_neighbours_Sensor       `json:"neighbours,omitempty"`
 }
 
 type EDGE_Sensor_feeds_Sensor struct {
 	TargetID string                   `json:"_target_id"`
 	Since    *Timestamp20060102150405 `json:"since,omitempty"`
+}
+
+type EDGE_Sensor_neighbours_Sensor struct {
+	TargetID string `json:"_target_id"`
 }
 
 type Graph struct {
@@ -123,7 +129,7 @@ type Graph struct {
 // the name the re-load looks it up by, as verbatim .yammm text. Read it
 // through SerializedSources below.
 var serializedSources = map[string]string{
-	"temporal.yammm": "schema \"temporal\"\n\ntype Day   = Date\ntype Stamp = Timestamp\ntype Wall  = Timestamp[\"2006-01-02 15:04:05\"]\n\npart type Reading {\n\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\ton Date\n}\n\npart type Casing {\n\tserial String primary\n}\n\ntype Sensor {\n\tid             String primary\n\tinstalled      Date required\n\tdecommissioned Date\n\tcreated_at     Timestamp required\n\tseen_wall      Timestamp[\"2006-01-02 15:04:05\"]\n\tseen_at        Timestamp[\"2006-01-02T15:04:05.000000000Z07:00\"] required\n\tday            Day\n\tstamp          Stamp\n\twall           Wall\n\tdays           List<Date>\n\twalls          List<Timestamp[\"2006-01-02 15:04:05\"]>\n\t*-> HAS_READING (many) Reading\n\t*-> IN_CASING (one) Casing\n\t--> FEEDS (one) Sensor {\n\t\tsince Timestamp[\"2006-01-02 15:04:05\"]\n\t}\n}\n",
+	"temporal.yammm": "schema \"temporal\"\n\ntype Day   = Date\ntype Stamp = Timestamp\ntype Wall  = Timestamp[\"2006-01-02 15:04:05\"]\n\npart type Reading {\n\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\ton Date\n}\n\npart type Casing {\n\tserial String primary\n}\n\ntype Sensor {\n\tid             String primary\n\tinstalled      Date required\n\tdecommissioned Date\n\tcreated_at     Timestamp required\n\tseen_wall      Timestamp[\"2006-01-02 15:04:05\"]\n\tseen_at        Timestamp[\"2006-01-02T15:04:05.000000000Z07:00\"] required\n\tday            Day\n\tstamp          Stamp\n\twall           Wall\n\tdays           List<Date>\n\twalls          List<Timestamp[\"2006-01-02 15:04:05\"]>\n\tlabels         List<String>\n\t*-> HAS_READING (many) Reading\n\t*-> IN_CASING (one) Casing\n\t--> FEEDS (one) Sensor {\n\t\tsince Timestamp[\"2006-01-02 15:04:05\"]\n\t}\n\t--> NEIGHBOURS (many) Sensor\n}\n",
 }
 
 // SerializedEntry is the entry-point key into SerializedSources.
@@ -146,4 +152,4 @@ func SerializedSources() map[string][]byte {
 	return m
 }
 
-const SchemaHash = "sha256:b65f3094fb14834b63e3683c9cb7de2847b1ad255a03d5f108c558d7dce38920"
+const SchemaHash = "sha256:dcfae1300515b58f170b0c62342721e1e4f4a26eda69290c1a801026819988c1"

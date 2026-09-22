@@ -3,6 +3,8 @@ package doclint
 import (
 	"go/ast"
 	"go/doc/comment"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -24,7 +26,8 @@ type Link struct {
 //
 // A link whose target package is outside the module is not resolved and not
 // reported: the standard library and this module's dependencies keep their own
-// promises. Checked reports how many links were resolved, so a caller can tell
+// promises. A link under the module's own path that names no loaded package
+// dangles. Checked reports how many links were resolved, so a caller can tell
 // "nothing dangles" from "nothing was read".
 func (m *Module) Dangling() (dangling []Link, checked int) {
 	for _, pkg := range m.Packages {
@@ -33,12 +36,12 @@ func (m *Module) Dangling() (dangling []Link, checked int) {
 			parser := m.parserFor(imports)
 			for _, cg := range f.Comments {
 				for _, link := range m.links(pkg, parser, cg) {
-					target, ok := m.resolve(pkg, link)
-					if !ok {
-						continue // outside the module
+					target, inModule := m.resolve(pkg, link)
+					if !inModule {
+						continue
 					}
 					checked++
-					if !resolves(target, link) {
+					if target == nil || !resolves(target, link) {
 						dangling = append(dangling, link)
 					}
 				}
@@ -56,7 +59,10 @@ func resolves(target *Package, l Link) bool {
 	if l.Name == "" {
 		return true
 	}
-	_, found := target.names[key(l)]
+	if _, found := target.names[key(l)]; found {
+		return true
+	}
+	_, found := target.otherBuildNames[key(l)]
 	return found
 }
 
@@ -68,14 +74,49 @@ func key(l Link) string {
 	return l.Recv + "." + l.Name
 }
 
-// resolve returns the package a link names, and false when that package is
-// outside the module.
-func (m *Module) resolve(from *Package, l Link) (*Package, bool) {
+// resolve returns the package a link names, and false when its import path is
+// outside the module. A path under the module that no loaded package holds
+// returns nil and true.
+func (m *Module) resolve(from *Package, l Link) (pkg *Package, inModule bool) {
 	if l.ImportPath == "" {
 		return from, true
 	}
-	pkg, ok := m.byImport[l.ImportPath]
-	return pkg, ok
+	if pkg, ok := m.byImport[l.ImportPath]; ok {
+		return pkg, true
+	}
+	return nil, m.contains(l.ImportPath)
+}
+
+// contains reports whether importPath is the module's path or under it, and
+// in no other module: not in a directory that carries its own go.mod, and not
+// under a major-version element such as v2 that names no directory here.
+func (m *Module) contains(importPath string) bool {
+	rest, ok := strings.CutPrefix(importPath, m.Path)
+	if !ok || (rest != "" && !strings.HasPrefix(rest, "/")) {
+		return false
+	}
+	rel := strings.TrimPrefix(rest, "/")
+	for _, n := range m.nested {
+		if rel == n || strings.HasPrefix(rel, n+"/") {
+			return false
+		}
+	}
+	first, _, _ := strings.Cut(rel, "/")
+	if isMajorVersion(first) {
+		info, err := os.Stat(filepath.Join(m.root, first))
+		return err == nil && info.IsDir()
+	}
+	return true
+}
+
+// isMajorVersion reports whether elem is a major-version path element: v and
+// a number of 2 or more, without a leading zero.
+func isMajorVersion(elem string) bool {
+	digits, ok := strings.CutPrefix(elem, "v")
+	if !ok || digits == "" || digits[0] == '0' || digits == "1" {
+		return false
+	}
+	return strings.Trim(digits, "0123456789") == ""
 }
 
 // parserFor builds a comment parser bound to one file's imports.

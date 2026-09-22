@@ -121,11 +121,6 @@ func TestRender_LayoutContract(t *testing.T) {
 				"  \"second-long-enum-member-value\"\n" +
 				"]",
 		},
-		{
-			name: "raw_passthrough",
-			v:    object(kv{"const", raw(json.RawMessage(`42`))}),
-			want: `{ "const": 42 }`,
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -60,16 +60,18 @@ func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opt
 		return nil, err
 	}
 
-	var data []byte
-	if cfg.indent != "" {
-		data, err = json.MarshalIndent(output, "", cfg.indent)
-	} else {
-		data, err = json.Marshal(output)
-	}
-	if err != nil {
+	// The document is a data file people read and edit, and no HTML embeds it,
+	// so "<", ">" and "&" are written as themselves; a JSON reader, this
+	// package's own among them, reads either spelling as the same text.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", cfg.indent)
+	if err := enc.Encode(output); err != nil {
 		return nil, fmt.Errorf("json marshal: %w", err)
 	}
-	return data, nil
+	// Encode ends the value with a newline that json.Marshal does not write.
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // WriteObject writes a graph snapshot to an io.Writer in JSON object-keyed format.

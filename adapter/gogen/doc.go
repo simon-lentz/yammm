@@ -37,8 +37,12 @@
 //     SerializedEntry pair, and SchemaHash (see the Embedded Source section
 //     below).
 //
-// A type's or property's schema doc-comment is carried through verbatim as the Go
-// declaration's doc-comment.
+// A type's or property's schema doc-comment becomes the Go declaration's
+// doc-comment, one "//" line for each of its lines. The indentation its
+// continuation lines share is removed, because the Go doc-comment formatter
+// reads an indented line as a code block. A line indented deeper than the rest
+// keeps the difference and is rendered as a code block, which gofmt sets apart
+// with a blank "//" line before and after it.
 //
 // # Type Mapping
 //
@@ -59,22 +63,39 @@
 // bare time.Time cannot decode. The generated Date and per-layout types are
 // structs embedding time.Time — so every time.Time method is promoted and a
 // value is built as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that
-// speak the stored form. A per-layout type is named from its layout alone,
-// "Timestamp" plus the layout's letters and digits (Timestamp20060102150405
-// for "2006-01-02 15:04:05"), so the name cannot move when an unrelated part
-// of the schema changes; a schema type of that name keeps it and the generated
-// type takes a numbered suffix. A default-layout Timestamp stays time.Time,
+// speak the stored form. A per-layout type is named "Timestamp" plus the
+// layout's letters and digits (Timestamp20060102150405 for "2006-01-02
+// 15:04:05") when nothing else claims that name. It is claimed when another
+// layout that a position renders as a generated type has the same letters and
+// digits, or when a declared type or data type, a reserved name or an EDGE_
+// struct holds it; an inline enum is named later and yields to the layout. A
+// layout named only by a temporal DataType claims nothing, since that DataType
+// is its own type. A layout whose name is claimed takes "Timestamp_" plus its
+// layout with every other rune written as its hexadecimal code point between
+// underscores, and an invalid UTF-8 byte as "_x" and its hexadecimal value
+// (Timestamp_2006_2D_01_2D_02 for "2006-01-02"), a name nothing else can hold.
+// A layout's name therefore never passes to another layout: a schema edit that
+// claims a bare name moves its layout to the exact name, which no other layout
+// can take. A default-layout Timestamp stays time.Time,
 // whose own codec already exchanges RFC 3339 with nanoseconds, the form the
 // library stores. A DataType resolving to any temporal kind is emitted as
 // struct{ time.Time } too, with the codec its layout needs.
 //
 // Named types are rendered faithfully rather than collapsed to their primitive: a
-// field typed by a named DataType keeps that Go type, a List of a named DataType
-// renders []<Name> (not []string), and an enum declared inline on a property
-// becomes that property's own <Owner><Field> string type. An optional non-slice
-// field becomes a pointer (*T); slices and vectors stay nil-able as-is, since a nil
-// slice already encodes absence. Every field carries a json tag preserving the wire
-// name verbatim, with ,omitempty added when the field is optional.
+// field typed by a named DataType keeps that Go type; a List whose innermost
+// element is a named DataType renders it at every depth ([]<Name>,
+// [][]<Name>), in a property and in a List DataType's own declaration; and an
+// enum declared inline on a property becomes that property's own
+// <Owner><Field> string type, where an edge property's owner is its EDGE_
+// struct. An optional non-slice field becomes a pointer (*T); slices and
+// vectors stay nil-able as-is, since a nil slice already encodes absence.
+//
+// Every field carries a json tag preserving the wire name verbatim. An optional
+// pointer field adds ,omitempty. An optional slice field adds ,omitzero, which
+// leaves out a nil slice and writes a present empty list as [], since the
+// library keeps an empty list apart from an absent one. Every relation field
+// adds ,omitempty, required ones included: the parser refuses a null relation,
+// and a required relation left unset is refused where presence is checked.
 //
 // # Associations and the Graph Aggregate
 //
@@ -124,10 +145,12 @@
 // assigned before any qualified one, so a qualified name already taken — by another
 // type or data type, or by a reserved name such as SchemaHash — takes a numeric
 // suffix (AFoo2) rather than the other declaration's name.
-// Inherited properties, associations, and compositions resolve against their
-// declaring schema, so a member inherited from a cross-schema parent maps to the
-// correct type. A collision that qualification cannot resolve — two entities in
-// one schema mapping to a single Go name — is a hard error.
+// Two entities of one schema that map to one Go name — a type and a data type
+// both named Region, or Url and URL under the initialisms — both qualify, and
+// the numeric suffix separates them in declaration order, types before data
+// types (GeoRegion, GeoRegion2). Inherited properties, associations, and
+// compositions resolve against their declaring schema, so a member inherited
+// from a cross-schema parent maps to the correct type.
 //
 // # Embedded Source
 //
@@ -224,8 +247,6 @@
 //     [github.com/simon-lentz/yammm/schema.NewBuilder] without retained source);
 //   - the [WithPackageName] value cannot head a package clause
 //     ([ErrInvalidPackageName]);
-//   - two entities of one schema map to one Go name, which schema-qualification
-//     cannot separate;
 //   - a source is imported by two paths under two keys, two sources take one
 //     key, a source has no path relative to the root, or a LoadString name has
 //     no base (see Embedded Source);

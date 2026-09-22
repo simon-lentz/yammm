@@ -5,7 +5,7 @@ type RegionCode string
 
 type County struct {
 	Fips     string                        `json:"fips"`
-	InRegion *EDGE_County_in_region_Region `json:"in_region"`
+	InRegion *EDGE_County_in_region_Region `json:"in_region,omitempty"`
 }
 
 type Region struct {

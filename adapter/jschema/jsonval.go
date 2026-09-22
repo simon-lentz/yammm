@@ -49,8 +49,9 @@ func array(vs ...val) val { return val{kind: kindArray, arr: vs} }
 // scalar renders x as a JSON scalar with HTML escaping disabled, so text like
 // "endDate > startDate" survives into the output verbatim rather than as
 // \u003e escapes. Inputs are generator-controlled (strings, int64s, float64s,
-// bools); anything unmarshalable is a generator bug and panics rather than
-// producing broken output.
+// bools), and a schema's Float bounds are finite because the DSL and the
+// Builder both refuse another; anything unmarshalable is a generator bug and
+// panics rather than producing broken output.
 func scalar(x any) val {
 	var sb strings.Builder
 	enc := json.NewEncoder(&sb)
@@ -75,10 +76,6 @@ func (v val) stringValue() (string, bool) {
 	}
 	return s, true
 }
-
-// raw wraps a pre-rendered JSON fragment verbatim. The fragment must be a
-// single-line value: it participates in compact-width measurement as-is.
-func raw(j json.RawMessage) val { return val{kind: kindRaw, raw: j} }
 
 // compact returns v's single-line rendering: `{ "k": v, ... }` for objects,
 // `[v, ...]` for arrays, and the raw fragment for scalars. Empty containers

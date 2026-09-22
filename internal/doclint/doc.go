@@ -38,7 +38,22 @@
 // name is the fallback, which is how a comment can reference a package that
 // would be an import cycle to depend on. Links resolving outside the module are
 // skipped: the standard library and this module's dependencies are not this
-// gate's business.
+// gate's business. A link under the module's own path is not outside it: when
+// no package holds that path, the link dangles. Two paths under it are still
+// another module's: a directory that carries its own go.mod, and a first
+// element such as v2 that names a major version and no directory here.
+//
+// A directory whose every non-test file is behind a constraint the pinned
+// context excludes still holds a package, one that exists under another build.
+// A link into it resolves against the names that build declares; a link
+// written inside it is not checked.
+//
+// # Code names
+//
+// [AssertCitedCodesExist] reads every diagnostic code name written in a Go
+// comment or a Markdown file against the registry the caller passes. A renamed
+// or removed code leaves its name in prose exactly as a removed symbol leaves
+// its links, and a code name is not a doc link, so the resolver cannot see it.
 //
 // # Names
 //

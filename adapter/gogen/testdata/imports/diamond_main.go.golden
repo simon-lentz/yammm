@@ -3,18 +3,18 @@ package top
 
 type Top struct {
 	ID      string                   `json:"id"`
-	ToLeft  *EDGE_Top_to_left_Left   `json:"to_left"`
-	ToRight *EDGE_Top_to_right_Right `json:"to_right"`
+	ToLeft  *EDGE_Top_to_left_Left   `json:"to_left,omitempty"`
+	ToRight *EDGE_Top_to_right_Right `json:"to_right,omitempty"`
 }
 
 type Left struct {
 	ID       string                      `json:"id"`
-	ToShared *EDGE_Left_to_shared_Shared `json:"to_shared"`
+	ToShared *EDGE_Left_to_shared_Shared `json:"to_shared,omitempty"`
 }
 
 type Right struct {
 	ID       string                       `json:"id"`
-	ToShared *EDGE_Right_to_shared_Shared `json:"to_shared"`
+	ToShared *EDGE_Right_to_shared_Shared `json:"to_shared,omitempty"`
 }
 
 type Shared struct {

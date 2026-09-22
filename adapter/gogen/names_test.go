@@ -3,7 +3,6 @@ package gogen
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -50,22 +49,47 @@ func TestGoPackageName(t *testing.T) {
 	}
 }
 
-// TestBuildNameTable_TypeDataTypeCollision pins the cross-kind collision path: a type
-// and a datatype sharing a name both LOAD (separate indexTypes/indexDataTypes), so the
-// name table must catch the resulting Go clash. Same-schema, schema-qualification
-// cannot separate them, so it is a hard error. (Loadability verified against source.)
-func TestBuildNameTable_TypeDataTypeCollision(t *testing.T) {
-	s, res := schema.LoadString(context.Background(),
-		"schema \"geo\"\n\ntype Region = String\n\ntype Region {\n\tid String primary\n}", "collide.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load (expected to succeed — loader permits the overlap): %v", res.Err())
-	}
-	_, err := buildNameTable(s, defaultInitialisms)
-	if err == nil {
-		t.Fatal("expected a hard collision error for a type and a datatype both named Region")
-	}
-	if want := `type "Region" and datatype "Region" in schema "geo"`; !strings.Contains(err.Error(), want) {
-		t.Errorf("error %q does not name both entities: want %s", err, want)
+// TestBuildNameTable_OneSchemaSharingACandidateTakesTheSuffix pins that two
+// entities of one schema mapping to one Go name both qualify, and the numeric
+// suffix separates them in declaration order, types before data types: a type
+// and a data type both named Region, and two types Url and URL, which the
+// initialisms map to one name.
+func TestBuildNameTable_OneSchemaSharingACandidateTakesTheSuffix(t *testing.T) {
+	for name, tc := range map[string]struct {
+		src  string
+		want map[string]string
+	}{
+		"a type and a data type": {
+			src:  "schema \"geo\"\n\ntype Region = String\n\ntype Region {\n\tid String primary\n\tr Region\n}\n",
+			want: map[string]string{"type Region": "GeoRegion", "datatype Region": "GeoRegion2"},
+		},
+		"two types under an initialism": {
+			src:  "schema \"geo\"\n\ntype Url {\n\tid String primary\n}\n\ntype URL {\n\tid String primary\n}\n",
+			want: map[string]string{"type Url": "GeoURL", "type URL": "GeoURL2"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, res := schema.LoadString(context.Background(), tc.src, "collide.yammm")
+			if res.HasErrors() {
+				t.Fatalf("load: %v", res.Err())
+			}
+			nt := buildNameTable(s, defaultInitialisms)
+			got := map[string]string{}
+			for _, typ := range s.TypesSlice() {
+				got["type "+typ.Name()], _ = nt.goType(typ.ID())
+			}
+			for _, dt := range s.DataTypesSlice() {
+				got["datatype "+dt.Name()], _ = nt.goDataType(dt)
+			}
+			if len(got) != len(tc.want) {
+				t.Errorf("named %v, want %v", got, tc.want)
+			}
+			for k, w := range tc.want {
+				if got[k] != w {
+					t.Errorf("%s = %q, want %q", k, got[k], w)
+				}
+			}
+		})
 	}
 }
 
@@ -83,10 +107,7 @@ func TestBuildNameTable_BareNamesBeforeQualified(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("load: %v", res.Err())
 	}
-	nt, err := buildNameTable(s, defaultInitialisms)
-	if err != nil {
-		t.Fatalf("buildNameTable: %v", err)
-	}
+	nt := buildNameTable(s, defaultInitialisms)
 	want := map[string]string{
 		"main.Bar":    "MainBar2",
 		"main.Holder": "Holder",
@@ -125,10 +146,7 @@ func TestBuildNameTable_ReservedNameQualified(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("load: %v", res.Err())
 	}
-	nt, err := buildNameTable(s, defaultInitialisms)
-	if err != nil {
-		t.Fatalf("buildNameTable: %v", err)
-	}
+	nt := buildNameTable(s, defaultInitialisms)
 	gt, _ := s.Type("Graph")
 	name, ok := nt.goType(gt.ID())
 	if !ok || name == "Graph" {
@@ -165,10 +183,7 @@ func TestBuildNameTable_DateReserved(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("load: %v", res.Err())
 	}
-	nt, err := buildNameTable(s, defaultInitialisms)
-	if err != nil {
-		t.Fatalf("buildNameTable: %v", err)
-	}
+	nt := buildNameTable(s, defaultInitialisms)
 	if !nt.taken[dateGoName] {
 		t.Errorf("%q is not reserved in the name table", dateGoName)
 	}
@@ -186,10 +201,7 @@ func TestBuildNameTable_QualifiedNamePastAReservedName(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("load: %v", res.Err())
 	}
-	nt, err := buildNameTable(s, defaultInitialisms)
-	if err != nil {
-		t.Fatalf("buildNameTable: %v", err)
-	}
+	nt := buildNameTable(s, defaultInitialisms)
 	want := map[string]string{"schema": "SchemaHash2", "b": "BHash"}
 	for _, sc := range s.Closure() {
 		typ, ok := sc.Type("Hash")
@@ -229,10 +241,7 @@ func TestBuildNameTable_QualifiedNamesAreDeterministic(t *testing.T) {
 		"c.Foo":       "CFoo",
 	}
 	for range 64 {
-		nt, err := buildNameTable(s, defaultInitialisms)
-		if err != nil {
-			t.Fatalf("buildNameTable: %v", err)
-		}
+		nt := buildNameTable(s, defaultInitialisms)
 		for _, sc := range s.Closure() {
 			for _, typ := range sc.TypesSlice() {
 				k := sc.Name() + "." + typ.Name()
@@ -240,6 +249,30 @@ func TestBuildNameTable_QualifiedNamesAreDeterministic(t *testing.T) {
 					t.Fatalf("%s = %q, want %q", k, got, want[k])
 				}
 			}
+		}
+	}
+}
+
+// TestRegisterEdges_ReservesEveryEdgeName pins that EDGE_ struct names live in
+// the shared namespace, so a later synthesized name that would equal one takes
+// the suffix instead.
+func TestRegisterEdges_ReservesEveryEdgeName(t *testing.T) {
+	g, err := newGenerator(loadFixture(t, "relations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.registerEdges(); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.edgeNames) == 0 {
+		t.Fatal("the fixture declares no association")
+	}
+	for _, name := range g.edgeNames {
+		if !g.names.taken[name] {
+			t.Errorf("%s is not reserved", name)
+		}
+		if got := g.names.reserve(name); got != name+"2" {
+			t.Errorf("reserve(%q) = %q, want the suffix", name, got)
 		}
 	}
 }

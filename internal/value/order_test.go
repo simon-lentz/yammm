@@ -1860,3 +1860,37 @@ func TestGetString_RefusesAJSONNumber(t *testing.T) {
 		t.Errorf("a named string carrier must still read: got %q, %v", s, ok)
 	}
 }
+
+// An integer json.Number outside int64 and uint64 is compared exactly, so it
+// never equals the int64 or float64 its nearest float64 stands for.
+func TestOrder_IntegerOutsideInt64ComparesExactly(t *testing.T) {
+	below := json.Number("-9223372036854775809")
+	cases := []struct {
+		name        string
+		left, right any
+		want        int
+	}{
+		{"below MinInt64 against MinInt64", below, int64(math.MinInt64), -1},
+		{"MinInt64 against below MinInt64", int64(math.MinInt64), below, 1},
+		{"below MinInt64 against its nearest float64", below, -math.Pow(2, 63), -1},
+		{"two literals that round to one float64", below, json.Number("-9223372036854775808"), -1},
+		{"a literal against itself", below, below, 0},
+		{"past uint64 against the float64 it rounds to", json.Number("18446744073709551617"), math.Pow(2, 64), 1},
+		{"below MinInt64 against negative infinity", below, math.Inf(-1), 1},
+		{"below MinInt64 against NaN", below, math.NaN(), -1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := value.Order(c.left, c.right)
+			if err != nil {
+				t.Fatalf("Order: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("Order(%v, %v) = %d, want %d", c.left, c.right, got, c.want)
+			}
+		})
+	}
+	if value.Equal(below, int64(math.MinInt64)) {
+		t.Error("Equal reports an integer below MinInt64 equal to MinInt64")
+	}
+}

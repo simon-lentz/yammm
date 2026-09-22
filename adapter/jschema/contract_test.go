@@ -238,10 +238,9 @@ func TestContractAsymmetry_CustomTimestampFormat(t *testing.T) {
 	}
 }
 
-// yammmStageCodes runs a data file through ParseObject and instance
-// validation per type key, the stages `yammm check` runs, then through graph
-// assembly and Check, the stages `yammm load` adds, and returns the codes
-// each stage reported, keyed by stage.
+// yammmStageCodes runs a data file through ParseObject, instance validation
+// per type key, and graph assembly and Check — the stages every yammm data
+// command runs — and returns the codes each stage reported, keyed by stage.
 func yammmStageCodes(t *testing.T, s *schema.Schema, data []byte) map[string][]diag.Code {
 	t.Helper()
 	ctx := context.Background()
@@ -521,4 +520,26 @@ func deepTree(depth int) string {
 	}
 	b.WriteString(`]}]}`)
 	return b.String()
+}
+
+// A type and a datatype sharing one name in one schema generate, and data the
+// schema accepts validates under the emitted document.
+func TestMarshal_TypeAndDataTypeSharingANameGenerate(t *testing.T) {
+	const src = `schema "geo"
+
+type Region = String [2, 2]
+
+type Region {
+	id String primary
+	code Region
+}
+`
+	s := loadFixture(t, src, "test://type_dt_shared.yammm")
+	compiled := compileEmitted(t, s)
+	if err := validateEmitted(t, compiled, []byte(`{"Region":[{"id":"a","code":"NE"}]}`)); err != nil {
+		t.Errorf("valid data refused: %v", err)
+	}
+	if err := validateEmitted(t, compiled, []byte(`{"Region":[{"id":"a","code":"NEW"}]}`)); err == nil {
+		t.Error("a code of the wrong length validated: the property does not reference its datatype")
+	}
 }

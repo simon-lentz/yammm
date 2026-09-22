@@ -111,7 +111,7 @@ yammm check schema.yammm data.csv --type-column '$type'
 yammm check --from csv schema.yammm data.tsv --type User
 ```
 
-Validates data against a schema without building a full graph. Reports constraint violations, missing fields, and invariant failures. Every command that reads data treats a `.tsv` file as CSV input whose fields split on tabs, with CSV quoting still in force; any other CSV file splits on commas.
+Validates data against a schema as `load` does, and writes nothing: every instance, primary-key uniqueness, and every association's target. Reports constraint violations, missing fields, invariant failures, duplicate primary keys and unresolved required associations. Every command that reads data treats a `.tsv` file as CSV input whose fields split on tabs, with CSV quoting still in force; any other CSV file splits on commas.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -125,7 +125,7 @@ Validates data against a schema without building a full graph. Reports constrain
 yammm load schema.yammm data.json
 ```
 
-Loads data into an in-memory graph and validates completeness (resolves associations, checks required relationships). Same flags as `check`.
+Loads data into an in-memory graph, validates it as `check` does, and prints a summary. Same flags as `check`.
 
 ---
 
@@ -239,7 +239,7 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 
 `--to go` generates Go source via the `adapter/gogen` adapter: one struct per type, named Enum/DataType types, generated `Date` and per-layout `Timestamp` types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
 
-`--to jsonschema` generates a JSON Schema draft 2020-12 document via the `adapter/jschema` adapter, describing the instance-data JSON object form `yammm check` accepts — wire it into an editor (e.g. a `# yaml-language-server: $schema=…` header or a VS Code `json.schemas` mapping) for completion, hover documentation, and validation while authoring data files. Same closure flattening; output is deterministic and self-checked before being written.
+`--to jsonschema` generates a JSON Schema draft 2020-12 document via the `adapter/jschema` adapter, describing the instance-data JSON object form `yammm check` accepts — wire it into an editor through a VS Code `json.schemas` mapping for completion, hover documentation, and validation while authoring JSON data files. A JSON data file cannot carry a `"$schema"` member, because `adapter/json` reads every top-level key as a type name. A `# yaml-language-server: $schema=…` header wires a YAML file, but yammm reads no YAML data file, so that file gets the editor's checks alone. Same closure flattening; output is deterministic and self-checked before being written.
 
 `--to md` (alias `markdown`) generates a Markdown reference document via the `adapter/markdown` adapter: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
 
