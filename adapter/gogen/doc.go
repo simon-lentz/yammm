@@ -86,14 +86,19 @@
 // element is a named DataType renders it at every depth ([]<Name>,
 // [][]<Name>), in a property and in a List DataType's own declaration; and an
 // enum declared inline on a property becomes that property's own
-// <Owner><Field> string type, where an edge property's owner is its EDGE_
-// struct. An optional non-slice field becomes a pointer (*T); slices and
+// <Owner><Field> string type, at any List depth ([]<Owner><Field>), and an
+// edge property's owner is its EDGE_ struct; the inline enum a List
+// DataType holds as its innermost element becomes <DataType>Element, so
+// type Tags = List<Enum[...]> emits type TagsElement and type Tags
+// []TagsElement. An optional non-slice field becomes a pointer (*T); slices and
 // vectors stay nil-able as-is, since a nil slice already encodes absence.
 //
 // Every field carries a json tag preserving the wire name verbatim. An optional
 // pointer field adds ,omitempty. An optional slice field adds ,omitzero, which
 // leaves out a nil slice and writes a present empty list as [], since the
-// library keeps an empty list apart from an absent one. Every relation field
+// library keeps an empty list apart from an absent one; encoding/json reads
+// omitzero from Go 1.24, and a consumer built below it writes a nil slice as
+// null, which adapter/json reads as an absent optional. Every relation field
 // adds ,omitempty, required ones included: the parser refuses a null relation,
 // and a required relation left unset is refused where presence is checked.
 //

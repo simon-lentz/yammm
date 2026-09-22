@@ -347,3 +347,83 @@ func TestMarshal_InlineEnumIsNamedForItsOwnersGoName(t *testing.T) {
 	got := marshalString(t, "schema \"k\"\n\ntype Api_key {\n\tid String primary\n\tkind Enum[\"a\", \"b\"]\n}\n")
 	assertHolds(t, got, []string{"type APIKeyKind string", "Kind *APIKeyKind "}, []string{"Api_keyKind"})
 }
+
+// TestMarshal_ListInlineEnumIsNamedAtEveryDepth pins that an enum declared
+// inline inside a List takes the <Owner><Field> type a scalar inline enum
+// takes, at every depth, and that a List DataType's inline element is
+// <DataType>Element; a List of a named Enum keeps the DataType's name.
+func TestMarshal_ListInlineEnumIsNamedAtEveryDepth(t *testing.T) {
+	t.Parallel()
+
+	got := marshalString(t, `schema "p"
+
+type Tags = List<Enum["red", "green"]>
+type Tone = Enum["warm", "cool"]
+
+type Post {
+	id     String primary
+	labels List<Enum["draft", "final"]>
+	matrix List<List<Enum["yes", "no"]>>
+	tones  List<Tone>
+	tags   Tags
+}
+`)
+	assertHolds(t, got, []string{
+		"type TagsElement string",
+		`TagsElementRed   TagsElement = "red"`,
+		"type Tags []TagsElement",
+		"type PostLabels string",
+		`PostLabelsDraft PostLabels = "draft"`,
+		"type PostMatrix string",
+		"Labels []PostLabels   `json:\"labels,omitzero\"`",
+		"Matrix [][]PostMatrix `json:\"matrix,omitzero\"`",
+		"Tones  []Tone         `json:\"tones,omitzero\"`",
+		"Tags   Tags           `json:\"tags,omitzero\"`",
+	}, []string{"[]string", "[][]string"})
+}
+
+// TestMarshal_ListEnumNamesAreReservedAfterTheLayouts pins that a List inline
+// enum's name and a List DataType's Element name are reserved at emission,
+// after the per-layout Timestamp types, so a layout whose base equals one of
+// them keeps the base and the enum takes the suffix.
+func TestMarshal_ListEnumNamesAreReservedAfterTheLayouts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a List inline enum on a property", func(t *testing.T) {
+		t.Parallel()
+		got := marshalString(t, `schema "p"
+
+type Timestamp2006 {
+	id String primary
+	x  List<Enum["a", "b"]>
+	t  Timestamp["2006 X"]
+}
+`)
+		assertHolds(t, got, []string{
+			"type Timestamp2006X struct{ time.Time }",
+			"type Timestamp2006X2 string",
+			"X  []Timestamp2006X2 `json:\"x,omitzero\"`",
+			"T  *Timestamp2006X   `json:\"t,omitempty\"`",
+		}, []string{"Timestamp_2006_20_X"})
+	})
+
+	t.Run("a List DataType's inline element", func(t *testing.T) {
+		t.Parallel()
+		got := marshalString(t, `schema "p"
+
+type Timestamp2006 = List<Enum["a", "b"]>
+
+type Row {
+	id String primary
+	v  Timestamp2006
+	t  Timestamp["2006 Element"]
+}
+`)
+		assertHolds(t, got, []string{
+			"type Timestamp2006Element struct{ time.Time }",
+			"type Timestamp2006Element2 string",
+			"type Timestamp2006 []Timestamp2006Element2",
+			"T  *Timestamp2006Element `json:\"t,omitempty\"`",
+		}, []string{"Timestamp_2006_20_Element"})
+	})
+}

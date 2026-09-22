@@ -146,8 +146,10 @@ func layoutTypeBase(layout string) string {
 
 // layoutTypeExact is a per-layout type's name when its base is claimed:
 // "Timestamp_", then the layout with each other rune written "_<hex>_" and each
-// invalid UTF-8 byte "_x<hex>_", so no two layouts share it. No base, schema
-// name or reserved name can equal it, since those never hold "_" after a letter.
+// invalid UTF-8 byte "_x<hex>_", so no two layouts share it. No other emitted
+// name starts "Timestamp_": each is a reserved name, an "EDGE_" name, or built
+// from identifiers goExportedIdent derives, which hold "_" only after their
+// leading "X" or between two digit runs.
 func layoutTypeExact(layout string) string {
 	var b strings.Builder
 	b.WriteString("Timestamp_")

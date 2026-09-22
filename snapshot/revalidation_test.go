@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"sync"
@@ -413,5 +414,172 @@ func TestLoad_RevalidationUnresolvedRequired(t *testing.T) {
 	_, res := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
 	if !res.HasCode(diag.W_SNAPSHOT_UNRESOLVED_REQUIRED) {
 		t.Errorf("a Required unresolved record was not reported: %s", res.String())
+	}
+}
+
+// TestLoad_RevalidationJudgesANumberByItsText pins that revalidation hands the
+// validator the document's own number text: an Integer literal outside int64
+// is refused on both sides of the range, where the value just below the
+// minimum once rounded to math.MinInt64 and passed. The body is tampered
+// under WithIntegrityCheck(false), because the writer never emits one.
+func TestLoad_RevalidationJudgesANumberByItsText(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, res := schema.LoadString(ctx, `schema "num"
+
+type T {
+	id String primary
+	n Integer
+	f Float
+	s String
+}
+`, "num.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res.String())
+	}
+	vi, vr := instance.NewValidator(s).ValidateOne(ctx, "T", instance.RawInstance{
+		Properties: map[string]any{"id": "a", "n": int64(7), "f": 1.5, "s": "x"},
+	})
+	if vr.HasErrors() {
+		t.Fatalf("validate: %s", vr.String())
+	}
+	g := graph.New(s)
+	if r := g.Add(ctx, vi); r.HasErrors() {
+		t.Fatalf("add: %s", r.String())
+	}
+	clean, mr := snapshot.Marshal(ctx, g.Snapshot())
+	if mr.HasErrors() {
+		t.Fatalf("marshal: %s", mr.String())
+	}
+	for _, c := range []struct {
+		name, from, to string
+		code           diag.Code
+		message        string
+	}{
+		{name: "untouched"},
+		{name: "an Integer below int64", from: `"n":7`, to: `"n":-9223372036854775809`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: -9223372036854775809"},
+		{name: "an Integer above int64", from: `"n":7`, to: `"n":9223372036854775808`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: 9223372036854775808"},
+		{name: "a Float holding a wide integer", from: `"f":1.5`, to: `"f":99999999999999999999`},
+		{name: "an Integer written 7.0", from: `"n":7`, to: `"n":7.0`},
+		{name: "an Integer written 7.5", from: `"n":7`, to: `"n":7.5`, code: diag.E_TYPE_MISMATCH, message: "float with fractional part"},
+		{name: "a number at a String", from: `"s":"x"`, to: `"s":5`, code: diag.E_TYPE_MISMATCH, message: "expected string"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			data := clean
+			if c.from != "" {
+				if !bytes.Contains(data, []byte(c.from)) {
+					t.Fatalf("the document does not hold %q", c.from)
+				}
+				data = bytes.Replace(clean, []byte(c.from), []byte(c.to), 1)
+			}
+			_, res := snapshot.Load(ctx, data, s,
+				snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+			var got []string
+			for issue := range res.Issues() {
+				got = append(got, issue.Code().String()+": "+issue.Message())
+			}
+			if c.message == "" {
+				if len(got) != 0 {
+					t.Fatalf("issues = %v; want none", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.HasPrefix(got[0], c.code.String()+": ") || !strings.Contains(got[0], c.message) {
+				t.Fatalf("issues = %v; want one %s holding %q", got, c.code, c.message)
+			}
+		})
+	}
+}
+
+// TestLoad_RevalidationJudgesAnEdgePropertyNumberByItsText pins the same rule
+// on an edge: an Integer edge property holding a literal just below int64 is
+// refused as written, not passed as math.MinInt64, and a number at an edge
+// target key is named as the decoder's json.Number.
+func TestLoad_RevalidationJudgesAnEdgePropertyNumberByItsText(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, res := schema.LoadString(ctx, `schema "edgenum"
+
+type U {
+	id String primary
+}
+
+type T {
+	id String primary
+	--> LINKS (_:many) U { n Integer }
+}
+`, "edgenum.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res.String())
+	}
+	v := instance.NewValidator(s)
+	u, ur := v.ValidateOne(ctx, "U", instance.RawInstance{Properties: map[string]any{"id": "u1"}})
+	if ur.HasErrors() {
+		t.Fatalf("validate U: %s", ur.String())
+	}
+	ti, tr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
+		"id":    "t1",
+		"links": []any{map[string]any{"_target_id": "u1", "n": int64(7)}},
+	}})
+	if tr.HasErrors() {
+		t.Fatalf("validate T: %s", tr.String())
+	}
+	g := graph.New(s)
+	for _, vi := range []*instance.ValidInstance{u, ti} {
+		if r := g.Add(ctx, vi); r.HasErrors() {
+			t.Fatalf("add: %s", r.String())
+		}
+	}
+	clean, mr := snapshot.Marshal(ctx, g.Snapshot())
+	if mr.HasErrors() {
+		t.Fatalf("marshal: %s", mr.String())
+	}
+	for _, c := range []struct {
+		name, from, to string
+		code           diag.Code
+		message        string
+	}{
+		{name: "untouched"},
+		{name: "an edge property below int64", from: `"n":7`, to: `"n":-9223372036854775809`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: -9223372036854775809"},
+		{name: "an edge property above int64", from: `"n":7`, to: `"n":9223372036854775808`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: 9223372036854775808"},
+		{name: "a number at an edge target key", from: `"target_key":["u1"]`, to: `"target_key":[5]`, code: diag.E_TYPE_MISMATCH, message: `FK field "_target_id": expected string, got json.Number`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			data := clean
+			if c.from != "" {
+				if !bytes.Contains(data, []byte(c.from)) {
+					t.Fatalf("the document does not hold %q:\n%s", c.from, clean)
+				}
+				data = bytes.Replace(clean, []byte(c.from), []byte(c.to), 1)
+			}
+			_, res := snapshot.Load(ctx, data, s,
+				snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+			var got []string
+			for issue := range res.Issues() {
+				got = append(got, issue.Code().String()+": "+issue.Message())
+			}
+			if c.message == "" {
+				if len(got) != 0 {
+					t.Fatalf("issues = %v; want none", got)
+				}
+				return
+			}
+			if c.from == `"target_key":["u1"]` {
+				// The walker reports the dangling target too; the FK check's
+				// wording is what this case pins.
+				for _, g := range got {
+					if strings.HasPrefix(g, c.code.String()+": ") && strings.Contains(g, c.message) {
+						t.Logf("issues = %v", got)
+						return
+					}
+				}
+				t.Fatalf("issues = %v; want one %s holding %q", got, c.code, c.message)
+			}
+			if len(got) != 1 || !strings.HasPrefix(got[0], c.code.String()+": ") || !strings.Contains(got[0], c.message) {
+				t.Fatalf("issues = %v; want one %s holding %q", got, c.code, c.message)
+			}
+		})
 	}
 }

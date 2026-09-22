@@ -576,10 +576,12 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 	if depth > maxComposedDepth {
 		return nil
 	}
-	// Normalized like instanceParts' materialization: the decoder reads
-	// numbers as json.Number, which the validator does not accept.
+	// The validator judges the document's own text: a number stays the
+	// decoder's json.Number, which the checkers read exactly, so a wide integer
+	// is refused as written rather than passed as the float64 that
+	// materialization (instanceParts) reads by the wire's numeric contract.
 	props := make(map[string]any, len(inst.Properties)+len(inst.Edges)+len(inst.Composed))
-	maps.Copy(props, normalizeMap(inst.Properties))
+	maps.Copy(props, inst.Properties)
 	sev := sd.loadCfg.revalidateSeverity
 	ref := schema.TagForm(sd.schema, t.ID())
 
@@ -623,10 +625,10 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 				continue
 			}
 			obj := make(map[string]any, len(pks)+len(e.Properties))
-			for i, comp := range normalizeSlice(e.TargetKey) {
+			for i, comp := range e.TargetKey {
 				obj["_target_"+pks[i].Name()] = comp
 			}
-			maps.Copy(obj, normalizeMap(e.Properties))
+			maps.Copy(obj, e.Properties)
 			arr = append(arr, obj)
 		}
 		if rel.IsMany() {

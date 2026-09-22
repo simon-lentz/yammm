@@ -58,11 +58,12 @@ func validPackageName(name string) bool {
 // package-block namespace that taken records. It keeps the initialism set its
 // names were derived with, so every later derivation uses the same set.
 type nameTable struct {
-	inits      map[string]bool
-	taken      map[string]bool
-	types      map[schema.TypeID]string
-	dataTypes  map[*schema.DataType]string
-	inlineEnum map[string]string // memo key -> Go enum type name
+	inits           map[string]bool
+	taken           map[string]bool
+	types           map[schema.TypeID]string
+	dataTypes       map[*schema.DataType]string
+	inlineEnum      map[string]string // memo key -> Go enum type name
+	dataTypeElement map[*schema.DataType]string
 }
 
 // reservedNames are the package-level identifiers gogen emits or once emitted.
@@ -86,11 +87,12 @@ var reservedNames = []string{
 // another entity's bare name.
 func buildNameTable(s *schema.Schema, inits map[string]bool) *nameTable {
 	nt := &nameTable{
-		inits:      inits,
-		taken:      map[string]bool{},
-		types:      map[schema.TypeID]string{},
-		dataTypes:  map[*schema.DataType]string{},
-		inlineEnum: map[string]string{},
+		inits:           inits,
+		taken:           map[string]bool{},
+		types:           map[schema.TypeID]string{},
+		dataTypes:       map[*schema.DataType]string{},
+		inlineEnum:      map[string]string{},
+		dataTypeElement: map[*schema.DataType]string{},
 	}
 	for _, r := range reservedNames {
 		nt.taken[r] = true
@@ -193,6 +195,23 @@ func (nt *nameTable) goInlineEnum(owner enumOwner, p *schema.Property) string {
 	name := nt.reserve(owner.goName + nt.ident(p.Name()))
 	nt.inlineEnum[key] = name
 	return name
+}
+
+// goDataTypeElement returns the memoized Go type name of the inline enum a List
+// DataType holds as its innermost element: "<DataTypeGoName>Element", reserved
+// in the shared namespace on first use. It is false for a DataType the table
+// never named.
+func (nt *nameTable) goDataTypeElement(dt *schema.DataType) (string, bool) {
+	if n, ok := nt.dataTypeElement[dt]; ok {
+		return n, true
+	}
+	base, ok := nt.dataTypes[dt]
+	if !ok {
+		return "", false
+	}
+	name := nt.reserve(base + "Element")
+	nt.dataTypeElement[dt] = name
+	return name, true
 }
 
 // enumOwner names the struct an inline-enum field belongs to: its Go name, and

@@ -129,20 +129,69 @@ func TestBuilder_RefusesANegativeLength(t *testing.T) {
 	}
 }
 
-// The check reads through an alias's resolved constraint, and refuses a
-// Pattern with no pattern, which the DSL cannot write.
+// The check reads a declared DataType's constraint, so a fault behind an alias
+// is refused at the DataType the alias names, and a Pattern with no pattern,
+// which the DSL cannot write, is refused where it stands.
 func TestBuilder_RefusesAFaultBehindAnAliasAndAnEmptyPattern(t *testing.T) {
 	for name, c := range map[string]schema.Constraint{
-		"alias to inverted bounds": schema.NewAliasConstraint("Code", schema.IntegerBetween(5, 1)),
-		"list of such an alias":    schema.NewListConstraint(schema.NewAliasConstraint("Code", schema.IntegerBetween(5, 1))),
+		"alias to inverted bounds": schema.NewAliasConstraint("Code", nil),
+		"list of such an alias":    schema.NewListConstraint(schema.NewAliasConstraint("Code", nil)),
 		"a pattern with none":      schema.NewPatternConstraint(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, res := schema.NewBuilder().WithName("fleet").
+				AddDataType("Code", schema.IntegerBetween(5, 1)).
 				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 				WithProperty("v", c).Done().Build()
 			if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) {
 				t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT", s, res.String())
+			}
+		})
+	}
+}
+
+// TestBuilder_ResolvesAnAliasByItsNameAlone pins that a resolution the caller
+// passes to NewAliasConstraint is not read by the Builder, at any List depth:
+// an undeclared name is refused whatever resolution rides with it, and a
+// declared DataType governs over a resolution that contradicts it.
+func TestBuilder_ResolvesAnAliasByItsNameAlone(t *testing.T) {
+	build := func(t *testing.T, declared, supplied schema.Constraint) (*schema.Schema, diag.Result) {
+		t.Helper()
+		b := schema.NewBuilder().WithName("fleet")
+		if declared != nil {
+			b = b.AddDataType("Code", declared)
+		}
+		return b.AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
+			WithProperty("v", schema.NewAliasConstraint("Code", supplied)).
+			WithProperty("vs", schema.NewListConstraint(schema.NewAliasConstraint("Code", supplied))).
+			Done().Build()
+	}
+	t.Run("an undeclared name is refused with a resolution supplied", func(t *testing.T) {
+		s, res := build(t, nil, schema.IntegerBetween(1, 5))
+		if s != nil || !hasCode(res, diag.E_UNKNOWN_TYPE) {
+			t.Fatalf("Build = %v, %s; want E_UNKNOWN_TYPE", s, res.String())
+		}
+	})
+	for name, supplied := range map[string]schema.Constraint{
+		"a contradicting bound":   schema.IntegerBetween(10, 20),
+		"a contradicting kind":    schema.NewStringConstraint(),
+		"a fault no source holds": schema.IntegerBetween(5, 1),
+	} {
+		t.Run("the declaration governs over "+name, func(t *testing.T) {
+			s, res := build(t, schema.IntegerBetween(1, 5), supplied)
+			if s == nil {
+				t.Fatalf("Build refused: %s", res.String())
+			}
+			car, _ := s.Type("Car")
+			for _, field := range []string{"v", "vs"} {
+				p, _ := car.Property(field)
+				want := schema.IntegerBetween(1, 5)
+				if got := schema.ResolveAlias(p.Constraint()); field == "v" && !got.Equal(want) {
+					t.Errorf("%s resolves to %v; want %v", field, got, want)
+				}
+				if lc, ok := p.Constraint().(schema.ListConstraint); ok && !schema.ResolveAlias(lc.Element()).Equal(want) {
+					t.Errorf("%s element resolves to %v; want %v", field, schema.ResolveAlias(lc.Element()), want)
+				}
 			}
 		})
 	}
@@ -177,4 +226,80 @@ func hasCode(r diag.Result, code diag.Code) bool {
 		}
 	}
 	return false
+}
+
+// TestBuilder_ResolvesADataTypeAliasByItsNameAlone pins the rule on a
+// DataType: one whose constraint is an alias, or a List of one, resolves by
+// the name it references, not by a resolution the caller supplied with it.
+func TestBuilder_ResolvesADataTypeAliasByItsNameAlone(t *testing.T) {
+	t.Run("an undeclared name in a DataType is refused with a resolution supplied", func(t *testing.T) {
+		s, res := schema.NewBuilder().WithName("fleet").
+			AddDataType("Wide", schema.NewAliasConstraint("Nope", schema.IntegerBetween(1, 5))).
+			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
+			WithProperty("v", schema.NewAliasConstraint("Wide", nil)).Done().Build()
+		if s != nil || !hasCode(res, diag.E_UNKNOWN_TYPE) {
+			t.Fatalf("Build = %v, %s; want E_UNKNOWN_TYPE", s, res.String())
+		}
+	})
+	t.Run("the declaration governs a DataType alias and a List of one", func(t *testing.T) {
+		s, res := schema.NewBuilder().WithName("fleet").
+			AddDataType("Code", schema.IntegerBetween(1, 5)).
+			AddDataType("Wide", schema.NewAliasConstraint("Code", schema.NewStringConstraint())).
+			AddDataType("Wides", schema.NewListConstraint(schema.NewAliasConstraint("Code", schema.NewStringConstraint()))).
+			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
+			WithProperty("v", schema.NewAliasConstraint("Wide", nil)).
+			WithProperty("vs", schema.NewAliasConstraint("Wides", nil)).Done().Build()
+		if s == nil {
+			t.Fatalf("Build refused: %s", res.String())
+		}
+		want := schema.IntegerBetween(1, 5)
+		wide, _ := s.DataType("Wide")
+		if got := schema.ResolveAlias(wide.Constraint()); !got.Equal(want) {
+			t.Errorf("Wide resolves to %v; want %v", got, want)
+		}
+		wides, _ := s.DataType("Wides")
+		lc, ok := wides.Constraint().(schema.ListConstraint)
+		if !ok {
+			t.Fatalf("Wides is %T; want a ListConstraint", wides.Constraint())
+		}
+		if got := schema.ResolveAlias(lc.Element()); !got.Equal(want) {
+			t.Errorf("Wides element resolves to %v; want %v", got, want)
+		}
+	})
+}
+
+// TestBuilder_KeepsAListsLengthBoundsAroundAnAlias pins that dropping a
+// supplied alias resolution inside a List keeps the List's own length bounds.
+func TestBuilder_KeepsAListsLengthBoundsAroundAnAlias(t *testing.T) {
+	for name, c := range map[string]struct {
+		in           schema.Constraint
+		lo, hi       int64
+		hasLo, hasHi bool
+	}{
+		"between":                        {in: schema.ListLenBetween(schema.NewAliasConstraint("Code", nil), 1, 3), lo: 1, hi: 3, hasLo: true, hasHi: true},
+		"min":                            {in: schema.ListMinLen(schema.NewAliasConstraint("Code", nil), 2), lo: 2, hasLo: true},
+		"max":                            {in: schema.ListMaxLen(schema.NewAliasConstraint("Code", nil), 4), hi: 4, hasHi: true},
+		"between around a plain element": {in: schema.ListLenBetween(schema.NewStringConstraint(), 1, 3), lo: 1, hi: 3, hasLo: true, hasHi: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, res := schema.NewBuilder().WithName("fleet").
+				AddDataType("Code", schema.IntegerBetween(1, 5)).
+				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
+				WithProperty("vs", c.in).Done().Build()
+			if s == nil {
+				t.Fatalf("Build refused: %s", res.String())
+			}
+			car, _ := s.Type("Car")
+			p, _ := car.Property("vs")
+			lc, ok := p.Constraint().(schema.ListConstraint)
+			if !ok {
+				t.Fatalf("vs is %T; want a ListConstraint", p.Constraint())
+			}
+			lo, hasLo := lc.MinLen()
+			hi, hasHi := lc.MaxLen()
+			if hasLo != c.hasLo || hasHi != c.hasHi || (hasLo && lo != c.lo) || (hasHi && hi != c.hi) {
+				t.Errorf("bounds = (%d,%v) (%d,%v); want (%d,%v) (%d,%v)", lo, hasLo, hi, hasHi, c.lo, c.hasLo, c.hi, c.hasHi)
+			}
+		})
+	}
 }

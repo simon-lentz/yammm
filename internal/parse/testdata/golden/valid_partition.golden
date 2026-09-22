@@ -40,6 +40,7 @@ adapter/gogen/testdata/imports/temporal_main.yammm
 adapter/gogen/testdata/inheritance.yammm
 adapter/gogen/testdata/inherited_edge.yammm
 adapter/gogen/testdata/initialisms.yammm
+adapter/gogen/testdata/inline_enum_list.yammm
 adapter/gogen/testdata/marker.yammm
 adapter/gogen/testdata/modroot/a/b/entry.yammm
 adapter/gogen/testdata/modroot/lib/dep.yammm

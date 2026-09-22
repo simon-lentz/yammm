@@ -307,8 +307,8 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 	m := &model{
 		Name:          b.name,
 		Imports:       b.imports,
-		Types:         b.convertTypes(),
-		DataTypes:     b.dataTypes,
+		Types:         unresolveTypes(b.convertTypes()),
+		DataTypes:     unresolveDataTypes(b.dataTypes),
 		Documentation: b.documentation,
 		Span:          location.Span{}, // Synthetic
 	}
@@ -598,10 +598,6 @@ func constraintFault(c Constraint) (string, bool) {
 	case PatternConstraint:
 		if c.PatternCount() == 0 {
 			return "pattern constraint needs at least one pattern", true
-		}
-	case AliasConstraint:
-		if c.Resolved() != nil {
-			return constraintFault(c.Resolved())
 		}
 	case VectorConstraint:
 		if d := c.Dimension(); d < parse.MinVectorDimensions || d > parse.MaxVectorDimensions {
@@ -974,4 +970,56 @@ func builderAnnotationDecl(name string, args []string) *annotationDecl {
 // Done completes the type definition and returns to the parent Builder.
 func (t *TypeBuilder) Done() *Builder {
 	return t.parent
+}
+
+// unresolve drops a caller-supplied alias resolution, at any List depth, so
+// completion resolves every alias by its name as it does for a loaded schema.
+func unresolve(c Constraint) Constraint {
+	switch c := c.(type) {
+	case AliasConstraint:
+		return NewAliasConstraint(c.DataTypeName(), nil)
+	case ListConstraint:
+		elem := unresolve(c.Element())
+		lo, hasLo := c.MinLen()
+		hi, hasHi := c.MaxLen()
+		switch {
+		case hasLo && hasHi:
+			return ListLenBetween(elem, lo, hi)
+		case hasLo:
+			return ListMinLen(elem, lo)
+		case hasHi:
+			return ListMaxLen(elem, hi)
+		}
+		return NewListConstraint(elem)
+	}
+	return c
+}
+
+func unresolveProps(ps []*propertyDecl) []*propertyDecl {
+	out := make([]*propertyDecl, len(ps))
+	for i, p := range ps {
+		cp := *p
+		cp.Constraint = unresolve(p.Constraint)
+		out[i] = &cp
+	}
+	return out
+}
+
+// unresolveTypes covers the properties alone: the Builder gives a relation no
+// properties, so a relationDecl it converts holds none to unresolve.
+func unresolveTypes(ts []*typeDecl) []*typeDecl {
+	for _, t := range ts {
+		t.Properties = unresolveProps(t.Properties)
+	}
+	return ts
+}
+
+func unresolveDataTypes(ds []*dataTypeDecl) []*dataTypeDecl {
+	out := make([]*dataTypeDecl, len(ds))
+	for i, d := range ds {
+		cd := *d
+		cd.Constraint = unresolve(d.Constraint)
+		out[i] = &cd
+	}
+	return out
 }

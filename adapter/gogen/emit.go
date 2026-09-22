@@ -54,6 +54,16 @@ func (g *generator) emitNamedTypes() error {
 				g.emitDefaultTimestampDecl(name)
 				continue
 			}
+			if lc, isList := dt.Constraint().(schema.ListConstraint); isList {
+				if ec, ok := inlineEnum(lc); ok {
+					elem, ok := g.names.goDataTypeElement(dt)
+					if !ok {
+						return fmt.Errorf("gogen: no Go name for datatype %q", dt.Name())
+					}
+					fmt.Fprintf(g.buf, "type %s string\n\n", elem)
+					g.emitEnumConsts(elem, ec.Values())
+				}
+			}
 			base, err := g.dataTypeBase(sc, dt)
 			if err != nil {
 				return fmt.Errorf("gogen: datatype %q: %w", dt.Name(), err)
@@ -82,26 +92,36 @@ func (g *generator) emitNamedTypes() error {
 }
 
 // emitInlineEnums emits the named type and value constants of every property
-// in props that declares an enum inline.
+// in props that declares an enum inline, as its own constraint or as the
+// innermost element of the Lists it nests.
 func (g *generator) emitInlineEnums(owner fieldOwner, props []*schema.Property) error {
 	for _, p := range props {
-		c := p.Constraint()
-		if isAlias(c) {
-			continue
-		}
-		resolved := schema.ResolveAlias(c)
-		if resolved.Kind() != schema.KindEnum {
-			continue
-		}
-		ec, ok := resolved.(schema.EnumConstraint)
+		ec, ok := inlineEnum(p.Constraint())
 		if !ok {
-			return fmt.Errorf("gogen: property %q has Enum kind without EnumConstraint", p.Name())
+			continue
 		}
 		name := g.names.goInlineEnum(owner.enum, p)
 		fmt.Fprintf(g.buf, "type %s string\n\n", name)
 		g.emitEnumConsts(name, ec.Values())
 	}
 	return nil
+}
+
+// inlineEnum returns the enum c declares inline: c itself, or the innermost
+// element of the Lists it nests. A DataType reference at any depth is not
+// inline, whatever it resolves to.
+func inlineEnum(c schema.Constraint) (schema.EnumConstraint, bool) {
+	for {
+		if isAlias(c) {
+			return schema.EnumConstraint{}, false
+		}
+		lc, ok := c.(schema.ListConstraint)
+		if !ok {
+			ec, ok := c.(schema.EnumConstraint)
+			return ec, ok
+		}
+		c = lc.Element()
+	}
 }
 
 // typeOwner is the owner of a type's struct fields.
@@ -131,7 +151,17 @@ func (g *generator) dataTypeBase(sc *schema.Schema, dt *schema.DataType) (string
 	if !ok {
 		return g.goBaseType(dt.Constraint())
 	}
-	return g.listType(lc, func(ac schema.AliasConstraint) (string, error) {
+	elemEnum := func() (string, error) {
+		if g.collect != nil {
+			return "", nil
+		}
+		name, ok := g.names.goDataTypeElement(dt)
+		if !ok {
+			return "", fmt.Errorf("gogen: no Go name for datatype %q", dt.Name())
+		}
+		return name, nil
+	}
+	return g.listType(lc, elemEnum, func(ac schema.AliasConstraint) (string, error) {
 		qualifier, name, qualified := strings.Cut(ac.DataTypeName(), ".")
 		if !qualified {
 			qualifier, name = "", qualifier
@@ -149,9 +179,11 @@ func (g *generator) dataTypeBase(sc *schema.Schema, dt *schema.DataType) (string
 }
 
 // listType renders a List. When its innermost element names a DataType, the
-// result is one "[]" per level around elemName's answer; otherwise it is
-// goBaseType's rendering of the whole List.
-func (g *generator) listType(lc schema.ListConstraint, elemName func(schema.AliasConstraint) (string, error)) (string, error) {
+// result is one "[]" per level around elemName's answer; when it declares an
+// enum inline, around elemEnum's, whose empty answer is the collect pass
+// declining to reserve a name; otherwise it is goBaseType's rendering of the
+// whole List.
+func (g *generator) listType(lc schema.ListConstraint, elemEnum func() (string, error), elemName func(schema.AliasConstraint) (string, error)) (string, error) {
 	depth := 1
 	elem := lc.Element()
 	for {
@@ -162,13 +194,22 @@ func (g *generator) listType(lc schema.ListConstraint, elemName func(schema.Alia
 		depth++
 		elem = inner.Element()
 	}
-	ac, ok := elem.(schema.AliasConstraint)
-	if !ok {
+	var name string
+	switch e := elem.(type) {
+	case schema.AliasConstraint:
+		n, err := elemName(e)
+		if err != nil {
+			return "", err
+		}
+		name = n
+	case schema.EnumConstraint:
+		n, err := elemEnum()
+		if err != nil || n == "" {
+			return "", err
+		}
+		name = n
+	default:
 		return g.goBaseType(lc)
-	}
-	name, err := elemName(ac)
-	if err != nil {
-		return "", err
 	}
 	return strings.Repeat("[]", depth) + name, nil
 }
@@ -577,8 +618,7 @@ func propertyOmit(p *schema.Property) string {
 
 // goFieldType returns the Go type of p's field in owner's struct: a pointer for
 // an optional non-slice, a named DataType under its own name at any List depth,
-// and an inline enum under its own name, except as a List element, which is
-// string.
+// and an inline enum under its own name at any List depth.
 func (g *generator) goFieldType(owner fieldOwner, p *schema.Property) (string, error) {
 	c := p.Constraint()
 	resolved := schema.ResolveAlias(c)
@@ -609,7 +649,15 @@ func (g *generator) goFieldType(owner fieldOwner, p *schema.Property) (string, e
 		if !ok {
 			return "", errors.New("gogen: List kind without ListConstraint")
 		}
-		t, err := g.listType(lc, func(ac schema.AliasConstraint) (string, error) {
+		elemEnum := func() (string, error) {
+			if g.collect != nil {
+				// As the scalar arm above: the name is reserved after the
+				// layouts, never during the collect pass.
+				return "", nil
+			}
+			return g.names.goInlineEnum(owner.enum, p), nil
+		}
+		t, err := g.listType(lc, elemEnum, func(ac schema.AliasConstraint) (string, error) {
 			// The parser records a List property's innermost element ref as
 			// the property's own, so the table holds the element's name.
 			if name, ok := g.dtFieldNames[p.Origin()]; ok {

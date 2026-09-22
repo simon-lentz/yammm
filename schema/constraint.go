@@ -691,7 +691,12 @@ type AliasConstraint struct {
 	resolved     Constraint // the resolved underlying constraint
 }
 
-// NewAliasConstraint creates an AliasConstraint referencing a DataType.
+// NewAliasConstraint creates an AliasConstraint referencing a DataType. The
+// resolved argument has one kind of reader: a raw-constraint caller with no
+// schema, such as [instance.CheckValue], [instance.CanonicalValue] or the
+// Neo4j adapter's Coerce, reads it as the alias's meaning. [Builder.Build] does not: it drops the argument at any List
+// depth and resolves the name through completion, as a loaded schema is
+// resolved, so a DataType reference means its declaration and nothing else.
 func NewAliasConstraint(dataTypeName string, resolved Constraint) AliasConstraint {
 	return AliasConstraint{dataTypeName: dataTypeName, resolved: resolved}
 }
