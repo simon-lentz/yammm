@@ -51,7 +51,7 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | `WithLogger` | Structured logger for load diagnostics |
 | `CaptureSources(&dst)` | Store the load's sources in `dst` before the load reads anything, so a caller can render excerpts for a load that fails and returns no schema; a load that fails before it reads anything leaves `dst` holding that load's empty sources |
 | `WithImportsAllowed` | Whether import declarations are processed (default `true`); `false` refuses them with `E_IMPORT_NOT_ALLOWED` |
-| `WithSourcesOnly` | With `true`, restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources) |
+| `WithSourcesOnly` | With `true`, restrict import resolution to pre-registered in-memory sources — a miss errors instead of reading the filesystem (hermetic loads of embedded sources). It decides where an import is read from, never a source's identity. `LoadSourcesWithEntry` alone takes it: `Load` and `LoadString` refuse it with `true` |
 | `WithSyntheticRoot` | Give in-memory sources synthetic identities under a root such as `embedded://app`, so type identities do not move with the working directory (see [Synthetic source identities](#synthetic-source-identities)) |
 
 ### Module root discovery
@@ -149,17 +149,22 @@ The option refuses rather than degrades. Each of these is an error:
 
 | Condition | Why |
 | --------- | --- |
-| An invalid root (empty, or absolute-looking after the trailing slash is trimmed) | An absolute-looking root collides with file-backed identities |
+| A root not of the form `scheme://authority`, optionally followed by a path — empty, `embedded://`, `embedded:`, `.` — one that looks absolute, one holding a backslash, or one whose path climbs above its authority | Without an authority two roots join one identity (`embedded://` and `embedded:` both gave `embedded:/main.yammm`), a root with no scheme reads as a directory, and an absolute-looking root collides with file-backed identities. A root is normalized once — the scheme in lower case, the path cleaned, the whole in NFC — so `EMBEDDED://app/`, `embedded://app//` and `embedded://app/.` are all `embedded://app` |
 | A root without `WithSourcesOnly` | An unresolved import would read from disk and mix a file-backed identity into the same closure |
 | A root together with a non-empty `moduleRoot` argument | The two name one concept and the load can honor only one |
 | The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there |
-| An absolute source key, or one resolving to the root itself | An absolute key collides with file-backed identities, and the root is not itself a source. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
+| An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory is a source. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
+| A source key holding a backslash | Windows reads a backslash as a separator and every other host as part of a file name, so one store would name different sources on each |
 
 A relative import (`"./x"`, `"../x"`) resolves against the importing source's
 key, as text: `"../dep"` from `a/b/main.yammm` is `a/dep.yammm`, and one that
 climbs above the root keeps its leading `..`. `schema.SyntheticImportKey`
-returns the key any import resolves to, which is how `gogen.Marshal` keys the
-sources it embeds. `Schema.ModuleRoot()` reports the synthetic root — it is the
+returns the key any import resolves to, which is how `gogen.Marshal` keys each
+source it embeds through an import; the entry and a source nothing imports key
+from their identities. `location.NormalizeSyntheticKey` is the key rule itself:
+it returns a key cleaned, in NFC and with a leading `..` kept, or refuses it,
+and the loader, `SyntheticImportKey` and `gogen.Marshal` all read a key
+through it. A key it returns is a fixed point: the rule returns it unchanged. `Schema.ModuleRoot()` reports the synthetic root — it is the
 root the load resolved imports against — so a schema loaded this way is a
 supported input to `gogen.Marshal`, whose embedded keys are relative to it.
 

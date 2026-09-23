@@ -232,14 +232,15 @@ func (e *pathEscapeError) Error() string {
 
 // Load loads a schema from a file path.
 //
-// The path must be an absolute or relative path to a .yammm file.
-// Imports are resolved relative to the file's directory or the module root
-// if WithModuleRoot is provided.
+// The path names the entry file, absolute or relative; its extension is not
+// checked. A relative import resolves from its importer's directory, and a
+// module-style import under the module root: WithModuleRoot's, else the
+// nearest ancestor holding a yammm.mod marker, else the entry's directory.
 //
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
 // a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header yields no usable schema name;
+// load cannot begin from, or a source whose header cannot be parsed;
 // the package documentation enumerates them.
 func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
@@ -249,7 +250,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	cfg := defaultLoadConfig()
 	applyLoadOptions(cfg, opts)
 	cfg.startCapture()
-	if err := rejectSyntheticRoot(cfg); err != nil {
+	if err := rejectInMemoryOptions(cfg); err != nil {
 		return fatalResult(err, diag.Result{})
 	}
 
@@ -313,8 +314,8 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 
 // LoadString loads a schema from a string source.
 //
-// The sourceName is used as the display path in diagnostics. For
-// consistent error messages, use a meaningful path-like name.
+// The source's identity, which diagnostics display, is "string://" followed by
+// sourceName. For consistent error messages, use a meaningful path-like name.
 //
 // Imports are not supported when loading from a string.
 // The loader always disallows imports for string sources, regardless of other options.
@@ -326,7 +327,7 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
 // a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header yields no usable schema name;
+// load cannot begin from, or a source whose header cannot be parsed;
 // the package documentation enumerates them.
 func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
@@ -336,7 +337,7 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 	cfg := defaultLoadConfig()
 	applyLoadOptions(cfg, opts)
 	cfg.startCapture()
-	if err := rejectSyntheticRoot(cfg); err != nil {
+	if err := rejectInMemoryOptions(cfg); err != nil {
 		return fatalResult(err, diag.Result{})
 	}
 	cfg.disallowImports = true // Always disallow imports from string, even if user opts try to enable
@@ -359,8 +360,9 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 
 // LoadSourcesWithEntry loads a schema from in-memory sources with an explicit entry point.
 //
-// The sources map keys are paths relative to moduleRoot, and values are
-// the file contents. The provided entryPath selects the entry point; an empty
+// The sources map keys are paths, a relative one resolved under moduleRoot, or
+// under the synthetic root with [WithSyntheticRoot]; values are the file
+// contents. The provided entryPath selects the entry point; an empty
 // entryPath falls back to sorted key order.
 //
 // This is useful when the caller knows which file should be the entry point,
@@ -375,7 +377,7 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 // ctx must not be nil. Passing nil will panic.
 // A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
 // a load that could not start or finish — an I/O failure, a cancellation, input a
-// load cannot begin from, or a source whose header yields no usable schema name;
+// load cannot begin from, or a source whose header cannot be parsed;
 // the package documentation enumerates them.
 func LoadSourcesWithEntry(ctx context.Context, sources map[string][]byte, entryPath string, moduleRoot string, opts ...LoadOption) (*Schema, diag.Result) {
 	if ctx == nil {
@@ -1382,12 +1384,21 @@ func (l *loader) resolveImportToRelative(sourceID location.SourceID, importPath 
 // from the root otherwise — with ".yammm" added when absent. A key climbing
 // above the root keeps its leading "..". It is the loader's own rule, so a
 // generator writing embedded sources keys each one exactly as the re-load
-// will ask for it.
+// will ask for it. importerKey is read as the loader reads a key, through
+// [location.NormalizeSyntheticKey], and a key the loader refuses is refused.
 func SyntheticImportKey(importerKey, importPath string) (string, error) {
 	if strings.ContainsRune(importPath, '\\') {
 		return "", errImportBackslash
 	}
-	return syntheticSourceKey(importCandidates(importKeyText(importerKey, importPath))[0])
+	importer, err := location.NormalizeSyntheticKey(importerKey)
+	if err != nil {
+		return "", fmt.Errorf("importer: %w", err)
+	}
+	key, err := location.NormalizeSyntheticKey(importCandidates(importKeyText(importer, importPath))[0])
+	if err != nil {
+		return "", fmt.Errorf("import %q: %w", importPath, err)
+	}
+	return key, nil
 }
 
 // importKeyText resolves an import path against its importer's key as text.
@@ -1649,13 +1660,13 @@ func (l *loader) inMemorySourceID(key string) (location.SourceID, error) {
 // derived from; the path is empty for a synthetic key.
 func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 	if l.syntheticRoot != "" {
-		normalized, err := syntheticSourceKey(key)
+		// Every derivation site reaches this line, so one key gives one identity.
+		normalized, err := location.NormalizeSyntheticKey(key)
 		if err != nil {
-			return location.SourceID{}, "", err
+			return location.SourceID{}, "", fmt.Errorf("under synthetic root %s: %w", l.syntheticRoot, err)
 		}
-		// NewSourceID bypasses validation, which is right here: the root was
-		// validated once at load, and no key can make a validated root look
-		// absolute. The joined string is deliberately not cleaned.
+		// The joined string is never cleaned: path.Clean would collapse the
+		// root's "//". NewSourceID skips validation, and the root was validated.
 		return location.NewSourceID(l.syntheticRoot + "/" + normalized), "", nil
 	}
 
@@ -1673,54 +1684,18 @@ func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 	return id, host, nil
 }
 
-// syntheticSourceKey normalizes an in-memory source key for joining to a
-// synthetic root, so the three sites that derive an identity from one key —
-// pre-registration, candidateImportSourceIDs, and readImportFile — reach the
-// same string. A disagreement between them is a silent hermetic-load miss under
-// WithSourcesOnly, not a compile error.
-//
-// The joined identity is never cleaned: path.Clean collapses "//" to "/", so
-// cleaning "embedded://app/x.yammm" would eat the scheme separator. The key is
-// therefore cleaned here instead. A cleaned key keeps a leading "..", so a
-// source outside the root — the key adapter/gogen writes for an entry outside
-// the module root — yields a ".."-bearing identity that is still stable and still distinct.
-func syntheticSourceKey(key string) (string, error) {
-	slashed := filepath.ToSlash(key)
-	// ValidateSyntheticSourceID is the absoluteness predicate rather than
-	// filepath.IsAbs: it rejects the Unix, UNC, and Windows-volume forms on
-	// every platform, and yammm ships six. The empty key is left to the
-	// cleans-to-"." check below, which names it better.
-	if slashed != "" {
-		if err := location.ValidateSyntheticSourceID(slashed); err != nil {
-			return "", fmt.Errorf("source key %q must be relative to the synthetic root: %w", key, err)
-		}
-	}
-	cleaned := path.Clean(slashed) // "" cleans to "."
-	if cleaned == "." {
-		return "", fmt.Errorf("source key %q resolves to the synthetic root itself", key)
-	}
-	// NFC, as every file-backed identity carries; location.NewSourceID applies
-	// none.
-	return norm.NFC.String(cleaned), nil
-}
-
 // normalizeSyntheticRoot validates cfg's synthetic root against the load it was
-// given to and returns the value the derivation sites use. It returns "" when
-// the option was not passed.
-//
-// The trailing-slash trim runs before validation so two spellings of one root
-// give one identity, and so a bare "/" reaches ValidateSyntheticSourceID as the
-// empty string rather than as an absolute path. Both companion checks refuse
-// rather than degrade: without WithSourcesOnly an import miss falls back to a
-// sandboxed disk read and mixes a file-backed identity into the same closure,
-// and a non-empty module root names the same concept twice when the load can
-// honor only one.
+// given to and returns the value the derivation sites use, or "" when the
+// option was not passed.
 func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) {
 	if !cfg.syntheticRootSet {
 		return "", nil
 	}
-	root := strings.TrimRight(cfg.syntheticRoot, "/")
-	if err := location.ValidateSyntheticSourceID(root); err != nil {
+	root, err := syntheticRootForm(cfg.syntheticRoot)
+	if err == nil {
+		err = location.ValidateSyntheticSourceID(root)
+	}
+	if err != nil {
 		return "", fmt.Errorf("invalid synthetic root %q: %w", cfg.syntheticRoot, err)
 	}
 	if !cfg.sourcesOnly {
@@ -1731,19 +1706,67 @@ func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) 
 		return "", fmt.Errorf("synthetic root %q cannot be combined with module root %q: "+
 			"pass an empty module root, which the synthetic root stands in for", cfg.syntheticRoot, moduleRoot)
 	}
-	// NFC, as syntheticSourceKey applies to the key half: two spellings of one
-	// root must mint one identity, as two spellings of one key do.
+	// NFC, as location.NormalizeSyntheticKey applies to the key half: two
+	// spellings of one root must mint one identity, as two spellings of one key do.
 	return norm.NFC.String(root), nil
 }
 
-// rejectSyntheticRoot refuses WithSyntheticRoot on the load functions it cannot
-// serve. Load resolves its entry from disk and always has a module root;
-// LoadString mints its own "string://" identity and disallows imports. On both
-// the option could only ever be a silent no-op, which is the worst of the three
-// outcomes.
-func rejectSyntheticRoot(cfg *loadConfig) error {
-	if !cfg.syntheticRootSet {
-		return nil
+// syntheticRootForm returns root with its scheme in lower case and its path
+// cleaned, or an error when root is not scheme://authority with an optional
+// path; its caller's NFC completes the one form. A backslash and a path
+// climbing above the authority are refused.
+func syntheticRootForm(root string) (string, error) {
+	scheme, rest, ok := strings.Cut(root, "://")
+	if !ok || !isURIScheme(scheme) {
+		return "", errors.New("a synthetic root has the form scheme://authority, such as embedded://app")
 	}
-	return errors.New("WithSyntheticRoot applies to LoadSourcesWithEntry only")
+	authority, rootPath, _ := strings.Cut(rest, "/")
+	switch {
+	case authority == "":
+		return "", errors.New("the root names no authority after its scheme")
+	case strings.ContainsRune(rest, '\\'):
+		return "", errors.New("the root holds a backslash; a synthetic root separates its segments with / alone")
+	}
+	form := strings.ToLower(scheme) + "://" + authority
+	switch cleaned := path.Clean(strings.TrimLeft(rootPath, "/")); {
+	case cleaned == ".":
+	case cleaned == ".." || strings.HasPrefix(cleaned, "../"):
+		return "", errors.New("the root's path climbs above its authority")
+	default:
+		form += "/" + cleaned
+	}
+	return form, nil
+}
+
+// isURIScheme reports whether s is a URI scheme as RFC 3986 section 3.1 spells
+// one: a letter, then letters, digits, "+", "-" and ".".
+func isURIScheme(s string) bool {
+	if s == "" || !isASCIILetter(s[0]) {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if !isASCIILetter(c) && (c < '0' || c > '9') && c != '+' && c != '-' && c != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// rejectInMemoryOptions refuses on Load and LoadString the two options only
+// LoadSourcesWithEntry serves: under WithSourcesOnly an import of Load that no
+// shared registry holds fails as not pre-registered, and on LoadString either
+// option is a silent no-op.
+func rejectInMemoryOptions(cfg *loadConfig) error {
+	switch {
+	case cfg.syntheticRootSet:
+		return errors.New("WithSyntheticRoot applies to LoadSourcesWithEntry only")
+	case cfg.sourcesOnly:
+		return errors.New("WithSourcesOnly applies to LoadSourcesWithEntry only")
+	}
+	return nil
 }

@@ -55,6 +55,7 @@ func TestKeyRoot_NoRelativeFormIsAnError(t *testing.T) {
 		"a synthetic source under a file root":        {keyRoot{dir: location.MustCanonicalPath(t.TempDir())}, location.NewSourceID("string://a.yammm")},
 		"the root directory itself":                   {keyRoot{dir: location.MustCanonicalPath(dir)}, location.MustSourceIDFromPath(dir)},
 		"a zero source":                               {keyRoot{dir: location.MustCanonicalPath(dir)}, location.SourceID{}},
+		"a file source with no root":                  {keyRoot{}, location.MustSourceIDFromPath(filepath.Join(dir, "a.yammm"))},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

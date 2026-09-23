@@ -2,8 +2,11 @@ package location
 
 import (
 	"fmt"
+	"path"
 	"strings"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // SourceID identifies a source uniquely within a build.
@@ -77,6 +80,38 @@ func ValidateSyntheticSourceID(identifier string) error {
 		return fmt.Errorf("%w: %q; use a scheme prefix (e.g., test://, inline:) to avoid collision with file-backed sources", ErrAbsolutePathSourceID, identifier)
 	}
 	return nil
+}
+
+// NormalizeSyntheticKey returns key in the one form a synthetic root joins:
+// slash-separated text, cleaned as [path.Clean] cleans it, in NFC, with a
+// leading ".." kept for a source outside the root. It refuses a key holding a
+// backslash, and a key whose raw or normalized form [ValidateSyntheticSourceID]
+// refuses or that names the root or a directory above it rather than a file.
+// A normalized key is a fixed point, and its form does not depend on the host.
+func NormalizeSyntheticKey(key string) (string, error) {
+	if key != "" {
+		if err := ValidateSyntheticSourceID(key); err != nil {
+			return "", fmt.Errorf("source key %q must be relative to the synthetic root: %w", key, err)
+		}
+	}
+	// One host reads a backslash as a separator and another as part of a file
+	// name, so no single reading of such a key holds on every host.
+	if strings.ContainsRune(key, '\\') {
+		return "", fmt.Errorf("source key %q holds a backslash; a synthetic key separates its segments with / alone", key)
+	}
+	normalized := norm.NFC.String(path.Clean(key)) // "" cleans to "."
+	switch {
+	case normalized == ".":
+		return "", fmt.Errorf("source key %q resolves to the synthetic root itself", key)
+	case normalized == ".." || strings.HasSuffix(normalized, "/.."):
+		return "", fmt.Errorf("source key %q names a directory above the synthetic root, not a file", key)
+	}
+	// Cleaning and NFC can each make a key look absolute: "./C:/x.yammm" cleans
+	// to "C:/x.yammm", and NFC maps U+212A KELVIN SIGN to "K".
+	if err := ValidateSyntheticSourceID(normalized); err != nil {
+		return "", fmt.Errorf("source key %q must be relative to the synthetic root once normalized to %q: %w", key, normalized, err)
+	}
+	return normalized, nil
 }
 
 // SourceIDFromPath returns the file-backed identity of path, derived as

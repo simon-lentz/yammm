@@ -47,9 +47,9 @@
 // a load that could not start or finish: an I/O failure, a cancellation, or
 // input a load cannot begin from, such as no sources, a source key the loader
 // refuses, two keys that name one source, or a source name that is not valid
-// UTF-8, or a source whose header yields no usable schema name, which the
-// parser reports as a Fatal E_SYNTAX. Check result.HasErrors() to determine
-// semantic success.
+// UTF-8, or a source whose header cannot be parsed, which the parser reports
+// as a Fatal E_SYNTAX. An empty schema name is an Error, E_INVALID_NAME, with a
+// nil Schema. Check result.HasErrors() to determine semantic success.
 //
 // # Load Options
 //
@@ -87,8 +87,9 @@
 // [UUIDConstraint], [EnumConstraint], [PatternConstraint],
 // [VectorConstraint], [ListConstraint], and [AliasConstraint].
 //
-// Each constraint type has constructors for bounded and unbounded variants
-// (e.g., [NewStringConstraint], [StringLenBetween]). Use [ResolveAlias] to
+// The String, Integer, Float and List constraints have constructors for bounded
+// and unbounded variants (e.g., [NewStringConstraint], [StringLenBetween]); the
+// other kinds take no bounds. Use [ResolveAlias] to
 // unwrap alias chains.
 //
 // # Registry
@@ -108,9 +109,11 @@
 // usage first-class:
 //
 //   - [Registry.Register] is idempotent for exact-match: registering the same
-//     SourceID twice with identical [StructuralHash] is a no-op. Divergent
-//     content under the same SourceID still errors loudly with both hashes
-//     reported in the diagnostic message.
+//     SourceID twice with the same bytes, the entry's and every import's, and
+//     the same [StructuralHash] is a no-op. The bytes decide first, since the
+//     hash excludes annotations and documentation: changed bytes under one
+//     SourceID are an error naming the change, and matching bytes with
+//     divergent hashes an error reporting both hashes.
 //   - loadImport short-circuits cross-Load via the shared Registry: when an
 //     import's SourceID is already registered, the loader reuses the existing
 //     *Schema pointer and skips the parse, compile, and re-register pipeline.

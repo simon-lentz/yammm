@@ -40,8 +40,9 @@ type importResolution struct {
 
 // resolvedImportMap maps an import alias to its resolution. An alias is present
 // iff its declaration was seen; an absent alias was never resolved (a loader
-// bug on the Load path, or a no-imports / no-registry context elsewhere). See
-// [completer.classifyQualifier], the single interpreter of this map.
+// bug on the Load path, or a no-imports / no-registry context elsewhere).
+// [completer.classifyQualifier] interprets it for every qualifier-resolving
+// site; [completer.indexImports] reads it to build each Import.
 type resolvedImportMap map[string]importResolution
 
 // completeModel transforms a parsed AST model into a completed Schema.

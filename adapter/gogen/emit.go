@@ -538,10 +538,24 @@ func resolveKeyRoot(s *schema.Schema) (keyRoot, error) {
 	return keyRoot{}, nil
 }
 
-// key returns id's key under the root, or for a synthetic source loaded with
-// no root, the only source such a load holds, its base name. Where no relative
-// form exists key returns an error, since a key is never a machine path.
+// key returns id's key under the root, or its base name for a synthetic source
+// loaded with no root, judged by [location.NormalizeSyntheticKey], the rule the
+// re-load reads a key by. A key with no relative form or one that rule refuses
+// is an error naming its source, since a key is never a machine path.
 func (k keyRoot) key(id location.SourceID) (string, error) {
+	candidate, err := k.candidate(id)
+	if err != nil {
+		return "", err
+	}
+	key, err := location.NormalizeSyntheticKey(candidate)
+	if err != nil {
+		return "", fmt.Errorf("gogen: source %s has no key the re-load can read: %w", id, err)
+	}
+	return key, nil
+}
+
+// candidate is key before the re-load's key rule judges it.
+func (k keyRoot) candidate(id location.SourceID) (string, error) {
 	switch {
 	case k.synthetic != "":
 		if key, ok := strings.CutPrefix(id.String(), k.synthetic+"/"); ok {

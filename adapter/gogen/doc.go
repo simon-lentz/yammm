@@ -197,7 +197,13 @@
 // neighbour on load and resolves by the key's text on re-load).
 // A source with no path relative to the root, such as one on another drive, is
 // refused too, because a key is never a generation-machine path, and so is a
-// LoadString name with no base, which names no file. const SchemaHash carries the schema's
+// LoadString name with no base, which names no file. So is a key the re-load's
+// key rule, [github.com/simon-lentz/yammm/location.NormalizeSyntheticKey],
+// refuses: one holding a backslash, which a Unix file name may hold and another
+// host reads as a separator, and one that looks absolute, such as the key of a
+// source in a directory named "C:" directly under the root. The entry and a
+// source nothing imports key from their identities, so a symlinked path to one
+// is judged by where the link resolves. const SchemaHash carries the schema's
 // [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning,
 // [Marshal] re-loads the store exactly as emitted, through the recipe the
 // generated file prints, and confirms it produces the input's StructuralHash —
@@ -253,8 +259,9 @@
 //   - the [WithPackageName] value cannot head a package clause
 //     ([ErrInvalidPackageName]);
 //   - a source is imported by two paths under two keys, two sources take one
-//     key, a source has no path relative to the root, or a LoadString name has
-//     no base (see Embedded Source);
+//     key, a source has no path relative to the root, a LoadString name has
+//     no base, or a key is one the re-load's key rule refuses (see Embedded
+//     Source);
 //   - the generated source fails to format, fails to type-check, or the
 //     embedded store fails its round-trip hash check (each a generator bug).
 //
@@ -286,7 +293,7 @@
 //
 //	adapter/gogen  ──imports──▶  schema, location, internal/ident
 //
-// gogen is the one adapter that imports an internal package — internal/ident, for
+// gogen is the one adapter that imports a core internal package — internal/ident, for
 // the canonical identifier-casing transform the library uses elsewhere (e.g. JSON
 // field names) — and, unlike the data adapters, it imports neither instance/graph
 // nor diag. The generated output depends only on the standard library, importing at
