@@ -497,6 +497,7 @@ func TestStructuralHash_ConstraintFieldCoverage(t *testing.T) {
 		"PatternConstraint": {
 			"patterns": true, // TestStructuralHash_ConstraintSensitivity ("pattern different patterns")
 			"compiled": true, // derived from patterns, not hashed independently
+			"invalid":  true, // derived from patterns; Build refuses a constraint that sets it
 		},
 		"VectorConstraint": {
 			"dimension": true, // TestStructuralHash_ConstraintSensitivity ("vector dimension")

@@ -977,6 +977,7 @@ Aliases are:
 - Case-preserved: the declared name is canonical (not lowercased internally)
 - Referenced by name in property declarations
 - Not chainable: an alias target must be a built-in, so `type Money = PositiveInt` is a syntax error
+- Resolved by reference, not by declaration order: a `List` target may name another alias as its element, declared before or after it (`type Codes = List<Code>`). An alias that reaches itself through `List` elements — `type Tree = List<Tree>`, or two aliases that list each other — has no constraint to resolve to, and each alias on the cycle is refused with `E_INVALID_CONSTRAINT`
 
 Using aliases:
 

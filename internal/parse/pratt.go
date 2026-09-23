@@ -465,6 +465,18 @@ var propertyNameExclusions = map[string]bool{
 	"nil": true, "true": true, "false": true,
 }
 
+// IsDatatypeKeyword reports whether name is one of the eleven built-in type
+// names, which no type, datatype or relation name may spell.
+func IsDatatypeKeyword(name string) bool {
+	return datatypeKeywords[name]
+}
+
+// IsExcludedPropertyName reports whether name is one of the six spellings no
+// property or annotation name may spell.
+func IsExcludedPropertyName(name string) bool {
+	return propertyNameExclusions[name]
+}
+
 // ReservedKeywords returns every spelling the language refuses in a position
 // that admits either case — an import alias, a relation name, a reverse name.
 // It is the union of the lowercase keywords and the built-in datatype names,

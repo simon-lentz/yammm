@@ -165,6 +165,11 @@ type completer struct {
 	// so the shadow warning does not advise editing a declaration the load has
 	// already rejected outright.
 	conflictedProperties map[*Property]bool
+
+	// dtStates and dtStack drive [completer.resolveDataType]: each datatype's
+	// resolution state, and the datatypes whose resolution is in progress.
+	dtStates map[*DataType]dtState
+	dtStack  []*DataType
 }
 
 func (c *completer) complete() *Schema {
@@ -392,15 +397,15 @@ func (c *completer) indexImports() {
 
 	// deferRejectedAlias records a rejected declaration's alias as deferred in
 	// the resolution map — the single deferral signal both reference kinds read:
-	// datatype references via resolveAliasChain, and extends/relation references
+	// datatype references via resolveReference, and extends/relation references
 	// via referenceDeferred (through classifyQualifier). A reference through the
 	// alias then defers to the rejection's root-cause diagnostic instead of
 	// re-blaming E_UNKNOWN_TYPE; and on the Load path — where the loader may
 	// already have resolved this alias before this phase rejected it — the
 	// deferred entry overwrites that resolution, so a datatype reference cannot
-	// silently resolve against the rejected import. The nil check skips contexts
-	// with no resolution map (a completeModel bridge, or a Builder with no
-	// imports), where there is nothing to record or defer against.
+	// silently resolve against the rejected import. The nil check covers a
+	// Builder with no imports, whose resolution map is nil and which declares no
+	// import to defer.
 	deferRejectedAlias := func(id *importDecl) {
 		if c.resolvedImports != nil {
 			c.resolvedImports[id.Alias] = importResolution{deferred: true}
@@ -718,88 +723,25 @@ func convertAnnotations(decls []*annotationDecl) []*Annotation {
 	return anns
 }
 
-// resolveAliasConstraints resolves all AliasConstraint references in
-// properties and datatypes. Unresolvable chains (cycles) are reported per
-// chain and the affected constraint left unresolved; resolution continues
-// with the remaining constraints.
+// resolveAliasConstraints resolves every datatype reference in datatypes,
+// properties and edge properties. Datatypes resolve depth-first over the
+// reference graph, each once, so a datatype is complete before any reference
+// copies its constraint, whatever the declaration order. A reference cycle,
+// through an alias or a List element, is reported at every datatype on it.
 func (c *completer) resolveAliasConstraints() {
-	// First, resolve DataType constraints (they may reference each other)
+	c.dtStates = make(map[*DataType]dtState, len(c.schema.dataTypes))
 	for _, dt := range c.schema.dataTypes {
-		if alias, isAlias := dt.Constraint().(AliasConstraint); isAlias && !alias.IsResolved() {
-			resolved, success := c.resolveAliasChain(alias.DataTypeName(), dt.Span(), make(map[string]bool))
-			if !success {
-				continue
-			}
-			dt.setConstraint(resolved)
-		}
+		c.resolveDataType(dt)
 	}
-
-	// Resolve List element aliases in DataTypes
-	for _, dt := range c.schema.dataTypes {
-		if _, isList := dt.Constraint().(ListConstraint); isList {
-			resolved, success := c.resolveListElementAliases(dt.Constraint(), dt.Span())
-			if !success {
-				continue
-			}
-			dt.setConstraint(resolved)
-		}
-	}
-
-	// Then, resolve property constraints on all types
 	for _, t := range c.schema.types {
 		for p := range t.Properties() {
-			if alias, isAlias := p.Constraint().(AliasConstraint); isAlias && !alias.IsResolved() {
-				resolved, success := c.resolveAliasChain(alias.DataTypeName(), p.Span(), make(map[string]bool))
-				if !success {
-					continue
-				}
+			if resolved, ok := c.resolveConstraint(p.Constraint(), p.Span()); ok {
 				p.setConstraint(resolved)
 			}
 		}
-	}
-
-	// Resolve List element aliases in Properties
-	for _, t := range c.schema.types {
-		for p := range t.Properties() {
-			if _, isList := p.Constraint().(ListConstraint); isList {
-				resolved, success := c.resolveListElementAliases(p.Constraint(), p.Span())
-				if !success {
-					continue
-				}
-				p.setConstraint(resolved)
-			}
-		}
-	}
-
-	// Resolve relation edge-property constraints. Associations are the only
-	// relation kind that carries a property block (compositions have none by
-	// grammar), and their properties resolve exactly like type properties:
-	// against this schema's own datatype index and import bindings, so a
-	// declaring-schema-relative reference keeps declaring-schema semantics on
-	// inherited relations (subtypes share the declaring type's *Relation).
-	// Resolution must precede validateRelationProperties, whose Vector/List
-	// bans unwrap aliases via Resolved().
-	for _, t := range c.schema.types {
 		for rel := range t.Associations() {
 			for p := range rel.Properties() {
-				if alias, isAlias := p.Constraint().(AliasConstraint); isAlias && !alias.IsResolved() {
-					resolved, success := c.resolveAliasChain(alias.DataTypeName(), p.Span(), make(map[string]bool))
-					if !success {
-						continue
-					}
-					p.setConstraint(resolved)
-				}
-			}
-			// List-shaped edge properties are rejected by the List-on-edge ban
-			// before a schema is produced, so resolved elements are observable
-			// only in diagnostics; the pass keeps every property the completer
-			// owns in the same state on exit from resolveAliasConstraints.
-			for p := range rel.Properties() {
-				if _, isList := p.Constraint().(ListConstraint); isList {
-					resolved, success := c.resolveListElementAliases(p.Constraint(), p.Span())
-					if !success {
-						continue
-					}
+				if resolved, ok := c.resolveConstraint(p.Constraint(), p.Span()); ok {
 					p.setConstraint(resolved)
 				}
 			}
@@ -807,10 +749,123 @@ func (c *completer) resolveAliasConstraints() {
 	}
 }
 
+type dtState uint8
+
+const (
+	dtUnvisited dtState = iota
+	dtResolving
+	dtResolved
+	dtFailed
+)
+
+// resolveDataType resolves dt's constraint once. A datatype re-entered while
+// it resolves closes a cycle: every datatype on the stack from it upward is
+// reported and fails. A datatype that fails keeps its declared constraint.
+func (c *completer) resolveDataType(dt *DataType) {
+	switch c.dtStates[dt] {
+	case dtResolved, dtFailed:
+		return
+	case dtResolving:
+		i := len(c.dtStack) - 1
+		for c.dtStack[i] != dt {
+			i--
+		}
+		for _, member := range c.dtStack[i:] {
+			c.errorf(member.Span(), diag.E_INVALID_CONSTRAINT,
+				"datatype %q forms a cycle", member.Name())
+			c.dtStates[member] = dtFailed
+		}
+		return
+	}
+	c.dtStates[dt] = dtResolving
+	c.dtStack = append(c.dtStack, dt)
+	resolved, ok := c.resolveConstraint(dt.Constraint(), dt.Span())
+	c.dtStack = c.dtStack[:len(c.dtStack)-1]
+	if c.dtStates[dt] == dtFailed || !ok {
+		c.dtStates[dt] = dtFailed
+		return
+	}
+	dt.setConstraint(resolved)
+	c.dtStates[dt] = dtResolved
+}
+
+// resolveConstraint resolves every datatype reference in con, at any List
+// depth.
+func (c *completer) resolveConstraint(con Constraint, span location.Span) (Constraint, bool) {
+	switch x := con.(type) {
+	case AliasConstraint:
+		return c.resolveReference(x.DataTypeName(), span)
+	case ListConstraint:
+		elem, ok := c.resolveConstraint(x.Element(), span)
+		if !ok {
+			return con, false
+		}
+		minLen, hasMin := x.MinLen()
+		maxLen, hasMax := x.MaxLen()
+		switch {
+		case hasMin && hasMax:
+			return ListLenBetween(elem, minLen, maxLen), true
+		case hasMin:
+			return ListMinLen(elem, minLen), true
+		case hasMax:
+			return ListMaxLen(elem, maxLen), true
+		default:
+			return NewListConstraint(elem), true
+		}
+	}
+	return con, true
+}
+
+// resolveReference resolves one datatype name to an alias carrying the
+// datatype's resolved constraint. An unknown name is E_UNKNOWN_TYPE at the
+// reference, and a declared-but-failed import defers. A local datatype that
+// failed was reported by its own resolution; the reference carries the
+// constraint it declares, so a later phase still judges its shape (a List
+// datatype is refused on an edge whether or not its element resolved).
+func (c *completer) resolveReference(dataTypeName string, span location.Span) (Constraint, bool) {
+	qualifier, name := parseQualifiedName(dataTypeName)
+	if qualifier == "" {
+		dt, found := c.dataIndex[name]
+		if !found {
+			c.errorf(span, diag.E_UNKNOWN_TYPE,
+				"unknown type %q in datatype reference; a property type must be a built-in or a declared datatype",
+				dataTypeName)
+			return nil, false
+		}
+		c.resolveDataType(dt)
+		return NewAliasConstraint(dataTypeName, dt.Constraint()), true
+	}
+	state, sourceID := c.classifyQualifier(qualifier)
+	switch state {
+	case aliasDeferred:
+		return NewAliasConstraint(dataTypeName, nil), true
+	case aliasAbsent:
+		c.errorf(span, diag.E_UNKNOWN_TYPE,
+			"unknown type %q in datatype reference: no import declared with alias %q",
+			dataTypeName, qualifier)
+		return nil, false
+	}
+	importedSchema, ok := c.registry.LookupBySourceID(sourceID)
+	if !ok {
+		c.errorf(span, diag.E_UNKNOWN_TYPE,
+			"unknown type %q in datatype reference: schema imported as %q is not registered",
+			dataTypeName, qualifier)
+		return nil, false
+	}
+	dt, found := importedSchema.DataType(name)
+	if !found {
+		c.errorf(span, diag.E_UNKNOWN_TYPE,
+			"unknown type %q in datatype reference: datatype %q does not exist in the schema imported as %q",
+			dataTypeName, name, qualifier)
+		return nil, false
+	}
+	return NewAliasConstraint(dataTypeName, dt.Constraint()), true
+}
+
 // aliasResolution classifies an import qualifier against the resolution map —
 // the single source of truth for alias state during completion. It is the one
-// interpreter of that map's three-state sentinel, so the deferral and
-// resolution sites cannot disagree about an alias the way a Schema.ImportByAlias
+// interpreter of that map's three-state sentinel for a reference, so the
+// deferral and resolution sites cannot disagree about an alias the way a Schema.ImportByAlias
 // reader and a resolvedImports reader once could (the divergence that let a
 // completion-rejected alias resolve silently on one path while re-blaming
 // E_UNKNOWN_TYPE on another). Callers layer their own registry policy on top.
@@ -832,8 +887,9 @@ const (
 )
 
 // classifyQualifier interprets the resolution map for one qualifier. It reads
-// only the map, never the registry: its callers ([completer.referenceDeferred]
-// and [completer.resolveAliasChain]) layer their own registry policy on top.
+// only the map, never the registry: its callers ([completer.referenceDeferred],
+// [completer.resolveReference] and [completer.resolveImportedSchema]) layer
+// their own registry policy on top.
 func (c *completer) classifyQualifier(qualifier string) (aliasResolution, location.SourceID) {
 	if c.resolvedImports == nil {
 		// No resolution map means zero declared imports (with or without a
@@ -871,18 +927,20 @@ func (c *completer) referenceDeferred(qualifier string) bool {
 // [completer.resolveAliasConstraints]), which runs before this check:
 //
 //   - reported — an undeclared local name, or a qualifier naming no declared
-//     import, draws E_UNKNOWN_TYPE; a cyclic chain draws the cycle diagnostic;
+//     import, draws E_UNKNOWN_TYPE at the reference;
 //   - silently deferred — a declared-but-failed import, whose failure is the
 //     root cause and already carries its own diagnostic.
 //
 // Either way the root cause is owned elsewhere, so the type check defers rather
 // than stacking a (usually misleading) E_INVALID_PRIMARY_KEY_TYPE on top of a
 // reported error. A resolved terminal (a builtin, or an alias resolved to one)
-// is checked normally.
+// is checked normally, and so is a reference to a local datatype that failed (a
+// cycle, an unknown element): it carries the datatype's declared List, which is
+// no primary key whatever its element.
 //
 // Keying off the terminal's resolved state alone — not a re-derived
 // qualifier/registry prediction — is what keeps this in step with
-// [completer.resolveAliasChain]: every unresolved terminal it leaves behind was
+// [completer.resolveReference]: every unresolved terminal it leaves behind was
 // reported or deferred there, and a resolved one is the only shape this checks.
 //
 // This couples to [completer.resolveAliasConstraints] leaving a deferred
@@ -896,171 +954,6 @@ func (c *completer) primaryKeyTypeDeferred(constraint Constraint) bool {
 	}
 	terminal, isAlias := ResolveAlias(constraint).(AliasConstraint)
 	return isAlias && !terminal.IsResolved()
-}
-
-// reportUnknownAlias emits an E_UNKNOWN_TYPE for an unresolvable datatype
-// reference unless suppress is set. The chain recursion in resolveAliasChain —
-// resolving a found datatype's own unresolved underlying — suppresses it: that
-// datatype's own resolution already blamed the unknown terminal, so re-walking
-// it through a referencing property or datatype must not re-report the same
-// name. Direct references each report independently.
-func (c *completer) reportUnknownAlias(suppress bool, span location.Span, format string, args ...any) {
-	if suppress {
-		return
-	}
-	c.errorf(span, diag.E_UNKNOWN_TYPE, format, args...)
-}
-
-// resolveAliasChain resolves a datatype name to its underlying constraint.
-// The visited map tracks seen names for cycle detection. Returns the resolved
-// AliasConstraint and success status.
-//
-// A name that cannot name a datatype is an error (E_UNKNOWN_TYPE): an
-// undeclared local name, a qualifier that names no declared import, or a
-// resolved import that lacks the datatype. The reference is left unresolved
-// silently only for a declared-but-failed import, whose failure was already
-// reported.
-//
-// suppressUnknown gates the E_UNKNOWN_TYPE reports (not the cycle report): the
-// self-recursion that resolves a found datatype's own unresolved underlying
-// sets it, because that datatype's own resolution already blamed the unknown
-// terminal — re-walking the chain through a referencing property or datatype
-// must not re-report the same name.
-func (c *completer) resolveAliasChain(dataTypeName string, span location.Span, visited map[string]bool) (Constraint, bool) {
-	// The self-recursion below (resolving a found datatype's own underlying)
-	// inherits a non-empty visited map; every external caller passes a fresh
-	// empty one. That distinction IS the suppress signal — re-walking a declared
-	// datatype's chain must not re-report an unknown its own resolution already
-	// blamed, while a direct reference reports independently.
-	suppressUnknown := len(visited) > 0
-
-	// Cycle detection
-	if visited[dataTypeName] {
-		c.errorf(span, diag.E_INVALID_CONSTRAINT,
-			"alias constraint %q forms a cycle", dataTypeName)
-		return nil, false
-	}
-	visited[dataTypeName] = true
-
-	// Parse qualified name
-	qualifier, name := parseQualifiedName(dataTypeName)
-
-	// Lookup DataType
-	var dt *DataType
-	var found bool
-	if qualifier == "" {
-		// Local datatype. The lookup needs no registry, so an undeclared
-		// name is an error in every resolution context: a property's type
-		// must be a built-in or a declared (possibly imported) datatype.
-		dt, found = c.dataIndex[name]
-		if !found {
-			c.reportUnknownAlias(suppressUnknown, span,
-				"unknown type %q in datatype reference; a property type must be a built-in or a declared datatype",
-				dataTypeName)
-			return nil, false
-		}
-	} else {
-		// Cross-schema reference: reads the tri-state directly (it needs the
-		// SourceID) but defers on the same one condition [completer.referenceDeferred] does.
-		state, sourceID := c.classifyQualifier(qualifier)
-		switch state {
-		case aliasDeferred:
-			// A declared import whose load/declaration failed; its failure
-			// already carries the root cause, so defer rather than re-blame.
-			return NewAliasConstraint(dataTypeName, nil), true
-		case aliasAbsent:
-			// The qualifier names no declared import: a genuine unknown, with
-			// or without a registry — no link step will ever resolve it.
-			c.reportUnknownAlias(suppressUnknown, span,
-				"unknown type %q in datatype reference: no import declared with alias %q",
-				dataTypeName, qualifier)
-			return nil, false
-		}
-		// aliasResolved: the import resolved to sourceID. The registry is
-		// non-nil here by construction — [Builder.resolveImports] returns a nil
-		// resolution map whenever it is absent, and a nil map classifies every
-		// qualifier absent, so this branch is unreachable without one.
-		importedSchema, ok := c.registry.LookupBySourceID(sourceID)
-		if !ok {
-			// The import resolved to a SourceID but its schema is absent from the
-			// registry — an internal inconsistency (every resolved import is
-			// registered on both the Load and Builder paths). Report it as unknown
-			// rather than leaving the reference silently unresolved, matching how
-			// resolveTypeRef surfaces the same state for relation/extends targets.
-			c.reportUnknownAlias(suppressUnknown, span,
-				"unknown type %q in datatype reference: schema imported as %q is not registered",
-				dataTypeName, qualifier)
-			return nil, false
-		}
-		dt, found = importedSchema.DataType(name)
-		if !found {
-			c.reportUnknownAlias(suppressUnknown, span,
-				"unknown type %q in datatype reference: datatype %q does not exist in the schema imported as %q",
-				dataTypeName, name, qualifier)
-			return nil, false
-		}
-	}
-
-	underlying := dt.Constraint()
-
-	// If underlying is an unresolved alias, resolve it first. Passing the
-	// inherited (non-empty) visited map suppresses its E_UNKNOWN_TYPE: dt is a
-	// declared datatype, so dt's own resolution already blamed any unknown
-	// terminal in its chain — re-blaming it through this reference would report
-	// the same name twice.
-	if alias, isAlias := underlying.(AliasConstraint); isAlias && !alias.IsResolved() {
-		resolved, ok := c.resolveAliasChain(alias.DataTypeName(), dt.Span(), visited)
-		if !ok {
-			return nil, false
-		}
-		return NewAliasConstraint(dataTypeName, resolved), true
-	}
-
-	// Otherwise, return new alias with underlying as resolved
-	return NewAliasConstraint(dataTypeName, underlying), true
-}
-
-// resolveListElementAliases recursively resolves alias constraints inside
-// ListConstraint elements. Returns the constraint with aliases resolved,
-// or the original if no resolution was needed.
-func (c *completer) resolveListElementAliases(constraint Constraint, span location.Span) (Constraint, bool) {
-	lc, ok := constraint.(ListConstraint)
-	if !ok {
-		return constraint, true
-	}
-
-	elem := lc.Element()
-
-	// Recurse into nested lists first
-	resolved, ok := c.resolveListElementAliases(elem, span)
-	if !ok {
-		return constraint, false
-	}
-	elem = resolved
-
-	// Resolve alias if element is an alias
-	if alias, isAlias := elem.(AliasConstraint); isAlias && !alias.IsResolved() {
-		resolvedAlias, success := c.resolveAliasChain(alias.DataTypeName(), span, make(map[string]bool))
-		if !success {
-			return constraint, false
-		}
-		elem = resolvedAlias
-	}
-
-	// Rebuild with resolved element
-	minLen, hasMin := lc.MinLen()
-	maxLen, hasMax := lc.MaxLen()
-
-	switch {
-	case hasMin && hasMax:
-		return ListLenBetween(elem, minLen, maxLen), true
-	case hasMin:
-		return ListMinLen(elem, minLen), true
-	case hasMax:
-		return ListMaxLen(elem, maxLen), true
-	default:
-		return NewListConstraint(elem), true
-	}
 }
 
 // parseQualifiedName splits a qualified name into qualifier and local name.

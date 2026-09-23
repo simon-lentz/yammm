@@ -685,3 +685,93 @@ func TestParamTypes_KeyNamedPropertyBelongsToWhicheverShapeAsks(t *testing.T) {
 		}
 	}
 }
+
+// Coerce and CoerceParams judge a hand-built constraint before they coerce
+// anything, refusing what the schema Builder refuses and a DataType reference
+// with no resolved constraint, so neither reaches the driver as a value in the
+// wrong type.
+func TestCoerce_RefusesAConstraintNoSchemaHolds(t *testing.T) {
+	unresolved := schema.NewAliasConstraint("Day", nil)
+	list := schema.NewListConstraint(schema.NewStringConstraint())
+	for name, tc := range map[string]struct {
+		c    schema.Constraint
+		raw  any
+		want string
+	}{
+		"an unresolved reference":             {unresolved, "2026-01-01", `datatype "Day" resolves to no constraint`},
+		"a List of an unresolved reference":   {schema.NewListConstraint(unresolved), []any{"2026-01-01"}, `datatype "Day" resolves to no constraint`},
+		"a pointer to a List":                 {&list, []any{"a"}, "none this package constructs"},
+		"inverted bounds, whatever the value": {schema.IntegerBetween(5, 1), nil, "integer bounds inverted"},
+	} {
+		t.Run("Coerce "+name, func(t *testing.T) {
+			if _, err := Coerce(tc.c, tc.raw); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Coerce = %v; want an error naming %q", err, tc.want)
+			}
+		})
+		t.Run("CoerceParams "+name, func(t *testing.T) {
+			got, err := CoerceParams(map[string]any{"v": tc.raw}, ParamTypes{"v": tc.c})
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), `param type "v"`) {
+				t.Errorf("CoerceParams = %v, %v; want an error naming the key and %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+// A constraint judged sound passes, resolved or not wrapped in a reference.
+func TestCoerceParams_CoercesThroughAResolvedReference(t *testing.T) {
+	day := schema.NewAliasConstraint("Day", schema.NewDateConstraint())
+	got, err := CoerceParams(map[string]any{"days": []any{"2026-01-01"}}, ParamTypes{"days": schema.NewListConstraint(day)})
+	if err != nil {
+		t.Fatalf("CoerceParams: %v", err)
+	}
+	if _, ok := got["days"].([]dbtype.Date); !ok {
+		t.Errorf("days = %T; want []dbtype.Date", got["days"])
+	}
+}
+
+// Coerce returns the value unchanged beside a judge's error, as every other
+// error arm does.
+func TestCoerce_ReturnsTheValueUnchangedBesideAJudgeError(t *testing.T) {
+	got, err := Coerce(schema.IntegerBetween(5, 1), int64(3))
+	if err == nil {
+		t.Fatal("Coerce accepted inverted bounds")
+	}
+	if got != int64(3) {
+		t.Errorf("Coerce returned %#v beside its error; want the value unchanged", got)
+	}
+}
+
+// CoerceParams judges every constraint types holds before it reads params: a
+// refused key params does not hold is an error, params empty or not, and of
+// several refused keys the first in sorted order is named. A nil constraint is
+// "no type to coerce against" and passes its value through.
+func TestCoerceParams_JudgesEveryTypeBeforeAnyValue(t *testing.T) {
+	bad := schema.IntegerBetween(5, 1)
+	for name, params := range map[string]map[string]any{
+		"a key params does not hold": {"a": int64(1)},
+		"empty params":               {},
+		"nil params":                 nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := CoerceParams(params, ParamTypes{"zz": bad})
+			if err == nil || !strings.Contains(err.Error(), `param type "zz"`) {
+				t.Errorf("CoerceParams = %v; want an error naming \"zz\"", err)
+			}
+		})
+	}
+	t.Run("the first refused key in sorted order", func(t *testing.T) {
+		types := ParamTypes{"d4": bad, "b2": bad, "c3": bad, "e5": bad}
+		for range 20 {
+			_, err := CoerceParams(map[string]any{}, types)
+			if err == nil || !strings.Contains(err.Error(), `param type "b2"`) {
+				t.Fatalf("CoerceParams = %v; want an error naming \"b2\"", err)
+			}
+		}
+	})
+	t.Run("a nil constraint passes its value through", func(t *testing.T) {
+		got, err := CoerceParams(map[string]any{"x": "s"}, ParamTypes{"x": nil})
+		if err != nil || got["x"] != "s" {
+			t.Errorf("CoerceParams = %v, %v; want x passed through", got, err)
+		}
+	})
+}

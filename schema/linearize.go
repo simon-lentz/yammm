@@ -229,7 +229,7 @@ func (c *completer) completeTypes() {
 		for i, p := range allProps {
 			if p.IsPrimaryKey() {
 				// A primary whose type bottoms out in an already-diagnosed
-				// unresolvable alias (deferred import, cyclic local chain)
+				// unresolvable alias (an unknown name, a deferred import)
 				// is kept as a key without the type check: the declaration
 				// IS a primary key — only its type is unknowable here — and
 				// the root cause carries its own diagnostic.
@@ -250,7 +250,7 @@ func (c *completer) completeTypes() {
 						// rather than dereferencing it.
 						kind := "missing type"
 						if pc := p.Constraint(); pc != nil {
-							kind = pc.Kind().String()
+							kind = ResolveAlias(pc).Kind().String()
 						}
 						c.errorf(p.Span(), diag.E_INVALID_PRIMARY_KEY_TYPE,
 							"property %q: %s cannot be used as a primary key (allowed: String, UUID, Date, Timestamp)",

@@ -271,11 +271,11 @@ func (b *builder) enumConstraint(c *enuC, span location.Span) *Constraint {
 	return out
 }
 
-// maxPatterns is the largest pattern list a Pattern constraint accepts. The
-// count is of patterns that compile, which is what the generated parser counts;
-// every written literal stays in PatternLits, and only the first maxPatterns
+// MaxPatterns is the largest pattern list a Pattern constraint accepts. The
+// count is of patterns that compile; every written literal stays in PatternLits, and only the first MaxPatterns
 // survivors carry a Regex, so nothing downstream enforces a pattern past the cap.
-const maxPatterns = 2
+// The schema Builder refuses a longer list by the same bound.
+const MaxPatterns = 2
 
 func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 	out := &Constraint{Kind: ConstraintPattern, Span: span}
@@ -295,7 +295,7 @@ func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 		case err != nil:
 			b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span,
 				"invalid regex pattern %q: %v", text, err)
-		case kept < maxPatterns:
+		case kept < MaxPatterns:
 			lit.Regex, lit.Kept = re, true
 			kept++
 		default:
@@ -303,9 +303,9 @@ func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 		}
 		out.PatternLits = append(out.PatternLits, lit)
 	}
-	if kept > maxPatterns {
+	if kept > MaxPatterns {
 		b.reportf(diag.E_INVALID_CONSTRAINT, span,
-			"pattern constraint exceeds maximum of %d patterns (got %d)", maxPatterns, kept)
+			"pattern constraint exceeds maximum of %d patterns (got %d)", MaxPatterns, kept)
 	}
 	return out
 }

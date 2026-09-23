@@ -66,6 +66,29 @@ func TestMarshal_NotSourceBacked(t *testing.T) {
 	}
 }
 
+// A Builder-built schema whose properties name a DataType, directly and as a
+// List element, draws the same documented refusal: the DataType field resolves
+// from the property's constraint, which a built schema holds as a loaded one
+// does, so no step before the source check fails first.
+func TestMarshal_NotSourceBackedWithDataTypeProperties(t *testing.T) {
+	s, res := schema.NewBuilder().
+		WithName("geo").
+		AddDataType("Code", schema.NewStringConstraint()).
+		AddType("County").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("code", schema.NewAliasConstraint("Code", nil)).
+		WithProperty("codes", schema.NewListConstraint(schema.NewAliasConstraint("Code", nil))).
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("build: %v", res.Err())
+	}
+	_, err := gogen.Marshal(s)
+	if err == nil || !strings.Contains(err.Error(), "not source-backed") {
+		t.Errorf("Marshal error = %v; want the not source-backed refusal", err)
+	}
+}
+
 // TestMarshal_Imports exercises a real imported (multi-source) schema end-to-end:
 // closure flatten, cross-schema reference + naming, the faithful cross-schema
 // Where-block PK, and the module-root-relative multi-source embedded store. A

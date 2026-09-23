@@ -74,3 +74,29 @@ func TestCheckValue_RecoversAPanicIntoAnInternalError(t *testing.T) {
 		t.Errorf("kind = %v, want KindConstraintPanic", internal.Kind)
 	}
 }
+
+// A Pattern means regexp.Compile of its source, as a .yammm source compiles
+// it. A regexp built under POSIX reads ^ and $ at line breaks, so without that
+// reading the value below would pass a hand-built constraint the DSL's
+// Pattern["^b$"] refuses.
+func TestCheckValue_ReadsAPatternAsItsSourceCompiles(t *testing.T) {
+	t.Parallel()
+	src := `schema "s"
+
+type T {
+	id String primary
+	p Pattern["^b$"]
+}
+`
+	s, res := schema.LoadString(t.Context(), src, "s.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	tt, _ := s.Type("T")
+	p, _ := tt.Property("p")
+	loaded := instance.CheckValue("a\nb", p.Constraint())
+	built := instance.CheckValue("a\nb", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX(`^b$`)}))
+	if loaded == nil || built == nil {
+		t.Errorf("CheckValue(%q) = %v from the DSL and %v from CompilePOSIX; want both refused", "a\nb", loaded, built)
+	}
+}

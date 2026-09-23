@@ -499,8 +499,10 @@ func TestCoerceSlice_ListValueUnderScalarConstraintErrors(t *testing.T) {
 
 func TestCoerceSlice_AliasedElementCoercesAsItsResolvedKind(t *testing.T) {
 	t.Parallel()
-	// An unresolved alias element reads as KindAlias, whose arm passes the []any
-	// through: the dates would reach the driver as strings under a DATE property.
+	// coerceSlice resolves the element's DataType reference before it picks a
+	// slice type. Read unresolved, the element's kind is Alias, whose arm passes
+	// the []any through, and the dates would reach the driver as strings under a
+	// DATE property.
 	s := loadInline(t, `schema "aliased_element"
 
 type Day = Date
@@ -531,10 +533,10 @@ type Calendar {
 	}
 }
 
-func TestCoerceSlice_ListWithoutAnElementConstraintErrors(t *testing.T) {
+func TestCoerceParams_RefusesAListWithoutAnElementConstraint(t *testing.T) {
 	t.Parallel()
-	// [schema.NewListConstraint] accepts a nil element and [CoerceParams] takes
-	// the caller's constraints as given, so the exported path reaches this shape.
+	// [schema.NewListConstraint] accepts a nil element, and CoerceParams judges
+	// the caller's constraints before any value, as the Builder does.
 	_, err := CoerceParams(
 		map[string]any{"tags": []any{"a"}},
 		ParamTypes{"tags": schema.NewListConstraint(nil)},
@@ -542,8 +544,8 @@ func TestCoerceSlice_ListWithoutAnElementConstraintErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a List constraint holding no element constraint, got nil")
 	}
-	if !strings.Contains(err.Error(), "holds no element constraint") {
-		t.Errorf("error %q does not name the missing element constraint", err)
+	if !strings.Contains(err.Error(), `param type "tags"`) || !strings.Contains(err.Error(), "no element constraint") {
+		t.Errorf("error %q does not name the key and the missing element constraint", err)
 	}
 	if strings.Contains(err.Error(), "scalar") {
 		t.Errorf("error %q calls a List constraint scalar", err)

@@ -366,7 +366,7 @@ func (a *Adapter) BatchEdgeQueries(
 }
 
 // propsToParamMap converts instance properties to a Neo4j-driver-compatible
-// map, routing every scalar through [Coerce] and every []any slice through
+// map, routing every scalar through [coerceScalar] and every []any slice through
 // [coerceSlice] against the property's schema constraint. This repairs the
 // JSON round-trip — a whole-number Float decoded as int64, and Date/Timestamp
 // values carried as strings — so the driver receives native types that satisfy
@@ -407,11 +407,11 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // homogeneous Go slice Neo4j requires ([]string, []float64, []dbtype.Date, ...).
 // A Vector is float-valued by definition (matching the eval package's checkVector
 // / coerceVector), so it coerces elementwise exactly as a List<Float> would; this
-// is what repairs a vector loaded from a pre-v0.12 snapshot, whose whole floats
-// were written int-shaped and arrive narrowed to int64. Per-element conversion delegates
-// to [Coerce] (the Float width-repair and Date/Timestamp parse rules) or, for
+// repairs a vector whose whole floats arrive as int64, as a hand-built param map
+// can carry them. Per-element conversion delegates
+// to [coerceScalar] (the Float width-repair and Date/Timestamp parse rules) or, for
 // Integer elements, to [repairInt64] (every Go int/uint width and every whole
-// float -> int64, mirroring Coerce's Float repair), so the repair rules live in
+// float inside the int64 range -> int64, mirroring Coerce's Float repair), so the repair rules live in
 // one place; coerceSlice owns only the slice typing. Scalar Integer positions
 // route through the same [repairInt64], so an element and a scalar of that kind
 // cannot disagree.
@@ -423,20 +423,16 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // validated node path this never fires (instance validation already enforced each
 // element's type); it guards the direct-Cypher path, where the param map is
 // hand-built. A []any value under a scalar (non-List, non-Vector) constraint is a
-// shape mismatch — a scalar property cannot hold a list — and is an error too, as
-// is a List constraint built by hand with no element constraint. A
+// shape mismatch — a scalar property cannot hold a list — and is an error too. A
 // nested-collection element kind (a List or Vector element, e.g. List<Vector>) has
 // no concrete driver slice type at this level and returns the []any unchanged. The
 // element switch is exhaustiveness-guarded, so a newly-added ConstraintKind fails
-// the build here rather than silently passing a []any to the driver.
+// the lint here rather than silently passing a []any to the driver.
 func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	c = schema.ResolveAlias(c)
+	// A judged constraint's List holds an element, so no element means a scalar.
 	elem := schema.ResolveAlias(constraintof.Element(c))
 	if elem == nil {
-		// Only a hand-built constraint holds no element; every loaded List has one.
-		if c.Kind() == schema.KindList {
-			return nil, errors.New("cannot coerce a list value against a List constraint that holds no element constraint")
-		}
 		return nil, fmt.Errorf("cannot coerce a list value against a scalar %s constraint", c.Kind())
 	}
 	//exhaustive:enforce
@@ -464,7 +460,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindFloat:
 		out := make([]float64, len(raw))
 		for i, v := range raw {
-			cv, err := Coerce(elem, v)
+			cv, err := coerceScalar(elem, v)
 			if err != nil {
 				return nil, fmt.Errorf("list element %d: %w", i, err)
 			}
@@ -488,7 +484,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindDate:
 		out := make([]dbtype.Date, len(raw))
 		for i, v := range raw {
-			cv, err := Coerce(elem, v)
+			cv, err := coerceScalar(elem, v)
 			if err != nil {
 				return nil, fmt.Errorf("list element %d: %w", i, err)
 			}
@@ -502,7 +498,7 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindTimestamp:
 		out := make([]time.Time, len(raw))
 		for i, v := range raw {
-			cv, err := Coerce(elem, v)
+			cv, err := coerceScalar(elem, v)
 			if err != nil {
 				return nil, fmt.Errorf("list element %d: %w", i, err)
 			}
@@ -516,12 +512,12 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindVector, schema.KindList, schema.KindAlias:
 		// A nested-collection element (List<Vector>, List<List<…>>) has no concrete
 		// driver slice type at this level, so the []any passes through unchanged.
-		// KindAlias is unreachable here (elem is alias-resolved above) but is listed
-		// to satisfy the exhaustiveness guard.
+		// KindAlias is unreachable here: elem is alias-resolved above, and a judged
+		// constraint's DataType reference holds a resolved constraint.
 		return raw, nil
 	default:
 		// Unreachable: schema.Constraint is sealed, so elem.Kind() is always one of
-		// the cases above. The //exhaustive:enforce directive fails the build if a
+		// the cases above. The //exhaustive:enforce directive fails the lint if a
 		// new ConstraintKind is added without a case, rather than letting a []any
 		// reach the driver un-coerced.
 		return nil, fmt.Errorf("coerceSlice: unhandled element kind %v", elem.Kind())

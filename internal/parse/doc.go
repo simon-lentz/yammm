@@ -17,20 +17,22 @@
 // # What Parse reports and what it does not
 //
 // Parse reports the diagnostics a reader of the source alone can justify, and
-// it emits three codes. E_SYNTAX covers text that does not fit the grammar.
+// it emits five codes. E_SYNTAX covers text that does not fit the grammar.
 // E_INVALID_CONSTRAINT covers a constraint whose written arguments contradict
 // themselves — inverted bounds, an unparseable bound, a duplicate enum value,
 // a regex that does not compile. E_INVALID_INVARIANT covers a literal inside
-// an invariant expression that will not convert, such as a malformed number or
-// an unquotable string. Parse never reports anything that needs another
+// an invariant expression that will not convert, such as a number out of range
+// or an unquotable string. E_INVALID_NAME covers an empty schema name and a
+// relation name that is not UPPER_SNAKE, and E_REVERSE_CLAUSE_REMOVED a
+// relation that still writes the removed reverse clause. Parse never reports anything that needs another
 // declaration, another file, or a resolved name to decide.
 //
 // Three consequences are worth stating because callers depend on them.
 // Callers that want syntax errors alone must filter on the code category
 // (diag.CategorySyntax), not on the presence of any diagnostic at all.
-// Only E_SYNTAX is diag.CategorySyntax: both E_INVALID_CONSTRAINT and
-// E_INVALID_INVARIANT are diag.CategorySchema, so that filter keeps one code
-// of the three and drops every constraint and invariant defect — consume the
+// Only E_SYNTAX is diag.CategorySyntax: the other four are
+// diag.CategorySchema, so that filter keeps one code of the five and drops
+// every constraint, invariant and name defect — consume the
 // whole slice unless a narrower set is what you mean. And callers must not
 // assume a diagnostic-free parse means a valid schema; it means a well-formed
 // one.
@@ -54,7 +56,10 @@
 // stop before ever reaching the literal, since Integer[0x10, 5] fails at the
 // '[' because an Integer with no bounds is itself well-formed. The construct's
 // extent is therefore measured after recovery has run, which is the first
-// point at which the whole of a malformed construct is known.
+// point at which the whole of a malformed construct is known. The schema
+// header is the exception: its recovery runs to the first declaration, so its
+// extent ends where the failed parse reached, and a literal in a declaration
+// it skipped does not take over its diagnostic.
 //
 // Diagnostic text names the construct, never the grammar. participle renders
 // its own expected-set as the EBNF of this package's node structs, which names
@@ -87,10 +92,10 @@
 //
 // # Spans
 //
-// Positions are byte-native. The lexer records a byte offset and rune-counted
-// line and column for every token, which is exactly [location.Position]'s
-// currency, so spans are constructed directly with no offset conversion layer.
-// Span ends are exclusive.
+// Positions are byte-native. Every span is built from byte offsets:
+// spanFromOffsets derives each end's line and column from the source text,
+// counting columns in runes as the lexer does, so a span agrees with the
+// positions the lexer records for a token. Span ends are exclusive.
 //
 // [location.RangeWithBytes] panics when the end precedes the start, so every
 // span this package builds — for nodes and for diagnostics, in the recovery
@@ -112,8 +117,8 @@
 //
 //   - Comment forms and REGEXP come before SLASH. "//…" and "/*…*/" win over a
 //     regex literal on ties, and a '/' with no closing partner on the same line
-//     falls through to division — the same reading the LSP's brace scanner and
-//     the TextMate grammar encode.
+//     falls through to division — the same reading the LSP's brace scanner
+//     encodes.
 //   - FLOAT, word-boundary-anchored, comes before INVALID_NUMBER, which comes
 //     before INTEGER. "2.5e10" must lex as one FLOAT, which first-match
 //     ordering alone cannot express: INVALID_NUMBER's optional-exponent path
@@ -124,7 +129,8 @@
 //     already taken by INVALID_NUMBER.
 //   - Every multi-character operator comes before its single-character prefix:
 //     -->, *->, ->, >=, <=, ==, =~, !=, !~, &&, ||, @@.
-//   - VARIABLE comes before DOLLAR, so a bare '$' stays a token of its own.
+//   - VARIABLE comes before DOLLAR, so "$name" lexes as one VARIABLE token
+//     rather than DOLLAR and a word.
 //   - ANY_OTHER is last: one rune, unconditional. It keeps the lexer total, so
 //     every rejection happens in the parser with a position attached and no
 //     input can fail to lex.
@@ -137,9 +143,11 @@
 // [TestTags_LookaheadGroupsAreAtTheirCanonicalSites] holds every copy to its
 // map and every site to its set.
 //
-// The string-escape set matches the language's STRING rule exactly: an invalid
-// escape makes the whole literal fail to lex, falling through to ANY_OTHER at
-// the opening quote.
+// The string-escape set matches the language's STRING rule exactly: a
+// backslash before a letter outside the escape vocabulary makes the whole
+// literal fail to lex, falling through to ANY_OTHER at the opening quote. A \x
+// or \u escape lexes whatever follows it, and unquoting refuses malformed
+// digits.
 //
 // # Expression precedence
 //

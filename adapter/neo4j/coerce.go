@@ -60,17 +60,31 @@ import (
 // Coerce takes the full [schema.Constraint] (not just its kind) so a Timestamp's
 // custom layout is honored; the constraint's alias chain is resolved internally.
 // It operates on scalar values — a List/collection value is element-coerced by
-// [CoerceParams] or the adapter write path, which route each element's constraint
-// back through Coerce. Calling Coerce with a collection constraint returns the
-// value unchanged.
+// [CoerceParams] or the adapter write path, which apply the same rule to each
+// element. Calling Coerce with a collection constraint returns the value
+// unchanged.
 //
-// A nil value, or a nil constraint ("no type to coerce against"), passes through
-// unchanged. The default arm is unreachable in practice — schema.Constraint is
-// sealed, so every value carries one of the kinds above — but a kind added to the
-// enum after this switch was written surfaces as a build failure via the
-// //exhaustive:enforce directive, rather than as a silent driver-side
-// PROPERTY_TYPE rejection in production.
+// A non-nil constraint is judged first by [schema.CheckConstraint]: Coerce
+// refuses a hand-built constraint [schema.Builder.Build] refuses, and a DataType
+// reference that resolves to no constraint, returning the value unchanged
+// with an error, whatever the value. A nil value, or a nil constraint ("no type
+// to coerce against"), passes through unchanged. The default arm is unreachable in
+// practice — schema.Constraint is sealed, so every value carries one of the
+// kinds above — but a kind added to the enum after this switch was written
+// surfaces as a lint failure via the //exhaustive:enforce directive, rather
+// than as a silent driver-side PROPERTY_TYPE rejection in production.
 func Coerce(constraint schema.Constraint, raw any) (any, error) {
+	if constraint != nil {
+		if err := schema.CheckConstraint(constraint); err != nil {
+			return raw, fmt.Errorf("coerce: %w", err)
+		}
+	}
+	return coerceScalar(constraint, raw)
+}
+
+// coerceScalar is [Coerce] with the constraint already judged: every internal
+// path reaches it with a constraint a loaded or judged schema holds.
+func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 	if raw == nil {
 		//nolint:nilnil // a nil value coerces to nil with no error: nil is a valid absent property, not a failure
 		return nil, nil
@@ -178,11 +192,12 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 // per-value rule shared by every coercion path. A []any is element-coerced via
 // [coerceSlice] against the constraint's List/Vector element type (and is an
 // error under a scalar constraint — a scalar cannot hold a list). Every other
-// value routes through the scalar [Coerce] chokepoint. A nil constraint passes
-// the value through unchanged.
+// value routes through the scalar rule, [coerceScalar]. A nil constraint passes
+// the value through unchanged. The constraint is one the caller has judged: a
+// loaded schema's, or one [CoerceParams] checked.
 //
 // Shape note: a non-[]any value under a List or Vector constraint passes through
-// [Coerce] unchanged (Coerce treats collection kinds as scalar-passthrough). This
+// the scalar rule unchanged (it treats collection kinds as scalar-passthrough). This
 // is deliberate — an already-typed collection value, such as an in-memory Vector
 // carried as []float64, must survive untouched rather than be rejected — and it
 // means the inverse shape mismatch (a genuine scalar mistakenly declared under a
@@ -199,7 +214,7 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 	if slice, ok := raw.([]any); ok {
 		return coerceSlice(slice, constraint)
 	}
-	return Coerce(constraint, raw)
+	return coerceScalar(constraint, raw)
 }
 
 // ParamTypes maps a Cypher parameter name to the schema constraint its value
@@ -215,9 +230,9 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 type ParamTypes map[string]schema.Constraint
 
 // CoerceParams returns a new map with each value coerced against the constraint
-// declared for its key in types. Keys absent from types pass through. The
-// returned top-level map is always independent of params: params is never
-// mutated, and mutating the result's top-level keys cannot affect the input
+// declared for its key in types. Keys absent from types pass through. params
+// is never mutated, and for a non-empty params the returned top-level map is a
+// new one, so mutating its top-level keys cannot affect the input
 // (values that pass through uncoerced may still share backing storage, as on the
 // adapter write path). An empty params map is returned as-is — there is nothing
 // to copy. Walks one level of nested map[string]any and []map[string]any using
@@ -227,7 +242,12 @@ type ParamTypes map[string]schema.Constraint
 // returned error names the same (lexicographically first) offending key on every
 // run — failures are reproducible rather than dependent on map iteration order.
 //
-// Scalar values route through [Coerce]; []any list values are element-coerced
+// Every non-nil constraint in types is judged by [schema.CheckConstraint] before
+// any value is coerced, in sorted key order, so a hand-built constraint that
+// [schema.Builder.Build] would refuse is an error naming its key, whether or not
+// params holds that key.
+//
+// Scalar values take [Coerce]'s rule; []any list values are element-coerced
 // against the List element type (a List<Float> of int64s reaches the driver as
 // []float64, a List<Date> of strings as []dbtype.Date) — the same rule the
 // adapter write path applies, so a direct-Cypher boundary cannot silently skip
@@ -237,6 +257,13 @@ type ParamTypes map[string]schema.Constraint
 // properties but does not pass through the adapter write path's coercion
 // (e.g. an enrichment MERGE built by hand).
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error) {
+	for _, k := range slices.Sorted(maps.Keys(types)) {
+		if c := types[k]; c != nil {
+			if err := schema.CheckConstraint(c); err != nil {
+				return nil, fmt.Errorf("param type %q: %w", k, err)
+			}
+		}
+	}
 	if len(params) == 0 {
 		return params, nil
 	}
@@ -363,7 +390,8 @@ const driverOffsetZoneName = "Offset"
 // before the resolvability check, which would otherwise keep it.
 const localZoneName = "Local"
 
-// THE TEMPORAL RULE, stated once because three releases restated it.
+// THE TEMPORAL RULE, stated here in full; three releases restated it, and the
+// Coerce and driverZone godocs restate its arms.
 //
 // A temporal value is sent in the form the driver and the server will both read
 // back as the instant, zone and date yammm holds. One rule, two arms, and
@@ -379,7 +407,7 @@ const localZoneName = "Local"
 // host's tz database holds it, nil when it does not. It caches a host fact
 // fixed for the process lifetime, not adapter state — LoadLocation opens a
 // zoneinfo file on every call, and a batch write hands every row's instants
-// through Coerce.
+// through [coerceScalar].
 //
 //nolint:gochecknoglobals // a process-wide memo of a fact that cannot change at runtime
 var resolvedZones sync.Map // name -> *time.Location (nil when unresolvable)

@@ -287,7 +287,11 @@ s, result := schema.NewBuilder().
     Build()
 ```
 
-`Build()` refuses a constraint argument no `.yammm` source can state — inverted bounds, a non-finite `Float` bound, a negative length, an enum with an empty or repeated value or fewer than two values, a `Vector` dimension outside 1 to 65536, at any `List` depth — with `E_INVALID_CONSTRAINT` and no schema. A `List` with no element constraint still builds.
+`Build()` refuses what the DSL refuses in a constraint, with `E_INVALID_CONSTRAINT` and no schema: an argument no `.yammm` source can state — inverted bounds, a non-finite `Float` bound, a negative length, an enum with an empty or repeated value or fewer than two values, a `Pattern` with no pattern or more than two, a `Vector` dimension outside 1 to 65536 — a `List` with no element constraint, and a constraint of a Go type the `schema` package does not construct, such as a pointer to one, each at any `List` depth. It also refuses a datatype declared as another datatype alone (`AddDataType("B", schema.NewAliasConstraint("A", nil))`), which the DSL has no spelling for, and resolves every datatype reference by its name, in any declaration order, refusing a cycle as the DSL does.
+
+`schema.CheckConstraint(c) error` returns why `c` cannot judge a value, or `nil` when it can. It refuses what `Build()` refuses in a constraint, and a hand-built constraint meets no completion, so it also refuses a DataType reference that resolves to no constraint, at any `List` depth. The Neo4j adapter's `Coerce` and `CoerceParams` call it before they coerce a value.
+
+`schema.NewPatternConstraint` keeps every pattern it is given, and compiles each again with `regexp.Compile` from its source text, as a `.yammm` source compiles it. A pattern therefore matches by its source's Perl reading however its regexp was built: under `regexp.CompilePOSIX`, `^b$` matches `"a\nb"`, and in a `PatternConstraint` it does not. A source that reading refuses, which POSIX syntax can accept (`a**`), is kept as given, and `Build()` and `schema.CheckConstraint` refuse the constraint, as the DSL refuses `Pattern["a**"]`.
 
 ### Builder Methods
 
@@ -306,14 +310,17 @@ s, result := schema.NewBuilder().
 | `Build()` | Construct the final `*Schema` from builder state |
 
 `Build()` validates declared names against the DSL's own productions, so every
-builder-built schema remains expressible in `.yammm` form: type and datatype
-names start with an uppercase letter, property names with a lowercase letter,
-and relation names with a letter of either case — all continuing with letters,
-digits, or underscores. Violations fail the build with `E_INVALID_NAME`.
-Schema names and invariant names are quoted strings in the DSL, so they are
-not held to those productions — but neither may be empty: `Build()` reports
-`E_INVALID_NAME` for a missing schema name and for an empty invariant name.
-Import aliases are validated during completion (`E_INVALID_ALIAS`).
+builder-built schema remains expressible in `.yammm` form. Type and datatype
+names start with an uppercase letter, continue with letters, digits or
+underscores, and are none of the eleven built-in type names (`String`, `List`
+and the rest). Property names start with a lowercase letter, continue the same
+way, and are none of `as`, `part`, `in`, `nil`, `true` and `false`. Relation
+names are UPPER_SNAKE and are not `UUID`. Violations fail the build with
+`E_INVALID_NAME`. Schema names and invariant messages are quoted strings in the
+DSL, so they are not held to those productions. `Build()` refuses an empty
+schema name with `E_INVALID_NAME`, and completion refuses an empty invariant
+message with `E_INVALID_INVARIANT`. Import aliases are validated during
+completion (`E_INVALID_ALIAS`).
 
 A qualified reference (`alias.Type` in `Extends`, a relation or composition
 target, or a qualified datatype constraint) must resolve at build time: the
@@ -1377,7 +1384,9 @@ The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries`) coer
 // (e.g. a Timestamp["layout"] is parsed against its custom layout). Takes the
 // full Constraint, not just its Kind, so the custom layout is available; the
 // alias chain is resolved internally. Collection values are handled by
-// CoerceParams, which element-coerces against the constraint.
+// CoerceParams, which element-coerces against the constraint. A non-nil
+// constraint is judged first by schema.CheckConstraint, and one it refuses is
+// an error whatever the value.
 func Coerce(constraint schema.Constraint, raw any) (any, error)
 
 // ParamTypes maps a Cypher parameter name to the schema constraint its value
@@ -1389,8 +1398,10 @@ type ParamTypes map[string]schema.Constraint
 
 // CoerceParams coerces every value in a parameter map against its declared
 // constraint, walking one level of nested map[string]any and []map[string]any.
-// Scalars route through Coerce; []any lists are element-coerced against the
-// List element type. Returns the first coercion error, naming the offending key.
+// Scalars take Coerce's rule; []any lists are element-coerced against the
+// List element type. Every non-nil constraint in types is judged first by
+// schema.CheckConstraint, in sorted key order. Returns the first error, naming
+// the offending key.
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error)
 
 // ParamTypesForType derives a ParamTypes from a schema type's properties, own

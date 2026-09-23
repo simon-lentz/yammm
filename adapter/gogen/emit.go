@@ -162,20 +162,26 @@ func (g *generator) dataTypeBase(sc *schema.Schema, dt *schema.DataType) (string
 		return name, nil
 	}
 	return g.listType(lc, elemEnum, func(ac schema.AliasConstraint) (string, error) {
-		qualifier, name, qualified := strings.Cut(ac.DataTypeName(), ".")
-		if !qualified {
-			qualifier, name = "", qualifier
-		}
-		target, ok := sc.ResolveDataType(schema.NewDataTypeRef(qualifier, name, location.Span{}))
-		if !ok {
-			return "", fmt.Errorf("gogen: list element names unresolved datatype %q", ac.DataTypeName())
-		}
-		goName, ok := g.names.goDataType(target)
-		if !ok {
-			return "", fmt.Errorf("gogen: no Go name for datatype %q", target.Name())
-		}
-		return goName, nil
+		return g.dataTypeGoName(sc, ac)
 	})
+}
+
+// dataTypeGoName returns the Go name of the DataType ac names, resolved in sc,
+// the schema whose declaration holds the reference.
+func (g *generator) dataTypeGoName(sc *schema.Schema, ac schema.AliasConstraint) (string, error) {
+	qualifier, name, qualified := strings.Cut(ac.DataTypeName(), ".")
+	if !qualified {
+		qualifier, name = "", qualifier
+	}
+	target, ok := sc.ResolveDataType(schema.NewDataTypeRef(qualifier, name, location.Span{}))
+	if !ok {
+		return "", fmt.Errorf("gogen: reference to unresolved datatype %q", ac.DataTypeName())
+	}
+	goName, ok := g.names.goDataType(target)
+	if !ok {
+		return "", fmt.Errorf("gogen: no Go name for datatype %q", target.Name())
+	}
+	return goName, nil
 }
 
 // listType renders a List. When its innermost element names a DataType, the
@@ -227,22 +233,21 @@ func (g *generator) emitEnumConsts(enumGoName string, values []string) {
 }
 
 // registerDataTypeFields records the DataType Go name of every type and edge
-// property whose DataTypeRef is set, keyed by the property pointer and resolved
-// in the declaring schema, since an inherited property's ref is relative to
-// its parent's schema. A List property carries its innermost element's ref.
+// property whose constraint names a DataType, directly or as its innermost List
+// element, keyed by the property pointer. The name resolves in the declaring
+// schema, since an inherited property's reference is relative to its parent's
+// schema. The constraint holds the reference in a loaded and a built schema
+// alike; a property's DataTypeRef is a syntactic reference only the parser
+// records.
 func (g *generator) registerDataTypeFields() error {
 	record := func(sc *schema.Schema, kind, owner string, p *schema.Property) error {
-		ref := p.DataTypeRef()
-		if ref.IsZero() {
+		ac, ok := innermostDataType(p.Constraint())
+		if !ok {
 			return nil
 		}
-		dt, ok := sc.ResolveDataType(ref)
-		if !ok {
-			return fmt.Errorf("gogen: %s %q property %q references unresolved datatype %q", kind, owner, p.Name(), ref.String())
-		}
-		name, ok := g.names.goDataType(dt)
-		if !ok {
-			return fmt.Errorf("gogen: no Go name for datatype %q", dt.Name())
+		name, err := g.dataTypeGoName(sc, ac)
+		if err != nil {
+			return fmt.Errorf("gogen: %s %q property %q: %w", kind, owner, p.Name(), err)
 		}
 		g.dtFieldNames[p] = name
 		return nil
@@ -658,8 +663,8 @@ func (g *generator) goFieldType(owner fieldOwner, p *schema.Property) (string, e
 			return g.names.goInlineEnum(owner.enum, p), nil
 		}
 		t, err := g.listType(lc, elemEnum, func(ac schema.AliasConstraint) (string, error) {
-			// The parser records a List property's innermost element ref as
-			// the property's own, so the table holds the element's name.
+			// registerDataTypeFields keys a List property by its innermost
+			// element's DataType, so the table holds the element's name.
 			if name, ok := g.dtFieldNames[p.Origin()]; ok {
 				return name, nil
 			}
@@ -681,6 +686,21 @@ func (g *generator) goFieldType(owner fieldOwner, p *schema.Property) (string, e
 		return "*" + typ, nil
 	}
 	return typ, nil
+}
+
+// innermostDataType returns the DataType reference c names, directly or as the
+// innermost element of its List layers.
+func innermostDataType(c schema.Constraint) (schema.AliasConstraint, bool) {
+	for {
+		switch x := c.(type) {
+		case schema.ListConstraint:
+			c = x.Element()
+		case schema.AliasConstraint:
+			return x, true
+		default:
+			return schema.AliasConstraint{}, false
+		}
+	}
 }
 
 // isAlias reports whether a constraint is a DataType reference (AliasConstraint).

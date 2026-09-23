@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -90,6 +92,8 @@ func TestBuilder_RefusesEveryConstraintTheDSLRefuses(t *testing.T) {
 		{"a one-value enum", `Enum["a"]`, schema.NewEnumConstraint([]string{"a"}), "at least two values"},
 		{"a zero-dimension vector", "Vector[0]", schema.NewVectorConstraint(0), "vector dimensions"},
 		{"a vector past the maximum", "Vector[65537]", schema.NewVectorConstraint(65537), "vector dimensions"},
+		{"three patterns", `Pattern["a", "b", "c"]`, schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("a"), regexp.MustCompile("b"), regexp.MustCompile("c")}), "exceeds maximum of 2 patterns"},
+		{"a pattern Perl syntax refuses", `Pattern["a**"]`, schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompilePOSIX("a**")}), `invalid regex pattern "a**"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -130,13 +134,11 @@ func TestBuilder_RefusesANegativeLength(t *testing.T) {
 }
 
 // The check reads a declared DataType's constraint, so a fault behind an alias
-// is refused at the DataType the alias names, and a Pattern with no pattern,
-// which the DSL cannot write, is refused where it stands.
-func TestBuilder_RefusesAFaultBehindAnAliasAndAnEmptyPattern(t *testing.T) {
+// is refused at the DataType the alias names.
+func TestBuilder_RefusesAFaultBehindAnAlias(t *testing.T) {
 	for name, c := range map[string]schema.Constraint{
 		"alias to inverted bounds": schema.NewAliasConstraint("Code", nil),
 		"list of such an alias":    schema.NewListConstraint(schema.NewAliasConstraint("Code", nil)),
-		"a pattern with none":      schema.NewPatternConstraint(nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, res := schema.NewBuilder().WithName("fleet").
@@ -148,6 +150,153 @@ func TestBuilder_RefusesAFaultBehindAnAliasAndAnEmptyPattern(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A Pattern with no pattern, which the DSL cannot write, is refused where it
+// stands. The schema holds no other fault, so the refusal is the pattern's.
+func TestBuilder_RefusesAPatternWithNone(t *testing.T) {
+	s, res := schema.NewBuilder().WithName("fleet").
+		AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
+		WithProperty("v", schema.NewPatternConstraint(nil)).Done().Build()
+	if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), "needs at least one pattern") {
+		t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT naming the missing pattern", s, res.String())
+	}
+}
+
+// Every List the DSL writes names its element, so a List with none — from a
+// constructor handed nil, or the zero ListConstraint — is refused at any depth,
+// on a property and on a datatype, and no later reader meets it.
+func TestBuilder_RefusesAListWithNoElement(t *testing.T) {
+	for name, c := range map[string]schema.Constraint{
+		"NewListConstraint(nil)":        schema.NewListConstraint(nil),
+		"the zero ListConstraint":       schema.ListConstraint{},
+		"ListMinLen(nil, 1)":            schema.ListMinLen(nil, 1),
+		"ListMaxLen(nil, 1)":            schema.ListMaxLen(nil, 1),
+		"ListLenBetween(nil, 0, 1)":     schema.ListLenBetween(nil, 0, 1),
+		"a nested List with no element": schema.NewListConstraint(schema.NewListConstraint(nil)),
+	} {
+		t.Run("property "+name, func(t *testing.T) {
+			s, res := schema.NewBuilder().WithName("fleet").
+				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
+				WithProperty("v", c).Done().Build()
+			assertRefusedNoElement(t, s, res)
+		})
+		t.Run("datatype "+name, func(t *testing.T) {
+			s, res := schema.NewBuilder().WithName("fleet").
+				AddDataType("Tags", c).
+				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).Done().Build()
+			assertRefusedNoElement(t, s, res)
+		})
+	}
+}
+
+func assertRefusedNoElement(t *testing.T, s *schema.Schema, res diag.Result) {
+	t.Helper()
+	if s != nil {
+		t.Fatal("Build returned a schema holding a List with no element")
+	}
+	if !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), "list has no element constraint") {
+		t.Errorf("Build reported %s; want E_INVALID_CONSTRAINT naming the missing element", res.String())
+	}
+}
+
+// Every constraint method has a value receiver, so a pointer to a constraint
+// satisfies the interface and names no constraint the DSL states. The Builder
+// refuses it, at any List depth, rather than build a property every value fails.
+func TestBuilder_RefusesAConstraintThePackageDoesNotConstruct(t *testing.T) {
+	list := schema.NewListConstraint(schema.NewStringConstraint())
+	str := schema.NewStringConstraint()
+	for name, c := range map[string]schema.Constraint{
+		"a pointer to a List":             &list,
+		"a pointer to a String":           &str,
+		"a List of a pointer to a String": schema.NewListConstraint(&str),
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, res := schema.NewBuilder().WithName("fleet").
+				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
+				WithProperty("v", c).Done().Build()
+			if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), "none this package constructs") {
+				t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT naming the Go type", s, res.String())
+			}
+		})
+	}
+}
+
+// The DSL declares a datatype over a built-in type or a List; "type B = A" is a
+// syntax error. The Builder refuses the same declaration, so no reader meets a
+// datatype that is only another datatype's name.
+func TestBuilder_RefusesADataTypeDeclaredAsAnotherAlone(t *testing.T) {
+	src := "schema \"fleet\"\n\ntype A = Integer\ntype B = A\n\ntype Car {\n\tvin String primary\n}\n"
+	if _, lres := schema.LoadString(context.Background(), src, "fleet.yammm"); !lres.HasErrors() {
+		t.Fatal("the DSL accepts a datatype declared as another alone")
+	}
+	s, res := schema.NewBuilder().WithName("fleet").
+		AddDataType("A", schema.NewIntegerConstraint()).
+		AddDataType("B", schema.NewAliasConstraint("A", nil)).
+		AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).Done().Build()
+	if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), `datatype "B" is declared as datatype "A" alone`) {
+		t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT naming B and A", s, res.String())
+	}
+}
+
+// Every declared name the DSL refuses, the Builder refuses as E_INVALID_NAME.
+// Each case is stated both ways, and the two spellings the DSL accepts in the
+// same positions build.
+func TestBuilder_RefusesANameTheDSLRefuses(t *testing.T) {
+	car := schema.NewTypeRef("", "Car", location.Span{})
+	cases := []struct {
+		name  string
+		dsl   string
+		build func(*schema.Builder) *schema.Builder
+	}{
+		{"a type named List", "type List {\n\tid String primary\n}", func(b *schema.Builder) *schema.Builder {
+			return b.AddType("List").WithPrimaryKey("id", schema.NewStringConstraint()).Done()
+		}},
+		{"a datatype named String", "type String = Integer", func(b *schema.Builder) *schema.Builder {
+			return b.AddDataType("String", schema.NewIntegerConstraint())
+		}},
+		{"a relation named UUID", "type Pal {\n\tid String primary\n\t--> UUID (one) Car\n}", func(b *schema.Builder) *schema.Builder {
+			return b.AddType("Pal").WithPrimaryKey("id", schema.NewStringConstraint()).WithRelation("UUID", car, false, false).Done()
+		}},
+	}
+	for _, word := range []string{"as", "part", "in", "nil", "true", "false"} {
+		cases = append(cases, struct {
+			name  string
+			dsl   string
+			build func(*schema.Builder) *schema.Builder
+		}{"a property named " + word, "type Pal {\n\tid String primary\n\t" + word + " String\n}", func(b *schema.Builder) *schema.Builder {
+			return b.AddType("Pal").WithPrimaryKey("id", schema.NewStringConstraint()).WithProperty(word, schema.NewStringConstraint()).Done()
+		}})
+	}
+	base := func() *schema.Builder {
+		return schema.NewBuilder().WithName("fleet").
+			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).Done()
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "schema \"fleet\"\n\ntype Car {\n\tvin String primary\n}\n\n" + tc.dsl + "\n"
+			if _, lres := schema.LoadString(context.Background(), src, "fleet.yammm"); !lres.HasErrors() {
+				t.Fatalf("the DSL accepts %s", tc.name)
+			}
+			s, res := tc.build(base()).Build()
+			if s != nil || !hasCode(res, diag.E_INVALID_NAME) {
+				t.Errorf("Build = %v, %s; want E_INVALID_NAME", s, res.String())
+			}
+		})
+	}
+	t.Run("a relation named LIST and a property named schema build", func(t *testing.T) {
+		src := "schema \"fleet\"\n\ntype Car {\n\tvin String primary\n\tschema String\n\t--> LIST (one) Car\n}\n"
+		if _, lres := schema.LoadString(context.Background(), src, "fleet.yammm"); lres.HasErrors() {
+			t.Fatalf("the DSL refuses them: %v", lres.Err())
+		}
+		s, res := schema.NewBuilder().WithName("fleet").
+			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
+			WithProperty("schema", schema.NewStringConstraint()).
+			WithRelation("LIST", car, false, false).Done().Build()
+		if s == nil || res.HasErrors() {
+			t.Errorf("Build refused: %s", res.String())
+		}
+	})
 }
 
 // TestBuilder_ResolvesAnAliasByItsNameAlone pins that a resolution the caller
@@ -229,33 +378,33 @@ func hasCode(r diag.Result, code diag.Code) bool {
 }
 
 // TestBuilder_ResolvesADataTypeAliasByItsNameAlone pins the rule on a
-// DataType: one whose constraint is an alias, or a List of one, resolves by
-// the name it references, not by a resolution the caller supplied with it.
+// DataType's List element and on a property: an alias resolves by the name it
+// references, not by a resolution the caller supplied with it.
 func TestBuilder_ResolvesADataTypeAliasByItsNameAlone(t *testing.T) {
 	t.Run("an undeclared name in a DataType is refused with a resolution supplied", func(t *testing.T) {
 		s, res := schema.NewBuilder().WithName("fleet").
-			AddDataType("Wide", schema.NewAliasConstraint("Nope", schema.IntegerBetween(1, 5))).
+			AddDataType("Wides", schema.NewListConstraint(schema.NewAliasConstraint("Nope", schema.IntegerBetween(1, 5)))).
 			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
-			WithProperty("v", schema.NewAliasConstraint("Wide", nil)).Done().Build()
+			WithProperty("vs", schema.NewAliasConstraint("Wides", nil)).Done().Build()
 		if s != nil || !hasCode(res, diag.E_UNKNOWN_TYPE) {
 			t.Fatalf("Build = %v, %s; want E_UNKNOWN_TYPE", s, res.String())
 		}
 	})
-	t.Run("the declaration governs a DataType alias and a List of one", func(t *testing.T) {
+	t.Run("the declaration governs a property alias and a DataType's List of one", func(t *testing.T) {
 		s, res := schema.NewBuilder().WithName("fleet").
 			AddDataType("Code", schema.IntegerBetween(1, 5)).
-			AddDataType("Wide", schema.NewAliasConstraint("Code", schema.NewStringConstraint())).
 			AddDataType("Wides", schema.NewListConstraint(schema.NewAliasConstraint("Code", schema.NewStringConstraint()))).
 			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
-			WithProperty("v", schema.NewAliasConstraint("Wide", nil)).
+			WithProperty("v", schema.NewAliasConstraint("Code", schema.NewStringConstraint())).
 			WithProperty("vs", schema.NewAliasConstraint("Wides", nil)).Done().Build()
 		if s == nil {
 			t.Fatalf("Build refused: %s", res.String())
 		}
 		want := schema.IntegerBetween(1, 5)
-		wide, _ := s.DataType("Wide")
-		if got := schema.ResolveAlias(wide.Constraint()); !got.Equal(want) {
-			t.Errorf("Wide resolves to %v; want %v", got, want)
+		car, _ := s.Type("Car")
+		v, _ := car.Property("v")
+		if got := schema.ResolveAlias(v.Constraint()); !got.Equal(want) {
+			t.Errorf("v resolves to %v; want %v", got, want)
 		}
 		wides, _ := s.DataType("Wides")
 		lc, ok := wides.Constraint().(schema.ListConstraint)
