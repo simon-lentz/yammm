@@ -69,8 +69,6 @@ func TestAssertNoDanglingLinks_ReportsEveryDanglingShape(t *testing.T) {
 	}
 }
 
-// The directory, not the package, is the resolution unit: the anchor lives in
-// package clean's doc and the test it names lives in package clean_test.
 // A path that extends the module's path without a slash names another module.
 func TestAssertNoDanglingLinks_SkipsAModuleThatSharesThePathPrefix(t *testing.T) {
 	t.Parallel()
@@ -80,6 +78,9 @@ func TestAssertNoDanglingLinks_SkipsAModuleThatSharesThePathPrefix(t *testing.T)
 	}
 }
 
+// The directory, not the package, is the resolution unit: the anchor lives in
+// a doc comment of package clean and the test it names lives in package
+// clean_test.
 func TestAssertNoDanglingLinks_ResolvesAcrossTestFiles(t *testing.T) {
 	t.Parallel()
 	r, _ := runGate(t)

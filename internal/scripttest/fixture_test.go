@@ -2,6 +2,7 @@ package scripttest
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -41,16 +43,19 @@ func (f *fixture) pinGoDirective() {
 }
 
 // goDirective returns the running toolchain's version as a go.mod go directive
-// spells it: "1.26.0", never "go1.26.0", and never a devel or beta suffix.
+// spells it: "1.26.0" or "1.27rc1", never "go1.26.0", and never a suffix.
 func goDirective() string {
-	v := strings.TrimPrefix(runtime.Version(), "go")
+	return directiveOf(runtime.Version())
+}
+
+// directiveOf spells a toolchain version as a go.mod go directive: the version
+// less its "go" prefix and any experiment or build suffix. scripts/toolchain.sh
+// compares "go" and the directive with `go env GOVERSION`, which spells a
+// release and a prerelease the same way.
+func directiveOf(version string) string {
+	v := strings.TrimPrefix(version, "go")
 	if i := strings.IndexAny(v, "-+ "); i >= 0 {
 		v = v[:i]
-	}
-	// A two-component version is a released toolchain's own spelling; go.mod
-	// wants three.
-	if strings.Count(v, ".") == 1 {
-		v += ".0"
 	}
 	return v
 }
@@ -163,6 +168,7 @@ func (f *fixture) git(args ...string) {
 	f.t.Helper()
 	cmd := exec.CommandContext(f.t.Context(), "git", args...)
 	cmd.Dir = f.dir
+	cmd.Env = withoutRepositoryVars(f.t, os.Environ())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		f.t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
@@ -170,10 +176,16 @@ func (f *fixture) git(args ...string) {
 
 func (f *fixture) run(script string, args ...string) result {
 	f.t.Helper()
+	return f.runFrom(f.dir, script, args...)
+}
+
+// runFrom runs one of the fixture's scripts with dir as the working directory.
+func (f *fixture) runFrom(dir, script string, args ...string) result {
+	f.t.Helper()
 	//nolint:gosec // runs one of the repository's scripts, copied into the fixture's own module
-	cmd := exec.CommandContext(f.t.Context(), "bash", append([]string{"scripts/" + script}, args...)...)
-	cmd.Dir = f.dir
-	cmd.Env = append(fixtureEnv(), f.env...)
+	cmd := exec.CommandContext(f.t.Context(), "bash", append([]string{filepath.Join(f.dir, "scripts", script)}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = append(withoutRepositoryVars(f.t, fixtureEnv()), f.env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	var r result
@@ -187,6 +199,33 @@ func (f *fixture) run(script string, args ...string) result {
 	}
 	r.stdout, r.stderr = stdout.String(), stderr.String()
 	return r
+}
+
+// repositoryVars returns the variables `git rev-parse --local-env-vars` names:
+// each sets the repository, index or configuration git uses, whatever the
+// working directory. A commit
+// with -a runs the pre-commit hook with GIT_INDEX_FILE naming the commit's
+// temporary index, and a fixture's git inheriting it locks, and can write, the
+// real repository's index.
+var repositoryVars = sync.OnceValues(func() ([]string, error) {
+	out, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--local-env-vars").Output()
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
+})
+
+// withoutRepositoryVars returns env without the variables repositoryVars names.
+func withoutRepositoryVars(t *testing.T, env []string) []string {
+	t.Helper()
+	vars, err := repositoryVars()
+	if err != nil {
+		t.Fatalf("git rev-parse --local-env-vars: %v", err)
+	}
+	return slices.DeleteFunc(env, func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		return slices.Contains(vars, name)
+	})
 }
 
 // fixtureEnv keeps a fixture's go commands inside the fixture module and off

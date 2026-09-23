@@ -2,7 +2,7 @@ package diag_test
 
 import (
 	"os"
-	"strings"
+	"regexp"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -49,11 +49,35 @@ func TestRegisteredCodesDocumented(t *testing.T) {
 
 		text := string(content)
 		for _, c := range diag.AllCodes() {
-			if !strings.Contains(text, c.String()) {
+			if !documents(text, c.String()) {
 				t.Errorf("registered code %s is not documented in %s", c, oracle.name)
 			}
 		}
 	}
 
 	t.Logf("verified %d registered codes against both oracles", len(diag.AllCodes()))
+}
+
+// documents reports whether text names code as a whole word: a code such as
+// E_UNRESOLVED_REQUIRED is a substring of a longer one, and a substring match
+// would document it by accident.
+func documents(text, code string) bool {
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(code) + `\b`).MatchString(text)
+}
+
+func TestDocuments(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		text string
+		want bool
+	}{
+		{"| `E_UNRESOLVED_REQUIRED` | a required association |", true},
+		{"E_UNRESOLVED_REQUIRED.", true},
+		{"| `E_UNRESOLVED_REQUIRED_COMPOSITION` | a required part |", false},
+		{"XE_UNRESOLVED_REQUIRED", false},
+	} {
+		if got := documents(c.text, "E_UNRESOLVED_REQUIRED"); got != c.want {
+			t.Errorf("documents(%q) = %v, want %v", c.text, got, c.want)
+		}
+	}
 }

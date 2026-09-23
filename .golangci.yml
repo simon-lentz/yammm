@@ -56,7 +56,7 @@ linters:
     # - gochecknoinits # ban init() functions
     # - gochecknoglobals # ban globals
     - exhaustive # enum-style switch exhaustiveness (scoped to //exhaustive:enforce)
-    - depguard # import denylist — enforces the testify freeze for new test code
+    - depguard # import denylists: the testify freeze for new test code, and library-imports-no-adapter
     - testifylint # testify API misuse guards for the grandfathered call sites
     - usetesting # t.TempDir()/t.Context()/t.Chdir() over os equivalents in tests
   disable:

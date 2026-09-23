@@ -10,27 +10,34 @@
 # every tracked package whose code or tests import it directly, and ./docs.
 #
 # ./docs joins every computed set whether or not it imports the target, where the
-# checkout has one. It holds the documentation-conformance gates and imports 12
-# of this module's 54 packages, so an import-graph set alone lets a mutation that
-# breaks a documented claim read as survived. Every run sets
+# checkout has one. It holds the documentation-conformance gates, which judge
+# claims about packages it does not import, so an import-graph set alone lets a
+# mutation that breaks a documented claim read as survived. Every run sets
 # -failfast, -p=2 and MUTATE_BASELINE_CACHE, so a copy runs a baseline once per package set,
 # spelling and tree. "folded" is TMPDIR's last component "T" spelled "t", which
 # names the same directory only on a case-insensitive volume.
 #
-# Each worker owns one copy (rsync of the checkout without .claude and
-# node_modules) and runs its mutants one at a time; its unstaged tree must be
+# Each worker owns one copy (rsync of the checkout without .claude,
+# node_modules and .vscode-test) and runs its mutants one at a time; its unstaged tree must be
 # clean before and after every run. The checkout's unstaged tree must be clean.
 # Writes <out dir>/results.tsv and one log per run under <out dir>/logs.
 #
-# A run owns its build cache and removes it with the worker trees at exit,
-# leaving results.tsv, logs/, pkgsets/ and work/worker.N.out. Every entry a
-# worker's build writes is keyed by the copy's path, so a run that kept them
-# would leave a cache nothing reads again: 1,931 mutant runs over five days
-# grew the shared cache to 163 GB and filled the disk.
+# A run owns its build cache and removes it with the worker trees, the baseline
+# stamps and the queues at exit, leaving results.tsv, logs/, pkgsets/,
+# work/worker.N.out and work/results.wN.tsv. An interrupted run writes no
+# results.tsv, so the files it keeps are its record. Every entry a worker's
+# build writes for the checkout's own packages is keyed by the copy's path, so
+# a run that kept them would leave a cache nothing reads again: the shared
+# cache reached 163 GB in four days of mutant runs and filled the disk.
 #
-# A run no test was judged by reads NOBUILD, whether mutate.sh refused the
-# mutant before the verdict run or found that no named package ran one.
+# A mutant that does not build, and a verdict run in which any named package
+# did not run, read NOBUILD: the verdict cannot rest on that run. A search that
+# matches nothing reads NOMATCH, and a red baseline reads RED.
 set -euo pipefail
+# With CDPATH exported, a `cd` that finds a relative argument through it
+# prints the directory it chose, and $(cd "$1" && pwd -P) below would capture
+# two lines.
+unset CDPATH
 
 usage() {
 	echo "usage: $0 <checkout> <mutants dir> <out dir> [workers]" >&2
@@ -51,15 +58,11 @@ git -C "$src" diff --quiet || { echo "the checkout's unstaged tree is not clean"
 
 # The checkout's own toolchain, before any worker starts: the package sets below
 # come from `go list` and every verdict comes from scripts/mutate.sh, and the two
-# must be one Go. Failing here costs one message; failing inside each worker
-# costs one per mutant. TOOLCHAIN_ROOT is not exported, so a worker's mutate.sh
-# resolves its own copy rather than this checkout.
-# This script never changes directory, so the helper is resolved beside it
-# rather than through the caller's working directory.
-TOOLCHAIN_ROOT="$src"
-# shellcheck source=scripts/toolchain.sh
-. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/toolchain.sh"
-unset TOOLCHAIN_ROOT
+# must be one Go. The run works from the checkout, so the go command resolves
+# the toolchain there and not in the caller's directory. No path below depends
+# on the caller's directory.
+cd "$src"
+. scripts/toolchain.sh
 
 real_t=$(cd "${TMPDIR:-/tmp}" && pwd -P)
 folded_t=""
@@ -85,19 +88,22 @@ pids=()
 
 # The workers stop before the removal: one that still builds writes back what
 # the removal takes. A worker's own child outlives the signal path, so a run
-# killed mid-build can leave part of the cache behind.
+# killed mid-build can leave part of the cache behind. Only a job bash still
+# lists as running is signalled: bash reaps a finished worker before any
+# `wait` names it, and the system may then give its PID to another process.
 # shellcheck disable=SC2329 # the EXIT trap below is what invokes it
 cleanup() {
 	local p d
-	for p in ${pids[@]+"${pids[@]}"}; do
+	for p in $(jobs -pr); do
 		kill "$p" 2>/dev/null || true
 	done
 	wait 2>/dev/null || true
 	rm -rf -- "$out/work/gocache"
-	for d in "$out"/work/w[0-9]*/; do
+	for d in "$out"/work/w[0-9]*/ "$out"/work/baselines.w[0-9]*/; do
 		[ -d "$d" ] || continue
 		rm -rf -- "$d"
 	done
+	rm -f -- "$out"/work/queue.*
 }
 trap cleanup EXIT
 # Without these the exit trap never runs on a signal, which is how a cancelled
@@ -136,10 +142,13 @@ pkgset() {
 	cat "$out/pkgsets/$key"
 }
 
+# readbytes <var> <file> assigns the file's bytes to var, trailing newlines
+# included. Command substitution would strip them, and a search that loses its
+# newline can match more sites than the one it names.
 readbytes() {
 	local v
-	v=$(cat "$1"; printf x)
-	printf '%s' "${v%x}"
+	v=$(cat "$2"; printf x)
+	printf -v "$1" '%s' "${v%x}"
 }
 
 i=0
@@ -151,8 +160,12 @@ for d in "$mutants"/*/; do
 	for f in file search replace spell; do
 		[ -f "$d/$f" ] || { echo "mutant $id has no $f file" >&2; exit 2; }
 	done
+	# Refused here, before any copy: the name is used byte for byte, and a
+	# trailing newline names a file the checkout does not hold.
+	readbytes file "$d/file"
+	[ -f "$src/$file" ] || { printf 'mutant %s names %q, which the checkout does not hold\n' "$id" "$file" >&2; exit 2; }
 	if [ ! -f "$d/pkgs" ]; then
-		pkgset "$(readbytes "$d/file")" >/dev/null
+		pkgset "$file" >/dev/null
 	fi
 	echo "$id" >>"$out/work/queue.$((i % workers + 1))"
 	i=$((i + 1))
@@ -169,9 +182,9 @@ worker() {
 	local w=$1 tree="$out/work/w$1" id d file search replace pkgs spell tdir log start rc secs verdict fails output
 	while IFS= read -r id <&3; do
 		d="$mutants/$id"
-		file=$(readbytes "$d/file")
-		search=$(readbytes "$d/search")
-		replace=$(readbytes "$d/replace")
+		readbytes file "$d/file"
+		readbytes search "$d/search"
+		readbytes replace "$d/replace"
 		if [ -f "$d/pkgs" ]; then pkgs=$(cat "$d/pkgs"); else pkgs=$(pkgset "$file"); fi
 		spells=$(cat "$d/spell")
 		# shellcheck disable=SC2086 # spells is a word list

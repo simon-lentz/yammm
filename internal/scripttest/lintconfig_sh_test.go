@@ -28,7 +28,9 @@ func TestLintConfigScript_RefusesAKeyTheSchemaRefuses(t *testing.T) {
 			f := &fixture{t: t, dir: t.TempDir()}
 			f.copyFile("go.mod")
 			f.copyFile("go.sum")
+			f.pinGoDirective()
 			f.copyScript("lintconfig.sh")
+			f.copyScript("toolchain.sh")
 			f.write(".golangci.yml", row.config)
 			f.index()
 			// The schema comes from the module cache, so the run needs no network.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -143,7 +144,13 @@ func TestMutateScript_RecordsAGreenBaselineOncePerTreeAndEnvironment(t *testing.
 			change:   func() { f.env = append(f.env, "YAMMM_PROBE=1") },
 			wantRuns: 11, wantStamps: 5,
 		},
-		{name: "the changed tree and environment reuse their own record", change: func() {}, wantCached: true, wantRuns: 12, wantStamps: 5},
+		{
+			// PATH chooses the programs a test runs, a -exec runner among them.
+			name:     "another PATH is a new environment",
+			change:   func() { f.env = append(f.env, "PATH="+t.TempDir()+string(os.PathListSeparator)+os.Getenv("PATH")) },
+			wantRuns: 13, wantStamps: 6,
+		},
+		{name: "the changed tree and environment reuse their own record", change: func() {}, wantCached: true, wantRuns: 14, wantStamps: 6},
 	}
 	for _, step := range steps {
 		step.change()
@@ -316,7 +323,8 @@ func TestMutateScript_RecordsNoRedBaseline(t *testing.T) {
 
 // goShim is a go that replaces one `go test` run's output and leaves every
 // other run to the real toolchain. It counts the runs that are not the
-// pre-build, so GO_SHIM_FAIL_ON=2 names the verdict run.
+// pre-build, so GO_SHIM_FAIL_ON=2 names the verdict run, and appends each
+// counted run's arguments to GO_SHIM_ARGS, one line per run.
 const goShim = `#!/usr/bin/env bash
 for a in "$@"; do
 	if [ "$a" = "-exec=true" ]; then exec "$GO_SHIM_REAL" "$@"; fi
@@ -326,6 +334,7 @@ if [ "${1:-}" = "test" ]; then
 	if [ -f "$GO_SHIM_COUNT" ]; then n=$(cat "$GO_SHIM_COUNT"); fi
 	n=$((n + 1))
 	printf '%s\n' "$n" >"$GO_SHIM_COUNT"
+	printf '%s\n' "$*" >>"$GO_SHIM_ARGS"
 	if [ "$n" = "$GO_SHIM_FAIL_ON" ]; then
 		cat "$GO_SHIM_OUT"
 		exit 1
@@ -355,8 +364,25 @@ func (f *fixture) shimVerdictRun(out string) {
 		"GO_SHIM_REAL="+real,
 		"GO_SHIM_COUNT="+filepath.Join(dir, "count"),
 		"GO_SHIM_OUT="+outFile,
+		"GO_SHIM_ARGS="+filepath.Join(dir, "args"),
 		"GO_SHIM_FAIL_ON=2",
 	)
+}
+
+// shimArgs returns the arguments of each go test run the shim counted.
+func (f *fixture) shimArgs() []string {
+	f.t.Helper()
+	for _, kv := range f.env {
+		if p, ok := strings.CutPrefix(kv, "GO_SHIM_ARGS="); ok {
+			b, err := os.ReadFile(p)
+			if err != nil {
+				f.t.Fatal(err)
+			}
+			return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+		}
+	}
+	f.t.Fatal("no go shim is installed")
+	return nil
 }
 
 // A non-zero verdict exit is not a kill. go test gives a package a duration
@@ -387,6 +413,21 @@ func TestMutateScript_NeedsAPackageThatRanItsTests(t *testing.T) {
 			code:    1, want: "mutate: NO TEST RAN",
 		},
 		{
+			name:    "a binary that never started is not a kill",
+			verdict: "fork/exec /nonexistent/runner: no such file or directory\nFAIL\t" + pkg + "\t0.001s\nFAIL\n",
+			code:    1, want: "mutate: NO TEST RAN",
+		},
+		{
+			name:    "a runner found on no PATH is not a kill",
+			verdict: "exec: \"myrun\": executable file not found in $PATH\nFAIL\t" + pkg + "\t0.000s\nFAIL\n",
+			code:    1, want: "mutate: NO TEST RAN",
+		},
+		{
+			name:    "a failing test that logs a start error is still a kill",
+			verdict: "--- FAIL: TestAdd (0.00s)\n    m_test.go:31: fork/exec /nonexistent: no such file or directory\nFAIL\nFAIL\t" + pkg + "\t0.31s\nFAIL\n",
+			code:    0, want: "mutate: MUTANT KILLED",
+		},
+		{
 			name:    "a verdict run naming no package is not a kill",
 			verdict: "go: internal error\n",
 			code:    1, want: "mutate: NO TEST RAN",
@@ -414,5 +455,28 @@ func TestMutateScript_NeedsAPackageThatRanItsTests(t *testing.T) {
 			}
 			f.wantRestored()
 		})
+	}
+}
+
+// Under -failfast, go test drops the line of every package that starts after
+// one has failed, "[build failed]" included, so the rule above would read a
+// kill beside a package that never built. The verdict run overrides a GOFLAGS
+// -failfast, as scripts/run_mutants.sh's workers set it.
+func TestMutateScript_VerdictRunOverridesAFailfastGOFLAGS(t *testing.T) {
+	t.Parallel()
+	const pkg = fixtureModule + "/m"
+	f, _ := mutateFixture(t, "3")
+	f.env = append(f.env, "GOFLAGS=-mod=mod -count=1 -failfast=true")
+	f.shimVerdictRun("--- FAIL: TestAdd (0.00s)\nFAIL\nFAIL\t" + pkg + "\t0.31s\nFAIL\n")
+
+	r := f.mutate()
+
+	r.wantCode(t, 0)
+	args := f.shimArgs()
+	if len(args) != 2 {
+		t.Fatalf("the shim counted %d go test runs, want the baseline and the verdict: %q", len(args), args)
+	}
+	if !slices.Contains(strings.Fields(args[1]), "-failfast=false") {
+		t.Errorf("the verdict run's arguments %q do not override -failfast", args[1])
 	}
 }

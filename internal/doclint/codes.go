@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -20,6 +21,8 @@ type CodeCitations struct {
 	Comments int
 	// Markdown counts the names read in Markdown files.
 	Markdown int
+	// Shell counts the names read in shell scripts' comment lines.
+	Shell int
 }
 
 // CodeRules is what [AssertCitedCodesExist] checks citations against.
@@ -32,21 +35,28 @@ type CodeRules struct {
 	// Placeholders holds names that stand for a code that does not exist by
 	// design, such as the name an example passes to diag.NewCode.
 	Placeholders []string
+	// Removed maps a slash-separated path from the root to the names of codes
+	// that no longer exist and that file may cite, such as a change record
+	// naming the codes a release removed or renamed.
+	Removed map[string][]string
 }
 
 // AssertCitedCodesExist reports every diagnostic code name cited under root
 // that names no code in rules, and returns how many names it read.
 //
 // A code name is an E_ or W_ word in capitals, bare or qualified as
-// diag.W_SNAPSHOT_PATH_FALLBACK. A name ending in an underscore, as in E_SNAPSHOT_*,
-// cites a family and must be the prefix of at least one code. The names are
+// diag.W_SNAPSHOT_PATH_FALLBACK, or the capitals that open a longer word, as
+// in E_TYPE_MISMATCHes. A name that ends in an underscore and is followed by
+// an asterisk, as in E_SNAPSHOT_*, cites a family and must be the prefix of at
+// least one code. The names are
 // read in every comment of every tracked Go file, whatever its build
-// constraint, and in every tracked Markdown file. A Go string literal is not
-// read, and neither is a path under a testdata directory: both hold fixtures,
-// not claims.
+// constraint, in every tracked Markdown file, and in every tracked shell
+// script's lines that open on "#", a heredoc's included. A Go string literal is not read, and neither is
+// a path under a testdata directory: both hold fixtures, not claims.
 //
-// An exclusion that matches no file, and a placeholder that is registered or
-// cited nowhere, are reported too, so neither can outlive what it names.
+// An exclusion that matches no file the gate reads, a placeholder that is
+// registered or cited nowhere, and a removed name that is registered or not
+// cited in its file are reported too, so none can outlive what it names.
 func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 	t.Helper()
 	var n CodeCitations
@@ -69,39 +79,61 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 			t.Errorf("placeholder %s is a registered code; cite it as one", p)
 		}
 	}
+	removedCited := make(map[string]map[string]bool, len(rules.Removed))
+	for rel, names := range rules.Removed {
+		removedCited[rel] = make(map[string]bool, len(names))
+		for _, name := range names {
+			removedCited[rel][name] = false
+			if registry.has(name) {
+				t.Errorf("removed name %s in %s is a registered code; cite it as one", name, rel)
+			}
+		}
+	}
 	excluded := make(map[string]bool)
 	fset := token.NewFileSet()
 	for _, rel := range files {
 		if slices.Contains(strings.Split(rel, "/"), "testdata") {
 			continue
 		}
-		isGo, isMarkdown := strings.HasSuffix(rel, ".go"), strings.HasSuffix(rel, ".md")
-		if !isGo && !isMarkdown {
+		isGo, isMarkdown, isShell := strings.HasSuffix(rel, ".go"), strings.HasSuffix(rel, ".md"), strings.HasSuffix(rel, ".sh")
+		if !isGo && !isMarkdown && !isShell {
 			continue
 		}
-		if p, ok := matchesAny(rules.Exclude, rel); ok {
-			excluded[p] = true
+		if matched := matchingPatterns(rules.Exclude, rel); len(matched) > 0 {
+			for _, p := range matched {
+				excluded[p] = true
+			}
 			continue
 		}
 		full := filepath.Join(root, filepath.FromSlash(rel))
 		var cites []codeCitation
-		if isGo {
+		switch {
+		case isGo:
 			cites, err = goCommentCitations(fset, full)
-		} else {
+		case isMarkdown:
 			cites, err = markdownCitations(full)
+		default:
+			cites, err = shellCitations(full)
 		}
 		if err != nil {
 			t.Errorf("%v", err)
 			continue
 		}
 		for _, c := range cites {
-			if isGo {
+			switch {
+			case isGo:
 				n.Comments++
-			} else {
+			case isMarkdown:
 				n.Markdown++
+			default:
+				n.Shell++
 			}
 			if _, ok := placeholders[c.name]; ok {
 				placeholders[c.name] = true
+				continue
+			}
+			if _, ok := removedCited[rel][c.name]; ok {
+				removedCited[rel][c.name] = true
 				continue
 			}
 			if !registry.has(c.name) {
@@ -111,7 +143,7 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 	}
 	for _, p := range rules.Exclude {
 		if !excluded[p] {
-			t.Errorf("exclusion %q matches no tracked Go or Markdown file", p)
+			t.Errorf("exclusion %q matches no tracked Go, Markdown or shell file", p)
 		}
 	}
 	for _, p := range rules.Placeholders {
@@ -119,16 +151,26 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 			t.Errorf("placeholder %s is cited nowhere", p)
 		}
 	}
+	for _, rel := range slices.Sorted(maps.Keys(removedCited)) {
+		for _, name := range rules.Removed[rel] {
+			if !removedCited[rel][name] {
+				t.Errorf("removed name %s is not cited in %s", name, rel)
+			}
+		}
+	}
 	return n
 }
 
-func matchesAny(patterns []string, rel string) (string, bool) {
+// matchingPatterns returns every pattern that matches rel, so an exclusion
+// shadowed by another one is still counted as used.
+func matchingPatterns(patterns []string, rel string) []string {
+	var matched []string
 	for _, p := range patterns {
 		if ok, err := path.Match(p, rel); err == nil && ok {
-			return p, true
+			matched = append(matched, p)
 		}
 	}
-	return "", false
+	return matched
 }
 
 // codeCitation is one code name and the 1-based line it was written on.
@@ -141,53 +183,65 @@ type codeCitation struct {
 // read out of the middle of a longer one such as NODE_PROPERTY_UNIQUENESS.
 var wordPattern = regexp.MustCompile(`[A-Za-z0-9_]+`)
 
-// markdownEscapes undoes the backslash escape Markdown prose puts inside a code
-// name, as in E\_DUPLICATE\_PK. A name that ends in an underscore cites a
-// family whether an asterisk follows or not, so an escaped asterisk needs no
-// undoing. No replacement moves a newline.
-var markdownEscapes = strings.NewReplacer(`\_`, "_")
+// markdownEscapes undoes the backslash escapes Markdown prose puts inside a
+// code name, as in E\_DUPLICATE\_PK and the family W\_SNAPSHOT\_\*. No
+// replacement moves a newline.
+var markdownEscapes = strings.NewReplacer(`\_`, "_", `\*`, "*")
 
 // citationsIn returns the code names in text, whose first line is line. A name
-// wrapped in emphasis underscores, as in _E_DUPLICATE_PK_ or
-// __E_DUPLICATE_PK__, is read without them.
+// wrapped in emphasis underscores, as in _E_DUPLICATE_PK_, __E_DUPLICATE_PK__
+// or the unbalanced _E_DUPLICATE_PK__, is read without them.
 func citationsIn(text string, line int) []codeCitation {
 	text = markdownEscapes.Replace(text)
 	var out []codeCitation
 	for _, loc := range wordPattern.FindAllStringIndex(text, -1) {
-		word := text[loc[0]:loc[1]]
 		family := loc[1] < len(text) && text[loc[1]] == '*'
-		word = stripEmphasis(word, family)
-		if isCodeName(word) {
-			out = append(out, codeCitation{name: word, line: line + strings.Count(text[:loc[0]], "\n")})
+		if name, ok := codeName(stripEmphasis(text[loc[0]:loc[1]], family)); ok {
+			out = append(out, codeCitation{name: name, line: line + strings.Count(text[:loc[0]], "\n")})
 		}
 	}
 	return out
 }
 
-// stripEmphasis removes the underscores that open word and as many that close
-// it. A family name keeps its closing underscore, which is part of the name.
+// stripEmphasis removes the underscores that open word and those that close
+// it. A family name keeps its closing underscores, which are part of the name;
+// without the asterisk that marks a family, a closing underscore is emphasis.
 func stripEmphasis(word string, family bool) string {
 	inner := strings.TrimLeft(word, "_")
 	if family {
 		return inner
 	}
-	for range len(word) - len(inner) {
-		inner = strings.TrimSuffix(inner, "_")
-	}
-	return inner
+	return strings.TrimRight(inner, "_")
 }
 
-// isCodeName reports whether word has a code's shape: E_ or W_, a capital,
-// then capitals, digits and underscores.
-func isCodeName(word string) bool {
-	rest, ok := strings.CutPrefix(word, "E_")
-	if !ok {
-		rest, ok = strings.CutPrefix(word, "W_")
+// codeName returns the code name word cites: E_ or W_, a capital, then
+// capitals, digits and underscores, up to the first lowercase letter. A word
+// that goes on in lowercase cites the name before it only when that name has
+// two characters or more after the prefix, as in E_TYPE_MISMATCHes: E_Known
+// and W_Foo_bar are capitalized words, not codes.
+func codeName(word string) (string, bool) {
+	if !strings.HasPrefix(word, "E_") && !strings.HasPrefix(word, "W_") {
+		return "", false
 	}
-	if !ok || rest == "" || rest[0] < 'A' || rest[0] > 'Z' {
-		return false
+	end := 2
+	for end < len(word) && isCodeByte(word[end]) {
+		end++
 	}
-	return strings.Trim(rest, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") == ""
+	if end == 2 || word[2] < 'A' || word[2] > 'Z' {
+		return "", false
+	}
+	if end == len(word) {
+		return word, true
+	}
+	name := strings.TrimRight(word[:end], "_")
+	if len(name) < 4 {
+		return "", false
+	}
+	return name, true
+}
+
+func isCodeByte(c byte) bool {
+	return 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_'
 }
 
 func goCommentCitations(fset *token.FileSet, file string) ([]codeCitation, error) {
@@ -200,6 +254,25 @@ func goCommentCitations(fset *token.FileSet, file string) ([]codeCitation, error
 		for _, c := range g.List {
 			out = append(out, citationsIn(c.Text, fset.Position(c.Pos()).Line)...)
 		}
+	}
+	return out, nil
+}
+
+// shellCitations reads every line of a shell script whose first non-blank
+// character is "#", a heredoc's lines included, except a shebang: "#!" at the
+// very start of the first line.
+func shellCitations(file string) ([]codeCitation, error) {
+	data, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", file, err)
+	}
+	var out []codeCitation
+	for i, l := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimLeft(l, " \t")
+		if !strings.HasPrefix(trimmed, "#") || (i == 0 && strings.HasPrefix(l, "#!")) {
+			continue
+		}
+		out = append(out, citationsIn(trimmed, i+1)...)
 	}
 	return out, nil
 }

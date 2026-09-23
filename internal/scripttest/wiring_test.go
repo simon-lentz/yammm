@@ -759,11 +759,38 @@ func TestPreCommitHooks_ShellcheckReadsEveryScript(t *testing.T) {
 			continue
 		}
 		ran = true
-		if slices.Contains(strings.Split(s.Env["SKIP"], ","), "shellcheck") {
+		if slices.Contains(skippedHooks(s.Env["SKIP"]), "shellcheck") {
 			t.Errorf("CI's pre-commit job skips shellcheck (SKIP=%s)", s.Env["SKIP"])
 		}
 	}
 	if !ran {
 		t.Error("CI's pre-commit job runs no pre-commit")
+	}
+}
+
+// skippedHooks returns the hook ids a SKIP value names, read as pre-commit
+// reads it: split on commas, each entry stripped of spaces, empty entries
+// dropped.
+func skippedHooks(skip string) []string {
+	var ids []string
+	for id := range strings.SplitSeq(skip, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func TestSkippedHooks(t *testing.T) {
+	t.Parallel()
+	for skip, want := range map[string][]string{
+		"":                          nil,
+		"shellcheck":                {"shellcheck"},
+		"golangci-lint, shellcheck": {"golangci-lint", "shellcheck"},
+		" shellcheck ,,":            {"shellcheck"},
+	} {
+		if got := skippedHooks(skip); !slices.Equal(got, want) {
+			t.Errorf("skippedHooks(%q) = %q, want %q", skip, got, want)
+		}
 	}
 }

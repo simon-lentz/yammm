@@ -19,25 +19,21 @@
 #     which claims the installed toolchain is already the right one; this is
 #     what checks that claim.
 #
-# The module file is the working directory's, or TOOLCHAIN_ROOT's where a caller
-# works on a checkout that is not its own — scripts/run_mutants.sh reads one
-# checkout and mutates copies of it.
-#
-# TOOLCHAIN_ROOT is an environment variable and NOT a positional parameter, on
-# purpose. A sourced script shares the caller's positional parameters, so
-# `. scripts/toolchain.sh` inside scripts/vet.sh would read that script's own
-# $1 — which is `--host` — as a path.
+# The module file is the working directory's alone. A caller working on another
+# checkout changes into it first, as scripts/run_mutants.sh does; a variable
+# naming the root would reach every script that sources this one, including
+# ones that never meant to set it.
 #
 # Usage: source scripts/toolchain.sh          (from the repository root)
-#        TOOLCHAIN_ROOT=<dir> source scripts/toolchain.sh
 
-modfile="${TOOLCHAIN_ROOT:-.}/go.mod"
+modfile=go.mod
 if [ ! -f "${modfile}" ]; then
-	echo "toolchain: no go.mod at ${modfile}" >&2
+	echo "toolchain: no go.mod in $(pwd)" >&2
 	exit 2
 fi
 
-want=$(awk '$1 == "go" { print $2; exit }' "${modfile}")
+# A checkout written with CRLF line endings leaves a CR on the directive.
+want=$(awk '$1 == "go" { sub(/\r$/, "", $2); print $2; exit }' "${modfile}")
 if [ -z "${want}" ]; then
 	echo "toolchain: ${modfile} names no go directive" >&2
 	exit 2

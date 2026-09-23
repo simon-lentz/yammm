@@ -82,6 +82,7 @@ baseline_key() {
 	{
 		printf '%s\n' "${pkgs[@]}"
 		printf 'TMPDIR=%s\n' "${TMPDIR:-}"
+		printf 'PATH=%s\n' "${PATH:-}"
 		env | grep '^YAMMM_' | LC_ALL=C sort || true
 		go env GOOS GOARCH CGO_ENABLED GOFLAGS GOEXPERIMENT
 		go version
@@ -148,8 +149,11 @@ if ! build_out=$(env -u MUTATE_BASELINE_CACHE go test -exec=true "${pkgs[@]}" 2>
 fi
 printf 'mutate: build ok\n'
 
+# -failfast=false overrides a GOFLAGS -failfast: once one package fails,
+# -failfast drops the line of every package that starts after it, a
+# "[build failed]" line included, and the rule below needs every line.
 set +e
-test_out=$(env -u MUTATE_BASELINE_CACHE go test "${pkgs[@]}" 2>&1)
+test_out=$(env -u MUTATE_BASELINE_CACHE go test -failfast=false "${pkgs[@]}" 2>&1)
 rc=$?
 set -e
 
@@ -171,16 +175,23 @@ fi
 # run: a genuine failure beside a package that never built still judges a tree
 # the pre-build never saw.
 #
-# Limit: a test binary killed from outside prints a duration like any other
-# run that started, and this reads that as a kill.
+# A binary that never started also gets a duration. go test reports the start
+# failure first, on a line of its own: "fork/exec <path>: ..." for a program
+# given by path, `exec: "<name>": ...` for one looked up on PATH. Either line
+# is read as a package that did not run.
+#
+# Limits: a test binary killed from outside prints a duration like any other
+# run that started, and this reads that as a kill. A test that prints such a
+# line itself, at the start of a line, reads as not run: a miss, never a
+# false kill.
 ran_re='^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9]+\.[0-9]+s$'
-notrun=$(printf '%s\n' "${test_out}" | grep -E '^FAIL[[:space:]]' | grep -vE "${ran_re}" || true)
+notrun=$(printf '%s\n' "${test_out}" | grep -E '^FAIL[[:space:]]|^fork/exec |^exec: "' | grep -vE "${ran_re}" || true)
 ran=$(printf '%s\n' "${test_out}" | grep -cE "${ran_re}" || true)
 
 if [ -n "${notrun}" ]; then
 	printf 'mutate: NO TEST RAN in a named package, so this is not a kill\n' >&2
 	printf '%s\n' "${notrun}" >&2
-	printf '  a package line carries a duration when its test binary ran; a bracketed reason means it did not\n' >&2
+	printf '  a package line carries a duration when its test binary ran; a bracketed reason or a start error means it did not\n' >&2
 	printf '  the pre-build passed, so the tree moved under the verdict run\n' >&2
 	exit 1
 fi
