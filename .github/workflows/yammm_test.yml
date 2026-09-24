@@ -24,6 +24,12 @@ jobs:
   # the job's by at least the time the job takes to start its last test binary,
   # measured on CI, so a hung binary prints its own stack before the job is
   # killed; jobMargins in internal/scripttest's wiring test holds the margins.
+  #
+  # Every job names its image's OS release, never a -latest label. GitHub moves
+  # those labels to a new release on its own schedule, which changes the gate's
+  # operating system under a commit that does not say so; floatingRunners in the
+  # same wiring test refuses one in any tracked workflow. A named release still
+  # takes GitHub's weekly image rebuilds.
   test:
     name: Test ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -33,11 +39,11 @@ jobs:
       matrix:
         include:
           - name: Linux
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - name: Windows
-            os: windows-latest
+            os: windows-2025
           - name: macOS
-            os: macos-latest
+            os: macos-26
     defaults:
       run:
         # bash on every host: pwsh reports only the last command's exit status.
@@ -108,7 +114,7 @@ jobs:
   # 20 minutes is 2.9 times the slowest Vet step measured plus its setup.
   cross-vet:
     name: Vet every target
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
       run:
@@ -137,7 +143,7 @@ jobs:
   # runs the same matrix on a developer's machine.
   integration:
     name: Neo4j ${{ matrix.label }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       # Every combination runs: knowing that a change breaks the OLD server but

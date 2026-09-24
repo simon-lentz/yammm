@@ -14,7 +14,7 @@ permissions:
 jobs:
   pre-commit:
     name: Pre-commit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -35,7 +35,7 @@ jobs:
   # binary cross-compiles from this host with CGO_ENABLED=0.
   extension-checks:
     name: Extension Checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -75,7 +75,7 @@ jobs:
         run: xvfb-run -a npm run test:integration
   build-extension:
     name: Build Extension ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       matrix:

@@ -19,7 +19,7 @@ on:
 jobs:
   build:
     name: Build ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       matrix:
@@ -96,7 +96,7 @@ jobs:
           path: lsp/editors/vscode/*.vsix
   publish:
     name: Publish to Marketplace
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: build
     steps:
