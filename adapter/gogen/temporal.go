@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -145,25 +144,21 @@ func layoutTypeBase(layout string) string {
 }
 
 // layoutTypeExact is a per-layout type's name when its base is claimed:
-// "Timestamp_", then the layout with each other rune written "_<hex>_" and each
-// invalid UTF-8 byte "_x<hex>_", so no two layouts share it. No other emitted
-// name starts "Timestamp_": each is a reserved name, an "EDGE_" name, or built
-// from identifiers goExportedIdent derives, which hold "_" only after their
-// leading "X" or between two digit runs.
+// "Timestamp_", then the layout with each other rune written "_<hex>_", so no
+// two layouts share it. A layout is valid UTF-8, since the DSL and the Builder
+// refuse any other. No other emitted name starts "Timestamp_": each is a
+// reserved name, an "EDGE_" name, or built from identifiers goExportedIdent
+// derives, which hold "_" only after their leading "X" or between two digit
+// runs.
 func layoutTypeExact(layout string) string {
 	var b strings.Builder
 	b.WriteString("Timestamp_")
-	for i := 0; i < len(layout); {
-		r, size := utf8.DecodeRuneInString(layout[i:])
-		switch {
-		case r == utf8.RuneError && size == 1:
-			fmt.Fprintf(&b, "_x%02X_", layout[i])
-		case unicode.IsLetter(r) || unicode.IsDigit(r):
+	for _, r := range layout {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(r)
-		default:
-			fmt.Fprintf(&b, "_%X_", r)
+			continue
 		}
-		i += size
+		fmt.Fprintf(&b, "_%X_", r)
 	}
 	return b.String()
 }

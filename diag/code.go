@@ -171,7 +171,7 @@ var (
 	// E_INVALID_CONSTRAINT indicates a constraint definition is invalid.
 	E_INVALID_CONSTRAINT = NewCode("E_INVALID_CONSTRAINT", CategorySchema)
 
-	// E_INVALID_INVARIANT indicates an invariant expression is invalid.
+	// E_INVALID_INVARIANT indicates an invariant's expression or message is invalid.
 	E_INVALID_INVARIANT = NewCode("E_INVALID_INVARIANT", CategorySchema)
 
 	// E_DUPLICATE_INVARIANT indicates a type declares one invariant message twice.
@@ -285,7 +285,8 @@ var (
 
 // Syntax codes.
 var (
-	// E_SYNTAX indicates a syntax error in the schema source.
+	// E_SYNTAX indicates a syntax error in the schema source, or a Builder
+	// documentation string no doc comment can carry.
 	E_SYNTAX = NewCode("E_SYNTAX", CategorySyntax)
 )
 

@@ -47,9 +47,9 @@ Inside a production, `"a" ... "z"` is a character range — the closed set from 
 
 ## Source Code Representation
 
-Source code is Unicode text encoded in UTF-8. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
+Source code is Unicode text encoded in UTF-8. A byte sequence that is not valid UTF-8 is a syntax error (`E_SYNTAX`), reported at the bytes inside a comment or a string or regex literal and failing the construct that holds it anywhere else, and so is the NUL character (U+0000), which a string literal writes with the `\0` escape instead. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
 
-A schema file can start with one UTF-8 byte order mark (U+FEFF). The lexer skips it: it is no token, though line 1's columns count it, and the formatter never writes one: `yammm fmt --check` reports a file that starts with one as unformatted, and `yammm fmt --write` removes it. A byte order mark anywhere else is a syntax error (`E_SYNTAX`). The `yammm.mod` marker file is the exception, below.
+A schema file can start with one UTF-8 byte order mark (U+FEFF). The lexer skips it: it is no token, though line 1's columns count it, and the formatter never writes one: `yammm fmt --check` reports a file that starts with one as unformatted, and `yammm fmt --write` removes it. A byte order mark anywhere else is a syntax error (`E_SYNTAX`), inside a comment or a literal too; a string literal writes U+FEFF with the `\uFEFF` escape. The `yammm.mod` marker file is the exception, below.
 
 Each code point is distinct; upper and lower case letters are different characters.
 
@@ -59,7 +59,7 @@ Line comments, string literals and regex literals run to the end of a line, whic
 
 ```text
 newline    = /* the Unicode code point U+000A or U+000D */ .
-line_char  = /* an arbitrary Unicode code point except newline */ .
+line_char  = /* a Unicode code point except newline, U+0000 and U+FEFF */ .
 ```
 
 ### Letters and Digits
@@ -270,7 +270,7 @@ Several escape sequences allow arbitrary values to be encoded as ASCII text:
 \0           U+0000 null character
 ```
 
-This is the complete escape vocabulary — a backslash before any other character does not lex. `\0` always means U+0000 and is not an octal prefix: `'\012'` is the null character followed by the two characters `12`. The quote character not delimiting the literal may appear unescaped: `'say "hi"'` and `"don't"` are both valid, so single-quoted literals can carry double quotes directly and vice versa.
+This is the complete escape vocabulary — a backslash before any other character does not lex. **A string's value is valid UTF-8.** `\xXX` writes one byte, so the bytes a literal's characters and escapes write must together be UTF-8: `"\xc3\xa9"` is `é`, and `"\xff"` is refused, as is a `\uXXXX` escape naming a surrogate (U+D800 to U+DFFF). The refusal is `E_SYNTAX`, or `E_INVALID_INVARIANT` for a literal inside an invariant expression; an annotation argument that will not unquote keeps its written spelling as a bare literal instead, so it never holds a value the escapes wrote. `\0` always means U+0000 and is not an octal prefix: `'\012'` is the null character followed by the two characters `12`. The quote character not delimiting the literal may appear unescaped: `'say "hi"'` and `"don't"` are both valid, so single-quoted literals can carry double quotes directly and vice versa.
 
 Examples:
 
@@ -821,6 +821,8 @@ phone Pattern["^\\d{3}-\\d{3}-\\d{4}$"]
 ```
 
 When two patterns are provided, the value must match both.
+
+A pattern follows Go's `regexp` syntax, and one that does not compile is `E_INVALID_CONSTRAINT`. So is a pattern that writes a surrogate code point (U+D800 to U+DFFF) with a `\x{…}` escape, alone or in a class: Go compiles it, but no string holds a surrogate, so the surrogate matches nothing and has no reading a JSON Schema validator shares. A class that spans the surrogate block, such as `[\x{D000}-\x{E000}]`, writes none.
 
 #### Timestamp
 
@@ -1731,7 +1733,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_RESERVED_PREFIX` — name uses a reserved prefix
 - `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
 - `E_INVALID_CONSTRAINT` — constraint definition error
-- `E_INVALID_INVARIANT` — invariant expression error
+- `E_INVALID_INVARIANT` — an invariant's expression or message is invalid
 - `E_INVALID_NAME` — invalid identifier format
 - `E_INVALID_PRIMARY_KEY_TYPE` — disallowed type for primary key
 - `E_NO_PRIMARY_KEY` — concrete type declares or inherits no primary key
@@ -1741,7 +1743,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
 - `E_LOAD_IO_FAILURE` — I/O error during schema loading
 - `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines
-- `E_LOAD_SOURCE_CHANGED` — a source re-registered in a shared registry with content that differs from what the registry holds
+- `E_LOAD_SOURCE_CHANGED` — a source a shared registry holds with content that differs from the load's: re-registered after an edit, registered with its sources where the registry's schema has none, or imported where the load's own bytes for it differ from the ones the registry compiled
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, or duplicate errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
@@ -1750,7 +1752,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 
 **Syntax** — parse errors:
 
-- `E_SYNTAX` — syntax error in schema source
+- `E_SYNTAX` — syntax error in schema source, or a `schema.Builder` documentation string no doc comment can carry
 
 **Import** — import resolution errors:
 

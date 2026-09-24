@@ -2,6 +2,7 @@ package jschema
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -34,8 +35,8 @@ func WithSchemaID(uri string) Option {
 // instance-data JSON object form the yammm instance layer accepts. Output is
 // deterministic — byte-identical across runs and machines — and validated
 // before return: the bytes must parse as JSON and every "$ref" must resolve
-// to an emitted "$defs" entry; a failure there is a generator bug surfaced
-// as an error, never emitted output.
+// to an entry of the "$defs" object those bytes hold; a failure there is a
+// generator bug surfaced as an error, never emitted output.
 func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	cfg := config{}
 	for _, o := range opts {
@@ -45,42 +46,50 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	doc, defKeys, err := buildDocument(s, table, cfg)
+	doc, err := buildDocument(s, table, cfg)
 	if err != nil {
 		return nil, err
 	}
-	return finish(renderDocument(doc), defKeys)
+	return finish(renderDocument(doc))
 }
 
 // finish runs selfCheck over the rendered document and returns it. Marshal
 // returns only what finish returns, so the check cannot be bypassed without
 // losing the output.
-func finish(out []byte, defKeys map[string]bool) ([]byte, error) {
-	if err := selfCheck(out, defKeys); err != nil {
+func finish(out []byte) ([]byte, error) {
+	if err := selfCheck(out); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
 // selfCheck guards Marshal's output contract: the bytes are valid JSON and
-// every emitted "$ref" is a "#/$defs/<key>" pointer resolving to an emitted
-// $defs entry. A failure is a generator bug surfaced as an error, never
-// emitted output.
-func selfCheck(out []byte, defKeys map[string]bool) error {
+// every "$ref" is a "#/$defs/<key>" pointer naming a member of the top-level
+// "$defs" object decoded from those same bytes, as a validator resolves it. A
+// failure is a generator bug surfaced as an error, never emitted output.
+func selfCheck(out []byte) error {
 	var doc any
 	if err := json.Unmarshal(out, &doc); err != nil {
 		return fmt.Errorf("jschema: self-check: emitted document is not valid JSON: %w", err)
 	}
-	return checkRefs(doc, defKeys)
+	root, ok := doc.(map[string]any)
+	if !ok {
+		return errors.New("jschema: self-check: emitted document is not a JSON object")
+	}
+	var defs map[string]any
+	if d, ok := root["$defs"].(map[string]any); ok {
+		defs = d
+	}
+	return checkRefs(doc, defs)
 }
 
-// checkRefs walks a decoded document and verifies every "$ref" member
-// resolves, decoding each as [refKey] does. No emitted property is ever named
-// "$ref" (wire field names come from the DSL grammar, which cannot produce a
-// "$"), so every "$ref" key in the document is a reference. Members are walked
-// in sorted key order, so a document holding several broken references
-// reports the same one on every run.
-func checkRefs(v any, defKeys map[string]bool) error {
+// checkRefs walks a decoded document and verifies every "$ref" member names a
+// member of defs, decoding each as [refKey] does. No emitted property is ever
+// named "$ref" (wire field names come from the DSL grammar, which cannot
+// produce a "$"), so every "$ref" key in the document is a reference. Members
+// are walked in sorted key order, so a document holding several broken
+// references reports the same one on every run.
+func checkRefs(v any, defs map[string]any) error {
 	switch x := v.(type) {
 	case map[string]any:
 		if ref, ok := x["$ref"]; ok {
@@ -92,18 +101,18 @@ func checkRefs(v any, defKeys map[string]bool) error {
 			if err != nil {
 				return fmt.Errorf("jschema: self-check: %w", err)
 			}
-			if !defKeys[key] {
+			if _, ok := defs[key]; !ok {
 				return fmt.Errorf("jschema: self-check: $ref %q resolves to no emitted $defs entry", s)
 			}
 		}
 		for _, k := range slices.Sorted(maps.Keys(x)) {
-			if err := checkRefs(x[k], defKeys); err != nil {
+			if err := checkRefs(x[k], defs); err != nil {
 				return err
 			}
 		}
 	case []any:
 		for _, elem := range x {
-			if err := checkRefs(elem, defKeys); err != nil {
+			if err := checkRefs(elem, defs); err != nil {
 				return err
 			}
 		}

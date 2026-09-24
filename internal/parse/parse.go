@@ -57,6 +57,7 @@ func parseSource(text string, sourceID location.SourceID, withTokens bool) (*Fil
 		lineStarts: lineStarts(text), file: &File{},
 	}
 	b.parseFile(plex)
+	b.checkSourceText()
 	slices.SortStableFunc(b.issues, compareIssues)
 
 	var stream []Token
@@ -75,6 +76,27 @@ func parseSource(text string, sourceID location.SourceID, withTokens bool) (*Fil
 		}
 	}
 	return b.file, stream, b.issues
+}
+
+// checkSourceText reports every run of text the source rules refuse inside a
+// comment or a string or regex literal, at the run itself. These four tokens
+// hold any character but their own delimiters, and all but a doc comment end
+// at a line break; anywhere else such a character lexes as ANY_OTHER, and the
+// construct holding it fails.
+func (b *builder) checkSourceText() {
+	tok := b.ps.tok
+	for i := range b.toks {
+		t := &b.toks[i]
+		switch t.Type {
+		case tok.docComment, tok.slComment, tok.str, tok.regexp:
+		default:
+			continue
+		}
+		for f, ok := nextTextFault(t.Value, 0); ok; f, ok = nextTextFault(t.Value, f.end) {
+			b.report(diag.Error, diag.E_SYNTAX,
+				b.spanFromOffsets(t.Pos.Offset+f.start, t.Pos.Offset+f.end), f.why)
+		}
+	}
 }
 
 // countingLexer records how many tokens passed through, which is the only way

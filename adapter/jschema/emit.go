@@ -14,11 +14,10 @@ import (
 const fkTargetPrefix = "_target_"
 
 // buildDocument assembles the complete JSON Schema document for a schema and
-// its import closure, returning the ordered value tree plus the set of $defs
-// keys actually emitted (the reference universe selfCheck audits $refs
-// against). Envelope member order: $schema, $id (only when configured),
-// title, description, type, properties, additionalProperties, $defs.
-func buildDocument(s *schema.Schema, table *defsTable, cfg config) (val, map[string]bool, error) {
+// its import closure as an ordered value tree. Envelope member order: $schema,
+// $id (only when configured), title, description, type, properties,
+// additionalProperties, $defs.
+func buildDocument(s *schema.Schema, table *defsTable, cfg config) (val, error) {
 	pairs := []kv{{K: "$schema", V: scalar("https://json-schema.org/draft/2020-12/schema")}}
 	if cfg.schemaID != "" {
 		pairs = append(pairs, kv{K: "$id", V: scalar(cfg.schemaID)})
@@ -32,7 +31,7 @@ func buildDocument(s *schema.Schema, table *defsTable, cfg config) (val, map[str
 
 	top, err := topLevelProperties(s, table)
 	if err != nil {
-		return val{}, nil, err
+		return val{}, err
 	}
 	pairs = append(
 		pairs,
@@ -40,12 +39,12 @@ func buildDocument(s *schema.Schema, table *defsTable, cfg config) (val, map[str
 		kv{K: "additionalProperties", V: scalar(false)},
 	)
 
-	defs, defKeys, err := buildDefs(table)
+	defs, err := buildDefs(table)
 	if err != nil {
-		return val{}, nil, err
+		return val{}, err
 	}
 	pairs = append(pairs, kv{K: "$defs", V: defs})
-	return object(pairs...), defKeys, nil
+	return object(pairs...), nil
 }
 
 // topLevelProperties emits one envelope key per concrete non-part type, keyed by
@@ -84,13 +83,8 @@ func topLevelProperties(s *schema.Schema, table *defsTable) (val, error) {
 // association target must be a concrete non-part type and a composition
 // target a part type, so nothing can ever $ref an abstract type; its members
 // reach the document flattened into each subtype.
-func buildDefs(table *defsTable) (val, map[string]bool, error) {
+func buildDefs(table *defsTable) (val, error) {
 	var entries []kv
-	keys := map[string]bool{}
-	add := func(k string, v val) {
-		entries = append(entries, kv{K: k, V: v})
-		keys[k] = true
-	}
 
 	for _, t := range table.orderedTypes {
 		if t.IsAbstract() {
@@ -98,40 +92,40 @@ func buildDefs(table *defsTable) (val, map[string]bool, error) {
 		}
 		name, ok := table.defName(t.ID())
 		if !ok {
-			return val{}, nil, fmt.Errorf("jschema: no $defs key for type %q", t.Name())
+			return val{}, fmt.Errorf("jschema: no $defs key for type %q", t.Name())
 		}
 		v, err := typeDef(t, table)
 		if err != nil {
-			return val{}, nil, err
+			return val{}, err
 		}
-		add(name, v)
+		entries = append(entries, kv{K: name, V: v})
 	}
 
 	for _, er := range table.orderedEdges {
 		key, ok := table.edgeDefName(er.rel)
 		if !ok {
-			return val{}, nil, fmt.Errorf("jschema: association %q has no registered EDGE_ $defs key", er.rel.Name())
+			return val{}, fmt.Errorf("jschema: association %q has no registered EDGE_ $defs key", er.rel.Name())
 		}
 		v, err := edgeDef(er, table)
 		if err != nil {
-			return val{}, nil, err
+			return val{}, err
 		}
-		add(key, v)
+		entries = append(entries, kv{K: key, V: v})
 	}
 
 	for _, d := range table.orderedDataTypes {
 		name, ok := table.dataTypeDefName(d)
 		if !ok {
-			return val{}, nil, fmt.Errorf("jschema: no $defs key for datatype %q", d.Name())
+			return val{}, fmt.Errorf("jschema: no $defs key for datatype %q", d.Name())
 		}
 		v, err := dataTypeDef(d, table)
 		if err != nil {
-			return val{}, nil, err
+			return val{}, err
 		}
-		add(name, v)
+		entries = append(entries, kv{K: name, V: v})
 	}
 
-	return object(entries...), keys, nil
+	return object(entries...), nil
 }
 
 // typeDef emits one instance-object schema: flattened properties (own +

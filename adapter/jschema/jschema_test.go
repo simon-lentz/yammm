@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -329,63 +330,72 @@ part type Wheel {
 }
 
 // TestFinish_RefusesADanglingRef drives the self-check over a document Marshal's
-// own pipeline built, with the key one of its $refs names withdrawn from the
-// emitted-keys set.
+// own pipeline built, with the $defs entry one of its $refs names withdrawn
+// from the document itself.
 func TestFinish_RefusesADanglingRef(t *testing.T) {
 	s := loadSchema(t, "named")
 	table, err := buildDefsTable(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc, defKeys, err := buildDocument(s, table, config{})
+	doc, err := buildDocument(s, table, config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := renderDocument(doc)
-	if got, err := finish(out, defKeys); err != nil || !bytes.Equal(got, out) {
+	if got, err := finish(out); err != nil || !bytes.Equal(got, out) {
 		t.Fatalf("finish over the built document = %d bytes, %v; want the document and nil", len(got), err)
 	}
 
-	var decoded any
+	var decoded map[string]any
 	if err := json.Unmarshal(out, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	key, ok := firstRefKey(decoded)
+	key, ok := firstRefKey(t, decoded)
 	if !ok {
 		t.Fatal("the fixture's document holds no $ref")
 	}
-	if !defKeys[key] {
+	defs, _ := decoded["$defs"].(map[string]any)
+	if _, held := defs[key]; !held {
 		t.Fatalf("the $ref key %q is not an emitted key, so withdrawing it proves nothing", key)
 	}
-	delete(defKeys, key)
+	delete(defs, key)
+	withdrawn, err := json.Marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	got, err := finish(out, defKeys)
+	got, err := finish(withdrawn)
 	if err == nil {
-		t.Error("finish = nil, want the dangling $ref refused")
+		t.Errorf("finish = nil, want the $ref to the withdrawn %q refused", key)
 	}
 	if got != nil {
 		t.Errorf("finish returned %d bytes beside its error, want none", len(got))
 	}
 }
 
-// firstRefKey returns the $defs key one "$ref" in a decoded document names,
-// unescaped as checkRefs unescapes it.
-func firstRefKey(v any) (string, bool) {
+// firstRefKey returns the $defs key the first "$ref" in a decoded document
+// names, walking members in sorted key order and decoding through refKey as
+// checkRefs does.
+func firstRefKey(t *testing.T, v any) (string, bool) {
+	t.Helper()
 	switch x := v.(type) {
 	case map[string]any:
 		if ref, ok := x["$ref"].(string); ok {
-			if key, ok := strings.CutPrefix(ref, "#/$defs/"); ok {
-				return strings.ReplaceAll(strings.ReplaceAll(key, "~1", "/"), "~0", "~"), true
+			key, err := refKey(ref)
+			if err != nil {
+				t.Fatalf("refKey(%q): %v", ref, err)
 			}
+			return key, true
 		}
-		for _, member := range x {
-			if key, ok := firstRefKey(member); ok {
+		for _, k := range slices.Sorted(maps.Keys(x)) {
+			if key, ok := firstRefKey(t, x[k]); ok {
 				return key, true
 			}
 		}
 	case []any:
 		for _, elem := range x {
-			if key, ok := firstRefKey(elem); ok {
+			if key, ok := firstRefKey(t, elem); ok {
 				return key, true
 			}
 		}
@@ -394,38 +404,97 @@ func firstRefKey(v any) (string, bool) {
 }
 
 func TestSelfCheck(t *testing.T) {
-	defs := map[string]bool{"Person": true, "a/b": true}
+	const defs = `"$defs":{"Person":{},"a/b":{}}`
 
 	t.Run("resolving_refs_pass", func(t *testing.T) {
-		doc := []byte(`{"properties":{"p":{"$ref":"#/$defs/Person"}},"$defs":{"Person":{}}}`)
-		if err := selfCheck(doc, defs); err != nil {
+		doc := []byte(`{"properties":{"p":{"$ref":"#/$defs/Person"}},` + defs + `}`)
+		if err := selfCheck(doc); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("escaped_pointer_resolves", func(t *testing.T) {
-		doc := []byte(`{"p":{"$ref":"#/$defs/a~1b"}}`)
-		if err := selfCheck(doc, defs); err != nil {
+		doc := []byte(`{"p":{"$ref":"#/$defs/a~1b"},` + defs + `}`)
+		if err := selfCheck(doc); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 	})
 
 	t.Run("unknown_ref_fails", func(t *testing.T) {
-		doc := []byte(`{"p":{"$ref":"#/$defs/Ghost"}}`)
-		if err := selfCheck(doc, defs); err == nil {
+		doc := []byte(`{"p":{"$ref":"#/$defs/Ghost"},` + defs + `}`)
+		if err := selfCheck(doc); err == nil {
 			t.Error("expected an error for a $ref with no $defs entry")
 		}
 	})
 
+	t.Run("a_key_held_below_the_top_level_is_no_entry", func(t *testing.T) {
+		doc := []byte(`{"p":{"$ref":"#/$defs/Ghost"},"properties":{"$defs":{"Ghost":{}}},` + defs + `}`)
+		if err := selfCheck(doc); err == nil {
+			t.Error("expected an error for a $ref naming a key the top-level $defs does not hold")
+		}
+	})
+
+	t.Run("a_pointer_below_an_entry_fails", func(t *testing.T) {
+		doc := []byte(`{"p":{"$ref":"#/$defs/Person/properties"},` + defs + `}`)
+		if err := selfCheck(doc); err == nil {
+			t.Error("expected an error for a $ref pointing below a $defs entry")
+		}
+	})
+
+	t.Run("a_percent_encoded_slash_is_a_separator", func(t *testing.T) {
+		doc := []byte(`{"p":{"$ref":"#/$defs/a%2Fb"},` + defs + `}`)
+		if err := selfCheck(doc); err == nil {
+			t.Error(`expected an error: a resolver reads "a%2Fb" as the two tokens "a" and "b"`)
+		}
+	})
+
+	t.Run("an_undecodable_key_fails", func(t *testing.T) {
+		doc := []byte(`{"p":{"$ref":"#/$defs/g%FF.Foo"},"$defs":{"g\ufffd.Foo":{}}}`)
+		if err := selfCheck(doc); err == nil {
+			t.Error("expected an error for a $ref whose decoded key is not the emitted one")
+		}
+	})
+
+	t.Run("non_string_ref_fails", func(t *testing.T) {
+		doc := []byte(`{"p":{"$ref":7},` + defs + `}`)
+		if err := selfCheck(doc); err == nil || !strings.Contains(err.Error(), "non-string $ref value 7") {
+			t.Errorf("selfCheck = %v, want the non-string $ref named", err)
+		}
+	})
+
+	t.Run("an_undefined_tilde_escape_fails", func(t *testing.T) {
+		for _, ref := range []string{"#/$defs/a~2b", "#/$defs/a~"} {
+			doc := []byte(`{"p":{"$ref":"` + ref + `"},"$defs":{"a~2b":{},"a~":{}}}`)
+			if err := selfCheck(doc); err == nil {
+				t.Errorf("selfCheck accepted %s, which RFC 6901 does not define", ref)
+			}
+		}
+	})
+
+	t.Run("a_document_that_is_no_object_fails", func(t *testing.T) {
+		for _, doc := range []string{`[]`, `null`, `"x"`, `7`} {
+			if err := selfCheck([]byte(doc)); err == nil || !strings.Contains(err.Error(), "not a JSON object") {
+				t.Errorf("selfCheck(%s) = %v, want the document refused as no object", doc, err)
+			}
+		}
+	})
+
+	t.Run("a_ref_inside_an_array_is_checked", func(t *testing.T) {
+		doc := []byte(`{"p":{"anyOf":[{"$ref":"#/$defs/Person"},{"$ref":"#/$defs/Ghost"}]},` + defs + `}`)
+		if err := selfCheck(doc); err == nil {
+			t.Error("expected an error for a dangling $ref inside an array")
+		}
+	})
+
 	t.Run("non_local_ref_fails", func(t *testing.T) {
-		doc := []byte(`{"p":{"$ref":"https://example.com/x.json"}}`)
-		if err := selfCheck(doc, defs); err == nil {
+		doc := []byte(`{"p":{"$ref":"https://example.com/x.json"},` + defs + `}`)
+		if err := selfCheck(doc); err == nil {
 			t.Error("expected an error for a non-#/$defs/ $ref")
 		}
 	})
 
 	t.Run("invalid_json_fails", func(t *testing.T) {
-		if err := selfCheck([]byte(`{`), defs); err == nil {
+		if err := selfCheck([]byte(`{`)); err == nil {
 			t.Error("expected an error for invalid JSON")
 		}
 	})

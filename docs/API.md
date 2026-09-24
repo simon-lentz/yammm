@@ -292,7 +292,7 @@ s, result := schema.NewBuilder().
     Build()
 ```
 
-`Build()` refuses what the DSL refuses in a constraint, with `E_INVALID_CONSTRAINT` and no schema: an argument no `.yammm` source can state — inverted bounds, a non-finite `Float` bound, a negative length, an enum with an empty or repeated value or fewer than two values, a `Pattern` with no pattern or more than two, a `Vector` dimension outside 1 to 65536 — a `List` with no element constraint, and a constraint of a Go type the `schema` package does not construct, such as a pointer to one, each at any `List` depth. It also refuses a datatype declared as another datatype alone (`AddDataType("B", schema.NewAliasConstraint("A", nil))`), which the DSL has no spelling for, and resolves every datatype reference by its name, in any declaration order, refusing a cycle as the DSL does.
+`Build()` refuses what the DSL refuses in a constraint, with `E_INVALID_CONSTRAINT` and no schema: an argument no `.yammm` source can state — inverted bounds, a non-finite `Float` bound, a negative length, an enum with an empty or repeated value or fewer than two values, an enum value or `Timestamp` format that is not valid UTF-8, a `Pattern` with no pattern or more than two, or one writing a surrogate code point with a `\x{…}` escape, a `Vector` dimension outside 1 to 65536 — a `List` with no element constraint, and a constraint of a Go type the `schema` package does not construct, such as a pointer to one, each at any `List` depth. It also refuses a datatype declared as another datatype alone (`AddDataType("B", schema.NewAliasConstraint("A", nil))`), which the DSL has no spelling for, and resolves every datatype reference by its name, in any declaration order, refusing a cycle as the DSL does.
 
 `schema.CheckConstraint(c) error` returns why `c` cannot judge a value, or `nil` when it can. It refuses what `Build()` refuses in a constraint, and a hand-built constraint meets no completion, so it also refuses a DataType reference that resolves to no constraint, at any `List` depth. The Neo4j adapter's `Coerce` and `CoerceParams` call it before they coerce a value.
 
@@ -326,6 +326,14 @@ DSL, so they are not held to those productions. `Build()` refuses an empty
 schema name with `E_INVALID_NAME`, and completion refuses an empty invariant
 message with `E_INVALID_INVARIANT`. Import aliases are validated during
 completion (`E_INVALID_ALIAS`).
+
+Every string value the Builder takes is valid UTF-8, as the DSL's string
+literals are: a schema name that is not is `E_INVALID_NAME`, an import path
+`E_IMPORT_RESOLVE` once `WithSourceID` is set, as `AddImport` requires, and an invariant message or a string literal in an
+invariant's expression `E_INVALID_INVARIANT`. A documentation string passed to
+`WithDocumentation`, `WithTypeDocumentation` or `WithInvariant` is one a doc
+comment can carry: one holding `*/`, a NUL, a byte order mark or bytes that are
+not UTF-8 is `E_SYNTAX`.
 
 A qualified reference (`alias.Type` in `Extends`, a relation or composition
 target, or a qualified datatype constraint) must resolve at build time: the
@@ -1783,7 +1791,7 @@ Fidelity caveats. The emitted schema does not reproduce yammm's validation, and 
 
 ### Validation
 
-Output is deterministic (byte-identical across runs and checkouts, so generated documents can be committed and drift-checked by regenerate-and-diff). Before returning, `Marshal` self-checks: the bytes must parse as JSON and every `$ref` must resolve to an emitted `$defs` entry — a failure is a generation error, never emitted output. The package's contract-alignment tests additionally prove, per corpus case, that sample data validates identically under yammm and under the emitted schema compiled by a real 2020-12 validator.
+Output is deterministic (byte-identical across runs and checkouts, so generated documents can be committed and drift-checked by regenerate-and-diff). Before returning, `Marshal` self-checks: the bytes must parse as JSON and every `$ref` must resolve, as a validator resolves it, to an entry of the `$defs` object those bytes hold — a failure is a generation error, never emitted output. The package's contract-alignment tests additionally prove, per corpus case, that sample data validates identically under yammm and under the emitted schema compiled by a real 2020-12 validator.
 
 ### CLI
 

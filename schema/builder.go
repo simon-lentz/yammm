@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/parse"
@@ -19,7 +20,8 @@ import (
 // the parser are two front doors to the same object model: a Builder-built
 // schema must remain expressible in the DSL, so declared names are held to
 // the same productions the parser enforces structurally. Schema names and
-// invariant names are quoted strings in the DSL and stay free-form.
+// invariant names are quoted strings in the DSL and stay free-form, but valid
+// UTF-8, as every string value is.
 var (
 	// builderTypeNameRE mirrors UC_WORD (type and datatype names).
 	builderTypeNameRE = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
@@ -60,6 +62,50 @@ func unsupportedLiteral(e expr.Expression) (any, bool) {
 	return nil, false
 }
 
+// invalidStringLiteral finds the first string literal in e, or string element
+// of a []string literal, that is not valid UTF-8: the DSL writes every string
+// literal as a STRING, whose value is valid UTF-8.
+func invalidStringLiteral(e expr.Expression) (string, bool) {
+	switch ex := e.(type) {
+	case *expr.Literal:
+		switch v := ex.Val.(type) {
+		case string:
+			return v, !utf8.ValidString(v)
+		case []string:
+			for _, s := range v {
+				if !utf8.ValidString(s) {
+					return s, true
+				}
+			}
+		case []expr.Expression:
+			for _, arg := range v {
+				if bad, found := invalidStringLiteral(arg); found {
+					return bad, true
+				}
+			}
+		}
+	case expr.SExpr:
+		for _, child := range ex.Children() {
+			if bad, found := invalidStringLiteral(child); found {
+				return bad, true
+			}
+		}
+	}
+	return "", false
+}
+
+// docFault describes why no doc comment can carry doc: a character the
+// source rules refuse, or "*/", which ends a doc comment.
+func docFault(doc string) (string, bool) {
+	if why, found := parse.SourceTextFault(doc); found {
+		return why, true
+	}
+	if strings.Contains(doc, "*/") {
+		return `"*/", which ends a doc comment`, true
+	}
+	return "", false
+}
+
 // ImportResolver resolves import paths to SourceIDs for synthetic sources.
 // This is required when the builder's SourceID is synthetic (not file-backed)
 // and imports use relative paths like "./common".
@@ -72,8 +118,9 @@ type ImportResolver func(path string) (location.SourceID, bool)
 //
 // # Validation Contract
 //
-// Build refuses what the DSL refuses in a name or a constraint, so a
-// Builder-built schema's names and constraints remain expressible in the DSL.
+// Build refuses what the DSL refuses in a name, a string value, a
+// documentation string or a constraint, so a Builder-built schema remains
+// expressible in the DSL.
 // A declared name that the DSL's name productions
 // refuse is E_INVALID_NAME: type and datatype names are an uppercase letter
 // followed by letters, digits or underscores, and none is one of the eleven
@@ -85,9 +132,14 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // with no pattern, more than two or one regexp.Compile refuses, a Vector
 // dimension outside 1 to 65536, a List with no element, and a Go type this
 // package does not construct. So is a datatype declared as a bare reference to
-// another datatype. Schema names and
-// invariant names are quoted strings in the DSL and stay free-form. Import
-// aliases are validated during completion.
+// another datatype, a Pattern writing a surrogate code point, and an enum value
+// or Timestamp format that is not valid UTF-8. Schema names and invariant names
+// are quoted strings in the DSL and stay free-form, but a string value is valid
+// UTF-8 wherever the Builder takes one: E_INVALID_NAME for the schema name,
+// E_IMPORT_RESOLVE for an import path, E_INVALID_INVARIANT for an invariant's
+// message or string literal. A documentation string no doc comment can carry —
+// one holding "*/", a NUL, a byte order mark or bytes that are not UTF-8 — is
+// E_SYNTAX. Import aliases are validated during completion.
 //
 // # Import Requirements
 //
@@ -275,6 +327,12 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 			WithDetail(diag.DetailKeyContext, "Builder").Build())
 		return nil, collector.Result()
 	}
+	if !utf8.ValidString(b.name) {
+		collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+			fmt.Sprintf("schema name %q is not valid UTF-8; the DSL writes it as a string, whose value is", b.name)).
+			WithDetail(diag.DetailKeyContext, "Builder").Build())
+		return nil, collector.Result()
+	}
 
 	// Validate SourceID requirement for imports - must be set AND non-zero
 	if len(b.imports) > 0 && (!b.sourceIDSet || b.sourceID.IsZero()) {
@@ -414,8 +472,10 @@ func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
 // names LC_WORD less the six excluded spellings, relation names UPPER_SNAKE less
 // UUID); every constraint argument [constraintFault] refuses, and a datatype
 // declared as another datatype alone; the Go type of every literal an invariant
-// holds; and the property each WithPropertyAnnotation names. An invariant's
-// message and expression are completion's to check.
+// holds, and that every string value is valid UTF-8; that every documentation
+// string is one a doc comment can carry; and the property each
+// WithPropertyAnnotation names. An invariant's message and expression are
+// otherwise completion's to check.
 // Returns true if validation passes, false otherwise (with diagnostics collected).
 //
 // Uses semantic diagnostic codes per:
@@ -424,11 +484,34 @@ func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
 //     source can state (see [constraintFault]), and for a datatype declared as
 //     another datatype alone
 //   - E_INVALID_INVARIANT for invalid invariant declarations
+//   - E_IMPORT_RESOLVE for an import path that is not valid UTF-8
+//   - E_SYNTAX for a documentation string no doc comment can carry
 //   - E_UNKNOWN_ANNOTATION_TARGET for a property annotation naming no property
 func (b *Builder) validateInput(collector *diag.Collector) bool {
 	hasErrors := false
 
+	for _, imp := range b.imports {
+		if !utf8.ValidString(imp.Path) {
+			collector.Collect(importResolveIssue("", diag.ModuleRootNone,
+				fmt.Sprintf("import path %q is not valid UTF-8, so it names no schema", imp.Path), imp))
+			hasErrors = true
+		}
+	}
+	if why, found := docFault(b.documentation); found {
+		collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
+			"schema documentation cannot be written as a doc comment: "+why).
+			WithDetail(diag.DetailKeyContext, "Builder").Build())
+		hasErrors = true
+	}
+
 	for _, t := range b.types {
+		if why, found := docFault(t.documentation); found {
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
+				fmt.Sprintf("documentation of type %q cannot be written as a doc comment: %s", t.name, why)).
+				WithDetail(diag.DetailKeyTypeName, t.name).
+				WithDetail(diag.DetailKeyContext, "Builder").Build())
+			hasErrors = true
+		}
 		switch {
 		case t.name == "":
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
@@ -512,11 +595,32 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 		// An empty message and an absent expression are the completer's to
 		// refuse, by the one rule the parse front door shares.
 		for _, inv := range t.invariants {
+			if !utf8.ValidString(inv.Name) {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
+					fmt.Sprintf("invariant message %q in type %q is not valid UTF-8; the DSL writes it as a string, whose value is", inv.Name, t.name)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyName, inv.Name).Build())
+				hasErrors = true
+			}
 			if bad, found := unsupportedLiteral(inv.Expr); found {
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
 					fmt.Sprintf("invariant %q in type %q holds a literal of Go type %T; an expression literal is nil, string, int64, float64, bool or *regexp.Regexp", inv.Name, t.name, bad)).
 					WithDetail(diag.DetailKeyTypeName, t.name).
 					WithDetail(diag.DetailKeyName, inv.Name).Build())
+				hasErrors = true
+			} else if bad, found := invalidStringLiteral(inv.Expr); found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
+					fmt.Sprintf("invariant %q in type %q holds the string literal %q, which is not valid UTF-8", inv.Name, t.name, bad)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyName, inv.Name).Build())
+				hasErrors = true
+			}
+			if why, found := docFault(inv.Documentation); found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
+					fmt.Sprintf("documentation of invariant %q in type %q cannot be written as a doc comment: %s", inv.Name, t.name, why)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyName, inv.Name).
+					WithDetail(diag.DetailKeyContext, "Builder").Build())
 				hasErrors = true
 			}
 		}
@@ -625,9 +729,13 @@ func CheckConstraint(c Constraint) error {
 // DataType reference is judged by its name, which completion resolves.
 func constraintFault(c Constraint) (string, bool) {
 	switch c := c.(type) {
-	case BooleanConstraint, TimestampConstraint, DateConstraint, UUIDConstraint, AliasConstraint:
-		// Nothing to judge: the DSL states every Boolean, Date, UUID and Timestamp
-		// format, and a reference is judged by the name completion resolves.
+	case BooleanConstraint, DateConstraint, UUIDConstraint, AliasConstraint:
+		// Nothing to judge: the DSL states every Boolean, Date and UUID, and a
+		// reference is judged by the name completion resolves.
+	case TimestampConstraint:
+		if !utf8.ValidString(c.Format()) {
+			return fmt.Sprintf("timestamp format %q is not valid UTF-8", c.Format()), true
+		}
 	case IntegerConstraint:
 		lo, hasLo := c.Min()
 		hi, hasHi := c.Max()
@@ -665,6 +773,8 @@ func constraintFault(c Constraint) (string, bool) {
 			switch {
 			case v == "":
 				return "enum value cannot be empty", true
+			case !utf8.ValidString(v):
+				return fmt.Sprintf("enum value %q is not valid UTF-8", v), true
 			case seen[v]:
 				return fmt.Sprintf("duplicate enum value %q", v), true
 			}

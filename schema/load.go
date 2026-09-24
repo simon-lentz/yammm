@@ -1107,11 +1107,9 @@ func (l *loader) reportAmbiguousImport(imp *importDecl, sourceID location.Source
 	l.mu.Lock()
 	l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: sourceID}
 	l.mu.Unlock()
-	l.collector.Collect(diag.NewIssue(diag.Error, diag.E_IMPORT_RESOLVE,
-		fmt.Sprintf("import %q names a source the shared registry holds as two compiles with different bytes", imp.Path)).
-		WithSpan(imp.Span).
-		WithDetail(diag.DetailKeyImportPath, imp.Path).
-		WithDetail(diag.DetailKeyAlias, imp.Alias).Build())
+	root, origin := l.loaderRoot()
+	l.collector.Collect(importResolveIssue(root, origin,
+		fmt.Sprintf("import %q names a source the shared registry holds as two compiles with different bytes", imp.Path), imp))
 }
 
 // closureConflict names a closure member one load cannot hold beside what it
@@ -1132,13 +1130,14 @@ func (l *loader) reportClosureConflict(imp *importDecl, sourceID location.Source
 	l.mu.Lock()
 	l.imports[imp.Alias] = importBinding{decl: imp, failed: true, sourceID: sourceID}
 	l.mu.Unlock()
-	code, msg := diag.E_IMPORT_RESOLVE,
-		fmt.Sprintf("import %q holds %s in its closure compiled from different bytes than the compile this load already holds", imp.Path, c.member)
-	if c.sourceChanged {
-		code, msg = diag.E_LOAD_SOURCE_CHANGED,
-			fmt.Sprintf("import %q: the shared registry compiled %s from different bytes than this load holds for it", imp.Path, c.member)
+	if !c.sourceChanged {
+		root, origin := l.loaderRoot()
+		l.collector.Collect(importResolveIssue(root, origin,
+			fmt.Sprintf("import %q holds %s in its closure compiled from different bytes than the compile this load already holds", imp.Path, c.member), imp))
+		return
 	}
-	l.collector.Collect(diag.NewIssue(diag.Error, code, msg).
+	l.collector.Collect(diag.NewIssue(diag.Error, diag.E_LOAD_SOURCE_CHANGED,
+		fmt.Sprintf("import %q: the shared registry compiled %s from different bytes than this load holds for it", imp.Path, c.member)).
 		WithSpan(imp.Span).
 		WithDetail(diag.DetailKeyImportPath, imp.Path).
 		WithDetail(diag.DetailKeyAlias, imp.Alias).Build())

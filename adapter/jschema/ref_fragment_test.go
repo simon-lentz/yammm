@@ -59,7 +59,7 @@ type Region {
 }
 
 func TestRefKey_InvertsRefTo(t *testing.T) {
-	for _, key := range []string{"Person", "common.Region", "a/b.X", "odd~name.X", "a%b.X", "a%2Fb.X", "ü #?.X", "~1/~0"} {
+	for _, key := range []string{"Person", "common.Region", "a/b.X", "odd~name.X", "a%b.X", "a%2Fb.X", "ü #?.X", "~1/~0", "a+b.X"} {
 		ref, ok := refTo(key).obj[0].V.stringValue()
 		if !ok {
 			t.Fatalf("refTo(%q) holds no string", key)
@@ -84,7 +84,7 @@ func TestSelfCheck_ReportsOneDanglingRefOnEveryRun(t *testing.T) {
 	doc := []byte(`{"properties": {` + strings.Join(members, ", ") + `}}`)
 	want := `jschema: self-check: $ref "#/$defs/Ghost0" resolves to no emitted $defs entry`
 	for range 200 {
-		err := selfCheck(doc, map[string]bool{})
+		err := selfCheck(doc)
 		if err == nil || err.Error() != want {
 			t.Fatalf("selfCheck = %v, want %s", err, want)
 		}

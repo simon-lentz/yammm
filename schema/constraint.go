@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/simon-lentz/yammm/internal/parse"
 )
 
 // ConstraintKind identifies the kind of constraint.
@@ -495,7 +497,8 @@ type PatternConstraint struct {
 // regexp built with [regexp.CompilePOSIX] or [regexp.Regexp.Longest] matches
 // by the source's Perl reading. A source that reading refuses, which POSIX
 // syntax can accept (a**), is kept as given, and [Builder.Build] and
-// [CheckConstraint] refuse the constraint as the DSL refuses the pattern.
+// [CheckConstraint] refuse the constraint as the DSL refuses the pattern. They
+// refuse a pattern writing a surrogate code point with a \x{…} escape too.
 func NewPatternConstraint(patterns []*regexp.Regexp) PatternConstraint {
 	c := PatternConstraint{
 		patterns: make([]string, len(patterns)),
@@ -509,6 +512,8 @@ func NewPatternConstraint(patterns []*regexp.Regexp) PatternConstraint {
 			if c.invalid == "" {
 				c.invalid = fmt.Sprintf("invalid regex pattern %q: %v", c.patterns[i], err)
 			}
+		} else if r, found := parse.SurrogateEscape(c.patterns[i]); found && c.invalid == "" {
+			c.invalid = parse.SurrogateMessage(c.patterns[i], r)
 		}
 		c.compiled[i] = perl
 	}

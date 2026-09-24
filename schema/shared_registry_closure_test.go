@@ -416,6 +416,7 @@ func TestLoadSourcesWithEntry_RefusesADisagreeingMemberInEitherImportOrder(t *te
 				if !strings.Contains(issueLines(res), "two compiles with different bytes") {
 					t.Errorf("the refusal does not name the disagreement: %s", issueLines(res))
 				}
+				assertResolutionShape(t, res)
 			})
 		}
 	}
@@ -458,6 +459,7 @@ func TestLoadSourcesWithEntry_RefusesTheSecondOfTwoOwnersThatDisagree(t *testing
 					!strings.Contains(lines, "compiled from different bytes than the compile this load already holds") {
 					t.Errorf("the refusal does not name the second import %q, the member b.yammm and the disagreement: %s", row.refused, lines)
 				}
+				assertResolutionShape(t, res)
 			})
 		}
 	}

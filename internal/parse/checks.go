@@ -2,9 +2,11 @@ package parse
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -291,10 +293,13 @@ func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 		}
 		lit.Text = text
 		re, err := regexp.Compile(text)
+		surrogate, namesSurrogate := SurrogateEscape(text)
 		switch {
 		case err != nil:
 			b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span,
 				"invalid regex pattern %q: %v", text, err)
+		case namesSurrogate:
+			b.reportf(diag.E_INVALID_CONSTRAINT, lit.Span, "%s", SurrogateMessage(text, surrogate))
 		case kept < MaxPatterns:
 			lit.Regex, lit.Kept = re, true
 			kept++
@@ -308,6 +313,53 @@ func (b *builder) patternConstraint(c *patC, span location.Span) *Constraint {
 			"pattern constraint exceeds maximum of %d patterns (got %d)", MaxPatterns, kept)
 	}
 	return out
+}
+
+// SurrogateEscape returns the first surrogate code point (U+D800 to U+DFFF)
+// that pattern writes with a \x{…} escape, the one spelling RE2 has for one,
+// and reports whether there is one. Go's regexp compiles it, but no string
+// holds a surrogate, so it has no reading another dialect shares; a Pattern
+// constraint refuses it as a string literal refuses \uD800. Text between \Q and \E is
+// literal, and a class that spans the surrogate block writes none.
+func SurrogateEscape(pattern string) (rune, bool) {
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] != '\\' || i+1 >= len(pattern) {
+			continue
+		}
+		switch pattern[i+1] {
+		case 'Q':
+			end := strings.Index(pattern[i+2:], `\E`)
+			if end < 0 {
+				return 0, false
+			}
+			i += 2 + end + 1
+		case 'x':
+			rest := pattern[i+2:]
+			if !strings.HasPrefix(rest, "{") {
+				i++
+				continue
+			}
+			end := strings.IndexByte(rest, '}')
+			if end < 0 {
+				return 0, false
+			}
+			// A surrogate fits sixteen bits; a longer value is none.
+			v, err := strconv.ParseUint(rest[1:end], 16, 16)
+			if r := rune(uint16(v)); err == nil && utf16.IsSurrogate(r) {
+				return r, true
+			}
+			i += 2 + end
+		default:
+			i++
+		}
+	}
+	return 0, false
+}
+
+// SurrogateMessage is the diagnostic for a pattern [SurrogateEscape] refuses;
+// the schema Builder refuses one in the same words.
+func SurrogateMessage(pattern string, r rune) string {
+	return fmt.Sprintf("regex pattern %q names the surrogate code point U+%04X, which no string holds", pattern, r)
 }
 
 func (b *builder) timestampConstraint(c *timC, span location.Span) *Constraint {
@@ -392,18 +444,22 @@ func (b *builder) unquoteAt(t *strTok, what string) (string, bool) {
 	return text, true
 }
 
-// unquoteSyntaxCause is the unquoter's message without the prefix, for the one
-// reporting site that supplies its own.
-const unquoteSyntaxCause = "invalid syntax"
+// unquotePrefix begins every unquote error, as the strconv-backed unquoter's
+// did, so consumers matching diagnostic text see no change. The one reporting
+// site that supplies its own prefix strips it.
+const unquotePrefix = "unquote string: "
 
-// errUnquoteSyntax keeps the exact message the strconv-backed unquoter
-// produced, so consumers matching diagnostic text see no change.
-var errUnquoteSyntax = errors.New("unquote string: " + unquoteSyntaxCause)
+var (
+	errUnquoteSyntax = errors.New(unquotePrefix + "invalid syntax")
+	errUnquoteUTF8   = errors.New(unquotePrefix + "the value its escapes write is not valid UTF-8")
+)
 
 // unquote strips a literal's surrounding quotes and resolves exactly the
 // lexer's STRING escape vocabulary: \b \t \n \f \r \0 \xHH \uHHHH \" \' \\.
-// The quote character not delimiting the literal appears literally unescaped,
-// and an invalid UTF-8 byte becomes U+FFFD, as strconv.Unquote resolved it.
+// The quote character not delimiting the literal appears literally unescaped.
+// A value is valid UTF-8: a \xHH escape writes one byte, so escapes that do
+// not form UTF-8 are refused. A raw invalid byte becomes U+FFFD, since the
+// source rules already refuse it where it stands and one diagnostic is enough.
 func unquote(s string) (string, error) {
 	if !isQuoted(s) {
 		return s, nil
@@ -477,6 +533,9 @@ func unquote(s string) (string, error) {
 		default:
 			return "", errUnquoteSyntax
 		}
+	}
+	if !utf8.ValidString(out.String()) {
+		return "", errUnquoteUTF8
 	}
 	return out.String(), nil
 }

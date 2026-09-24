@@ -24,8 +24,11 @@ func refTo(defName string) val {
 	return object(kv{"$ref", scalar(defsRefPrefix + fragmentEscape(token))})
 }
 
-// refKey inverts [refTo]: it returns the $defs key a "$ref" value names,
-// percent-decoding before the RFC 6901 unescape as a resolver does.
+// refKey inverts [refTo]: it returns the $defs key a "$ref" value names, read
+// as a resolver reads it — the fragment percent-decoded, then split on "/"
+// into RFC 6901 tokens, then each token unescaped. A pointer below a $defs
+// entry names no entry, so a second token is refused, and so is a "~" that is
+// not "~0" or "~1", which RFC 6901 does not define.
 func refKey(ref string) (string, error) {
 	token, ok := strings.CutPrefix(ref, defsRefPrefix)
 	if !ok {
@@ -34,6 +37,18 @@ func refKey(ref string) (string, error) {
 	token, err := url.PathUnescape(token)
 	if err != nil {
 		return "", fmt.Errorf("$ref %q is not a valid URI fragment: %w", ref, err)
+	}
+	if strings.Contains(token, "/") {
+		return "", fmt.Errorf("$ref %q points below a %s entry", ref, defsRefPrefix)
+	}
+	for i := 0; i < len(token); i++ {
+		if token[i] != '~' {
+			continue
+		}
+		if i+1 == len(token) || (token[i+1] != '0' && token[i+1] != '1') {
+			return "", fmt.Errorf("$ref %q holds a \"~\" RFC 6901 does not define", ref)
+		}
+		i++
 	}
 	return strings.ReplaceAll(strings.ReplaceAll(token, "~1", "/"), "~0", "~"), nil
 }

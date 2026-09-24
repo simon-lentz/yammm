@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/alecthomas/participle/v2/lexer"
 )
@@ -72,7 +73,8 @@ type Token struct {
 }
 
 // byteOrderMark is U+FEFF. A source can start with one, as Go's scanner
-// allows; [lexStart] skips it, and a mark anywhere else lexes as ANY_OTHER.
+// allows; [lexStart] skips it. A mark anywhere else lexes as ANY_OTHER, or
+// inside a comment or a literal, where the source rules refuse it.
 const byteOrderMark = "\uFEFF"
 
 // lexStart returns the byte offset the lexer starts at: past one leading byte
@@ -83,6 +85,49 @@ func lexStart(src string) int {
 		return len(byteOrderMark)
 	}
 	return 0
+}
+
+// textFault is one run of source text the source rules refuse, as byte
+// offsets into the text scanned.
+type textFault struct {
+	start, end int
+	why        string
+}
+
+// nextTextFault returns the first run at or after from that the source rules
+// refuse: bytes that are not valid UTF-8 (a run of them is one fault), a byte
+// order mark, or a NUL. No other character is one the source rules refuse
+// inside a comment or a literal.
+func nextTextFault(s string, from int) (textFault, bool) {
+	for i := from; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			j := i + 1
+			for j < len(s) {
+				if r, n := utf8.DecodeRuneInString(s[j:]); r != utf8.RuneError || n != 1 {
+					break
+				}
+				j++
+			}
+			return textFault{i, j, "invalid UTF-8 encoding"}, true
+		case strings.HasPrefix(s[i:], byteOrderMark):
+			return textFault{i, i + size, "byte order mark (U+FEFF) past the start of the source"}, true
+		case r == 0:
+			return textFault{i, i + 1, `NUL character (U+0000) in the source; a string writes it as \0`}, true
+		}
+		i += size
+	}
+	return textFault{}, false
+}
+
+// SourceTextFault describes the first character of s that no schema source
+// can hold past its start — a byte that is not valid UTF-8, a byte order mark,
+// or a NUL — and reports whether there is one. The schema Builder holds a documentation
+// string to it, since a doc comment is source text.
+func SourceTextFault(s string) (string, bool) {
+	f, ok := nextTextFault(s, 0)
+	return f.why, ok
 }
 
 // Lex returns every token in src, in source order, with nothing elided —

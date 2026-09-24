@@ -41,8 +41,12 @@
 // doc-comment, one "//" line for each of its lines. The indentation its
 // continuation lines share is removed, because the Go doc-comment formatter
 // reads an indented line as a code block. A line indented deeper than the rest
-// keeps the difference and is rendered as a code block, which gofmt sets apart
-// with a blank "//" line before and after it.
+// keeps the difference and is rendered as a code block: gofmt puts a blank
+// "//" line before it, and after it when text follows. A line Go would read as
+// a build line — "+build ignore" as a "//" line, which gofmt moves into the
+// file's build constraints — is written as a one-line /* */ comment in the
+// same comment group, which neither gofmt nor go vet reads as one, so the doc
+// reads unchanged; gofmt then leaves that group as written.
 //
 // # Type Mapping
 //
@@ -72,8 +76,8 @@
 // layout named only by a temporal DataType claims nothing, since that DataType
 // is its own type. A layout whose name is claimed takes "Timestamp_" plus its
 // layout with every other rune written as its hexadecimal code point between
-// underscores, and an invalid UTF-8 byte as "_x" and its hexadecimal value
-// (Timestamp_2006_2D_01_2D_02 for "2006-01-02"), a name nothing else can hold.
+// underscores (Timestamp_2006_2D_01_2D_02 for "2006-01-02"), a name nothing
+// else can hold.
 // A layout's name therefore never passes to another layout: a schema edit that
 // claims a bare name moves its layout to the exact name, which no other layout
 // can take. A default-layout Timestamp stays time.Time,
@@ -294,8 +298,8 @@
 //	adapter/gogen  ──imports──▶  schema, location, internal/ident
 //
 // gogen is the one adapter that imports a core internal package — internal/ident, for
-// the canonical identifier-casing transform the library uses elsewhere (e.g. JSON
-// field names) — and, unlike the data adapters, it imports neither instance/graph
+// the identifier-casing transform that turns schema names into Go
+// identifiers — and, unlike the data adapters, it imports neither instance/graph
 // nor diag. The generated output depends only on the standard library, importing at
 // most "time" and "encoding/json".
 package gogen

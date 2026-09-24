@@ -17,10 +17,15 @@
 // # What Parse reports and what it does not
 //
 // Parse reports the diagnostics a reader of the source alone can justify, and
-// it emits five codes. E_SYNTAX covers text that does not fit the grammar.
-// E_INVALID_CONSTRAINT covers a constraint whose written arguments contradict
-// themselves — inverted bounds, an unparseable bound, a duplicate enum value,
-// a regex that does not compile. E_INVALID_INVARIANT covers a literal inside
+// it emits five codes. E_SYNTAX covers text that does not fit the grammar, and
+// the source rules: a byte that is not valid UTF-8, a byte order mark past the
+// start and a NUL are refused at the byte inside a comment or a string or
+// regex literal, and fail the construct holding them anywhere else; a string
+// literal whose escapes write bytes that are not UTF-8 is refused at the
+// literal, except an annotation argument, which keeps its written spelling. E_INVALID_CONSTRAINT covers a
+// constraint whose written arguments contradict themselves — inverted bounds,
+// an unparseable bound, a duplicate enum value, a regex that does not compile
+// or that writes a surrogate code point. E_INVALID_INVARIANT covers a literal inside
 // an invariant expression that will not convert, such as a number out of range
 // or an unquotable string. E_INVALID_NAME covers an empty schema name and a
 // relation name that is not UPPER_SNAKE, and E_REVERSE_CLAUSE_REMOVED a
@@ -147,7 +152,7 @@
 // backslash before a letter outside the escape vocabulary makes the whole
 // literal fail to lex, falling through to ANY_OTHER at the opening quote. A \x
 // or \u escape lexes whatever follows it, and unquoting refuses malformed
-// digits.
+// digits and a value that is not valid UTF-8.
 //
 // # Expression precedence
 //

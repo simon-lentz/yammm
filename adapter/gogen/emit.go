@@ -3,6 +3,7 @@ package gogen
 import (
 	"errors"
 	"fmt"
+	"go/build/constraint"
 	"strconv"
 	"strings"
 
@@ -735,13 +736,34 @@ func jsonTag(name, opt string) string {
 // emitDoc writes a yammm doc-comment as Go line comments, one per line. The
 // indentation every continuation line shares is removed, since the doc-comment
 // formatter reads an indented line as a code block; deeper indentation stays.
+// A line Go would read as a build line ([buildLineHazard]) is written as a
+// one-line block comment instead, in the same comment group, so go/doc reads
+// the doc unchanged. No doc of a loaded schema holds "*/".
 func (g *generator) emitDoc(doc string) {
 	if doc == "" {
 		return
 	}
 	for line := range strings.SplitSeq(dedentContinuation(doc), "\n") {
-		fmt.Fprintf(g.buf, "// %s\n", strings.TrimRight(line, " \t"))
+		line = strings.TrimRight(line, " \t")
+		if buildLineHazard(line) {
+			fmt.Fprintf(g.buf, "/*%s*/\n", line)
+			continue
+		}
+		fmt.Fprintf(g.buf, "// %s\n", line)
 	}
+}
+
+// buildLineHazard reports whether "// "+line is a comment Go reads as a build
+// line: go/printer moves a "+build" line, wherever it stands, into the file's
+// build constraints, and go vet's buildtag check refuses a "+build" line or a
+// "//go:build" line out of place, and one it reads as a "//go:build" line
+// written with a space. Neither reads a one-line block comment.
+func buildLineHazard(line string) bool {
+	text := "// " + line
+	if constraint.IsPlusBuild(text) {
+		return true
+	}
+	return strings.Contains(text, "//go:build") && constraint.IsGoBuild("//"+strings.TrimSpace(text[2:]))
 }
 
 // dedentContinuation removes from every line after the first the leading

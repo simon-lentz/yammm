@@ -91,7 +91,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SYNTAX` | Syntax error in `.yammm` source |
+| `E_SYNTAX` | Syntax error in `.yammm` source, or a Builder documentation string no doc comment can carry |
 
 ### Import
 
@@ -119,7 +119,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type |
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
 | `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
-| `E_INVALID_INVARIANT` | Invariant expression is invalid |
+| `E_INVALID_INVARIANT` | An invariant's expression or message is invalid |
 | `E_DUPLICATE_INVARIANT` | One invariant message declared twice on a type |
 | `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ |
 | `E_REVERSE_CLAUSE_REMOVED` | Schema carries the reverse clause removed in v0.15.0 (v0.15+) |

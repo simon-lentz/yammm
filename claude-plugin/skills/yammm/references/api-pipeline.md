@@ -117,7 +117,7 @@ s, result := schema.NewBuilder().
     Build()
 ```
 
-`Build()` validates declared names against the DSL's own productions (`E_INVALID_NAME`): type and datatype names start with an uppercase letter and property names with a lowercase letter, both continuing with letters, digits, or underscores; relation names are UPPER_SNAKE — an uppercase letter, then uppercase letters, digits, or underscores. No type, datatype or relation name is one of the eleven built-in type names (`List`, `String`, `UUID` and the rest), and no property name is `as`, `part`, `in`, `nil`, `true` or `false`. Schema names and invariant names are free-form strings.
+`Build()` validates declared names against the DSL's own productions (`E_INVALID_NAME`): type and datatype names start with an uppercase letter and property names with a lowercase letter, both continuing with letters, digits, or underscores; relation names are UPPER_SNAKE — an uppercase letter, then uppercase letters, digits, or underscores. No type, datatype or relation name is one of the eleven built-in type names (`List`, `String`, `UUID` and the rest), and no property name is `as`, `part`, `in`, `nil`, `true` or `false`. Schema names and invariant names are free-form strings, and like every string value the Builder takes they are valid UTF-8. A documentation string holding `*/`, a NUL, a byte order mark or bytes that are not UTF-8 is `E_SYNTAX`, since no doc comment can carry it.
 
 ### Schema Type (Read API)
 

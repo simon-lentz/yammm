@@ -582,9 +582,14 @@ func TestMarshal_LayoutNameNeverPassesToAnotherLayout(t *testing.T) {
 		t.Errorf("a layout whose base a declared type holds is named %v, want its exact name", after)
 	}
 
-	invalid := layoutNames(t, "", "a\xffb", "a\uFFFDb")
-	if invalid["Timestamp_a_xFF_b"] != "a\xffb" || invalid["Timestamp_a_FFFD_b"] != "a\uFFFDb" {
-		t.Errorf("an invalid byte and U+FFFD are not told apart: %v", invalid)
+	// A layout holding an invalid byte would name as U+FFFD does; the DSL
+	// refuses it, so the two never meet.
+	if _, res := schema.LoadString(context.Background(),
+		"schema \"bases\"\n\ntype Doc {\n\tid String primary\n\tp Timestamp[\"a\\xffb\"]\n}\n", "bases.yammm"); !res.HasErrors() {
+		t.Error(`Timestamp["a\xffb"] loads; a layout holding an invalid byte would name as U+FFFD does`)
+	}
+	if shared := layoutNames(t, "", "ab", "a\uFFFDb"); shared["Timestamp_a_FFFD_b"] != "a\uFFFDb" {
+		t.Errorf("U+FFFD's layout, sharing its base with ab, is named %v, want Timestamp_a_FFFD_b", shared)
 	}
 
 	carrier := layoutNames(t, "type Wall = Timestamp[\"2006-01-02\"]\n", "20060102")
