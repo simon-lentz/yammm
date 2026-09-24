@@ -15,7 +15,7 @@ Signed integer values with optional bounds.
 - Bounds are inclusive
 - `_` means unbounded on that side
 - Negative bounds allowed: `Integer[-40, 50]`
-- Validation accepts signed and unsigned integers. Unsigned values exceeding `int64` max are rejected.
+- Validation accepts signed and unsigned integers. Unsigned values exceeding `int64` max are rejected, and so is every float, whole or not: in a data file an Integer value is written without `.`, `e` or `E` (`5`, never `5.0` or `1e2`).
 
 ```yammm-snippet
 age Integer                     // unbounded

@@ -61,8 +61,8 @@
 //     Names compare as the decoder reads them: escapes are resolved, and each
 //     byte of an invalid UTF-8 sequence reads as U+FFFD, which is the key the
 //     decoder keeps. Each repeat is reported where it stands, and the instance
-//     is produced holding the value the decoder kept, which is the value every
-//     other JSON reader keeps.
+//     is produced holding the value the decoder kept, the last one the object
+//     states.
 //   - Anything but white space and closed comments after the root object,
 //     reported where it starts, whether or not it reads as a JSON value. An
 //     unterminated block comment is content.
@@ -87,7 +87,8 @@
 //
 // Every instance carries a [location.Provenance]: the source the caller named,
 // the instance's path in the document ($.Person[0]), and a point span at its
-// opening brace. Every parse diagnostic carries a span in that source too.
+// opening brace. A parse diagnostic carries a span in that source wherever its
+// offset lies inside the data; the cancellation diagnostic carries none.
 //
 // The path indexes the document's own array, so $.Person[2] addresses the
 // document even where element 1 failed to decode. [adapter/csv] indexes by the
@@ -122,11 +123,15 @@
 //
 // JSON numbers are read by lexical form: a literal with '.', 'e' or 'E' is a
 // float64 when a finite float64 holds it, and an integer literal is an int64.
-// A literal no finite float64 holds, such as 1e400, stays a json.Number that
-// validation refuses. An integer literal outside the
-// int64 range keeps its exact text as a json.Number: validation refuses it at
-// an Integer property (E_TYPE_MISMATCH) and reads it as its nearest float64 at
-// a Float property. A float64 holds integers exactly only up to 2^53.
+// An Integer property takes an integer literal alone: 5.0 and 1e2 are floats,
+// which validation refuses there (E_TYPE_MISMATCH). A Float property takes any
+// number, read as its nearest float64. A literal no finite float64 holds, such
+// as 1e400, stays a json.Number that validation refuses at either kind. An
+// integer literal outside the int64 range keeps its exact text as a
+// json.Number: validation refuses it at an Integer property and reads it as its
+// nearest float64 at a Float property, refusing it there only when no finite
+// float64 holds it. The literal -0 stays a json.Number too, so a Float reads
+// it as the float64 -0. A float64 holds integers exactly only up to 2^53.
 //
 // # Dependencies
 //

@@ -1668,156 +1668,9 @@ func TestCompareUint64Float64_Quick(t *testing.T) {
 	}
 }
 
-func TestIsWholeNumber(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  float64
-		expect bool
-	}{
-		// Whole numbers
-		{"zero", 0.0, true},
-		{"positive_one", 1.0, true},
-		{"negative_one", -1.0, true},
-		{"large_positive", 1000000.0, true},
-		{"large_negative", -1000000.0, true},
-		{"max_safe_integer", 9007199254740992.0, true},          // 2^53
-		{"negative_max_safe", -9007199254740992.0, true},        // -2^53
-		{"near_max_int64", float64(math.MaxInt64 - 1024), true}, // Close to max (loses precision)
-		{"near_min_int64", float64(math.MinInt64), true},        // Exactly -2^63
-		{"at_max_boundary", float64(1 << 62), true},             // Large but safely within range
-		{"negative_at_boundary", -float64(1 << 63), true},       // Exactly -2^63
-		// Note: float64(1<<63 - 1) rounds UP to 2^63, which is out of int64 range
-
-		// Non-whole numbers
-		{"fractional_half", 0.5, false},
-		{"fractional_pi", 3.14159, false},
-		{"fractional_negative", -2.5, false},
-		{"fractional_small", 0.0001, false},
-
-		// Non-finite values
-		{"positive_infinity", math.Inf(1), false},
-		{"negative_infinity", math.Inf(-1), false},
-		{"nan", math.NaN(), false},
-
-		// Whole but outside int64: whole all the same. GetInt64FromFloat
-		// carries the range and refuses these (whole_test.go).
-		{"too_large", float64(1 << 63), true},
-		{"too_large_positive", 1e20, true},
-		{"too_large_negative", -1e20, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := value.IsWholeNumber(tt.input)
-			if result != tt.expect {
-				t.Errorf("IsWholeNumber(%v) = %v, want %v", tt.input, result, tt.expect)
-			}
-		})
-	}
-}
-
-func TestGetInt64FromFloat(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   float64
-		wantVal int64
-		wantOK  bool
-	}{
-		// Valid whole numbers
-		{"zero", 0.0, 0, true},
-		{"positive_one", 1.0, 1, true},
-		{"negative_one", -1.0, -1, true},
-		{"forty_two", 42.0, 42, true},
-		{"negative_forty_two", -42.0, -42, true},
-		{"large_positive", 1000000.0, 1000000, true},
-		{"large_negative", -1000000.0, -1000000, true},
-		{"max_safe_integer", 9007199254740992.0, 9007199254740992, true}, // 2^53
-
-		// Invalid: fractional
-		{"fractional_half", 0.5, 0, false},
-		{"fractional_pi", 3.14, 0, false},
-		{"fractional_negative", -2.5, 0, false},
-
-		// Invalid: non-finite
-		{"positive_infinity", math.Inf(1), 0, false},
-		{"negative_infinity", math.Inf(-1), 0, false},
-		{"nan", math.NaN(), 0, false},
-
-		// Invalid: out of range
-		{"too_large", float64(1 << 63), 0, false}, // 2^63 is too large
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotVal, gotOK := value.GetInt64FromFloat(tt.input)
-			if gotOK != tt.wantOK {
-				t.Errorf("GetInt64FromFloat(%v) ok = %v, want %v", tt.input, gotOK, tt.wantOK)
-			}
-			if gotVal != tt.wantVal {
-				t.Errorf("GetInt64FromFloat(%v) = %d, want %d", tt.input, gotVal, tt.wantVal)
-			}
-		})
-	}
-}
-
-func TestGetInt64FromFloat_Quick(t *testing.T) {
-	// Property: if GetInt64FromFloat returns (v, true), then float64(v) == f
-	f := func(i int64) bool {
-		// Use int64 as source to ensure we test valid whole numbers
-		flt := float64(i)
-		v, ok := value.GetInt64FromFloat(flt)
-		if !ok {
-			// If conversion failed, that's ok - might be precision loss
-			return true
-		}
-		// The extracted int64 should equal the original (within float64 precision)
-		return float64(v) == flt
-	}
-	if err := quick.Check(f, nil); err != nil {
-		t.Error(err)
-	}
-}
-
-func TestIsWholeNumber_BoundaryConditions(t *testing.T) {
-	// Test specific boundary values around int64 limits
-
-	// float64(1<<63) is exactly 2^63: a whole number that is > MaxInt64
-	// (2^63 - 1), so it is whole and does not convert.
-	t.Run("at_2_63_is_whole_but_does_not_fit", func(t *testing.T) {
-		f := float64(1 << 63)
-		if !value.IsWholeNumber(f) {
-			t.Errorf("IsWholeNumber(2^63) should be true: it has no fractional part")
-		}
-		if _, ok := value.GetInt64FromFloat(f); ok {
-			t.Errorf("GetInt64FromFloat(2^63) should refuse: 2^63 exceeds MaxInt64")
-		}
-	})
-
-	// float64(-1<<63) is exactly -2^63, which equals MinInt64
-	t.Run("at_negative_2_63_is_true", func(t *testing.T) {
-		f := -float64(1 << 63)
-		if !value.IsWholeNumber(f) {
-			t.Errorf("IsWholeNumber(-2^63) should be true, -2^63 equals MinInt64")
-		}
-	})
-
-	// Verify the extracted value is correct
-	t.Run("extract_negative_2_63", func(t *testing.T) {
-		f := -float64(1 << 63)
-		v, ok := value.GetInt64FromFloat(f)
-		if !ok {
-			t.Fatalf("GetInt64FromFloat(-2^63) should succeed")
-		}
-		if v != math.MinInt64 {
-			t.Errorf("GetInt64FromFloat(-2^63) = %d, want %d", v, math.MinInt64)
-		}
-	})
-}
-
 // A time.Time is a struct, so it lands in no strata and every comparison over
-// it errors. Timestamp is the DSL's only two-representation kind: the same
-// property holds a comparable string or an incomparable time.Time depending on
-// what the caller submitted.
+// it errors. A caller can hand the evaluator one directly; a validated
+// Timestamp property holds the canonical string instead.
 func TestTypeStrata_TimeIsInvalid(t *testing.T) {
 	ts := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
 	if got := value.TypeStrata(ts); got != value.InvalidStrata {
@@ -1862,7 +1715,8 @@ func TestGetString_RefusesAJSONNumber(t *testing.T) {
 }
 
 // An integer json.Number outside int64 and uint64 is compared exactly, so it
-// never equals the int64 or float64 its nearest float64 stands for.
+// equals a float64 only when that float64 is the same integer, and a literal
+// spelled with an exponent is a float however long its digit run.
 func TestOrder_IntegerOutsideInt64ComparesExactly(t *testing.T) {
 	below := json.Number("-9223372036854775809")
 	cases := []struct {
@@ -1878,6 +1732,10 @@ func TestOrder_IntegerOutsideInt64ComparesExactly(t *testing.T) {
 		{"past uint64 against the float64 it rounds to", json.Number("18446744073709551617"), math.Pow(2, 64), 1},
 		{"below MinInt64 against negative infinity", below, math.Inf(-1), 1},
 		{"below MinInt64 against NaN", below, math.NaN(), -1},
+		{"2^64 against the float64 that is 2^64", json.Number("18446744073709551616"), math.Pow(2, 64), 0},
+		{"-2^64 against the float64 that is -2^64", json.Number("-18446744073709551616"), -math.Pow(2, 64), 0},
+		{"an exponent literal is compared as its float", json.Number("18446744073709551616e-18"), 18.446744073709553, 0},
+		{"an exponent literal against the uint64 maximum", json.Number("18446744073709551615e0"), uint64(math.MaxUint64), 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

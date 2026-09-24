@@ -140,20 +140,27 @@
 //
 // The other divergences are in how one value or one name is read:
 //
-//   - Numbers. JSON Schema reads a number exactly; yammm reads a plain
-//     integer literal as an integer and any other number as a float64. So
-//     the editor accepts a number yammm cannot hold — 1e400 on a Float, an
+//   - Numbers. yammm's Integer is an integer literal — no '.', 'e' or 'E' —
+//     that an int64 holds, and its Float is any literal read to its nearest
+//     float64 that is finite. JSON Schema's "integer" is a number with no
+//     fractional part, whatever its spelling. So the editor accepts on an
+//     Integer a whole decimal or exponent literal such as 5.0 or 1e2, and an
 //     integer outside int64 such as 9223372036854775808 or
-//     -9223372036854775809 on an Integer — and yammm refuses it
-//     (E_TYPE_MISMATCH). A decimal or exponent literal on an Integer, and any
-//     integer on a Float, is read through float64, so the two can disagree in
-//     both directions near the limits of that precision.
+//     -9223372036854775809, and on a Float a literal no float64 holds such as
+//     1e400; yammm refuses each (E_TYPE_MISMATCH). A validator that reads a
+//     number exactly judges a Float's bounds on the literal's own value, where
+//     yammm judges its nearest float64, so it flags 1.00000000000000001 under
+//     Float[_, 1.0], which yammm accepts. Validators differ among themselves:
+//     vscode-json-languageservice reads "integer" by the absence of '.', so it
+//     flags 5.0 and accepts 5e-1, whose value is fractional.
 //   - Formats. The uuid, date and date-time keywords are annotations by
 //     default under draft 2020-12, so an editor that does not assert formats
 //     accepts a malformed UUID, Date or Timestamp that instance validation
 //     refuses (E_CONSTRAINT_FAIL). A validator that asserts formats reads each
 //     by its own grammar, which differs from yammm's parsers in both
-//     directions: it flags a UUID without hyphens, which yammm accepts.
+//     directions: it flags a UUID without hyphens, which yammm accepts, and it
+//     accepts a date-time with a lowercase t or z, or with a leap second
+//     (23:59:60), which yammm refuses.
 //   - Null for an optional property. yammm reads a null value as an absent
 //     one. The emitted schema gives each property its value's type alone, so
 //     the editor flags the null.

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -179,13 +178,14 @@ func cellsOf(t *testing.T, data []byte, column string) []string {
 }
 
 // A scalar has one spelling in a cell, in a list cell, in a Vector cell and in
-// an edge segment: the one scalar renderer's. A Float is positional and keeps
-// every float64 digit; an Integer is decimal.
+// an edge segment: the one scalar renderer's. A Float is positional, keeps
+// every float64 digit and carries a decimal point when it is whole; an Integer
+// is decimal.
 func TestListRendering_AScalarHasOneSpellingInEveryCell(t *testing.T) {
 	t.Parallel()
 	s := loadListRenderingSchema(t)
 	big, small, fine := 1e21, 1e-7, 0.30000000000000004
-	spell := func(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
+	const bigCell, smallCell = "1000000000000000000000.0", "0.0000001"
 	snap := emptyCellSnapshot(t, s, []typedRow{
 		{"Station", map[string]any{"code": "sA"}},
 		{"Grid", map[string]any{
@@ -208,15 +208,15 @@ func TestListRendering_AScalarHasOneSpellingInEveryCell(t *testing.T) {
 	}
 	grid := files["Grid"]
 	for column, want := range map[string]string{
-		"weight":  spell(big),
-		"weights": spell(big) + "|" + spell(small) + "|0.5|0.30000000000000004",
-		"at":      spell(big) + "|" + spell(small),
-		"points":  spell(big) + `\|` + spell(small),
+		"weight":  bigCell,
+		"weights": bigCell + "|" + smallCell + "|0.5|0.30000000000000004",
+		"at":      bigCell + "|" + smallCell,
+		"points":  bigCell + `\|` + smallCell,
 		"n":       "255",
 		"counts":  "255|-7",
 		"ok":      "true",
 		"flags":   "true|false",
-		"stops.w": spell(big),
+		"stops.w": bigCell,
 	} {
 		if got := cellsOf(t, grid, column)[0]; got != want {
 			t.Errorf("column %q: got %q, want %q", column, got, want)
@@ -265,14 +265,14 @@ func TestListRendering_ABypassBuiltFloat32RendersAsAFloatDoes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
 	}
-	wide := func(f float32) string { return strconv.FormatFloat(float64(f), 'f', -1, 64) }
+	const tenth, tenMillion, tenMillionth = "0.10000000149011612", "10000000.0", "0.00000010000000116860974"
 	for column, want := range map[string]string{
-		"weight":  wide(0.1),
-		"weights": wide(0.1),
-		"at":      wide(1e7) + "|" + wide(0.1),
-		"av":      wide(1e7) + "|" + wide(0.1),
-		"points":  wide(1e7) + `\|` + wide(1e-7),
-		"stops.w": wide(0.1),
+		"weight":  tenth,
+		"weights": tenth,
+		"at":      tenMillion + "|" + tenth,
+		"av":      tenMillion + "|" + tenth,
+		"points":  tenMillion + `\|` + tenMillionth,
+		"stops.w": tenth,
 	} {
 		if got := cellsOf(t, files["Grid"], column)[0]; got != want {
 			t.Errorf("column %q: got %q, want %q", column, got, want)

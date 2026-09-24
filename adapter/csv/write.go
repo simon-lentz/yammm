@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -415,22 +417,40 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 	return refusal.New(ErrUnrepresentable, "csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
 }
 
-// scalarCell renders one scalar value as cell text.
+// scalarCell renders one scalar value as cell text. A float carries a decimal
+// point whatever constraint holds it, as the JSON and .ys writers mark one: a
+// whole float under an Integer is written 5.0, which the Integer column
+// refuses on the way back, rather than 5, which it would read as the integer
+// the snapshot never held. A cell carries no type, so a String column reads
+// the same float back as the text 5.0.
 func scalarCell(v any) string {
 	switch t := v.(type) {
 	case string:
 		return t
 	case int64:
 		return strconv.FormatInt(t, 10)
-	case float64:
-		return strconv.FormatFloat(t, 'f', -1, 64)
 	case bool:
 		return strconv.FormatBool(t)
 	case nil:
 		return ""
-	default:
-		return fmt.Sprint(t)
 	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Float32:
+		return floatCell(rv.Float(), 32)
+	case reflect.Float64:
+		return floatCell(rv.Float(), 64)
+	}
+	return fmt.Sprint(v)
+}
+
+// floatCell writes f in plain decimal notation at bitSize, with ".0" appended
+// to a finite whole value so the cell reads as a float.
+func floatCell(f float64, bitSize int) string {
+	s := strconv.FormatFloat(f, 'f', -1, bitSize)
+	if !math.IsNaN(f) && !math.IsInf(f, 0) && !strings.Contains(s, ".") {
+		s += ".0"
+	}
+	return s
 }
 
 // canonicalOrRaw renders raw in the form its constraint stores, and returns it

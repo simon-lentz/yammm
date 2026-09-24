@@ -1,12 +1,13 @@
 package eval
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -40,6 +41,50 @@ func typeMismatch(format string, args ...any) *CheckError {
 
 func constraintFail(format string, args ...any) *CheckError {
 	return &CheckError{Kind: KindConstraintFail, Msg: fmt.Sprintf(format, args...)}
+}
+
+// floatText renders a refused float for a diagnostic with a float indicator,
+// so a whole float reads as the float it is: 5.0, never 5. The digits are
+// encoding/json's, as the writers emit them: a float32 held in val, a named one
+// included, at its 32-bit width, and any other float (a json.Number's, read
+// into norm by [value.Classify]) at 64 bits. A value encoding/json cannot
+// encode (NaN, ±Inf) is spelled as strconv spells it.
+func floatText(val, norm any) string {
+	rv := reflect.ValueOf(val)
+	for rv.Kind() == reflect.Pointer && !rv.IsNil() {
+		rv = rv.Elem()
+	}
+	var f any
+	switch rv.Kind() {
+	case reflect.Float32:
+		f = float32(rv.Float())
+	case reflect.Float64:
+		f = rv.Float()
+	default:
+		f, _ = value.GetFloat64(norm)
+	}
+	b, err := json.Marshal(f)
+	if err != nil {
+		g, _ := value.GetFloat64(f)
+		return strconv.FormatFloat(g, 'g', -1, 64)
+	}
+	if !bytes.ContainsAny(b, ".eE") {
+		b = append(b, '.', '0')
+	}
+	return string(b)
+}
+
+// maxNumberText bounds how much of a number literal a diagnostic repeats: a
+// literal can run to megabytes, and the message is written once per value.
+const maxNumberText = 32
+
+// numberText renders a number literal for a diagnostic, cut to its first
+// maxNumberText bytes with its length beside it when it is longer.
+func numberText(n json.Number) string {
+	if len(n) <= maxNumberText {
+		return string(n)
+	}
+	return fmt.Sprintf("%s… (%d characters)", n[:maxNumberText], len(n))
 }
 
 // CheckValue validates that val conforms to the given constraint, by the one
@@ -163,99 +208,86 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 	}
 }
 
-// coerceInteger converts any integer-compatible value to int64.
-// Accepts integer types and float64 whole numbers per spec.
+// coerceInteger converts an integer value to int64. A float is refused whole or
+// not, as [checkInteger] refuses it: the lexical rule makes 5.0 a float.
 func coerceInteger(val any) (any, error) {
-	// Try direct integer extraction first (fast path)
 	if i, ok := value.GetInt64(val); ok {
 		return i, nil
 	}
-	// A decimal integer no int64 holds: its nearest float64 can be a
-	// different integer, so the float path below must not see it.
-	if kind, norm := value.Classify(val); kind == value.IntKind {
-		if n, ok := norm.(json.Number); ok {
-			return nil, fmt.Errorf("cannot coerce integer %s outside the int64 range to int64", n)
-		}
-	}
-	// Try float64 whole number extraction
-	if f, ok := value.GetFloat64(val); ok {
-		if i, ok := value.GetInt64FromFloat(f); ok {
+	kind, norm := value.Classify(val)
+	switch kind {
+	case value.IntKind:
+		// Classify reads through a pointer to a json.Number, which GetInt64
+		// does not, so an integer literal that fits is read from norm.
+		if i, ok := value.GetInt64(norm); ok {
 			return i, nil
 		}
-		switch {
-		case !value.IsFinite(f):
-			return nil, errors.New("cannot coerce non-finite float (NaN or Inf) to int64")
-		case !value.IsWholeNumber(f):
-			return nil, fmt.Errorf("cannot coerce float with fractional part %v to int64", f)
-		default:
-			return nil, fmt.Errorf("cannot coerce whole float %v outside the int64 range to int64", f)
+		// An integer literal no int64 holds: its nearest float64 can be a
+		// different integer, so it is refused rather than rounded.
+		if n, ok := norm.(json.Number); ok {
+			return nil, fmt.Errorf("cannot coerce integer %s outside the int64 range to int64", numberText(n))
 		}
+		if u, ok := value.GetUint64(norm); ok {
+			return nil, fmt.Errorf("uint64 value %d exceeds int64 max", u)
+		}
+	case value.FloatKind:
+		return nil, fmt.Errorf("cannot coerce float %s to int64", floatText(val, norm))
 	}
-
-	// A named integer type: Classify reads its base kind, reflect its value.
-	kind, _ := value.Classify(val)
-	if kind == value.IntKind {
-		rv := reflect.ValueOf(val)
-		for rv.Kind() == reflect.Pointer {
-			if rv.IsNil() {
-				return nil, errors.New("cannot coerce nil pointer to int64")
-			}
-			rv = rv.Elem()
-		}
-		switch rv.Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			return rv.Int(), nil
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-			u := rv.Uint()
-			if u > uint64(math.MaxInt64) {
-				return nil, fmt.Errorf("uint64 value %d exceeds int64 max", u)
-			}
-			return int64(u), nil
-		}
-	}
-
 	return nil, fmt.Errorf("cannot coerce %T to int64", val)
 }
 
-// coerceFloat converts any float-compatible value to float64.
+// coerceFloat converts a float or an integer to float64. A number literal is
+// read to its nearest float64, which keeps a negative zero's sign; one no finite
+// float64 holds, and a NaN or infinity a caller spells, is refused, as
+// [checkFloat] refuses it.
 func coerceFloat(val any) (any, error) {
-	// Try direct float extraction first (fast path)
-	if f, ok := value.GetFloat64(val); ok {
+	if n, ok := asNumber(val); ok {
+		f, err := n.Float64()
+		switch {
+		case errors.Is(err, strconv.ErrRange):
+			return nil, fmt.Errorf("cannot coerce %s to float64: no finite float64 holds it", numberText(n))
+		case err != nil:
+			return nil, fmt.Errorf("cannot coerce json.Number %q to float64", numberText(n))
+		case !value.IsFinite(f):
+			return nil, errors.New("cannot coerce non-finite float (NaN or Inf)")
+		}
+		return f, nil
+	}
+	kind, norm := value.Classify(val)
+	if kind != value.FloatKind && kind != value.IntKind {
+		return nil, fmt.Errorf("cannot coerce %T to float64", val)
+	}
+	if f, ok := value.GetFloat64(norm); ok {
 		// Defense in depth: reject NaN/Inf even if check was bypassed
 		if !value.IsFinite(f) {
 			return nil, errors.New("cannot coerce non-finite float (NaN or Inf)")
 		}
 		return f, nil
 	}
-	if i, ok := value.GetInt64(val); ok {
-		return float64(i), nil // integers are always finite
+	if i, ok := value.GetInt64(norm); ok {
+		return float64(i), nil
 	}
-
-	// A named numeric type: Classify reads its base kind, reflect its value.
-	kind, _ := value.Classify(val)
-	if kind == value.FloatKind || kind == value.IntKind {
-		rv := reflect.ValueOf(val)
-		for rv.Kind() == reflect.Pointer {
-			if rv.IsNil() {
-				return nil, errors.New("cannot coerce nil pointer to float64")
-			}
-			rv = rv.Elem()
-		}
-		switch rv.Kind() {
-		case reflect.Float32, reflect.Float64:
-			f := rv.Float()
-			if !value.IsFinite(f) {
-				return nil, errors.New("cannot coerce non-finite float (NaN or Inf)")
-			}
-			return f, nil
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			return float64(rv.Int()), nil
-		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-			return float64(rv.Uint()), nil
-		}
+	if u, ok := value.GetUint64(norm); ok {
+		return float64(u), nil
 	}
-
 	return nil, fmt.Errorf("cannot coerce %T to float64", val)
+}
+
+// asNumber returns val as a json.Number, through any pointers to one. A number
+// literal is read as its own text at a Float: [value.Classify] reads the
+// integer literal -0 as the int64 0, which has no sign.
+func asNumber(val any) (json.Number, bool) {
+	rv := reflect.ValueOf(val)
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return "", false
+		}
+		rv = rv.Elem()
+	}
+	if !rv.IsValid() || rv.Type() != reflect.TypeFor[json.Number]() {
+		return "", false
+	}
+	return json.Number(rv.String()), true
 }
 
 // coerceVector converts any numeric slice to []float64, each element through
@@ -307,40 +339,25 @@ func checkString(val any, c schema.Constraint) error {
 	return nil
 }
 
-// checkInteger validates that val is an integer with optional bounds.
-// Per spec, accepts integer types and float64 whole numbers (math.Trunc(f) == f).
+// checkInteger validates that val is an integer with optional bounds. A float
+// is refused whatever it holds, a whole 5.0 or 1e2 included: an Integer value
+// is an integer literal or a Go integer, by the rule [value.Classify] applies.
 func checkInteger(val any, c schema.Constraint) error {
 	kind, norm := value.Classify(val)
 
 	var i int64
-	var ok bool
-
 	switch kind {
 	case value.IntKind:
-		i, ok = value.GetInt64(val)
+		var ok bool
+		i, ok = value.GetInt64(norm)
 		if !ok {
 			if n, isNumber := norm.(json.Number); isNumber {
-				return typeMismatch("expected integer, got an integer outside the int64 range: %s", n)
+				return typeMismatch("expected integer, got an integer outside the int64 range: %s", numberText(n))
 			}
 			return typeMismatch("cannot convert %T to int64", val)
 		}
 	case value.FloatKind:
-		// Accept float64 whole numbers per spec
-		f, fok := value.GetFloat64(val)
-		if !fok {
-			return typeMismatch("cannot convert %T to float64", val)
-		}
-		i, ok = value.GetInt64FromFloat(f)
-		if !ok {
-			switch {
-			case !value.IsFinite(f):
-				return constraintFail("expected integer, got non-finite float (NaN or Inf)")
-			case !value.IsWholeNumber(f):
-				return typeMismatch("expected integer, got float with fractional part: %v", f)
-			default:
-				return typeMismatch("expected integer, got whole float outside the int64 range: %v", f)
-			}
-		}
+		return typeMismatch("expected integer, got float %s", floatText(val, norm))
 	default:
 		return typeMismatch("expected integer, got %T", val)
 	}
@@ -361,23 +378,35 @@ func checkInteger(val any, c schema.Constraint) error {
 }
 
 // checkFloat validates that val is a float or integer with optional bounds.
-// An unsigned value above math.MaxInt64 is a float like any other integer:
-// coerceFloat converts it, so the check must accept it.
+// An integer widens: an unsigned value above math.MaxInt64 and an integer
+// literal no int64 holds are read as their nearest float64, as coerceFloat
+// converts them. A literal no finite float64 holds is refused.
 func checkFloat(val any, c schema.Constraint) error {
-	kind, _ := value.Classify(val)
-	if kind != value.FloatKind && kind != value.IntKind {
-		return typeMismatch("expected float, got %T", val)
-	}
-
 	var f float64
-	if fv, ok := value.GetFloat64(val); ok {
-		f = fv
-	} else if iv, ok := value.GetInt64(val); ok {
-		f = float64(iv)
-	} else if uv, ok := value.GetUint64(val); ok {
-		f = float64(uv)
+	if n, isNumber := asNumber(val); isNumber {
+		fv, err := n.Float64()
+		switch {
+		case err == nil:
+			f = fv
+		case errors.Is(err, strconv.ErrRange):
+			return typeMismatch("expected float, got a number no float64 holds: %s", numberText(n))
+		default:
+			return typeMismatch("expected float, got %T", val)
+		}
 	} else {
-		return typeMismatch("cannot convert %T to float64", val)
+		kind, norm := value.Classify(val)
+		if kind != value.FloatKind && kind != value.IntKind {
+			return typeMismatch("expected float, got %T", val)
+		}
+		if fv, ok := value.GetFloat64(norm); ok {
+			f = fv
+		} else if iv, ok := value.GetInt64(norm); ok {
+			f = float64(iv)
+		} else if uv, ok := value.GetUint64(norm); ok {
+			f = float64(uv)
+		} else {
+			return typeMismatch("cannot convert %T to float64", val)
+		}
 	}
 
 	// Reject NaN and Inf values per spec
@@ -538,23 +567,14 @@ func checkVector(val any, c schema.Constraint) error {
 		return constraintFail("vector has %d elements, expected %d", len(slice), expected)
 	}
 
-	// Check each element is numeric and finite
+	// Each element is judged by the Float rule, and coerceVector converts each
+	// through coerceFloat, which refuses what checkFloat refuses.
 	for i, elem := range slice {
-		kind, _ := value.Classify(elem)
-		if kind != value.FloatKind && kind != value.IntKind {
-			return typeMismatch("vector element [%d]: expected number, got %T", i, elem)
-		}
-		// Check for NaN/Inf in float elements. An integer is finite unless it is
-		// a json.Number no float64 holds, which coerceFloat refuses too.
-		if kind == value.FloatKind {
-			if fv, ok := value.GetFloat64(elem); ok && !value.IsFinite(fv) {
-				return constraintFail("vector element [%d]: value is not finite (NaN or Inf)", i)
+		if err := checkFloat(elem, nil); err != nil {
+			if ce, ok := errors.AsType[*CheckError](err); ok {
+				return &CheckError{Kind: ce.Kind, Msg: fmt.Sprintf("vector element [%d]: %s", i, ce.Msg)}
 			}
-		}
-		if n, isNumber := elem.(json.Number); isNumber && kind == value.IntKind {
-			if _, ok := value.GetFloat64(n); !ok {
-				return typeMismatch("vector element [%d]: expected number, got %T", i, elem)
-			}
+			return fmt.Errorf("vector element [%d]: %w", i, err)
 		}
 	}
 	return nil
@@ -669,8 +689,8 @@ func IsString() TypeChecker {
 	return checkerOf(checkString)
 }
 
-// IsInteger returns a TypeChecker that validates integer values.
-// Accepts integer types and float64 whole numbers per spec.
+// IsInteger returns a TypeChecker that validates integer values. A float is
+// refused, whole or not.
 func IsInteger() TypeChecker {
 	return checkerOf(checkInteger)
 }

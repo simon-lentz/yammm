@@ -18,13 +18,13 @@ import (
 //     float64 passes through. Repairs the JSON round-trip where a whole-number
 //     Float decodes as int64 and Neo4j rejects it against an IS :: FLOAT
 //     constraint. A non-numeric value is a coercion failure and returns an error.
-//   - Integer: any Go signed/unsigned integer width, or a whole float, -> int64;
-//     an int64 passes through. Repairs the inverse round-trip, where a decode
-//     without UseNumber leaves an Integer value as float64 and Neo4j sees a
-//     Cypher FLOAT against an IS :: INTEGER constraint — a MERGE that matches
-//     nothing and reports no error. A fractional float, or a value past the
-//     int64 range, is a coercion failure and returns an error, as it is on the
-//     list path ([coerceSlice]), which applies the same rule per element.
+//   - Integer: any Go signed/unsigned integer width -> int64; an int64 passes
+//     through. A float is a coercion failure and returns an error, whole or
+//     not, as the validator's Integer rule refuses it: a caller holding an
+//     Integer as float64 decoded its JSON without UseNumber, and converting it
+//     would send an integer the document never wrote. A uint past the int64
+//     range is a failure too, as it is on the list path ([coerceSlice]), which
+//     applies the same rule per element.
 //   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
 //     constraint's custom Go layout when it declares one (Timestamp["…"]) and
 //     against RFC3339 otherwise; a time.Time passes through. A string that does
@@ -172,7 +172,7 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 			return raw, fmt.Errorf("coerce %s: cannot convert %T to a date (want a YYYY-MM-DD string, time.Time, or dbtype.Date)", kind, raw)
 		}
 	case schema.KindInteger:
-		n, ok := repairInt64(raw)
+		n, ok := widenInt64(raw)
 		if !ok {
 			return raw, fmt.Errorf("coerce %s: cannot convert %T to int64", kind, raw)
 		}

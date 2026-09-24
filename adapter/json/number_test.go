@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -29,10 +30,11 @@ func numberSchemaless(t *testing.T, doc string) map[string]any {
 	return items[0].Properties
 }
 
-// The parser takes the module's canonical number rule rather than its own.
-// Classification is lexical: a float indicator means float64 and an int-shaped
-// literal means int64, which is what immutable.NormalizeNumber does and what
-// every other decoder in the module already agreed on.
+// The parser reads a number by the module's lexical rule,
+// immutable.IsIntegerLiteral: a float indicator means float64 and an integer
+// literal means int64. An integer literal no int64 holds, and -0, keep their
+// text, which the validator then judges; a literal with an indicator is a float
+// however long its digit run.
 func TestParseObject_ReadsANumberByTheModuleRule(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -48,6 +50,9 @@ func TestParseObject_ReadsANumberByTheModuleRule(t *testing.T) {
 		{name: "past int64 keeps its exact text", literal: "99999999999999999999", want: json.Number("99999999999999999999")},
 		{name: "below int64 keeps its exact text", literal: "-9223372036854775809", want: json.Number("-9223372036854775809")},
 		{name: "zero is int64", literal: "0", want: int64(0)},
+		{name: "negative zero keeps its text", literal: "-0", want: json.Number("-0")},
+		{name: "a long digit run with an exponent is float64", literal: "20000000000000000000e-18", want: 20.0},
+		{name: "a long digit run with a point is float64", literal: "100000000000000000000.5", want: 1e20},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -215,6 +220,41 @@ func TestParseObject_IntegerLiteralOutsideInt64IsRefusedAtAnInteger(t *testing.T
 			}
 			if !strings.Contains(vres.String(), "E_TYPE_MISMATCH") || !strings.Contains(vres.String(), "outside the int64 range") {
 				t.Errorf("%s drew %s, want E_TYPE_MISMATCH naming the int64 range", literal, vres.String())
+			}
+		})
+	}
+}
+
+// A float literal is refused at an Integer property whatever its value: whole
+// (5.0, 1e2), made whole by an exponent after a long digit run, or rounding to
+// -2^63 from just below it. Each draws E_TYPE_MISMATCH naming a float, never
+// the int64 range.
+func TestParseObject_AFloatLiteralIsRefusedAtAnInteger(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	s, res := schema.LoadString(ctx, integerRangeSchema, "r.yammm")
+	if err := res.Err(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for _, literal := range []string{
+		"5.0",
+		"1e2",
+		"5E0",
+		"100000000000000000000e-19",
+		"-9223372036854775809.0",
+		"-9.223372036854775809e18",
+	} {
+		t.Run(literal, func(t *testing.T) {
+			t.Parallel()
+			doc := fmt.Sprintf(`{"T":[{"id":"a","n":%s,"f":1.5}]}`, literal)
+			parsed, pres := New().ParseObject(ctx, location.NewSourceID("r.json"), []byte(doc))
+			if err := pres.Err(); err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			_, vres := instance.NewValidator(s).Validate(ctx, "T", parsed["T"])
+			if !vres.HasCode(diag.E_TYPE_MISMATCH) || !strings.Contains(vres.String(), "got float") ||
+				strings.Contains(vres.String(), "int64 range") {
+				t.Errorf("%s drew %s, want E_TYPE_MISMATCH naming a float", literal, vres.String())
 			}
 		})
 	}

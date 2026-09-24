@@ -730,7 +730,7 @@ index Integer[_, 99]         // no minimum, maximum 99
 temperature Integer[-40, 50] // negative lower bound
 ```
 
-Validation accepts signed and unsigned integers, including named/alias types and pointer values. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal in a data document outside the `int64` range: it is never read as its nearest float, which for a literal just below the minimum is the minimum itself.
+Validation accepts signed and unsigned integers, including named/alias types and pointer values, and refuses every float, whole or not. In a data document an `Integer` value is an integer literal — no `.`, `e` or `E` — read exactly, so `5.0` and `1e2` are floats and are refused. Unsigned inputs larger than `int64` are rejected before bound checks, and so is an integer literal outside the `int64` range: validation never reads it as its nearest float, which for a literal just below the minimum is the minimum itself. A `.ys` snapshot loaded without revalidation stores such a literal as its nearest `float64`; revalidation judges the document's own text.
 
 #### Float
 
@@ -743,6 +743,8 @@ max    = [ "-" ] ( "_" | INTEGER | FLOAT ) .
 ```
 
 As for `Integer`, a minus sign before `_` is accepted with a Warning and no effect.
+
+Validation accepts floats and integers; an integer is widened to `float64`. In a JSON or CSV data document a `Float` value is any number literal, read as its nearest `float64`, so `-0` keeps its sign; a literal no finite `float64` holds, such as `1e400`, is refused. `NaN` and the infinities are refused. Loading a `.ys` snapshot stores a number by its spelling alone, with or without revalidation, so an integer literal under a `Float` there, such as `-0` or `5`, loads as an `int64`; the writer writes one only for an integer no `float64` holds exactly.
 
 Examples:
 
@@ -1411,7 +1413,7 @@ Supported datatype keywords for type checking:
 
 Each check applies the rule a property of that kind applies: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts a `time.Time` or an RFC 3339 string. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
 
-Numeric type checks are cross-form: `5 =~ Float` and `5.0 =~ Integer` both hold — a whole number matches both numeric types.
+Numeric type checks follow the property rules: `5 =~ Float` holds, because an integer widens to a float, and `5.0 =~ Integer` does not — a float is never an integer, whole or not.
 
 #### Ternary Operator
 

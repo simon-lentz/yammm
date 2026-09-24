@@ -420,8 +420,9 @@ func TestLoad_RevalidationUnresolvedRequired(t *testing.T) {
 // TestLoad_RevalidationJudgesANumberByItsText pins that revalidation hands the
 // validator the document's own number text: an Integer literal outside int64
 // is refused on both sides of the range, where the value just below the
-// minimum once rounded to math.MinInt64 and passed. The body is tampered
-// under WithIntegrityCheck(false), because the writer never emits one.
+// minimum once rounded to math.MinInt64 and passed, and a float literal is
+// refused at an Integer whole or not. The body is tampered under
+// WithIntegrityCheck(false), because the writer never emits one.
 func TestLoad_RevalidationJudgesANumberByItsText(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -460,8 +461,10 @@ type T {
 		{name: "an Integer below int64", from: `"n":7`, to: `"n":-9223372036854775809`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: -9223372036854775809"},
 		{name: "an Integer above int64", from: `"n":7`, to: `"n":9223372036854775808`, code: diag.E_TYPE_MISMATCH, message: "an integer outside the int64 range: 9223372036854775808"},
 		{name: "a Float holding a wide integer", from: `"f":1.5`, to: `"f":99999999999999999999`},
-		{name: "an Integer written 7.0", from: `"n":7`, to: `"n":7.0`},
-		{name: "an Integer written 7.5", from: `"n":7`, to: `"n":7.5`, code: diag.E_TYPE_MISMATCH, message: "float with fractional part"},
+		{name: "an Integer written 7.0", from: `"n":7`, to: `"n":7.0`, code: diag.E_TYPE_MISMATCH, message: "expected integer, got float 7.0"},
+		{name: "an Integer written 7e0", from: `"n":7`, to: `"n":7e0`, code: diag.E_TYPE_MISMATCH, message: "expected integer, got float 7.0"},
+		{name: "an Integer written 7.5", from: `"n":7`, to: `"n":7.5`, code: diag.E_TYPE_MISMATCH, message: "expected integer, got float 7.5"},
+		{name: "an Integer written just below int64 with a point", from: `"n":7`, to: `"n":-9223372036854775809.0`, code: diag.E_TYPE_MISMATCH, message: "expected integer, got float -9223372036854776000.0"},
 		{name: "a number at a String", from: `"s":"x"`, to: `"s":5`, code: diag.E_TYPE_MISMATCH, message: "expected string"},
 	} {
 		t.Run(c.name, func(t *testing.T) {

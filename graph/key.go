@@ -55,7 +55,8 @@ func FormatKey(values ...any) string {
 //
 //   - An int-shaped literal beyond the int64 range comes back as float64, with
 //     the precision loss that implies. FormatKey writes one for a whole float64
-//     from 2^63 up to 1e21 and for a uint64 above math.MaxInt64.
+//     of magnitude 2^63 to below 1e21, on either sign, and for a uint64 above
+//     math.MaxInt64.
 //   - A literal that is valid JSON but has no finite Go value, such as 1e999,
 //     is an error naming the component's index. FormatKey never writes one.
 //

@@ -158,12 +158,10 @@ func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 	return mustBuild(t, s, result)
 }
 
-// testSchemaTemporal carries every kind that canonicalizes — Timestamp
-// (default and declared layout), UUID and Date — plus a List<Date>, so the
-// writer's rendering of each stored form has a fixture.
 // testSchemaFloats declares a Float as a property, under an alias, as a List's
-// elements and as a Vector's, beside an Integer that must NOT take the
-// indicator.
+// elements and as a Vector's, beside two Integers: one holding an integer,
+// which takes no indicator, and one holding a float, which keeps it because the
+// indicator follows the value held.
 func testSchemaFloats(t *testing.T) *schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), `schema "floats"
@@ -178,6 +176,7 @@ type Reading {
 	at Vector[2]
 	narrow Float
 	count Integer
+	held Integer
 }
 `, "floats.yammm")
 	if res.HasErrors() {
@@ -186,6 +185,9 @@ type Reading {
 	return s
 }
 
+// testSchemaTemporal carries every kind that canonicalizes — Timestamp
+// (default and declared layout), UUID and Date — plus a List<Date>, so the
+// writer's rendering of each stored form has a fixture.
 func testSchemaTemporal(t *testing.T) *schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
@@ -470,9 +472,10 @@ func TestMarshalObject_Golden(t *testing.T) {
 			// A Float as a property, under an alias, in a List and in a Vector — an
 			// edge property's is pinned by its own test — and every spelling that
 			// decides what the indicator has to do: a whole value, a fraction, a negative
-			// zero, and exponents encoding/json writes in both notations. Bypass-
-			// built, because a float32 and a Vector element at its own width reach
-			// the writer no other way, and Graph.Add leaves a number as it arrived.
+			// zero, and exponents encoding/json writes in both notations. A float held
+			// under an Integer keeps its indicator. Bypass-built, because a float32, a
+			// Vector element at its own width and a float under an Integer reach the
+			// writer no other way, and Graph.Add leaves a number as it arrived.
 			name:   "float_kinds",
 			schema: testSchemaFloats,
 			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
@@ -483,10 +486,11 @@ func TestMarshalObject_Golden(t *testing.T) {
 						"id":     "r1",
 						"ratio":  float64(1),
 						"scaled": float64(2), // whole, so the alias must resolve for the indicator to appear
-						"ratios": []any{float64(3), float64(-0.25), math.Copysign(0, -1)},
-						"at":     []any{float64(1e21), float64(1e-7)},
+						"ratios": []any{float64(3), float64(-0.25), math.Copysign(0, -1), float64(1e-7)},
+						"at":     []any{float64(1e21), float64(5)},
 						"narrow": float32(0.1),
 						"count":  int64(4),
+						"held":   float64(6),
 					}),
 				)
 			},

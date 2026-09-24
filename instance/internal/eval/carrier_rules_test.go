@@ -3,6 +3,7 @@ package eval_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"reflect"
@@ -183,18 +184,19 @@ func TestCoerceValue_EveryArmReturnsNilOnError(t *testing.T) {
 	}
 }
 
-// A whole float outside the int64 range at an Integer property is a type
-// mismatch, as a fractional float is: the value cannot be the type. The
-// message names the fact that holds.
-func TestCheckInteger_OutOfRangeWholeFloatIsATypeMismatch(t *testing.T) {
+// A float at an Integer property is a type mismatch whatever it holds: whole,
+// outside the int64 range or not finite. The message names the float.
+func TestCheckInteger_AFloatIsATypeMismatch(t *testing.T) {
 	t.Parallel()
-	err := eval.CheckValue(1e19, schema.NewIntegerConstraint())
-	var ce *eval.CheckError
-	if !errors.As(err, &ce) {
-		t.Fatalf("err = %v, want a *CheckError", err)
-	}
-	if ce.Kind != eval.KindTypeMismatch || !strings.Contains(ce.Msg, "outside the int64 range") {
-		t.Errorf("kind=%v msg=%q; want KindTypeMismatch naming the range", ce.Kind, ce.Msg)
+	for _, f := range []float64{1e19, 3, math.Inf(1)} {
+		err := eval.CheckValue(f, schema.NewIntegerConstraint())
+		var ce *eval.CheckError
+		if !errors.As(err, &ce) {
+			t.Fatalf("CheckValue(%v) err = %v, want a *CheckError", f, err)
+		}
+		if ce.Kind != eval.KindTypeMismatch || !strings.Contains(ce.Msg, "got float") {
+			t.Errorf("CheckValue(%v): kind=%v msg=%q; want KindTypeMismatch naming the float", f, ce.Kind, ce.Msg)
+		}
 	}
 }
 
@@ -222,33 +224,74 @@ func TestIntegerLiteralOutsideInt64_IsATypeMismatchAtAnInteger(t *testing.T) {
 }
 
 // An integer literal no float64 holds is refused at a Vector element by the
-// check, as the coercion refuses it: the two agree on every value.
+// check, as the coercion refuses it: the two agree on every value, a pointer to
+// the number included, and the message says why.
 func TestIntegerLiteralNoFloatHolds_IsRefusedAtAVectorElement(t *testing.T) {
 	t.Parallel()
 	huge := json.Number("1" + strings.Repeat("0", 400))
 	c := schema.NewVectorConstraint(2)
-	if err := eval.CheckValue([]any{huge, int64(1)}, c); err == nil {
-		t.Error("CheckValue accepted a vector element no float64 holds")
-	}
-	if _, err := eval.CoerceValue([]any{huge, int64(1)}, c); err == nil {
-		t.Error("CoerceValue accepted a vector element no float64 holds")
+	for _, elem := range []any{huge, &huge} {
+		err := eval.CheckValue([]any{elem, int64(1)}, c)
+		var ce *eval.CheckError
+		if !errors.As(err, &ce) {
+			t.Fatalf("CheckValue(%T) err = %v, want a *CheckError", elem, err)
+		}
+		const want = "vector element [0]: expected float, got a number no float64 holds: 10000000000000000000000000000000… (401 characters)"
+		if ce.Kind != eval.KindTypeMismatch || ce.Msg != want {
+			t.Errorf("CheckValue(%T): kind=%v msg=%q; want KindTypeMismatch %q", elem, ce.Kind, ce.Msg, want)
+		}
+		if _, err := eval.CoerceValue([]any{elem, int64(1)}, c); err == nil {
+			t.Errorf("CoerceValue(%T) accepted a vector element no float64 holds", elem)
+		}
 	}
 	big := json.Number("99999999999999999999")
-	if err := eval.CheckValue([]any{big, int64(1)}, c); err != nil {
-		t.Errorf("CheckValue refused an integer a float64 holds: %v", err)
+	for _, elem := range []any{big, &big} {
+		if err := eval.CheckValue([]any{elem, int64(1)}, c); err != nil {
+			t.Errorf("CheckValue(%T) refused an integer a float64 holds: %v", elem, err)
+		}
+		if _, err := eval.CoerceValue([]any{elem, int64(1)}, c); err != nil {
+			t.Errorf("CoerceValue(%T) refused an integer a float64 holds: %v", elem, err)
+		}
 	}
 }
 
-// A json.Number that is no number at all keeps the coercion's generic
-// message: only a decimal integer outside int64 is named as out of range.
-func TestCoerceInteger_ANonNumberIsNotCalledOutOfRange(t *testing.T) {
+// Only an integer literal outside int64 is named as out of range. A json.Number
+// that is no number keeps the generic message, and a decimal or exponent
+// literal is a float however long its digit run, although strconv reports
+// ErrRange for the run before it reads the '.' or 'e'.
+func TestCoerceInteger_OnlyAnIntegerLiteralIsCalledOutOfRange(t *testing.T) {
 	t.Parallel()
-	_, err := eval.CoerceValue(json.Number("abc"), schema.NewIntegerConstraint())
-	if err == nil {
-		t.Fatal("CoerceValue accepted json.Number(\"abc\")")
+	for _, c := range []struct {
+		n    json.Number
+		want string
+	}{
+		{"abc", "cannot coerce json.Number to int64"},
+		{"20000000000000000000e-10", "cannot coerce float 2000000000.0 to int64"},
+		{"100000000000000000000.5", "cannot coerce float 100000000000000000000.0 to int64"},
+		{"18446744073709551616e-18", "cannot coerce float 18.446744073709553 to int64"},
+	} {
+		_, err := eval.CoerceValue(c.n, schema.NewIntegerConstraint())
+		if err == nil || err.Error() != c.want {
+			t.Errorf("CoerceValue(%q) = %v, want %q", c.n, err, c.want)
+		}
+		if cerr := eval.CheckValue(c.n, schema.NewIntegerConstraint()); cerr == nil || strings.Contains(cerr.Error(), "outside the int64 range") {
+			t.Errorf("CheckValue(%q) = %v, want a refusal that names no range", c.n, cerr)
+		}
 	}
-	if strings.Contains(err.Error(), "outside the int64 range") {
-		t.Errorf("CoerceValue(\"abc\") = %v, which names a range for a value that is no integer", err)
+}
+
+// An integer literal's message quotes a bounded prefix of it, so a literal of a
+// megabyte does not write a megabyte into every diagnostic.
+func TestIntegerLiteralOutsideInt64_MessageIsBounded(t *testing.T) {
+	t.Parallel()
+	n := json.Number("9" + strings.Repeat("0", 100000))
+	err := eval.CheckValue(n, schema.NewIntegerConstraint())
+	const want = "expected integer, got an integer outside the int64 range: 90000000000000000000000000000000… (100001 characters)"
+	if err == nil || err.Error() != want {
+		t.Errorf("CheckValue = %v, want %q", err, want)
+	}
+	if _, cerr := eval.CoerceValue(n, schema.NewIntegerConstraint()); cerr == nil || len(cerr.Error()) > 200 {
+		t.Errorf("CoerceValue error is %d bytes, want a bounded message", len(fmt.Sprint(cerr)))
 	}
 }
 
@@ -369,5 +412,92 @@ func TestSubstring_StartPastTheLengthIsEmpty(t *testing.T) {
 	got, err := eval.NewEvaluator().Evaluate(t.Context(), makeBuiltinCall(lit("north"), "Substring", []expr.Expression{lit(int64(7)), lit(int64(9))}, nil, nil), eval.EmptyScope())
 	if err != nil || got != "" {
 		t.Errorf("Substring(7, 9) on a five-rune value = %#v, %v; want \"\"", got, err)
+	}
+}
+
+// The check and the coercion agree on a number reached through pointers: an
+// integer literal at an Integer is read as the int64 it spells, and "-0" at a
+// Float keeps its sign, through one pointer or two.
+func TestNumberThroughPointers_CheckAndCoerceAgree(t *testing.T) {
+	t.Parallel()
+	five := json.Number("5")
+	pfive := &five
+	for _, v := range []any{pfive, &pfive} {
+		if err := eval.CheckValue(v, schema.NewIntegerConstraint()); err != nil {
+			t.Errorf("CheckValue(%T) = %v, want nil", v, err)
+		}
+		if got, err := eval.CoerceValue(v, schema.NewIntegerConstraint()); err != nil || got != int64(5) {
+			t.Errorf("CoerceValue(%T) = %#v, %v; want int64(5)", v, got, err)
+		}
+	}
+	z := json.Number("-0")
+	pz := &z
+	for _, v := range []any{z, pz, &pz} {
+		got, err := eval.CoerceValue(v, schema.NewFloatConstraint())
+		if f, ok := got.(float64); err != nil || !ok || !math.Signbit(f) {
+			t.Errorf("CoerceValue(%T) = %#v, %v; want the float64 -0", v, got, err)
+		}
+	}
+	half := json.Number("2.5")
+	if err := eval.CheckValue(&half, schema.NewIntegerConstraint()); err == nil || err.Error() != "expected integer, got float 2.5" {
+		t.Errorf("CheckValue(&2.5) = %v", err)
+	}
+	if _, err := eval.CoerceValue(&half, schema.NewIntegerConstraint()); err == nil || err.Error() != "cannot coerce float 2.5 to int64" {
+		t.Errorf("CoerceValue(&2.5) = %v", err)
+	}
+}
+
+// A NaN or an infinity a caller spells as a json.Number is refused by the
+// coercion as the check refuses it, at a Float and at a Vector element.
+func TestNonFiniteNumberLiteral_IsRefusedByCheckAndCoerce(t *testing.T) {
+	t.Parallel()
+	for _, n := range []json.Number{"NaN", "Inf", "-Infinity"} {
+		if err := eval.CheckValue(n, schema.NewFloatConstraint()); err == nil {
+			t.Errorf("CheckValue(%q) accepted", n)
+		}
+		if got, err := eval.CoerceValue(n, schema.NewFloatConstraint()); err == nil {
+			t.Errorf("CoerceValue(%q) = %v, want an error", n, got)
+		}
+		if got, err := eval.CoerceValue([]any{n, json.Number("1")}, schema.NewVectorConstraint(2)); err == nil {
+			t.Errorf("CoerceValue([%q 1], Vector[2]) = %v, want an error", n, got)
+		}
+	}
+	if _, err := eval.CoerceValue(json.Number("0x1q"), schema.NewFloatConstraint()); err == nil || strings.Contains(err.Error(), "no finite float64") {
+		t.Errorf("a malformed literal drew %v, want a refusal that names no range", err)
+	}
+}
+
+// Each message names the fact in the form it is written: an uppercase exponent
+// after a long digit run is a float, an exponent form takes no ".0", a float32
+// keeps its 32-bit digits, a literal of exactly the bound is quoted whole, an
+// unsigned value above MaxInt64 names the bound, and a wide literal is named
+// out of range by the coercion as by the check.
+func TestIntegerMessages_NameTheFactAsWritten(t *testing.T) {
+	t.Parallel()
+	ic := schema.NewIntegerConstraint()
+	msg := func(err error) string {
+		if err == nil {
+			return "<nil>"
+		}
+		return err.Error()
+	}
+	if _, err := eval.CoerceValue(json.Number("20000000000000000000E-10"), ic); msg(err) != "cannot coerce float 2000000000.0 to int64" {
+		t.Errorf("uppercase exponent: %v", err)
+	}
+	if err := eval.CheckValue(1e21, ic); msg(err) != "expected integer, got float 1e+21" {
+		t.Errorf("exponent form: %v", err)
+	}
+	if err := eval.CheckValue(float32(0.1), ic); msg(err) != "expected integer, got float 0.1" {
+		t.Errorf("float32: %v", err)
+	}
+	n32 := json.Number("1" + strings.Repeat("0", 31))
+	if err := eval.CheckValue(n32, ic); msg(err) != "expected integer, got an integer outside the int64 range: "+string(n32) {
+		t.Errorf("32-byte literal: %v", err)
+	}
+	if _, err := eval.CoerceValue(uint64(1<<63), ic); msg(err) != "uint64 value 9223372036854775808 exceeds int64 max" {
+		t.Errorf("uint64: %v", err)
+	}
+	if _, err := eval.CoerceValue(json.Number("1"+strings.Repeat("0", 400)), ic); !strings.Contains(msg(err), "outside the int64 range") {
+		t.Errorf("wide literal: %v", err)
 	}
 }

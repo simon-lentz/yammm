@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -540,7 +541,7 @@ func kindOf(v any) string {
 		return "string"
 	case bool:
 		return "boolean"
-	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, json.Number:
 		return "number"
 	}
 	switch reflect.TypeOf(v).Kind() {

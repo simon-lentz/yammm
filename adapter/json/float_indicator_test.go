@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -95,10 +96,9 @@ func TestMarshalObject_WholeFloatSurvivesItsOwnReader(t *testing.T) {
 	}
 }
 
-// The sign of a graph-held negative zero survives the write side. A
-// document literal -0 carries no indicator, so the reader's lexical rule
-// classifies it int64 and the sign is gone before any writer runs; that half
-// is immutable.NormalizeNumber's ratified rule and is not repaired here.
+// The sign of a negative zero survives both halves: the writer emits -0.0, and
+// the reader keeps a document's -0, which carries no indicator, as the literal
+// a Float reads as the float64 -0.
 func TestMarshalObject_NegativeZeroKeepsItsSign(t *testing.T) {
 	t.Parallel()
 	doc := indicatorDoc(t, map[string]any{"id": "r1", "ratio": math.Copysign(0, -1)})
@@ -114,6 +114,24 @@ func TestMarshalObject_NegativeZeroKeepsItsSign(t *testing.T) {
 	f, ok := got.(float64)
 	if !ok || !math.Signbit(f) {
 		t.Errorf("a negative zero re-read as %#v (%T), want a float64 with its sign", got, got)
+	}
+
+	s, lres := schema.LoadString(context.Background(), indicatorSchema, "ind.yammm")
+	if err := lres.Err(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	literal, res := New().ParseObject(context.Background(),
+		location.NewSourceID("ind.json"), []byte(`{"Reading":[{"id":"r1","ratio":-0}]}`))
+	if err := res.Err(); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	vi, vres := instance.NewValidator(s).ValidateOne(context.Background(), "Reading", literal["Reading"][0])
+	if vres.HasErrors() {
+		t.Fatalf("validate: %s", vres)
+	}
+	held, _ := vi.Properties().Get("ratio")
+	if f, ok := held.Unwrap().(float64); !ok || !math.Signbit(f) {
+		t.Errorf("a document's -0 at a Float validated as %#v, want the float64 -0", held.Unwrap())
 	}
 }
 
@@ -142,21 +160,23 @@ func TestMarshalObject_FloatBearingCollectionsCarryTheIndicator(t *testing.T) {
 	}
 }
 
-// An undeclared property has no constraint, so nothing says its value is a
-// float and no indicator is added. A whole float stored under a name the type
-// does not declare stays int-shaped, as the schema-driven rule requires.
-func TestMarshalObject_UndeclaredPropertyTakesNoIndicator(t *testing.T) {
+// The indicator follows the value held, not a constraint: a whole float under a
+// name the type does not declare keeps it, so the document states the float the
+// snapshot holds rather than an integer.
+func TestMarshalObject_UndeclaredWholeFloatKeepsTheIndicator(t *testing.T) {
 	t.Parallel()
 	doc := indicatorDoc(t, map[string]any{
 		"id": "r1", "ratio": float64(1), "extra": float64(8),
 	})
-	if !strings.Contains(doc, `"extra":8`) || strings.Contains(doc, `"extra":8.0`) {
-		t.Errorf("an undeclared whole float wrote %s, want an extra of 8", doc)
+	if !strings.Contains(doc, `"extra":8.0`) {
+		t.Errorf("an undeclared whole float wrote %s, want an extra of 8.0", doc)
 	}
 }
 
-// An Integer property is untouched: the indicator belongs to float-bearing
-// constraints alone.
+// An integer takes no indicator, and a float held under an Integer keeps its
+// own, so the document states what the snapshot holds and this package's
+// reader and the validator refuse it on the way back rather than read an
+// integer the snapshot never held.
 func TestMarshalObject_IntegerTakesNoIndicator(t *testing.T) {
 	t.Parallel()
 	const s = `schema "i"
@@ -173,19 +193,45 @@ type Counter {
 	}
 	ty, _ := sc.Type("Counter")
 	g := graph.New(sc)
-	inst := instance.NewValidInstance("Counter", ty.ID(),
-		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"id": "c1", "n": int64(5)}),
-		nil, nil, nil)
-	if r := g.Add(ctx, inst); r.Err() != nil {
-		t.Fatalf("add: %v", r.Err())
+	for _, c := range []struct {
+		key  string
+		n    any
+		want string
+	}{
+		{"c1", int64(5), `"n":5}`},
+		{"c2", float64(6), `"n":6.0}`},
+	} {
+		inst := instance.NewValidInstance("Counter", ty.ID(),
+			immutable.WrapKey([]any{c.key}),
+			immutable.WrapProperties(map[string]any{"id": c.key, "n": c.n}),
+			nil, nil, nil)
+		if r := g.Add(ctx, inst); r.Err() != nil {
+			t.Fatalf("add: %v", r.Err())
+		}
 	}
 	doc, err := New().MarshalObject(ctx, g.Snapshot())
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !strings.Contains(string(doc), `"n":5`) || strings.Contains(string(doc), `"n":5.0`) {
-		t.Errorf("an Integer wrote %s, want an n of 5", doc)
+	for _, want := range []string{`"n":5}`, `"n":6.0}`} {
+		if !strings.Contains(string(doc), want) {
+			t.Errorf("an Integer wrote %s, want it to contain %s", doc, want)
+		}
+	}
+
+	parsed, pres := New().ParseObject(ctx, location.NewSourceID("i.json"), doc)
+	if err := pres.Err(); err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	v := instance.NewValidator(sc)
+	for _, raw := range parsed["Counter"] {
+		_, vres := v.ValidateOne(ctx, "Counter", raw)
+		if raw.Properties["id"] == "c2" && !vres.HasCode(diag.E_TYPE_MISMATCH) {
+			t.Errorf("the held float re-read as %#v and validated as %s, want E_TYPE_MISMATCH", raw.Properties["n"], vres)
+		}
+		if raw.Properties["id"] == "c1" && vres.HasErrors() {
+			t.Errorf("the integer re-read and drew %s", vres)
+		}
 	}
 }
 
@@ -276,8 +322,8 @@ func TestMarshalObject_EdgePropertyFloatCarriesTheIndicator(t *testing.T) {
 }
 
 // A whole Float that encoding/json renders in exponent form already carries an
-// indicator, so nothing is appended and its bytes do not move. This is the
-// only place the "e" member of the indicator set is pinned in this package.
+// indicator, so nothing is appended and its bytes do not move. The float_kinds
+// golden pins the same member inside a Vector.
 func TestMarshalObject_ExponentFormTakesNoAppendedZero(t *testing.T) {
 	t.Parallel()
 	doc := indicatorDoc(t, map[string]any{"id": "r1", "ratio": 1e21})

@@ -424,9 +424,12 @@ func TestContractAsymmetry_ValueAndNameReading(t *testing.T) {
 	})
 }
 
-// TestContractAsymmetry_Numbers pins the number divergence: JSON Schema reads
-// a number exactly, and yammm reads a plain integer literal that fits as an
-// int64 and any other number as a float64.
+// TestContractAsymmetry_Numbers pins the number divergence in both directions.
+// yammm's Integer is an integer literal an int64 holds and its Float any literal
+// read to its nearest finite float64; JSON Schema's "integer" is a number with
+// no fractional part whatever its spelling, and this validator reads a number
+// exactly. So the editor accepts numbers yammm refuses, and flags a Float
+// literal just past a bound that yammm, judging its nearest float64, accepts.
 func TestContractAsymmetry_Numbers(t *testing.T) {
 	s, res := schema.LoadString(context.Background(), `schema "n"
 
@@ -434,18 +437,21 @@ type N {
 	id String primary
 	i Integer
 	f Float
+	u Float[_, 1.0]
 }
 `, "test://n.yammm")
 	if res.HasErrors() {
 		t.Fatalf("load: %v", res.Err())
 	}
 	compiled := compileEmitted(t, s)
-	refused := []struct{ name, data string }{
+	refusedByYammm := []struct{ name, data string }{
 		{"integer 2^63", `{"N":[{"id":"a","i":9223372036854775808}]}`},
 		{"integer 1e20", `{"N":[{"id":"a","i":100000000000000000000}]}`},
+		{"whole decimal literal on an Integer", `{"N":[{"id":"a","i":5.0}]}`},
+		{"whole exponent literal on an Integer", `{"N":[{"id":"a","i":1e2}]}`},
 		{"float beyond float64", `{"N":[{"id":"a","f":1e400}]}`},
 	}
-	for _, tc := range refused {
+	for _, tc := range refusedByYammm {
 		t.Run(tc.name, func(t *testing.T) {
 			data := []byte(tc.data)
 			if err := validateEmitted(t, compiled, data); err != nil {
@@ -454,14 +460,21 @@ type N {
 			assertOnlyStageCode(t, yammmStageCodes(t, s, data), "validate", diag.E_TYPE_MISMATCH)
 		})
 	}
-	t.Run("decimal literal read through float64", func(t *testing.T) {
-		data := []byte(`{"N":[{"id":"a","i":1.0000000000000000001}]}`)
+	t.Run("a Float just past its bound is its nearest float64 to yammm", func(t *testing.T) {
+		data := []byte(`{"N":[{"id":"a","u":1.00000000000000001}]}`)
 		if err := validateEmitted(t, compiled, data); err == nil {
-			t.Error("emitted schema must flag a fractional value on an Integer")
+			t.Error("an exact validator must flag a literal above the maximum")
 		}
 		if got := yammmStageCodes(t, s, data); len(got) != 0 {
 			t.Errorf("yammm reads the literal as float64 1 and must accept it; got %v", got)
 		}
+	})
+	t.Run("a fractional literal on an Integer is refused by both", func(t *testing.T) {
+		data := []byte(`{"N":[{"id":"a","i":1.0000000000000000001}]}`)
+		if err := validateEmitted(t, compiled, data); err == nil {
+			t.Error("emitted schema must flag a fractional value on an Integer")
+		}
+		assertOnlyStageCode(t, yammmStageCodes(t, s, data), "validate", diag.E_TYPE_MISMATCH)
 	})
 }
 
@@ -472,7 +485,7 @@ func TestContractAsymmetry_Formats(t *testing.T) {
 	s := loadSchema(t, "scalars")
 	const county = `"fips":"12345","name":"Alpha","population":1,"active":true`
 
-	t.Run("annotation mode accepts a malformed UUID", func(t *testing.T) {
+	t.Run("annotation mode accepts a malformed UUID, Date or Timestamp", func(t *testing.T) {
 		out, err := Marshal(s)
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)
@@ -489,11 +502,23 @@ func TestContractAsymmetry_Formats(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Compile: %v", err)
 		}
-		data := []byte(`{"County":[{` + county + `,"guid":"nope"}]}`)
-		if err := validateEmitted(t, compiled, data); err != nil {
-			t.Errorf("an editor that does not assert formats must accept the value:\n%v", err)
+		for _, field := range []string{`"guid":"nope"`, `"founded":"2024-02-30"`, `"updated_at":"nope"`} {
+			data := []byte(`{"County":[{` + county + `,` + field + `}]}`)
+			if err := validateEmitted(t, compiled, data); err != nil {
+				t.Errorf("%s: an editor that does not assert formats must accept the value:\n%v", field, err)
+			}
+			assertOnlyStageCode(t, yammmStageCodes(t, s, data), "validate", diag.E_CONSTRAINT_FAIL)
 		}
-		assertOnlyStageCode(t, yammmStageCodes(t, s, data), "validate", diag.E_CONSTRAINT_FAIL)
+	})
+
+	t.Run("asserting mode accepts a date-time yammm refuses", func(t *testing.T) {
+		for _, stamp := range []string{"2024-01-15t10:30:00z", "2024-12-31T23:59:60Z"} {
+			data := []byte(`{"County":[{` + county + `,"updated_at":"` + stamp + `"}]}`)
+			if err := validateEmitted(t, compileEmitted(t, s), data); err != nil {
+				t.Errorf("%s: an asserting validator reads RFC 3339 and must accept it:\n%v", stamp, err)
+			}
+			assertOnlyStageCode(t, yammmStageCodes(t, s, data), "validate", diag.E_CONSTRAINT_FAIL)
+		}
 	})
 
 	t.Run("asserting mode flags a UUID without hyphens", func(t *testing.T) {

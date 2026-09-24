@@ -9,8 +9,8 @@ import (
 
 // NormalizeNumber converts a json.Number to the appropriate Go numeric type.
 //
-// The conversion applies a float-indicator heuristic: if the number string
-// contains '.', 'e', or 'E', it is treated as float64; otherwise as int64.
+// The conversion applies the lexical rule [IsIntegerLiteral] states: a number
+// string containing '.', 'e', or 'E' is treated as float64; otherwise as int64.
 // This correctly classifies scientific notation like "1e2" as float64 (its
 // JSON representation uses exponent notation, even though its mathematical
 // value is an integer). A float-form string that is malformed or has no finite
@@ -34,17 +34,17 @@ import (
 //     value: the string is malformed, or no float64 holds it (e.g., a
 //     400-digit integer)
 //
-// Classification is by lexical form alone: a float indicator ('.', 'e', 'E')
-// means float64, an int-shaped literal means int64 — the reader sees only the
-// text, never a schema. A writer that wants a whole float to survive the round
-// trip therefore has to emit the indicator itself, as snapshot.Marshal and
-// adapter/json both do for a value under a float-bearing constraint. The Value
+// Classification is by lexical form, within the fallbacks above: a float
+// indicator ('.', 'e', 'E') means float64, an int-shaped literal means int64 —
+// the reader sees only the text, never a schema. A writer that wants a whole
+// float to survive the round trip therefore has to emit the indicator itself,
+// as snapshot.Marshal and adapter/json both do for every float in a property
+// value, at any depth of its lists and string-keyed maps. The Value
 // typed accessors (Int(), Float()) read both representations transparently.
 func NormalizeNumber(n json.Number) any {
 	s := n.String()
 
-	// Float indicator: '.', 'e', or 'E' means float64.
-	if strings.ContainsAny(s, ".eE") {
+	if !IsIntegerLiteral(n) {
 		if f, err := strconv.ParseFloat(s, 64); err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) {
 			return f
 		}
@@ -59,6 +59,15 @@ func NormalizeNumber(n json.Number) any {
 		return f
 	}
 	return n // malformed or non-finite
+}
+
+// IsIntegerLiteral reports whether n is spelled as an integer: it carries no
+// float indicator ('.', 'e' or 'E'). It judges the spelling alone, not the
+// syntax or the range. It is the lexical rule every reader of a data document
+// applies: an Integer value is an integer literal, and a decimal or exponent
+// literal is a float even when its value is whole.
+func IsIntegerLiteral(n json.Number) bool {
+	return !strings.ContainsAny(string(n), ".eE")
 }
 
 // NormalizeValue recursively normalizes json.Number values within arbitrary

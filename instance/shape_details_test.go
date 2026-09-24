@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -29,4 +30,12 @@ func TestEdgeShapeMismatch_NamesTypedContainers(t *testing.T) {
 	v := instance.NewValidator(loadSrc(t, personCompany))
 	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": []string{"x"}}})
 	yammmtest.Diff(t, []string{"array"}, detailValues(mustIssue(t, res, instance.ErrEdgeShapeMismatch), diag.DetailKeyGot))
+}
+
+// A json.Number, the form a JSON document's numbers take, is named a number,
+// not by its underlying Go kind, which is string.
+func TestEdgeShapeMismatch_NamesAJSONNumberANumber(t *testing.T) {
+	v := instance.NewValidator(loadSrc(t, personCompany))
+	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p", "works_at": json.Number("42")}})
+	yammmtest.Diff(t, []string{"number"}, detailValues(mustIssue(t, res, instance.ErrEdgeShapeMismatch), diag.DetailKeyGot))
 }

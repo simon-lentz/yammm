@@ -182,7 +182,7 @@ params, err := neo4jAdapter.CoerceParams(params, types)  // whole parameter map
 relProps, err := neo4jAdapter.CoerceRelProps(props, rel)  // one edge's property map, returned as a copy
 ```
 
-This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints. `CoerceRelProps` reaches the `rel_props` map inside a `$rows` row of a hand-built relationship MERGE, one nesting level below what `CoerceParams` walks. A `time.Time` is sent in a location the driver can encode: `time.Local` and any zone name the host cannot resolve become an offset; a resolvable IANA name is kept.
+This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints; a float at an Integer is an error, whole or not. `CoerceRelProps` reaches the `rel_props` map inside a `$rows` row of a hand-built relationship MERGE, one nesting level below what `CoerceParams` walks. A `time.Time` is sent in a location the driver can encode: `time.Local` and any zone name the host cannot resolve become an offset; a resolvable IANA name is kept when its offset agrees with the value's, and becomes an offset otherwise.
 
 ### Label Management
 

@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -30,8 +31,13 @@ func contractFixture(t *testing.T, schemaFile, dataFile string) (*schema.Schema,
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Numbers stay json.Number, as yammm's JSON adapter reads a document: a
+	// float64 decode would turn every integer into a float, which no Integer
+	// accepts.
 	var data map[string][]map[string]any
-	if err := json.Unmarshal(raw, &data); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&data); err != nil {
 		t.Fatal(err)
 	}
 	return s, data

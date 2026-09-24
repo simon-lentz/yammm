@@ -24,8 +24,8 @@
 //   - bool (false < true)
 //   - integers: int, int8-64, uint, uint8-64, uintptr
 //   - floats: float32, float64 (with special handling: -Inf < finite < +Inf < NaN)
-//   - [encoding/json.Number], as the integer it holds when it holds one and as
-//     a float otherwise
+//   - [encoding/json.Number], as the integer it spells when it is an integer
+//     literal and as a float otherwise
 //   - string and *regexp.Regexp (regexp compared via String())
 //   - slices of supported types (lexicographic comparison)
 //
@@ -55,7 +55,7 @@
 // the value transformed where the kind requires it:
 //
 //   - [IntKind]: Integer values (returns normalized int64 for json.Number, or
-//     the json.Number itself for a decimal integer no int64 holds)
+//     the json.Number itself for an integer literal no int64 holds)
 //   - [FloatKind]: Float values (returns normalized float64 for json.Number)
 //   - [BoolKind]: Boolean values
 //   - [StringKind]: String values
@@ -66,22 +66,24 @@
 //
 // # json.Number Handling
 //
-// [Classify] determines what a value IS, not what it should be per schema:
-//   - json.Number("42") → IntKind (no decimal point)
-//   - json.Number("3.0") → FloatKind (has decimal point)
+// [Classify] determines what a value IS, not what it should be per schema. It
+// reads a json.Number by its spelling ([immutable.IsIntegerLiteral]):
+//   - json.Number("42") → IntKind (no '.', 'e' or 'E')
+//   - json.Number("3.0") → FloatKind (has a decimal point)
+//   - json.Number("1e2") → FloatKind (has an exponent), though its value is whole
 //   - json.Number("3.14") → FloatKind
 //   - json.Number("-9223372036854775809") → IntKind, kept as the json.Number:
 //     an integer no int64 holds, which an Integer check refuses
 //
-// Strict rejection of "3.0" for Integer schema types happens at instance
-// validation time, not in this classification layer.
+// The Integer check at instance validation refuses every FloatKind value, "3.0"
+// and 3.0 included: a float is never an Integer, whole or not.
 //
 // # Float Precision Warning
 //
 // When large integers (> 2^53) are coerced to float64, precision may be lost.
 // This is inherent to IEEE 754 floating-point representation, not a library
 // limitation. For example, json.Number("9007199254740993") as Float loses
-// precision because 9007199254740993 > 2^53 (JavaScript's MAX_SAFE_INTEGER).
+// precision because 9007199254740993 > 2^53 (JavaScript's MAX_SAFE_INTEGER is 2^53-1).
 // Schemas requiring exact large integers should use Integer type.
 //
 // # Large Unsigned Integer Comparison
@@ -102,11 +104,12 @@
 // convert the float to integer (not vice versa) when the float is a whole number,
 // avoiding the precision loss that occurs when large integers are converted to float64.
 //
-// An integer takes the exact path whatever carries it: a json.Number that
-// parses as an int64 or a uint64 is compared as that integer, and only a
-// json.Number with a fraction is compared as a float. A json.Number holding a
-// decimal integer neither int64 nor uint64 holds is compared exactly, as a
-// rational, so it never equals the float64 it rounds to. The order is therefore
+// An integer takes the exact path whatever carries it: a json.Number spelled as
+// an integer that an int64 or a uint64 holds is compared as that integer, and a
+// json.Number carrying '.', 'e' or 'E' is compared as a float. A json.Number
+// spelled as an integer neither int64 nor uint64 holds is compared exactly, as
+// a rational, so it equals a float64 only when that float64 is the same integer
+// exactly (2^64 is; the float64 nearest 2^64+1 is not). The order is therefore
 // transitive across every supported value:
 //   - Order(uint64(2^53+1), float64(2^53)) returns 1 (greater), not 0
 //   - Order(int64(2^53+1), float64(2^53)) returns 1 (greater), not 0
@@ -122,7 +125,8 @@
 //
 // [Canonical] returns a value in the single stored representation its schema
 // constraint defines. Timestamp, UUID and Date each accept more than one Go
-// representation and store one; every other kind passes through. It is the
+// representation and store one, a List over one of them is rebuilt at its
+// elements, and every other kind passes through. It is the
 // temporal and UUID half of the stored-form rule: the instance layer's
 // CoerceValue — the rule itself — calls it for those kinds, and the graph
 // writer and the snapshot wire call it directly for a value that reached them
@@ -132,7 +136,7 @@
 //
 //	internal/value  ──imports──▶  immutable, schema, github.com/google/uuid
 //
-// Comparison and kind detection depend only on stdlib; [Canonical] is what
+// Comparison and kind detection depend on stdlib and immutable; [Canonical] is what
 // reaches schema and github.com/google/uuid, because a canonical form is
 // defined by a constraint. The edge is one-directional: schema does not import
 // this package, and adding that edge would create a cycle.

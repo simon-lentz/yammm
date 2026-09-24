@@ -13,10 +13,10 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// wireFloat marks a value under a float-bearing constraint so it emits with a
-// float indicator (".", "e", or "E") — the set [immutable.NormalizeNumber]
-// classifies by on decode. Without it, a whole float emits int-shaped and
-// narrows to int64 across a marshal/load round trip.
+// wireFloat marks a float, or a number under a float-bearing constraint, so it
+// emits with a float indicator (".", "e", or "E") — the set
+// [immutable.NormalizeNumber] classifies by on decode. Without it, a whole
+// float emits int-shaped and narrows to int64 across a marshal/load round trip.
 type wireFloat float64
 
 // MarshalJSON emits the value exactly as encoding/json's float encoder would,
@@ -101,17 +101,22 @@ func typeByWireID(s *schema.Schema, schemaName, name string) (*schema.Type, bool
 
 // wireProps clones props and rewrites each value under its schema constraint
 // so float-bearing values emit with a float indicator. A nil clone stays nil
-// (the wire's "properties":null shape); a nil type and undeclared properties
-// pass through untouched.
+// (the wire's "properties":null shape). An undeclared property, and every
+// property under a nil type, has no constraint: its floats keep their
+// indicator ([wireValue]) and everything else passes through untouched.
 func wireProps(props immutable.Properties, t *schema.Type) map[string]any {
 	m := props.Clone()
-	if len(m) == 0 || t == nil {
+	if len(m) == 0 {
 		return m
 	}
 	for name, v := range m {
-		if prop, ok := t.Property(name); ok {
-			m[name] = wireValue(v, prop.Constraint())
+		var c schema.Constraint
+		if t != nil {
+			if prop, ok := t.Property(name); ok {
+				c = prop.Constraint()
+			}
 		}
+		m[name] = wireValue(v, c)
 	}
 	return m
 }
@@ -122,24 +127,34 @@ func wireProps(props immutable.Properties, t *schema.Type) map[string]any {
 // own TypeID — the shared input, not the shared body.
 func wireEdgeProps(props immutable.Properties, rel *schema.Relation) map[string]any {
 	m := props.Clone()
-	if len(m) == 0 || rel == nil {
+	if len(m) == 0 {
 		return m
 	}
 	for name, v := range m {
-		if p, ok := rel.Property(name); ok {
-			m[name] = wireValue(v, p.Constraint())
+		var c schema.Constraint
+		if rel != nil {
+			if p, ok := rel.Property(name); ok {
+				c = p.Constraint()
+			}
 		}
+		m[name] = wireValue(v, c)
 	}
 	return m
 }
 
-// wireValue rewrites one cloned value under its resolved constraint kind.
-// Float-bearing paths emit with a float indicator, and Timestamp, Date and
-// UUID render to their canonical text; every other kind, an unresolved alias,
-// and any unexpected shape pass through untouched.
+// wireValue rewrites one cloned value under its resolved constraint kind. A
+// number at a Float or Vector-element position emits with a float indicator
+// when it is a float or an integer a float64 holds exactly ([wireNumeric]), and
+// Timestamp, Date and UUID render to their canonical text. Anywhere else, a
+// value that is not the kind's shape included, every float in it keeps its
+// indicator at any depth of its lists and string-keyed maps
+// ([wireUnconstrained]), and every other value passes through untouched.
 func wireValue(v any, c schema.Constraint) any {
-	if v == nil || c == nil {
+	if v == nil {
 		return v
+	}
+	if c == nil {
+		return wireUnconstrained(v)
 	}
 	resolved := schema.ResolveAlias(c)
 	//exhaustive:enforce
@@ -151,7 +166,7 @@ func wireValue(v any, c schema.Constraint) any {
 		// only the dimension.
 		elems, ok := wireElems(v)
 		if !ok {
-			return v
+			return wireUnconstrained(v)
 		}
 		for i, e := range elems {
 			elems[i] = wireNumeric(e)
@@ -164,7 +179,7 @@ func wireValue(v any, c schema.Constraint) any {
 		}
 		elems, ok := wireElems(v)
 		if !ok {
-			return v
+			return wireUnconstrained(v)
 		}
 		elem := lc.Element()
 		for i, e := range elems {
@@ -175,21 +190,57 @@ func wireValue(v any, c schema.Constraint) any {
 		return wireCanonical(v, resolved)
 	case schema.KindString, schema.KindInteger, schema.KindBoolean,
 		schema.KindEnum, schema.KindPattern, schema.KindAlias:
-		return v
+		return wireUnconstrained(v)
+	}
+	return wireUnconstrained(v)
+}
+
+// wireHeldFloat marks one float with a float indicator, so the document states
+// the Go type the snapshot holds: a whole float under an Integer is written 5.0
+// and read back as the float it is, which the Integer check refuses, rather
+// than as the integer 5. [wireUnconstrained] walks a value to each float in its
+// lists and string-keyed maps. Every other value passes through.
+func wireHeldFloat(v any) any {
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Float32:
+		return wireFloat32(float32(rv.Float()))
+	case reflect.Float64:
+		return wireFloat(rv.Float())
 	}
 	return v
 }
 
 // wireCanonical renders a temporal or UUID value in the one form the kind
 // stores, catching a value that reached the graph without validation. A shape
-// the constraint cannot render passes through — Load never re-validates, and a
-// document written before this rule existed must stay writable.
+// the constraint cannot render passes through, its floats keeping their
+// indicator — Load re-validates only when the caller asks, and a document
+// written before this rule existed must stay writable.
 func wireCanonical(v any, c schema.Constraint) any {
 	canonical, err := value.Canonical(v, c)
 	if err != nil {
-		return v
+		return wireUnconstrained(v)
 	}
 	return canonical
+}
+
+// wireUnconstrained marks every float in a value no Float position describes,
+// at any depth of its lists and string-keyed maps, as [wireHeldFloat] marks
+// one. It does not walk a Go array, which is how a scalar carrier such as
+// uuid.UUID is spelled, nor a map with other keys, which no reader produces.
+func wireUnconstrained(v any) any {
+	if t, ok := v.(map[string]any); ok {
+		for k, e := range t {
+			t[k] = wireUnconstrained(e)
+		}
+		return t
+	}
+	if elems, ok := wireElems(v); ok {
+		for i, e := range elems {
+			elems[i] = wireUnconstrained(e)
+		}
+		return elems
+	}
+	return wireHeldFloat(v)
 }
 
 // twoPow63 and twoPow64 are the rounding ceilings of int64 and uint64 in
@@ -221,10 +272,12 @@ func exactWireUint(n uint64) (float64, bool) {
 	return f, uint64(f) == n
 }
 
-// wireNumeric wraps any numeric value as a wire float so it emits with a float
-// indicator; the type switch fast-paths what validation and the decoder
-// produce, and reflection reaches the rest. Non-numeric shapes pass through —
-// Load never re-validates.
+// wireNumeric wraps a float, and an integer a float64 holds exactly, as a wire
+// float so it emits with a float indicator; the type switch fast-paths what
+// validation and the decoder produce, and reflection reaches the rest. A
+// json.Number is read as the reader reads it ([wireJSONNumber]), any other
+// integer passes through int-shaped, and any other shape goes to
+// [wireUnconstrained] — Load re-validates only when the caller asks.
 func wireNumeric(v any) any {
 	switch n := v.(type) {
 	case float64:
@@ -255,7 +308,7 @@ func wireNumeric(v any) any {
 			return wireFloat(f)
 		}
 	}
-	return v
+	return wireUnconstrained(v)
 }
 
 // wireJSONNumber classifies n with [immutable.NormalizeNumber], the rule the

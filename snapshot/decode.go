@@ -817,7 +817,11 @@ func (sd *streamDecoder) checkValueConformance(inst instWire, row int) {
 		if !value.Canonicalizes(prop.Constraint()) {
 			continue
 		}
-		if _, err := value.Canonical(immutable.NormalizeValue(raw), prop.Constraint()); err != nil {
+		// raw is the decoder's own value, never normalized: NormalizeValue
+		// rewrites a list in place, and revalidation reads this same wire tree
+		// afterwards and must see the document's numbers as written. A number is
+		// refused by these kinds whatever form it takes.
+		if _, err := value.Canonical(raw, prop.Constraint()); err != nil {
 			sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_NONCONFORMING,
 				fmt.Sprintf("property %q of %s does not conform to its %s constraint: %s",
 					name, formatWireKey(inst.Key), prop.Constraint().Kind(), err)).

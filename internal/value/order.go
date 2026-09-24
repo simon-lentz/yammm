@@ -225,12 +225,14 @@ func Order(left, right any) (int, error) {
 	return 0, fmt.Errorf("value: unknown strata for comparison between %T and %T", left, right)
 }
 
-// isWideInteger reports whether v is a json.Number holding a decimal integer
+// isWideInteger reports whether v is a json.Number spelled as a decimal integer
 // neither int64 nor uint64 holds. Its nearest float64 can be a different
-// integer, so [Order] compares it exactly rather than through that float.
+// integer, so [Order] compares it exactly rather than through that float. A
+// literal carrying a float indicator is a float however long its digit run:
+// strconv reports ErrRange for such a run before it reads the indicator.
 func isWideInteger(v any) bool {
 	n, ok := v.(json.Number)
-	if !ok {
+	if !ok || !immutable.IsIntegerLiteral(n) {
 		return false
 	}
 	_, err := strconv.ParseInt(string(n), 10, 64)
@@ -253,11 +255,9 @@ func compareExact(left, right any) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// One operand is wide and ranks 0, so equal ranks mean two rationals.
 	if lrank != rrank {
 		return cmp.Compare(lrank, rrank), nil
-	}
-	if l == nil {
-		return 0, nil
 	}
 	return l.Cmp(r), nil
 }
@@ -429,31 +429,6 @@ func GetString(val any) (string, bool) {
 		return rv.String(), true
 	}
 	return "", false
-}
-
-// IsWholeNumber reports whether f is finite and has no fractional part. It
-// says nothing about range: see [GetInt64FromFloat] for the int64 bound.
-func IsWholeNumber(f float64) bool {
-	return IsFinite(f) && math.Trunc(f) == f
-}
-
-// GetInt64FromFloat extracts an int64 from a float64 that is whole AND within
-// int64. It reports false for a fractional, non-finite or out-of-range value;
-// a caller that must say which is which tests [IsWholeNumber] and [IsFinite].
-func GetInt64FromFloat(f float64) (int64, bool) {
-	if !IsWholeNumber(f) || !fitsInt64(f) {
-		return 0, false
-	}
-	return int64(f), true
-}
-
-// fitsInt64 reports whether a whole float64 is within int64: float64(MaxInt64)
-// rounds up to 2^63, so the upper bound is exclusive; float64(MinInt64) is
-// exactly -2^63.
-func fitsInt64(f float64) bool {
-	const maxInt64AsFloat = float64(1 << 63)
-	const minInt64AsFloat = -float64(1 << 63)
-	return f >= minInt64AsFloat && f < maxInt64AsFloat
 }
 
 // GetUint64 extracts a uint64 from any unsigned integer type, or from a

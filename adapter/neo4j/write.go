@@ -410,10 +410,10 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // repairs a vector whose whole floats arrive as int64, as a hand-built param map
 // can carry them. Per-element conversion delegates
 // to [coerceScalar] (the Float width-repair and Date/Timestamp parse rules) or, for
-// Integer elements, to [repairInt64] (every Go int/uint width and every whole
-// float inside the int64 range -> int64, mirroring Coerce's Float repair), so the repair rules live in
+// Integer elements, to [widenInt64] (every Go int/uint width -> int64, a float
+// refused, mirroring Coerce's Float repair), so the repair rules live in
 // one place; coerceSlice owns only the slice typing. Scalar Integer positions
-// route through the same [repairInt64], so an element and a scalar of that kind
+// route through the same [widenInt64], so an element and a scalar of that kind
 // cannot disagree.
 //
 // An element that is neither the element type nor coercible to it — a non-numeric
@@ -450,9 +450,9 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	case schema.KindInteger:
 		out := make([]int64, len(raw))
 		for i, v := range raw {
-			n, ok := repairInt64(v)
+			n, ok := widenInt64(v)
 			if !ok {
-				return nil, fmt.Errorf("list element %d: cannot use %T as an Integer element (want an integer type or a whole number)", i, v)
+				return nil, fmt.Errorf("list element %d: cannot use %T as an Integer element (want an integer type)", i, v)
 			}
 			out[i] = n
 		}
@@ -524,30 +524,18 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 	}
 }
 
-// repairInt64 normalizes a Go numeric value to int64 for an Integer-constrained
-// position, so a value hand-built with a narrower, unsigned, or floating type
-// reaches the driver as a Cypher INTEGER — the same width repair [Coerce]
-// applies for Float, in the other direction.
+// widenInt64 widens a Go integer of any width to int64 for an
+// Integer-constrained position, so a value hand-built with a narrower or
+// unsigned type reaches the driver as a Cypher INTEGER — the same width repair
+// [Coerce] applies for Float, in the other direction.
 //
-// Every signed and unsigned integer width widens. A float widens only when it
-// is integral and inside the int64 range: a whole float under an Integer
-// constraint is what a JSON decode without UseNumber produces, and rejecting it
-// would send a Cypher FLOAT to an IS :: INTEGER position, which matches
-// nothing. A fractional float is not repaired — that is a type error worth
-// surfacing, not one to silently truncate — and neither is any other type.
-//
-// It reports false for a uint or uint64 past the int64 range (matching the
-// validator's coerceInteger overflow guard) and for a float outside it. The
-// float bound is exclusive at the top and inclusive at the bottom, because no
-// float64 holds math.MaxInt64: the nearest one is 2^63, one past it, so
-// admitting the bound would convert out of range. -2^63 is math.MinInt64
-// exactly, so the lower bound is a value, not a limit.
-func repairInt64(v any) (int64, bool) {
+// A float is never an Integer, whole or not, so it is not widened: the driver
+// would otherwise receive an integer the caller never wrote, and the
+// validator's Integer rule refuses the same value. It reports false for a
+// float, for any other type, and for a uint or uint64 past the int64 range,
+// matching the validator's coerceInteger overflow guard.
+func widenInt64(v any) (int64, bool) {
 	switch n := v.(type) {
-	case float32:
-		return repairIntegralFloat(float64(n))
-	case float64:
-		return repairIntegralFloat(n)
 	case int:
 		return int64(n), true
 	case int8:
@@ -578,15 +566,6 @@ func repairInt64(v any) (int64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-// repairIntegralFloat converts f to int64 when it is whole and representable.
-func repairIntegralFloat(f float64) (int64, bool) {
-	limit := math.Ldexp(1, 63)
-	if f != math.Trunc(f) || f < -limit || f >= limit {
-		return 0, false
-	}
-	return int64(f), true
 }
 
 // CoerceRelProps returns a copy of props with each property rel declares
