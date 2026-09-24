@@ -20,8 +20,9 @@ var (
 	// E_CSV_CONFIG indicates the adapter was built with a setting this parse
 	// cannot use: a list separator the parser could not find again, a delimiter
 	// [encoding/csv] refuses, or [Adapter.ParseWithTypeColumn] with no
-	// [WithTypeColumn]. No record is read, and the remedy is in the caller's
-	// code rather than in the file.
+	// [WithTypeColumn] or with a name holding a CR LF, which no header can hold.
+	// No record is read, and the remedy is in the caller's code rather than in
+	// the file.
 	E_CSV_CONFIG = diag.NewCode("E_CSV_CONFIG", diag.CategoryAdapter)
 )
 

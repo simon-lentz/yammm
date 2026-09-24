@@ -19,7 +19,9 @@ const (
 	columnDotted                   // a dotted column, one cell of its field's group
 )
 
-// edgeMember is what a dotted column's suffix names within its association.
+// edgeMember is what a dotted column's suffix names within the association
+// its spelling names: the member it spells exactly or, unless strict, by fold.
+// Which key claims the member is decided per target by [instance.ClaimEdgeKeys].
 type edgeMember uint8
 
 const (
@@ -31,100 +33,50 @@ const (
 
 // column is one header column read against one row type.
 type column struct {
-	name   string
-	kind   columnKind
-	exact  bool             // the name spells its member exactly rather than by fold
-	prop   *schema.Property // columnPlain: the property the name spells or folds onto
-	field  string           // columnDotted: the association as the header spells it
-	suffix string           // columnDotted: the text after the dot, as written
-	rel    *schema.Relation // columnDotted: nil where the field names no association
-	member edgeMember       // columnDotted
-	key    *schema.Property // memberKey
-	eprop  *schema.Property // memberProperty
+	name     string
+	kind     columnKind
+	exact    *schema.Property // columnPlain: the property the name spells exactly
+	folds    *schema.Property // columnPlain: the property the name folds onto, unless strict
+	spelling int              // columnDotted: its field spelling in [plan.spellings]
+	suffix   string           // columnDotted: the text after the dot, as written
 }
 
-// claim is the columns (or field spellings) that name one member of one
-// object: the one that spells it exactly, if any, and those whose
-// [instance.FoldKey] matches it.
-type claim struct {
-	exact int // -1: none spells it exactly
-	folds []int
-}
-
-// resolve applies the validator's claim rule to one object holding the keys
-// present reports: an exact key claims its member, else the one folded key the
-// object holds resolves, and folded keys beside a claimant or each other pass
-// on. A lone folded candidate with no value resolves to its empty value.
-func (c claim) resolve(present func(i int) bool) (resolved int, passed []int) {
-	var filled []int
-	for _, i := range c.folds {
-		if present(i) {
-			filled = append(filled, i)
-		}
-	}
-	switch {
-	case c.exact >= 0 && present(c.exact):
-		return c.exact, filled
-	case len(filled) == 1:
-		return filled[0], nil
-	case len(filled) > 1:
-		return -1, filled
-	case len(c.folds) == 1:
-		return c.folds[0], nil
-	}
-	return -1, nil
-}
-
-// claims groups names by the member each spells or folds onto. member returns
-// a name's member and whether the name spells it exactly; ok is false for a
-// name that names none.
-func claims[M comparable](n int, member func(i int) (m M, exact, ok bool)) (map[M]*claim, []M) {
-	byMember := make(map[M]*claim)
-	var order []M
-	for i := range n {
-		m, exact, ok := member(i)
-		if !ok {
-			continue
-		}
-		c := byMember[m]
-		if c == nil {
-			c = &claim{exact: -1}
-			byMember[m] = c
-			order = append(order, m)
-		}
-		if exact {
-			c.exact = i
-		} else {
-			c.folds = append(c.folds, i)
-		}
-	}
-	return byMember, order
-}
-
-// plan is a header read against one row type: each column's member, the
-// claims over the undotted columns, and each association spelling's group.
+// plan is a header read against one row type: each column's candidate member
+// and each field spelling's group. Which key claims a member is decided per
+// row by [instance.ClaimKeys], since only the row knows which keys it holds.
 type plan struct {
+	typ       *schema.Type
 	columns   []column
-	props     []claim    // over column indexes
 	spellings []spelling // in header order
-	relClaims []claim    // over spelling indexes
+	claimMemo map[string]instance.Claims
 }
 
-// spelling is one field spelling of the dotted columns and the claims its
-// suffixes make within its association.
+// spelling is one field spelling of the dotted columns: its columns, the plain
+// column of the same name, and, where the spelling names an association, what
+// each suffix names in it.
 type spelling struct {
-	field   string
-	rel     *schema.Relation
-	cols    []int   // column indexes, in header order
-	members []claim // over positions in cols
+	field     string
+	cols      []int // column indexes, in header order
+	plain     int   // the plain column spelled as field, or -1
+	rel       *schema.Relation
+	target    *schema.Type
+	members   []suffixMember // over positions in cols; nil unless rel is set
+	claimMemo map[string]instance.EdgeClaims
 }
 
-// planColumns reads each header column against schemaType, once per header:
-// the member each name spells or folds onto. Which name claims a member is
-// decided per row by [claim.resolve], since only the row knows which keys it
-// holds. A nil schemaType keeps every cell as its string.
+// suffixMember is what one suffix names in its spelling's association.
+type suffixMember struct {
+	member  edgeMember
+	exact   bool
+	decides bool             // the column's segments decide the group's target count
+	key     *schema.Property // memberKey
+	eprop   *schema.Property // memberProperty
+}
+
+// planColumns reads each header column against schemaType, once per header. A
+// nil schemaType keeps every cell as its string.
 func (a *Adapter) planColumns(columns []string, schemaType *schema.Type) *plan {
-	p := &plan{columns: make([]column, len(columns))}
+	p := &plan{typ: schemaType, columns: make([]column, len(columns)), claimMemo: make(map[string]instance.Claims)}
 	for i, name := range columns {
 		p.columns[i] = column{name: name, kind: columnString}
 	}
@@ -132,145 +84,158 @@ func (a *Adapter) planColumns(columns []string, schemaType *schema.Type) *plan {
 		return p
 	}
 
-	byField := make(map[string]*schema.Relation)
-	for rel := range schemaType.AllAssociations() {
-		byField[rel.FieldName()] = rel
-	}
+	plainOf := make(map[string]int)
 	spellingOf := make(map[string]int)
 	for i, name := range columns {
 		c := &p.columns[i]
 		field, suffix, dotted := strings.Cut(name, ".")
 		if !dotted {
 			c.kind = columnPlain
-			c.prop = propertyNamed(schemaType, name, a.config.strict)
-			c.exact = c.prop != nil && c.prop.Name() == name
+			c.exact, c.folds = propertyNamed(schemaType, name, a.config.strict)
+			plainOf[name] = i
 			continue
 		}
-		c.field, c.suffix = field, suffix
-		rel := byField[field]
-		if rel == nil && !a.config.strict {
-			if lower, ok := instance.FoldKey(field); ok {
-				rel = byField[lower]
-			}
-		}
-		c.kind, c.rel = columnDotted, rel
+		c.kind, c.suffix = columnDotted, suffix
 		s, seen := spellingOf[field]
 		if !seen {
 			s = len(p.spellings)
 			spellingOf[field] = s
-			p.spellings = append(p.spellings, spelling{field: field, rel: rel})
+			p.spellings = append(p.spellings, spelling{field: field, plain: -1, claimMemo: make(map[string]instance.EdgeClaims)})
 		}
+		c.spelling = s
 		p.spellings[s].cols = append(p.spellings[s].cols, i)
 	}
-
-	propClaims, propOrder := claims(len(columns), func(i int) (*schema.Property, bool, bool) {
-		c := p.columns[i]
-		if c.kind != columnPlain || c.prop == nil {
-			return nil, false, false
-		}
-		return c.prop, c.exact, true
-	})
-	for _, m := range propOrder {
-		p.props = append(p.props, *propClaims[m])
-	}
-	relClaims, relOrder := claims(len(p.spellings), func(s int) (*schema.Relation, bool, bool) {
-		sp := p.spellings[s]
-		if sp.rel == nil {
-			return nil, false, false
-		}
-		return sp.rel, sp.rel.FieldName() == sp.field, true
-	})
-	for _, m := range relOrder {
-		p.relClaims = append(p.relClaims, *relClaims[m])
-	}
 	for s := range p.spellings {
-		if p.spellings[s].rel != nil {
-			a.planSuffixes(p, &p.spellings[s])
+		sp := &p.spellings[s]
+		if i, ok := plainOf[sp.field]; ok {
+			sp.plain = i
+		}
+		sp.rel = a.associationNamed(schemaType, sp.field)
+		if sp.rel != nil {
+			a.planSuffixes(p, sp)
 		}
 	}
 	return p
 }
 
-// propertyNamed returns the property name spells, exactly or, unless strict,
-// by fold.
-func propertyNamed(t *schema.Type, name string, strict bool) *schema.Property {
+// propertyNamed returns the property name spells exactly, or else, unless
+// strict, the one it folds onto.
+func propertyNamed(t *schema.Type, name string, strict bool) (exact, folds *schema.Property) {
 	if prop, ok := t.Property(name); ok {
-		return prop
+		return prop, nil
 	}
 	if strict {
-		return nil
+		return nil, nil
 	}
 	lower, ok := instance.FoldKey(name)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	canonical, ok := t.CanonicalPropertyName(lower)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	prop, _ := t.Property(canonical)
-	return prop
+	return nil, prop
 }
 
-// edgeKey is the member an edge-object key names: one of the target's keys or
-// one of the relation's edge properties.
-type edgeKey struct {
-	key  *schema.Property
-	prop *schema.Property
+// associationNamed returns the association field spells exactly or, unless
+// strict, by fold. A composition is not one: the parser assembles no composed
+// child, so its group is carried as text for the validator to judge.
+func (a *Adapter) associationNamed(t *schema.Type, field string) *schema.Relation {
+	rel, ok := t.RelationByField(field)
+	if !ok && !a.config.strict {
+		if lower, folds := instance.FoldKey(field); folds {
+			rel, ok = t.RelationByField(lower)
+		}
+	}
+	if !ok || rel.IsComposition() {
+		return nil
+	}
+	return rel
 }
 
 // planSuffixes reads each suffix of one spelling's group against its
 // association: a key component of the target, which [WithSchema] supplies, or
 // an edge property.
 func (a *Adapter) planSuffixes(p *plan, sp *spelling) {
-	rel := sp.rel
-	var target *schema.Type
 	if a.config.schema != nil {
-		target, _ = a.config.schema.TypeByID(rel.TargetID())
+		sp.target, _ = a.config.schema.TypeByID(sp.rel.TargetID())
 	}
 	keyByFold := make(map[string]*schema.Property)
-	if target != nil {
-		for pk := range target.PrimaryKeys() {
+	if sp.target != nil {
+		for pk := range sp.target.PrimaryKeys() {
 			keyByFold[strings.ToLower(keyPrefix+pk.Name())] = pk
 		}
 	}
-
-	for _, i := range sp.cols {
-		c := &p.columns[i]
-		lower, folds := instance.FoldKey(c.suffix)
+	sp.members = make([]suffixMember, len(sp.cols))
+	for j, i := range sp.cols {
+		suffix := p.columns[i].suffix
+		m := &sp.members[j]
+		lower, folds := instance.FoldKey(suffix)
 		folds = folds && !a.config.strict
-		isKey := strings.HasPrefix(c.suffix, keyPrefix) || folds && strings.HasPrefix(lower, keyPrefix)
 		switch {
-		case isKey && target == nil:
-			c.member = memberOpenKey
-		case isKey:
-			if folds {
-				c.key = keyByFold[lower]
+		case strings.HasPrefix(suffix, keyPrefix) || folds && strings.HasPrefix(lower, keyPrefix):
+			if sp.target == nil {
+				m.member = memberOpenKey
+				continue
 			}
-			if c.key == nil {
-				continue // names no key of the target: carried as text
+			if key := keyByFold[strings.ToLower(suffix)]; key != nil && keyPrefix+key.Name() == suffix {
+				m.member, m.key, m.exact = memberKey, key, true
+			} else if key := keyByFold[lower]; folds && key != nil {
+				m.member, m.key = memberKey, key
 			}
-			c.member, c.exact = memberKey, keyPrefix+c.key.Name() == c.suffix
 		default:
-			if c.eprop, c.exact = rel.Property(c.suffix); !c.exact && folds {
-				c.eprop, _ = rel.PropertyFold(lower)
-			}
-			if c.eprop != nil {
-				c.member = memberProperty
+			if eprop, ok := sp.rel.Property(suffix); ok {
+				m.member, m.eprop, m.exact = memberProperty, eprop, true
+			} else if eprop, ok := sp.rel.PropertyFold(lower); folds && ok {
+				m.member, m.eprop = memberProperty, eprop
 			}
 		}
 	}
-	byMember, order := claims(len(sp.cols), func(j int) (edgeKey, bool, bool) {
-		c := p.columns[sp.cols[j]]
-		switch c.member {
-		case memberKey:
-			return edgeKey{key: c.key}, c.exact, true
-		case memberProperty:
-			return edgeKey{prop: c.eprop}, c.exact, true
+	markDeciding(sp.members)
+}
+
+// markDeciding marks the columns whose segments decide a group's target count:
+// for each member, the one spelling no other can shadow or collide with — its
+// exact spelling, or its one folded spelling where none is exact. A shadowed or colliding
+// spelling claims nothing where the other is written, so it counts as a column
+// naming no member. A key component out of reach has no known spelling, so
+// every such column decides.
+func markDeciding(members []suffixMember) {
+	type spellings struct{ exact, folded int }
+	byMember := make(map[*schema.Property]*spellings)
+	for _, m := range members {
+		if p := m.property(); p != nil {
+			if byMember[p] == nil {
+				byMember[p] = &spellings{}
+			}
+			if m.exact {
+				byMember[p].exact++
+			} else {
+				byMember[p].folded++
+			}
 		}
-		return edgeKey{}, false, false
-	})
-	for _, m := range order {
-		sp.members = append(sp.members, *byMember[m])
 	}
+	for j := range members {
+		m := &members[j]
+		switch p := m.property(); {
+		case m.member == memberOpenKey:
+			m.decides = true
+		case p != nil:
+			n := byMember[p]
+			m.decides = m.exact || n.exact == 0 && n.folded == 1
+		}
+	}
+}
+
+// property is the key component or edge property the member names, or nil.
+func (m suffixMember) property() *schema.Property {
+	switch m.member {
+	case memberKey:
+		return m.key
+	case memberProperty:
+		return m.eprop
+	}
+	return nil
 }

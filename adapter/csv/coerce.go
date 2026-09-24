@@ -2,11 +2,13 @@ package csv
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strconv"
 	"time"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -30,16 +32,13 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 		return raw, nil
 
 	case schema.KindInteger:
-		v, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("cannot parse %q as Integer: %w", raw, err)
-		}
-		return v, nil
+		return integerFromCell(raw)
 
 	case schema.KindFloat:
-		v, err := strconv.ParseFloat(raw, 64)
+		// Returned through a nil check: a failed float64 in an any is not nil.
+		v, err := floatFromCell(raw)
 		if err != nil {
-			return nil, fmt.Errorf("cannot parse %q as Float: %w", raw, err)
+			return nil, err
 		}
 		return v, nil
 
@@ -133,30 +132,119 @@ func (a *Adapter) parseVectorValue(raw string) ([]any, error) {
 	parts := splitListElems(raw, a.config.listSep)
 	result := make([]any, len(parts))
 	for i, part := range parts {
-		v, err := strconv.ParseFloat(part, 64)
+		v, err := floatFromCell(part)
 		if err != nil {
-			return nil, fmt.Errorf("vector element %d: cannot parse %q as Float: %w", i, part, err)
+			return nil, fmt.Errorf("vector element %d: %w", i, err)
 		}
 		result[i] = v
 	}
 	return result, nil
 }
 
+// integerFromCell reads an Integer cell as the JSON adapter reads the literal a
+// document would hold there: a JSON integer literal, read exactly, and refused
+// outside int64. A float literal is never an Integer, whole or not, and a
+// spelling JSON has no literal for ("+5", "007") is refused.
+func integerFromCell(raw string) (any, error) {
+	if !numberLiteral(raw) || !immutable.IsIntegerLiteral(json.Number(raw)) {
+		return nil, fmt.Errorf("cannot parse %q as Integer: not a JSON integer literal", raw)
+	}
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse %q as Integer: %w", raw, err)
+	}
+	return v, nil
+}
+
+// floatFromCell reads a Float cell, or a Vector element, as the JSON adapter reads
+// the literal: any JSON number literal, read to its nearest float64 with the
+// sign of a zero kept, and refused when no float64 is finite.
+func floatFromCell(raw string) (float64, error) {
+	if !numberLiteral(raw) {
+		return 0, fmt.Errorf("cannot parse %q as Float: not a JSON number literal", raw)
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, fmt.Errorf("cannot parse %q as Float: %w", raw, err)
+	}
+	return v, nil
+}
+
+// numberLiteral reports whether s is a JSON number literal (RFC 8259, section
+// 6): -? (0 | [1-9][0-9]*) (.[0-9]+)? ([eE][+-]?[0-9]+)?, with nothing around
+// it.
+func numberLiteral(s string) bool {
+	i := 0
+	if i < len(s) && s[i] == '-' {
+		i++
+	}
+	switch {
+	case i < len(s) && s[i] == '0':
+		i++
+	case i < len(s) && s[i] >= '1' && s[i] <= '9':
+		i = digitsFrom(s, i)
+	default:
+		return false
+	}
+	if i < len(s) && s[i] == '.' {
+		j := digitsFrom(s, i+1)
+		if j == i+1 {
+			return false
+		}
+		i = j
+	}
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			i++
+		}
+		j := digitsFrom(s, i)
+		if j == i {
+			return false
+		}
+		i = j
+	}
+	return i == len(s)
+}
+
+// digitsFrom returns the index past the run of ASCII digits starting at i.
+func digitsFrom(s string, i int) int {
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	return i
+}
+
 // utf8BOM is the UTF-8 byte order mark.
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
-// stripBOM returns a reader that strips a UTF-8 BOM if present.
-// If no BOM is found, the original bytes are preserved.
+// stripBOM returns a reader that skips a leading UTF-8 BOM and returns r's
+// first error from every Read after it: see [stickyReader].
 func stripBOM(r io.Reader) io.Reader {
-	buf := make([]byte, 3)
-	n, err := io.ReadFull(r, buf)
-	if err != nil || n < 3 {
-		// Short read or error — return what we got plus the rest.
-		return io.MultiReader(bytes.NewReader(buf[:n]), r)
+	sticky := &stickyReader{r: r}
+	head := make([]byte, len(utf8BOM))
+	n, err := io.ReadFull(sticky, head) // on an error, sticky returns it from the Read past head
+	head = head[:n]
+	if err == nil && bytes.Equal(head, utf8BOM) {
+		head = head[:0]
 	}
-	if bytes.Equal(buf, utf8BOM) {
-		return r // BOM consumed, return remaining reader.
+	return io.MultiReader(bytes.NewReader(head), sticky)
+}
+
+// stickyReader returns the first error its reader returns from every later
+// Read. [encoding/csv.Reader] drops a read error that meets a quote fault and reads on,
+// so a reader that fails once would otherwise lose its failure; the error that
+// ends the head's read would be lost the same way.
+type stickyReader struct {
+	r   io.Reader
+	err error
+}
+
+func (s *stickyReader) Read(p []byte) (int, error) {
+	if s.err != nil {
+		return 0, s.err
 	}
-	// No BOM — prepend the 3 bytes back.
-	return io.MultiReader(bytes.NewReader(buf), r)
+	n, err := s.r.Read(p)
+	s.err = err
+	return n, err //nolint:wrapcheck // an io.Reader passes io.EOF through as it is: callers compare it by identity
 }

@@ -542,9 +542,10 @@ type B {
 
 // Two types whose associations share a field name but target different keys
 // put both key columns in a union header. The column that names no key of the
-// row's target is skipped when empty, which needs the target's keys — X also
-// declares a plain property "code", which is not a key, so the column Y's key
-// names stays foreign to A's row.
+// row's target is skipped when empty, with or without WithSchema: with it the
+// column names no key of the target, and without it an empty key segment is
+// absent. X also declares a plain property "code", which is not a key, so the
+// column Y's key names stays foreign to A's row.
 func TestEmptyCell_UnionHeaderWithASharedAssociationFieldParsesEveryRow(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), sharedFieldSchema, "shared.yammm")
@@ -554,26 +555,28 @@ func TestEmptyCell_UnionHeaderWithASharedAssociationFieldParsesEveryRow(t *testi
 	in := "kind,aid,bid,ref._target_id,ref._target_code\n" +
 		"A,a1,,x1,\n" +
 		"B,,b1,,y1\n"
-	byType, pres := New(WithTypeColumn("kind"), WithSchema(s)).ParseWithTypeColumn(context.Background(),
-		location.NewSourceID("shared.csv"), strings.NewReader(in), func(name string) *schema.Type {
-			typ, _ := s.Type(name)
-			return typ
-		})
-	if pres.HasErrors() {
-		t.Fatalf("ParseWithTypeColumn: %s", pres.String())
-	}
-	want := map[string]map[string]any{
-		"A": {"_target_id": "x1"},
-		"B": {"_target_code": "y1"},
-	}
-	v := instance.NewValidator(s)
-	for typeName, ref := range want {
-		raw := byType[typeName][0]
-		if got := raw.Properties["ref"]; !reflect.DeepEqual(got, ref) {
-			t.Errorf("%s ref: got %#v, want %#v", typeName, got, ref)
+	for _, opts := range [][]Option{{WithTypeColumn("kind"), WithSchema(s)}, {WithTypeColumn("kind")}} {
+		byType, pres := New(opts...).ParseWithTypeColumn(context.Background(),
+			location.NewSourceID("shared.csv"), strings.NewReader(in), func(name string) *schema.Type {
+				typ, _ := s.Type(name)
+				return typ
+			})
+		if pres.HasErrors() {
+			t.Fatalf("ParseWithTypeColumn with %d options: %s", len(opts), pres.String())
 		}
-		if _, vres := v.ValidateOne(context.Background(), typeName, raw); vres.HasErrors() {
-			t.Errorf("%s: %s", typeName, vres.String())
+		want := map[string]map[string]any{
+			"A": {"_target_id": "x1"},
+			"B": {"_target_code": "y1"},
+		}
+		v := instance.NewValidator(s)
+		for typeName, ref := range want {
+			raw := byType[typeName][0]
+			if got := raw.Properties["ref"]; !reflect.DeepEqual(got, ref) {
+				t.Errorf("%s ref with %d options: got %#v, want %#v", typeName, len(opts), got, ref)
+			}
+			if _, vres := v.ValidateOne(context.Background(), typeName, raw); vres.HasErrors() {
+				t.Errorf("%s with %d options: %s", typeName, len(opts), vres.String())
+			}
 		}
 	}
 }

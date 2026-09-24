@@ -180,102 +180,24 @@ type edgeObject struct {
 }
 
 func (v *Validator) resolveEdgeObject(rel *schema.Relation, targetType *schema.Type, obj map[string]any, collector *diag.Collector, prov *location.Provenance, targetPath path.Builder) edgeObject {
-	eo := edgeObject{
-		obj:      obj,
-		fk:       make(map[string]string),
-		props:    make(map[*schema.Property]string),
-		shadowed: make(map[string]string),
-	}
-	names := slices.Sorted(maps.Keys(obj))
-
-	fkByLower := make(map[string]string)
-	for pk := range targetType.PrimaryKeys() {
-		field := fkPrefix + pk.Name()
-		fkByLower[strings.ToLower(field)] = field
-	}
-
-	// Exact pass.
-	var unclaimed []string
-	for _, name := range names {
-		if _, isFK := fkByLower[strings.ToLower(name)]; isFK && fkByLower[strings.ToLower(name)] == name {
-			eo.fk[name] = name
-			continue
+	claims := claimEdgeObject(rel, targetType, slices.Sorted(maps.Keys(obj)), v.cfg.strictPropertyNames)
+	for _, c := range claims.collisions {
+		what := "edge property " + strconv.Quote(memberName(c.fk, c.prop))
+		if c.fk != "" {
+			what = "foreign-key field " + strconv.Quote(c.fk)
 		}
-		if p, ok := rel.Property(name); ok {
-			eo.props[p] = name
-			continue
+		issue := diag.NewIssue(
+			diag.Error,
+			ErrCaseFoldCollision,
+			fmt.Sprintf("multiple input fields %v fold to %s", c.keys, what),
+		).WithDetail(diag.DetailKeyRelationName, rel.Name())
+		if c.prop != nil {
+			issue.WithDetail(diag.DetailKeyPropertyName, c.prop.Name())
 		}
-		unclaimed = append(unclaimed, name)
+		withProvenance(issue, prov, targetPath.String())
+		collector.Collect(issue.Build())
 	}
-	if v.cfg.strictPropertyNames {
-		eo.unknown = unclaimed
-		return eo
-	}
-
-	// Fold pass over the unclaimed keys: member → the keys folding to it.
-	type member struct {
-		fk   string
-		prop *schema.Property
-	}
-	folded := make(map[member][]string)
-	var order []member
-	for _, name := range unclaimed {
-		lower, ok := FoldKey(name)
-		if !ok {
-			eo.unknown = append(eo.unknown, name)
-			continue
-		}
-		var m member
-		if field, isFK := fkByLower[lower]; isFK {
-			if _, claimed := eo.fk[field]; claimed {
-				eo.unknown = append(eo.unknown, name)
-				eo.shadowed[name] = field
-				continue
-			}
-			m = member{fk: field}
-		} else if p, isProp := rel.PropertyFold(lower); isProp {
-			if _, claimed := eo.props[p]; claimed {
-				eo.unknown = append(eo.unknown, name)
-				eo.shadowed[name] = p.Name()
-				continue
-			}
-			m = member{prop: p}
-		} else {
-			eo.unknown = append(eo.unknown, name)
-			continue
-		}
-		if _, seen := folded[m]; !seen {
-			order = append(order, m)
-		}
-		folded[m] = append(folded[m], name)
-	}
-	for _, m := range order {
-		keys := folded[m]
-		if len(keys) > 1 {
-			what := "edge property " + strconv.Quote(memberName(m.fk, m.prop))
-			if m.fk != "" {
-				what = "foreign-key field " + strconv.Quote(m.fk)
-			}
-			issue := diag.NewIssue(
-				diag.Error,
-				ErrCaseFoldCollision,
-				fmt.Sprintf("multiple input fields %v fold to %s", keys, what),
-			).WithDetail(diag.DetailKeyRelationName, rel.Name())
-			if m.prop != nil {
-				issue.WithDetail(diag.DetailKeyPropertyName, m.prop.Name())
-			}
-			withProvenance(issue, prov, targetPath.String())
-			collector.Collect(issue.Build())
-			continue
-		}
-		if m.fk != "" {
-			eo.fk[m.fk] = keys[0]
-		} else {
-			eo.props[m.prop] = keys[0]
-		}
-	}
-	slices.Sort(eo.unknown)
-	return eo
+	return edgeObject{obj: obj, fk: claims.fk, props: claims.props, unknown: claims.unknown, shadowed: claims.shadowed}
 }
 
 func memberName(fk string, p *schema.Property) string {

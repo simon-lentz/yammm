@@ -1833,7 +1833,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_ADAPTER_PARSE` — parsing error in adapter input
 - `E_ADAPTER_IO` (Fatal) — an adapter's input failed to arrive: the reader a parse reads from returned an error that is neither the input's end nor a fault in its content. What was read before the failure is kept
 - `E_CSV_COERCE` — a CSV cell's text does not coerce to the type its member declares
-- `E_CSV_CONFIG` — the CSV adapter holds a setting the parse cannot use: a list separator it could not find again, a delimiter `encoding/csv` refuses, or `ParseWithTypeColumn` with no type column set. No record is read
+- `E_CSV_CONFIG` — the CSV adapter holds a setting the parse cannot use: a list separator it could not find again, a delimiter `encoding/csv` refuses, or `ParseWithTypeColumn` with no type column set or with one whose name holds a CR LF, which no header can hold. No record is read
 - `E_NEO4J_LABEL_COLLISION` — two types render the same Neo4j label
 - `E_NEO4J_INVALID_IDENTIFIER` — an identifier is not usable unquoted in generated Cypher
 - `E_NEO4J_UNSUPPORTED_TYPE` — a property kind the adapter cannot express

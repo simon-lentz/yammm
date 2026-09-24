@@ -216,7 +216,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
-| `E_ADAPTER_PARSE` | All | Format-specific parsing error |
+| `E_ADAPTER_PARSE` | JSON, CSV | The input is not well formed |
 | `E_ADAPTER_IO` | CSV | The reader a streamed parse reads from failed; Fatal, and the CLI exits 3 as for any I/O failure. Module-wide by name, as `E_ADAPTER_PARSE` is, but the CSV adapter is the one parser that streams: the JSON adapter takes bytes |
 | `E_CSV_COERCE` | CSV | A cell's text does not coerce to the type its member declares |
 | `E_CSV_CONFIG` | CSV | The adapter holds a setting this parse cannot use; no record is read |

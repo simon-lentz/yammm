@@ -23,7 +23,8 @@
 // text and the row is still produced. A setting the adapter cannot use draws
 // [E_CSV_CONFIG] — a list separator the parser could not find again, a
 // delimiter [encoding/csv] refuses, [Adapter.ParseWithTypeColumn] with no
-// [WithTypeColumn] — before the parse reads a byte, and carries no span, since
+// [WithTypeColumn] or with a name holding a CR LF, which no header can hold —
+// before the parse reads a byte, and carries no span, since
 // it names the configuration and not the input. Input that is not well formed
 // draws [diag.E_ADAPTER_PARSE], the code the JSON adapter reports a malformed
 // document under, so one code answers that question for both data parsers. An
@@ -59,6 +60,9 @@
 // [diag.E_ADAPTER_IO], as the diag package documents for an I/O failure, and
 // the records read before it are kept. A header the reader cannot read is an
 // Error for a fault in the input and that same Fatal for the reader failing.
+// No failure is lost: the parser returns the reader's first error from every
+// later read, so a failure met while the byte order mark is looked for, or one
+// [encoding/csv] reads past behind a record it refuses, still stops the parse.
 //
 // # Cancellation
 //
@@ -91,16 +95,21 @@
 // the JSON adapter. So a row parses as the JSON object that holds the same keys
 // and values does, and the validator answers the two alike.
 //
-// A column name resolves by the rule [instance.Validator] applies to a JSON
-// object's keys, applied to the object a row makes: each row, and each target
-// of an edge group, is its own object, and a key it holds is one whose cell
-// the parser writes. The rule holds at four places: a property, an
-// association's field, an edge property and a key component. A name that
-// spells a member exactly claims it when the object holds it. Otherwise a name
-// whose [instance.FoldKey] matches the member resolves to it, when it is the
-// member's one such name the object holds, or the member's one candidate in the
-// header. The resolved member decides the cell's coercion, what an empty cell
-// holds and how an edge group assembles. Every key keeps the header's spelling.
+// A row's object holds one key per name its cells write: a filled plain
+// column, a dotted field whose group holds a filled cell and was not dropped
+// for a count clash (under Foreign Keys), and an empty plain column that holds
+// its property's empty value (under Empty Cells). Which
+// member each key claims is decided by [instance.ClaimKeys], the validator's
+// own decision over every key the object holds, plain and dotted alike, and
+// each target of an edge group is its own object, decided by
+// [instance.ClaimEdgeKeys]. A key that claims a member takes that member's
+// coercion and empty value, and every key keeps the header's spelling.
+//
+// A dotted field's group is split into targets only where its key claims an
+// association. Any other group — one whose field names a composition, a
+// property or nothing, or whose key is shadowed or collides — is carried as
+// one object of its filled cells' text under the field's spelling, for the
+// validator to judge as it judges that JSON object.
 //
 // [WithStrictPropertyNames] matches names exactly instead, as
 // [instance.WithStrictPropertyNames] makes the validator match them. Give the
@@ -109,20 +118,22 @@
 // value under the header's spelling, so the row draws the validator's unknown
 // field where the file means no value.
 //
-// A name the object holds that resolves to no member is carried as its text, as
-// a JSON key is, for the validator to report as unknown, shadowed or colliding,
-// or to ignore under [instance.WithAllowUnknownFields]; its empty cell is
-// skipped. That holds at every position: a column naming no property, a suffix
-// naming neither a key component nor an edge property, a key component the
-// target does not declare, and a dotted field naming no association, whose
-// cells are carried under the field's spelling: a list of objects, one per
-// list segment, and a lone object for a cell with no list separator.
+// A key that claims no member is carried as its text, as a JSON key is, for
+// the validator to report as unknown, shadowed or colliding, or to ignore under
+// [instance.WithAllowUnknownFields]; its empty cell is skipped. That holds at
+// every position: a column naming no property, a suffix naming neither a key
+// component nor an edge property, and a key component the target does not
+// declare.
 //
 // Two values for one key are refused, as a JSON object that repeats a member
-// is: where a plain column and the dotted columns of the same field both write
+// is: where a plain column and the dotted columns of the same field both hold
 // a value in one row, the row draws [diag.E_ADAPTER_PARSE] naming both — the
-// code that adapter reports its repeated member under — and the group is kept,
-// since it is the field's only valid form.
+// code that adapter reports its repeated member under — unless a count clash
+// dropped the group first, which leaves the plain value its one writer. The
+// group is kept where
+// the key claims an association, whose only valid form it is, and the plain
+// value everywhere else. An empty plain cell beside a filled group holds no
+// value, so the group alone writes the key.
 //
 // Each row type of a [WithTypeColumn] file reads the header against its own
 // members, once per type. A type-column value must be a type name by the
@@ -135,8 +146,14 @@
 // CSV values are strings. The adapter uses [*schema.Type] constraint metadata
 // to coerce string values to typed Go values during parsing:
 //
-//   - Integer properties: [strconv.ParseInt]
-//   - Float properties: [strconv.ParseFloat]
+//   - Integer properties: a JSON integer literal, read exactly and refused
+//     outside int64. A float literal ("1.0", "1e2") is never an Integer,
+//     whole or not, as the validator reads the JSON document holding it
+//   - Float properties: any JSON number literal, read to its nearest float64
+//     with the sign of a zero kept, and refused where none is finite
+//   - A spelling JSON has no number literal for ("+5", "007", "1_000",
+//     "0x1p4", "Inf") draws [E_CSV_COERCE] at either kind, and at a List's or
+//     a Vector's element
 //   - Boolean properties: [strconv.ParseBool], every spelling it accepts
 //   - Date properties: validated as "2006-01-02" format, kept as string
 //   - Timestamp properties: validated against the declared layout — the
@@ -144,6 +161,8 @@
 //     string
 //   - List properties: split by the list separator, each element coerced
 //     by the element constraint, a nested list by this same rule
+//   - Vector properties: split by the list separator, each element read as a
+//     Float
 //
 // Date and Timestamp values remain as strings in [instance.RawInstance],
 // matching the JSON adapter's behavior. Temporal coercion to driver types
@@ -250,9 +269,15 @@
 //
 // The writer emits each association as its dotted column group, and the
 // parser assembles the group back into the _target_-keyed objects the
-// instance validator accepts — identical to the JSON adapter path. Segment
-// counts across a group must agree, or the row draws [diag.E_ADAPTER_PARSE]
-// naming the relation.
+// instance validator accepts — identical to the JSON adapter path. The target
+// count is decided by the columns that can claim a member: the exact spelling
+// of a key component or an edge property, or its one folded spelling where
+// none is exact. Where two of them disagree the group writes nothing and claims
+// nothing, and the row draws [diag.E_ADAPTER_PARSE] naming the relation. Any
+// other column — one naming no member, or a shadowed or colliding spelling —
+// is zipped where its count agrees, taken whole as written where there is one
+// target, and otherwise left out with its own [diag.E_ADAPTER_PARSE]. Without
+// [WithSchema] no key spelling is known, so every key column decides.
 //
 // [WithSchema] gives the parser each association's target type. A non-empty
 // key component keeps its text either way: every kind a primary key may take
@@ -274,7 +299,9 @@
 // # Compositions
 //
 // CSV is a flat format, so a row has no column for a composed child. The parser
-// reads no composition. Both writers refuse a snapshot in which any instance
+// assembles no composition: a group whose field names one is carried as one
+// object of text, for the validator to judge as it judges that JSON object.
+// Both writers refuse a snapshot in which any instance
 // holds a composed child with an [ErrUnrepresentable] error naming the type,
 // the instance and the composition, before they produce any output. A
 // composition with no children loses nothing and is written. The JSON adapter

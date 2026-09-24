@@ -431,18 +431,19 @@ func instantiationRefusal(typ *schema.Type, typeName string, allowPartType bool,
 func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, typeName string, raw RawInstance, base path.Builder, depth int) (*ValidInstance, diag.Result) {
 	collector := diag.NewCollector(v.cfg.maxIssuesPerInstance)
 	prov := raw.Provenance
-	input := v.indexInput(raw.Properties)
+	names := slices.Sorted(maps.Keys(raw.Properties))
 
 	// Build the member index: every schema property and relation resolved
 	// to the input key it is read from, once, by one fold rule. Every
 	// collision it finds is reported HERE, before any pass, so no pass has to
 	// carry the report and no gate can swallow it.
-	propMapping, accounted := v.buildPropertyMapping(ctx, typ, input, collector, prov, base)
-	relInputs := v.buildRelationMapping(typ, input, accounted, collector, prov, base)
+	claims := claimObject(typ, names, v.cfg.strictPropertyNames)
+	propMapping := v.buildPropertyMapping(ctx, typ, claims, collector, prov, base)
+	relInputs := buildRelationMapping(claims, raw.Properties, collector, prov, base)
 
 	// Check for unknown fields
 	if !v.cfg.allowUnknownFields {
-		v.checkUnknownFields(typ, typeName, input, propMapping, accounted, collector, prov, base)
+		v.checkUnknownFields(typ, typeName, names, claims, collector, prov, base)
 	}
 
 	// Each pass is gated on ITS OWN errors, taken as a count before and after —
@@ -591,32 +592,6 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 	return validInstance, collector.Result()
 }
 
-// inputKeys is one instance's input object with its keys indexed by their
-// ASCII fold, so every member lookup — property, relation field, edge property
-// — answers in O(1) under the default mode instead of rescanning the object
-// once per member. names is the keys in sorted order, for deterministic
-// diagnostics; byFold is nil under strict property names, where no fold is
-// attempted.
-type inputKeys struct {
-	props  map[string]any
-	names  []string
-	byFold map[string][]string
-}
-
-func (v *Validator) indexInput(props map[string]any) inputKeys {
-	in := inputKeys{props: props, names: slices.Sorted(maps.Keys(props))}
-	if v.cfg.strictPropertyNames {
-		return in
-	}
-	in.byFold = make(map[string][]string, len(props))
-	for _, name := range in.names {
-		if lower, ok := FoldKey(name); ok {
-			in.byFold[lower] = append(in.byFold[lower], name)
-		}
-	}
-	return in
-}
-
 // FoldKey returns the case-fold the validator matches an input key by, or
 // false for a key no schema name can match under the fold. It is the rule
 // [WithStrictPropertyNames] switches off, and a parser that resolves names
@@ -662,47 +637,19 @@ type relationInput struct {
 	candidates []string // relationCollided: the keys that folded to the field
 }
 
-// buildRelationMapping resolves each of typ's relations to the input key its
-// value is under, by the rule properties follow: the exact field name first,
-// then under the default mode the one unclaimed key that folds to it; two
-// keys folding to it is a collision, recorded in the entry and reported by
-// the member index, before any pass runs, so both member kinds report from one
-// site and no pass's gate can swallow the report.
-// Every key a relation claims is added to accounted, so the unknown-field
-// check does not report it again — and a key that folds onto a claimed field
-// is not claimed by it, so that check does.
-func (v *Validator) buildRelationMapping(typ *schema.Type, in inputKeys, accounted map[string]bool, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[*schema.Relation]relationInput {
-	rels := make(map[*schema.Relation]relationInput)
-	resolve := func(rel *schema.Relation) {
-		if val, ok := in.props[rel.FieldName()]; ok {
-			rels[rel] = relationInput{state: relationPresent, key: rel.FieldName(), value: val}
-			accounted[rel.FieldName()] = true
-			return
-		}
-		if in.byFold == nil {
-			return
-		}
-		candidates := in.byFold[rel.FieldName()]
-		switch len(candidates) {
-		case 0:
-			return
-		case 1:
-			rels[rel] = relationInput{state: relationPresent, key: candidates[0], value: in.props[candidates[0]]}
-			accounted[candidates[0]] = true
-			return
-		}
-		for _, c := range candidates {
-			accounted[c] = true
-		}
-		in := relationInput{state: relationCollided, candidates: candidates}
-		rels[rel] = in
-		reportRelationCollision(rel, in, collector, prov, base)
+// buildRelationMapping reads each relation's entry from the member index:
+// present under the key that claims it, or collided, reported here once at the
+// object before any pass runs, so both member kinds report from one site and no
+// pass's gate can swallow the report.
+func buildRelationMapping(claims objectClaims, props map[string]any, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[*schema.Relation]relationInput {
+	rels := make(map[*schema.Relation]relationInput, len(claims.rels)+len(claims.relCollisions))
+	for rel, key := range claims.rels {
+		rels[rel] = relationInput{state: relationPresent, key: key, value: props[key]}
 	}
-	for rel := range typ.AllAssociations() {
-		resolve(rel)
-	}
-	for rel := range typ.AllCompositions() {
-		resolve(rel)
+	for _, c := range claims.relCollisions {
+		in := relationInput{state: relationCollided, candidates: c.keys}
+		rels[c.rel] = in
+		reportRelationCollision(c.rel, in, collector, prov, base)
 	}
 	return rels
 }
@@ -724,83 +671,38 @@ func reportRelationCollision(rel *schema.Relation, in relationInput, collector *
 	collector.Collect(issue.Build())
 }
 
-// buildPropertyMapping maps each schema property to the input key it is read
-// from: exact matches first, then under the default mode case-fold matches,
-// where two unclaimed keys folding to one property are an E_CASE_FOLD_COLLISION
-// at the object and neither is mapped. accounted is every key the mapping
-// spoke for, so the unknown-field check does not report it again.
-func (v *Validator) buildPropertyMapping(ctx context.Context, typ *schema.Type, in inputKeys, collector *diag.Collector, prov *location.Provenance, base path.Builder) (mapping map[string]string, accounted map[string]bool) {
-	mapping = make(map[string]string, len(in.names))
-	accounted = make(map[string]bool, len(in.names))
-
-	for _, inputName := range in.names {
-		if _, found := typ.Property(inputName); found {
-			mapping[inputName] = inputName
-			accounted[inputName] = true
-		}
+// buildPropertyMapping reads each schema property's input key from the member
+// index, reporting each collision there as an E_CASE_FOLD_COLLISION at the
+// object, where neither key is mapped.
+func (v *Validator) buildPropertyMapping(ctx context.Context, typ *schema.Type, claims objectClaims, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[string]string {
+	for _, c := range claims.propCollisions {
+		issue := diag.NewIssue(
+			diag.Error,
+			ErrCaseFoldCollision,
+			fmt.Sprintf("multiple input fields %v fold to schema property %q", c.keys, c.prop),
+		).WithDetail(diag.DetailKeyPropertyName, c.prop)
+		withProvenance(issue, prov, base.String())
+		collector.Collect(issue.Build())
 	}
-	if in.byFold == nil {
-		return mapping, accounted
-	}
-
-	// Fold pass: schema property → the unclaimed keys folding to it, in sorted
-	// order because in.names is sorted.
-	folded := make(map[string][]string)
-	var foldedNames []string
-	for _, inputName := range in.names {
-		if accounted[inputName] {
-			continue
-		}
-		lower, ok := FoldKey(inputName)
-		if !ok {
-			continue
-		}
-		schemaName, found := typ.CanonicalPropertyName(lower)
-		if !found || mapping[schemaName] != "" {
-			continue // unknown, or shadowed by an exact match: the unknown-field check names it
-		}
-		if _, seen := folded[schemaName]; !seen {
-			foldedNames = append(foldedNames, schemaName)
-		}
-		folded[schemaName] = append(folded[schemaName], inputName)
-	}
-
-	for _, schemaName := range foldedNames {
-		inputs := folded[schemaName]
-		if len(inputs) > 1 {
-			issue := diag.NewIssue(
-				diag.Error,
-				ErrCaseFoldCollision,
-				fmt.Sprintf("multiple input fields %v fold to schema property %q", inputs, schemaName),
-			).WithDetail(diag.DetailKeyPropertyName, schemaName)
-			withProvenance(issue, prov, base.String())
-			collector.Collect(issue.Build())
-			for _, inputName := range inputs {
-				accounted[inputName] = true
-			}
-			continue
-		}
-		inputName := inputs[0]
-		mapping[schemaName] = inputName
-		accounted[inputName] = true
+	for _, schemaName := range claims.folded {
 		// Through the package's ctx-taking helper, not slog.Logger.Debug, which
 		// the standard library hard-codes to context.Background: WithLogger
 		// promises every record carries the context passed to Validate.
 		trace.Debug(ctx, v.cfg.logger, "property name normalized",
 			slog.String(diag.DetailKeyTypeName, typ.Name()),
-			slog.String("input", inputName),
+			slog.String("input", claims.props[schemaName]),
 			slog.String("resolved", schemaName),
 		)
 	}
-	return mapping, accounted
+	return claims.props
 }
 
-// checkUnknownFields reports each input key that is neither a property the
-// mapping spoke for nor a relation field, in sorted order so the set that
-// survives a truncated collector is a function of the input.
-func (v *Validator) checkUnknownFields(typ *schema.Type, typeName string, in inputKeys, mapping map[string]string, accounted map[string]bool, collector *diag.Collector, prov *location.Provenance, base path.Builder) {
-	for _, inputName := range in.names {
-		if accounted[inputName] {
+// checkUnknownFields reports each input key no member claims and no collision
+// names, in sorted order so the set that survives a truncated collector is a
+// function of the input.
+func (v *Validator) checkUnknownFields(typ *schema.Type, typeName string, names []string, claims objectClaims, collector *diag.Collector, prov *location.Provenance, base path.Builder) {
+	for _, inputName := range names {
+		if claims.accounted[inputName] {
 			continue
 		}
 		issue := diag.NewIssue(
@@ -808,7 +710,7 @@ func (v *Validator) checkUnknownFields(typ *schema.Type, typeName string, in inp
 			ErrUnknownField,
 			fmt.Sprintf("unknown field %q", inputName),
 		).WithDetails(diag.TypeField(typeName, inputName)...)
-		if shadowed, ok := v.exactMatchShadowing(typ, inputName, mapping); ok {
+		if shadowed, ok := v.exactMatchShadowing(typ, inputName, claims.props); ok {
 			issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").
 				WithDetail(diag.DetailKeyPropertyName, shadowed)
 		}

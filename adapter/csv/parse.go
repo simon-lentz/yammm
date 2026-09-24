@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/simon-lentz/yammm/adapter/internal/typetag"
 	"github.com/simon-lentz/yammm/diag"
@@ -180,9 +181,8 @@ func (a *Adapter) ParseWithTypeColumn(
 ) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 
-	if a.config.typeColumn == "" {
-		collector.Collect(diag.NewIssue(diag.Error, E_CSV_CONFIG,
-			"csv adapter: ParseWithTypeColumn requires WithTypeColumn to be set").Build())
+	if msg := typeColumnError(a.config.typeColumn); msg != "" {
+		collector.Collect(diag.NewIssue(diag.Error, E_CSV_CONFIG, msg).Build())
 		return nil, collector.Result()
 	}
 	if a.configRefused(collector) {
@@ -284,6 +284,18 @@ func (a *Adapter) ParseWithTypeColumn(
 	return results, collector.Result()
 }
 
+// typeColumnError refuses a [WithTypeColumn] name no header can hold: none, or
+// one holding a CR LF, which [encoding/csv] reads back as LF.
+func typeColumnError(name string) string {
+	switch {
+	case name == "":
+		return "csv adapter: ParseWithTypeColumn requires WithTypeColumn to be set"
+	case strings.Contains(name, "\r\n"):
+		return fmt.Sprintf("csv adapter: type column %q holds a CR LF, which encoding/csv reads back as LF, so no header holds it", name)
+	}
+	return ""
+}
+
 // readHeader reads the header row and its line, refusing a column named twice
 // or not at all. The reader fixes FieldsPerRecord from this row, so a later
 // record of another length comes back with [csv.ErrFieldCount].
@@ -329,10 +341,11 @@ func (a *Adapter) readHeader(reader *csv.Reader, source location.SourceID, colle
 	return header, span, true
 }
 
-// recordToProps converts a CSV record to a property map, deciding each member's
-// claim over the keys this row holds, as the package documentation's "Column
-// Mapping" and "Empty Cells" state. The record is never longer than the plan:
-// see [Adapter.readHeader].
+// recordToProps converts a CSV record to the object the validator reads, as
+// the package documentation's "Column Mapping" and "Empty Cells" state: the
+// row's keys are decided from its cells, and [instance.ClaimKeys] decides
+// which member each key claims, over every key alike. The record is never
+// longer than the plan: see [Adapter.readHeader].
 func (a *Adapter) recordToProps(
 	record []string,
 	p *plan,
@@ -341,154 +354,264 @@ func (a *Adapter) recordToProps(
 	collector *diag.Collector,
 ) map[string]any {
 	props := make(map[string]any, len(record))
+	if p.typ == nil {
+		for i, val := range record {
+			props[p.columns[i].name] = val
+		}
+		return props
+	}
+	report := func(msg string) {
+		collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE, msg).
+			WithSpan(span).
+			WithDetail(diag.DetailKeyTypeName, typeName).Build())
+	}
 
-	// What each undotted column's cell becomes in this row.
-	resolved := make([]bool, len(record))
-	passed := make([]bool, len(record))
-	for _, c := range p.props {
-		r, pass := c.resolve(func(i int) bool { return i == c.exact || record[i] != "" })
-		if r >= 0 {
-			resolved[r] = true
-		}
-		for _, i := range pass {
-			passed[i] = true
-		}
-	}
-	// Which spelling of each association this row's object carries: one whose
-	// group writes an object, which is the key the validator sees.
-	shapes := make([]groupShape, len(p.spellings))
-	for s := range p.spellings {
-		shapes[s] = a.shapeOf(p, &p.spellings[s], record)
-	}
-	spellingState := make([]claimState, len(p.spellings))
-	for _, c := range p.relClaims {
-		r, pass := c.resolve(func(s int) bool { return shapes[s].writes() })
-		if r >= 0 {
-			spellingState[r] = claimResolved // a group that writes nothing assembles to nothing
-		}
-		for _, s := range pass {
-			spellingState[s] = claimPassed
-		}
-	}
+	present := make([]bool, len(p.spellings))
 	for s, sp := range p.spellings {
-		if sp.rel == nil {
-			spellingState[s] = claimPassed // names no association: the validator reports it
+		for _, i := range sp.cols {
+			present[s] = present[s] || record[i] != ""
 		}
+	}
+	// A group whose targets disagree on their count writes nothing and so
+	// claims nothing; dropping it can hand its member to another spelling,
+	// whose group is then read as that member's, so the decision repeats.
+	dropped := make([]bool, len(p.spellings))
+	shapes := make([]groupShape, len(p.spellings))
+	var claims instance.Claims
+	mask := make([]byte, 0, len(p.columns)+len(p.spellings))
+	for {
+		mask = rowMask(p, record, present, dropped, mask)
+		claims = a.nodeClaims(p, mask)
+		changed := false
+		for s := range p.spellings {
+			sp := &p.spellings[s]
+			if !present[s] || dropped[s] || !claimsAssociation(claims, sp) {
+				continue
+			}
+			shapes[s] = a.shapeOf(p, sp, record)
+			if shapes[s].clash != "" {
+				report(shapes[s].clash)
+				dropped[s], changed = true, true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+
+	for s, sp := range p.spellings {
+		if !present[s] || dropped[s] {
+			continue
+		}
+		if sp.plain >= 0 && record[sp.plain] != "" {
+			// Two values for one key, as a repeated JSON member. The group is
+			// kept where the key claims an association, whose only valid form
+			// it is, and the plain value everywhere else.
+			report(fmt.Sprintf("column %[1]q and the dotted columns %[1]s.* both write the key %[1]q", sp.field))
+			if !claimsAssociation(claims, &p.spellings[s]) {
+				continue
+			}
+		}
+		if claimsAssociation(claims, &p.spellings[s]) {
+			props[sp.field] = a.assembleEdgeGroup(p, &p.spellings[s], shapes[s], span, typeName, collector, report)
+			continue
+		}
+		obj := make(map[string]any, len(sp.cols))
+		for _, i := range sp.cols {
+			if record[i] != "" {
+				obj[p.columns[i].suffix] = record[i] // no association in reach: the validator rules
+			}
+		}
+		props[sp.field] = obj
 	}
 
 	for i, val := range record {
 		col := &p.columns[i]
-		switch col.kind {
-		case columnString:
-			props[col.name] = val
-
-		case columnPlain:
-			switch {
-			case resolved[i]:
-				a.writeProperty(props, col, val, span, typeName, collector)
-			case val != "" && (passed[i] || col.prop == nil):
-				props[col.name] = val // the validator reports the unknown or ambiguous field
-			}
-
-		}
-	}
-
-	for s := range p.spellings {
-		if shapes[s].clash != "" {
-			collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE, shapes[s].clash).
-				WithSpan(span).
-				WithDetail(diag.DetailKeyTypeName, typeName).Build())
-		}
-		if spellingState[s] == claimNone || !shapes[s].writes() {
+		if col.kind != columnPlain {
 			continue
 		}
-		if _, taken := props[p.spellings[s].field]; taken {
-			// Two values for one key, as a repeated JSON member; the group is
-			// the field's only valid form, so it is kept.
-			collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE,
-				fmt.Sprintf("column %[1]q and the dotted columns %[1]s.* both write the key %[1]q", p.spellings[s].field)).
-				WithSpan(span).
-				WithDetail(diag.DetailKeyTypeName, typeName).Build())
+		if _, written := props[col.name]; written {
+			continue // the group wrote the key, or holds it beside an empty cell
 		}
-		a.assembleEdgeGroup(p, &p.spellings[s], spellingState[s] == claimResolved, shapes[s], span, typeName, collector, props)
+		if prop := claims.Property(col.name); prop != nil {
+			a.writeProperty(props, col.name, prop, val, span, typeName, collector)
+			continue
+		}
+		if val != "" {
+			props[col.name] = val // the validator reports the unknown, shadowed or colliding field
+		}
 	}
 	return props
 }
 
-// claimState is what one row does with a name: nothing, resolve it to its
-// member, or pass it on for the validator to report.
-type claimState uint8
+// rowMask marks the keys a row's object holds before an empty folded column is
+// placed: a byte per column, set for a filled plain column and for an empty
+// one that spells a property exactly, which holds that property's empty value,
+// then a byte per spelling, set for a group with a filled cell that no count
+// clash dropped. Such a group writes its field's key, or loses it to the plain
+// column of the same name; the key is held either way.
+func rowMask(p *plan, record []string, present, dropped []bool, mask []byte) []byte {
+	mask = mask[:0]
+	for i, c := range p.columns {
+		mask = append(mask, flag(c.kind == columnPlain && (record[i] != "" || c.exact != nil)))
+	}
+	for s := range p.spellings {
+		mask = append(mask, flag(present[s] && !dropped[s]))
+	}
+	return mask
+}
 
-const (
-	claimNone claimState = iota
-	claimResolved
-	claimPassed
-)
+func flag(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
+}
 
-// groupShape is what one row's cells make of a spelling's group: the columns
-// the object is built from, as positions in its cols, each one's segments, and
-// the target count, -1 where every such cell is empty. clash is set where two
-// cells disagree on the count, and then the group writes nothing.
+// nodeClaims is [instance.ClaimKeys]'s decision over the keys mask marks and
+// every empty folded column the row places. It is a function of the mask alone,
+// so the plan keeps it: the rows of one file repeat few masks.
+func (a *Adapter) nodeClaims(p *plan, mask []byte) instance.Claims {
+	if c, ok := p.claimMemo[string(mask)]; ok {
+		return c
+	}
+	keys := make([]string, 0, len(mask))
+	for i, c := range p.columns {
+		if mask[i] != 0 {
+			keys = append(keys, c.name)
+		}
+	}
+	for s, sp := range p.spellings {
+		if mask[len(p.columns)+s] != 0 {
+			keys = append(keys, sp.field)
+		}
+	}
+	keys = append(keys, a.emptyFoldedColumns(p, mask, keys)...)
+	c := instance.ClaimKeys(p.typ, keys, a.config.strict)
+	p.claimMemo[string(mask)] = c
+	return c
+}
+
+// emptyFoldedColumns is the empty plain columns that hold their property's
+// empty value: a column that folds onto a property no key of the row folds
+// onto, when it is the one such column in the header. Two such columns are
+// both absent, as a JSON object that holds neither is. A folding column the
+// mask leaves unmarked is an empty one.
+func (a *Adapter) emptyFoldedColumns(p *plan, mask []byte, keys []string) []string {
+	if a.config.strict {
+		return nil
+	}
+	folded := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if lower, ok := instance.FoldKey(key); ok {
+			folded[lower] = true
+		}
+	}
+	candidates := make(map[*schema.Property][]string)
+	var order []*schema.Property
+	for i, c := range p.columns {
+		if c.kind != columnPlain || c.folds == nil || mask[i] != 0 || folded[strings.ToLower(c.folds.Name())] {
+			continue
+		}
+		if _, seen := candidates[c.folds]; !seen {
+			order = append(order, c.folds)
+		}
+		candidates[c.folds] = append(candidates[c.folds], c.name)
+	}
+	var added []string
+	for _, prop := range order {
+		if names := candidates[prop]; len(names) == 1 {
+			added = append(added, names[0])
+		}
+	}
+	return added
+}
+
+// claimsAssociation reports whether the spelling's key claims the association
+// the spelling names. A shadowed or colliding spelling claims nothing, so its
+// group is text for the validator to report.
+func claimsAssociation(claims instance.Claims, sp *spelling) bool {
+	return sp.rel != nil && claims.Relation(sp.field) == sp.rel
+}
+
+// groupShape is what one row's cells make of an association's group: each
+// position's segments, one per target, and the target count. The count is the
+// deciding columns' (see [markDeciding]), and clash is set where two of them
+// disagree. Any other column is zipped where its count agrees, taken whole as
+// written where there is one target, and otherwise left out, in stray.
 type groupShape struct {
-	cols  []int
 	segs  [][]string
 	n     int
 	clash string
+	stray []strayColumn
 }
 
-// writes reports whether the group writes an object into the row's properties.
-func (g groupShape) writes() bool {
-	return g.n > 0 && g.clash == ""
+// strayColumn is a column naming no member whose segment count is not the
+// group's target count.
+type strayColumn struct {
+	col, count int
 }
 
-// shapeOf splits a spelling's cells on the escaped list separator. The columns
-// refused under an exact spelling are left out, and the rest are read in
-// header order, so a disagreement names one pair on every run.
+// shapeOf splits a group's cells on the escaped list separator, in header
+// order, so a disagreement names one pair on every run.
 func (a *Adapter) shapeOf(p *plan, sp *spelling, record []string) groupShape {
 	g := groupShape{n: -1, segs: make([][]string, len(sp.cols))}
 	first := ""
 	for j, i := range sp.cols {
-		g.cols = append(g.cols, j)
-		val := record[i]
-		if val == "" || g.clash != "" {
+		if record[i] == "" {
 			continue
 		}
-		s := splitListElems(val, a.config.listSep)
-		switch {
-		case g.n == -1:
-			g.n, first = len(s), p.columns[i].name
-		case len(s) != g.n:
-			g.clash = fmt.Sprintf("association %q columns disagree on target count: %q holds %d, %q holds %d",
-				sp.field, first, g.n, p.columns[i].name, len(s))
+		g.segs[j] = splitListElems(record[i], a.config.listSep)
+		if !sp.members[j].decides {
+			continue
 		}
-		g.segs[j] = s
+		switch n := len(g.segs[j]); {
+		case g.n == -1:
+			g.n, first = n, p.columns[i].name
+		case n != g.n && g.clash == "":
+			g.clash = fmt.Sprintf("association %q columns disagree on target count: %q holds %d, %q holds %d",
+				sp.field, first, g.n, p.columns[i].name, n)
+		}
 	}
-	for _, j := range g.cols {
-		if g.segs[j] == nil && g.n > 0 {
+	if g.n == -1 {
+		g.n = 1 // no deciding column holds text: one target carries it
+	}
+	for j, i := range sp.cols {
+		if sp.members[j].decides || g.segs[j] == nil || len(g.segs[j]) == g.n {
+			continue
+		}
+		if g.n == 1 {
+			g.segs[j] = []string{record[i]}
+			continue
+		}
+		g.stray = append(g.stray, strayColumn{col: i, count: len(g.segs[j])})
+		g.segs[j] = nil
+	}
+	for j := range g.segs {
+		if g.segs[j] == nil {
 			g.segs[j] = make([]string, g.n)
 		}
 	}
 	return g
 }
 
-// writeProperty writes a resolved column's cell: its property's empty value,
-// or the cell coerced, or its text where it does not coerce. Only an exact
-// column reports that, since a strict validator reads no folded name.
-func (a *Adapter) writeProperty(props map[string]any, col *column, val string, span location.Span, typeName string, collector *diag.Collector) {
+// writeProperty writes a claimed column's cell: its property's empty value,
+// or the cell coerced, or its text where it does not coerce.
+func (a *Adapter) writeProperty(props map[string]any, name string, prop *schema.Property, val string, span location.Span, typeName string, collector *diag.Collector) {
 	if val == "" {
-		props[col.name] = a.emptyCell(col.prop)
+		props[name] = a.emptyCell(prop)
 		return
 	}
-	coerced, err := a.coerceStringValue(val, col.prop.Constraint())
+	coerced, err := a.coerceStringValue(val, prop.Constraint())
 	if err != nil {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-			fmt.Sprintf("column %q: %s", col.name, err)).
+			fmt.Sprintf("column %q: %s", name, err)).
 			WithSpan(span).
 			WithDetail(diag.DetailKeyTypeName, typeName).Build())
-		props[col.name] = val
+		props[name] = val
 		return
 	}
-	props[col.name] = coerced
+	props[name] = coerced
 }
 
 // emptyCell decides what an empty cell holds for a declared property. The wire
@@ -511,98 +634,158 @@ func (a *Adapter) emptyCell(p *schema.Property) any {
 	return v
 }
 
-// assembleEdgeGroup writes the object of a group that writes one, one object
-// per target on the escaped list separator, deciding each target's claims itself. An empty cell
-// in a present group is an empty segment on every target. Zipping holds
-// because edge properties are scalars by language rule.
+// assembleEdgeGroup builds the value of an association's group: one object per
+// target, zipped on the escaped list separator, each deciding its own claims.
+// An empty cell in a present group is an empty segment on every target.
+// Zipping holds because edge properties are scalars by language rule.
 func (a *Adapter) assembleEdgeGroup(
 	p *plan,
 	sp *spelling,
-	resolvedSpelling bool,
 	g groupShape,
 	span location.Span,
 	typeName string,
 	collector *diag.Collector,
-	props map[string]any,
-) {
-	cols, segs, n := g.cols, g.segs, g.n
-	targets := make([]any, n)
-	for t := range n {
-		obj := make(map[string]any, len(cols))
-		state := make([]claimState, len(sp.cols))
-		if resolvedSpelling {
-			for _, c := range sp.members {
-				r, pass := c.resolve(func(j int) bool {
-					return segs[j][t] != "" || j == c.exact && a.edgeEmptyValue(&p.columns[sp.cols[j]]) != nil
-				})
-				if r >= 0 {
-					state[r] = claimResolved
-				}
-				for _, j := range pass {
-					state[j] = claimPassed
-				}
-			}
+	report func(string),
+) any {
+	for _, st := range g.stray {
+		report(fmt.Sprintf("association %q column %q holds %d segments for %d targets and is left out",
+			sp.field, p.columns[st.col].name, st.count, g.n))
+	}
+	targets := make([]any, g.n)
+	for t := range g.n {
+		targets[t] = a.edgeTarget(p, sp, g, t, span, typeName, collector)
+	}
+	if !sp.rel.IsMany() && g.n == 1 {
+		return targets[0]
+	}
+	return targets
+}
+
+// edgeTarget builds one target's object. Its keys are its filled segments and
+// the empty ones that hold their member's empty value; [instance.ClaimEdgeKeys]
+// decides which member each claims.
+func (a *Adapter) edgeTarget(p *plan, sp *spelling, g groupShape, t int, span location.Span, typeName string, collector *diag.Collector) map[string]any {
+	mask := make([]byte, len(sp.cols))
+	for j := range sp.cols {
+		mask[j] = flag(g.segs[j][t] != "" || sp.members[j].exact && a.memberEmpty(sp.members[j]) != nil)
+	}
+	claims := a.edgeClaims(p, sp, mask)
+
+	obj := make(map[string]any, len(sp.cols))
+	for j, i := range sp.cols {
+		suffix, seg := p.columns[i].suffix, g.segs[j][t]
+		var member suffixMember
+		if key := claims.Key(suffix); key != nil {
+			member = suffixMember{member: memberKey, key: key}
+		} else if eprop := claims.Property(suffix); eprop != nil {
+			member = suffixMember{member: memberProperty, eprop: eprop}
 		}
-		for _, j := range cols {
-			col := &p.columns[sp.cols[j]]
-			seg := segs[j][t]
-			if !resolvedSpelling || state[j] == claimPassed || !claimable(col.member) {
-				if seg != "" {
-					obj[col.suffix] = seg // no member, no constraint in reach, or ambiguous: the validator rules
-				}
-				continue
+		switch {
+		case member.member == memberNone:
+			if seg != "" {
+				obj[suffix] = seg // no member, or shadowed or colliding: the validator rules
 			}
-			if state[j] != claimResolved {
-				continue // shadowed or folded empty: absent on this target
+		case seg == "":
+			if v := a.memberEmpty(member); v != nil {
+				obj[suffix] = v
 			}
-			if seg == "" {
-				if v := a.edgeEmptyValue(col); v != nil {
-					obj[col.suffix] = v
-				}
-				continue // an edge property is never null: absent on this target
+		default:
+			constraint := member.eprop
+			if member.member == memberKey {
+				constraint = member.key
 			}
-			member := col.eprop
-			if col.member == memberKey {
-				member = col.key
-			}
-			coerced, err := a.coerceStringValue(seg, member.Constraint())
+			coerced, err := a.coerceStringValue(seg, constraint.Constraint())
 			if err != nil {
 				collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-					fmt.Sprintf("column %q.%s: %s", sp.field, col.suffix, err)).
+					fmt.Sprintf("column %q.%s: %s", sp.field, suffix, err)).
 					WithSpan(span).
 					WithDetail(diag.DetailKeyTypeName, typeName).Build())
-				obj[col.suffix] = seg
+				obj[suffix] = seg
 				continue
 			}
-			obj[col.suffix] = coerced
+			obj[suffix] = coerced
 		}
-		targets[t] = obj
 	}
-
-	if (sp.rel == nil || !sp.rel.IsMany()) && n == 1 {
-		props[sp.field] = targets[0]
-		return
-	}
-	props[sp.field] = targets
+	return obj
 }
 
-// claimable reports whether a dotted column's member takes part in its
-// target's claims: a key the target declares, or an edge property.
-func claimable(m edgeMember) bool {
-	return m == memberKey || m == memberProperty
+// edgeClaims is [instance.ClaimEdgeKeys]'s decision over the suffixes mask
+// marks and every empty folded suffix the target places, kept per spelling as
+// [Adapter.nodeClaims] keeps a row's.
+func (a *Adapter) edgeClaims(p *plan, sp *spelling, mask []byte) instance.EdgeClaims {
+	if c, ok := sp.claimMemo[string(mask)]; ok {
+		return c
+	}
+	keys := make([]string, 0, len(mask))
+	for j, i := range sp.cols {
+		if mask[j] != 0 {
+			keys = append(keys, p.columns[i].suffix)
+		}
+	}
+	keys = append(keys, a.emptyFoldedSuffixes(p, sp, mask, keys)...)
+	c := instance.ClaimEdgeKeys(sp.rel, sp.target, keys, a.config.strict)
+	sp.claimMemo[string(mask)] = c
+	return c
 }
 
-// edgeEmptyValue is what an empty segment holds for a resolved edge column, or
-// nil where the member has no empty value and the key is absent: a key
-// component's kind decides, and an edge property follows [Adapter.emptyCell].
-func (a *Adapter) edgeEmptyValue(col *column) any {
-	switch col.member {
+// emptyFoldedSuffixes is the empty segments of one target that hold their
+// member's empty value: a suffix that folds onto a member no key of the target
+// folds onto, when it is the one such suffix in the group. A folding suffix
+// the mask leaves unmarked is an empty one.
+func (a *Adapter) emptyFoldedSuffixes(p *plan, sp *spelling, mask []byte, keys []string) []string {
+	if a.config.strict {
+		return nil
+	}
+	folded := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		if lower, ok := instance.FoldKey(key); ok {
+			folded[lower] = true
+		}
+	}
+	candidates := make(map[string][]string)
+	var order []string
+	for j, i := range sp.cols {
+		m := sp.members[j]
+		if mask[j] != 0 || m.exact || a.memberEmpty(m) == nil {
+			continue
+		}
+		name := m.name()
+		if folded[name] {
+			continue
+		}
+		if _, seen := candidates[name]; !seen {
+			order = append(order, name)
+		}
+		candidates[name] = append(candidates[name], p.columns[i].suffix)
+	}
+	var added []string
+	for _, name := range order {
+		if suffixes := candidates[name]; len(suffixes) == 1 {
+			added = append(added, suffixes[0])
+		}
+	}
+	return added
+}
+
+// name is the lower-case field the member is read under.
+func (m suffixMember) name() string {
+	if m.member == memberKey {
+		return strings.ToLower(keyPrefix + m.key.Name())
+	}
+	return strings.ToLower(m.eprop.Name())
+}
+
+// memberEmpty is what an empty segment holds for a member, or nil where it is
+// absent: a key component's kind decides, and an edge property follows
+// [Adapter.emptyCell], since an edge property is never null.
+func (a *Adapter) memberEmpty(m suffixMember) any {
+	switch m.member {
 	case memberKey:
-		if v, err := a.coerceStringValue("", col.key.Constraint()); err == nil {
+		if v, err := a.coerceStringValue("", m.key.Constraint()); err == nil {
 			return v
 		}
 	case memberProperty:
-		return a.emptyCell(col.eprop)
+		return a.emptyCell(m.eprop)
 	}
 	return nil
 }
