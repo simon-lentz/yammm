@@ -84,13 +84,12 @@ func unnameableDocument(t *testing.T, items string) ([]byte, *schema.Schema) {
 
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{basin},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			basin: {{
-				TypeName:   schema.TagForm(s, basin),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     basin,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
-			}},
+			},
 		},
 	})
 	if res.HasErrors() {

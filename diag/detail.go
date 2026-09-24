@@ -89,7 +89,8 @@ const (
 
 	// DetailKeyTypeSchema is the identity of the schema a type is defined in,
 	// its SchemaPath, written as the identity and never relativized. Used with
-	// E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_PARENT_NOT_FOUND and E_INTERNAL.
+	// E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_PARENT_NOT_FOUND, E_SNAPSHOT_UNNAMEABLE_TYPE
+	// and E_INTERNAL.
 	DetailKeyTypeSchema = "type_schema"
 
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.

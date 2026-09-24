@@ -63,25 +63,25 @@ func unresolvableFixture(t *testing.T) (*schema.Schema, schema.TypeID) {
 	return s, schema.NewTypeID(location.MustNewSourceID("test://absent.yammm"), "Ghost")
 }
 
-func TestRebuildSnapshot_RefusesAnUnresolvableInstanceGroup(t *testing.T) {
+func TestRebuildSnapshot_RefusesAnUnresolvableRootInstance(t *testing.T) {
 	t.Parallel()
 	s, ghost := unresolvableFixture(t)
 	key := immutable.WrapKey([]any{"g1"})
 
 	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			ghost: {{
-				TypeName: "Ghost", TypeID: ghost, PrimaryKey: key,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID: ghost, PrimaryKey: key,
 				Properties: immutable.WrapProperties(map[string]any{"gid": "g1"}),
-			}},
+			},
 		},
 	})
 
 	if res.Err() == nil {
-		t.Fatal("a group keyed by an identity the schema cannot resolve was accepted")
+		t.Fatal("a root instance of an identity the schema cannot resolve was accepted")
 	}
-	requireIdentityRefusal(t, res, "unresolvable type identity "+ghost.String()+" keys an instance group of 1 instances")
+	requireIdentityRefusal(t, res, "unresolvable type identity "+ghost.String()+` at instance position, key ["g1"]`)
 }
 
 // The identity reaches the writers through an edge as well as through a group,
@@ -95,11 +95,11 @@ func TestRebuildSnapshot_RefusesAnUnresolvableEdgeEndpoint(t *testing.T) {
 
 	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{empT.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			empT.ID(): {{
-				TypeName: "Employee", TypeID: empT.ID(), PrimaryKey: empKey,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID: empT.ID(), PrimaryKey: empKey,
 				Properties: immutable.WrapProperties(map[string]any{"employee_id": "e1"}),
-			}},
+			},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation: "WORKS_AT", SourceType: empT.ID(), SourceKey: empKey,
@@ -113,7 +113,7 @@ func TestRebuildSnapshot_RefusesAnUnresolvableEdgeEndpoint(t *testing.T) {
 	}
 	// The whole phrase, because an edge whose target instance is merely absent
 	// is refused for a different reason and would satisfy a looser match.
-	requireIdentityRefusal(t, res, "unresolvable type identity at edge target position")
+	requireIdentityRefusal(t, res, "unresolvable type identity "+ghost.String()+" at edge target position")
 }
 
 // A composed child's type need not be a root type, so the root-type rule never
@@ -126,25 +126,25 @@ func TestRebuildSnapshot_RefusesAnUnresolvableComposedChild(t *testing.T) {
 
 	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{empT.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			empT.ID(): {{
-				TypeName: "Employee", TypeID: empT.ID(), PrimaryKey: empKey,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID: empT.ID(), PrimaryKey: empKey,
 				Properties: immutable.WrapProperties(map[string]any{"employee_id": "e1"}),
 				Composed: map[string][]graph.InstanceParts{
 					"PIECES": {{
-						TypeName: "Ghost", TypeID: ghost,
+						TypeID:     ghost,
 						PrimaryKey: immutable.WrapKey([]any{"g1"}),
 						Properties: immutable.WrapProperties(map[string]any{"gid": "g1"}),
 					}},
 				},
-			}},
+			},
 		},
 	})
 
 	if res.Err() == nil {
 		t.Fatal("a composed child of a type the schema cannot resolve was accepted")
 	}
-	requireIdentityRefusal(t, res, "unresolvable type identity at composed child position")
+	requireIdentityRefusal(t, res, "unresolvable type identity "+ghost.String()+" at composed child position")
 }
 
 // The rule judges identities, not names: a resolvable identity is accepted at
@@ -159,15 +159,15 @@ func TestRebuildSnapshot_AcceptsResolvableIdentitiesAtEveryPosition(t *testing.T
 
 	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{compT.ID(), empT.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			compT.ID(): {{
-				TypeName: "Company", TypeID: compT.ID(), PrimaryKey: compKey,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID: compT.ID(), PrimaryKey: compKey,
 				Properties: immutable.WrapProperties(map[string]any{"company_id": "c1"}),
-			}},
-			empT.ID(): {{
-				TypeName: "Employee", TypeID: empT.ID(), PrimaryKey: empKey,
+			},
+			{
+				TypeID: empT.ID(), PrimaryKey: empKey,
 				Properties: immutable.WrapProperties(map[string]any{"employee_id": "e1"}),
-			}},
+			},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation: "WORKS_AT", SourceType: empT.ID(), SourceKey: empKey,
@@ -193,7 +193,7 @@ func TestRebuildSnapshot_RefusesAnUnresolvableIdentityInARecord(t *testing.T) {
 	empKey := immutable.WrapKey([]any{"e1"})
 	ghostKey := immutable.WrapKey([]any{"g1"})
 	emp := graph.InstanceParts{
-		TypeName: "Employee", TypeID: empT.ID(), PrimaryKey: empKey,
+		TypeID: empT.ID(), PrimaryKey: empKey,
 		Properties: immutable.WrapProperties(map[string]any{"employee_id": "e1"}),
 	}
 
@@ -233,10 +233,9 @@ func TestRebuildSnapshot_RefusesAnUnresolvableIdentityInARecord(t *testing.T) {
 			}}
 		}},
 		{"instance", func(p *graph.SnapshotParts) {
-			// A resolvable group holding an instance that names another type.
 			stray := emp
 			stray.TypeID = ghost
-			p.Instances[empT.ID()] = append(p.Instances[empT.ID()], stray)
+			p.Instances = append(p.Instances, stray)
 		}},
 		{"duplicate instance", func(p *graph.SnapshotParts) {
 			stray := emp
@@ -257,12 +256,14 @@ func TestRebuildSnapshot_RefusesAnUnresolvableIdentityInARecord(t *testing.T) {
 		t.Run(c.position, func(t *testing.T) {
 			t.Parallel()
 			parts := graph.SnapshotParts{
-				Types:     []schema.TypeID{empT.ID()},
-				Instances: map[schema.TypeID][]graph.InstanceParts{empT.ID(): {emp}},
+				Types: []schema.TypeID{empT.ID()},
+				Instances: []graph.InstanceParts{
+					emp,
+				},
 			}
 			c.parts(&parts)
 			_, res := graph.RebuildSnapshot(s, parts)
-			requireIdentityRefusal(t, res, "unresolvable type identity at "+c.position+" position")
+			requireIdentityRefusal(t, res, "unresolvable type identity "+ghost.String()+" at "+c.position+" position")
 		})
 	}
 }
@@ -291,19 +292,16 @@ func slicesOf(result diag.Result) []diag.Issue {
 	return out
 }
 
-// A nil schema resolves nothing, so only the zero identity is judged and a
-// rebuild under one does not dereference it.
-func TestRebuildSnapshot_ANilSchemaJudgesZeroIdentitiesAlone(t *testing.T) {
+// TestRebuildSnapshot_NilSchemaPanics holds RebuildSnapshot to the rule New,
+// NewBatchAssembler and NewBatchAssemblerFromSnapshot apply: every identity of
+// a snapshot names a type of its schema, and a nil schema names none.
+func TestRebuildSnapshot_NilSchemaPanics(t *testing.T) {
 	t.Parallel()
 	_, ghost := unresolvableFixture(t)
-
-	_, res := graph.RebuildSnapshot(nil, graph.SnapshotParts{
-		Types: []schema.TypeID{ghost},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			ghost: {{TypeName: "Ghost", TypeID: ghost, PrimaryKey: immutable.WrapKey([]any{"g1"})}},
-		},
-	})
-	if msg := res.String(); strings.Contains(msg, "unresolvable type identity") {
-		t.Errorf("a nil schema judged resolvability: %s", msg)
-	}
+	defer func() {
+		if r := recover(); r != "graph.RebuildSnapshot: nil Schema" {
+			t.Errorf("recovered %v, want the nil-schema panic", r)
+		}
+	}()
+	graph.RebuildSnapshot(nil, graph.SnapshotParts{Types: []schema.TypeID{ghost}})
 }

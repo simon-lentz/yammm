@@ -39,13 +39,12 @@ func shapeFixtureSnapshot(t *testing.T) *graph.Snapshot {
 
 	snap, rres := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{id},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			id: {{
-				TypeName:   "Beacon",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     id,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1", "power": float64(1)}),
-			}},
+			},
 		},
 	})
 	if rres.HasErrors() {

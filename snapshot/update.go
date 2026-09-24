@@ -295,10 +295,10 @@ func UpdateMetadata(
 // where any Load + Marshal round-trip is operationally unacceptable and
 // the caller would rather surface the failure than silently recover.
 //
-// Cost on the happy path matches [UpdateMetadata] (~20-40 ms on a
-// 20 MB .ys). On the fallback path, cost matches Load + Marshal
-// (~1 s on the same file); the W_UPDATE_METADATA_FALLBACK warning makes
-// the transition visible in consumer logs and dashboards.
+// Cost on the happy path matches [UpdateMetadata]. On the fallback path it
+// matches Load + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
+// three times slower on a 20 MB .ys; the W_UPDATE_METADATA_FALLBACK warning
+// makes the transition visible in consumer logs and dashboards.
 //
 // E_CONTEXT_CANCELLED is not a fallback trigger — it propagates as
 // cancellation without re-attempting via the slow path.

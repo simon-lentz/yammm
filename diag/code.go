@@ -321,10 +321,12 @@ var (
 	// E_INSTANCE_TYPE_NOT_FOUND indicates a type referenced in instance data cannot be found.
 	E_INSTANCE_TYPE_NOT_FOUND = NewCode("E_INSTANCE_TYPE_NOT_FOUND", CategoryInstance)
 
-	// E_ABSTRACT_TYPE indicates an attempt to instantiate an abstract type.
+	// E_ABSTRACT_TYPE indicates an attempt to instantiate an abstract type,
+	// an empty batch under its name included.
 	E_ABSTRACT_TYPE = NewCode("E_ABSTRACT_TYPE", CategoryInstance)
 
-	// E_PART_TYPE_DIRECT indicates an attempt to directly instantiate a part type.
+	// E_PART_TYPE_DIRECT indicates an attempt to directly instantiate a part
+	// type, an empty batch under its name included.
 	E_PART_TYPE_DIRECT = NewCode("E_PART_TYPE_DIRECT", CategoryInstance)
 
 	// E_TYPE_MISMATCH indicates a value has the wrong type.
@@ -421,33 +423,42 @@ var (
 	// E_GRAPH_INVALID_COMPOSITION indicates an invalid composition in graph operations.
 	E_GRAPH_INVALID_COMPOSITION = NewCode("E_GRAPH_INVALID_COMPOSITION", CategoryGraph)
 
-	// E_GRAPH_MISSING_PK indicates a primary key is missing in graph operations.
+	// E_GRAPH_MISSING_PK indicates a root whose type declares no primary key.
+	// An instance whose own key is empty or absent draws E_GRAPH_INVALID_PK.
 	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
 
-	// E_GRAPH_CARDINALITY indicates an association carrying more targets
-	// than its declared multiplicity allows.
+	// E_GRAPH_CARDINALITY indicates a (one) association holding more than one
+	// record: several targets at graph.Graph.Add, or several edges and
+	// unresolved records together in a snapshot or a .ys document.
 	E_GRAPH_CARDINALITY = NewCode("E_GRAPH_CARDINALITY", CategoryGraph)
 
-	// E_GRAPH_UNKNOWN_RELATION indicates instance data under a relation
-	// name the type does not declare. The graph layer reports it at Error
-	// severity on Add/AddComposed; snapshot revalidation reports the same
-	// defect in a loaded document at the option's severity.
+	// E_GRAPH_UNKNOWN_RELATION indicates instance data or an association
+	// record under a relation name the type does not declare in that slot, or
+	// an association record naming a target other than the association's
+	// declared one. Every constructor of a snapshot reports it at Error, and
+	// the .ys reader reports an undeclared association name with it.
 	E_GRAPH_UNKNOWN_RELATION = NewCode("E_GRAPH_UNKNOWN_RELATION", CategoryGraph)
 
-	// E_GRAPH_ABSTRACT_TYPE indicates an instance of an abstract type
-	// reached the graph; the validator rejects it, so only a bypass
-	// constructor can produce one.
+	// E_GRAPH_ABSTRACT_TYPE indicates a root of an abstract type: an instance
+	// a bypass constructor built, since the validator rejects one, or a
+	// snapshot imported under a schema that makes its type abstract.
 	E_GRAPH_ABSTRACT_TYPE = NewCode("E_GRAPH_ABSTRACT_TYPE", CategoryGraph)
 
-	// E_GRAPH_INVALID_PK indicates an instance primary key that is empty
-	// or disagrees with the instance's own key properties.
+	// E_GRAPH_INVALID_PK indicates a primary key that is empty, has the wrong
+	// arity, holds a component graph.ParseKey cannot read back, has a key
+	// property that is absent or null, or disagrees with the instance's own key properties;
+	// or an association target key of the wrong arity or with such a component.
 	E_GRAPH_INVALID_PK = NewCode("E_GRAPH_INVALID_PK", CategoryGraph)
 )
 
 // Snapshot persistence codes.
 var (
-	// E_SNAPSHOT_MALFORMED indicates the .ys file is not valid JSON or has
-	// wrong top-level structure (e.g., missing yammm_snapshot header as first key).
+	// E_SNAPSHOT_MALFORMED indicates the .ys file is not valid JSON, has the
+	// wrong top-level structure (e.g., missing yammm_snapshot header as first
+	// key), or states content a structural rule refuses: an undeclared name, a
+	// stored key its key properties contradict, a key or target key component
+	// graph.ParseKey cannot read back, a target key of the wrong arity, an undocumented
+	// reason, a record contradicting itself.
 	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED", CategorySnapshot)
 
 	// E_SNAPSHOT_UNSUPPORTED_VERSION indicates the format version is not recognized.
@@ -465,16 +476,19 @@ var (
 	// in the provided schema.
 	E_SNAPSHOT_UNKNOWN_TYPE = NewCode("E_SNAPSHOT_UNKNOWN_TYPE", CategorySnapshot)
 
-	// E_SNAPSHOT_UNNAMEABLE_TYPE indicates the types table names a type the entry
-	// schema cannot name: the import closure declares it, but the schema reaches
-	// it only through an intermediate import and so has no name form for it.
-	// Every writer keys its output by the name of each type a snapshot denotes,
-	// so such a document describes a snapshot no writer can render. The hint
-	// names the remedy, which is to import the declaring schema directly.
+	// E_SNAPSHOT_UNNAMEABLE_TYPE indicates an instances group or a root
+	// duplicate record names a type the entry schema cannot name: the import
+	// closure declares it, but the schema reaches it only through an
+	// intermediate import. adapter/json and adapter/csv key their output by the
+	// name the entry schema gives each denoted type, so such a document
+	// describes a snapshot they cannot render. The hint names the remedy, which
+	// is to import the declaring schema directly.
 	E_SNAPSHOT_UNNAMEABLE_TYPE = NewCode("E_SNAPSHOT_UNNAMEABLE_TYPE", CategorySnapshot)
 
-	// E_SNAPSHOT_TYPE_MISMATCH indicates the instances section is inconsistent
-	// with the types table (structural malformation).
+	// E_SNAPSHOT_TYPE_MISMATCH indicates a type row that contradicts its
+	// position: a root's row that is not its group's, a duplicate instance's
+	// that is not its record's, or a composed child's or an association
+	// record's target row that is not the relation's declared target.
 	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
 
 	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target or duplicate conflict
@@ -482,16 +496,18 @@ var (
 	E_SNAPSHOT_DANGLING_REFERENCE = NewCode("E_SNAPSHOT_DANGLING_REFERENCE", CategorySnapshot)
 
 	// E_SNAPSHOT_INVALID_COMPOSED indicates a composed child instance carries edges,
-	// which violates the composed children invariant (edges are only on root instances).
+	// which violates the composed children invariant (edges are only on root
+	// instances), or composed children under a name the type does not declare
+	// as a composition.
 	E_SNAPSHOT_INVALID_COMPOSED = NewCode("E_SNAPSHOT_INVALID_COMPOSED", CategorySnapshot)
 
 	// W_SNAPSHOT_VALUE_DROPPED (Warning) indicates a write path held a value
 	// the wire cannot carry at that position and did not write it, so the
 	// document produced is well-formed and the warning names what is missing.
 	//
-	// It marks THREE sites, all of them an unresolved record under a reason the
-	// wire admits neither field for: its target key and its edge properties at
-	// marshal, and its target key again on the metadata-update fallback.
+	// It marks one site: a metadata update that re-marshals the document and
+	// cannot carry a created_at the input header states in a form other than
+	// RFC 3339.
 	//
 	// Two drops are DELIBERATE and are NOT marked: a duplicate record's
 	// Diagnostic, which the wire has no field for, and an instance provenance's
@@ -499,9 +515,9 @@ var (
 	// detection on this code alone and be right.
 	W_SNAPSHOT_VALUE_DROPPED = NewCode("W_SNAPSHOT_VALUE_DROPPED", CategorySnapshot)
 
-	// E_SNAPSHOT_INVALID_ROOT indicates an instances-section group names a type
-	// that cannot hold a root instance: an abstract type, a part type, or one
-	// declaring no primary key. Nameability is a denoted type's rule and draws
+	// E_SNAPSHOT_INVALID_ROOT indicates an instances group, empty or not, or a
+	// root duplicate record names a type that cannot hold a root instance: an
+	// abstract type, a part type, or one declaring no primary key. Nameability is a denoted type's rule and draws
 	// [E_SNAPSHOT_UNNAMEABLE_TYPE]. The graph layer refuses all three at
 	// [github.com/simon-lentz/yammm/graph.Graph.Add], so a document stating one
 	// describes a graph that cannot be built. The message names which rule the
@@ -592,7 +608,8 @@ var (
 	W_SNAPSHOT_VALUE_NONCONFORMING = NewCode("W_SNAPSHOT_VALUE_NONCONFORMING", CategorySnapshot)
 
 	// W_SNAPSHOT_UNRESOLVED_REQUIRED indicates a loaded document carries an
-	// unresolved record for a Required association. Reported only when the
+	// unresolved record for an association the schema declares required, which
+	// is read from the schema, never from the record. Reported only when the
 	// caller passes snapshot.WithRevalidation, at that option's severity —
 	// the walk that finds the record runs on every Load and Verify, but a
 	// document holding the record is well-formed, so without the option the

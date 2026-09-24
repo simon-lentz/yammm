@@ -246,7 +246,7 @@ func TestNewFromSnapshot_ComposedDuplicate_KeepsItsComposingCoordinates(t *testi
 		t.Fatal("the overflow child was accepted")
 	}
 
-	seeded := graph.NewFromSnapshot(s, g.Snapshot()).Snapshot()
+	seeded := mustImport(t, s, g.Snapshot()).Snapshot()
 	dups := seeded.Duplicates()
 	if len(dups) != 1 {
 		t.Fatalf("seeded snapshot carries %d duplicates, want 1", len(dups))

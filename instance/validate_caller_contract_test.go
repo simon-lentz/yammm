@@ -162,6 +162,53 @@ func TestValidate_UnknownTypeFailsOnAnEmptyBatch(t *testing.T) {
 	}
 }
 
+// An abstract or a part type's name cannot hold a root, and an empty batch is
+// refused under it as a row would be, with no instance index: the batch names
+// no row. Without it a writer's empty group under such a name read back OK.
+func TestValidate_AnAbstractOrPartNameFailsOnAnEmptyBatch(t *testing.T) {
+	t.Parallel()
+	s := loadT(t, "schema \"p\"\n\nabstract type A {\n\tid String primary\n}\n\npart type P {\n\tid String primary\n}\n\ntype T {\n\tid String primary\n\t*-> PS (many) P\n}\n")
+	v := instance.NewValidator(s)
+	for _, c := range []struct {
+		name string
+		code diag.Code
+	}{{"A", diag.E_ABSTRACT_TYPE}, {"P", diag.E_PART_TYPE_DIRECT}} {
+		for batch, raws := range map[string][]instance.RawInstance{"nil": nil, "empty": {}} {
+			valids, res := v.Validate(t.Context(), c.name, raws)
+			if valids != nil || !res.HasCode(c.code) {
+				t.Errorf("%s, %s batch: valids=%v codes=%v; want nil and %s", c.name, batch, valids, codes(res), c.code)
+			}
+			for issue := range res.Issues() {
+				for _, d := range issue.Details() {
+					if d.Key == diag.DetailKeyInstanceIndex {
+						t.Errorf("%s, %s batch: the refusal names instance %s, but the batch names none", c.name, batch, d.Value)
+					}
+				}
+			}
+		}
+	}
+	if valids, res := v.Validate(t.Context(), "T", []instance.RawInstance{}); valids == nil || res.Err() != nil {
+		t.Errorf("control: a root type and an empty batch is empty, OK; got %v, %v", valids, res.Err())
+	}
+}
+
+// A row's refusal under an abstract name carries the row's own span.
+func TestValidate_AnAbstractRowRefusalCarriesItsSpan(t *testing.T) {
+	t.Parallel()
+	s := loadT(t, "schema \"a\"\n\nabstract type A {\n\tid String primary\n}\n")
+	span := location.Point(location.NewSourceID("rows.json"), 7, 3)
+	raw := instance.RawInstance{Properties: map[string]any{"id": "x"}, Provenance: location.NewProvenance("rows.json", path.Root(), span)}
+	_, res := instance.NewValidator(s).Validate(t.Context(), "A", []instance.RawInstance{raw})
+	if !res.HasCode(diag.E_ABSTRACT_TYPE) {
+		t.Fatalf("Validate = %s, want E_ABSTRACT_TYPE", res)
+	}
+	for issue := range res.Issues() {
+		if issue.Span() != span {
+			t.Errorf("the refusal's span is %v, want the row's %v", issue.Span(), span)
+		}
+	}
+}
+
 // A cancelled composition batch returns no partial slice either: the
 // one-entry-per-input contract is ValidateForComposition's as it is Validate's.
 func TestValidateForComposition_CancellationReturnsNoPartialSlice(t *testing.T) {

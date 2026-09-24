@@ -28,10 +28,12 @@ func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 
 	rebuilt, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{runID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{runID: {{
-			TypeName: "Run", TypeID: runID, PrimaryKey: immutable.WrapKey([]any{rawInstant}),
-			Properties: immutable.WrapProperties(map[string]any{"at": rawInstant}),
-		}}},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID: runID, PrimaryKey: immutable.WrapKey([]any{rawInstant}),
+				Properties: immutable.WrapProperties(map[string]any{"at": rawInstant}),
+			},
+		},
 	})
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)

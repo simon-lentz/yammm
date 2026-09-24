@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
@@ -19,14 +20,19 @@ import (
 
 // BuildSnapshot adds the given pre-validated instances to a fresh graph
 // over s and returns its snapshot — the shared constructor for round-trip
-// fixtures. Add diagnostics are intentionally not asserted: fixtures may
-// deliberately construct duplicate or unresolved shapes; assert on the
-// snapshot instead.
+// fixtures. A duplicate primary key is recorded in the snapshot, so a fixture
+// may build one on purpose; any other refusal fails tb, because the refused
+// instance would be missing from the snapshot the test then asserts on.
 func BuildSnapshot(tb testing.TB, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
 	tb.Helper()
 	g := graph.New(s)
-	for _, inst := range instances {
-		g.Add(context.Background(), inst)
+	for i, inst := range instances {
+		res := g.Add(context.Background(), inst)
+		for issue := range res.Issues() {
+			if issue.Severity().IsFailure() && issue.Code() != diag.E_DUPLICATE_PK {
+				tb.Fatalf("BuildSnapshot: instance %d was refused: %s", i, res)
+			}
+		}
 	}
 	return g.Snapshot()
 }

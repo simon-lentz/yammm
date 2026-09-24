@@ -329,12 +329,13 @@ func TestMarshal_KeepsAnIntegerTargetKeyBeyondExactFloat(t *testing.T) {
 	const beyondExact = int64(1)<<53 + 1
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{id},
-		Instances: map[schema.TypeID][]graph.InstanceParts{id: {{
-			TypeName:   "Ref",
-			TypeID:     id,
-			PrimaryKey: immutable.WrapKey([]any{"r1"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
-		}}},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     id,
+				PrimaryKey: immutable.WrapKey([]any{"r1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
+			},
+		},
 		Unresolved: []graph.UnresolvedParts{{
 			SourceType: id,
 			SourceKey:  immutable.WrapKey([]any{"r1"}),
@@ -342,7 +343,6 @@ func TestMarshal_KeepsAnIntegerTargetKeyBeyondExactFloat(t *testing.T) {
 			TargetType: id,
 			TargetKey:  immutable.WrapKey([]any{beyondExact}),
 			Reason:     "target_missing",
-			Required:   true,
 		}},
 	})
 	if res.HasErrors() {

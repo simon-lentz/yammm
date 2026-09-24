@@ -39,57 +39,41 @@ type Source {
 	return s
 }
 
-// TestMarshal_DropsUnderAReasonTheWireRefuses_AreMarked drives the two
-// W_SNAPSHOT_VALUE_DROPPED sites the registry doc enumerates. Both were
-// asserted only ABSENT — one test requires the code not to appear on a clean
-// write — so the emitting arms themselves ran in no test and the doc's claim
-// about them rested on reading. Removing either arm turns this red.
-func TestMarshal_DropsUnderAReasonTheWireRefuses_AreMarked(t *testing.T) {
+// TestRebuildSnapshot_RefusesATargetOnARecordWithNoTarget pins why Marshal
+// has no drop to mark for an unresolved record: a record whose reason names no
+// target cannot carry a target key or edge properties into a snapshot, because
+// RebuildSnapshot refuses it as the reader does.
+func TestRebuildSnapshot_RefusesATargetOnARecordWithNoTarget(t *testing.T) {
 	t.Parallel()
 	s := dropReasonSchema(t)
 	sourceType, _ := s.Type("Source")
-
-	// A stated target key and edge properties under reason "absent" is the
-	// shape the wire cannot hold.
 	targetType, _ := s.Type("Target")
-	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{sourceType.ID(), targetType.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{sourceType.ID(): {{
-			TypeName: "Source", TypeID: sourceType.ID(),
-			PrimaryKey: immutable.WrapKey([]any{"s1"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
-		}}},
-		Unresolved: []graph.UnresolvedParts{{
-			Relation:   "LINK",
-			SourceType: sourceType.ID(), SourceKey: immutable.WrapKey([]any{"s1"}),
-			TargetType: targetType.ID(), TargetKey: immutable.WrapKey([]any{"t1"}),
-			Properties: immutable.WrapProperties(map[string]any{"note": "kept nowhere"}),
-			Required:   true,
-			Reason:     "absent",
-		}},
-	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
-	}
-
-	_, mres := snapshot.Marshal(t.Context(), snap)
-	var keyMarked, propsMarked bool
-	for is := range mres.Issues() {
-		if is.Code() != diag.W_SNAPSHOT_VALUE_DROPPED {
-			continue
+	for _, tc := range []struct {
+		name  string
+		key   immutable.Key
+		props immutable.Properties
+	}{
+		{"a target key", immutable.WrapKey([]any{"t1"}), immutable.Properties{}},
+		{"edge properties", immutable.Key{}, immutable.WrapProperties(map[string]any{"note": "kept nowhere"})},
+	} {
+		_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+			Types: []schema.TypeID{sourceType.ID(), targetType.ID()},
+			Instances: []graph.InstanceParts{{
+				TypeID:     sourceType.ID(),
+				PrimaryKey: immutable.WrapKey([]any{"s1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
+			}},
+			Unresolved: []graph.UnresolvedParts{{
+				Relation:   "LINK",
+				SourceType: sourceType.ID(), SourceKey: immutable.WrapKey([]any{"s1"}),
+				TargetType: targetType.ID(), TargetKey: tc.key,
+				Properties: tc.props,
+				Reason:     "absent",
+			}},
+		})
+		if !res.HasCode(diag.E_INTERNAL) || !strings.Contains(res.String(), `reason "absent" carries a target key or edge properties`) {
+			t.Errorf("%s: RebuildSnapshot = %s, want the refusal", tc.name, res)
 		}
-		if strings.Contains(is.Message(), "target key") {
-			keyMarked = true
-		}
-		if strings.Contains(is.Message(), "edge properties") {
-			propsMarked = true
-		}
-	}
-	if !keyMarked {
-		t.Errorf("the dropped target key was not marked: %s", mres)
-	}
-	if !propsMarked {
-		t.Errorf("the dropped edge properties were not marked: %s", mres)
 	}
 }
 
@@ -150,12 +134,14 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 		t.Helper()
 		snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 			Types: []schema.TypeID{targetType.ID()},
-			Instances: map[schema.TypeID][]graph.InstanceParts{targetType.ID(): {{
-				TypeName: "Target", TypeID: targetType.ID(),
-				PrimaryKey: immutable.WrapKey([]any{"t1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "t1"}),
-				Provenance: prov,
-			}}},
+			Instances: []graph.InstanceParts{
+				{
+					TypeID:     targetType.ID(),
+					PrimaryKey: immutable.WrapKey([]any{"t1"}),
+					Properties: immutable.WrapProperties(map[string]any{"id": "t1"}),
+					Provenance: prov,
+				},
+			},
 		})
 		if res.HasErrors() {
 			t.Fatalf("RebuildSnapshot: %s", res)

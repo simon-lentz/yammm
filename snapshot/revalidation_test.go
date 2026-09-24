@@ -148,22 +148,6 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			want: diag.E_INVARIANT_FAIL,
 		},
 		{
-			name: "edge_shape",
-			opts: []instancetest.VIOption{
-				instancetest.Props(map[string]any{"id": "t1"}),
-				goodItems(),
-				instancetest.Edges(map[string]*instance.ValidEdgeData{
-					"LINKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
-						instance.NewValidEdgeTarget(
-							immutable.WrapKey([]any{"x1"}),
-							immutable.WrapProperties(map[string]any{"bogus": "v"}),
-						),
-					}),
-				}),
-			},
-			want: diag.E_UNKNOWN_EDGE_FIELD,
-		},
-		{
 			name: "required_composition",
 			opts: []instancetest.VIOption{
 				instancetest.Props(map[string]any{"id": "t1"}),
@@ -343,47 +327,54 @@ func TestLoad_RevalidationReportsACancelledRowAtItsOwnSeverity(t *testing.T) {
 	}
 }
 
-// TestLoad_RevalidationUnknownRelation pins that a document carrying edges
-// under a relation name the type does not declare is reported, never
-// silently skipped — RebuildSnapshot accepts such parts, so the wire can
-// hold them.
-func TestLoad_RevalidationUnknownRelation(t *testing.T) {
+// TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation pins that an edge under a
+// relation name the type does not declare as an association is a structural
+// fault at every constructor: RebuildSnapshot refuses the parts, and Load and
+// Verify refuse the document with no option.
+func TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation(t *testing.T) {
 	t.Parallel()
 	s := revalLoadSchema(t)
 	thing, _ := s.Type("Thing")
 	target, _ := s.Type("Target")
 
-	node := func(id schema.TypeID, tag, k string) graph.InstanceParts {
+	node := func(id schema.TypeID, k string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   tag,
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{k}),
 			Properties: immutable.WrapProperties(map[string]any{"id": k}),
 		}
 	}
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{thing.ID(), target.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			thing.ID():  {node(thing.ID(), "Thing", "t1")},
-			target.ID(): {node(target.ID(), "Target", "x1")},
-		},
+	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types:     []schema.TypeID{thing.ID(), target.ID()},
+		Instances: []graph.InstanceParts{node(thing.ID(), "t1"), node(target.ID(), "x1")},
 		Edges: []graph.EdgeParts{{
 			Relation:   "BOGUS",
 			SourceType: thing.ID(), SourceKey: immutable.WrapKey([]any{"t1"}),
 			TargetType: target.ID(), TargetKey: immutable.WrapKey([]any{"x1"}),
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("assembling: %s", res)
-	}
-	data, mres := snapshot.Marshal(t.Context(), built)
-	if mres.HasErrors() {
-		t.Fatalf("Marshal: %s", mres.String())
+	if !res.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+		t.Errorf("RebuildSnapshot did not refuse an edge under an undeclared relation: %s", res)
 	}
 
-	_, lres := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
-	if !lres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
-		t.Errorf("edges under an undeclared relation were not reported: %s", lres.String())
+	data := revalDocument(
+		t, s,
+		instancetest.Props(map[string]any{"id": "t1"}),
+		instancetest.Edges(map[string]*instance.ValidEdgeData{
+			"LINKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"x1"}), immutable.Properties{}),
+			}),
+		}),
+	)
+	edited := bytes.Replace(data, []byte(`"LINKS":`), []byte(`"BOGUS":`), 1)
+	if bytes.Equal(edited, data) {
+		t.Fatalf("no LINKS edge to rename in %s", data)
+	}
+	if _, lres := snapshot.Load(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !lres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+		t.Errorf("Load did not refuse an edge under an undeclared relation: %s", lres)
+	}
+	if vres := snapshot.Verify(t.Context(), edited, s, snapshot.WithIntegrityCheck(false)); !vres.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+		t.Errorf("Verify did not refuse an edge under an undeclared relation: %s", vres)
 	}
 }
 

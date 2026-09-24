@@ -18,28 +18,30 @@
 //
 // The .ys header carries the writing library's attestation: whether every
 // root and composed child was validator-built, and whether every Required
-// association resolved. The integrity hash protects that claim against
-// tampering — and against nothing else. [graph.RebuildSnapshot] is exported,
+// association resolved. The integrity hash is an unkeyed SHA-256 of the
+// document: it detects corruption and an edit nobody rehashed, and anyone can
+// recompute it, so it stops no deliberate one. [graph.RebuildSnapshot] is exported,
 // so any process can assemble and sign a document whose header claims what
 // its instances never earned; the unforgeable point is the instance layer,
 // and the attestation is the writer's word, not a proof.
 //
-// [Load] returns what was written, with two exceptions it refuses outright.
-// A .ys can hold a graph that fails the graph layer's Add-time relation
-// guards, values outside their constraints, and invariant violations;
-// [WithRevalidation] is the option that reports all of it — the real
-// validator, run per root at load time.
+// [Load] refuses a document whose structure no caller of [graph.Graph.Add]
+// could have built: one that breaks a fact of the graph package doc's
+// "Structural facts" — type identity, root and denoted types, composition
+// slots, keys and their key properties, declared names, association shapes —
+// or holds two roots at one address ([diag.E_DUPLICATE_PK]). No option
+// excuses them, and [Verify] and [Info] run the same checks; a schema-less
+// read judges none that needs a schema.
 //
-// The exceptions are structural rather than a matter of validity, so no option
-// excuses them: an instances group keyed by a type that cannot hold a root
-// instance — abstract, part, or declaring no primary key — draws
-// [diag.E_SNAPSHOT_INVALID_ROOT], and two roots at one address draw
-// [diag.E_DUPLICATE_PK]. Neither describes a graph any caller could have
-// built, and the wire has a diagnostics section for a rejected duplicate.
-// [WithValueConformance] is the narrower canonical-form check. Duplicates
-// and unresolved records ride the document as data
+// What a .ys can still hold is data a validated graph would not: values
+// outside their constraints and invariant violations. [WithRevalidation] is
+// the option that reports them — the real validator, run per root at load
+// time — and [WithValueConformance] the narrower canonical-form check.
+// Duplicates and unresolved records ride the document as data
 // ([graph.Snapshot.Duplicates], [graph.Snapshot.Unresolved]); a rejected
-// duplicate's payload is outside the attestation.
+// duplicate's payload is outside the attestation, and whether an unresolved
+// record's association is required is read from the schema, never from the
+// document.
 //
 // [schema.StructuralHash] is the schema identity the header pins: an
 // identity over the rules that decide what instance data is valid.
@@ -102,8 +104,9 @@
 //
 // [HeaderOnly] reads header metadata from a .ys file without decoding the
 // instance body or verifying the integrity hash. Returns a [HeaderInfo] with
-// the header fields plus the types array. Cost is proportional to the header
-// size, not the total file size — the right choice for dispatch-style
+// the header fields plus the types array. It decodes the header alone, and
+// still scans the whole document once to check its top-level shape;
+// [HeaderOnlyRead] reads the header alone. Either suits dispatch-style
 // workloads that scan many .ys files to classify state or compare schema
 // hashes. When counts, diagnostics, or verified integrity are required, use
 // [Info] instead.
@@ -164,8 +167,8 @@
 //
 // [UpdateMetadataOrReMarshal] is the default consumer entry point:
 // it runs [UpdateMetadata] on the happy path and transparently falls
-// back to [Load] + [Marshal] on recoverable Fatals (body-offset
-// failure, malformed header, or any non-cancellation Fatal), surfacing
+// back to [Load] + [Marshal] on any Error or Fatal but a cancellation
+// (a body-offset failure or a malformed header among them), surfacing
 // a Warning-severity [diag.W_UPDATE_METADATA_FALLBACK] on the returned
 // [diag.Result] so operators can observe fallback frequency.
 //
@@ -205,9 +208,11 @@
 //
 // # Error Handling
 //
-// All functions return [diag.Result]:
+// The read, write and update functions return [diag.Result]; [WriteFile]
+// returns an error, and [ScanDir] and [ScanDirWith] yield one per entry:
 //
-//   - Fatal: I/O failure or context cancellation
+//   - Fatal: I/O failure, context cancellation, a body the metadata update
+//     cannot locate, or a broken invariant (E_INTERNAL)
 //   - Error: schema hash mismatch, integrity check failure, structural corruption
 //   - OK: success (may include warnings)
 //
@@ -256,6 +261,7 @@
 //
 //	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value
 //
-// The instance edge exists for [WithRevalidation]: re-validation runs the
-// real validator, so the option's fidelity is the validator's own.
+// The instance edge exists for [WithRevalidation], whose re-validation runs
+// the real validator, so the option's fidelity is the validator's own, and for
+// [instance.MaxComposedDepth], the depth bound the reader shares with it.
 package snapshot

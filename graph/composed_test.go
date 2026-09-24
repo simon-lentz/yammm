@@ -385,7 +385,7 @@ func TestAddComposed_SchemaMismatch(t *testing.T) {
 		"OtherChild",
 		otherChildType.ID(), // TypeID points to different schema
 		immutable.WrapKey([]any{"oc1"}),
-		immutable.WrapProperties(map[string]any{}),
+		immutable.WrapProperties(map[string]any{"id": "oc1"}),
 		nil, nil, nil,
 	)
 

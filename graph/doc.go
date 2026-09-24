@@ -81,9 +81,10 @@
 // [NewBatchAssemblerFromSnapshot] is its assembler-level counterpart.
 //
 // [RebuildSnapshot] constructs a [Snapshot] from asserted parts (types,
-// instances, edges, duplicates, unresolved records) without validation;
-// rebuilt instances report Validated() == false. This is the
-// deserialization entry point used by the snapshot package.
+// instances, edges, duplicates, unresolved records). It does not validate
+// values, and rebuilt instances report Validated() == false, but it holds the
+// parts to the structural facts below. This is the deserialization entry point
+// used by the snapshot package.
 //
 // # Type Resolution
 //
@@ -109,15 +110,16 @@
 //
 // A root instance's type must satisfy four members, and every entry point that
 // installs or asserts a root applies the same four: [Graph.Add],
-// [RebuildSnapshot], and the snapshot reader. A type is ineligible when it
+// [RebuildSnapshot], [NewFromSnapshot] and the snapshot reader. A type is
+// ineligible when it
 //
 //   - is abstract, because an abstract type has no instances;
 //   - is a part type, because a part instance is addressed through its parent
 //     composition;
 //   - declares no primary key, because it then has no address at all;
-//   - is one the entry schema cannot name, because a root is keyed by name in
-//     every output document and a type reached only through an intermediate
-//     import has no name form.
+//   - is one the entry schema cannot name, because adapter/json and
+//     adapter/csv key a root's output by that name and a type reached only
+//     through an intermediate import has no name form.
 //
 // [schema.Addressable] is the fourth member, and [schema.AddressableTag] is the
 // name it grants. Sharing one rule is what lets a writer read a root's tag
@@ -132,19 +134,57 @@
 //
 // # Denoted type eligibility
 //
-// A snapshot DENOTES every type in [Snapshot.Types], which is not the same set
-// as the types holding instances: a caller may name a type with an empty group,
-// and the .ys writer emits a row for each, part types included. Denotation is
-// weaker than rootness and takes the fourth member ALONE — a denoted type may be
-// abstract, a part type or keyless, and may not be one the entry schema cannot
-// name.
+// A snapshot DENOTES every type in [Snapshot.Types]. That set holds every
+// root's type, and [SnapshotParts.Types] may add a type with no instances.
+// Every denoted type is held to all four members above, whether or not the
+// snapshot holds an instance of it.
 //
-// The reason is the writers. Every one of them keys its output by the name of
-// each type the snapshot denotes, empty groups included, so a denoted type
-// without a name has no key. Holding denotation to the rule is what makes
-// [Snapshot.Types]'s contract true and lets a writer read a tag without checking
-// for a collision; the alternative leaves a snapshot able to denote a type no
-// writer can render.
+// The reason is the writers. adapter/json and adapter/csv key their output by
+// the name of each type the snapshot denotes, so a denoted type needs a name,
+// and a key they emit must be one the instance validator and the generated
+// aggregate read back. The validator refuses an abstract or a part type's name even for
+// an empty batch, so a snapshot that denoted one would write a document its own
+// readers refuse.
+//
+// # Structural facts
+//
+// [Graph.Add] never builds a snapshot that breaks the facts below, and every
+// other constructor of a snapshot refuses one that does: [RebuildSnapshot] over
+// parts, [NewFromSnapshot] and [NewBatchAssemblerFromSnapshot] over a snapshot
+// bound to another schema, and the snapshot package's reader over a document.
+// The facts are the whole promise: a shape they do not name, such as a
+// duplicate record whose conflict is of another type, can pass a constructor.
+// The facts are:
+//
+//   - Identity. Every type identity resolves in the schema.
+//   - Root and denoted types. See the two sections above.
+//   - Composition slots. A slot is a composition its parent's type declares,
+//     holds instances of its declared target, holds one child at most under a
+//     (one) composition, and holds each canonical key of a keyed part once.
+//   - Keys. A keyed instance's stored key has one component per declared
+//     primary key, each a scalar [ParseKey] reads back, and each agrees with
+//     its key property, which is present and not null. Two roots of one type never share a canonical
+//     address.
+//   - Names. Every stored property and edge property name is declared.
+//   - Associations. Every edge and unresolved record is under an association
+//     its source's type declares, names that association's declared target,
+//     carries a target key of the target's arity, each component a scalar
+//     [ParseKey] reads back, where it names a target, and
+//     states a reason [UnresolvedEdge] documents; an "absent" or "empty"
+//     record carries no target key and no edge properties. A (one)
+//     association holds one record at most, edges and unresolved records
+//     together.
+//   - Duplicates. A duplicate record's type and key are its instance's, its
+//     instance holds no composed children, and a root duplicate's type can
+//     hold a root.
+//
+// Whether an association is required is read from the schema, never stored:
+// [UnresolvedEdge.Required] is derived by every constructor, so a snapshot
+// imported under a schema that relaxes an association reports it under that
+// schema's rule.
+//
+// A snapshot bound to the importing schema already holds to every fact, so
+// the import walks only a snapshot built against another schema.
 //
 // # Build Then Commit
 //
@@ -152,11 +192,13 @@
 // checks the whole structure — edge names and multiplicities, and every slot
 // and child of the composition tree at any depth — and assembles the [Instance]
 // tree to install, touching no graph state. Only a walk that raised no error
-// reaches the commit phase, which takes the lock and installs the tree, the
-// staged association records and the attestation together.
+// reaches the commit phase, which installs the tree, the staged association
+// records and the attestation together under the graph's lock.
 //
-// A non-OK result therefore leaves the graph unchanged, and does so
-// structurally rather than by two functions agreeing. The alternative,
+// A non-OK result therefore installs nothing of the record — no instance, child
+// or edge — and does so structurally rather than by two functions agreeing. A
+// rejection is itself recorded: a duplicate in [Snapshot.Duplicates], and
+// every refusal's issue in [Snapshot.Diagnostics]. The alternative,
 // installing first and rejecting during the walk, left a record in the graph
 // that the caller had been told had failed: [BatchAssembler.Count]
 // under-reported against a snapshot that held the instance, and a retry of that
@@ -245,13 +287,15 @@
 //   - [Snapshot.InstancesOf]
 //   - [Snapshot.InstanceByKey]
 //   - [Graph.AddComposed]'s parentType parameter
-//   - [SnapshotParts.Types] and [SnapshotParts.Instances] map keys
+//   - [SnapshotParts.Types], and [InstanceParts.TypeID], which files a root
 //   - the type fields on [EdgeParts], [DuplicateParts] and [UnresolvedParts]
 //   - [UnresolvedEdge.TargetType]
 //
-// [Instance.TypeName] still carries the rendered name, because an instance
-// carries its identity beside it ([Instance.TypeID]) and the name is what a
-// document was written with. Use
+// [Instance.TypeName] still carries the rendered name beside the identity
+// ([Instance.TypeID]). Every constructor renders it from the identity under the
+// bound schema with [github.com/simon-lentz/yammm/schema.TagForm], which is
+// lossy as above: a root's name names only its type, and a composed child's
+// may match another type's. Use
 // [github.com/simon-lentz/yammm/schema.TagForm] to render an identity where
 // output needs a name — Cypher labels, CSV filenames, JSON object keys.
 //
@@ -268,8 +312,10 @@
 // accepts: every address the graph receives is canonicalized under the type's
 // key constraints before the lookup, as the key was at entry.
 //
-// Composed children have no key of their own. A part instance is identified
-// through its parent composition, so this package mints no address for one; a
+// A part type may declare a primary key, which a composed child carries and
+// the graph checks and uses to tell siblings apart. It is not an address: a
+// part instance is found through its parent composition, so
+// [Snapshot.InstanceByKey] never returns one and this package mints none; a
 // store that must give each part node an identity derives it, and
 // [github.com/simon-lentz/yammm/adapter/neo4j] is the only one that does.
 //
@@ -277,13 +323,15 @@
 //
 // Graph operations return [diag.Result]:
 //
-//   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED)
+//   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED), or
+//     a broken invariant (E_INTERNAL)
 //   - [diag.Result.HasErrors]: semantic failure (duplicate PK, type not found)
 //   - [diag.Result.OK]: success (may have warnings)
 //
 // Programmer errors (nil receiver, nil instance, schema mismatch) panic.
 //
-// [Graph.Add] emits:
+// [Graph.Add] emits the following. The first four judge a root's type in the
+// order listed, and a type breaking two draws the first:
 //
 //   - E_GRAPH_TYPE_NOT_FOUND: a root's type is not declared by this graph's
 //     schema or a direct import
@@ -292,11 +340,16 @@
 //     composed child is not an instance of its relation's target type
 //   - E_GRAPH_ABSTRACT_TYPE: the type is abstract
 //   - E_GRAPH_INVALID_PK: a primary key — the instance's own, or a composed
-//     child's of a keyed part type — is empty, has the wrong arity, or
-//     disagrees with its own key property
+//     child's of a keyed part type — is empty, has the wrong arity, holds a
+//     component [ParseKey] cannot read back, has a key
+//     property that is absent or null, or disagrees with its own key
+//     property; or an association target key has the wrong arity or a
+//     component [ParseKey] cannot read back
 //   - E_GRAPH_CARDINALITY: a (one) association carries several targets
 //   - E_GRAPH_UNKNOWN_RELATION: edge data or composed children arrived under a
 //     name the type does not declare in that slot
+//   - E_UNKNOWN_FIELD, E_UNKNOWN_EDGE_FIELD: a property or edge property name
+//     the type or association does not declare
 //   - E_DUPLICATE_COMPOSED_PK: a (one) composition carries several children,
 //     or two children of one (many) slot share a primary key
 //   - E_DUPLICATE_PK: the primary key already exists for this type
@@ -309,10 +362,16 @@
 //   - E_GRAPH_PARENT_NOT_FOUND: no instance carries that identity and key
 //   - E_GRAPH_INVALID_COMPOSITION: the named relation is not a composition, or
 //     the child is not an instance of its target type
-//   - E_GRAPH_INVALID_PK: the child's key is empty, has the wrong arity, or
-//     disagrees with its own key property
-//   - E_GRAPH_CARDINALITY, E_GRAPH_UNKNOWN_RELATION, E_DUPLICATE_COMPOSED_PK:
-//     from the child's own structure, which runs the same check as a root's
+//   - E_GRAPH_INVALID_PK: the child's key, or a descendant's, is empty, has
+//     the wrong arity, holds a component [ParseKey] cannot read back, has a
+//     key property that is absent or null, or disagrees with its own key
+//     property
+//   - E_DUPLICATE_COMPOSED_PK: the parent's (one) slot already holds a child,
+//     or its keyed (many) slot holds a sibling at the child's key
+//   - E_GRAPH_CARDINALITY, E_GRAPH_UNKNOWN_RELATION, E_DUPLICATE_COMPOSED_PK,
+//     E_GRAPH_INVALID_COMPOSITION, E_UNKNOWN_FIELD, E_UNKNOWN_EDGE_FIELD: from
+//     the child's own structure and its descendants', judged by the walk a
+//     root's composition tree takes
 //   - E_CONTEXT_CANCELLED: the context was cancelled
 //
 // It does NOT emit E_GRAPH_MISSING_PK, E_GRAPH_ABSTRACT_TYPE or
@@ -321,10 +380,18 @@
 // A composed child whose identity is not in the import closure is an
 // invariant guard on both paths, Fatal E_INTERNAL: the child must already
 // equal its relation's target, which the schema resolved at load, and a
-// child from outside the closure stops at the schema guard before either
-// arm. No public constructor reaches it.
+// child from outside the closure is refused first: by the target check on the
+// inline path, and by [Graph.AddComposed]'s schema guard on its own. No public
+// constructor reaches it.
 //
 // [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
+//
+// [RebuildSnapshot] and the import report a broken structural fact with the
+// code [Graph.Add] reports it with. The one exception is at [RebuildSnapshot]:
+// parts that break the identity, root, denoted-type, name, address, reason or
+// duplicate rule come only from a broken caller, so it reports them as Fatal
+// E_INTERNAL. [RebuildSnapshot] panics on a nil schema, as [New]
+// does.
 //
 // # Diagnostics Lifecycle
 //
@@ -351,7 +418,8 @@
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
 //   - [Snapshot.Duplicates]: (type, primaryKey, relation, conflictType,
-//     conflictKey, parent slot, rejected instance's properties)
+//     conflictKey, parent slot, rejected instance's properties, rejected
+//     instance's provenance)
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //

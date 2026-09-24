@@ -71,19 +71,17 @@ func sameNameSnapshot(t *testing.T) (*graph.Snapshot, *schema.Schema) {
 
 	snap, rres := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{local.ID(), imported.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			local.ID(): {{
-				TypeName:   localTag,
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     local.ID(),
 				PrimaryKey: immutable.WrapKey([]any{"l1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "l1", "power": float64(1)}),
-			}},
-			imported.ID(): {{
-				TypeName:   importedTag,
+			},
+			{
 				TypeID:     imported.ID(),
 				PrimaryKey: immutable.WrapKey([]any{"i1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "i1", "depth": float64(2)}),
-			}},
+			},
 		},
 	})
 	if rres.HasErrors() {

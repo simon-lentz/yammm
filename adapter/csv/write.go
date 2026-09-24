@@ -6,7 +6,6 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -142,13 +141,11 @@ func refuseComposedChildren(snap *graph.Snapshot) error {
 }
 
 // unnameableDenotedType reports a snapshot denoting a type the entry schema
-// cannot name. No constructor builds one from data bound to this schema, so
-// reaching this is a broken invariant or a snapshot imported from another
-// schema against [graph.NewFromSnapshot]'s contract. It carries no refusal
-// class: [ErrUnrepresentable] names data a caller can act on, and neither of
-// those is that.
+// cannot name. No constructor of a snapshot builds one, so reaching this is a
+// broken invariant. It carries no refusal class:
+// [ErrUnrepresentable] names data a caller can act on, and this is not that.
 func unnameableDenotedType(id schema.TypeID) error {
-	return fmt.Errorf("csv adapter: snapshot denotes type %s, which the entry schema cannot name, so per-type output has no name for it; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract", id)
+	return fmt.Errorf("csv adapter: snapshot denotes type %s, which the entry schema cannot name, so per-type output has no name for it; no constructor builds such a snapshot, so an invariant is broken", id)
 }
 
 // writeSnapshotTypeTo writes graph.Instance values from a snapshot as CSV rows.
@@ -292,26 +289,11 @@ func (a *Adapter) instanceToRow(
 ) ([]string, error) {
 	cells := make(map[string]string)
 	if schemaType != nil {
-		declared := 0
+		// Every constructor holds an edge to an association the type declares,
+		// so every edge has its group of columns.
 		for rel := range schemaType.AllAssociations() {
-			edges := edgesByRel[rel.Name()]
-			if len(edges) > 0 {
-				declared++
-			}
-			if err := a.relationCells(rel, s, edges, cells); err != nil {
+			if err := a.relationCells(rel, s, edgesByRel[rel.Name()], cells); err != nil {
 				return nil, err
-			}
-		}
-		// Every column comes from a declared association, so an edge under any
-		// other name has none and the row would be written without it.
-		if declared != len(edgesByRel) {
-			// In name order, so the relation a refusal names is the same on
-			// every run.
-			for _, relName := range slices.Sorted(maps.Keys(edgesByRel)) {
-				if rel, ok := schemaType.Relation(relName); !ok || !rel.IsAssociation() {
-					return nil, refusal.New(ErrUnrepresentable, "csv adapter: edge under %q, which type %s declares no association for, so it has no column",
-						relName, schemaType.ID())
-				}
 			}
 		}
 	}
@@ -352,7 +334,6 @@ var errCRLF = refusal.New(ErrUnrepresentable, "its text holds a CR LF, which enc
 // the absent-group marker, so it would read back as no edge at all. Two or more
 // targets always write a separator, so only a lone target can collide.
 func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []*graph.Edge, cells map[string]string) error {
-	// No edges leaves every column of the group unset, which a row reads as "".
 	if len(edges) == 0 {
 		return nil
 	}
@@ -361,38 +342,23 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		// buildColumnList already refused this shape; nothing to render.
 		return nil
 	}
-	// A (one) association reads back as ONE object, and the validator refuses
-	// the array two zipped targets make, so several edges have no shape.
-	if !rel.IsMany() && len(edges) > 1 {
-		return refusal.New(ErrUnrepresentable, "csv adapter: (one) association %q carries %d edges, and a (one) association reads back as one target",
-			rel.Name(), len(edges))
-	}
+	// Every constructor holds an edge to its association's declared target,
+	// and a (one) association to one record.
 	field := rel.FieldName()
 	var group []string
 
 	pks := target.PrimaryKeysSlice()
-	for _, e := range edges {
-		// The group's columns are the DECLARED target's keys, so an edge that
-		// points elsewhere would be written as a target of that type and read
-		// back as one. graph.Add resolves every edge to the declared target;
-		// only a rebuilt snapshot holds one that does not.
-		if e.Target().TypeID() != rel.TargetID() {
-			return refusal.New(ErrUnrepresentable, "csv adapter: association %q targets type %s; the association declares the target %s",
-				rel.Name(), e.Target().TypeID(), rel.TargetID())
-		}
-		// A short key would write empty segments for its missing components,
-		// which read back as a partial foreign key; a long one has no column.
-		if key := e.Target().PrimaryKey(); key.Len() != len(pks) {
-			return refusal.New(ErrUnrepresentable, "csv adapter: association %q target key has %d components; type %s declares %d",
-				rel.Name(), key.Len(), e.Target().TypeID(), len(pks))
-		}
-	}
 	for i, pk := range pks {
 		col := field + "._target_" + pk.Name()
 		group = append(group, col)
 		segs := make([]string, len(edges))
 		for j, e := range edges {
-			segs[j] = escapeListElem(scalarCell(canonicalOrRaw(e.Target().PrimaryKey().Get(i).Unwrap(), pk.Constraint())), a.config.listSep)
+			raw := e.Target().PrimaryKey().Get(i).Unwrap()
+			text, ok := scalarCell(canonicalOrRaw(raw, pk.Constraint()))
+			if !ok {
+				return fmt.Errorf("csv adapter: association %q: target key component %d, of type %T: %w", rel.Name(), i, raw, errNoCellSpelling)
+			}
+			segs[j] = escapeListElem(text, a.config.listSep)
 		}
 		cells[col] = strings.Join(segs, a.config.listSep)
 	}
@@ -403,7 +369,11 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		segs := make([]string, len(edges))
 		for j, e := range edges {
 			if v, ok := e.Properties().Get(p.Name()); ok && !v.IsNil() {
-				segs[j] = escapeListElem(scalarCell(canonicalOrRaw(v.Unwrap(), p.Constraint())), a.config.listSep)
+				text, ok := scalarCell(canonicalOrRaw(v.Unwrap(), p.Constraint()))
+				if !ok {
+					return fmt.Errorf("csv adapter: association %q: edge property %q, of type %T: %w", rel.Name(), p.Name(), v.Unwrap(), errNoCellSpelling)
+				}
+				segs[j] = escapeListElem(text, a.config.listSep)
 			}
 		}
 		cells[col] = strings.Join(segs, a.config.listSep)
@@ -417,30 +387,33 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 	return refusal.New(ErrUnrepresentable, "csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
 }
 
-// scalarCell renders one scalar value as cell text. A float carries a decimal
-// point whatever constraint holds it, as the JSON and .ys writers mark one: a
-// whole float under an Integer is written 5.0, which the Integer column
+// scalarCell renders one scalar value as cell text. A finite float carries a
+// decimal point whatever constraint holds it, as the JSON and .ys writers mark
+// one: a whole float under an Integer is written 5.0, which the Integer column
 // refuses on the way back, rather than 5, which it would read as the integer
 // the snapshot never held. A cell carries no type, so a String column reads
-// the same float back as the text 5.0.
-func scalarCell(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case int64:
-		return strconv.FormatInt(t, 10)
-	case bool:
-		return strconv.FormatBool(t)
-	case nil:
-		return ""
+// the same float back as the text 5.0. It reports false for a value no cell
+// spells: a map, an array, a pointer, a struct or another composite a
+// bypass-built snapshot can hold.
+func scalarCell(v any) (string, bool) {
+	if v == nil {
+		return "", true
 	}
 	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.String:
+		return rv.String(), true
+	case reflect.Bool:
+		return strconv.FormatBool(rv.Bool()), true
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(rv.Int(), 10), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(rv.Uint(), 10), true
 	case reflect.Float32:
-		return floatCell(rv.Float(), 32)
+		return floatCell(rv.Float(), 32), true
 	case reflect.Float64:
-		return floatCell(rv.Float(), 64)
+		return floatCell(rv.Float(), 64), true
 	}
-	return fmt.Sprint(v)
+	return "", false
 }
 
 // floatCell writes f in plain decimal notation at bitSize, with ".0" appended
@@ -464,6 +437,16 @@ func canonicalOrRaw(raw any, c schema.Constraint) any {
 	return canonical
 }
 
+// errNullListElement refuses a null list element: the list grammar writes it
+// as an empty element, which reads back as a value the list never held — ""
+// for a List<String>, an empty list for a List<List<T>> — or is refused. It carries [ErrUnrepresentable] and keeps its own text.
+var errNullListElement = refusal.New(ErrUnrepresentable, "a null list element has no spelling in a cell, so the element would not survive the round trip")
+
+// errNoCellSpelling refuses a value the list grammar has no spelling for: a
+// map, an array, a pointer, a struct. It carries [ErrUnrepresentable] and
+// keeps its own text.
+var errNoCellSpelling = refusal.New(ErrUnrepresentable, "a map, an array, a pointer or a struct has no spelling in a cell, so the value would not survive the round trip")
+
 // errListOfOneEmptyElement refuses a list whose one element renders as "": the
 // list grammar writes [""] and [] alike, so the list would read back as an
 // empty list, or as null where it is an optional property's whole value. It
@@ -478,13 +461,24 @@ func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) (strin
 	if val.IsNil() {
 		return "", nil
 	}
+	if _, ok := val.Map(); ok {
+		return "", fmt.Errorf("a map: %w", errNoCellSpelling)
+	}
 	s, ok := val.Slice()
 	if !ok {
-		return scalarCell(canonicalOrRaw(val.Unwrap(), c)), nil
+		raw := val.Unwrap()
+		text, ok := scalarCell(canonicalOrRaw(raw, c))
+		if !ok {
+			return "", fmt.Errorf("a value of type %T: %w", raw, errNoCellSpelling)
+		}
+		return text, nil
 	}
 	elem := constraintof.Element(c)
 	parts := make([]string, s.Len())
 	for i, v := range s.Iter2() {
+		if v.IsNil() {
+			return "", fmt.Errorf("list element %d: %w", i, errNullListElement)
+		}
 		text, err := a.valueToString(v, elem)
 		if err != nil {
 			return "", fmt.Errorf("list element %d: %w", i, err)

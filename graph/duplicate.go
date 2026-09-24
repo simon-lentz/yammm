@@ -15,8 +15,8 @@ import (
 // # Composed Children Not Included
 //
 // The Instance field contains the rejected instance without its composed children.
-// This is because duplicate detection occurs before composition extraction, so
-// composed children from the rejected instance are never processed. If you need
+// [Graph.Add] builds the whole tree before it meets the duplicate, and records
+// a childless copy of the rejected root: a duplicate installs nothing. If you need
 // to inspect composed children from duplicate data, access them from the original
 // [instance.ValidInstance] passed to [Graph.Add].
 //
@@ -76,8 +76,9 @@ type UnresolvedEdge struct {
 	// Empty for "absent" and "empty" reasons.
 	TargetKey string
 
-	// Required indicates whether this association is required by the schema.
-	// When true, this unresolved edge will cause Check() to emit E_UNRESOLVED_REQUIRED.
+	// Required indicates whether this association is required by the schema
+	// the snapshot is bound to. Every constructor derives it from the relation
+	// and none stores it. When true, Check() emits E_UNRESOLVED_REQUIRED.
 	Required bool
 
 	// Reason explains why the edge is unresolved:

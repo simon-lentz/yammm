@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -66,6 +66,22 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 				return emptyCellSnapshot(t, s, []typedRow{
 					{"Grid", map[string]any{"id": "g1", "tags": []any{""}}},
 				}), s
+			},
+		},
+		{
+			name: "a null list element",
+			snap: func(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+				t.Helper()
+				s := loadListRenderingSchema(t)
+				return bypassGrid(t, s, []any{"a", nil}), s
+			},
+		},
+		{
+			name: "a map value",
+			snap: func(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+				t.Helper()
+				s := loadListRenderingSchema(t)
+				return bypassGrid(t, s, map[string]any{"k": "v"}), s
 			},
 		},
 	} {
@@ -229,101 +245,17 @@ func TestWriters_TheRefusalClassesDoNotCoverIOOrANilSnapshot(t *testing.T) {
 	}
 }
 
-// rebuiltAssociations builds a snapshot of two Companies and one Employee
-// through graph.RebuildSnapshot, which reconstructs a document and does not
-// validate one: graph.Add refuses two of the shapes below itself and never
-// resolves the other two, but a .ys document can carry all of them to a writer.
-// WORKS_AT is a (one) association.
-func rebuiltAssociations(t *testing.T, edges func(employee, company schema.TypeID) []graph.EdgeParts) (*graph.Snapshot, *schema.Schema) {
+// bypassGrid builds Grid g1 holding tags through instancetest, which runs no
+// validation: the validator refuses a null list element and a map under a
+// List<String>, so only a bypass-built snapshot holds either.
+func bypassGrid(t *testing.T, s *schema.Schema, tags any) *graph.Snapshot {
 	t.Helper()
-	s, res := schema.LoadString(t.Context(), `schema "shapes"
-
-type Company {
-	company_id String primary
-	region String primary
-}
-
-type Employee {
-	employee_id String primary
-	--> WORKS_AT (_:one) Company
-}
-`, "shapes.yammm")
-	if res.HasErrors() {
-		t.Fatalf("load schema: %s", res)
+	grid, _ := s.Type("Grid")
+	g := graph.New(s)
+	inst := instancetest.VI("Grid", instancetest.TypeID(grid.ID()), instancetest.PK("g1"),
+		instancetest.Props(map[string]any{"id": "g1", "tags": tags}))
+	if res := g.Add(context.Background(), inst); !res.OK() {
+		t.Fatalf("add: %s", res)
 	}
-	companyT, _ := s.Type("Company")
-	employeeT, _ := s.Type("Employee")
-	company := func(id string, key ...any) graph.InstanceParts {
-		return graph.InstanceParts{
-			TypeName: "Company", TypeID: companyT.ID(), PrimaryKey: immutable.WrapKey(key),
-			Properties: immutable.WrapProperties(map[string]any{"company_id": id, "region": "eu"}),
-		}
-	}
-	snap, r := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{companyT.ID(), employeeT.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			companyT.ID(): {company("c1", "c1", "eu"), company("c2", "c2", "eu"), company("c3", "c3")},
-			employeeT.ID(): {{
-				TypeName: "Employee", TypeID: employeeT.ID(), PrimaryKey: immutable.WrapKey([]any{"e1"}),
-				Properties: immutable.WrapProperties(map[string]any{"employee_id": "e1"}),
-			}},
-		},
-		Edges: edges(employeeT.ID(), companyT.ID()),
-	})
-	if err := r.Err(); err != nil {
-		t.Fatalf("RebuildSnapshot refused the parts, so the refusal has no subject: %v", err)
-	}
-	return snap, s
-}
-
-// A row that its own parser and the validator would not read back is refused,
-// as the JSON writer refuses the same shapes. The last one was silent data
-// loss: an edge under a relation its type does not declare has no column, so
-// the writer wrote the row without it.
-func TestWriters_AnUnrepresentableAssociationIsRefused(t *testing.T) {
-	t.Parallel()
-	edge := func(rel string, from, to schema.TypeID, key ...any) graph.EdgeParts {
-		return graph.EdgeParts{
-			Relation: rel, SourceType: from, SourceKey: immutable.WrapKey([]any{"e1"}),
-			TargetType: to, TargetKey: immutable.WrapKey(key), Properties: immutable.WrapProperties(nil),
-		}
-	}
-	for _, c := range []struct {
-		name, mentions string
-		edges          func(e, c schema.TypeID) []graph.EdgeParts
-	}{
-		{
-			"a target key of the wrong arity", "target key has 1 components",
-			func(e, c schema.TypeID) []graph.EdgeParts { return []graph.EdgeParts{edge("WORKS_AT", e, c, "c3")} },
-		},
-		{
-			"a (one) association carrying two edges", `"WORKS_AT"`,
-			func(e, c schema.TypeID) []graph.EdgeParts {
-				return []graph.EdgeParts{edge("WORKS_AT", e, c, "c1", "eu"), edge("WORKS_AT", e, c, "c2", "eu")}
-			},
-		},
-		{
-			"an edge under a relation its type does not declare", `"NOPE"`,
-			func(e, c schema.TypeID) []graph.EdgeParts { return []graph.EdgeParts{edge("NOPE", e, c, "c1", "eu")} },
-		},
-		{
-			// graph.Add resolves every edge to the association's declared target, so
-			// only a rebuilt snapshot holds one that points elsewhere. Its key would
-			// be written into the declared target's columns as though it were one.
-			"an edge to a type the association does not declare", "declares the target",
-			func(e, _ schema.TypeID) []graph.EdgeParts { return []graph.EdgeParts{edge("WORKS_AT", e, e, "e1")} },
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			snap, s := rebuiltAssociations(t, c.edges)
-			_, err := New(WithSchema(s)).MarshalSnapshot(context.Background(), snap)
-			if !errors.Is(err, ErrUnrepresentable) {
-				t.Errorf("MarshalSnapshot: %v does not match ErrUnrepresentable", err)
-			}
-			if err != nil && !strings.Contains(err.Error(), c.mentions) {
-				t.Errorf("the refusal does not name %s: %v", c.mentions, err)
-			}
-		})
-	}
+	return g.Snapshot()
 }

@@ -2,7 +2,6 @@ package json
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
@@ -40,10 +39,8 @@ type Employee extends Staff {
 
 type kinIDs struct{ company, badge, employee schema.TypeID }
 
-// kinSnapshot rebuilds one Employee and three Companies, the third filed under
-// a one-part key and the fourth under a three-part one, then lets shape add
-// edges and composed children. graph.RebuildSnapshot reconstructs a document
-// and does not validate one, so it admits every shape these tests need.
+// kinSnapshot rebuilds one Employee and two Companies, then lets shape add
+// edges and composed children.
 func kinSnapshot(t *testing.T, shape func(p *graph.SnapshotParts, emp *graph.InstanceParts, ids kinIDs)) *graph.Snapshot {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), kinSchema, "kin.yammm")
@@ -57,22 +54,23 @@ func kinSnapshot(t *testing.T, shape func(p *graph.SnapshotParts, emp *graph.Ins
 
 	company := func(id string, key ...any) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName: "Company", TypeID: ids.company, PrimaryKey: immutable.WrapKey(key),
+			TypeID: ids.company, PrimaryKey: immutable.WrapKey(key),
 			Properties: immutable.WrapProperties(map[string]any{"company_id": id, "region": "eu"}),
 		}
 	}
 	emp := graph.InstanceParts{
-		TypeName: "Employee", TypeID: ids.employee, PrimaryKey: immutable.WrapKey([]any{"e1"}),
+		TypeID: ids.employee, PrimaryKey: immutable.WrapKey([]any{"e1"}),
 		Properties: immutable.WrapProperties(map[string]any{"staff_id": "e1"}),
 	}
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{ids.company, ids.employee},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			ids.company: {company("c1", "c1", "eu"), company("c2", "c2", "eu"), company("c3", "c3"), company("c4", "c4", "eu", "x")},
+		Instances: []graph.InstanceParts{
+			company("c1", "c1", "eu"),
+			company("c2", "c2", "eu"),
 		},
 	}
 	shape(&parts, &emp, ids)
-	parts.Instances[ids.employee] = []graph.InstanceParts{emp}
+	parts.Instances = append(parts.Instances, emp)
 
 	snap, r := graph.RebuildSnapshot(s, parts)
 	if err := r.Err(); err != nil {
@@ -90,7 +88,7 @@ func kinEdge(ids kinIDs, rel string, to schema.TypeID, key ...any) graph.EdgePar
 
 func kinBadge(ids kinIDs, code string) graph.InstanceParts {
 	return graph.InstanceParts{
-		TypeName: "Badge", TypeID: ids.badge, PrimaryKey: immutable.WrapKey([]any{code}),
+		TypeID: ids.badge, PrimaryKey: immutable.WrapKey([]any{code}),
 		Properties: immutable.WrapProperties(map[string]any{"code": code}),
 	}
 }
@@ -119,61 +117,5 @@ func TestMarshalObject_InheritedRelationsAreWritten(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("want %s in:\n%s", want, data)
 		}
-	}
-}
-
-// The refusals the single-association fixture cannot reach: a relation name of
-// the WRONG KIND, which a lookup by name alone finds; a key that is too LONG,
-// not only too short; and a fault on a (many) association's SECOND target.
-func TestWriters_RelationShapesTheFirstFixtureCannotReach(t *testing.T) {
-	t.Parallel()
-	for _, c := range []struct {
-		name, mentions string
-		shape          func(p *graph.SnapshotParts, emp *graph.InstanceParts, ids kinIDs)
-	}{
-		{
-			"composed children under a name the type does not declare", `"NOPE"`,
-			func(_ *graph.SnapshotParts, emp *graph.InstanceParts, ids kinIDs) {
-				emp.Composed = map[string][]graph.InstanceParts{"NOPE": {kinBadge(ids, "b1")}}
-			},
-		},
-		{
-			"composed children under an ASSOCIATION's name", `composed children under "WORKS_AT"`,
-			func(_ *graph.SnapshotParts, emp *graph.InstanceParts, ids kinIDs) {
-				emp.Composed = map[string][]graph.InstanceParts{"WORKS_AT": {kinBadge(ids, "b1")}}
-			},
-		},
-		{
-			"an edge under a COMPOSITION's name", `edge under "BADGES", which type`,
-			func(p *graph.SnapshotParts, _ *graph.InstanceParts, ids kinIDs) {
-				p.Edges = []graph.EdgeParts{kinEdge(ids, "BADGES", ids.company, "c1", "eu")}
-			},
-		},
-		{
-			"a target key that is too long", "target key has 3 components",
-			func(p *graph.SnapshotParts, _ *graph.InstanceParts, ids kinIDs) {
-				p.Edges = []graph.EdgeParts{kinEdge(ids, "WORKS_AT", ids.company, "c4", "eu", "x")}
-			},
-		},
-		{
-			"a short key on a (many) association's second target", "target key has 1 components",
-			func(p *graph.SnapshotParts, _ *graph.InstanceParts, ids kinIDs) {
-				p.Edges = []graph.EdgeParts{
-					kinEdge(ids, "ADVISES", ids.company, "c1", "eu"),
-					kinEdge(ids, "ADVISES", ids.company, "c3"),
-				}
-			},
-		},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := New().MarshalObject(context.Background(), kinSnapshot(t, c.shape))
-			if !errors.Is(err, ErrUnrepresentable) {
-				t.Fatalf("got %v, want ErrUnrepresentable", err)
-			}
-			if !strings.Contains(err.Error(), c.mentions) {
-				t.Errorf("the refusal does not name %s: %v", c.mentions, err)
-			}
-		})
 	}
 }

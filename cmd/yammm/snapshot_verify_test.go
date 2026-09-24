@@ -26,7 +26,7 @@ func TestSnapshotVerify_CorruptedFile(t *testing.T) {
 	require.NoError(t, err)
 
 	// Replace a character in the payload to break the integrity hash.
-	tampered := bytes.Replace(data, []byte(`"alice"`), []byte(`"alicX"`), 1)
+	tampered := bytes.Replace(data, []byte(`"Alice"`), []byte(`"AlicX"`), 1)
 	require.NoError(t, os.WriteFile(ysPath, tampered, 0o600))
 
 	code := executeCmd(t, "snapshot", "verify", "testdata/valid.yammm", ysPath)
@@ -42,7 +42,7 @@ func TestSnapshotVerify_SkipIntegrityCheck(t *testing.T) {
 	data, err := os.ReadFile(ysPath)
 	require.NoError(t, err)
 
-	tampered := bytes.Replace(data, []byte(`"alice"`), []byte(`"alicX"`), 1)
+	tampered := bytes.Replace(data, []byte(`"Alice"`), []byte(`"AlicX"`), 1)
 	require.NoError(t, os.WriteFile(ysPath, tampered, 0o600))
 
 	// With --skip-integrity-check, structural validation still runs but

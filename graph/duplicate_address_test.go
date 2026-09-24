@@ -179,26 +179,26 @@ func TestRebuildSnapshot_DuplicateRecordResolvesFromEverySpelling(t *testing.T) 
 
 	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{sensorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			sensorID: {{
-				TypeName: "Sensor", TypeID: sensorID,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{canonStamp}),
 				Properties: immutable.WrapProperties(map[string]any{"observed_at": canonStamp}),
 				Composed: map[string][]graph.InstanceParts{
 					"READINGS": {{
-						TypeName: "Reading", TypeID: readingID,
+						TypeID:     readingID,
 						PrimaryKey: immutable.WrapKey([]any{canonStamp}),
 						Properties: immutable.WrapProperties(map[string]any{"taken_at": canonStamp, "note": "first"}),
 					}},
 				},
-			}},
+			},
 		},
 		// Every address in the record is spelled RAW.
 		Duplicates: []graph.DuplicateParts{{
 			Type: readingID,
 			Key:  immutable.WrapKey([]any{rawStamp}),
 			Instance: graph.InstanceParts{
-				TypeName: "Reading", TypeID: readingID,
+				TypeID:     readingID,
 				PrimaryKey: immutable.WrapKey([]any{rawStamp}),
 				Properties: immutable.WrapProperties(map[string]any{"taken_at": rawStamp, "note": "second"}),
 			},
@@ -246,22 +246,26 @@ func TestRebuildSnapshot_DuplicateRefusalNamesTheCanonicalAddress(t *testing.T) 
 	// renders dp.Key.
 	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{sensorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			sensorID: {{
-				TypeName: "Sensor", TypeID: sensorID,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{canonStamp}),
 				Properties: immutable.WrapProperties(map[string]any{"observed_at": canonStamp}),
-			}},
+			},
 		},
 		Duplicates: []graph.DuplicateParts{{
 			Type: sensorID,
 			Key:  immutable.WrapKey([]any{rawStamp}),
 			Instance: graph.InstanceParts{
-				TypeName: "Sensor", TypeID: sensorID,
+				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{rawStamp}),
 				Properties: immutable.WrapProperties(map[string]any{"observed_at": rawStamp}),
 				Composed: map[string][]graph.InstanceParts{
-					"READINGS": {{TypeName: "Reading", TypeID: readingID}},
+					"READINGS": {{
+						TypeID:     readingID,
+						PrimaryKey: immutable.WrapKey([]any{canonStamp}),
+						Properties: immutable.WrapProperties(map[string]any{"taken_at": canonStamp}),
+					}},
 				},
 			},
 			ConflictType: sensorID,
@@ -313,17 +317,17 @@ type Doc {
 
 	snap, rres := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{docID, noteID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			docID: {{
-				TypeName: "Doc", TypeID: docID,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     docID,
 				PrimaryKey: immutable.WrapKey([]any{"d1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "d1"}),
-			}},
-			noteID: {{
-				TypeName: "Note", TypeID: noteID,
+			},
+			{
+				TypeID:     noteID,
 				PrimaryKey: immutable.WrapKey([]any{"n1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "n1"}),
-			}},
+			},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation:   "CITES",

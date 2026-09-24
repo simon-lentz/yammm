@@ -154,7 +154,8 @@ type FinalizeResult struct {
 //
 // The supplied ctx is captured and used for the assembler's internal
 // ValidateOne and Graph.Add calls. Cancelling ctx cancels in-flight
-// validation; Add returns the cancellation error directly. Finalize
+// validation; Add then returns a *diag.ContextualError whose result holds
+// Fatal E_CONTEXT_CANCELLED, so match the code rather than context.Canceled. Finalize
 // takes its own ctx parameter independent of the construction-time
 // context.
 //
@@ -202,11 +203,11 @@ func NewBatchAssembler(ctx context.Context, s *schema.Schema) *BatchAssembler {
 //     transient by design); the structural records — Duplicates and
 //     Unresolved — are what persist and import.
 //
-// snap must originate from s: taken from a [Graph] bound to s, or
-// loaded via [github.com/simon-lentz/yammm/snapshot.Load] against s,
-// which verifies structural compatibility. Seeding from a snapshot built
-// against a different schema is not detected and not filtered: import
-// consults no schema, so every type in snap is installed.
+// snap is held to s as [NewFromSnapshot] holds it, under the package doc's
+// "Structural facts": a snapshot that breaks one is refused with a nil
+// assembler and a diagnostic naming each position. A snapshot taken from a
+// [Graph] bound to s, or loaded via
+// [github.com/simon-lentz/yammm/snapshot.Load] against s, is never refused.
 //
 // Every other contract matches [NewBatchAssembler]: the captured ctx,
 // the Add / AddValid / Finalize lifecycle and finalize barrier, and the
@@ -214,7 +215,7 @@ func NewBatchAssembler(ctx context.Context, s *schema.Schema) *BatchAssembler {
 //
 // Panics if s, snap, or ctx is nil (consistent with [NewBatchAssembler]
 // and [NewFromSnapshot]).
-func NewBatchAssemblerFromSnapshot(ctx context.Context, s *schema.Schema, snap *Snapshot) *BatchAssembler {
+func NewBatchAssemblerFromSnapshot(ctx context.Context, s *schema.Schema, snap *Snapshot) (*BatchAssembler, diag.Result) {
 	if s == nil {
 		panic("graph.NewBatchAssemblerFromSnapshot: nil schema")
 	}
@@ -225,7 +226,11 @@ func NewBatchAssemblerFromSnapshot(ctx context.Context, s *schema.Schema, snap *
 		panic("graph.NewBatchAssemblerFromSnapshot: nil Snapshot")
 	}
 
-	return newBatchAssembler(ctx, s, NewFromSnapshot(s, snap))
+	g, res := NewFromSnapshot(s, snap)
+	if res.HasErrors() {
+		return nil, res
+	}
+	return newBatchAssembler(ctx, s, g), res
 }
 
 // newBatchAssembler wires a single shared validator around an

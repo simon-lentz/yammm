@@ -61,7 +61,7 @@ func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 		t.Fatalf("the persisted address is %s, want the raw %s", got, graph.FormatKey(rawInstant))
 	}
 
-	g := graph.NewFromSnapshot(after, persisted.Snapshot())
+	g := mustImport(t, after, persisted.Snapshot())
 	imported := g.Snapshot()
 	want := graph.FormatKey(canonInstant)
 
@@ -104,7 +104,7 @@ func TestNewFromSnapshot_ReKeyIsANoOpOnTheCommonPath(t *testing.T) {
 	}
 	before := src.Snapshot().InstancesOf(runID)[0].PrimaryKey().String()
 
-	after := graph.NewFromSnapshot(s, src.Snapshot()).Snapshot().InstancesOf(runID)[0].PrimaryKey().String()
+	after := mustImport(t, s, src.Snapshot()).Snapshot().InstancesOf(runID)[0].PrimaryKey().String()
 	if after != before {
 		t.Errorf("the same-schema import moved the address: %s, was %s", after, before)
 	}
@@ -135,11 +135,13 @@ func TestAdd_KeyComponentAgreesAcrossSpellings(t *testing.T) {
 	// The rebuild path is the control: it accepted this record all along.
 	if _, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{runID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{runID: {{
-			TypeName: "Run", TypeID: runID,
-			PrimaryKey: immutable.WrapKey([]any{rawInstant}),
-			Properties: immutable.WrapProperties(map[string]any{"at": canonInstant}),
-		}}},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     runID,
+				PrimaryKey: immutable.WrapKey([]any{rawInstant}),
+				Properties: immutable.WrapProperties(map[string]any{"at": canonInstant}),
+			},
+		},
 	}); res.HasErrors() {
 		t.Errorf("RebuildSnapshot refused the record it used to accept: %s", res)
 	}
@@ -263,9 +265,9 @@ type Doc {
 	}
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{docID, noteID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			docID:  {{TypeName: "Doc", TypeID: docID, PrimaryKey: immutable.WrapKey([]any{"d1"}), Properties: immutable.WrapProperties(map[string]any{"id": "d1"})}},
-			noteID: {{TypeName: "Note", TypeID: noteID, PrimaryKey: immutable.WrapKey([]any{"n1"}), Properties: immutable.WrapProperties(map[string]any{"id": "n1"})}},
+		Instances: []graph.InstanceParts{
+			{TypeID: docID, PrimaryKey: immutable.WrapKey([]any{"d1"}), Properties: immutable.WrapProperties(map[string]any{"id": "d1"})},
+			{TypeID: noteID, PrimaryKey: immutable.WrapKey([]any{"n1"}), Properties: immutable.WrapProperties(map[string]any{"id": "n1"})},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation:   "CITES",
@@ -282,7 +284,7 @@ type Doc {
 		t.Fatalf("the persisted edge property is %v, want the raw %s", v.Unwrap(), rawInstant)
 	}
 
-	edges := graph.NewFromSnapshot(s, persisted).Snapshot().Edges()
+	edges := mustImport(t, s, persisted).Snapshot().Edges()
 	if len(edges) != 1 {
 		t.Fatalf("edges = %d, want 1", len(edges))
 	}
@@ -326,7 +328,7 @@ part type Line {
 func composedOneSlotPart(t *testing.T, s *schema.Schema, typeName, prop, key string) graph.InstanceParts {
 	t.Helper()
 	return graph.InstanceParts{
-		TypeName: typeName, TypeID: mustTypeID(t, s, typeName),
+		TypeID:     mustTypeID(t, s, typeName),
 		PrimaryKey: immutable.WrapKey([]any{key}),
 		Properties: immutable.WrapProperties(map[string]any{prop: key}),
 	}
@@ -347,8 +349,10 @@ func TestRebuildSnapshot_RefusesASecondOccupantInAOneSlot(t *testing.T) {
 		root := composedOneSlotPart(t, s, "Order", "id", "o1")
 		root.Composed = map[string][]graph.InstanceParts{relation: children}
 		return graph.SnapshotParts{
-			Types:     []schema.TypeID{orderID},
-			Instances: map[schema.TypeID][]graph.InstanceParts{orderID: {root}},
+			Types: []schema.TypeID{orderID},
+			Instances: []graph.InstanceParts{
+				root,
+			},
 		}
 	}
 

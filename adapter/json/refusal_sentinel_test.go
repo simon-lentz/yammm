@@ -4,178 +4,87 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"math"
 	"strings"
 	"testing"
 
-	"github.com/simon-lentz/yammm/instance"
-
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
-	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// shortTargetKeySnapshot builds a snapshot whose edge names a target by one key
-// component where the target type declares two. graph.Add never resolves such
-// an edge, because it refuses the only instance whose key could match, so the
-// shape cannot reach a writer through it; graph.RebuildSnapshot validates
-// identity, denoted types, root types and cardinality and checks no key arity,
-// so a .ys document can carry one to the writer.
-func shortTargetKeySnapshot(t *testing.T) *graph.Snapshot {
-	t.Helper()
-	s, res := schema.NewBuilder().
-		WithName("arity").
-		WithSourceID(location.MustNewSourceID("test://arity.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithPrimaryKey("region", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), true, false).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("build schema: %s", res)
-	}
-	companyT, _ := s.Type("Company")
-	personT, _ := s.Type("Person")
+const nonFiniteSchema = `schema "nonfinite"
 
-	shortKey := immutable.WrapKey([]any{"c1"})
-	personKey := immutable.WrapKey([]any{"p1"})
-
-	snap, r := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{companyT.ID(), personT.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			companyT.ID(): {{
-				TypeName: "Company", TypeID: companyT.ID(), PrimaryKey: shortKey,
-				Properties: immutable.WrapProperties(map[string]any{"id": "c1", "region": "eu"}),
-			}},
-			personT.ID(): {{
-				TypeName: "Person", TypeID: personT.ID(), PrimaryKey: personKey,
-				Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
-			}},
-		},
-		Edges: []graph.EdgeParts{{
-			Relation:   "EMPLOYER",
-			SourceType: personT.ID(), SourceKey: personKey,
-			TargetType: companyT.ID(), TargetKey: shortKey,
-			Properties: immutable.WrapProperties(nil),
-		}},
-	})
-	if err := r.Err(); err != nil {
-		t.Fatalf("RebuildSnapshot refused the parts, so the refusal has no subject: %v", err)
-	}
-	return snap
+type Station {
+	id String primary
 }
 
-// rebuiltEdges builds a snapshot of two Companies and one Person through
-// graph.RebuildSnapshot, which reconstructs a document and does not validate
-// one: graph.Add refuses the first two shapes below itself and leaves the third
-// unresolved for good, since it refuses the only instance that could resolve
-// it, but a .ys document can carry all of them to a writer. Company declares a two-part key; EMPLOYER is a (one)
-// association.
-func rebuiltEdges(t *testing.T, edges func(person, company schema.TypeID) []graph.EdgeParts) *graph.Snapshot {
-	t.Helper()
-	return rebuiltEdgesTo(t, func(person, company, _ schema.TypeID) []graph.EdgeParts { return edges(person, company) })
-}
-
-// rebuiltEdgesTo is rebuiltEdges with a third type, Person itself, offered as
-// an edge target: a type the EMPLOYER association does not declare.
-func rebuiltEdgesTo(t *testing.T, edges func(person, company, other schema.TypeID) []graph.EdgeParts) *graph.Snapshot {
-	t.Helper()
-	s, res := schema.NewBuilder().
-		WithName("shapes").
-		WithSourceID(location.MustNewSourceID("test://shapes.yammm")).
-		AddType("Company").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithPrimaryKey("region", schema.StringConstraint{}).
-		Done().
-		AddType("Person").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithRelation("EMPLOYER", schema.LocalTypeRef("Company", location.Span{}), true, false).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("build schema: %s", res)
+type Reading {
+	id String primary
+	ratio Float
+	series List<Float>
+	--> AT (_:many) Station {
+		weight Float
 	}
-	companyT, _ := s.Type("Company")
-	personT, _ := s.Type("Person")
-	company := func(id string) graph.InstanceParts {
-		return graph.InstanceParts{
-			TypeName: "Company", TypeID: companyT.ID(), PrimaryKey: immutable.WrapKey([]any{id, "eu"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": id, "region": "eu"}),
+}
+`
+
+// nonFiniteSnapshot builds a graph through instance.NewValidInstance, which
+// runs no validation, because a validated Float is never non-finite. props and
+// weight place the value; the rest of the graph is finite.
+func nonFiniteSnapshot(t *testing.T, props map[string]any, weight any) *graph.Snapshot {
+	t.Helper()
+	s, res := schema.LoadString(t.Context(), nonFiniteSchema, "nonfinite.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	stationT, _ := s.Type("Station")
+	readingT, _ := s.Type("Reading")
+	g := graph.New(s)
+	stationAt := instance.NewValidInstance("Station", stationT.ID(), immutable.WrapKey([]any{"s1"}),
+		immutable.WrapProperties(map[string]any{"id": "s1"}), nil, nil, nil)
+	all := map[string]any{"id": "r1"}
+	maps.Copy(all, props)
+	reading := instance.NewValidInstance("Reading", readingT.ID(), immutable.WrapKey([]any{"r1"}),
+		immutable.WrapProperties(all),
+		map[string]*instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"s1"}), immutable.WrapProperties(map[string]any{"weight": weight})),
+		})}, nil, nil)
+	for _, inst := range []*instance.ValidInstance{stationAt, reading} {
+		if r := g.Add(context.Background(), inst); r.HasErrors() {
+			t.Fatalf("graph.Add: %s", r)
 		}
 	}
-	snap, r := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{companyT.ID(), personT.ID()},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			companyT.ID(): {company("c1"), company("c2")},
-			personT.ID(): {{
-				TypeName: "Person", TypeID: personT.ID(), PrimaryKey: immutable.WrapKey([]any{"p1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
-			}},
-		},
-		Edges: edges(personT.ID(), companyT.ID(), personT.ID()),
-	})
-	if err := r.Err(); err != nil {
-		t.Fatalf("RebuildSnapshot refused the parts, so the refusal has no subject: %v", err)
-	}
-	return snap
+	return g.Snapshot()
 }
 
-// The writer's promise is that ParseObject and the validator accept every
-// shape it emits. Each shape below is one a constructor admits and the writer
-// cannot keep that promise for, so it refuses, as a class and naming the edge,
-// rather than emit a document its own reader refuses.
-func TestWriters_AnUnrepresentableShapeIsRefusedAsAClass(t *testing.T) {
+var nonFinite = math.Inf(1)
+
+// JSON has no number for NaN or an infinity, and every constructor of a
+// snapshot holds its structure to what the writer renders, so a non-finite
+// float is the one shape of the data the writer refuses. It is refused as the
+// class wherever a value stands, naming the site.
+func TestWriters_ANonFiniteFloatIsRefusedAsTheClass(t *testing.T) {
 	t.Parallel()
-	edge := func(rel string, from, to schema.TypeID, key ...any) graph.EdgeParts {
-		return graph.EdgeParts{
-			Relation: rel, SourceType: from, SourceKey: immutable.WrapKey([]any{"p1"}),
-			TargetType: to, TargetKey: immutable.WrapKey(key), Properties: immutable.WrapProperties(nil),
-		}
-	}
 	for _, c := range []struct {
 		name, mentions string
-		snap           func(t *testing.T) *graph.Snapshot
+		props          map[string]any
+		weight         any
 	}{
-		{"a target key of the wrong arity", "target key has 1 components", shortTargetKeySnapshot},
-		{
-			"a (one) association carrying two edges", `"EMPLOYER"`,
-			func(t *testing.T) *graph.Snapshot {
-				t.Helper()
-				return rebuiltEdges(t, func(p, c schema.TypeID) []graph.EdgeParts {
-					return []graph.EdgeParts{edge("EMPLOYER", p, c, "c1", "eu"), edge("EMPLOYER", p, c, "c2", "eu")}
-				})
-			},
-		},
-		{
-			// graph.Add resolves every edge to the association's declared target, so
-			// only a rebuilt snapshot holds one that points elsewhere. Its _target_
-			// fields would be another type's keys, which the validator refuses.
-			"an edge to a type the association does not declare", "declares the target",
-			func(t *testing.T) *graph.Snapshot {
-				t.Helper()
-				return rebuiltEdgesTo(t, func(p, _, other schema.TypeID) []graph.EdgeParts {
-					return []graph.EdgeParts{edge("EMPLOYER", p, other, "p1")}
-				})
-			},
-		},
-		{
-			"an edge under a relation its type does not declare", `"NOPE"`,
-			func(t *testing.T) *graph.Snapshot {
-				t.Helper()
-				return rebuiltEdges(t, func(p, c schema.TypeID) []graph.EdgeParts {
-					return []graph.EdgeParts{edge("NOPE", p, c, "c1", "eu")}
-				})
-			},
-		},
+		{"a property", `property "ratio"`, map[string]any{"ratio": math.Inf(1)}, 1.5},
+		{"a list element", `property "series"`, map[string]any{"series": []any{1.5, math.Inf(-1)}}, 1.5},
+		{"NaN", `property "ratio"`, map[string]any{"ratio": math.NaN()}, 1.5},
+		{"inside a string-keyed map", `property "ratio"`, map[string]any{"ratio": map[string]any{"x": math.NaN()}}, 1.5},
+		{"inside an int-keyed map", `property "ratio"`, map[string]any{"ratio": map[int]any{1: math.NaN()}}, 1.5},
+		{"inside an array", `property "ratio"`, map[string]any{"ratio": [2]float64{1, math.NaN()}}, 1.5},
+		{"behind a pointer", `property "ratio"`, map[string]any{"ratio": &nonFinite}, 1.5},
+		{"an edge property", `edge property "weight"`, nil, math.Inf(1)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			snap := c.snap(t)
+			snap := nonFiniteSnapshot(t, c.props, c.weight)
 			a := New()
 			_, err := a.MarshalObject(context.Background(), snap)
 			if !errors.Is(err, ErrUnrepresentable) {
@@ -191,9 +100,16 @@ func TestWriters_AnUnrepresentableShapeIsRefusedAsAClass(t *testing.T) {
 	}
 }
 
-// The class separates a refusal of the data from a nil argument, an encoding
-// failure and a cancellation, which reach a caller through one return value.
-// Its own doc comment claims the first two; nothing else pins them.
+// failingWriter refuses every write with errWrite.
+type failingWriter struct{}
+
+var errWrite = errors.New("disk full")
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errWrite }
+
+// The class separates a refusal of the data from a nil argument, a
+// cancellation and an I/O failure, which reach a caller through one return
+// value.
 func TestWriters_TheRefusalClassCoversTheDataAlone(t *testing.T) {
 	t.Parallel()
 
@@ -205,24 +121,10 @@ func TestWriters_TheRefusalClassCoversTheDataAlone(t *testing.T) {
 		t.Errorf("a nil result matched the refusal class: %v", nilErr)
 	}
 
-	// encoding/json cannot render a non-finite float. instance.CanonicalValue
-	// refuses one, so canonicalOrRaw hands it back raw and the document's own
-	// Marshal is what fails — the writer's only encoding-failure path.
-	inf := infiniteFloatSnapshot(t)
-	if _, err := New().MarshalObject(context.Background(), inf); err == nil {
-		t.Error("a non-finite float was encoded")
-	} else {
-		if !strings.Contains(err.Error(), "json marshal:") {
-			t.Fatalf("the fixture did not reach the encode failure, so it guards nothing: %v", err)
-		}
-		if errors.Is(err, ErrUnrepresentable) {
-			t.Errorf("an encoding failure matched the refusal class: %v", err)
-		}
-	}
-
+	finite := nonFiniteSnapshot(t, map[string]any{"ratio": 1.5}, 2.5)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := New().MarshalObject(ctx, inf); err == nil {
+	if _, err := New().MarshalObject(ctx, finite); err == nil {
 		t.Error("a cancelled marshal reported success")
 	} else {
 		if !errors.Is(err, context.Canceled) {
@@ -232,32 +134,10 @@ func TestWriters_TheRefusalClassCoversTheDataAlone(t *testing.T) {
 			t.Errorf("a cancellation matched the refusal class: %v", err)
 		}
 	}
-}
 
-// infiniteFloatSnapshot builds a graph through instance.NewValidInstance, which
-// runs no validation, because a validated Float is never non-finite.
-func infiniteFloatSnapshot(t *testing.T) *graph.Snapshot {
-	t.Helper()
-	s, res := schema.NewBuilder().
-		WithName("nonfinite").
-		WithSourceID(location.MustNewSourceID("test://nonfinite.yammm")).
-		AddType("Reading").
-		WithPrimaryKey("id", schema.StringConstraint{}).
-		WithProperty("ratio", schema.FloatConstraint{}).
-		Done().
-		Build()
-	if res.HasErrors() {
-		t.Fatalf("build schema: %s", res)
+	if _, err := New().WriteObject(context.Background(), failingWriter{}, finite); !errors.Is(err, errWrite) {
+		t.Fatalf("the fixture did not reach the write, so it guards nothing: %v", err)
+	} else if errors.Is(err, ErrUnrepresentable) {
+		t.Errorf("an I/O failure matched the refusal class: %v", err)
 	}
-	readingT, _ := s.Type("Reading")
-
-	g := graph.New(s)
-	inst := instance.NewValidInstance("Reading", readingT.ID(),
-		immutable.WrapKey([]any{"r1"}),
-		immutable.WrapProperties(map[string]any{"id": "r1", "ratio": math.Inf(1)}),
-		nil, nil, nil)
-	if r := g.Add(context.Background(), inst); r.HasErrors() {
-		t.Fatalf("graph.Add: %s", r)
-	}
-	return g.Snapshot()
 }

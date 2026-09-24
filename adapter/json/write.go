@@ -119,7 +119,7 @@ func (a *Adapter) buildOutput(ctx context.Context, result *graph.Snapshot) (map[
 
 		typeName, ok := schema.AddressableTag(s, typeID)
 		if !ok {
-			return nil, fmt.Errorf("json adapter: snapshot denotes type %s, which the entry schema cannot name, so the output object has no key for it; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract", typeID)
+			return nil, fmt.Errorf("json adapter: snapshot denotes type %s, which the entry schema cannot name, so the output object has no key for it; no constructor builds such a snapshot, so an invariant is broken", typeID)
 		}
 		instances := result.InstancesOf(typeID)
 		serialized := make([]map[string]any, 0, len(instances))
@@ -162,14 +162,19 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 	// The field names every relation renders under come from the type.
 	schemaType, ok := lookupType(s, inst.TypeID())
 	if !ok {
-		return nil, fmt.Errorf("json adapter: instance %s: type %s does not resolve, so its relations' field names are unknowable; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract",
+		return nil, fmt.Errorf("json adapter: instance %s: type %s does not resolve, so its relations' field names are unknowable; no constructor builds such a snapshot, so an invariant is broken",
 			inst.PrimaryKey(), inst.TypeID())
 	}
 
 	// 1. Add properties. encoding/json sorts an object's keys, so the order
 	// they are added in does not reach the output.
 	for name, val := range inst.Properties().SortedRange() {
-		obj[name] = unwrapValue(val, constraintof.Property(schemaType, name))
+		v, ok := unwrapValue(val, constraintof.Property(schemaType, name))
+		if !ok {
+			return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: property %q holds a value JSON cannot write: a non-finite float, or a Go value encoding/json refuses",
+				inst.PrimaryKey(), name)
+		}
+		obj[name] = v
 	}
 
 	// 2. Add association targets using the snapshot edge index.
@@ -190,20 +195,9 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 		for _, relName := range relOrder {
 			edges := byRel[relName]
 
-			// An edge under a name the type declares no association for has
-			// no field to render under: its relation name is not one, and the
-			// validator refuses it as an unknown field.
-			rel, ok := schemaType.Relation(relName)
-			if !ok || !rel.IsAssociation() {
-				return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: edge under %q, which type %s declares no association for",
-					inst.PrimaryKey(), relName, inst.TypeID())
-			}
-			// A (one) association renders as ONE object, and the validator
-			// refuses an array there, so several edges have no shape.
-			if !rel.IsMany() && len(edges) > 1 {
-				return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: (one) association %q carries %d edges, and a (one) association renders as one object",
-					inst.PrimaryKey(), relName, len(edges))
-			}
+			// Every constructor holds an edge to an association the type
+			// declares, at its declared target, and a (one) to one record.
+			rel, _ := schemaType.Relation(relName)
 			fieldName := rel.FieldName()
 
 			objs := make([]any, len(edges))
@@ -231,11 +225,8 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 	for _, relName := range inst.ComposedRelations() {
 		children := inst.Composed(relName)
 
-		rel, ok := schemaType.Relation(relName)
-		if !ok || rel.IsAssociation() {
-			return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: composed children under %q, which type %s declares no composition for",
-				inst.PrimaryKey(), relName, inst.TypeID())
-		}
+		// Every constructor holds a slot to a composition the type declares.
+		rel, _ := schemaType.Relation(relName)
 		fieldName := rel.FieldName()
 
 		arr := make([]map[string]any, len(children))
@@ -254,51 +245,37 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 
 // edgeTargetObject renders one resolved edge as the object the parser
 // accepts: _target_<pk> components in the target's canonical stored form,
-// with the edge properties beside them. The target type supplies the field
-// names, so an unresolvable target is an error rather than a shape this
-// adapter's own parser rejects.
-//
-// The two arms differ in what a caller can do about them. An unresolvable
-// target type is not data a caller can act on: no constructor builds one from
-// data bound to this schema, so reaching that arm is a broken invariant or a
-// snapshot imported from another schema against [graph.NewFromSnapshot]'s
-// contract, and it carries no refusal class. A target key of the wrong
-// arity IS reachable — [graph.RebuildSnapshot] checks identity, denoted types,
-// root types and cardinality, and no key arity — so that arm carries
-// [ErrUnrepresentable]. Any differing arity reaches it, not only a short key.
+// with the edge properties beside them. Every constructor holds the target to
+// the association's declared type and its stored key to that type's arity,
+// so an unresolvable target is a broken invariant and carries no refusal class.
 func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (map[string]any, error) {
-	// An edge reads back as a target of the association's DECLARED type, so one
-	// that points elsewhere would carry another type's keys as its _target_
-	// fields. graph.Add resolves every edge to the declared target; only a
-	// rebuilt snapshot holds one that does not.
-	if e.Target().TypeID() != rel.TargetID() {
-		return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q targets type %s; the association declares the target %s",
-			e.Relation(), e.Target().TypeID(), rel.TargetID())
-	}
 	target, ok := lookupType(s, e.Target().TypeID())
 	if !ok {
-		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable; no constructor builds such a snapshot from data bound to this schema, so an invariant is broken or the snapshot was imported from another schema, against graph.NewFromSnapshot's contract",
+		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable; no constructor builds such a snapshot, so an invariant is broken",
 			e.Relation(), e.Target().TypeID())
 	}
 	pks := target.PrimaryKeysSlice()
 	key := e.Target().PrimaryKey()
-	if key.Len() != len(pks) {
-		return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q target key has %d components; type %s declares %d",
-			e.Relation(), key.Len(), e.Target().TypeID(), len(pks))
-	}
 
 	out := make(map[string]any, len(pks))
 	for i, pk := range pks {
 		// "_target_" is the parser's reserved prefix; no declared property
-		// can begin with an underscore, so the namespaces cannot collide.
-		out["_target_"+pk.Name()] = canonicalOrRaw(key.Get(i).Unwrap(), pk.Constraint())
+		// can begin with an underscore, so the namespaces cannot collide. An
+		// immutable.Key holds no component JSON cannot write.
+		v, _ := canonicalOrRaw(key.Get(i).Unwrap(), pk.Constraint())
+		out["_target_"+pk.Name()] = v
 	}
 	for name, val := range e.Properties().SortedRange() {
 		var c schema.Constraint
 		if p, ok := rel.Property(name); ok {
 			c = p.Constraint()
 		}
-		out[name] = unwrapValue(val, c)
+		v, ok := unwrapValue(val, c)
+		if !ok {
+			return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q to %s: edge property %q holds a value JSON cannot write: a non-finite float, or a Go value encoding/json refuses",
+				e.Relation(), e.Target().PrimaryKey(), name)
+		}
+		out[name] = v
 	}
 	return out, nil
 }
@@ -306,30 +283,37 @@ func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (ma
 // unwrapValue recursively converts an immutable.Value to a JSON-compatible any,
 // rendering each scalar in the form its constraint stores. A collection
 // descends with its element constraint, so a List<Timestamp> canonicalizes at
-// its elements and not only at its outer level.
-func unwrapValue(v immutable.Value, c schema.Constraint) any {
+// its elements and not only at its outer level. It reports false when a
+// non-finite float stands anywhere in v.
+func unwrapValue(v immutable.Value, c schema.Constraint) (any, bool) {
 	if v.IsNil() {
-		return nil
+		return nil, true
 	}
 
-	// Check for wrapped collections
 	if m, ok := v.Map(); ok {
 		result := make(map[string]any, m.Len())
 		for k, val := range m.Range() {
-			result[k] = unwrapValue(val, nil)
+			u, ok := unwrapValue(val, nil)
+			if !ok {
+				return nil, false
+			}
+			result[k] = u
 		}
-		return result
+		return result, true
 	}
 	if s, ok := v.Slice(); ok {
 		elem := constraintof.Element(c)
 		result := make([]any, s.Len())
 		for i, val := range s.Iter2() {
-			result[i] = unwrapValue(val, elem)
+			u, ok := unwrapValue(val, elem)
+			if !ok {
+				return nil, false
+			}
+			result[i] = u
 		}
-		return result
+		return result, true
 	}
 
-	// Primitives: rendered through the constraint.
 	return canonicalOrRaw(v.Unwrap(), c)
 }
 
@@ -339,7 +323,7 @@ func unwrapValue(v immutable.Value, c schema.Constraint) any {
 // the same way, when the constraint cannot render it: MarshalObject returns an
 // error rather than a diag.Result, so failing here would fail a whole export
 // over one malformed value.
-func canonicalOrRaw(raw any, c schema.Constraint) any {
+func canonicalOrRaw(raw any, c schema.Constraint) (any, bool) {
 	canonical, err := instance.CanonicalValue(raw, c)
 	if err != nil {
 		return withFloatIndicator(raw)
@@ -349,17 +333,18 @@ func canonicalOrRaw(raw any, c schema.Constraint) any {
 
 // withFloatIndicator renders a float with a float indicator (".", "e" or "E"),
 // the set [immutable.IsIntegerLiteral] reads as a float. Without it a whole
-// float emits int-shaped, reads back as an integer and loses a negative zero's
-// sign. The indicator follows the Go type the value holds, not its constraint:
+// float emits int-shaped and reads back as an integer wherever a reader
+// classifies a number by its spelling, a negative zero without its sign. The
+// indicator follows the Go type the value holds, not its constraint:
 // a float held under an Integer is written as the float it is, so the document
 // states what the snapshot holds and the validator refuses it on the way back.
 //
 // The digits come from encoding/json itself, so this cannot drift from the
 // encoder that writes every other number in the document. A float32, and a
 // named type over one, keeps its 32-bit shortest form. Every other value
-// passes through, and so does a non-finite float: JSON has no spelling for it,
-// and the document's own Marshal then fails the export.
-func withFloatIndicator(v any) any {
+// passes through. A non-finite float reports false, JSON having no number for
+// it, and so does a Go value encoding/json refuses.
+func withFloatIndicator(v any) (any, bool) {
 	var b []byte
 	var err error
 	switch rv := reflect.ValueOf(v); rv.Kind() {
@@ -367,14 +352,23 @@ func withFloatIndicator(v any) any {
 		b, err = json.Marshal(float32(rv.Float()))
 	case reflect.Float64:
 		b, err = json.Marshal(rv.Float())
+	case reflect.Map, reflect.Array, reflect.Slice, reflect.Pointer, reflect.Struct, reflect.Interface,
+		reflect.Chan, reflect.Func, reflect.Complex64, reflect.Complex128, reflect.UnsafePointer:
+		// A Go value the immutable layer holds unwrapped: encoding/json
+		// decides whether it has a spelling, a NaN inside one included.
+		if _, err := json.Marshal(v); err != nil {
+			return nil, false
+		}
+		return v, true
 	default:
-		return v
+		return v, true
 	}
+	// encoding/json refuses a float only when it is NaN or an infinity.
 	if err != nil {
-		return v
+		return nil, false
 	}
 	if !bytes.ContainsAny(b, ".eE") {
 		b = append(b, '.', '0')
 	}
-	return json.RawMessage(b)
+	return json.RawMessage(b), true
 }

@@ -1769,8 +1769,8 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 **Instance** — validation errors:
 
 - `E_INSTANCE_TYPE_NOT_FOUND` — type not found in schema
-- `E_ABSTRACT_TYPE` — attempt to instantiate abstract type
-- `E_PART_TYPE_DIRECT` — attempt to directly instantiate part type
+- `E_ABSTRACT_TYPE` — attempt to instantiate abstract type, an empty batch under its name included
+- `E_PART_TYPE_DIRECT` — attempt to directly instantiate part type, an empty batch under its name included
 - `E_TYPE_MISMATCH` — value has wrong type
 - `E_MISSING_REQUIRED` — required property missing
 - `E_UNKNOWN_FIELD` — unexpected field in instance data
@@ -1796,24 +1796,24 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_GRAPH_TYPE_NOT_FOUND` — type not found in graph operations
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
-- `E_GRAPH_MISSING_PK` — primary key missing in graph operations
-- `E_GRAPH_INVALID_PK` — primary key empty, or disagreeing with the instance's own key properties
-- `E_GRAPH_CARDINALITY` — an association carries more targets than its multiplicity allows
-- `E_GRAPH_UNKNOWN_RELATION` — instance data under a relation name the type does not declare
+- `E_GRAPH_MISSING_PK` — a root whose type declares no primary key
+- `E_GRAPH_INVALID_PK` — primary key empty, of the wrong arity, with a component `graph.ParseKey` cannot read back, with a key property absent or null, or disagreeing with the instance's own key properties; or an association target key of the wrong arity or with such a component
+- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add`, several edges and unresolved records in a snapshot or a `.ys` document
+- `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one
 - `E_GRAPH_ABSTRACT_TYPE` — an instance of an abstract type reached the graph
 
 **Snapshot** — persistence errors:
 
-- `E_SNAPSHOT_MALFORMED` — invalid JSON or missing required fields
+- `E_SNAPSHOT_MALFORMED` — invalid JSON, missing required fields, or content a structural rule refuses: an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself
 - `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
 - `E_SNAPSHOT_UNKNOWN_TYPE` — type name not found in schema
-- `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under
-- `E_SNAPSHOT_DANGLING_REFERENCE` — edge target or duplicate conflict not found
-- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges
-- `E_SNAPSHOT_INVALID_ROOT` — an instances group names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built
-- `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group denotes a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. Every writer keys its output by the name of each type a snapshot denotes, so such a document describes a snapshot no writer can render. It binds an EMPTY group too, where the three root members above do not: an empty group still denotes its type. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly
+- `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under, or a composed child's or an association record's target row is not the relation's declared target
+- `E_SNAPSHOT_DANGLING_REFERENCE` — an edge target, a duplicate's conflict or parent, or an unresolved record's source not found
+- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children stand under a name the type does not declare as a composition
+- `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a root duplicate record names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built
+- `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group, empty or not, or a root duplicate record names a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. `adapter/json` and `adapter/csv` key their output by the name of each type a snapshot denotes, so such a document describes a snapshot they cannot render. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly
 - `E_DUPLICATE_PK` — two root instances in one group state the same primary key. Listed here as well as under Graph: `snapshot.Load`, `snapshot.Verify` and `snapshot.Info` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Info` resolves no schema, so it compares keys as written and folds only identical spellings, where `Load` and `Verify` fold a timestamp, date or UUID key written two ways
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)

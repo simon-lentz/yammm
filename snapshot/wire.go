@@ -13,8 +13,10 @@ import (
 // FIELD ORDER IN WIRE STRUCTS IS PART OF THE FORMAT CONTRACT.
 //
 // encoding/json serializes struct fields in declaration order. The integrity
-// hash covers the exact serialized bytes. Reordering fields changes the
-// output and invalidates every previously-saved .ys file's integrity hash.
+// hash covers the exact serialized bytes. Reordering fields changes every
+// document Marshal writes from then on; a saved file still verifies, since the
+// hash is checked over the file's own bytes, but no longer equals what Marshal
+// writes for the same snapshot.
 //
 // Rules:
 //   - Do NOT reorder existing fields within a format version.
@@ -50,9 +52,10 @@ import (
 //     that insert a fifth top-level key, shift the header-body
 //     transition, or change the inter-key separator pattern silently
 //     break UpdateMetadata even without relaxing the field-order rule.
-//     UpdateMetadata(x, newMeta) == Marshal(Load(x)) for a document the
-//     current Marshal produced that carries no created_at, when newMeta
-//     is empty. The two conditions are not the same kind of condition.
+//     UpdateMetadata(x, newMeta) == Marshal(Load(x), WithIndent(i)) for a
+//     document the current Marshal produced with indent i that carries no
+//     created_at, when newMeta is empty: UpdateMetadata keeps the input's
+//     indent. The last two conditions are not the same kind of condition.
 //     created_at is a condition on the document: UpdateMetadata preserves
 //     it from the input header and Load does not return it, so a
 //     re-marshal cannot reproduce it. Metadata is a condition on the
@@ -63,7 +66,7 @@ import (
 //
 //  3. Version preservation (introduced v0.12.0). UpdateMetadata rebuilds
 //     the header at the version it read, so it is a header rewrite and
-//     never a migration. From v0.12.0 the only readable version is 3:
+//     never a migration. The only readable version is the current one:
 //     an older document is refused with
 //     E_SNAPSHOT_UNSUPPORTED_VERSION rather than rewritten, and
 //     UpdateMetadataOrReMarshal's Load + Marshal fallback refuses it
@@ -80,8 +83,9 @@ import (
 // snapshot/update_contract_test.go via
 // TestUpdateMetadata_PreservesInputVersion.
 //
-// These tests run across a representative corpus of Marshal outputs
-// under every supported Option combination, so a future Marshal-side
+// TestWireFormat_TopLevelKeyOrder and TestWireFormat_BodySuffixContract run
+// across a corpus of Marshal outputs under six combinations of the indent,
+// created_at and metadata options, so a future Marshal-side
 // change that silently breaks either contract fails at the wire-format
 // test level before reaching the consumers that depend on it.
 // See snapshot/update.go for the UpdateMetadata primitive that consumes
@@ -230,10 +234,10 @@ type marshalHeaderWire struct {
 	Attestation   *attestationWire  `json:"attestation,omitempty"`
 }
 
-// attestationWire is the header's validity claim. Marshal always writes
-// it; the pointer and omitempty state the read side — a pre-v0.15.0
-// document carries no field, and UpdateMetadata preserves that absence
-// rather than fabricating a claim.
+// attestationWire is the header's validity claim. Marshal writes it whenever
+// the snapshot holds a claim; the pointer and omitempty state the read side —
+// a document written from a snapshot with no claim carries no field, and
+// UpdateMetadata preserves that absence rather than fabricating a claim.
 type attestationWire struct {
 	Values       bool `json:"values"`
 	Associations bool `json:"associations"`

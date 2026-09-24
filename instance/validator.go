@@ -52,9 +52,11 @@ func NewValidator(s *schema.Schema, opts ...Option) *Validator {
 //   - valids: one entry per input instance; non-nil for successes, nil for failures
 //   - result: merged diagnostics for the entire batch (OK when all instances pass)
 //
-// Every diagnostic carries one [diag.DetailKeyInstanceIndex] detail naming the
-// element of raws it belongs to, and the batch result carries each instance's
-// truncation facts ([diag.Result.LimitReached], [diag.Result.DroppedCount]).
+// A diagnostic about one element of raws carries one
+// [diag.DetailKeyInstanceIndex] detail naming it; one about typeName itself —
+// a name that does not resolve, or an abstract or part type named by an empty
+// batch — carries none. The batch result carries each instance's truncation
+// facts ([diag.Result.LimitReached], [diag.Result.DroppedCount]).
 //
 // Panics if the receiver is nil or if ctx is nil.
 func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance) ([]*ValidInstance, diag.Result) {
@@ -74,10 +76,15 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 	if err != nil {
 		return nil, typeResolutionResultForBatch(err, raws)
 	}
-	if raws == nil {
-		return nil, diag.OK()
-	}
 	if len(raws) == 0 {
+		// An empty batch names a type that must be able to hold a root, as a
+		// row of it must: an abstract or part type name is refused either way.
+		if res, refused := instantiationRefusal(typ, typeName, false, nil); refused {
+			return nil, res
+		}
+		if raws == nil {
+			return nil, diag.OK()
+		}
 		return []*ValidInstance{}, diag.OK()
 	}
 
@@ -401,16 +408,22 @@ func typeResolutionResultForBatch(err error, raws []RawInstance) diag.Result {
 // document, which every diagnostic's path is built from; depth is its
 // composed depth, 0 for a root.
 func (v *Validator) validateComposedInstance(ctx context.Context, typeName string, typ *schema.Type, raw RawInstance, base path.Builder, allowPartType bool, depth int) (*ValidInstance, diag.Result) {
-	// Check instantiation eligibility
-	if typ.IsAbstract() {
-		return nil, createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), raw.Provenance)
+	if res, refused := instantiationRefusal(typ, typeName, allowPartType, raw.Provenance); refused {
+		return nil, res
 	}
-
-	if !allowPartType && typ.IsPart() {
-		return nil, createErrorResult(ErrPartTypeDirect, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), raw.Provenance)
-	}
-
 	return v.validateProperties(ctx, typ, typeName, raw, base, depth)
+}
+
+// instantiationRefusal refuses an abstract type, and a part type unless
+// allowPartType holds, reporting whether it refused.
+func instantiationRefusal(typ *schema.Type, typeName string, allowPartType bool, prov *location.Provenance) (diag.Result, bool) {
+	switch {
+	case typ.IsAbstract():
+		return createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), prov), true
+	case !allowPartType && typ.IsPart():
+		return createErrorResult(ErrPartTypeDirect, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), prov), true
+	}
+	return diag.Result{}, false
 }
 
 // validateProperties validates all members of an instance: properties, then

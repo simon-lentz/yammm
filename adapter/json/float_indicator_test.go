@@ -160,19 +160,6 @@ func TestMarshalObject_FloatBearingCollectionsCarryTheIndicator(t *testing.T) {
 	}
 }
 
-// The indicator follows the value held, not a constraint: a whole float under a
-// name the type does not declare keeps it, so the document states the float the
-// snapshot holds rather than an integer.
-func TestMarshalObject_UndeclaredWholeFloatKeepsTheIndicator(t *testing.T) {
-	t.Parallel()
-	doc := indicatorDoc(t, map[string]any{
-		"id": "r1", "ratio": float64(1), "extra": float64(8),
-	})
-	if !strings.Contains(doc, `"extra":8.0`) {
-		t.Errorf("an undeclared whole float wrote %s, want an extra of 8.0", doc)
-	}
-}
-
 // An integer takes no indicator, and a float held under an Integer keeps its
 // own, so the document states what the snapshot holds and this package's
 // reader and the validator refuse it on the way back rather than read an

@@ -37,7 +37,7 @@ func TestRebuildSnapshot_EmptyParts(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
 		Types:     []schema.TypeID{},
-		Instances: map[schema.TypeID][]graph.InstanceParts{},
+		Instances: []graph.InstanceParts{},
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
@@ -56,22 +56,16 @@ func TestRebuildSnapshot_WithInstances(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{mustTypeID(t, s, "Company"), mustTypeID(t, s, "Person")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			mustTypeID(t, s, "Company"): {
-				{
-					TypeName:   "Company",
-					TypeID:     mustTypeID(t, s, "Company"),
-					PrimaryKey: immutable.WrapKey([]any{"c1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
-				},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     mustTypeID(t, s, "Company"),
+				PrimaryKey: immutable.WrapKey([]any{"c1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
 			},
-			mustTypeID(t, s, "Person"): {
-				{
-					TypeName:   "Person",
-					TypeID:     mustTypeID(t, s, "Person"),
-					PrimaryKey: immutable.WrapKey([]any{"p1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-				},
+			{
+				TypeID:     mustTypeID(t, s, "Person"),
+				PrimaryKey: immutable.WrapKey([]any{"p1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
 			},
 		},
 	}
@@ -96,22 +90,16 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{mustTypeID(t, s, "Company"), mustTypeID(t, s, "Person")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			mustTypeID(t, s, "Company"): {
-				{
-					TypeName:   "Company",
-					TypeID:     mustTypeID(t, s, "Company"),
-					PrimaryKey: immutable.WrapKey([]any{"c1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
-				},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     mustTypeID(t, s, "Company"),
+				PrimaryKey: immutable.WrapKey([]any{"c1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
 			},
-			mustTypeID(t, s, "Person"): {
-				{
-					TypeName:   "Person",
-					TypeID:     mustTypeID(t, s, "Person"),
-					PrimaryKey: immutable.WrapKey([]any{"p1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-				},
+			{
+				TypeID:     mustTypeID(t, s, "Person"),
+				PrimaryKey: immutable.WrapKey([]any{"p1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
 			},
 		},
 		Edges: []graph.EdgeParts{
@@ -156,14 +144,11 @@ func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{mustTypeID(t, s, "Company")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			mustTypeID(t, s, "Company"): {
-				{
-					TypeName:   "Company",
-					TypeID:     mustTypeID(t, s, "Company"),
-					PrimaryKey: immutable.WrapKey([]any{"c1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
-				},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     mustTypeID(t, s, "Company"),
+				PrimaryKey: immutable.WrapKey([]any{"c1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
 			},
 		},
 		Edges: []graph.EdgeParts{
@@ -200,14 +185,11 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{mustTypeID(t, s, "Company")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			mustTypeID(t, s, "Company"): {
-				{
-					TypeName:   "Company",
-					TypeID:     mustTypeID(t, s, "Company"),
-					PrimaryKey: immutable.WrapKey([]any{"c1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
-				},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     mustTypeID(t, s, "Company"),
+				PrimaryKey: immutable.WrapKey([]any{"c1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
 			},
 		},
 		Duplicates: []graph.DuplicateParts{
@@ -215,7 +197,6 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 				Type: mustTypeID(t, s, "Company"),
 				Key:  immutable.WrapKey([]any{"c1"}),
 				Instance: graph.InstanceParts{
-					TypeName:   "Company",
 					TypeID:     mustTypeID(t, s, "Company"),
 					PrimaryKey: immutable.WrapKey([]any{"c1"}),
 					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme Corp"}),
@@ -252,13 +233,12 @@ func TestRebuildSnapshot_DuplicateConflictMissing(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
 		Types:     []schema.TypeID{mustTypeID(t, s, "Company")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{mustTypeID(t, s, "Company"): {}},
+		Instances: []graph.InstanceParts{},
 		Duplicates: []graph.DuplicateParts{
 			{
 				Type: mustTypeID(t, s, "Company"),
 				Key:  immutable.WrapKey([]any{"c_missing"}),
 				Instance: graph.InstanceParts{
-					TypeName:   "Company",
 					TypeID:     mustTypeID(t, s, "Company"),
 					PrimaryKey: immutable.WrapKey([]any{"c_missing"}),
 					Properties: immutable.WrapProperties(map[string]any{"id": "c_missing", "title": "Missing"}),
@@ -282,14 +262,11 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 	s := rebuildTestSchema(t)
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{mustTypeID(t, s, "Person")},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			mustTypeID(t, s, "Person"): {
-				{
-					TypeName:   "Person",
-					TypeID:     mustTypeID(t, s, "Person"),
-					PrimaryKey: immutable.WrapKey([]any{"p1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-				},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     mustTypeID(t, s, "Person"),
+				PrimaryKey: immutable.WrapKey([]any{"p1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
 			},
 		},
 		Unresolved: []graph.UnresolvedParts{
@@ -299,7 +276,6 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 				Relation:   "EMPLOYER",
 				TargetType: mustTypeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c99"}),
-				Required:   true,
 				Reason:     "target_missing",
 			},
 		},
@@ -336,27 +312,24 @@ func TestRebuildSnapshot_OneSlotConflictResolvesThroughSlot(t *testing.T) {
 	childID := mustTypeID(t, s, "Child")
 
 	occupant := graph.InstanceParts{
-		TypeName:   "Child",
 		TypeID:     childID,
 		PrimaryKey: immutable.WrapKey([]any{"c1"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "c1", "name": "first"}),
 	}
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{parentID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			parentID: {{
-				TypeName:   "Parent",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
 				Composed:   map[string][]graph.InstanceParts{"CHILD": {occupant}},
-			}},
+			},
 		},
 		Duplicates: []graph.DuplicateParts{{
 			Type: childID,
 			Key:  immutable.WrapKey([]any{"c2"}),
 			Instance: graph.InstanceParts{
-				TypeName:   "Child",
 				TypeID:     childID,
 				PrimaryKey: immutable.WrapKey([]any{"c2"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "c2", "name": "second"}),
@@ -395,7 +368,6 @@ func TestRebuildSnapshot_ManyConflictSelectsByStatedKey(t *testing.T) {
 
 	child := func(key, name string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "Child",
 			TypeID:     childID,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "name": name}),
@@ -403,14 +375,13 @@ func TestRebuildSnapshot_ManyConflictSelectsByStatedKey(t *testing.T) {
 	}
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{parentID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			parentID: {{
-				TypeName:   "Parent",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
 				Composed:   map[string][]graph.InstanceParts{"CHILDREN": {child("c1", "kept"), child("c2", "other")}},
-			}},
+			},
 		},
 		Duplicates: []graph.DuplicateParts{{
 			Type:         childID,
@@ -455,25 +426,22 @@ func TestRebuildSnapshot_ConflictTypeMismatchIsReported(t *testing.T) {
 
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{parentID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			parentID: {{
-				TypeName:   "Parent",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
 				Composed: map[string][]graph.InstanceParts{"CHILD": {{
-					TypeName:   "Child",
 					TypeID:     childID,
 					PrimaryKey: immutable.WrapKey([]any{"c1"}),
 					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "name": "first"}),
 				}}},
-			}},
+			},
 		},
 		Duplicates: []graph.DuplicateParts{{
 			Type: childID,
 			Key:  immutable.WrapKey([]any{"c2"}),
 			Instance: graph.InstanceParts{
-				TypeName:   "Child",
 				TypeID:     childID,
 				PrimaryKey: immutable.WrapKey([]any{"c2"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "c2", "name": "second"}),
@@ -504,25 +472,22 @@ func TestRebuildSnapshot_KeyedConflictTypeMismatchIsReported(t *testing.T) {
 
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{parentID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			parentID: {{
-				TypeName:   "Parent",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
 				Composed: map[string][]graph.InstanceParts{"CHILDREN": {{
-					TypeName:   "Child",
 					TypeID:     childID,
 					PrimaryKey: immutable.WrapKey([]any{"c1"}),
 					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "name": "first"}),
 				}}},
-			}},
+			},
 		},
 		Duplicates: []graph.DuplicateParts{{
 			Type: childID,
 			Key:  immutable.WrapKey([]any{"c1"}),
 			Instance: graph.InstanceParts{
-				TypeName:   "Child",
 				TypeID:     childID,
 				PrimaryKey: immutable.WrapKey([]any{"c1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "c1", "name": "again"}),
@@ -553,19 +518,17 @@ func TestRebuildSnapshot_RootConflictFollowsStatedAddress(t *testing.T) {
 
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{companyID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			companyID: {{
-				TypeName:   "Company",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     companyID,
 				PrimaryKey: immutable.WrapKey([]any{"c1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme"}),
-			}},
+			},
 		},
 		Duplicates: []graph.DuplicateParts{{
 			Type: companyID,
 			Key:  immutable.WrapKey([]any{"c9"}),
 			Instance: graph.InstanceParts{
-				TypeName:   "Company",
 				TypeID:     companyID,
 				PrimaryKey: immutable.WrapKey([]any{"c9"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "c9", "title": "Ghost"}),
@@ -598,7 +561,6 @@ func TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant(t *testing.T) {
 
 	child := func(key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "Child",
 			TypeID:     childID,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "name": key}),
@@ -606,14 +568,13 @@ func TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant(t *testing.T) {
 	}
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{parentID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			parentID: {{
-				TypeName:   "Parent",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
 				Composed:   map[string][]graph.InstanceParts{"CHILDREN": {child("c1"), child("c2")}},
-			}},
+			},
 		},
 		Duplicates: []graph.DuplicateParts{{
 			Type:         childID,
@@ -637,13 +598,12 @@ func TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant(t *testing.T) {
 
 // TestRebuildSnapshot_ZeroIdentityPartsRejected pins identity totality at
 // the boundary: a zero TypeID at any parts position draws Fatal E_INTERNAL
-// naming the position, and no snapshot returns.
+// stating a zero identity at the position, and no snapshot returns.
 func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 	s := rebuildTestSchema(t)
 	companyID := mustTypeID(t, s, "Company")
 	company := func(key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "Company",
 			TypeID:     companyID,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "title": key}),
@@ -651,7 +611,6 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 	}
 	zeroInst := func(key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "Company",
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key}),
 		}
@@ -665,67 +624,63 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 	}{
 		{
 			name:  "types entry",
-			want:  "types entry 0",
+			want:  "zero type identity at types entry 0",
 			parts: graph.SnapshotParts{Types: []schema.TypeID{{}}},
 		},
 		{
-			name: "instances group key",
-			want: "instance group",
-			parts: graph.SnapshotParts{
-				Instances: map[schema.TypeID][]graph.InstanceParts{{}: {company("c1")}},
-			},
-		},
-		{
 			name: "instance",
-			want: "at instance position",
+			want: "zero type identity at instance position",
 			parts: graph.SnapshotParts{
-				Instances: map[schema.TypeID][]graph.InstanceParts{companyID: {zeroInst("c1")}},
+				Instances: []graph.InstanceParts{
+					zeroInst("c1"),
+				},
 			},
 		},
 		{
 			name: "composed child",
-			want: "at composed child position",
+			want: "zero type identity at composed child position",
 			parts: graph.SnapshotParts{
-				Instances: map[schema.TypeID][]graph.InstanceParts{companyID: {{
-					TypeName:   "Company",
-					TypeID:     companyID,
-					PrimaryKey: immutable.WrapKey([]any{"c1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "c1"}),
-					Composed:   map[string][]graph.InstanceParts{"X": {zeroInst("x1")}},
-				}}},
+				Instances: []graph.InstanceParts{
+					{
+						TypeID:     companyID,
+						PrimaryKey: immutable.WrapKey([]any{"c1"}),
+						Properties: immutable.WrapProperties(map[string]any{"id": "c1"}),
+						Composed:   map[string][]graph.InstanceParts{"X": {zeroInst("x1")}},
+					},
+				},
 			},
 		},
 		{
 			name: "edge source",
-			want: "at edge source position",
+			want: "zero type identity at edge source position",
 			parts: graph.SnapshotParts{
 				Edges: []graph.EdgeParts{{Relation: "EMPLOYER", SourceKey: key, TargetType: companyID, TargetKey: key}},
 			},
 		},
 		{
 			name: "edge target",
-			want: "at edge target position",
+			want: "zero type identity at edge target position",
 			parts: graph.SnapshotParts{
 				Edges: []graph.EdgeParts{{Relation: "EMPLOYER", SourceType: companyID, SourceKey: key, TargetKey: key}},
 			},
 		},
 		{
 			name: "duplicate",
-			want: "at duplicate position",
+			want: "zero type identity at duplicate position",
 			parts: graph.SnapshotParts{
 				Duplicates: []graph.DuplicateParts{{Key: key, Instance: company("c9"), ConflictType: companyID, ConflictKey: key}},
 			},
 		},
 		{
 			name: "duplicate conflict",
-			want: "at duplicate conflict position",
+			want: "zero type identity at duplicate conflict position",
 			parts: graph.SnapshotParts{
 				Duplicates: []graph.DuplicateParts{{Type: companyID, Key: key, Instance: company("c9")}},
 			},
 		},
 		{
 			name: "duplicate parent",
-			want: "at duplicate parent position",
+			want: "zero type identity at duplicate parent position",
 			parts: graph.SnapshotParts{
 				Duplicates: []graph.DuplicateParts{{
 					Type: companyID, Key: key, Instance: company("c9"),
@@ -736,7 +691,7 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 		},
 		{
 			name: "duplicate instance",
-			want: "at duplicate instance position",
+			want: "zero type identity at duplicate instance position",
 			parts: graph.SnapshotParts{
 				Duplicates: []graph.DuplicateParts{{
 					Type: companyID, Key: key, Instance: zeroInst("c9"),
@@ -746,14 +701,14 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 		},
 		{
 			name: "unresolved source",
-			want: "at unresolved source position",
+			want: "zero type identity at unresolved source position",
 			parts: graph.SnapshotParts{
 				Unresolved: []graph.UnresolvedParts{{SourceKey: key, Relation: "EMPLOYER", TargetType: companyID, TargetKey: key, Reason: "target_missing"}},
 			},
 		},
 		{
 			name: "unresolved target",
-			want: "at unresolved target position",
+			want: "zero type identity at unresolved target position",
 			parts: graph.SnapshotParts{
 				Unresolved: []graph.UnresolvedParts{{SourceType: companyID, SourceKey: key, Relation: "EMPLOYER", TargetKey: key, Reason: "target_missing"}},
 			},
@@ -791,7 +746,6 @@ func TestRebuildSnapshot_EstablishesTheDocumentedOrdering(t *testing.T) {
 
 	ip := func(key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "Parent",
 			TypeID:     parentID,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "name": key}),
@@ -800,8 +754,12 @@ func TestRebuildSnapshot_EstablishesTheDocumentedOrdering(t *testing.T) {
 
 	// Deliberately unsorted, and with a repeated identity.
 	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{parentID, parentID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{parentID: {ip("p3"), ip("p1"), ip("p2")}},
+		Types: []schema.TypeID{parentID, parentID},
+		Instances: []graph.InstanceParts{
+			ip("p3"),
+			ip("p1"),
+			ip("p2"),
+		},
 	})
 	if res.HasErrors() {
 		t.Fatalf("rebuild: %s", res.String())
@@ -839,10 +797,9 @@ func TestSnapshot_DuplicatesComeBackSorted(t *testing.T) {
 
 	ip := func(key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "Person",
 			TypeID:     personID,
 			PrimaryKey: immutable.WrapKey([]any{key}),
-			Properties: immutable.WrapProperties(map[string]any{"name": key}),
+			Properties: immutable.WrapProperties(map[string]any{"id": key, "name": key}),
 		}
 	}
 	dp := func(key string) graph.DuplicateParts {
@@ -855,8 +812,10 @@ func TestSnapshot_DuplicatesComeBackSorted(t *testing.T) {
 
 	// Handed in descending key order; the accessor must return ascending.
 	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:      []schema.TypeID{personID},
-		Instances:  map[schema.TypeID][]graph.InstanceParts{personID: {ip("anchor")}},
+		Types: []schema.TypeID{personID},
+		Instances: []graph.InstanceParts{
+			ip("anchor"),
+		},
 		Duplicates: []graph.DuplicateParts{dp("d3"), dp("d1"), dp("d2")},
 	})
 	if res.HasErrors() {

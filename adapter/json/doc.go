@@ -22,15 +22,13 @@
 // validator accept every shape this writer emits. Unresolved edges are not
 // written; persist them in the .ys format when they must survive.
 //
-// [graph.RebuildSnapshot] reconstructs a document and does not validate one,
-// so a .ys document can carry shapes this writer cannot render as an object its
-// own parser and the validator accept: an edge whose target key has another
-// arity than its target type's, a (one) association carrying several edges, an
-// edge to a type its association does not declare, and an edge or composed
-// children under a name the type declares no relation of that kind for. Each
-// is refused with an error marked [ErrUnrepresentable], so a caller separates
-// it from an encoding failure and from an I/O failure without matching the
-// message text.
+// Every constructor of a snapshot holds its structure to what [graph.Graph.Add]
+// builds, so every relation this writer meets renders in a shape its own
+// parser and the validator accept. A value can still have no JSON form: a
+// non-finite float at any depth, which a validated Float never is, or a Go
+// value encoding/json refuses, which only a bypass-built snapshot holds, is
+// refused with an error marked [ErrUnrepresentable], so a caller separates it
+// from an I/O failure without matching the message text.
 //
 // Use [WithIndent] for pretty-printed output. The object shape keys instances
 // by the name the entry schema addresses each root type by, and two such names
@@ -48,10 +46,9 @@
 //
 // Every type name whose value is an array is an entry of the result, an empty
 // array included, unless it is read after a fault that stops the parse. Three
-// shapes that a decoder would resolve silently are Error diagnostics instead.
-// Each is reported and nothing the document states is dropped, because what a
-// decoder keeps of them is one reader's convention and not the document's
-// meaning:
+// shapes that a decoder would resolve silently are Error diagnostics instead,
+// because what a decoder keeps of them is one reader's convention and not the
+// document's meaning. Each is reported where it stands:
 //
 //   - A type name repeated as a key of the root object. Decoding keeps the last
 //     array and drops the first batch whole; here the repeat is reported at its

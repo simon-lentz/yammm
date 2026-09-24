@@ -22,9 +22,9 @@ type wireFloat float64
 // MarshalJSON emits the value exactly as encoding/json's float encoder would,
 // then appends ".0" when the output carries no float indicator.
 //
-// Delegating to json.Marshal instead would be shorter but costs 2.18× the
-// time and eight more allocations per call, on the path every float in a
-// document takes. [TestWireFloat_MatchesEncodingJSON] holds the two in
+// Delegating to json.Marshal instead would be shorter but slower, and
+// allocates more for a whole value, on the path every float in a document
+// takes. [TestWireFloat_MatchesEncodingJSON] holds the two in
 // lockstep so this copy cannot drift from the encoder it mirrors.
 func (f wireFloat) MarshalJSON() ([]byte, error) {
 	return appendWireFloat(float64(f), 64)
@@ -101,22 +101,17 @@ func typeByWireID(s *schema.Schema, schemaName, name string) (*schema.Type, bool
 
 // wireProps clones props and rewrites each value under its schema constraint
 // so float-bearing values emit with a float indicator. A nil clone stays nil
-// (the wire's "properties":null shape). An undeclared property, and every
-// property under a nil type, has no constraint: its floats keep their
-// indicator ([wireValue]) and everything else passes through untouched.
+// (the wire's "properties":null shape). Every name is declared: each
+// constructor of a snapshot refuses an undeclared one.
 func wireProps(props immutable.Properties, t *schema.Type) map[string]any {
 	m := props.Clone()
-	if len(m) == 0 {
+	if len(m) == 0 || t == nil {
 		return m
 	}
 	for name, v := range m {
-		var c schema.Constraint
-		if t != nil {
-			if prop, ok := t.Property(name); ok {
-				c = prop.Constraint()
-			}
+		if prop, ok := t.Property(name); ok {
+			m[name] = wireValue(v, prop.Constraint())
 		}
-		m[name] = wireValue(v, c)
 	}
 	return m
 }
@@ -127,17 +122,13 @@ func wireProps(props immutable.Properties, t *schema.Type) map[string]any {
 // own TypeID — the shared input, not the shared body.
 func wireEdgeProps(props immutable.Properties, rel *schema.Relation) map[string]any {
 	m := props.Clone()
-	if len(m) == 0 {
+	if len(m) == 0 || rel == nil {
 		return m
 	}
 	for name, v := range m {
-		var c schema.Constraint
-		if rel != nil {
-			if p, ok := rel.Property(name); ok {
-				c = p.Constraint()
-			}
+		if p, ok := rel.Property(name); ok {
+			m[name] = wireValue(v, p.Constraint())
 		}
-		m[name] = wireValue(v, c)
 	}
 	return m
 }

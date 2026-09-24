@@ -50,15 +50,17 @@ func TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T
 
 	node := func(k string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "base.Basin",
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{k}),
 			Properties: immutable.WrapProperties(map[string]any{"id": k}),
 		}
 	}
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{id},
-		Instances: map[schema.TypeID][]graph.InstanceParts{id: {node("b1"), node("b2")}},
+		Types: []schema.TypeID{id},
+		Instances: []graph.InstanceParts{
+			node("b1"),
+			node("b2"),
+		},
 		Edges: []graph.EdgeParts{{
 			Relation:   "NEAR",
 			SourceType: id, SourceKey: immutable.WrapKey([]any{"b1"}),

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -55,6 +56,37 @@ func testSchema(t *testing.T) *schema.Schema {
 	return s
 }
 
+// testSchemaWithEdgeProps is testSchema with EMPLOYER declaring every edge
+// property the edge-property round-trip tests and their fixture store.
+func testSchemaWithEdgeProps(t *testing.T) *schema.Schema {
+	t.Helper()
+	s, result := schema.LoadString(t.Context(), `schema "test"
+
+type Person {
+	id String primary
+	name String
+	--> EMPLOYER (one) Company {
+		role String
+		since Integer
+		kind String
+		source String
+		weight Float
+		locale String
+		tag String
+	}
+}
+
+type Company {
+	id String primary
+	title String
+}
+`, "test.yammm")
+	if result.HasErrors() {
+		t.Fatalf("testSchemaWithEdgeProps: %s", result)
+	}
+	return s
+}
+
 func testSchemaWithComposition(t *testing.T) *schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
@@ -93,7 +125,7 @@ func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 	)
 }
 
@@ -107,7 +139,7 @@ func mustValidInstanceWithEdge(t *testing.T, s *schema.Schema, typeName string, 
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
 	)
 }
@@ -118,7 +150,7 @@ func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk [
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 	)
 }
 
@@ -133,9 +165,30 @@ func mustValidInstanceWithEdgeProps(t *testing.T, s *schema.Schema, typeName str
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
 	)
+}
+
+// keyedProps returns props holding each primary-key property the key states,
+// where props does not state it, so a fixture instance holds its key the way a
+// validated one does. A key property the fixture states is kept as written.
+func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
+	t.Helper()
+	typ, ok := s.Type(typeName)
+	if !ok {
+		t.Fatalf("Type %q not found in schema", typeName)
+	}
+	out := make(map[string]any, len(props)+len(pk))
+	maps.Copy(out, props)
+	i := 0
+	for p := range typ.PrimaryKeys() {
+		if _, stated := out[p.Name()]; !stated && i < len(pk) {
+			out[p.Name()] = pk[i]
+		}
+		i++
+	}
+	return out
 }
 
 func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
@@ -1250,14 +1303,9 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 // silently dropped these both in the graph's unresolved-edge bookkeeping and
 // at the wire layer; this test regresses on both failure modes.
 func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
-	s := testSchema(t)
+	s := testSchemaWithEdgeProps(t)
 	// Person with EMPLOYER edge to non-existent Company c99, carrying
-	// property values. Although the DSL builder used by testSchema does
-	// not declare edge-property types on EMPLOYER, the in-memory
-	// ValidEdgeTarget construction accepts arbitrary property maps —
-	// mirroring graph/testhelpers_test.go's existing pattern at
-	// TestGraph_Edge_Properties. The round-trip path is what's under
-	// test, not schema-level type validation.
+	// property values the association declares.
 	person := mustValidInstanceWithEdgeProps(t, s, "Person",
 		[]any{"p1"}, map[string]any{"id": "p1", "name": "Alice"},
 		"EMPLOYER", []any{"c99"},
@@ -1300,7 +1348,7 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 // [TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes] pins at the
 // serialization-bytes layer.
 func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
-	s := testSchema(t)
+	s := testSchemaWithEdgeProps(t)
 
 	resolvedCompany := mustValidInstance(t, s, "Company",
 		[]any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})

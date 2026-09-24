@@ -16,8 +16,9 @@
 //
 // # Diagnostic Codes
 //
-// Four codes divide every fault this package reports, by what the caller must
-// do about it. A cell whose text does not coerce to the type its member
+// Four codes divide the faults this package's own checks find, by what the
+// caller must do about it, and two more, which the JSON adapter reports as
+// well, close the paragraph. A cell whose text does not coerce to the type its member
 // declares draws [E_CSV_COERCE]: the data needs cleaning, the cell keeps its
 // text and the row is still produced. A setting the adapter cannot use draws
 // [E_CSV_CONFIG] — a list separator the parser could not find again, a
@@ -114,7 +115,8 @@
 // skipped. That holds at every position: a column naming no property, a suffix
 // naming neither a key component nor an edge property, a key component the
 // target does not declare, and a dotted field naming no association, whose
-// cells are carried as one object under the field's spelling.
+// cells are carried under the field's spelling: a list of objects, one per
+// list segment, and a lone object for a cell with no list separator.
 //
 // Two values for one key are refused, as a JSON object that repeats a member
 // is: where a plain column and the dotted columns of the same field both write
@@ -174,8 +176,8 @@
 //
 // Every scalar renders one way wherever it sits — a cell, a list element, a
 // Vector element or an edge segment — so a Float is written in positional
-// notation ([strconv.FormatFloat] with 'f' and the shortest precision)
-// everywhere, never with an exponent. A Vector's elements render as Floats, as
+// notation ([strconv.FormatFloat] with 'f' and the shortest precision, with
+// ".0" after a whole value) everywhere, never with an exponent. A Vector's elements render as Floats, as
 // the validator coerces them, so a float32, which only an instance nothing
 // validated can hold, is widened to float64 in a Float, a List<Float> and a
 // Vector alike.
@@ -211,11 +213,11 @@
 // no empty value, is absent on that target.
 //
 // These values cannot be written so that they read back unchanged. The writer
-// refuses the two that would lose data, with an error marked
+// refuses the ones that would lose data, with an error marked
 // [ErrUnrepresentable] so a caller separates a refusal of the data from an I/O
 // failure and from [ErrConfig] without matching the message text; it writes the
-// other two, which are documented limitations rather than losses the writer can
-// prevent:
+// documented limitations, which are not losses the writer can prevent, and
+// writes one shape specially so that it reads back:
 //
 //   - An optional property holding "" or an empty list writes the cell null
 //     writes, so it reads back as null. This is a documented limitation: a
@@ -228,6 +230,13 @@
 //     edge properties are all absent or "" writes the cell an absent edge
 //     writes. The writer refuses both with an error naming the instance,
 //     rather than let an element or an association vanish on the way back.
+//   - A null list element, and a composite value its constraint cannot
+//     render: a map, an array, a pointer or a struct, or a time.Time outside a
+//     Timestamp or a Date. The list grammar has no spelling for either: a null
+//     element would be written as an empty one, and a composite as Go's
+//     rendering of it, which reads back as a string. A validated graph holds
+//     neither. The writer refuses both with an error naming the property or
+//     edge property, or the association and the target key component.
 //   - A cell whose text holds a CR LF: [encoding/csv]'s reader turns every CR
 //     LF into LF, inside a quoted field too. The writer refuses it with an
 //     error naming the column and the instance. A lone CR is written. A file
@@ -257,14 +266,10 @@
 // edge lookup. An association whose target type does not resolve is refused:
 // the writer will not emit columns its own parser cannot name.
 //
-// An association has shapes a row cannot carry back either, which a snapshot
-// rebuilt from a document can hold although [graph.Graph.Add] never builds
-// them: a (one) association carrying several edges, whose zipped targets the
-// validator refuses as an array; a target key of another arity than its type's;
-// an edge to a type the association does not declare, whose key would be
-// written into the declared target's columns and read back as a target of that
-// type; and an edge under a name the type declares no association for, which
-// has no column at all. Each is refused with an [ErrUnrepresentable] error.
+// Every constructor of a snapshot holds its associations to what
+// [graph.Graph.Add] builds: each edge is under an association its type
+// declares, at the declared target, and a (one) association holds one. So every
+// edge has its column group, and its key reads back as the declared target's.
 //
 // # Compositions
 //

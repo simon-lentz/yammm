@@ -103,7 +103,7 @@
 // gives the later claimant, types before DataTypes in declaration order, the
 // first free numeric suffix (geo.Region2), as adapter/gogen does. A suffixed
 // key can be another entity's natural spelling, which then takes the next
-// suffix in turn (a type Region2 beside it becomes geo.Region22). Each declared association gets one
+// suffix in turn. Each declared association gets one
 // EDGE_<ownerKey>_<field>_<targetKey> entry, shared by every subtype that
 // inherits it; when that key is already taken — by a type so named, or by
 // another association whose parts join to the same text — it takes the
@@ -169,12 +169,10 @@
 //     The emitted schema targets canonical spellings: a case-variant file
 //     still validates under yammm, and the editor flags it toward the
 //     canonical form.
-//   - A repeated member name. adapter/json refuses an object — the envelope
-//     or an instance — that names one member twice (E_ADAPTER_PARSE); a JSON
-//     Schema validator reads one of the two values and accepts the object.
-//   - An empty array under a key the envelope does not name. yammm accepts
-//     an empty array under a part type's or an abstract type's name; the
-//     envelope names neither, so the editor flags the key.
+//   - A repeated member name. adapter/json reports an object — the envelope
+//     or an instance — that names one member twice (Error E_ADAPTER_PARSE),
+//     so the file fails; a JSON Schema validator reads one of the two values
+//     and accepts the object.
 //   - Patterns. Each pattern is rewritten into syntax RE2 and ECMA-262 read
 //     alike (see Constraint Mapping). A pattern holding a line anchor under
 //     the "m" flag is not asserted, so the editor accepts what yammm may

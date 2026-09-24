@@ -58,24 +58,25 @@ func newSchemaNames(s *schema.Schema) schemaNames {
 	return names
 }
 
-// entry renders one type identity as the document states it, and reports
-// whether the closure could name it.
+// entry renders one type identity as the document states it: its schema's
+// name in the closure, and its type name.
 //
 // A miss is NOT rendered as a source path. The whole point of keying by name is
 // that a path does not travel, so falling back to one would put a
 // machine-local path into the field that exists to keep it out — and the
 // document would look well-formed.
 //
-// PRECONDITION: requireDenotable has passed. [Marshal] runs it before a byte
-// is written, so every identity reaching here is one the closure names.
+// PRECONDITION: the closure names id. Every constructor of a snapshot refuses
+// an identity the closure does not hold, so every identity a snapshot carries
+// meets it.
 func (n schemaNames) entry(id schema.TypeID) typeTableEntry {
 	return typeTableEntry{Schema: n[id.SchemaPath()], Name: id.Name()}
 }
 
 // requireDenotable reports the first type identity the closure cannot name.
-// An identity outside the closure reaches a snapshot only through
-// caller-assembled parts — [graph.Graph.Add] refuses one — and a document
-// that cannot state its own types is one no reader can bind.
+// Every constructor of a snapshot refuses such an identity, so this guards
+// that invariant: a document that cannot state its own types is one no reader
+// can bind.
 func (n schemaNames) requireDenotable(ids []schema.TypeID) (schema.TypeID, bool) {
 	for _, id := range ids {
 		if _, ok := n[id.SchemaPath()]; !ok {

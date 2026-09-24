@@ -2,6 +2,8 @@ package snapshottest_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -191,7 +193,7 @@ func TestDiffSnapshots_ComparesNumbersExactly(t *testing.T) {
 			"Person",
 			instancetest.TypeID(typeID(t, s, "Person")),
 			instancetest.PK("p1"),
-			instancetest.Props(map[string]any{"id": "p1", "code": code}),
+			instancetest.Props(map[string]any{"id": "p1", "name": code}),
 		))
 	}
 
@@ -233,56 +235,6 @@ func TestDiffSnapshots_DistinguishesProvenancePresence(t *testing.T) {
 	}
 }
 
-// TestDiffSnapshots_SeparatesIdentityFromName pins the two identity fields on
-// instProjection. Two snapshots whose composed child differs only in TypeID —
-// same name, same key, same properties — must not compare equal, because a
-// decoder that rebinds a child to a same-named type in another schema changes
-// nothing else.
-func TestDiffSnapshots_SeparatesIdentityFromName(t *testing.T) {
-	s := compositionSchema(t)
-	// RebuildSnapshot, not BuildSnapshot: Add re-derives a child's TypeName,
-	// so a pair built that way differs in the name and not only the identity.
-	holder := func(cardTypeID schema.TypeID) *graph.Snapshot {
-		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types: []schema.TypeID{typeID(t, s, "Holder")},
-			Instances: map[schema.TypeID][]graph.InstanceParts{
-				typeID(t, s, "Holder"): {{
-					TypeName:   "Holder",
-					TypeID:     typeID(t, s, "Holder"),
-					PrimaryKey: immutable.WrapKey([]any{"h1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
-					Composed: map[string][]graph.InstanceParts{
-						"ACCOUNTS": {{
-							TypeName:   "Account",
-							TypeID:     typeID(t, s, "Account"),
-							PrimaryKey: immutable.WrapKey([]any{"a1"}),
-							Properties: immutable.WrapProperties(map[string]any{"number": "a1"}),
-							Composed: map[string][]graph.InstanceParts{
-								"CARDS": {{
-									TypeName:   "Card",
-									TypeID:     cardTypeID,
-									PrimaryKey: immutable.WrapKey([]any{"4242"}),
-									Properties: immutable.WrapProperties(map[string]any{"last4": "4242"}),
-								}},
-							},
-						}},
-					},
-				}},
-			},
-		})
-		if res.HasErrors() {
-			t.Fatalf("rebuild: %s", res)
-		}
-		return built
-	}
-
-	probe := &testing.T{}
-	snapshottest.DiffSnapshots(probe, holder(typeID(t, s, "Card")), holder(typeID(t, s, "Account")))
-	if !probe.Failed() {
-		t.Error("DiffSnapshots must detect a composed child that kept its name and changed its TypeID")
-	}
-}
-
 // TestDiffSnapshots_SeparatesUnresolvedBySource pins the source key on an
 // unresolved record. Both snapshots hold the same two instances and one
 // unresolved edge; only the instance the edge hangs off differs.
@@ -290,7 +242,6 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 	s := testSchema(t)
 	personParts := func(key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "Person",
 			TypeID:     typeID(t, s, "Person"),
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key}),
@@ -298,15 +249,17 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 	}
 	withSource := func(sourceKey string) *graph.Snapshot {
 		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types:     []schema.TypeID{typeID(t, s, "Person")},
-			Instances: map[schema.TypeID][]graph.InstanceParts{typeID(t, s, "Person"): {personParts("p1"), personParts("p2")}},
+			Types: []schema.TypeID{typeID(t, s, "Person")},
+			Instances: []graph.InstanceParts{
+				personParts("p1"),
+				personParts("p2"),
+			},
 			Unresolved: []graph.UnresolvedParts{{
 				SourceType: typeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{sourceKey}),
 				Relation:   "EMPLOYER",
 				TargetType: typeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c99"}),
-				Required:   true,
 				Reason:     "target_missing",
 			}},
 		})
@@ -389,5 +342,42 @@ func TestDiffSnapshots_ComparesComposedTreesRecursively(t *testing.T) {
 	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, nil))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect loss of a composed child's provenance")
+	}
+}
+
+// recordingTB records Fatalf instead of stopping the test, so a helper's
+// failure can be asserted on.
+type recordingTB struct {
+	testing.TB
+	fatals []string
+}
+
+func (r *recordingTB) Helper() {}
+
+func (r *recordingTB) Fatalf(format string, args ...any) {
+	r.fatals = append(r.fatals, fmt.Sprintf(format, args...))
+}
+
+// TestBuildSnapshot_FailsOnARefusalButADuplicate pins that a fixture Graph.Add
+// refuses is a failed fixture, not a smaller snapshot: the refused instance
+// would be missing from what the test then asserts on. A duplicate primary key
+// is recorded in the snapshot, so a fixture may build one.
+func TestBuildSnapshot_FailsOnARefusalButADuplicate(t *testing.T) {
+	t.Parallel()
+	s := testSchema(t)
+	person := func(props map[string]any) *instance.ValidInstance {
+		return instancetest.VI("Person", instancetest.TypeID(typeID(t, s, "Person")), instancetest.PK("p1"), instancetest.Props(props))
+	}
+
+	refused := &recordingTB{TB: t}
+	snapshottest.BuildSnapshot(refused, s, person(map[string]any{"name": "no key property"}))
+	if len(refused.fatals) != 1 || !strings.Contains(refused.fatals[0], "instance 0 was refused") {
+		t.Errorf("a refused fixture: fatals = %q, want one naming instance 0", refused.fatals)
+	}
+
+	dup := &recordingTB{TB: t}
+	snap := snapshottest.BuildSnapshot(dup, s, person(map[string]any{"id": "p1"}), person(map[string]any{"id": "p1"}))
+	if len(dup.fatals) != 0 || len(snap.Duplicates()) != 1 {
+		t.Errorf("a duplicate fixture: fatals = %q, %d duplicates; want none and one", dup.fatals, len(snap.Duplicates()))
 	}
 }

@@ -88,7 +88,7 @@ func TestGraph_Add_NilReceiver(t *testing.T) {
 		"Person",
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
 		nil, nil, nil,
 	)
 
@@ -135,7 +135,7 @@ func TestGraph_Add_SchemaMismatch(t *testing.T) {
 		"TypeB",
 		typeB.ID(), // TypeID points to schemaB
 		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{}),
+		immutable.WrapProperties(map[string]any{"id": "x1"}),
 		nil, nil, nil,
 	)
 
@@ -159,7 +159,7 @@ func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
 		"c.Entity",
 		entityType.ID(), // TypeID points to imported schema
 		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"name": "Test Entity"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Test Entity"}),
 		nil, nil, nil,
 	)
 
@@ -180,7 +180,7 @@ func TestGraph_Add_ContextCancellation(t *testing.T) {
 		"Person",
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
 		nil, nil, nil,
 	)
 
@@ -211,7 +211,7 @@ func TestGraph_Add_Success(t *testing.T) {
 		"Person",
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
 		nil, nil, nil,
 	)
 
@@ -251,7 +251,7 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 		"Person",
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
 		nil, nil, nil,
 	)
 	if r := g.Add(ctx, inst1); !r.OK() {
@@ -263,7 +263,7 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 		"Person",
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice 2"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice 2"}),
 		nil, nil, nil,
 	)
 	result := g.Add(ctx, inst2)
@@ -322,7 +322,7 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 			"Person",
 			personType.ID(),
 			immutable.WrapKey([]any{name}),
-			immutable.WrapProperties(map[string]any{"name": name}),
+			immutable.WrapProperties(map[string]any{"id": name, "name": name}),
 			nil, nil, nil,
 		)
 		if r := g.Add(ctx, inst); !r.OK() {
@@ -356,7 +356,7 @@ func TestGraph_InstanceByKey(t *testing.T) {
 		"Person",
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
 		nil, nil, nil,
 	)
 
@@ -622,13 +622,13 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 	alice := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
 		nil, nil, nil,
 	)
 	acme := instance.NewValidInstance(
 		"Company", companyType.ID(),
 		immutable.WrapKey([]any{"acme"}),
-		immutable.WrapProperties(map[string]any{"name": "Acme"}),
+		immutable.WrapProperties(map[string]any{"id": "acme", "name": "Acme"}),
 		nil, nil, nil,
 	)
 
@@ -643,13 +643,13 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 	acmeDup := instance.NewValidInstance(
 		"Company", companyType.ID(),
 		immutable.WrapKey([]any{"acme"}),
-		immutable.WrapProperties(map[string]any{"name": "Acme Dup"}),
+		immutable.WrapProperties(map[string]any{"id": "acme", "name": "Acme Dup"}),
 		nil, nil, nil,
 	)
 	aliceDup := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice Dup"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice Dup"}),
 		nil, nil, nil,
 	)
 
@@ -744,7 +744,7 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 		inst := instance.NewValidInstance(
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{pk}),
-			immutable.WrapProperties(map[string]any{"name": pk}),
+			immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 			nil, nil, nil,
 		)
 
@@ -798,7 +798,7 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 		inst := instance.NewValidInstance(
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{key}),
-			immutable.WrapProperties(map[string]any{"name": key}),
+			immutable.WrapProperties(map[string]any{"id": key, "name": key}),
 			nil, nil, nil,
 		)
 
@@ -847,7 +847,7 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 		inst := instance.NewValidInstance(
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{key}),
-			immutable.WrapProperties(map[string]any{"name": key}),
+			immutable.WrapProperties(map[string]any{"id": key, "name": key}),
 			nil, nil, nil,
 		)
 
@@ -879,7 +879,7 @@ func TestGraph_CompositeKey_TwoComponents(t *testing.T) {
 			inst := instance.NewValidInstance(
 				"Record", recordType.ID(),
 				immutable.WrapKey([]any{region, fmt.Sprintf("id-%d", i)}),
-				immutable.WrapProperties(map[string]any{"value": fmt.Sprintf("%s-%d", region, i)}),
+				immutable.WrapProperties(map[string]any{"region": region, "id": fmt.Sprintf("id-%d", i), "value": fmt.Sprintf("%s-%d", region, i)}),
 				nil, nil, nil,
 			)
 
@@ -923,7 +923,7 @@ func TestGraph_EmptyProperties(t *testing.T) {
 	inst := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"minimal"}),
-		immutable.WrapProperties(map[string]any{}), // No additional properties
+		immutable.WrapProperties(map[string]any{"id": "minimal"}), // The key property alone
 		nil, nil, nil,
 	)
 
@@ -938,10 +938,10 @@ func TestGraph_EmptyProperties(t *testing.T) {
 		t.Fatalf("Expected 1 instance, got %d", len(instances))
 	}
 
-	// Verify the instance exists with empty properties
+	// A keyed instance holds its key property, and nothing else here.
 	found := instances[0]
-	if found.Properties().Len() != 0 {
-		t.Errorf("Expected 0 properties, got %d", found.Properties().Len())
+	if found.Properties().Len() != 1 {
+		t.Errorf("Expected 1 property, got %d", found.Properties().Len())
 	}
 }
 
@@ -1049,7 +1049,7 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 		"User", // Unqualified for local type
 		userType.ID(),
 		immutable.WrapKey([]any{"u1"}),
-		immutable.WrapProperties(map[string]any{"username": "alice"}),
+		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
 		nil, nil, nil,
 	)
 
@@ -1063,7 +1063,7 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 		"c.Entity", // Alias-qualified for imported type
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"name": "Entity 1"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
 		nil, nil, nil,
 	)
 
@@ -1156,7 +1156,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 		"b.Product",
 		productB.ID(),
 		immutable.WrapKey([]any{"p1"}), // Same PK
-		immutable.WrapProperties(map[string]any{"sourceB": "from B"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "sourceB": "from B"}),
 		nil, nil, nil,
 	)
 
@@ -1170,7 +1170,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 		"c.Product",
 		productC.ID(),
 		immutable.WrapKey([]any{"p1"}), // Same PK but different TypeID
-		immutable.WrapProperties(map[string]any{"sourceC": "from C"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "sourceC": "from C"}),
 		nil, nil, nil,
 	)
 
@@ -1258,13 +1258,13 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	inst1 := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
 		nil, nil, nil,
 	)
 	inst2 := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}), // Duplicate
-		immutable.WrapProperties(map[string]any{"name": "Alice 2"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice 2"}),
 		nil, nil, nil,
 	)
 
@@ -1274,8 +1274,8 @@ func TestContract19_FailureSemantics(t *testing.T) {
 	}
 
 	result2 := g.Add(ctx, inst2)
-	if result2.OK() {
-		t.Error("Duplicate PK result should not be OK")
+	if !result2.HasCode(diag.E_DUPLICATE_PK) {
+		t.Errorf("Duplicate PK result reported %s, want %s", result2, diag.E_DUPLICATE_PK)
 	}
 
 	// Test case 2: Nil instance → panic
@@ -1325,7 +1325,7 @@ func TestResult_Instances(t *testing.T) {
 		inst := instance.NewValidInstance(
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{fmt.Sprintf("person-%d", i)}),
-			immutable.WrapProperties(map[string]any{"name": fmt.Sprintf("Name %d", i)}),
+			immutable.WrapProperties(map[string]any{"id": fmt.Sprintf("person-%d", i), "name": fmt.Sprintf("Name %d", i)}),
 			nil, nil, nil,
 		)
 		if r := g.Add(ctx, inst); !r.OK() {
@@ -1355,7 +1355,7 @@ func TestResult_DiagnosticsAndFlags(t *testing.T) {
 	inst := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"test-person"}),
-		immutable.WrapProperties(map[string]any{"name": "Test"}),
+		immutable.WrapProperties(map[string]any{"id": "test-person", "name": "Test"}),
 		nil, nil, nil,
 	)
 	result := g.Add(ctx, inst)
@@ -1402,14 +1402,14 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"name": "Child 1"}),
+		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
 		nil, nil, nil,
 	)
 	child2 := instance.NewValidInstance(
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c2"}),
-		immutable.WrapProperties(map[string]any{"name": "Child 2"}),
+		immutable.WrapProperties(map[string]any{"id": "c2", "name": "Child 2"}),
 		nil, nil, nil,
 	)
 
@@ -1424,7 +1424,7 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 		"Parent",
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
 		nil, composed, nil,
 	)
 
@@ -1455,7 +1455,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 		"GrandChild",
 		grandchildType.ID(),
 		immutable.WrapKey([]any{"gc1"}),
-		immutable.WrapProperties(map[string]any{"name": "GrandChild 1"}),
+		immutable.WrapProperties(map[string]any{"id": "gc1", "name": "GrandChild 1"}),
 		nil, nil, nil,
 	)
 
@@ -1469,7 +1469,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"name": "Child 1"}),
+		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
 		nil, childComposed, nil,
 	)
 
@@ -1483,7 +1483,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 		"Parent",
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
 		nil, parentComposed, nil,
 	)
 
@@ -1527,7 +1527,7 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 		"Parent",
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
 		nil, composed, nil,
 	)
 
@@ -1557,7 +1557,7 @@ func TestGraph_Add_QualifiedTypeNotFound(t *testing.T) {
 		"c.NonExistent", // Valid alias, invalid type
 		fakeTypeID,
 		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{}),
+		immutable.WrapProperties(map[string]any{"id": "x1"}),
 		nil, nil, nil,
 	)
 
@@ -1567,8 +1567,8 @@ func TestGraph_Add_QualifiedTypeNotFound(t *testing.T) {
 	}
 	assertHasCode(t, result, diag.E_GRAPH_TYPE_NOT_FOUND)
 
-	// The alias-qualified branch adds a hint and a type_schema detail that
-	// nothing asserted; dropping either left the suite green.
+	// A type the closure does not hold is imported through nothing, so the
+	// transitive-import hint and its type_schema detail would mislead.
 	var sawHint, sawSchema bool
 	for issue := range result.Issues() {
 		if issue.Code() != diag.E_GRAPH_TYPE_NOT_FOUND {
@@ -1583,11 +1583,8 @@ func TestGraph_Add_QualifiedTypeNotFound(t *testing.T) {
 			}
 		}
 	}
-	if !sawHint {
-		t.Error("the alias-qualified branch lost its transitive-import hint")
-	}
-	if !sawSchema {
-		t.Error("the alias-qualified branch lost its type_schema detail")
+	if sawHint || sawSchema {
+		t.Errorf("a type the schema does not declare drew the transitive-import hint (%v) or type_schema detail (%v)", sawHint, sawSchema)
 	}
 }
 
@@ -1603,7 +1600,7 @@ func TestGraph_Add_UnknownSchemaPanics(t *testing.T) {
 		"unknown.SomeType", // Unknown alias
 		fakeTypeID,
 		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{}),
+		immutable.WrapProperties(map[string]any{"id": "x1"}),
 		nil, nil, nil,
 	)
 
@@ -1627,7 +1624,7 @@ func TestGraph_Add_UnqualifiedTypeNotFound(t *testing.T) {
 		"NonExistent", // Unqualified, doesn't exist locally
 		fakeTypeID,
 		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{}),
+		immutable.WrapProperties(map[string]any{"id": "x1"}),
 		nil, nil, nil,
 	)
 
@@ -1660,7 +1657,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 		"GrandChild",
 		grandchildType.ID(),
 		immutable.WrapKey([]any{"gc1"}),
-		immutable.WrapProperties(map[string]any{"name": "GrandChild 1"}),
+		immutable.WrapProperties(map[string]any{"id": "gc1", "name": "GrandChild 1"}),
 		nil, nil, nil,
 	)
 
@@ -1674,7 +1671,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"name": "Child 1"}),
+		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
 		nil, childComposed, nil,
 	)
 
@@ -1726,14 +1723,14 @@ func TestAdd_OneCardinality_MultipleChildren_RefusesWholeRecord(t *testing.T) {
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"name": "Child 1"}),
+		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
 		nil, nil, nil,
 	)
 	child2 := instance.NewValidInstance(
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c2"}),
-		immutable.WrapProperties(map[string]any{"name": "Child 2"}),
+		immutable.WrapProperties(map[string]any{"id": "c2", "name": "Child 2"}),
 		nil, nil, nil,
 	)
 
@@ -1747,7 +1744,7 @@ func TestAdd_OneCardinality_MultipleChildren_RefusesWholeRecord(t *testing.T) {
 		"Parent",
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
 		nil, parentComposed, nil,
 	)
 
@@ -1780,7 +1777,7 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
-		immutable.WrapProperties(map[string]any{"name": "Child 1"}),
+		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
 		nil, nil, nil,
 	)
 
@@ -1794,7 +1791,7 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 		"Parent",
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"name": "Parent 1"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
 		nil, parentComposed, nil,
 	)
 

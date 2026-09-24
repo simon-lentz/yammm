@@ -293,10 +293,10 @@ A write reports through an `error`, not a `diag.Result`, so the adapters carry s
 
 | Sentinel | Adapter | Meaning |
 | -------- | ------- | ------- |
-| `csv.ErrUnrepresentable` | CSV | The snapshot holds a value CSV cannot write so that its own parser reads it back unchanged: a composed child, a lone all-empty association, a cell holding a CR LF, a list of one empty element |
+| `csv.ErrUnrepresentable` | CSV | The snapshot holds a value CSV cannot write so that its own parser reads it back unchanged: a composed child, a lone all-empty association, a cell holding a CR LF, a list of one empty element, a null list element, a composite value (a map, an array, a pointer or a struct) |
 | `csv.ErrConfig` | CSV | The adapter holds a setting it cannot use: a list separator the parser could not find again, or a delimiter `encoding/csv` refuses. Refused before any writer is requested. The parse-side twin is `E_CSV_CONFIG` |
 | `csv.ErrNilSnapshot`, `json.ErrNilResult` | CSV, JSON | A write method received a nil snapshot |
-| `json.ErrUnrepresentable` | JSON | The snapshot holds a shape the writer cannot render as the object its own parser accepts: an edge whose target key arity differs from the target type's |
+| `json.ErrUnrepresentable` | JSON | The snapshot holds a value JSON cannot write: a non-finite float (NaN or an infinity) at any depth, which a validated `Float` never is, or a Go value `encoding/json` refuses |
 
 An I/O failure and a cancellation match none of these classes.
 

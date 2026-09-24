@@ -150,8 +150,8 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | Code | Meaning |
 | ---- | ------- |
 | `E_INSTANCE_TYPE_NOT_FOUND` | Type referenced in instance data not found |
-| `E_ABSTRACT_TYPE` | Attempt to instantiate an abstract type |
-| `E_PART_TYPE_DIRECT` | Attempt to directly instantiate a part type |
+| `E_ABSTRACT_TYPE` | Attempt to instantiate an abstract type, an empty batch under its name included |
+| `E_PART_TYPE_DIRECT` | Attempt to directly instantiate a part type, an empty batch under its name included |
 | `E_TYPE_MISMATCH` | Value has wrong type for its property |
 | `E_MISSING_REQUIRED` | Required property is missing |
 | `E_UNKNOWN_FIELD` | Unexpected field in instance data |
@@ -173,31 +173,31 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | Code | Meaning |
 | ---- | ------- |
 | `E_DUPLICATE_PK` | Duplicate primary key in graph |
-| `E_DUPLICATE_COMPOSED_PK` | Duplicate composed child primary key |
+| `E_DUPLICATE_COMPOSED_PK` | Two children of one `(many)` composition share a primary key, or a `(one)` composition holds several |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
 | `E_GRAPH_TYPE_NOT_FOUND` | Type not found in graph operations |
 | `E_GRAPH_PARENT_NOT_FOUND` | Parent node not found for composed child |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
-| `E_GRAPH_MISSING_PK` | Primary key missing in graph operations |
-| `E_GRAPH_CARDINALITY` | Association carries more targets than its `(one)` multiplicity allows (v0.15+) |
-| `E_GRAPH_UNKNOWN_RELATION` | Instance data under a relation name the type does not declare (v0.15+) |
+| `E_GRAPH_MISSING_PK` | A root whose type declares no primary key |
+| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: several targets at `Graph.Add`, several edges and unresolved records in a snapshot or `.ys` document (v0.15+) |
+| `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one (v0.15+) |
 | `E_GRAPH_ABSTRACT_TYPE` | Instance of an abstract type rejected by the graph (v0.15+) |
-| `E_GRAPH_INVALID_PK` | Instance primary key empty or disagreeing with its own key properties (v0.15+) |
+| `E_GRAPH_INVALID_PK` | Primary key empty, of the wrong arity, with a component `graph.ParseKey` cannot read back, with a key property absent or null, or disagreeing with its own key properties; or an association target key of the wrong arity or with such a component (v0.15+) |
 
 ### Snapshot
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON or wrong structure |
+| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, wrong structure, or content a structural rule refuses (an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason) |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
 | `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema |
-| `E_SNAPSHOT_TYPE_MISMATCH` | Instances section inconsistent with the types table |
-| `E_SNAPSHOT_DANGLING_REFERENCE` | Edge target references non-existent instance |
-| `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges (invalid) |
-| `E_SNAPSHOT_INVALID_ROOT` | Instances group names a type that cannot be a root: abstract, part, or no primary key |
-| `E_SNAPSHOT_UNNAMEABLE_TYPE` | Instances group denotes a type the entry schema reaches only through an intermediate import, so it has no name form |
+| `E_SNAPSHOT_TYPE_MISMATCH` | A type row that contradicts its position: a root's that is not its group's, a duplicate instance's that is not its record's, or a composed child's or association record's target row that is not the relation's declared target |
+| `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict or parent, or an unresolved record's source names no instance |
+| `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children stand under a name the type does not declare as a composition |
+| `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a root duplicate record names a type that cannot be a root: abstract, part, or no primary key |
+| `E_SNAPSHOT_UNNAMEABLE_TYPE` | An instances group or a root duplicate record names a type the entry schema reaches only through an intermediate import, so it has no name form |
 | `W_SNAPSHOT_VALUE_DROPPED` | Writer held a value the wire cannot carry at that position and did not write it |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
@@ -209,7 +209,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
 | `W_SNAPSHOT_VALUE_NONCONFORMING` | A stored `Timestamp`, `Date` or `UUID` value does not conform to its schema constraint; reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
-| `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record for a `Required` association; reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
+| `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 | `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 
 ### Adapter

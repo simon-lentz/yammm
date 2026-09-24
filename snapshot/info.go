@@ -96,21 +96,23 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // takes no option that raises it; a caller needing every issue on a
 // heavily-malformed document reads it through [Load].
 //
-// Returns (nil, result) when the document cannot be summarized at all: an
-// unreadable header, an unsupported version, an unrecognized feature, an
-// unrecognized schema hash algorithm, an undecodable section, or a cancelled
-// context. A document that decodes but
-// fails a structural check returns a summary beside Error-severity
-// diagnostics — an integrity mismatch reports
-// IntegrityStatus "mismatch", and a reference naming no table row is reported
-// and left out of the counts. Read the result before the summary.
+// Returns (nil, result) when the header or the types table breaks a rule — an
+// unreadable or malformed header, an unsupported version, an unrecognized
+// feature, an unrecognized schema hash algorithm, a types table that states
+// one identity twice — when a section does not decode, or when the context is
+// cancelled. A document that decodes but fails a structural check returns a
+// summary beside Error-severity diagnostics — an integrity mismatch reports
+// IntegrityStatus "mismatch", and an instances group whose row names no table
+// entry is reported and left out of the instance counts, while an edge or a
+// record naming no row is reported and still counted. Read the result before
+// the summary.
 //
 // Info runs the structural validation [Load] and [Verify] run and stops before
 // materialization. It resolves no schema, so a document Info summarizes cleanly
-// can still fail Load or Verify on schema resolution, and on the two structural
-// checks that need a schema: a (one) slot a document fills twice, which raises
-// E_DUPLICATE_COMPOSED_PK, and two spellings of one timestamp, date or UUID
-// key, which Info compares as written and Load and Verify fold.
+// can still fail Load or Verify on schema resolution and on every structural
+// check that needs a schema: the graph package doc's "Structural facts", and two
+// spellings of one timestamp, date or UUID key, which Info compares as written
+// and Load and Verify fold.
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
 func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
@@ -214,10 +216,9 @@ type HeaderInfo struct {
 //
 // HeaderOnly is the right choice for dispatch-style workloads that scan
 // many .ys files to classify lifecycle state, compare schema hashes, or
-// inspect metadata annotations like CreatedAt. Its cost is proportional
-// to the header size (< 1 KiB for typical .ys files), not the total
-// file size — a property that [Info] cannot offer because it populates
-// instance counts and diagnostic counts by scanning the body.
+// inspect metadata annotations like CreatedAt. It decodes the header
+// alone, where [Info] decodes the body to populate its counts; its one pass
+// over the whole document checks the outermost shape, below.
 //
 // HeaderOnly holds the whole document, so it checks the outermost shape:
 // sections absent, repeated, out of order, or followed by trailing bytes are

@@ -496,7 +496,7 @@ func TestGraph_Check_Idempotent(t *testing.T) {
 
 func TestGraph_Edge_Properties(t *testing.T) {
 	// Edge with properties captured correctly
-	s := testSchemaWithAssociation(t)
+	s := testSchemaWithEdgeProperties(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
@@ -551,7 +551,7 @@ func TestGraph_Edge_Properties(t *testing.T) {
 // regression in that conversion would surface only at the snapshot round-trip
 // layer. Parallel in shape to [TestGraph_Edge_Properties].
 func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
-	s := testSchemaWithAssociation(t)
+	s := testSchemaWithEdgeProperties(t)
 	g := graph.New(s)
 	ctx := t.Context()
 
@@ -771,7 +771,7 @@ func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
 		"Person",
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
 		edges,
 		nil,
 		prov,

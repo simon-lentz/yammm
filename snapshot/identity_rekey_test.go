@@ -20,6 +20,17 @@ import (
 // keyed by [schema.TypeID]. These tests drive the positions where a name key
 // merged or dropped instances.
 
+// mustImport imports snap into a new graph bound to s and fails the test when
+// the import is refused.
+func mustImport(tb testing.TB, s *schema.Schema, snap *graph.Snapshot) *graph.Graph {
+	tb.Helper()
+	g, res := graph.NewFromSnapshot(s, snap)
+	if res.HasErrors() {
+		tb.Fatalf("NewFromSnapshot: %s", res)
+	}
+	return g
+}
+
 // hasCode reports whether the result carries an issue with the given code.
 func hasCode(result diag.Result, code diag.Code) bool {
 	for issue := range result.Issues() {
@@ -47,35 +58,45 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 		t.Fatal("fixture is vacuous: the entry schema can name deep.Part")
 	}
 
+	basePart := mustTypeIDIn(t, s, "base", "Part")
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{siteID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			siteID: {{
-				TypeName:   tagForm(s, siteID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     siteID,
 				PrimaryKey: immutable.WrapKey([]any{"site1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "site1"}),
 				Composed: map[string][]graph.InstanceParts{
-					"PARTS": {{
-						TypeName:   tagForm(s, deepPart),
-						TypeID:     deepPart,
-						PrimaryKey: immutable.WrapKey([]any{"dp1"}),
-						Properties: immutable.WrapProperties(map[string]any{"name": "dp1", "density": float64(2)}),
+					"IMPORTED": {{
+						TypeID:     basePart,
+						PrimaryKey: immutable.WrapKey([]any{"bp1"}),
+						Properties: immutable.WrapProperties(map[string]any{"name": "bp1", "mass": float64(1)}),
+						Composed: map[string][]graph.InstanceParts{
+							"DEEP": {{
+								TypeID:     deepPart,
+								PrimaryKey: immutable.WrapKey([]any{"dp1"}),
+								Properties: immutable.WrapProperties(map[string]any{"name": "dp1", "density": float64(2)}),
+							}},
+						},
 					}},
 				},
-			}},
+			},
 		},
 	})
 	if result.HasErrors() {
 		t.Fatalf("assembling: %s", result)
 	}
 
-	after := graph.NewFromSnapshot(s, built).Snapshot()
+	after := mustImport(t, s, built).Snapshot()
 	roots := after.InstancesOf(siteID)
 	if len(roots) != 1 {
 		t.Fatalf("importing dropped the root: want 1, got %d", len(roots))
 	}
-	children := roots[0].Composed("PARTS")
+	parents := roots[0].Composed("IMPORTED")
+	if len(parents) != 1 {
+		t.Fatalf("importing dropped the base.Part child: want 1, got %d", len(parents))
+	}
+	children := parents[0].Composed("DEEP")
 	if len(children) != 1 {
 		t.Fatalf("importing a transitively imported child dropped it: want 1, got %d", len(children))
 	}
@@ -113,7 +134,6 @@ func sameNameBeacons(t *testing.T, s *schema.Schema) (*graph.Snapshot, schema.Ty
 	}
 	beacon := func(id schema.TypeID, key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   tagForm(s, id),
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "power": float64(1)}),
@@ -121,9 +141,9 @@ func sameNameBeacons(t *testing.T, s *schema.Schema) (*graph.Snapshot, schema.Ty
 	}
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{localBeacon, importedBeacon},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			localBeacon:    {beacon(localBeacon, "local1")},
-			importedBeacon: {beacon(importedBeacon, "imported1")},
+		Instances: []graph.InstanceParts{
+			beacon(localBeacon, "local1"),
+			beacon(importedBeacon, "imported1"),
 		},
 	})
 	if result.HasErrors() {
@@ -155,7 +175,7 @@ func TestGraphSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	s := loadIdentitySchema(t)
 
 	built, _, _ := sameNameBeacons(t, s)
-	after := graph.NewFromSnapshot(s, built).Snapshot()
+	after := mustImport(t, s, built).Snapshot()
 
 	var count int
 	for range after.AllInstances() {
@@ -198,19 +218,23 @@ func TestRoundTrip_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s := loadIdentitySchema(t)
+	s, lres := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+		"entry.yammm": []byte("schema \"entry\"\n\nimport \"base.yammm\" as base\n\ntype Anchor {\n\tid String primary\n}\n"),
+		"base.yammm":  []byte("schema \"base\"\n\ntype Basin {\n\tid String primary\n\t--> NEAR (one:one) Basin\n}\n"),
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	if lres.HasErrors() {
+		t.Fatalf("load: %s", lres)
+	}
 
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
-	tag := tagForm(s, basinID)
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{basinID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			basinID: {{
-				TypeName:   tag,
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(7)}),
-			}},
+				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
+			},
 		},
 		Unresolved: []graph.UnresolvedParts{{
 			SourceType: basinID,
@@ -218,7 +242,6 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 			Relation:   "NEAR",
 			TargetType: basinID,
 			TargetKey:  immutable.WrapKey([]any{"gone"}),
-			Required:   true,
 			Reason:     "target_missing",
 		}},
 	})
@@ -226,7 +249,7 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 		t.Fatalf("assembling: %s", result)
 	}
 
-	checked := graph.NewFromSnapshot(s, built).Check(ctx)
+	checked := mustImport(t, s, built).Check(ctx)
 
 	var seen, populated bool
 	for issue := range checked.Issues() {
@@ -250,8 +273,8 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 }
 
 // TestInfo_InstanceCountsKeyedByIdentity pins the schema-less Info surface
-// over a tag collision: two same-named types count under two distinct
-// TypeRef keys, and the per-type counts sum to the total.
+// over two same-named types, the entry schema's Beacon and base's: each counts
+// under its own TypeRef key, and the per-type counts sum to the total.
 func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -268,15 +291,15 @@ func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 	}
 
 	localRef := snapshot.TypeRef{Schema: schemaNameOf(t, s, localBeacon), Name: localBeacon.Name()}
-	deepRef := snapshot.TypeRef{Schema: schemaNameOf(t, s, importedBeacon), Name: importedBeacon.Name()}
-	if localRef == deepRef {
+	baseRef := snapshot.TypeRef{Schema: schemaNameOf(t, s, importedBeacon), Name: importedBeacon.Name()}
+	if localRef == baseRef {
 		t.Fatal("fixture is vacuous: the two Beacons share one TypeRef")
 	}
 	if got := info.InstanceCounts[localRef]; got != 1 {
 		t.Errorf("InstanceCounts[%s] = %d, want 1", localRef, got)
 	}
-	if got := info.InstanceCounts[deepRef]; got != 1 {
-		t.Errorf("InstanceCounts[%s] = %d, want 1", deepRef, got)
+	if got := info.InstanceCounts[baseRef]; got != 1 {
+		t.Errorf("InstanceCounts[%s] = %d, want 1", baseRef, got)
 	}
 	if info.TotalInstances != 2 {
 		t.Errorf("TotalInstances = %d, want 2", info.TotalInstances)

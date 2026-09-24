@@ -1,31 +1,75 @@
 package graph
 
 import (
+	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// NewFromSnapshot creates a Graph pre-populated from a Snapshot's contents.
+// NewFromSnapshot creates a Graph pre-populated from a Snapshot's contents,
+// ready for [Graph.Add] calls that resolve against the imported instances.
 //
-// The returned Graph is ready for additional [Graph.Add] calls. New instances
-// interact naturally with imported data: duplicate detection, edge resolution,
-// and composition extraction work as normal.
-//
-// NewFromSnapshot must be used instead of calling importSnapshot on an existing
-// graph — it enforces the precondition that the graph is fresh.
-//
-// snap must originate from s, as [NewBatchAssemblerFromSnapshot] requires: taken
-// from a [Graph] bound to s, or loaded against s. Import consults no schema, so
-// a snapshot built against a different schema is neither detected nor filtered,
-// and its type identities are installed whether or not s can resolve them.
+// snap need not have been built against s, but it must hold to s under the
+// package doc's "Structural facts". A snapshot that breaks one is refused with
+// a nil Graph and a diagnostic naming each position, under the code
+// [Graph.Add] refuses it with; nothing is installed. A snapshot bound to s
+// already holds to them and is not walked.
 //
 // Panics if s or snap is nil (programmer error).
-func NewFromSnapshot(s *schema.Schema, snap *Snapshot, opts ...Option) *Graph {
+func NewFromSnapshot(s *schema.Schema, snap *Snapshot, opts ...Option) (*Graph, diag.Result) {
 	if snap == nil {
 		panic("graph.NewFromSnapshot: nil Snapshot")
 	}
 	g := New(s, opts...)
+	if res := validateImport(g.schema, g.canon, snap); res.HasErrors() {
+		return nil, res
+	}
 	g.importSnapshot(snap)
-	return g
+	return g, diag.OK()
+}
+
+// validateImport holds snap to s through [structureRules], the definition
+// [RebuildSnapshot] applies, so an import cannot install what the rebuild path
+// refuses. snap's types include every root's type, so its types entries carry
+// the root rule. A record's reason and a duplicate record's own type and key
+// need no schema, and every constructor of snap held them, so the walk skips them.
+func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag.Result {
+	if snap.schema == s {
+		return diag.OK()
+	}
+	c := diag.NewCollector(0)
+	r := &structureRules{s: s, canon: canon, c: c, op: "NewFromSnapshot", callerFacing: true}
+
+	for i, id := range snap.types {
+		r.typesEntry(i, id)
+	}
+	for _, id := range snap.types {
+		for _, inst := range snap.instances[id] {
+			checkTree(r, "instance", inst)
+			r.address(id, inst.primaryKey)
+		}
+	}
+	for _, e := range snap.edges {
+		r.association(associationRecord{
+			position: "edge from", source: e.source.typeID, sourceKey: e.source.primaryKey, relation: e.relation,
+			target: e.target.typeID, targetKey: e.target.primaryKey, properties: e.properties,
+		})
+	}
+	for i, dup := range snap.duplicates {
+		if dup.Parent == nil {
+			r.rootDuplicate(i, dup.Instance.typeID)
+		}
+		checkTree(r, "duplicate instance", dup.Instance)
+	}
+	for _, u := range snap.unresolved {
+		r.identity(u.TargetType, positionAt("unresolved target", u.TargetKey))
+		r.association(associationRecord{
+			position: "unresolved record of", source: u.Source.typeID, sourceKey: u.Source.primaryKey, relation: u.Relation,
+			target: u.TargetType, targetKey: unresolvedTargetKey(u), reason: u.Reason, properties: u.properties,
+		})
+	}
+	r.oneOverflow()
+	return c.Result()
 }
 
 // importSnapshot populates a mutable Graph from a Snapshot's contents,
@@ -49,6 +93,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// into the graph's instance index. The cloneMap tracks snapshot instance
 	// pointers → graph instance pointers for steps 2-4.
 	cloneMap := make(map[*Instance]*Instance)
+	name := tagForms(g.schema)
 
 	imported := 0
 	for _, typeID := range snap.Types() {
@@ -57,6 +102,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 		}
 		for _, inst := range snap.InstancesOf(typeID) {
 			cloned := cloneInstance(inst, cloneMap)
+			g.rename(name, cloned)
 			// Re-keyed under THIS graph's canonicalizer, not the one that wrote
 			// the snapshot: a document persisted before a key's constraint
 			// changed carries addresses the importing schema no longer spells
@@ -101,12 +147,14 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			reasonDetail = ""
 		}
 
-		// Not persisted in .ys, so rebuilt here. Resolved by identity, which
-		// reaches the whole closure where the source's tag form does not.
-		jsonField := ""
+		// Read from THIS graph's schema, as Add reads them: the import rule
+		// holds the relation to an association of the source's type there.
+		// Resolved by identity, which reaches the whole closure where the
+		// source's tag form does not.
+		jsonField, required := "", false
 		if typ, ok := g.schema.TypeByID(unres.Source.TypeID()); ok {
 			if rel, ok := typ.Relation(unres.Relation); ok {
-				jsonField = rel.FieldName()
+				jsonField, required = rel.FieldName(), !rel.IsOptional()
 			}
 		}
 
@@ -121,7 +169,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			targetType:   unres.TargetType,
 			targetKey:    targetKey,
 			properties:   g.canon.edgeProperties(unres.Source.TypeID(), unres.Relation, unres.Properties()),
-			isRequired:   unres.Required,
+			isRequired:   required,
 			reasonDetail: reasonDetail,
 		})
 	}
@@ -135,6 +183,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			// Duplicate's Instance was rejected and is not in the snapshot's
 			// instance list. Clone it directly.
 			instClone = cloneInstance(dup.Instance, cloneMap)
+			g.rename(name, instClone)
 			g.canon.reinstance(instClone)
 		}
 
@@ -145,6 +194,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			parentClone = cloneMap[dup.Parent]
 			if parentClone == nil {
 				parentClone = cloneInstance(dup.Parent, cloneMap)
+				g.rename(name, parentClone)
 				g.canon.reinstance(parentClone)
 			}
 		}
@@ -156,4 +206,30 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	// Step 5: Diagnostics — no-op.
 	// Loaded snapshots have diag.OK() diagnostics. Construction diagnostics
 	// are transient and not persisted.
+}
+
+// rename renders inst's name, and every composed child's, under this graph's
+// schema. A snapshot's names were rendered under the schema it was built
+// against, whose import aliases need not be this graph's.
+func (g *Graph) rename(name func(schema.TypeID) string, inst *Instance) {
+	inst.typeName = name(inst.typeID)
+	for _, children := range inst.composed {
+		for _, child := range children {
+			g.rename(name, child)
+		}
+	}
+}
+
+// unresolvedTargetKey recovers the key an unresolved record stores as its
+// rendering. "absent" and "empty" records store none, and a rendering that
+// does not parse reads as no key, which the arity rule then refuses.
+func unresolvedTargetKey(u *UnresolvedEdge) immutable.Key {
+	if u.TargetKey == "" {
+		return immutable.Key{}
+	}
+	components, err := ParseKey(u.TargetKey)
+	if err != nil {
+		return immutable.Key{}
+	}
+	return immutable.WrapKey(components)
 }

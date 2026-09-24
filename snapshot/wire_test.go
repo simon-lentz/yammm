@@ -44,9 +44,10 @@ func marshalCorpus(t *testing.T) []corpusEntry {
 	// A snapshot with a cross-batch unresolved edge carrying properties.
 	// Exercises the unresolvedWire.Properties field against every
 	// Option combination the wire-format tests iterate.
+	es := testSchemaWithEdgeProps(t)
 	unresolvedWithPropsSnap := buildSnapshot(
-		t, s,
-		mustValidInstanceWithEdgeProps(t, s, "Person",
+		t, es,
+		mustValidInstanceWithEdgeProps(t, es, "Person",
 			[]any{"p1"}, map[string]any{"name": "Alice"},
 			"EMPLOYER", []any{"missing"},
 			map[string]any{"role": "Engineer", "since": int64(2020)}),

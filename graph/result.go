@@ -116,15 +116,12 @@ func (r *Snapshot) Schema() *schema.Schema {
 	return r.schema
 }
 
-// Types returns every ROOT type identity in the graph, ordered by TypeID:
-// schema path, then name. A composed child's type is absent unless a root of
-// that type is present too; walk [Instance.ComposedRelations] for the subtree.
-//
-// Every identity returned is one the bound schema can name, so
-// [schema.AddressableTag] accepts each: [Graph.Add] and [RebuildSnapshot] hold
-// every type a snapshot DENOTES to that rule, not only the ones with instances.
-// Use with [Snapshot.InstancesOf] for deterministic iteration. Returns a
-// defensive copy.
+// Types returns every type the snapshot denotes, ordered by TypeID: each
+// root's type, and each type [SnapshotParts.Types] named with no instance.
+// Every one can hold a root under the package doc's "Root type eligibility",
+// so [schema.AddressableTag] accepts it; a composed child's type is a part
+// type and is never denoted, so walk [Instance.ComposedRelations] for a
+// subtree. Returns a defensive copy.
 func (r *Snapshot) Types() []schema.TypeID {
 	if r == nil || len(r.types) == 0 {
 		return nil
@@ -279,7 +276,8 @@ func (r *Snapshot) Attestation() *Attestation {
 // Duplicates returns duplicate primary key records in sorted order.
 //
 // Duplicates are sorted by the tuple (type, primaryKey, relation,
-// conflictType, conflictKey, parent slot, rejected instance's properties).
+// conflictType, conflictKey, parent slot, rejected instance's properties,
+// rejected instance's provenance).
 // Returns nil if no duplicates were detected.
 // Returns a defensive copy.
 func (r *Snapshot) Duplicates() []*Duplicate {

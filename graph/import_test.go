@@ -75,7 +75,7 @@ func TestNewFromSnapshot_NilPanics(t *testing.T) {
 				t.Error("expected panic for nil schema")
 			}
 		}()
-		graph.NewFromSnapshot(nil, snap)
+		mustImport(t, nil, snap)
 	})
 
 	t.Run("nil_snapshot", func(t *testing.T) {
@@ -85,7 +85,7 @@ func TestNewFromSnapshot_NilPanics(t *testing.T) {
 				t.Error("expected panic for nil snapshot")
 			}
 		}()
-		graph.NewFromSnapshot(s, nil)
+		mustImport(t, s, nil)
 	})
 }
 
@@ -94,7 +94,7 @@ func TestNewFromSnapshot_EmptySnapshot(t *testing.T) {
 	s := importTestSchema(t)
 	snap := buildSnapshot(t, s)
 
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	ctx := context.Background()
 
 	// Add a new instance to the imported graph.
@@ -113,7 +113,7 @@ func TestNewFromSnapshot_InstancesIndexed(t *testing.T) {
 	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
 	snap := buildSnapshot(t, s, company, person)
 
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	reSnap := g.Snapshot()
 
 	assert.Len(t, reSnap.InstancesOf(mustTypeID(t, s, "Company")), 1)
@@ -135,7 +135,7 @@ func TestNewFromSnapshot_EdgesPreserved(t *testing.T) {
 	// Verify original has edges.
 	require.Len(t, snap.Edges(), 1)
 
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	reSnap := g.Snapshot()
 
 	// Edges survive round-trip.
@@ -163,7 +163,7 @@ func TestNewFromSnapshot_UnresolvedTargetMissing(t *testing.T) {
 	assert.Equal(t, "target_missing", snap.Unresolved()[0].Reason)
 
 	// Import, then add the missing Company.
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	ctx := context.Background()
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	result := g.Add(ctx, company)
@@ -195,7 +195,7 @@ func TestNewFromSnapshot_UnresolvedAbsentEmpty(t *testing.T) {
 	require.True(t, absentFound, "expected absent or empty unresolved edge")
 
 	// Import and re-snapshot — structural unresolved should persist.
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	reSnap := g.Snapshot()
 
 	var reAbsentFound bool
@@ -217,7 +217,7 @@ func TestNewFromSnapshot_DuplicatesPreserved(t *testing.T) {
 	snap := buildSnapshot(t, s, c1a, c1b)
 	require.Len(t, snap.Duplicates(), 1)
 
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	reSnap := g.Snapshot()
 
 	assert.Len(t, reSnap.Duplicates(), 1)
@@ -232,7 +232,7 @@ func TestNewFromSnapshot_AddAfterImport_NewType(t *testing.T) {
 	person := mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"})
 	snap := buildSnapshot(t, s, person)
 
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	ctx := context.Background()
 
 	// Add a Company — a type not in the original snapshot.
@@ -252,7 +252,7 @@ func TestNewFromSnapshot_AddAfterImport_DuplicatePK(t *testing.T) {
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	snap := buildSnapshot(t, s, company)
 
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	ctx := context.Background()
 
 	// Add another Company with same PK → should be flagged as duplicate.
@@ -272,7 +272,7 @@ func TestNewFromSnapshot_AddAfterImport_EdgeResolution(t *testing.T) {
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	snap := buildSnapshot(t, s, company)
 
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	ctx := context.Background()
 
 	// Add Person with edge to imported Company.
@@ -296,7 +296,7 @@ func TestNewFromSnapshot_CrossResolution(t *testing.T) {
 	require.Empty(t, snap.Edges())
 
 	// Import, then add the Company that resolves the pending edge.
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	ctx := context.Background()
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	result := g.Add(ctx, company)
@@ -319,7 +319,7 @@ func TestNewFromSnapshot_RoundTripFidelity(t *testing.T) {
 	original := buildSnapshot(t, s, company, person)
 
 	// Import and re-snapshot.
-	g := graph.NewFromSnapshot(s, original)
+	g := mustImport(t, s, original)
 	reconstructed := g.Snapshot()
 
 	// Structural comparison.
@@ -333,7 +333,7 @@ func TestNewFromSnapshot_Independence(t *testing.T) {
 	company := mustValidInstance(t, s, "Company", []any{"c1"}, map[string]any{"id": "c1", "title": "Acme"})
 	snap := buildSnapshot(t, s, company)
 
-	g := graph.NewFromSnapshot(s, snap)
+	g := mustImport(t, s, snap)
 	ctx := context.Background()
 
 	// Add a new instance to the graph.

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"maps"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -168,7 +167,9 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 		if pk := inst.PrimaryKey(); pk.Len() > 0 {
 			builder = builder.WithDetail(diag.DetailKeyPrimaryKey, pk.String())
 		}
-		if strings.Contains(inst.TypeName(), ".") {
+		// A type the closure holds and the entry schema cannot name is one
+		// imported through another schema, whatever the caller spelled.
+		if ok {
 			builder = builder.WithHint("if this type is from a transitively imported schema, add a direct import to access it")
 			builder = builder.WithDetail(diag.DetailKeyTypeSchema, typeID.SchemaPath().String())
 		}
@@ -324,8 +325,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 //     [Instance.TypeID] carry it. A rendered name cannot denote a type exactly
 //     — see the package doc's Type Identity and Type Names section.
 //   - parentKey: the parent's primary key in [FormatKey]'s form — for example
-//     `["alice"]`, which [FormatKey]("alice") renders, or the String of the
-//     [instance.ValidInstance] handed to [Graph.Add]. A Timestamp, Date or UUID
+//     `["alice"]`, which [FormatKey]("alice") renders, or the PrimaryKey().String()
+//     of the [instance.ValidInstance] handed to [Graph.Add]. A Timestamp, Date or UUID
 //     component is canonicalized here as [Graph.Add] canonicalized it, so any
 //     spelling of the instant addresses the parent; a refusal names the
 //     spelling the caller wrote.
@@ -492,13 +493,9 @@ func (g *Graph) AddComposed(
 				WithDetail(diag.DetailKeyRelationName, relationName).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			// The key must name the occupant that EXISTS, not the rejected
-			// child, which never attaches. Whether there is a key at all is a
-			// question for the SCHEMA and for the OCCUPANT: a part type
-			// declaring none has no key to report however an instance was
-			// constructed, and a rebuilt occupant of a keyed type can carry
-			// none, since RebuildSnapshot checks identity and not keys. The
-			// detail is then absent rather than carrying the "[]" stand-in.
-			if conflictInst != nil && childTyp.HasPrimaryKey() && conflictInst.PrimaryKey().Len() > 0 {
+			// child, which never attaches. A part type declaring no key has
+			// none to report, so the detail is absent rather than "[]".
+			if conflictInst != nil && childTyp.HasPrimaryKey() {
 				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, conflictInst.PrimaryKey().String())
 			}
 			issue := builder.Build()
@@ -849,25 +846,34 @@ func (g *Graph) iterEdges(inst *instance.ValidInstance) map[string]*instance.Val
 	return maps.Collect(inst.Edges())
 }
 
-// checkInstanceKey rejects an empty key, a key whose arity disagrees with the
-// type's declared primary keys, and a component that disagrees with the
-// instance's own present key property. An absent property is not a mismatch.
+// checkInstanceKey applies [checkKey] to a validated instance.
 func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance, canon *canonicalizer) error {
-	key := inst.PrimaryKey()
+	return checkKey(typ, inst.PrimaryKey(), inst.Property, canon)
+}
+
+// checkKey rejects an empty key, a key whose arity disagrees with the type's
+// declared primary keys, a component [ParseKey] cannot read back, a key
+// property that is absent or null, and a component that disagrees with its key property. A key states what the
+// instance's own properties state, so a key property the instance does not
+// hold leaves the key unstated. Every constructor of a snapshot shares it, so
+// a key one refuses the others refuse.
+func checkKey(typ *schema.Type, key immutable.Key, property func(string) (immutable.Value, bool), canon *canonicalizer) error {
 	if key.Len() == 0 {
 		return errors.New("primary key is empty")
 	}
-	declared := 0
-	for range typ.PrimaryKeys() {
-		declared++
-	}
-	if key.Len() != declared {
+	if declared := keyArity(typ); key.Len() != declared {
 		return fmt.Errorf("primary key has %d components; type declares %d", key.Len(), declared)
+	}
+	if i := unreadableComponent(key); i >= 0 {
+		return fmt.Errorf("primary key component %d is not a scalar graph.ParseKey reads back", i)
 	}
 	i := 0
 	for pk := range typ.PrimaryKeys() {
-		val, ok := inst.Property(pk.Name())
-		if ok && !keyComponentAgrees(key.Get(i), val, pk.Constraint(), canon) {
+		val, ok := property(pk.Name())
+		if !ok || val.IsNil() {
+			return fmt.Errorf("primary key property %q is absent or null", pk.Name())
+		}
+		if !keyComponentAgrees(key.Get(i), val, pk.Constraint(), canon) {
 			return fmt.Errorf("primary key component %d disagrees with property %q (%s vs %s)",
 				i, pk.Name(), renderKeyComponent(key.Get(i)), renderKeyComponent(val))
 		}
@@ -886,6 +892,11 @@ func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance, canon *can
 // of one Timestamp agree: the graph holds one spelling per value, and refusing
 // the pair here would refuse a record the rebuild path accepts.
 func keyComponentAgrees(component, property immutable.Value, c schema.Constraint, canon *canonicalizer) bool {
+	// One scalar stored twice is one value in every form, so the common case
+	// renders nothing; any other pair reaches the canonical form.
+	if sameScalar(component.Unwrap(), property.Unwrap()) {
+		return true
+	}
 	x, y := canon.canonicalOrRaw(component, c), canon.canonicalOrRaw(property, c)
 	switch xv := x.(type) {
 	case string:
@@ -906,6 +917,23 @@ func keyComponentAgrees(component, property immutable.Value, c schema.Constraint
 	// [0], and a typed nil is not == to an untyped one while both render
 	// [null]. The rendering decides key identity, so it decides here.
 	return renderKeyValue(x) == renderKeyValue(y)
+}
+
+// sameScalar reports whether x and y are one string, int64 or bool. It never
+// reports a float or a nil equal, for the reasons keyComponentAgrees states.
+func sameScalar(x, y any) bool {
+	switch xv := x.(type) {
+	case string:
+		yv, ok := y.(string)
+		return ok && xv == yv
+	case int64:
+		yv, ok := y.(int64)
+		return ok && xv == yv
+	case bool:
+		yv, ok := y.(bool)
+		return ok && xv == yv
+	}
+	return false
 }
 
 // renderKeyComponent renders one value in the canonical key form. Diagnostics

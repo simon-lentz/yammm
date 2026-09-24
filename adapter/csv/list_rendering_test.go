@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"fmt"
+	"errors"
 	"io"
 	"reflect"
 	"strings"
@@ -281,8 +281,10 @@ func TestListRendering_ABypassBuiltFloat32RendersAsAFloatDoes(t *testing.T) {
 }
 
 // A value its constraint cannot render reaches the writer only through a
-// bypass-built instance. It is written as it arrived, through Go's default
-// format, at the top of a cell and inside a list alike.
+// bypass-built instance. A scalar is written as it arrived, at the top of a
+// cell and inside a list alike, so the reader meets the value the snapshot
+// held; a composite such as a time.Time has no spelling a reader would read
+// back as it, and is refused.
 func TestListRendering_AValueItsConstraintCannotRenderIsWrittenAsItArrived(t *testing.T) {
 	t.Parallel()
 	s := loadListRenderingSchema(t)
@@ -290,19 +292,30 @@ func TestListRendering_AValueItsConstraintCannotRenderIsWrittenAsItArrived(t *te
 	if !ok {
 		t.Fatal("Grid missing from the fixture schema")
 	}
-	when := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
-	g := graph.New(s)
-	vi := instancetest.VI("Grid", instancetest.TypeID(grid.ID()), instancetest.PK("g1"),
-		instancetest.Props(map[string]any{"id": "g1", "tags": []any{when, "b"}}))
-	if res := g.Add(context.Background(), vi); res.HasErrors() {
-		t.Fatalf("add: %s", res)
+	build := func(props map[string]any) *graph.Snapshot {
+		t.Helper()
+		g := graph.New(s)
+		vi := instancetest.VI("Grid", instancetest.TypeID(grid.ID()), instancetest.PK("g1"), instancetest.Props(props))
+		if res := g.Add(context.Background(), vi); res.HasErrors() {
+			t.Fatalf("add: %s", res)
+		}
+		return g.Snapshot()
 	}
-	files, err := New().MarshalSnapshot(context.Background(), g.Snapshot())
+	files, err := New().MarshalSnapshot(context.Background(), build(map[string]any{"id": "g1", "n": "seven", "counts": []any{"eight", int64(9)}}))
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
 	}
-	if got, want := cellsOf(t, files["Grid"], "tags")[0], fmt.Sprint(when)+"|b"; got != want {
-		t.Errorf("tags: got %q, want %q", got, want)
+	if got := cellsOf(t, files["Grid"], "n")[0]; got != "seven" {
+		t.Errorf("n: got %q, want seven", got)
+	}
+	if got := cellsOf(t, files["Grid"], "counts")[0]; got != "eight|9" {
+		t.Errorf("counts: got %q, want eight|9", got)
+	}
+
+	when := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	_, err = New().MarshalSnapshot(context.Background(), build(map[string]any{"id": "g1", "tags": []any{when, "b"}}))
+	if !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), "a value of type time.Time") {
+		t.Errorf("a time.Time in a List<String>: %v, want ErrUnrepresentable naming its type", err)
 	}
 }
 

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -679,6 +681,43 @@ func TestBatchNodeQueries_MissingShape(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no shape for type") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestBatchNodeQueries_AShapeNamingAKeyTheInstanceLacks pins the route to the
+// missing and nil key refusals once every constructor of a snapshot holds a
+// key property present and non-null: a GraphShape entry whose key names were
+// changed after ShapeForSchema built it. The map is exported, so a caller can.
+func TestBatchNodeQueries_AShapeNamingAKeyTheInstanceLacks(t *testing.T) {
+	t.Parallel()
+	s, _ := loadSchemaAndValidator(t, "basic.yammm")
+	a := New()
+	entity, _ := s.Type("Entity")
+	// Built without validation, which never stores a null property value.
+	g := graph.New(s)
+	if r := g.Add(context.Background(), instance.NewValidInstance("Entity", entity.ID(), immutable.WrapKey([]any{"e1"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "score": nil}), nil, nil, nil)); r.HasErrors() {
+		t.Fatalf("add: %s", r)
+	}
+	graphResult := g.Snapshot()
+	for _, c := range []struct {
+		keys []string
+		want string
+	}{
+		{[]string{"id", "description"}, "missing required primary key(s): [description]"},
+		{[]string{"id", "score"}, "nil primary key(s): [score]"},
+	} {
+		shapes, res := a.ShapeForSchema(context.Background(), s)
+		if res.HasErrors() {
+			t.Fatalf("ShapeForSchema: %s", res)
+		}
+		sh := shapes.Types[entity.ID()]
+		sh.PrimaryKeys = c.keys
+		shapes.Types[entity.ID()] = sh
+		_, err := a.BatchNodeQueries(context.Background(), graphResult, shapes)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("keys %v: got %v, want %q", c.keys, err, c.want)
+		}
 	}
 }
 

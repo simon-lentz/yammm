@@ -33,6 +33,7 @@ part type Mid {
 part type Leaf {
 	id String primary
 	label String
+	*-> LEAF (many) Leaf
 }
 `
 
@@ -80,23 +81,21 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{parentID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			parentID: {{
-				TypeName:   "Parent",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     parentID,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
 				Provenance: mustProvenance(t, "parents.json", "$.rows[0]"),
 				Composed: map[string][]graph.InstanceParts{
 					"CHILDREN": {{
-						TypeName:   "Child",
 						TypeID:     childID,
 						PrimaryKey: immutable.WrapKey([]any{"c1"}),
 						Properties: immutable.WrapProperties(map[string]any{"id": "c1", "value": "v"}),
 						Provenance: mustProvenance(t, "children.json", "$.rows[1]"),
 					}},
 				},
-			}},
+			},
 		},
 	}
 
@@ -155,21 +154,18 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{rootID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			rootID: {{
-				TypeName:   "Root",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     rootID,
 				PrimaryKey: immutable.WrapKey([]any{"r1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
 				Composed: map[string][]graph.InstanceParts{
 					"MID": {{
-						TypeName:   "Mid",
 						TypeID:     mustTypeID(t, s, "Mid"),
 						PrimaryKey: immutable.WrapKey([]any{"m1"}),
 						Properties: immutable.WrapProperties(map[string]any{"id": "m1"}),
 						Composed: map[string][]graph.InstanceParts{
 							"LEAF": {{
-								TypeName:   "Leaf",
 								TypeID:     mustTypeID(t, s, "Leaf"),
 								PrimaryKey: immutable.WrapKey([]any{"l1"}),
 								Properties: immutable.WrapProperties(map[string]any{"id": "l1", "label": "deep"}),
@@ -177,7 +173,7 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 						},
 					}},
 				},
-			}},
+			},
 		},
 	}
 
@@ -235,19 +231,17 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID, basinID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   "Anchor",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-			}},
-			basinID: {{
-				TypeName:   "base.Basin",
+			},
+			{
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(7)}),
-			}},
+			},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation:   "DRAINS",
@@ -348,7 +342,7 @@ var parallelEdgeSchema = func() string {
 	var src strings.Builder
 	src.WriteString("schema \"parallel\"\n\ntype Node {\n\tid String primary\n")
 	for _, r := range parallelRelations {
-		src.WriteString("\t--> R" + string(r) + " (_) Node { w Float }\n")
+		src.WriteString("\t--> R" + string(r) + " (_:many) Node { w Float }\n")
 	}
 	src.WriteString("}\n")
 	return src.String()
@@ -380,7 +374,6 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 
 	node := func(k string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   "Node",
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{k}),
 			Properties: immutable.WrapProperties(map[string]any{"id": k}),
@@ -400,9 +393,12 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 		}
 	}
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{id},
-		Instances: map[schema.TypeID][]graph.InstanceParts{id: {node("n1"), node("n2")}},
-		Edges:     edges,
+		Types: []schema.TypeID{id},
+		Instances: []graph.InstanceParts{
+			node("n1"),
+			node("n2"),
+		},
+		Edges: edges,
 	})
 	if res.HasErrors() {
 		t.Fatalf("assembling: %s", res)

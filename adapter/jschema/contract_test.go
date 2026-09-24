@@ -409,19 +409,26 @@ func TestContractAsymmetry_ValueAndNameReading(t *testing.T) {
 			t.Error("a null optional property must read as absent")
 		}
 	})
+}
 
-	t.Run("empty array under a part or abstract type's name", func(t *testing.T) {
-		for _, fx := range []struct{ fixture, key string }{{"relations", "Wheel"}, {"inheritance", "GeoEntity"}} {
-			s := loadSchema(t, fx.fixture)
-			data := []byte(`{"` + fx.key + `":[]}`)
-			if got := yammmStageCodes(t, s, data); len(got) != 0 {
-				t.Errorf("%s: yammm must accept an empty array under %s; got %v", fx.fixture, fx.key, got)
-			}
-			if err := validateEmitted(t, compileEmitted(t, s), data); err == nil {
-				t.Errorf("%s: emitted schema must flag the key %s", fx.fixture, fx.key)
-			}
+// TestContract_AKeyTheEnvelopeDoesNotNameIsRefusedByBoth pins one key set on
+// both sides: the envelope names no part or abstract type, and instance
+// validation refuses either name before it answers an empty batch.
+func TestContract_AKeyTheEnvelopeDoesNotNameIsRefusedByBoth(t *testing.T) {
+	for _, fx := range []struct {
+		fixture, key string
+		code         diag.Code
+	}{
+		{"relations", "Wheel", diag.E_PART_TYPE_DIRECT},
+		{"inheritance", "GeoEntity", diag.E_ABSTRACT_TYPE},
+	} {
+		s := loadSchema(t, fx.fixture)
+		data := []byte(`{"` + fx.key + `":[]}`)
+		assertOnlyStageCode(t, yammmStageCodes(t, s, data), "validate", fx.code)
+		if err := validateEmitted(t, compileEmitted(t, s), data); err == nil {
+			t.Errorf("%s: emitted schema must flag the key %s", fx.fixture, fx.key)
 		}
-	})
+	}
 }
 
 // TestContractAsymmetry_Numbers pins the number divergence in both directions.

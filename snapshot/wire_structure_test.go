@@ -168,7 +168,7 @@ func TestWireProbe_DuplicateTypeDiffersFromConflict(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"duplicates":[{"type":0,`, `"duplicates":[{"type":1,`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	expectOutcome(t, "load[ok] verify[ok]", "load["+loadSig+"] verify["+verifySig+"]")
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DuplicateRelationWithoutParent deletes a composed duplicate's
@@ -200,7 +200,7 @@ func TestWireProbe_DuplicateAtDepthTwo(t *testing.T) {
 	}
 	data := nestedDoc(ctx, t, s)
 
-	dup := `{"type":0,"key":["l1"],"instance":{"key":["l1"],"properties":{},"provenance":null},"conflict":{"type":0,"key":["l1"]},"parent_type":1,"parent_key":["m1"],"relation":"LEAF"}`
+	dup := `{"type":0,"key":["l1"],"instance":{"key":["l1"],"properties":{"id":"l1"},"provenance":null},"conflict":{"type":0,"key":["l1"]},"parent_type":1,"parent_key":["m1"],"relation":"LEAF"}`
 	edited := spliceOnce(t, data, `"duplicates":[]`, `"duplicates":[`+dup+`]`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
 	expectOutcome(t, "load[error:E_SNAPSHOT_DANGLING_REFERENCE] verify[error:E_SNAPSHOT_DANGLING_REFERENCE]", "load["+loadSig+"] verify["+verifySig+"]")
@@ -223,21 +223,18 @@ func nestedDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 	rootID := mustTypeID(t, s, "Root")
 	parts := graph.SnapshotParts{
 		Types: []schema.TypeID{rootID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			rootID: {{
-				TypeName:   "Root",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     rootID,
 				PrimaryKey: immutable.WrapKey([]any{"r1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
 				Composed: map[string][]graph.InstanceParts{
 					"MID": {{
-						TypeName:   "Mid",
 						TypeID:     mustTypeID(t, s, "Mid"),
 						PrimaryKey: immutable.WrapKey([]any{"m1"}),
 						Properties: immutable.WrapProperties(map[string]any{"id": "m1"}),
 						Composed: map[string][]graph.InstanceParts{
 							"LEAF": {{
-								TypeName:   "Leaf",
 								TypeID:     mustTypeID(t, s, "Leaf"),
 								PrimaryKey: immutable.WrapKey([]any{"l1"}),
 								Properties: immutable.WrapProperties(map[string]any{"id": "l1", "label": "deep"}),
@@ -245,7 +242,7 @@ func nestedDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 						},
 					}},
 				},
-			}},
+			},
 		},
 	}
 	return marshalParts(ctx, t, s, parts)
@@ -263,13 +260,12 @@ func TestWireProbe_TypesTableWiderThanInstances(t *testing.T) {
 
 	first := marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID, basinID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-			}},
+			},
 		},
 	})
 
@@ -304,21 +300,19 @@ func TestWireProbe_TableRowStaleSchemaName(t *testing.T) {
 
 	data := marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{siteID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			siteID: {{
-				TypeName:   tagForm(s, siteID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     siteID,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
 				Composed: map[string][]graph.InstanceParts{
 					"IMPORTED": {{
-						TypeName:   tagForm(s, basePartID),
 						TypeID:     basePartID,
 						PrimaryKey: immutable.WrapKey([]any{"bp1"}),
 						Properties: immutable.WrapProperties(map[string]any{"name": "bp1", "mass": float64(2)}),
 					}},
 				},
-			}},
+			},
 		},
 	})
 
@@ -346,19 +340,17 @@ func TestWireProbe_RootTypeIndexContradictsSection(t *testing.T) {
 
 	data := marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID, basinID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-			}},
-			basinID: {{
-				TypeName:   tagForm(s, basinID),
+			},
+			{
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(7)}),
-			}},
+			},
 		},
 	})
 
@@ -376,10 +368,11 @@ func TestWireProbe_RootTypeIndexContradictsSection(t *testing.T) {
 	expectOutcome(t, "load[error:E_SNAPSHOT_TYPE_MISMATCH] verify[error:E_SNAPSHOT_TYPE_MISMATCH]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
-// TestWireProbe_RootGroupKeyContradictsPartsIdentity assembles parts whose
-// instance carries an identity different from the group it is filed under,
-// and asks which one survives the round trip.
-func TestWireProbe_RootGroupKeyContradictsPartsIdentity(t *testing.T) {
+// TestWireProbe_RootOutsideTheTypesTableKeepsItsIdentity assembles parts whose
+// types list names Anchor while the one root is a Site, and asks which identity
+// survives the round trip. The parts file a root under its own identity, so
+// there is no group key to disagree with it.
+func TestWireProbe_RootOutsideTheTypesTableKeepsItsIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
@@ -388,13 +381,12 @@ func TestWireProbe_RootGroupKeyContradictsPartsIdentity(t *testing.T) {
 
 	data := marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, siteID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     siteID,
 				PrimaryKey: immutable.WrapKey([]any{"x1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "x1"}),
-			}},
+			},
 		},
 	})
 
@@ -417,15 +409,17 @@ func edgeDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
 	basin := func(key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   tagForm(s, basinID),
 			TypeID:     basinID,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "area": float64(1)}),
 		}
 	}
 	return marshalParts(ctx, t, s, graph.SnapshotParts{
-		Types:     []schema.TypeID{basinID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{basinID: {basin("b1"), basin("b2")}},
+		Types: []schema.TypeID{basinID},
+		Instances: []graph.InstanceParts{
+			basin("b1"),
+			basin("b2"),
+		},
 		Edges: []graph.EdgeParts{{
 			Relation:   "NEAR",
 			SourceType: basinID,
@@ -443,13 +437,12 @@ func unresolvedDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
 	return marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{basinID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			basinID: {{
-				TypeName:   tagForm(s, basinID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(1)}),
-			}},
+			},
 		},
 		Unresolved: []graph.UnresolvedParts{{
 			SourceType: basinID,
@@ -468,14 +461,15 @@ func rootDupDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 	t.Helper()
 	anchorID := mustTypeIDIn(t, s, "", "Anchor")
 	inst := graph.InstanceParts{
-		TypeName:   tagForm(s, anchorID),
 		TypeID:     anchorID,
 		PrimaryKey: immutable.WrapKey([]any{"a9"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "a9", "depth": float64(4)}),
 	}
 	return marshalParts(ctx, t, s, graph.SnapshotParts{
-		Types:     []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{anchorID: {inst}},
+		Types: []schema.TypeID{anchorID},
+		Instances: []graph.InstanceParts{
+			inst,
+		},
 		Duplicates: []graph.DuplicateParts{{
 			Type:         anchorID,
 			Key:          immutable.WrapKey([]any{"a9"}),
@@ -516,7 +510,7 @@ func TestWireProbe_DuplicateKeyDisagreesWithItsInstance(t *testing.T) {
 	edited := spliceOnce(t, data, `"instance":{"key":["a9"]`, `"instance":{"key":["a8"]`)
 
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]",
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED x2] verify[error:E_SNAPSHOT_MALFORMED x2]",
 		"load["+loadSig+"] verify["+verifySig+"]")
 }
 
@@ -527,22 +521,20 @@ func rootDupTwoRowDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byt
 	anchorID := mustTypeIDIn(t, s, "", "Anchor")
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
 	inst := graph.InstanceParts{
-		TypeName:   tagForm(s, anchorID),
 		TypeID:     anchorID,
 		PrimaryKey: immutable.WrapKey([]any{"a9"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "a9", "depth": float64(4)}),
 	}
 	basin := graph.InstanceParts{
-		TypeName:   tagForm(s, basinID),
 		TypeID:     basinID,
 		PrimaryKey: immutable.WrapKey([]any{"b1"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(2)}),
 	}
 	return marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID, basinID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {inst},
-			basinID:  {basin},
+		Instances: []graph.InstanceParts{
+			inst,
+			basin,
 		},
 		Duplicates: []graph.DuplicateParts{{
 			Type:         anchorID,
@@ -699,9 +691,11 @@ func TestWireProbe_AbsentUnresolvedTargetType(t *testing.T) {
 	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
 
-// TestWireProbe_ComposedChildRowIgnoresRelationTarget rebinds a composed
-// child's row to a type its relation does not target.
-func TestWireProbe_ComposedChildRowIgnoresRelationTarget(t *testing.T) {
+// TestWireProbe_ComposedChildRowOutsideItsRelationTargetIsRefused rebinds a
+// composed child's row to a type its relation does not target. graph.Add
+// matches a child to the target by identity, so no graph holds the shape, and a
+// writer would render the child under the composition's field as the target.
+func TestWireProbe_ComposedChildRowOutsideItsRelationTargetIsRefused(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s, result := schema.LoadString(t.Context(), nestedSchema, "nested.yammm")
@@ -711,19 +705,8 @@ func TestWireProbe_ComposedChildRowIgnoresRelationTarget(t *testing.T) {
 	data := nestedDoc(ctx, t, s)
 
 	edited := spliceOnce(t, data, `"LEAF":[{"key":["l1"],"type":0,`, `"LEAF":[{"key":["l1"],"type":2,`)
-	loadSig, verifySig, loaded := loadAndVerify(ctx, t, edited, s)
-	fact := ""
-	if loaded != nil {
-		rootID := mustTypeID(t, s, "Root")
-		if root, ok := loaded.InstanceByKey(rootID, graph.FormatKey("r1")); ok {
-			for _, mid := range root.Composed("MID") {
-				for _, leaf := range mid.Composed("LEAF") {
-					fact = "; leaf bound to " + ident(leaf.TypeID())
-				}
-			}
-		}
-	}
-	expectOutcome(t, "load[ok] verify[ok]; leaf bound to Root@nested.yammm", "load["+loadSig+"] verify["+verifySig+"]"+fact)
+	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED error:E_SNAPSHOT_TYPE_MISMATCH] verify[error:E_SNAPSHOT_MALFORMED error:E_SNAPSHOT_TYPE_MISMATCH]", "load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DuplicateIdentityRows appends a second table row carrying an
@@ -736,13 +719,12 @@ func TestWireProbe_DuplicateIdentityRows(t *testing.T) {
 
 	data := marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-			}},
+			},
 		},
 	})
 
@@ -817,13 +799,12 @@ func TestWireProbe_ZeroIdentityInstanceMarshal(t *testing.T) {
 
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID, {}},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-			}},
+			},
 		},
 	})
 	if result.HasErrors() {
@@ -849,13 +830,12 @@ func TestWireProbe_Float32PropertyRoundTrip(t *testing.T) {
 
 	data := marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float32(1.5)}),
-			}},
+			},
 		},
 	})
 
@@ -938,13 +918,12 @@ func TestWireProbe_UnparseableProvenancePath(t *testing.T) {
 
 	data := marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-			}},
+			},
 		},
 	})
 
@@ -965,13 +944,12 @@ func TestWireProbe_NonCanonicalProvenancePathSurvives(t *testing.T) {
 
 	data := marshalParts(ctx, t, s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-			}},
+			},
 		},
 	})
 
@@ -1058,7 +1036,7 @@ func TestWireProbe_ComposedNestingBeyondLimit(t *testing.T) {
 	leaf := `{"key":["l1"],"type":0,"properties":{"id":"l1","label":"deep"},"provenance":null}`
 	chain := leaf
 	for i := range 35 {
-		chain = fmt.Sprintf(`{"key":["d%d"],"type":0,"properties":{},"composed":{"LEAF":[%s]},"provenance":null}`, i, chain)
+		chain = fmt.Sprintf(`{"key":["d%d"],"type":0,"properties":{"id":"d%d"},"composed":{"LEAF":[%s]},"provenance":null}`, i, i, chain)
 	}
 	edited := spliceOnce(t, data, leaf, chain)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)

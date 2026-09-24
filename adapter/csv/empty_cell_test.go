@@ -3,6 +3,7 @@ package csv
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"reflect"
 	"strings"
@@ -857,16 +858,15 @@ func (w *nthFailingWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// A bypass-built snapshot can hold a null property and a null list element,
-// which the validator never produces. Both write empty text, never a spelling
-// of null.
+// A bypass-built snapshot can hold a null property, which the validator never
+// produces. It writes empty text, never a spelling of null.
 func TestEmptyCell_BypassBuiltNullWritesEmptyText(t *testing.T) {
 	t.Parallel()
 	s := canonicalTestSchema(t)
 	g := graph.New(s)
 	sensorID, _ := s.Type("Sensor")
 	sensor := instancetest.VI("Sensor", instancetest.TypeID(sensorID.ID()), instancetest.PK("s1"),
-		instancetest.Props(map[string]any{"id": "s1", "created_at": nil, "samples": []any{nil, "2026-08-19T13:00:00Z"}}))
+		instancetest.Props(map[string]any{"id": "s1", "created_at": nil, "samples": []any{"2026-08-19T13:00:00Z"}}))
 	if res := g.Add(context.Background(), sensor); !res.OK() {
 		t.Fatalf("add: %s", res.String())
 	}
@@ -874,7 +874,45 @@ func TestEmptyCell_BypassBuiltNullWritesEmptyText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
 	}
-	if got, want := string(out["Sensor"]), "created_at,id,installed,run_id,samples,feed._target_at\n,s1,,,|2026-08-19T13:00:00Z,\n"; got != want {
+	if got, want := string(out["Sensor"]), "created_at,id,installed,run_id,samples,feed._target_at\n,s1,,,2026-08-19T13:00:00Z,\n"; got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// A null list element and a composite value — a map, an array, a struct —
+// have no spelling in a cell: the list grammar would write the element as ""
+// and the composite as Go's %v of it. Each is refused as the class, naming the
+// property, at any position in a list.
+func TestWriters_AValueACellCannotSpellIsRefused(t *testing.T) {
+	t.Parallel()
+	s := canonicalTestSchema(t)
+	sensorID, _ := s.Type("Sensor")
+	for _, c := range []struct {
+		name, mentions string
+		samples        any
+	}{
+		{"a null list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", nil}},
+		{"a map value", "a map: a map, an array, a pointer or a struct has no spelling", map[string]any{"at": "2026-08-19T13:00:00Z"}},
+		{"a map list element", "list element 0: a map: a map, an array", []any{map[string]any{"at": "x"}}},
+		{"an int-keyed map", "a value of type map[int]interface {}: a map, an array", map[int]any{1: "x"}},
+		{"an array", "a value of type [2]string: a map, an array", [2]string{"a", "b"}},
+		{"a struct", "a value of type struct { A int }: a map, an array", struct{ A int }{1}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			g := graph.New(s)
+			sensor := instancetest.VI("Sensor", instancetest.TypeID(sensorID.ID()), instancetest.PK("s1"),
+				instancetest.Props(map[string]any{"id": "s1", "samples": c.samples}))
+			if res := g.Add(context.Background(), sensor); !res.OK() {
+				t.Fatalf("add: %s", res.String())
+			}
+			_, err := New().MarshalSnapshot(context.Background(), g.Snapshot())
+			if !errors.Is(err, ErrUnrepresentable) {
+				t.Fatalf("MarshalSnapshot: %v does not match ErrUnrepresentable", err)
+			}
+			if !strings.Contains(err.Error(), `property "samples": `+c.mentions) {
+				t.Errorf("the refusal does not name the site: %v", err)
+			}
+		})
 	}
 }

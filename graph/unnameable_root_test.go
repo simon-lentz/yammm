@@ -87,9 +87,8 @@ func unnameableFixture(t *testing.T) (*schema.Schema, schema.TypeID) {
 	return s, typ.ID()
 }
 
-func beaconParts(s *schema.Schema, id schema.TypeID, key string) graph.InstanceParts {
+func beaconParts(id schema.TypeID, key string) graph.InstanceParts {
 	return graph.InstanceParts{
-		TypeName:   schema.TagForm(s, id),
 		TypeID:     id,
 		PrimaryKey: immutable.WrapKey([]any{key}),
 		Properties: immutable.WrapProperties(map[string]any{"id": key, "power": float64(1)}),
@@ -108,8 +107,8 @@ func TestRebuildSnapshot_UnnameableRootRefused(t *testing.T) {
 
 	_, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{deepBeacon},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			deepBeacon: {beaconParts(s, deepBeacon, "d1")},
+		Instances: []graph.InstanceParts{
+			beaconParts(deepBeacon, "d1"),
 		},
 	})
 	if !result.HasErrors() {
@@ -141,7 +140,7 @@ func TestRebuildSnapshot_UnnameableRootDuplicateRefused(t *testing.T) {
 		Duplicates: []graph.DuplicateParts{{
 			Type:         deepBeacon,
 			Key:          immutable.WrapKey([]any{"d1"}),
-			Instance:     beaconParts(s, deepBeacon, "d1"),
+			Instance:     beaconParts(deepBeacon, "d1"),
 			ConflictType: deepBeacon,
 			ConflictKey:  immutable.WrapKey([]any{"d1"}),
 		}},
@@ -207,21 +206,19 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{basin},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			basin: {{
-				TypeName:   schema.TagForm(s, basin),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     basin,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
 				Composed: map[string][]graph.InstanceParts{
 					"PIECES": {{
-						TypeName:   schema.TagForm(s, shard.ID()),
 						TypeID:     shard.ID(),
 						PrimaryKey: immutable.WrapKey([]any{"s1"}),
 						Properties: immutable.WrapProperties(map[string]any{"name": "s1", "density": float64(3)}),
 					}},
 				},
-			}},
+			},
 		},
 	})
 	if result.HasErrors() {
@@ -241,7 +238,10 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 }
 
 // TestGraphAdd_UnnameableRootRefused pins that Add applies the same rule the
-// constructors do, by the same predicate rather than by its own copy.
+// constructors do, by the same predicate rather than by its own copy, and that
+// the refusal carries the transitive-import hint and the declaring schema under
+// any spelling of the name: the identity decides, not a dot in the caller's
+// string.
 //
 // The BEHAVIOUR here predates the shared predicate — TestIntegration_ComplexMultiSchema
 // already drove Add's refusal — so what this adds is the diagnostic code at a
@@ -254,17 +254,31 @@ func TestGraphAdd_UnnameableRootRefused(t *testing.T) {
 	deep, _ := base.Schema().ImportByAlias("deep")
 	typ, _ := deep.Schema().Type("Beacon")
 
-	valid := instance.NewValidInstance(schema.TagForm(s, typ.ID()), typ.ID(),
-		immutable.WrapKey([]any{"d1"}),
-		immutable.WrapProperties(map[string]any{"id": "d1", "power": float64(1)}),
-		nil, nil, nil)
+	for _, spelling := range []string{schema.TagForm(s, typ.ID()), "Beacon"} {
+		valid := instance.NewValidInstance(spelling, typ.ID(),
+			immutable.WrapKey([]any{"d1"}),
+			immutable.WrapProperties(map[string]any{"id": "d1", "power": float64(1)}),
+			nil, nil, nil)
 
-	addResult := graph.New(s).Add(context.Background(), valid)
-	if !addResult.HasErrors() {
-		t.Fatal("Add accepted a root the entry schema cannot name")
-	}
-	if !resultHasCode(addResult, diag.E_GRAPH_TYPE_NOT_FOUND) {
-		t.Errorf("Add reported %s, want %s", addResult, diag.E_GRAPH_TYPE_NOT_FOUND)
+		addResult := graph.New(s).Add(context.Background(), valid)
+		if !addResult.HasErrors() {
+			t.Fatalf("Add accepted a root the entry schema cannot name, spelled %q", spelling)
+		}
+		var sawHint, sawSchema bool
+		for issue := range addResult.Issues() {
+			if issue.Code() != diag.E_GRAPH_TYPE_NOT_FOUND {
+				continue
+			}
+			sawHint = strings.Contains(issue.Hint(), "transitively imported schema")
+			for _, d := range issue.Details() {
+				if d.Key == diag.DetailKeyTypeSchema && d.Value == typ.ID().SchemaPath().String() {
+					sawSchema = true
+				}
+			}
+		}
+		if !resultHasCode(addResult, diag.E_GRAPH_TYPE_NOT_FOUND) || !sawHint || !sawSchema {
+			t.Errorf("spelled %q: Add reported %s, want %s with the transitive-import hint and type_schema", spelling, addResult, diag.E_GRAPH_TYPE_NOT_FOUND)
+		}
 	}
 	if got := deepBeacon; got != typ.ID() {
 		t.Errorf("the fixture and the resolved type disagree: %s, %s", got, typ.ID())

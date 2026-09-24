@@ -8,12 +8,14 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Instance represents a validated instance node in the graph.
+// Instance represents an instance node in the graph. [Instance.Validated]
+// reports whether it came through the validator.
 //
 // Instance provides read-only access to instance data. It is safe for
 // concurrent read access from multiple goroutines.
 //
-// Instances are created internally by [Graph.Add] and [Graph.AddComposed].
+// Instances are created internally, by [Graph.Add], [Graph.AddComposed],
+// [RebuildSnapshot] and the snapshot copies [Graph.Snapshot] and the import take.
 // They are accessed via [Snapshot.AllInstances], [Snapshot.InstancesOf], or
 // [Snapshot.InstanceByKey].
 type Instance struct {
@@ -179,8 +181,9 @@ func (i *Instance) ComposedRelations() []string {
 	return result
 }
 
-// newInstance creates an Instance from graph-internal data.
-// This is an internal constructor; instances are created by Graph.Add/AddComposed.
+// newInstance creates an Instance from graph-internal data. [Graph.Add],
+// [Graph.AddComposed] and [RebuildSnapshot] build through it; a snapshot copy
+// is taken by cloneInstance.
 func newInstance(
 	typeName string,
 	typeID schema.TypeID,

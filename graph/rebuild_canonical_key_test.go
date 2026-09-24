@@ -36,60 +36,35 @@ part type Address {
 	return s
 }
 
-// TestAddComposed_OneOverflow_RebuiltKeylessOccupantReportsNoStandIn drives
-// the (one)-overflow site through the one public path that installs a keyed
-// part's occupant with no key: RebuildSnapshot checks a part's identity and
-// not its key, so a loaded document can hold one. The primary_key detail must
-// then be absent, not the literal "[]" the zero key renders.
-func TestAddComposed_OneOverflow_RebuiltKeylessOccupantReportsNoStandIn(t *testing.T) {
+// TestRebuildSnapshot_RefusesAKeylessOccupantOfAKeyedPart holds a keyed
+// part's occupant to the key rule Graph.Add applies, so no loaded document
+// installs a keyed child with no key.
+func TestRebuildSnapshot_RefusesAKeylessOccupantOfAKeyedPart(t *testing.T) {
 	t.Parallel()
 	s := oneKeyedPartSchema(t)
 	orderID := mustTypeID(t, s, "Order")
 	addressID := mustTypeID(t, s, "Address")
 
-	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{orderID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			orderID: {{
-				TypeName:   "Order",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     orderID,
 				PrimaryKey: immutable.WrapKey([]any{"o1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "o1"}),
 				Composed: map[string][]graph.InstanceParts{
 					"ADDRESS": {{
-						TypeName:   "Address",
 						TypeID:     addressID,
 						Properties: immutable.WrapProperties(map[string]any{"line": "first"}),
 					}},
 				},
-			}},
+			},
 		},
 	})
-	if res.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", res)
+	if !res.HasErrors() {
+		t.Fatal("a keyed part's occupant with no key was rebuilt")
 	}
-
-	g := graph.NewFromSnapshot(s, snap)
-	second := instance.NewValidInstance("Address", addressID,
-		immutable.WrapKey([]any{"second"}),
-		immutable.WrapProperties(map[string]any{"line": "second"}),
-		nil, nil, nil)
-	result := g.AddComposed(t.Context(), orderID, graph.FormatKey("o1"), "ADDRESS", second)
-	if result.OK() {
-		t.Fatal("a second child on a (one) slot was accepted")
-	}
-	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
-
-	for issue := range result.Issues() {
-		if issue.Code() != diag.E_DUPLICATE_COMPOSED_PK {
-			continue
-		}
-		for _, d := range issue.Details() {
-			if d.Key == diag.DetailKeyPrimaryKey {
-				t.Errorf("primary_key detail = %q; the occupant carries no key, so the detail must be absent", d.Value)
-			}
-		}
-	}
+	assertHasCode(t, res, diag.E_GRAPH_INVALID_PK)
 }
 
 // canonicalKeySchema declares a canonicalizing kind at every position the Add
@@ -171,27 +146,24 @@ func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 
 	rebuilt, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{sensorID, siteID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			siteID: {{
-				TypeName:   "Site",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     siteID,
 				PrimaryKey: immutable.WrapKey([]any{spelled}),
 				Properties: immutable.WrapProperties(map[string]any{"established_at": spelled}),
-			}},
-			sensorID: {{
-				TypeName:   "Sensor",
+			},
+			{
 				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "s1", "created_at": parsed}),
 				Composed: map[string][]graph.InstanceParts{
 					"READINGS": {{
-						TypeName:   "Reading",
 						TypeID:     readingID,
 						PrimaryKey: immutable.WrapKey([]any{spelled}),
 						Properties: immutable.WrapProperties(map[string]any{"taken_at": spelled, "logged_at": parsed}),
 					}},
 				},
-			}},
+			},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation:   "SITE",
@@ -361,15 +333,15 @@ func rawKeyedEventParts(t *testing.T, s *schema.Schema, edgeSpelling string) gra
 	const raw = "2020-01-02T03:04:05+00:00"
 	return graph.SnapshotParts{
 		Types: []schema.TypeID{eventID, noteID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			eventID: {{
-				TypeName: "Event", TypeID: eventID, PrimaryKey: immutable.WrapKey([]any{raw}),
+		Instances: []graph.InstanceParts{
+			{
+				TypeID: eventID, PrimaryKey: immutable.WrapKey([]any{raw}),
 				Properties: immutable.WrapProperties(map[string]any{"observed_at": raw}),
-			}},
-			noteID: {{
-				TypeName: "Note", TypeID: noteID, PrimaryKey: immutable.WrapKey([]any{"n1"}),
+			},
+			{
+				TypeID: noteID, PrimaryKey: immutable.WrapKey([]any{"n1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "n1"}),
-			}},
+			},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation: "ABOUT", SourceType: noteID, SourceKey: immutable.WrapKey([]any{"n1"}),
@@ -430,13 +402,16 @@ func TestRebuildSnapshot_RefusesTwoInstancesAtOneCanonicalAddress(t *testing.T) 
 	eventID := mustTypeID(t, s, "Event")
 	event := func(at string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName: "Event", TypeID: eventID, PrimaryKey: immutable.WrapKey([]any{at}),
+			TypeID: eventID, PrimaryKey: immutable.WrapKey([]any{at}),
 			Properties: immutable.WrapProperties(map[string]any{"observed_at": at}),
 		}
 	}
 	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{eventID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{eventID: {event("2020-01-02T03:04:05Z"), event("2020-01-02T03:04:05+00:00")}},
+		Types: []schema.TypeID{eventID},
+		Instances: []graph.InstanceParts{
+			event("2020-01-02T03:04:05Z"),
+			event("2020-01-02T03:04:05+00:00"),
+		},
 	})
 	if snap != nil || !res.HasFatal() {
 		t.Fatalf("two spellings of one key were admitted as two instances: snap=%v %s", snap != nil, res)

@@ -62,13 +62,16 @@ func loadBenchInputs(tb testing.TB) benchInputs {
 				"Person", typ.ID(),
 				immutable.WrapKey([]any{fmt.Sprintf("p%06d", i)}),
 				immutable.WrapProperties(map[string]any{
+					"id":    fmt.Sprintf("p%06d", i),
 					"name":  fmt.Sprintf("Person %06d", i),
 					"email": fmt.Sprintf("person%06d@example.org", i),
 					"role":  "contributor",
 				}),
 				nil, nil, nil,
 			)
-			g.Add(ctx, inst)
+			if res := g.Add(ctx, inst); res.HasErrors() {
+				tb.Fatalf("bench add: %v", res.Err())
+			}
 		}
 		snap := g.Snapshot()
 		data, res := snapshot.Marshal(ctx, snap)

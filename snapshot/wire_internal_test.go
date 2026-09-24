@@ -152,7 +152,6 @@ func nestedParts(nodeID schema.TypeID, depth int) []graph.InstanceParts {
 		return nil
 	}
 	node := graph.InstanceParts{
-		TypeName:   "Node",
 		TypeID:     nodeID,
 		PrimaryKey: immutable.WrapKey([]any{fmt.Sprintf("n%d", depth)}),
 		Properties: immutable.WrapProperties(map[string]any{"id": fmt.Sprintf("n%d", depth)}),
@@ -187,15 +186,16 @@ func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
 	build := func(chain int) *graph.Snapshot {
 		t.Helper()
 		root := graph.InstanceParts{
-			TypeName:   "Trunk",
 			TypeID:     trunk.ID(),
 			PrimaryKey: immutable.WrapKey([]any{"t1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "t1"}),
 			Composed:   map[string][]graph.InstanceParts{"KIDS": nestedParts(node.ID(), chain)},
 		}
 		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types:     []schema.TypeID{trunk.ID(), node.ID()},
-			Instances: map[schema.TypeID][]graph.InstanceParts{trunk.ID(): {root}},
+			Types: []schema.TypeID{trunk.ID()},
+			Instances: []graph.InstanceParts{
+				root,
+			},
 		})
 		if res.HasErrors() {
 			t.Fatalf("assembling a %d-deep chain: %s", chain, res)

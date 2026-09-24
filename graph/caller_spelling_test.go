@@ -26,7 +26,7 @@ func callerSpellingSchema(t *testing.T) *schema.Schema {
 
 type Run {
 	at Timestamp primary
-	--> NEXT (_) Run
+	--> NEXT (_:many) Run
 	*-> STEPS (_:many) Step
 }
 
@@ -137,11 +137,11 @@ func TestUnresolvedTarget_OneAddressOnEveryPath(t *testing.T) {
 
 	rebuilt, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{runID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			runID: {{
-				TypeName: "Run", TypeID: runID, PrimaryKey: immutable.WrapKey([]any{"2021-01-01T00:00:00Z"}),
+		Instances: []graph.InstanceParts{
+			{
+				TypeID: runID, PrimaryKey: immutable.WrapKey([]any{"2021-01-01T00:00:00Z"}),
 				Properties: immutable.WrapProperties(map[string]any{"at": "2021-01-01T00:00:00Z"}),
-			}},
+			},
 		},
 		Unresolved: []graph.UnresolvedParts{{
 			SourceType: runID, SourceKey: immutable.WrapKey([]any{"2021-01-01T00:00:00Z"}),
@@ -169,13 +169,16 @@ func TestRebuildSnapshot_SourceAddressesMoveWithTheInstances(t *testing.T) {
 	const other = "2021-01-01T00:00:00Z"
 	parts := func(at string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName: "Run", TypeID: runID, PrimaryKey: immutable.WrapKey([]any{at}),
+			TypeID: runID, PrimaryKey: immutable.WrapKey([]any{at}),
 			Properties: immutable.WrapProperties(map[string]any{"at": at}),
 		}
 	}
 	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types:     []schema.TypeID{runID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{runID: {parts(rawInstant), parts(other)}},
+		Types: []schema.TypeID{runID},
+		Instances: []graph.InstanceParts{
+			parts(rawInstant),
+			parts(other),
+		},
 		Edges: []graph.EdgeParts{{
 			SourceType: runID, SourceKey: immutable.WrapKey([]any{rawInstant}),
 			Relation: "NEXT", TargetType: runID, TargetKey: immutable.WrapKey([]any{other}),

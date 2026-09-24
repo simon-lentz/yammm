@@ -137,3 +137,25 @@ func decodeKeyArray(s string) ([]any, error) {
 	}
 	return out, nil
 }
+
+// unreadableComponent returns the index of the first component of k that
+// [ParseKey] cannot read back — one rendering as a JSON array or object, or as
+// a number no finite float64 holds — or -1. A string, a bool, an int64 and a
+// finite float64 settle without rendering.
+func unreadableComponent(k immutable.Key) int {
+	for i := range k.Len() {
+		v := k.Get(i)
+		switch v.Unwrap().(type) {
+		case string, bool, int64, float64, nil:
+			continue
+		}
+		b, err := json.Marshal(v.Clone())
+		if err != nil {
+			return i
+		}
+		if _, err := ParseKey("[" + string(b) + "]"); err != nil {
+			return i
+		}
+	}
+	return -1
+}

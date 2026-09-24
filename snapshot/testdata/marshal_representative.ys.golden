@@ -5,7 +5,7 @@
 		"schema_source": "test://test.yammm",
 		"schema_hash": "sha256:fa0cde371d426aaa451d3a5d7891b85a631c56ffafc68424556f40165739b936",
 		"schema_hash_algorithm": 4,
-		"integrity_hash": "sha256:0ef79f5a4da4915c48d914421046c6329d1b32d5918018be3d0d84bd7e82b8a3",
+		"integrity_hash": "sha256:8fbf27eeaeb29c76679efaaf5fe9e87d418a40eadae90b00861e224a503ec748",
 		"features": [],
 		"attestation": {
 			"values": false,
@@ -31,6 +31,7 @@
 						"c1"
 					],
 					"properties": {
+						"id": "c1",
 						"title": "Acme"
 					},
 					"provenance": null
@@ -45,6 +46,7 @@
 						"p1"
 					],
 					"properties": {
+						"id": "p1",
 						"name": "Alice"
 					},
 					"provenance": null
@@ -54,6 +56,7 @@
 						"p2"
 					],
 					"properties": {
+						"id": "p2",
 						"name": "Bob"
 					},
 					"edges": {
@@ -74,6 +77,7 @@
 						"p3"
 					],
 					"properties": {
+						"id": "p3",
 						"name": "Cara"
 					},
 					"provenance": null

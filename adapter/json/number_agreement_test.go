@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -226,11 +227,9 @@ type T {
 // width, a named float, a float under a String, a Timestamp, a Date, a UUID and
 // a List<Timestamp> element, a float standing where a Vector or a List belongs,
 // a float nested in a list or a string-keyed map that stands where a scalar
-// belongs, a list standing at a Float or nested as a Vector element, and, in
-// the .ys writer, under a property the type does not declare. A snapshot holds
-// such a value only when nothing validated it. A CSV cell has no spelling for a
-// map, so the row naming no CSV cell asserts of CSV only that the file is
-// written.
+// belongs, and a list standing at a Float or nested as a Vector element. A
+// snapshot holds such a value only when nothing validated it. A CSV cell has
+// no spelling for a map, so the CSV writer refuses the map row as the class.
 func TestWriters_MarkEveryHeldFloat(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -255,7 +254,7 @@ func TestWriters_MarkEveryHeldFloat(t *testing.T) {
 		{"v", float64(7), `"v":7.0`, ",7.0"},
 		{"l", float64(8), `"l":8.0`, ",8.0"},
 		{"n", []any{float64(6)}, `"n":[6.0]`, ",6.0,"},
-		{"n", map[string]any{"k": float64(6)}, `"n":{"k":6.0}`, ""},
+		{"n", map[string]any{"k": float64(6)}, `"n":{"k":6.0}`, "refused"},
 		{"ts", []any{float64(6)}, `"ts":[6.0]`, ",6.0"},
 		{"f", []any{float64(6)}, `"f":[6.0]`, ",6.0,"},
 		{"v", []any{[]any{float64(6)}, float64(1)}, `"v":[[6.0],1.0]`, ",6.0|1.0"},
@@ -276,19 +275,14 @@ func TestWriters_MarkEveryHeldFloat(t *testing.T) {
 			t.Errorf(".ys %s=%#v wrote %s (%s), want %s", c.prop, c.held, ys, mres, c.jsonYS)
 		}
 		files, err := csvad.New(csvad.WithSchema(s)).MarshalSnapshot(ctx, snap)
+		if c.csvCell == "refused" {
+			if !errors.Is(err, csvad.ErrUnrepresentable) {
+				t.Errorf("CSV %s=%#v = %v, want ErrUnrepresentable", c.prop, c.held, err)
+			}
+			continue
+		}
 		if err != nil || !strings.Contains(string(files["T"]), c.csvCell) {
 			t.Errorf("CSV %s=%#v wrote %q (%v), want %s", c.prop, c.held, files["T"], err, c.csvCell)
 		}
-	}
-
-	g := graph.New(s)
-	inst := instance.NewValidInstance("T", ty.ID(), immutable.WrapKey([]any{"a"}),
-		immutable.WrapProperties(map[string]any{"id": "a", "extra": float64(8), "extras": []any{float64(9)}}), nil, nil, nil)
-	if r := g.Add(ctx, inst); r.HasErrors() {
-		t.Fatalf("add: %s", r)
-	}
-	ys, mres := snapshot.Marshal(ctx, g.Snapshot())
-	if mres.HasErrors() || !bytes.Contains(ys, []byte(`"extra":8.0`)) || !bytes.Contains(ys, []byte(`"extras":[9.0]`)) {
-		t.Errorf(".ys undeclared floats wrote %s (%s), want 8.0 and [9.0]", ys, mres)
 	}
 }

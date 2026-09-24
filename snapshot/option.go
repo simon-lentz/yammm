@@ -174,37 +174,16 @@ func WithValueConformance(report bool) LoadOption {
 	}
 }
 
-// WithRevalidation makes [Load] and [Verify] run every root instance — its
-// composed children, association edges and invariants included — back
-// through the real validator ([github.com/simon-lentz/yammm/instance.Validator])
-// and report each finding at the given severity, typically
-// [github.com/simon-lentz/yammm/diag.Warning] or
-// [github.com/simon-lentz/yammm/diag.Error]. At Error severity a document
-// that fails re-validation refuses to load.
-//
-// This is the full check [WithValueConformance] is not: bounds, enums,
-// patterns, invariants, edge shapes and compositions are all evaluated. A
-// loaded document can fail it, because the graph accepts what
-// [github.com/simon-lentz/yammm/graph.RebuildSnapshot] and the bypass
-// constructors assert without validation.
-//
-// An unresolved record for a Required association is reported as
-// [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED]. An
-// edge or composed child stored under a relation name its type does not
-// declare is reported rather than silently skipped — such a document is
-// exactly what the option exists to find. Off by default: without the
-// option, Load returns what was written.
-//
-// A systematic defect on a large document produces one finding per instance;
-// [WithIssueLimit] bounds what is stored (default 100), and the counts stay
-// exact past it.
-//
-// It also reports a wire row that contradicts the schema: an edge whose
-// target_type, or a composed child whose type, names a type the relation does
-// not declare as its target. Both are [diag.E_SNAPSHOT_TYPE_MISMATCH] at the
-// chosen severity, and neither is visible to the validator alone — the
-// rebuilt input takes its types from the relation, so the document's own claim
-// is only checked here.
+// WithRevalidation makes [Load] and [Verify] run every root instance, its
+// composed children, edges and invariants included, back through the real
+// validator ([github.com/simon-lentz/yammm/instance.Validator]) and report each
+// finding at the given severity; at Error a document that fails refuses to
+// load. It judges values — bounds, enums, patterns, invariants — which the
+// structural checks every read runs leave alone, and reports an unresolved
+// record under a required association as
+// [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED].
+// [WithIssueLimit] bounds what a systematic defect stores (default 100), and
+// the counts stay exact past it.
 func WithRevalidation(severity diag.Severity) LoadOption {
 	return func(c *loadConfig) {
 		c.revalidate = true

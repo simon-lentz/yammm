@@ -294,11 +294,15 @@ type edgeRef struct {
 }
 
 // docIndex carries the structural facts one walk of the instances section
-// produces: root existence, slot occupancy, and edge references.
+// produces: root existence, slot occupancy, and edge references. ones counts
+// the records under each (one) association, edges and unresolved records
+// together, and is allocated at the first such record.
 type docIndex struct {
 	exists map[int]map[string]bool
 	slots  map[slotCoord][]slotChild
 	refs   []edgeRef
+	ones   map[slotCoord]int
+	order  []slotCoord
 }
 
 func (idx *docIndex) rootExists(row int, key string) bool {
@@ -332,7 +336,7 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 			continue
 		}
 		seenRows[row] = gi
-		sd.checkRootTypeEligible(row, gi, len(g.Items))
+		sd.checkRootTypeEligible(row, fmt.Sprintf("instances entry %d", gi))
 		if idx.exists[row] == nil {
 			idx.exists[row] = make(map[string]bool, len(g.Items))
 		}
@@ -343,13 +347,12 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 	return idx, nil
 }
 
-// checkRootTypeEligible refuses an instances group whose type a snapshot must not
-// denote, or must not hold a root instance of. The graph package doc's "Denoted
-// type eligibility" and "Root type eligibility" sections state the two rules, and
-// the split is why an empty group is exempt from one and not the other. Defence in
-// depth against a foreign writer: no load option excuses a member, and a
+// checkRootTypeEligible refuses a group or root duplicate at position whose
+// type cannot hold a root instance, by the graph package doc's "Root type
+// eligibility" section. An empty group is held to it too: adapter/json and
+// adapter/csv key their output by a denoted type's name. No load option excuses a member, and a
 // schema-less read checks none.
-func (sd *streamDecoder) checkRootTypeEligible(row, gi, items int) {
+func (sd *streamDecoder) checkRootTypeEligible(row int, position string) {
 	if sd.schema == nil || row >= len(sd.tableIDs) {
 		return
 	}
@@ -357,38 +360,30 @@ func (sd *streamDecoder) checkRootTypeEligible(row, gi, items int) {
 	if !ok {
 		return // resolveTypeTable already reported the row
 	}
-	// Nameability binds every group, empty or not: the group denotes the type
-	// either way, and every writer keys its output by a denoted type's name.
 	if !schema.Addressable(sd.schema, sd.tableIDs[row]) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNNAMEABLE_TYPE,
-			fmt.Sprintf("instances entry %d denotes %s, which this schema reaches only through an intermediate import and cannot name",
-				gi, sd.refAt(row))).
+			fmt.Sprintf("%s denotes %s, which this schema reaches only through an intermediate import and cannot name",
+				position, sd.refAt(row))).
 			WithHint("import the schema that declares it directly, then read the document again").
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			WithDetail(diag.DetailKeyTypeSchema, sd.tableIDs[row].SchemaPath().String()).
 			Build())
 		return
 	}
-	// An EMPTY group states that the snapshot holds the type, not that it holds
-	// a root instance of it — the writer emits one for every type the snapshot
-	// denotes, part types included, and the format documents that shape.
-	if items == 0 {
-		return
-	}
+	// Graph.Add's order, so a type breaking two rules draws the rule Add names.
 	var rule string
 	switch {
-	case t.IsAbstract():
-		rule = "is abstract"
-	case t.IsPart():
-		rule = "is a part type, which is reachable only as a composed child"
 	case !t.HasPrimaryKey():
 		rule = "declares no primary key"
+	case t.IsPart():
+		rule = "is a part type, which is reachable only as a composed child"
+	case t.IsAbstract():
+		rule = "is abstract"
 	default:
 		return
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_ROOT,
-		fmt.Sprintf("instances entry %d holds root instances of %s, which %s",
-			gi, sd.refAt(row), rule)).
+		fmt.Sprintf("%s denotes %s, which %s", position, sd.refAt(row), rule)).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 		Build())
 }
@@ -420,6 +415,8 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 
 	sd.checkProvenancePath(inst, row)
 	sd.checkValueConformance(inst, row)
+	sd.checkStoredKey(row, inst)
+	sd.checkDeclaredProperties(row, inst.Key, inst.Properties)
 
 	// Every address in the index is the CANONICAL key — the spelling the
 	// rebuilt instance will carry — so two roots that spell one instant two
@@ -447,9 +444,13 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 
 	for relName, targets := range inst.Edges {
 		for ei, e := range targets {
+			sd.checkDeclaredEdgeProperties(row, inst.Key, relName, e.Properties)
 			targetRow, ok := sd.requireRow(e.TargetType, func() string {
 				return fmt.Sprintf("edge %d under %s.%s", ei, sd.refAt(row), relName)
 			})
+			if depth == 0 {
+				sd.checkAssociation(idx, fmt.Sprintf("edge %d", ei), row, inst.Key, keyStr, relName, e.TargetType, e.TargetKey, "")
+			}
 			if !ok {
 				continue
 			}
@@ -465,7 +466,10 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 	}
 
 	for relName, children := range inst.Composed {
-		sd.checkComposedCardinality(row, relName, len(children))
+		target, judged := sd.checkComposedSlot(row, relName, len(children))
+		if judged {
+			sd.checkSiblingKeys(row, formatWireKey(inst.Key), relName, target, children)
+		}
 		for _, child := range children {
 			// The writer emits a row at every non-root position, so an absent
 			// one is malformed rather than a value to recover from context.
@@ -474,6 +478,9 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 			})
 			if !ok {
 				continue
+			}
+			if judged {
+				sd.checkComposedChildType(row, relName, childRow, child.Key, target)
 			}
 			var childSlot *slotCoord
 			if depth == 0 {
@@ -488,29 +495,229 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 	}
 }
 
-// checkComposedCardinality refuses a non-many composition slot carrying more
-// than one occupant. The (one) composed key segment carries no discriminating
-// element because such a slot holds exactly one child; without this the reader
-// admits two and the adapter mints one byte-identical _composed_key for both.
-// A schema-less read makes no claim, as every other schema-derived check here.
-func (sd *streamDecoder) checkComposedCardinality(row int, relation string, occupants int) {
-	if occupants < 2 || sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
-		return
+// checkComposedSlot holds one slot to the rules graph.Add applies when it
+// attaches a child, and returns the composition's declared target for the
+// per-child check. A slot under a name the parent's type does not declare as a
+// composition is refused: no declared target exists to read a child back as. A
+// (one) slot holding several children is refused: the (one) composed key
+// segment carries no discriminating element, so the adapter would mint one
+// byte-identical _composed_key for both. A schema-less read, or a parent row
+// that resolves to no type, makes no claim, as every other schema-derived check
+// here.
+func (sd *streamDecoder) checkComposedSlot(row int, relation string, occupants int) (schema.TypeID, bool) {
+	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+		return schema.TypeID{}, false
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
 	if !ok {
-		return
+		return schema.TypeID{}, false
 	}
 	rel, ok := t.Relation(relation)
-	if !ok || rel.Kind() != schema.RelationComposition || rel.IsMany() {
+	if !ok || rel.Kind() != schema.RelationComposition {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_COMPOSED,
+			fmt.Sprintf("%s holds composed children under %q, which the type does not declare as a composition",
+				sd.refAt(row), relation)).
+			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+			WithDetail(diag.DetailKeyRelationName, relation).
+			Build())
+		return schema.TypeID{}, false
+	}
+	if occupants > 1 && !rel.IsMany() {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+			fmt.Sprintf("composition %q under %s: (one) cardinality violated, got %d children",
+				relation, sd.refAt(row), occupants)).
+			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+			WithDetail(diag.DetailKeyRelationName, relation).
+			WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
+	}
+	return rel.TargetID(), true
+}
+
+// checkSiblingKeys refuses two children of one (many) slot at one canonical
+// key, as graph.Add refuses them. A keyless part has no key to repeat, and a
+// child of another type is checkComposedChildType's to report.
+func (sd *streamDecoder) checkSiblingKeys(row int, parentKey, relation string, target schema.TypeID, children []instWire) {
+	if len(children) < 2 {
 		return
 	}
-	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
-		fmt.Sprintf("composition %q under %s: (one) cardinality violated, got %d children",
-			relation, sd.refAt(row), occupants)).
-		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+	t, ok := sd.schema.TypeByID(target)
+	if !ok || !t.HasPrimaryKey() {
+		return
+	}
+	seen := make(map[string]int, len(children))
+	for i, child := range children {
+		childRow, ok := sd.rowAt(child.Type)
+		if !ok || childRow >= len(sd.tableIDs) || sd.tableIDs[childRow] != target {
+			continue
+		}
+		key := sd.canonicalWireKey(childRow, child.Key)
+		if first, dup := seen[key]; dup {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
+				fmt.Sprintf("composition %q under %s[%s] holds children %d and %d at key %s",
+					relation, sd.refAt(row), parentKey, first, i, key)).
+				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+				WithDetail(diag.DetailKeyRelationName, relation).
+				WithDetail(diag.DetailKeyPrimaryKey, key).
+				Build())
+			continue
+		}
+		seen[key] = i
+	}
+}
+
+// checkComposedChildType refuses a composed child whose type row names a type
+// other than its composition's declared target. graph.Add matches the target by
+// identity and nothing wider, and a writer renders the child under the
+// composition's field, so such a child reads back as the target: a silent
+// retype. A row that did not resolve is resolveTypeTable's to report.
+func (sd *streamDecoder) checkComposedChildType(parentRow int, relation string, childRow int, key []any, want schema.TypeID) {
+	if childRow >= len(sd.tableIDs) {
+		return
+	}
+	got := sd.tableIDs[childRow]
+	if got.IsZero() || got == want {
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
+		fmt.Sprintf("composed child %s under %s.%s is typed %s, which the composition declares as %s",
+			formatWireKey(key), sd.refAt(parentRow), relation, sd.refAt(childRow), sd.identRef(want))).
+		WithDetail(diag.DetailKeyTypeName, sd.refAt(parentRow)).
 		WithDetail(diag.DetailKeyRelationName, relation).
-		WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
+		WithDetail(diag.DetailKeyExpected, sd.identRef(want)).
+		WithDetail(diag.DetailKeyGot, sd.refAt(childRow)).
+		Build())
+}
+
+// checkStoredKey refuses an instance whose stored key is not the key its own
+// properties state, by the rule graph.Add and graph.RebuildSnapshot apply: the
+// key is non-empty, has one component per declared primary key, and each
+// component agrees with its property, which is present and not null. Agreement
+// is judged in canonical form, so two spellings of one instant agree. Without
+// it an edge to the instance is written as a foreign key that reads back
+// addressing another instance, or none. A component graph.ParseKey cannot read
+// back is refused on every read; beyond that, a schema-less read, a row that resolves
+// to no type, and a keyless type make no claim.
+func (sd *streamDecoder) checkStoredKey(row int, inst instWire) {
+	if i := unreadableWireComponent(inst.Key); i >= 0 {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("instance of %s stores key %s, whose component %d is not a scalar graph.ParseKey reads back", sd.refAt(row), formatWireKey(inst.Key), i)).
+			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+			WithDetail(diag.DetailKeyPrimaryKey, formatWireKey(inst.Key)).
+			Build())
+		return
+	}
+	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok || !t.HasPrimaryKey() {
+		return
+	}
+	var reason string
+	declared := keyArity(t)
+	switch {
+	case len(inst.Key) == 0:
+		reason = "is empty"
+	case len(inst.Key) != declared:
+		reason = fmt.Sprintf("has %d components; the type declares %d", len(inst.Key), declared)
+	default:
+		positions := sd.rowKeyPositions(row)
+		i := 0
+		for pk := range t.PrimaryKeys() {
+			prop := inst.Properties[pk.Name()]
+			if prop == nil {
+				reason = fmt.Sprintf("cannot agree with key property %q: it is absent or null", pk.Name())
+				break
+			}
+			if !wireComponentAgrees(inst.Key[i], prop, canonicalizingConstraint(positions, i)) {
+				reason = fmt.Sprintf("component %d disagrees with property %q, which holds %s",
+					i, pk.Name(), formatWireKey([]any{prop}))
+				break
+			}
+			i++
+		}
+	}
+	if reason == "" {
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+		fmt.Sprintf("instance of %s stores key %s, which %s", sd.refAt(row), formatWireKey(inst.Key), reason)).
+		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+		WithDetail(diag.DetailKeyPrimaryKey, formatWireKey(inst.Key)).
+		Build())
+}
+
+// unreadableWireComponent returns the index of the first component of a
+// decoded key that graph.ParseKey cannot read back — a JSON array or object,
+// or a number no finite float64 holds — or -1.
+func unreadableWireComponent(key []any) int {
+	for i, v := range key {
+		switch v := v.(type) {
+		case []any, map[string]any:
+			return i
+		case json.Number:
+			if _, err := graph.ParseKey("[" + v.String() + "]"); err != nil {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// keyArity returns the number of primary-key components t declares.
+func keyArity(t *schema.Type) int {
+	n := 0
+	for range t.PrimaryKeys() {
+		n++
+	}
+	return n
+}
+
+// canonicalizingConstraint returns the constraint deciding key component i's
+// canonical form, or nil when its kind has none.
+func canonicalizingConstraint(positions []wireKeyPosition, i int) schema.Constraint {
+	for _, pos := range positions {
+		if pos.index == i {
+			return pos.constraint
+		}
+	}
+	return nil
+}
+
+// wireComponentAgrees reports whether a stored key component and its property
+// hold one value, as graph's keyComponentAgrees decides it: both sides in the
+// form c stores where c renders them, identical scalar kinds compared
+// directly, and anything else by its canonical key rendering.
+func wireComponentAgrees(component, property any, c schema.Constraint) bool {
+	x, y := immutable.NormalizeValue(component), immutable.NormalizeValue(property)
+	if xs, ok := x.(string); ok {
+		if ys, ok := y.(string); ok && xs == ys {
+			return true
+		}
+	}
+	if c != nil {
+		if cx, err := value.Canonical(x, c); err == nil {
+			x = cx
+		}
+		if cy, err := value.Canonical(y, c); err == nil {
+			y = cy
+		}
+	}
+	switch xv := x.(type) {
+	case string:
+		if yv, ok := y.(string); ok {
+			return xv == yv
+		}
+	case int64:
+		if yv, ok := y.(int64); ok {
+			return xv == yv
+		}
+	case bool:
+		if yv, ok := y.(bool); ok {
+			return xv == yv
+		}
+	}
+	return immutable.WrapKey([]any{x}).String() == immutable.WrapKey([]any{y}).String()
 }
 
 // revalidateRoot reconstructs one root's raw form — properties, edges as
@@ -530,7 +737,7 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instW
 		return
 	}
 	keyStr := formatWireKey(inst.Key)
-	props := sd.rebuildRawProperties(t, keyStr, inst, 0)
+	props := sd.rebuildRawProperties(t, inst, 0)
 	_, res := sd.revalidator.ValidateOne(ctx, sd.tableTags[row], instance.RawInstance{Properties: props})
 	// MergeRetag keeps the validator's order, so a capped collector evicts by
 	// when a finding was raised, not by how its message sorts.
@@ -564,11 +771,9 @@ func reportsTheRun(code diag.Code) bool {
 // input shape for one instance: edges become _target_<pk>-keyed objects with
 // edge properties beside ((one) an object, (many) an array), composed
 // children become nested arrays of the same form, keyed by the relation's
-// JSON field name. A relation name the type does not declare, a target-key
-// arity mismatch, or extra targets on a (one) are reported at the option's
-// severity — never silently dropped, because a document holding one is
-// exactly what re-validation exists to find.
-func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, inst instWire, depth int) map[string]any {
+// JSON field name. An edge checkAssociation refused is skipped: the document
+// is refused already, and the validator would only report it again.
+func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, inst instWire, depth int) map[string]any {
 	// Bounded like walkInstance, which it follows. walkInstance stops at
 	// maxComposedDepth and then runs revalidateRoot on the SAME untruncated
 	// wire tree, so an unbounded rebuild recursed past the depth the reader had
@@ -582,18 +787,10 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 	// materialization (instanceParts) reads by the wire's numeric contract.
 	props := make(map[string]any, len(inst.Properties)+len(inst.Edges)+len(inst.Composed))
 	maps.Copy(props, inst.Properties)
-	sev := sd.loadCfg.revalidateSeverity
-	ref := schema.TagForm(sd.schema, t.ID())
 
 	for _, relName := range slices.Sorted(maps.Keys(inst.Edges)) {
 		rel, found := t.Relation(relName)
 		if !found || rel.Kind() != schema.RelationAssociation {
-			sd.collector.Collect(diag.NewIssue(sev, diag.E_GRAPH_UNKNOWN_RELATION,
-				fmt.Sprintf("revalidation of %s[%s]: document carries edges under %q, which the type does not declare as an association",
-					ref, keyStr, relName)).
-				WithDetail(diag.DetailKeyTypeName, ref).
-				WithDetail(diag.DetailKeyRelationName, relName).
-				Build())
 			continue
 		}
 		targetType, ok := sd.schema.TypeByID(rel.TargetID())
@@ -603,25 +800,8 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 		pks := targetType.PrimaryKeysSlice()
 		targets := inst.Edges[relName]
 		arr := make([]any, 0, len(targets))
-		for ei, e := range targets {
-			if !sd.wireTypeMatches(e.TargetType, rel.TargetID()) {
-				sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_TYPE_MISMATCH,
-					fmt.Sprintf("revalidation of %s[%s]: edge %d under %q targets %s, which the association declares as %s",
-						ref, keyStr, ei, relName, sd.wireTypeRef(e.TargetType), sd.identRef(rel.TargetID()))).
-					WithDetail(diag.DetailKeyTypeName, ref).
-					WithDetail(diag.DetailKeyRelationName, relName).
-					WithDetail(diag.DetailKeyExpected, sd.identRef(rel.TargetID())).
-					WithDetail(diag.DetailKeyGot, sd.wireTypeRef(e.TargetType)).
-					Build())
-				continue
-			}
-			if len(e.TargetKey) != len(pks) {
-				sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_MALFORMED,
-					fmt.Sprintf("revalidation of %s[%s]: edge %d under %q carries %d key components for a %d-part target key",
-						ref, keyStr, ei, relName, len(e.TargetKey), len(pks))).
-					WithDetail(diag.DetailKeyTypeName, ref).
-					WithDetail(diag.DetailKeyRelationName, relName).
-					Build())
+		for _, e := range targets {
+			if !sd.wireTypeMatches(e.TargetType, rel.TargetID()) || len(e.TargetKey) != len(pks) {
 				continue
 			}
 			obj := make(map[string]any, len(pks)+len(e.Properties))
@@ -635,14 +815,6 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 			props[rel.FieldName()] = arr
 			continue
 		}
-		if len(arr) > 1 {
-			sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("revalidation of %s[%s]: (one) association %q carries %d targets",
-					ref, keyStr, relName, len(arr))).
-				WithDetail(diag.DetailKeyTypeName, ref).
-				WithDetail(diag.DetailKeyRelationName, relName).
-				Build())
-		}
 		if len(arr) > 0 {
 			props[rel.FieldName()] = arr[0]
 		}
@@ -651,13 +823,7 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 	for _, relName := range slices.Sorted(maps.Keys(inst.Composed)) {
 		rel, found := t.Relation(relName)
 		if !found || rel.Kind() != schema.RelationComposition {
-			sd.collector.Collect(diag.NewIssue(sev, diag.E_GRAPH_UNKNOWN_RELATION,
-				fmt.Sprintf("revalidation of %s[%s]: document carries composed children under %q, which the type does not declare as a composition",
-					ref, keyStr, relName)).
-				WithDetail(diag.DetailKeyTypeName, ref).
-				WithDetail(diag.DetailKeyRelationName, relName).
-				Build())
-			continue
+			continue // checkComposedSlot refused the slot
 		}
 		childType, ok := sd.schema.TypeByID(rel.TargetID())
 		if !ok {
@@ -667,18 +833,9 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, keyStr string, ins
 		arr := make([]any, 0, len(children))
 		for _, child := range children {
 			if !sd.wireTypeMatches(child.Type, rel.TargetID()) {
-				sd.collector.Collect(diag.NewIssue(sev, diag.E_SNAPSHOT_TYPE_MISMATCH,
-					fmt.Sprintf("revalidation of %s[%s]: composed child %s under %q is typed %s, which the composition declares as %s",
-						ref, keyStr, formatWireKey(child.Key), relName,
-						sd.wireTypeRef(child.Type), sd.identRef(rel.TargetID()))).
-					WithDetail(diag.DetailKeyTypeName, ref).
-					WithDetail(diag.DetailKeyRelationName, relName).
-					WithDetail(diag.DetailKeyExpected, sd.identRef(rel.TargetID())).
-					WithDetail(diag.DetailKeyGot, sd.wireTypeRef(child.Type)).
-					Build())
-				continue
+				continue // checkComposedChildType refused the child
 			}
-			arr = append(arr, sd.rebuildRawProperties(childType, formatWireKey(child.Key), child, depth+1))
+			arr = append(arr, sd.rebuildRawProperties(childType, child, depth+1))
 		}
 		props[rel.FieldName()] = arr
 	}
@@ -781,6 +938,69 @@ func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
 		Build())
 }
 
+// checkDeclaredProperties refuses a stored property name the row's type does not
+// declare, own or inherited. The validator stores values under declared names
+// alone and [graph.Graph.Add] refuses any other, so such a document describes a
+// graph no caller could have built, and every writer downstream would have to
+// drop the name or write it as the field it spells. Structural, like the other
+// refusals no option excuses; a schema-less read makes no claim.
+func (sd *streamDecoder) checkDeclaredProperties(row int, key []any, props map[string]any) {
+	if sd.schema == nil || len(props) == 0 || row < 0 || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok {
+		return
+	}
+	for _, name := range undeclaredWireNames(props, func(n string) bool { _, ok := t.Property(n); return ok }) {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("instance %s[%s] holds property %q, which its type does not declare",
+				sd.refAt(row), formatWireKey(key), name)).
+			WithDetails(diag.TypeProp(sd.refAt(row), name)...).
+			Build())
+	}
+}
+
+// checkDeclaredEdgeProperties is checkDeclaredProperties for the properties of
+// an edge or unresolved record under relation. A relation the row's type does
+// not declare as an association has no declared edge properties to judge
+// against; checkAssociation refuses that relation.
+func (sd *streamDecoder) checkDeclaredEdgeProperties(row int, key []any, relation string, props map[string]any) {
+	if sd.schema == nil || len(props) == 0 || row < 0 || row >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok {
+		return
+	}
+	rel, ok := t.Relation(relation)
+	if !ok || !rel.IsAssociation() {
+		return
+	}
+	for _, name := range undeclaredWireNames(props, func(n string) bool { _, ok := rel.Property(n); return ok }) {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("edge %q of %s[%s] holds edge property %q, which the association does not declare",
+				relation, sd.refAt(row), formatWireKey(key), name)).
+			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
+			WithDetail(diag.DetailKeyRelationName, relation).
+			WithDetail(diag.DetailKeyPropertyName, name).
+			Build())
+	}
+}
+
+// undeclaredWireNames returns the keys of props that declared rejects, in
+// sorted order. The clean case allocates nothing.
+func undeclaredWireNames(props map[string]any, declared func(string) bool) []string {
+	var out []string
+	for name := range props {
+		if !declared(name) {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 // checkValueConformance reports a stored value its own schema constraint
 // cannot render. Off unless the caller asked for it, because Load documents
 // that it does not re-validate instance data and this walk would otherwise be
@@ -875,11 +1095,13 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 		if rowOK {
 			sd.checkProvenancePath(dup.Instance, row)
+			sd.checkDeclaredProperties(row, dup.Instance.Key, dup.Instance.Properties)
+			sd.checkStoredKey(row, dup.Instance)
 			// A ROOT duplicate is a rejected root instance, so its type must be
 			// able to hold one. A COMPOSED duplicate is not: a part type is
 			// exactly what belongs there, and Relation is what separates them.
 			if dup.Relation == "" {
-				sd.checkRootTypeEligible(row, di, 1)
+				sd.checkRootTypeEligible(row, fmt.Sprintf("duplicate record %d", di))
 			}
 		}
 
@@ -970,7 +1192,11 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			return fmt.Sprintf("unresolved record %d source", ui)
 		})
 		if ok {
+			sd.checkDeclaredEdgeProperties(sourceRow, u.SourceKey, u.Relation, u.Properties)
 			sourceKey := sd.canonicalWireKey(sourceRow, u.SourceKey)
+			sd.warnUnresolvedRequired(sourceRow, u)
+			sd.checkAssociation(idx, fmt.Sprintf("unresolved record %d", ui), sourceRow, u.SourceKey, sourceKey,
+				u.Relation, u.TargetType, u.TargetKey, u.Reason)
 			if !idx.rootExists(sourceRow, sourceKey) {
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 					fmt.Sprintf("unresolved edge source %s[%s] references non-existent instance",
@@ -990,25 +1216,11 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 // state the graph model cannot hold.
 var unresolvedReasons = map[string]bool{"target_missing": true, "absent": true, "empty": true}
 
-// checkUnresolvedReason holds the reader to the contract the writer already
-// meets. Without it a hand-edited record loads a target key and properties
-// into a value graph.UnresolvedEdge documents as always empty, and the next
-// Marshal discards them silently.
+// checkUnresolvedReason holds a record to the reasons graph.UnresolvedEdge
+// documents, and a reason naming no target to carry no target key or edge
+// properties, as graph.RebuildSnapshot does; Verify and Info then report what
+// Load refuses.
 func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) {
-	// Gated on the revalidation option: the record is well-formed data
-	// (Snapshot.Unresolved), so without the option no reader pays a new
-	// diagnostic for it.
-	if sd.loadCfg.revalidate && u.Required {
-		sourceRef := "?"
-		if row, ok := sd.rowAt(u.SourceType); ok {
-			sourceRef = sd.refAt(row)
-		}
-		sd.collector.Collect(diag.NewIssue(sd.loadCfg.revalidateSeverity, diag.W_SNAPSHOT_UNRESOLVED_REQUIRED,
-			fmt.Sprintf("required association %q of %s[%s] is unresolved (%s)",
-				u.Relation, sourceRef, formatWireKey(u.SourceKey), u.Reason)).
-			WithDetail(diag.DetailKeyRelationName, u.Relation).
-			Build())
-	}
 	if !unresolvedReasons[u.Reason] {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("unresolved record %d states reason %q, which is not one of target_missing, absent or empty",
@@ -1027,6 +1239,121 @@ func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("unresolved record %d states reason %q but carries edge properties",
 				ui, u.Reason)).Build())
+	}
+}
+
+// warnUnresolvedRequired reports an unresolved record under a required
+// association at the revalidation severity. Whether it is required is read
+// from the schema, never from the record's own field. Without the option the
+// record is well-formed data (Snapshot.Unresolved), so no reader pays for it.
+func (sd *streamDecoder) warnUnresolvedRequired(sourceRow int, u unresolvedWire) {
+	if !sd.loadCfg.revalidate {
+		return
+	}
+	rel, ok := sd.associationAt(sourceRow, u.Relation)
+	if !ok || rel.IsOptional() {
+		return
+	}
+	sd.collector.Collect(diag.NewIssue(sd.loadCfg.revalidateSeverity, diag.W_SNAPSHOT_UNRESOLVED_REQUIRED,
+		fmt.Sprintf("required association %q of %s[%s] is unresolved (%s)",
+			u.Relation, sd.refAt(sourceRow), formatWireKey(u.SourceKey), u.Reason)).
+		WithDetail(diag.DetailKeyRelationName, u.Relation).
+		Build())
+}
+
+// associationAt returns relation as an association of the type at row, or
+// false for a schema-less read, a row that resolves to no type, or a relation
+// that is not an association of it.
+func (sd *streamDecoder) associationAt(row int, relation string) (*schema.Relation, bool) {
+	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+		return nil, false
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok {
+		return nil, false
+	}
+	rel, ok := t.Relation(relation)
+	if !ok || !rel.IsAssociation() {
+		return nil, false
+	}
+	return rel, true
+}
+
+// checkAssociation holds one record, a root's edge (reason "") or an
+// unresolved record, to what graph.Add stages: an association of the source's
+// type, at its declared target, with a target key of the target's arity. It
+// counts the record against a (one) association; checkOnes judges the counts.
+func (sd *streamDecoder) checkAssociation(idx *docIndex, what string, sourceRow int, sourceKey []any, keyStr, relation string,
+	targetRow *int, targetKey []any, reason string,
+) {
+	if i := unreadableWireComponent(targetKey); i >= 0 {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("%s of %s under %q carries target key %s, whose component %d is not a scalar graph.ParseKey reads back",
+				what, formatWireKey(sourceKey), relation, formatWireKey(targetKey), i)).
+			WithDetail(diag.DetailKeyRelationName, relation).
+			Build())
+	}
+	if sd.schema == nil || sourceRow < 0 || sourceRow >= len(sd.tableIDs) {
+		return
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[sourceRow])
+	if !ok {
+		return
+	}
+	source := sd.refAt(sourceRow)
+	at := fmt.Sprintf("%s of %s[%s] under %q", what, source, formatWireKey(sourceKey), relation)
+	rel, ok := t.Relation(relation)
+	if !ok || !rel.IsAssociation() {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
+			at+", which the type does not declare as an association").
+			WithDetail(diag.DetailKeyTypeName, source).
+			WithDetail(diag.DetailKeyRelationName, relation).
+			Build())
+		return
+	}
+	missing := reason == "absent" || reason == "empty"
+	if !sd.wireTypeMatches(targetRow, rel.TargetID()) {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
+			fmt.Sprintf("%s targets %s, which the association declares as %s",
+				at, sd.wireTypeRef(targetRow), sd.identRef(rel.TargetID()))).
+			WithDetail(diag.DetailKeyTypeName, source).
+			WithDetail(diag.DetailKeyRelationName, relation).
+			WithDetail(diag.DetailKeyExpected, sd.identRef(rel.TargetID())).
+			WithDetail(diag.DetailKeyGot, sd.wireTypeRef(targetRow)).
+			Build())
+	} else if target, ok := sd.schema.TypeByID(rel.TargetID()); ok && !missing {
+		if declared := keyArity(target); len(targetKey) != declared {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+				fmt.Sprintf("%s carries a %d-part target key; the target declares %d", at, len(targetKey), declared)).
+				WithDetail(diag.DetailKeyTypeName, source).
+				WithDetail(diag.DetailKeyRelationName, relation).
+				Build())
+		}
+	}
+	if !rel.IsMany() {
+		slot := slotCoord{parentRow: sourceRow, parentKey: keyStr, relation: relation}
+		if idx.ones == nil {
+			idx.ones = make(map[slotCoord]int)
+		}
+		if idx.ones[slot] == 0 {
+			idx.order = append(idx.order, slot)
+		}
+		idx.ones[slot]++
+	}
+}
+
+// checkOnes refuses each (one) association holding more than one record,
+// edges and unresolved records together: graph.Add stages at most one.
+func (sd *streamDecoder) checkOnes(idx *docIndex) {
+	for _, slot := range idx.order {
+		if n := idx.ones[slot]; n > 1 {
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
+				fmt.Sprintf("(one) association %q of %s[%s] holds %d records",
+					slot.relation, sd.refAt(slot.parentRow), slot.parentKey, n)).
+				WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.parentRow)).
+				WithDetail(diag.DetailKeyRelationName, slot.relation).
+				Build())
+		}
 	}
 }
 
@@ -1098,6 +1425,7 @@ func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGrou
 		return err
 	}
 	sd.validateDiagnostics(diags, idx)
+	sd.checkOnes(idx)
 	sd.validateEdgeRefs(idx)
 	return nil
 }
@@ -1107,17 +1435,20 @@ func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGrou
 // collects a diagnostic.
 func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire) graph.SnapshotParts {
 	types := make([]schema.TypeID, 0, len(groups))
-	instParts := make(map[schema.TypeID][]graph.InstanceParts, len(groups))
+	total := 0
+	for _, g := range groups {
+		total += len(g.Items)
+	}
+	instParts := make([]graph.InstanceParts, 0, total)
 	var edgeParts []graph.EdgeParts
 
 	for _, g := range groups {
 		row := *g.Type
 		id := sd.tableIDs[row]
 		types = append(types, id)
-		parts := make([]graph.InstanceParts, 0, len(g.Items))
 		for _, item := range g.Items {
 			ip := sd.instanceParts(row, item)
-			parts = append(parts, ip)
+			instParts = append(instParts, ip)
 			// Sorted, not map order: the rebuild sorts with an unstable sort, so
 			// a deterministic input order is what keeps two Loads of one
 			// document identical.
@@ -1134,7 +1465,6 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 				}
 			}
 		}
-		instParts[id] = parts
 	}
 
 	dupParts := make([]graph.DuplicateParts, 0, len(diags.Duplicates))
@@ -1161,7 +1491,6 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 			SourceKey:  immutable.WrapKey(normalizeSlice(uw.SourceKey)),
 			Relation:   uw.Relation,
 			TargetType: sd.tableIDs[*uw.TargetType],
-			Required:   uw.Required,
 			Reason:     uw.Reason,
 			Properties: immutable.WrapProperties(normalizeMap(uw.Properties)),
 		}
@@ -1171,9 +1500,8 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 		unresParts = append(unresParts, up)
 	}
 
-	// The header's claim rides the parts verbatim; an absent field is a
-	// pre-v0.15.0 document and reads as both false.
-	// nil when the document carries no attestation — a pre-v0.15.0 file, say.
+	// The header's claim rides the parts verbatim, and is nil when the
+	// document carries none, as one written from a snapshot with no claim does.
 	// Collapsing that to a zero value made the next Marshal write
 	// {"values":false,"associations":false}, turning silence into a claim the
 	// document never made.
@@ -1193,12 +1521,11 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 }
 
 // instanceParts converts a validated wire instance to InstanceParts. The
-// instance name is derived from the resolved identity, never carried on the
-// wire, so a name cannot disagree with the identity beside it.
+// wire carries no instance name, and neither do the parts: RebuildSnapshot
+// renders it from the identity.
 func (sd *streamDecoder) instanceParts(row int, inst instWire) graph.InstanceParts {
 	id := sd.tableIDs[row]
 	ip := graph.InstanceParts{
-		TypeName:   sd.tableTags[row],
 		TypeID:     id,
 		PrimaryKey: immutable.WrapKey(normalizeSlice(inst.Key)),
 		Properties: immutable.WrapProperties(normalizeMap(inst.Properties)),

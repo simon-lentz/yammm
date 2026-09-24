@@ -95,28 +95,27 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{holder},
-		Instances: map[schema.TypeID][]graph.InstanceParts{holder: {{
-			TypeName:   schema.TagForm(s, holder),
-			TypeID:     holder,
-			PrimaryKey: immutable.WrapKey([]any{"h1"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
-			Composed: map[string][]graph.InstanceParts{
-				"PIECES": {{
-					TypeName:   schema.TagForm(s, shard),
-					TypeID:     shard,
-					PrimaryKey: immutable.WrapKey([]any{"s1"}),
-					Properties: immutable.WrapProperties(map[string]any{"name": "s1"}),
-					Composed: map[string][]graph.InstanceParts{
-						"BITS": {{
-							TypeName:   schema.TagForm(s, crumb),
-							TypeID:     crumb,
-							PrimaryKey: immutable.WrapKey([]any{"c1"}),
-							Properties: immutable.WrapProperties(map[string]any{"name": "c1"}),
-						}},
-					},
-				}},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     holder,
+				PrimaryKey: immutable.WrapKey([]any{"h1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "h1"}),
+				Composed: map[string][]graph.InstanceParts{
+					"PIECES": {{
+						TypeID:     shard,
+						PrimaryKey: immutable.WrapKey([]any{"s1"}),
+						Properties: immutable.WrapProperties(map[string]any{"name": "s1"}),
+						Composed: map[string][]graph.InstanceParts{
+							"BITS": {{
+								TypeID:     crumb,
+								PrimaryKey: immutable.WrapKey([]any{"c1"}),
+								Properties: immutable.WrapProperties(map[string]any{"name": "c1"}),
+							}},
+						},
+					}},
+				},
 			},
-		}}},
+		},
 	})
 	if res.HasErrors() {
 		t.Fatalf("assembling: %s", res)

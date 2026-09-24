@@ -266,13 +266,12 @@ func TestAssertRoundTrip_Float32Property(t *testing.T) {
 	want := float32(0.1)
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{anchorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			anchorID: {{
-				TypeName:   tagForm(s, anchorID),
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     anchorID,
 				PrimaryKey: immutable.WrapKey([]any{"a1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": want}),
-			}},
+			},
 		},
 	})
 	if result.HasErrors() {

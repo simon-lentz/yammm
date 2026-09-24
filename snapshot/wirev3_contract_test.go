@@ -622,20 +622,19 @@ func TestWireV3_NegativeRowIndexIsMalformed(t *testing.T) {
 // both generations of the round trip.
 func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
 	ctx := context.Background()
-	s := testSchemaWithComposition(t)
+	s := testSchema(t)
 
-	populated := mustTypeID(t, s, "Parent")
-	empty := mustTypeID(t, s, "Child")
+	populated := mustTypeID(t, s, "Person")
+	empty := mustTypeID(t, s, "Company")
 
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{populated, empty},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			populated: {{
-				TypeName:   "Parent",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     populated,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
-			}},
+			},
 		},
 	})
 	if res.HasErrors() {
@@ -648,7 +647,7 @@ func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
 		t.Fatalf("marshal: %v", mres)
 	}
 	for i, e := range wireTypeTable(t, data) {
-		if e.Name == "Child" {
+		if e.Name == "Company" {
 			emptyRow = i
 		}
 	}
