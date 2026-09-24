@@ -101,16 +101,14 @@ func TestRebuildSnapshot_RefusesAnUndeclaredNameAtEveryPosition(t *testing.T) {
 			},
 			Edges: []graph.EdgeParts{{
 				Relation: "OWNER", SourceType: holderT.ID(), SourceKey: hk,
-				TargetType: targetT.ID(), TargetKey: immutable.WrapKey([]any{"t1"}), Properties: immutable.WrapProperties(props[atEdge]),
+				TargetKey: immutable.WrapKey([]any{"t1"}), Properties: immutable.WrapProperties(props[atEdge]),
 			}},
 			Duplicates: []graph.DuplicateParts{{
-				Type: holderT.ID(), Key: hk,
-				Instance:     graph.InstanceParts{TypeID: holderT.ID(), PrimaryKey: hk, Properties: immutable.WrapProperties(props[atDuplicate])},
-				ConflictType: holderT.ID(), ConflictKey: hk,
+				Instance: graph.InstanceParts{TypeID: holderT.ID(), PrimaryKey: hk, Properties: immutable.WrapProperties(props[atDuplicate])},
 			}},
 			Unresolved: []graph.UnresolvedParts{{
 				SourceType: holderT.ID(), SourceKey: hk, Relation: "OWNER",
-				TargetType: targetT.ID(), TargetKey: immutable.WrapKey([]any{"t9"}), Reason: "target_missing",
+				TargetKey: immutable.WrapKey([]any{"t9"}), Reason: "target_missing",
 				Properties: immutable.WrapProperties(props[atUnresolved]),
 			}},
 		}

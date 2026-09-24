@@ -94,7 +94,10 @@ func TestNewFromSnapshot_RefusesARootTheImportingSchemaMakesAbstract(t *testing.
 	requireRefused(t, abstract, src.Snapshot(), diag.E_GRAPH_ABSTRACT_TYPE, "which is abstract")
 }
 
-func TestNewFromSnapshot_RefusesAnUnresolvedTargetTheImportingSchemaDoesNotDeclare(t *testing.T) {
+// A record's target is its association's declared target, so an importing
+// schema that drops the association is what leaves a record with no target: the
+// import refuses it with the code Add gives data under an undeclared association.
+func TestNewFromSnapshot_RefusesAnUnresolvedRecordUnderAnAssociationTheImportingSchemaDrops(t *testing.T) {
 	t.Parallel()
 	with := loadEntry(t, "schema \"entry\"\n\ntype Company {\n\tid String primary\n}\n\ntype Person {\n\tid String primary\n\t--> WORKS_AT (one) Company\n}\n")
 	without := loadEntry(t, "schema \"entry\"\n\ntype Person {\n\tid String primary\n}\n")
@@ -111,7 +114,6 @@ func TestNewFromSnapshot_RefusesAnUnresolvedTargetTheImportingSchemaDoesNotDecla
 			SourceType: personID,
 			SourceKey:  immutable.WrapKey([]any{"p1"}),
 			Relation:   "WORKS_AT",
-			TargetType: typeIDOf(t, with, "Company"),
 			TargetKey:  immutable.WrapKey([]any{"gone"}),
 			Reason:     "target_missing",
 		}},
@@ -119,7 +121,7 @@ func TestNewFromSnapshot_RefusesAnUnresolvedTargetTheImportingSchemaDoesNotDecla
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
-	requireRefused(t, without, snap, diag.E_GRAPH_TYPE_NOT_FOUND, "at unresolved target position")
+	requireRefused(t, without, snap, diag.E_GRAPH_UNKNOWN_RELATION, `under "WORKS_AT", which its type does not declare as an association`)
 }
 
 func TestNewFromSnapshot_RefusesTwoChildrenInASlotTheImportingSchemaMakesOne(t *testing.T) {
@@ -248,23 +250,18 @@ func TestNewFromSnapshot_DerivesRequiredUnderTheImportingSchema(t *testing.T) {
 	}
 }
 
-// A duplicate record's type and key are its instance's: Graph.Add records the
-// rejected instance under its own, and the root rule judges the record's type.
-func TestRebuildSnapshot_RefusesADuplicateRecordItsInstanceContradicts(t *testing.T) {
+// A root duplicate's conflict is the root at its own type and key, as Graph.Add
+// records it, so a record of an abstract type, which holds no root, has none.
+func TestRebuildSnapshot_RefusesARootDuplicateOfATypeNoRootHolds(t *testing.T) {
 	t.Parallel()
 	s := loadEntry(t, "schema \"entry\"\n\nabstract type Thing {\n\tid String primary\n}\n\ntype P {\n\tid String primary\n}\n")
 	p, thing := typeIDOf(t, s, "P"), typeIDOf(t, s, "Thing")
 	p1 := graph.InstanceParts{TypeID: p, PrimaryKey: immutable.WrapKey([]any{"p1"}), Properties: immutable.WrapProperties(map[string]any{"id": "p1"})}
-	for name, dp := range map[string]graph.DuplicateParts{
-		"another type": {
-			Type: p, Key: immutable.WrapKey([]any{"p1"}), ConflictType: p, ConflictKey: immutable.WrapKey([]any{"p1"}),
-			Instance: graph.InstanceParts{TypeID: thing, PrimaryKey: immutable.WrapKey([]any{"p1"}), Properties: immutable.WrapProperties(map[string]any{"id": "p1"})},
-		},
-		"another key": {Type: p, Key: immutable.WrapKey([]any{"p2"}), ConflictType: p, ConflictKey: immutable.WrapKey([]any{"p1"}), Instance: p1},
-	} {
-		_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Types: []schema.TypeID{p}, Instances: []graph.InstanceParts{p1}, Duplicates: []graph.DuplicateParts{dp}})
-		if !res.HasCode(diag.E_INTERNAL) || !strings.Contains(res.String(), "duplicate record 0 states") {
-			t.Errorf("%s: RebuildSnapshot = %s, want the record refused", name, res)
-		}
+	dp := graph.DuplicateParts{
+		Instance: graph.InstanceParts{TypeID: thing, PrimaryKey: immutable.WrapKey([]any{"p1"}), Properties: immutable.WrapProperties(map[string]any{"id": "p1"})},
+	}
+	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Types: []schema.TypeID{p}, Instances: []graph.InstanceParts{p1}, Duplicates: []graph.DuplicateParts{dp}})
+	if !res.HasCode(diag.E_INTERNAL) || !strings.Contains(res.String(), "duplicate record 0") || !strings.Contains(res.String(), "no root is at its own type and key") {
+		t.Errorf("RebuildSnapshot = %s, want the record refused", res)
 	}
 }

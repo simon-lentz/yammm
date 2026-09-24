@@ -248,7 +248,7 @@ func TestLoad_UnresolvedTargetIsCanonicalized(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res)
 	}
-	if u := snap.Unresolved(); len(u) != 1 || u[0].TargetKey != graph.FormatKey(canon) {
+	if u := snap.Unresolved(); len(u) != 1 || u[0].TargetKey() != graph.FormatKey(canon) {
 		t.Errorf("unresolved target after Load = %v, want %s", u, graph.FormatKey(canon))
 	}
 }

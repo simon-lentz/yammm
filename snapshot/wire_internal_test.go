@@ -256,3 +256,26 @@ func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
 			diag.E_SNAPSHOT_DEPTH_EXCEEDED, deepRes)
 	}
 }
+
+// Marshal refuses an unresolved record whose target key graph.ParseKey cannot
+// read, as an invariant break: no constructor builds one and no caller can
+// write one, so the guard is reached here alone.
+func TestParseTargetKey_RefusesAKeyParseKeyCannotRead(t *testing.T) {
+	t.Parallel()
+	for _, keyStr := range []string{`[["nested"]]`, `[{"a":1}]`, `["unterminated`, `[1e400]`} {
+		if got, err := parseTargetKey(keyStr); err == nil {
+			t.Errorf("parseTargetKey(%q) = %v with no error; a key ParseKey cannot read must be refused", keyStr, got)
+		} else if !strings.Contains(err.Error(), keyStr) {
+			t.Errorf("parseTargetKey(%q) error %q does not name the key", keyStr, err)
+		}
+	}
+	for _, keyStr := range []string{"", "[]"} {
+		if got, err := parseTargetKey(keyStr); err != nil || got != nil {
+			t.Errorf("parseTargetKey(%q) = %v, %v; a keyless form yields nil", keyStr, got, err)
+		}
+	}
+	got, err := parseTargetKey(`["r9",2]`)
+	if err != nil || len(got) != 2 || got[0] != "r9" {
+		t.Errorf(`parseTargetKey(["r9",2]) = %v, %v`, got, err)
+	}
+}

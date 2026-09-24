@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -36,6 +37,31 @@ type depthExceededError struct {
 func (e *depthExceededError) Error() string {
 	return fmt.Sprintf("composed nesting depth %d exceeds limit %d at %s[%s]",
 		e.depth, maxComposedDepth, e.ref, e.key)
+}
+
+// unwritableValueError names a property whose value the wire cannot carry: an
+// instance's, or, where relation is set, an edge property of one of its
+// association records. ref and key address a root, or a duplicate record's
+// instance where duplicate is set; path names the composition hops below it.
+type unwritableValueError struct {
+	ref, key, relation, property string
+	path                         []string
+	duplicate                    bool
+}
+
+func (e *unwritableValueError) Error() string {
+	where := fmt.Sprintf("%s[%s]", e.ref, e.key)
+	if e.duplicate {
+		where = "duplicate record " + where
+	}
+	if len(e.path) > 0 {
+		where += "." + strings.Join(e.path, ".")
+	}
+	if e.relation != "" {
+		where += fmt.Sprintf(" under %q", e.relation)
+	}
+	return fmt.Sprintf("%s: property %q holds a value the wire cannot carry: a non-finite float, or a Go value encoding/json refuses",
+		where, e.property)
 }
 
 // schemaNames maps each import-closure member's source identity to its
@@ -149,20 +175,20 @@ func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 	}
 
 	for _, d := range view.duplicates {
-		collectInstance(d.Instance)
-		if d.Conflict != nil {
-			seen[d.Conflict.TypeID()] = struct{}{}
+		collectInstance(d.Instance())
+		if d.Conflict() != nil {
+			seen[d.Conflict().TypeID()] = struct{}{}
 		}
-		if d.Parent != nil {
-			seen[d.Parent.TypeID()] = struct{}{}
+		if d.Parent() != nil {
+			seen[d.Parent().TypeID()] = struct{}{}
 		}
 	}
 
 	for _, u := range view.unresolved {
-		if u.Source != nil {
-			seen[u.Source.TypeID()] = struct{}{}
+		if u.Source() != nil {
+			seen[u.Source().TypeID()] = struct{}{}
 		}
-		seen[u.TargetType] = struct{}{}
+		seen[u.TargetType()] = struct{}{}
 	}
 
 	// Ordered by the rendered row, not by TypeID: the sort key must be what

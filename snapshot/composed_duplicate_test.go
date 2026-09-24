@@ -63,13 +63,13 @@ func TestRoundTrip_ComposedChildDuplicate(t *testing.T) {
 	}
 
 	dup := loaded.Duplicates()[0]
-	if dup.Conflict == nil {
+	if dup.Conflict() == nil {
 		t.Fatal("duplicate conflict pointer did not resolve")
 	}
-	if got := dup.Conflict.PrimaryKey().String(); got != graph.FormatKey("c1") {
+	if got := dup.Conflict().PrimaryKey().String(); got != graph.FormatKey("c1") {
 		t.Errorf("conflict primary key = %s, want %s", got, graph.FormatKey("c1"))
 	}
-	v, ok := dup.Conflict.Property("value")
+	v, ok := dup.Conflict().Property("value")
 	if !ok {
 		t.Fatal("conflict instance has no value property")
 	}
@@ -113,7 +113,7 @@ func TestRoundTrip_ComposedChildDuplicateAmongSiblings(t *testing.T) {
 	if len(dups) != 1 {
 		t.Fatalf("loaded snapshot holds %d duplicates, want 1", len(dups))
 	}
-	conflict := dups[0].Conflict
+	conflict := dups[0].Conflict()
 	if conflict == nil {
 		t.Fatal("duplicate conflict pointer did not resolve")
 	}
@@ -151,14 +151,14 @@ func TestSnapshot_ComposedDuplicateCarriesParent(t *testing.T) {
 	snap := composedPKCollision(t)
 	dup := snap.Duplicates()[0]
 
-	if dup.Parent == nil {
+	if dup.Parent() == nil {
 		t.Fatal("composed-child duplicate carries no parent")
 	}
-	if got := dup.Parent.PrimaryKey().String(); got != graph.FormatKey("p1") {
+	if got := dup.Parent().PrimaryKey().String(); got != graph.FormatKey("p1") {
 		t.Errorf("parent primary key = %s, want %s", got, graph.FormatKey("p1"))
 	}
-	if dup.Relation != "CHILDREN" {
-		t.Errorf("relation = %q, want %q", dup.Relation, "CHILDREN")
+	if dup.Relation() != "CHILDREN" {
+		t.Errorf("relation = %q, want %q", dup.Relation(), "CHILDREN")
 	}
 }
 
@@ -212,7 +212,7 @@ func TestRoundTrip_OneSlotKeylessConflict(t *testing.T) {
 	if len(dups) != 1 {
 		t.Fatalf("loaded snapshot holds %d duplicates, want 1", len(dups))
 	}
-	conflict := dups[0].Conflict
+	conflict := dups[0].Conflict()
 	if conflict == nil {
 		t.Fatal("duplicate conflict pointer did not resolve")
 	}

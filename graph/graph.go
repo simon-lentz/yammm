@@ -246,7 +246,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 				slog.String("type", typeName),
 				slog.String("pk", pkString),
 			)
-			return g.reject(opCollector, dup.Diagnostic)
+			return g.reject(opCollector, dup.diagnostic)
 		}
 	} else {
 		g.instances[typeID] = make(map[string]*Instance)
@@ -716,24 +716,24 @@ func (g *Graph) Snapshot() *Snapshot {
 	for i, d := range g.duplicates {
 		// The rejected instance may not be in the graph's instances map,
 		// so clone it separately if not already in cloneMap
-		clonedInstance := cloneMap[d.Instance]
+		clonedInstance := cloneMap[d.instance]
 		if clonedInstance == nil {
-			clonedInstance = cloneInstance(d.Instance, cloneMap)
+			clonedInstance = cloneInstance(d.instance, cloneMap)
 		}
 		// The conflict instance should be in instances map, but apply same
 		// defensive pattern for consistency and future resilience
-		clonedConflict := cloneMap[d.Conflict]
+		clonedConflict := cloneMap[d.conflict]
 		if clonedConflict == nil {
-			clonedConflict = cloneInstance(d.Conflict, cloneMap)
+			clonedConflict = cloneInstance(d.conflict, cloneMap)
 		}
 		var clonedParent *Instance
-		if d.Parent != nil {
-			clonedParent = cloneMap[d.Parent]
+		if d.parent != nil {
+			clonedParent = cloneMap[d.parent]
 			if clonedParent == nil {
-				clonedParent = cloneInstance(d.Parent, cloneMap)
+				clonedParent = cloneInstance(d.parent, cloneMap)
 			}
 		}
-		duplicates[i] = newDuplicate(clonedInstance, clonedConflict, clonedParent, d.Relation, d.Diagnostic)
+		duplicates[i] = newDuplicate(clonedInstance, clonedConflict, clonedParent, d.relation, d.diagnostic)
 	}
 
 	// Rebuild unresolved edges with cloned source references.

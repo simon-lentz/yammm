@@ -457,8 +457,11 @@ var (
 	// wrong top-level structure (e.g., missing yammm_snapshot header as first
 	// key), or states content a structural rule refuses: an undeclared name, a
 	// stored key its key properties contradict, a key or target key component
-	// graph.ParseKey cannot read back, a target key of the wrong arity, an undocumented
-	// reason, a record contradicting itself.
+	// graph.ParseKey cannot read back, a target key of the wrong arity, an
+	// undocumented reason, a record contradicting itself, records graph.Add
+	// would not derive, a duplicate with no conflict. snapshot.Marshal raises it
+	// for input that would write such a file: an indent that is not whitespace,
+	// or a property value the wire cannot carry.
 	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED", CategorySnapshot)
 
 	// E_SNAPSHOT_UNSUPPORTED_VERSION indicates the format version is not recognized.
@@ -487,8 +490,9 @@ var (
 
 	// E_SNAPSHOT_TYPE_MISMATCH indicates a type row that contradicts its
 	// position: a root's row that is not its group's, a duplicate instance's
-	// that is not its record's, or a composed child's or an association
-	// record's target row that is not the relation's declared target.
+	// that is not its record's, a composed child's or an association record's
+	// target row that is not the relation's declared target, or a composed
+	// duplicate's row that is not its composition's declared target.
 	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
 
 	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target or duplicate conflict

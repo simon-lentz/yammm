@@ -188,12 +188,12 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, wrong structure, or content a structural rule refuses (an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason) |
+| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, wrong structure, or content a structural rule refuses (an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict); from `snapshot.Marshal`, an indent that is not whitespace or a property value the wire cannot carry |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
 | `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema |
-| `E_SNAPSHOT_TYPE_MISMATCH` | A type row that contradicts its position: a root's that is not its group's, a duplicate instance's that is not its record's, or a composed child's or association record's target row that is not the relation's declared target |
+| `E_SNAPSHOT_TYPE_MISMATCH` | A type row that contradicts its position: a root's that is not its group's, a duplicate instance's that is not its record's, a composed child's or association record's target row that is not the relation's declared target, or a composed duplicate's row that is not its composition's declared target |
 | `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict or parent, or an unresolved record's source names no instance |
 | `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children stand under a name the type does not declare as a composition |
 | `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a root duplicate record names a type that cannot be a root: abstract, part, or no primary key |

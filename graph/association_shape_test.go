@@ -67,17 +67,10 @@ func personParts(ids assocIDs) graph.SnapshotParts {
 	}
 }
 
-func fromP1(relation string, target schema.TypeID, key ...any) graph.EdgeParts {
-	return graph.EdgeParts{
-		Relation: relation, SourceType: target, SourceKey: immutable.WrapKey([]any{"p1"}),
-		TargetType: target, TargetKey: immutable.WrapKey(key),
-	}
-}
-
-func unresolvedFromP1(ids assocIDs, relation string, target schema.TypeID, reason string, key ...any) graph.UnresolvedParts {
+func unresolvedFromP1(ids assocIDs, relation, reason string, key ...any) graph.UnresolvedParts {
 	up := graph.UnresolvedParts{
 		SourceType: ids.person, SourceKey: immutable.WrapKey([]any{"p1"}), Relation: relation,
-		TargetType: target, Reason: reason,
+		Reason: reason,
 	}
 	if key != nil {
 		up.TargetKey = immutable.WrapKey(key)
@@ -93,10 +86,11 @@ func unresolvedFromP1(ids assocIDs, relation string, target schema.TypeID, reaso
 func TestRebuildSnapshot_HoldsEveryAssociationRecordToWhatAddStages(t *testing.T) {
 	t.Parallel()
 	s, ids := loadAssociationShapes(t)
-	edge := func(relation string, target schema.TypeID, key ...any) graph.EdgeParts {
-		e := fromP1(relation, target, key...)
-		e.SourceType = ids.person
-		return e
+	edge := func(relation string, key ...any) graph.EdgeParts {
+		return graph.EdgeParts{
+			Relation: relation, SourceType: ids.person, SourceKey: immutable.WrapKey([]any{"p1"}),
+			TargetKey: immutable.WrapKey(key),
+		}
 	}
 	for _, c := range []struct {
 		name   string
@@ -105,39 +99,33 @@ func TestRebuildSnapshot_HoldsEveryAssociationRecordToWhatAddStages(t *testing.T
 		shape  func(p *graph.SnapshotParts)
 	}{
 		{"an edge under an undeclared name", diag.E_GRAPH_UNKNOWN_RELATION, `under "BOSS", which its type does not declare as an association`, func(p *graph.SnapshotParts) {
-			p.Edges = []graph.EdgeParts{edge("BOSS", ids.company, "c1")}
+			p.Edges = []graph.EdgeParts{edge("BOSS", "c1")}
 		}},
 		{"an edge under a composition's name", diag.E_GRAPH_UNKNOWN_RELATION, `under "BADGES", which its type does not declare as an association`, func(p *graph.SnapshotParts) {
-			p.Edges = []graph.EdgeParts{edge("BADGES", ids.company, "c1")}
+			p.Edges = []graph.EdgeParts{edge("BADGES", "c1")}
 		}},
 		{"an unresolved record under a composition's name", diag.E_GRAPH_UNKNOWN_RELATION, `under "BADGES", which its type does not declare as an association`, func(p *graph.SnapshotParts) {
-			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "BADGES", ids.badge, "target_missing", "b1")}
-		}},
-		{"an edge to another type", diag.E_GRAPH_UNKNOWN_RELATION, "targets " + ids.person.String() + "; the association declares " + ids.company.String(), func(p *graph.SnapshotParts) {
-			p.Edges = []graph.EdgeParts{edge("EMPLOYER", ids.person, "p1")}
-		}},
-		{"an absent record at another type", diag.E_GRAPH_UNKNOWN_RELATION, "targets " + ids.company.String() + "; the association declares " + ids.person.String(), func(p *graph.SnapshotParts) {
-			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "MANAGER", ids.company, "absent")}
+			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "BADGES", "target_missing", "b1")}
 		}},
 		{"a (one) holding two edges", diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of Person[["p1"]] holds 2 records`, func(p *graph.SnapshotParts) {
 			p.Instances = append(p.Instances, graph.InstanceParts{TypeID: ids.company, PrimaryKey: immutable.WrapKey([]any{"c2"}), Properties: immutable.WrapProperties(map[string]any{"id": "c2"})})
-			p.Edges = []graph.EdgeParts{edge("EMPLOYER", ids.company, "c1"), edge("EMPLOYER", ids.company, "c2")}
+			p.Edges = []graph.EdgeParts{edge("EMPLOYER", "c1"), edge("EMPLOYER", "c2")}
 		}},
 		{"a (one) holding an edge and an unresolved record", diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of Person[["p1"]] holds 2 records`, func(p *graph.SnapshotParts) {
-			p.Edges = []graph.EdgeParts{edge("EMPLOYER", ids.company, "c1")}
-			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "EMPLOYER", ids.company, "target_missing", "c9")}
+			p.Edges = []graph.EdgeParts{edge("EMPLOYER", "c1")}
+			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "EMPLOYER", "target_missing", "c9")}
 		}},
 		{"an unresolved target key of the wrong arity", diag.E_GRAPH_INVALID_PK, `under "PARTNER" carries a 1-part target key; the target declares 2`, func(p *graph.SnapshotParts) {
-			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "PARTNER", ids.pair, "target_missing", "x")}
+			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "PARTNER", "target_missing", "x")}
 		}},
 		{"an edge target key of the wrong arity", diag.E_GRAPH_INVALID_PK, `under "EMPLOYER" carries a 2-part target key; the target declares 1`, func(p *graph.SnapshotParts) {
-			p.Edges = []graph.EdgeParts{edge("EMPLOYER", ids.company, "c1", "extra")}
+			p.Edges = []graph.EdgeParts{edge("EMPLOYER", "c1", "extra")}
 		}},
 		{"a reason outside the documented set", diag.E_INTERNAL, `states reason "lost", which is not one of`, func(p *graph.SnapshotParts) {
-			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "EMPLOYER", ids.company, "lost", "c9")}
+			p.Unresolved = []graph.UnresolvedParts{unresolvedFromP1(ids, "EMPLOYER", "lost", "c9")}
 		}},
 		{"an empty record carrying edge properties", diag.E_INTERNAL, `reason "empty" carries a target key or edge properties`, func(p *graph.SnapshotParts) {
-			up := unresolvedFromP1(ids, "MANAGER", ids.person, "empty")
+			up := unresolvedFromP1(ids, "MANAGER", "empty")
 			up.Properties = immutable.WrapProperties(map[string]any{"since": "x"})
 			p.Unresolved = []graph.UnresolvedParts{up}
 		}},
@@ -172,7 +160,7 @@ func TestRebuildSnapshot_CountsAOneSlotByItsCanonicalSourceKey(t *testing.T) {
 	record := func(source string, target string) graph.UnresolvedParts {
 		return graph.UnresolvedParts{
 			SourceType: ids.run, SourceKey: immutable.WrapKey([]any{source}), Relation: "NEXT",
-			TargetType: ids.run, TargetKey: immutable.WrapKey([]any{target}), Reason: "target_missing",
+			TargetKey: immutable.WrapKey([]any{target}), Reason: "target_missing",
 		}
 	}
 	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
@@ -196,8 +184,8 @@ func TestRebuildSnapshot_DerivesRequiredFromTheRelation(t *testing.T) {
 	s, ids := loadAssociationShapes(t)
 	parts := personParts(ids)
 	parts.Unresolved = []graph.UnresolvedParts{
-		unresolvedFromP1(ids, "MANAGER", ids.person, "absent"),
-		unresolvedFromP1(ids, "FRIENDS", ids.person, "target_missing", "p9"),
+		unresolvedFromP1(ids, "MANAGER", "absent"),
+		unresolvedFromP1(ids, "FRIENDS", "target_missing", "p9"),
 	}
 	snap, res := graph.RebuildSnapshot(s, parts)
 	if res.HasErrors() {
@@ -205,7 +193,7 @@ func TestRebuildSnapshot_DerivesRequiredFromTheRelation(t *testing.T) {
 	}
 	got := map[string]bool{}
 	for _, u := range snap.Unresolved() {
-		got[u.Relation] = u.Required
+		got[u.Relation()] = u.Required()
 	}
 	if !got["MANAGER"] || got["FRIENDS"] {
 		t.Errorf("Required = %v, want MANAGER required and FRIENDS not", got)

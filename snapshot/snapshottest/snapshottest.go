@@ -189,28 +189,28 @@ func project(s *graph.Snapshot) snapProjection {
 	}
 	for _, d := range s.Duplicates() {
 		dp := dupProjection{
-			Instance: projectInstanceTree(d.Instance),
-			Relation: d.Relation,
+			Instance: projectInstanceTree(d.Instance()),
+			Relation: d.Relation(),
 		}
-		if d.Conflict != nil {
-			dp.ConflictType = d.Conflict.TypeID().String()
-			dp.ConflictKey = d.Conflict.PrimaryKey().String()
+		if d.Conflict() != nil {
+			dp.ConflictType = d.Conflict().TypeID().String()
+			dp.ConflictKey = d.Conflict().PrimaryKey().String()
 		}
-		if d.Parent != nil {
-			dp.ParentType = d.Parent.TypeID().String()
-			dp.ParentKey = d.Parent.PrimaryKey().String()
+		if d.Parent() != nil {
+			dp.ParentType = d.Parent().TypeID().String()
+			dp.ParentKey = d.Parent().PrimaryKey().String()
 		}
 		p.Duplicates = append(p.Duplicates, dp)
 	}
 	for _, u := range s.Unresolved() {
 		p.Unresolved = append(p.Unresolved, unresProjection{
-			SourceType: u.Source.TypeID().String(),
-			SourceKey:  u.Source.PrimaryKey().String(),
-			Relation:   u.Relation,
-			TargetType: u.TargetType.String(),
-			TargetKey:  u.TargetKey,
-			Required:   u.Required,
-			Reason:     u.Reason,
+			SourceType: u.Source().TypeID().String(),
+			SourceKey:  u.Source().PrimaryKey().String(),
+			Relation:   u.Relation(),
+			TargetType: u.TargetType().String(),
+			TargetKey:  u.TargetKey(),
+			Required:   u.Required(),
+			Reason:     u.Reason(),
 			Properties: widenFloat32Map(u.Properties().Clone()),
 		})
 	}

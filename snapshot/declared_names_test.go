@@ -64,20 +64,18 @@ func declaredNamesDocument(t *testing.T) (*schema.Schema, string) {
 		},
 		Edges: []graph.EdgeParts{{
 			Relation: "OWNER", SourceType: holderT.ID(), SourceKey: hk,
-			TargetType: targetT.ID(), TargetKey: immutable.WrapKey([]any{"t1"}),
+			TargetKey:  immutable.WrapKey([]any{"t1"}),
 			Properties: immutable.WrapProperties(map[string]any{"since": "EDGE"}),
 		}},
 		Duplicates: []graph.DuplicateParts{{
-			Type: holderT.ID(), Key: hk,
 			Instance: graph.InstanceParts{
 				TypeID: holderT.ID(), PrimaryKey: hk,
 				Properties: immutable.WrapProperties(map[string]any{"id": "h1", "note": "DUP"}),
 			},
-			ConflictType: holderT.ID(), ConflictKey: hk,
 		}},
 		Unresolved: []graph.UnresolvedParts{{
 			SourceType: holderT.ID(), SourceKey: hk, Relation: "OWNER",
-			TargetType: targetT.ID(), TargetKey: immutable.WrapKey([]any{"t9"}), Reason: "target_missing",
+			TargetKey: immutable.WrapKey([]any{"t9"}), Reason: "target_missing",
 			Properties: immutable.WrapProperties(map[string]any{"since": "UNRES"}),
 		}},
 	})

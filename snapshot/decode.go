@@ -303,6 +303,9 @@ type docIndex struct {
 	refs   []edgeRef
 	ones   map[slotCoord]int
 	order  []slotCoord
+	// edges counts each root's edges per relation name whose target row
+	// resolves, keyed as a slot; checkRecordFacts reads it.
+	edges map[slotCoord]int
 }
 
 func (idx *docIndex) rootExists(row int, key string) bool {
@@ -455,6 +458,10 @@ func (sd *streamDecoder) walkInstance(ctx context.Context, row int, inst instWir
 				continue
 			}
 			if depth == 0 {
+				if idx.edges == nil {
+					idx.edges = make(map[slotCoord]int)
+				}
+				idx.edges[slotCoord{parentRow: row, parentKey: keyStr, relation: relName}]++
 				idx.refs = append(idx.refs, edgeRef{
 					sourceRow: row,
 					sourceKey: keyStr,
@@ -1151,6 +1158,13 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 					WithDetail(diag.DetailKeyPrimaryKey, conflictKey).
 					Build())
 			}
+			// graph.Add records a root duplicate against the root at its own
+			// type and key, and graph.RebuildSnapshot derives it so.
+			if rowOK && (conflictRow != row || conflictKey != carried) {
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("duplicate record %d states conflict %s[%s]; a root duplicate's conflict is the root at its own type and key, %s[%s]",
+						di, sd.refAt(conflictRow), conflictKey, dupRef, carried)).Build())
+			}
 			continue
 		}
 
@@ -1175,14 +1189,19 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 				Build())
 			continue
 		}
-		if !sd.conflictInSlot(idx, slotCoord{parentRow: parentRow, parentKey: parentKey, relation: dup.Relation},
-			conflictRow, dup.Conflict.Key, conflictKey) {
+		slot := slotCoord{parentRow: parentRow, parentKey: parentKey, relation: dup.Relation}
+		occupant, found := sd.conflictInSlot(idx, slot, conflictRow, dup.Conflict.Key, conflictKey)
+		if !found {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("duplicate conflict %s[%s] under %s[%s].%s references non-existent instance",
 					sd.refAt(conflictRow), conflictKey, sd.refAt(parentRow), parentKey, dup.Relation)).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(conflictRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, conflictKey).
 				Build())
+			continue
+		}
+		if rowOK {
+			sd.checkComposedConflict(di, row, slot, occupant, carried)
 		}
 	}
 
@@ -1207,6 +1226,101 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			}
 		}
 		sd.requireRow(u.TargetType, func() string { return fmt.Sprintf("unresolved record %d target", ui) })
+	}
+}
+
+// checkRecordFacts holds the unresolved records to the facts graph.Add derives
+// them by, as graph.RebuildSnapshot does: every root holds an edge or a record
+// under each required association of its type; an absent or empty record stands
+// alone, once, and only under a required association; and a target_missing
+// record names a target no root holds. A schema-less read makes no claim.
+func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
+	if sd.schema == nil {
+		return
+	}
+	type record struct {
+		slot slotCoord
+		ok   bool
+	}
+	records := make([]record, len(diags.Unresolved))
+	held := make(map[slotCoord]int, len(idx.edges)+len(diags.Unresolved))
+	for slot, n := range idx.edges {
+		held[slot] += n
+	}
+	missing := make(map[slotCoord]int)
+	for ui, u := range diags.Unresolved {
+		row, ok := sd.rowAt(u.SourceType)
+		if !ok {
+			continue
+		}
+		slot := slotCoord{parentRow: row, parentKey: sd.canonicalWireKey(row, u.SourceKey), relation: u.Relation}
+		records[ui] = record{slot: slot, ok: true}
+		if u.Reason == "absent" || u.Reason == "empty" {
+			missing[slot]++
+		} else {
+			held[slot]++
+		}
+	}
+	reported := make(map[slotCoord]bool)
+	for ui, u := range diags.Unresolved {
+		rec := records[ui]
+		if !rec.ok {
+			continue
+		}
+		rel, ok := sd.associationAt(rec.slot.parentRow, u.Relation)
+		if !ok {
+			continue
+		}
+		switch u.Reason {
+		case "absent", "empty":
+			switch {
+			case rel.IsOptional():
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("unresolved record %d states reason %q under %q of %s[%s], which is optional, where graph.Add records none",
+						ui, u.Reason, u.Relation, sd.refAt(rec.slot.parentRow), rec.slot.parentKey)).Build())
+			case !reported[rec.slot] && (missing[rec.slot] > 1 || held[rec.slot] > 0):
+				reported[rec.slot] = true
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("%q of %s[%s] holds an %s record beside another record, where graph.Add records it alone",
+						u.Relation, sd.refAt(rec.slot.parentRow), rec.slot.parentKey, u.Reason)).Build())
+			}
+		case "target_missing":
+			targetRow, ok := sd.rowAt(u.TargetType)
+			if ok && targetRow < len(sd.tableIDs) && sd.tableIDs[targetRow] == rel.TargetID() {
+				if key := sd.canonicalWireKey(targetRow, u.TargetKey); idx.rootExists(targetRow, key) {
+					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+						fmt.Sprintf("unresolved record %d names target %s[%s], which a root holds, where graph.Add resolves an edge",
+							ui, sd.refAt(targetRow), key)).Build())
+				}
+			}
+		}
+	}
+	for _, row := range slices.Sorted(maps.Keys(idx.exists)) {
+		if row >= len(sd.tableIDs) {
+			continue
+		}
+		t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+		if !ok {
+			continue
+		}
+		var required []string
+		for rel := range t.AllAssociations() {
+			if !rel.IsOptional() {
+				required = append(required, rel.Name())
+			}
+		}
+		if len(required) == 0 {
+			continue
+		}
+		for _, key := range slices.Sorted(maps.Keys(idx.exists[row])) {
+			for _, relation := range required {
+				if slot := (slotCoord{parentRow: row, parentKey: key, relation: relation}); held[slot]+missing[slot] == 0 {
+					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+						fmt.Sprintf("root %s[%s] holds no edge and no record under the required association %q, where graph.Add records an absent one",
+							sd.refAt(row), key, relation)).Build())
+				}
+			}
+		}
 	}
 }
 
@@ -1357,21 +1471,67 @@ func (sd *streamDecoder) checkOnes(idx *docIndex) {
 	}
 }
 
-// conflictInSlot reports whether the stated conflict address resolves in the
-// slot: a non-empty key selects among the occupants, an empty one addresses a
-// sole occupant. The arm is chosen by length, not nil-ness, because an empty
-// JSON array decodes non-nil and graph.resolveDuplicateConflict uses Key.Len().
-func (sd *streamDecoder) conflictInSlot(idx *docIndex, slot slotCoord, conflictRow int, rawKey []any, keyStr string) bool {
+// checkComposedConflict holds a composed duplicate record at row to the conflict
+// graph.AddComposed records and graph.RebuildSnapshot derives: the record's type
+// is the composition's declared target, and occupant, the child its conflict
+// block resolves to, is the child of a keyed (many) slot at the record's own
+// key; a keyless (many) slot holds no conflict. A (one) slot's occupant is its
+// sole child, because the instance walk refuses a (one) slot holding more.
+// A schema-less read makes no claim.
+func (sd *streamDecoder) checkComposedConflict(di, row int, slot slotCoord, occupant slotChild, carried string) {
+	if sd.schema == nil || slot.parentRow >= len(sd.tableIDs) || row >= len(sd.tableIDs) {
+		return
+	}
+	pt, ok := sd.schema.TypeByID(sd.tableIDs[slot.parentRow])
+	if !ok {
+		return
+	}
+	// The occupant sits in a slot the instance walk read, which refuses a slot
+	// its parent does not declare as a composition.
+	rel, ok := pt.Relation(slot.relation)
+	if !ok || rel.Kind() != schema.RelationComposition {
+		return
+	}
+	if sd.tableIDs[row] != rel.TargetID() {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
+			fmt.Sprintf("duplicate record %d is typed %s, which the composition %q declares as %s",
+				di, sd.refAt(row), slot.relation, sd.identRef(rel.TargetID()))).Build())
+		return
+	}
+	if !rel.IsMany() {
+		return
+	}
+	if target, ok := sd.schema.TypeByID(rel.TargetID()); ok && !target.HasPrimaryKey() {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("duplicate record %d is under the keyless (many) composition %q, where no child conflicts",
+				di, slot.relation)).Build())
+		return
+	}
+	if occupant.key != carried {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("duplicate record %d states conflict %s[%s]; under the (many) composition %q its conflict is the child at its own key, %s",
+				di, sd.refAt(occupant.row), occupant.key, slot.relation, carried)).Build())
+	}
+}
+
+// conflictInSlot returns the occupant the stated conflict address resolves to
+// in the slot: a non-empty key selects among the occupants, an empty one
+// addresses a sole occupant. The arm is chosen by length, not nil-ness,
+// because an empty JSON array decodes non-nil.
+func (sd *streamDecoder) conflictInSlot(idx *docIndex, slot slotCoord, conflictRow int, rawKey []any, keyStr string) (slotChild, bool) {
 	occupants := idx.slots[slot]
 	if len(rawKey) > 0 {
 		for _, occ := range occupants {
 			if occ.row == conflictRow && occ.key == keyStr {
-				return true
+				return occ, true
 			}
 		}
-		return false
+		return slotChild{}, false
 	}
-	return len(occupants) == 1 && occupants[0].row == conflictRow
+	if len(occupants) == 1 && occupants[0].row == conflictRow {
+		return occupants[0], true
+	}
+	return slotChild{}, false
 }
 
 // validateEdgeRefs checks that all edge target references resolve.
@@ -1425,6 +1585,7 @@ func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGrou
 		return err
 	}
 	sd.validateDiagnostics(diags, idx)
+	sd.checkRecordFacts(diags, idx)
 	sd.checkOnes(idx)
 	sd.validateEdgeRefs(idx)
 	return nil
@@ -1458,7 +1619,6 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 						Relation:   relName,
 						SourceType: id,
 						SourceKey:  ip.PrimaryKey,
-						TargetType: sd.tableIDs[*e.TargetType],
 						TargetKey:  immutable.WrapKey(normalizeSlice(e.TargetKey)),
 						Properties: immutable.WrapProperties(normalizeMap(e.Properties)),
 					})
@@ -1469,13 +1629,7 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 
 	dupParts := make([]graph.DuplicateParts, 0, len(diags.Duplicates))
 	for _, dw := range diags.Duplicates {
-		dp := graph.DuplicateParts{
-			Type:         sd.tableIDs[*dw.Type],
-			Key:          immutable.WrapKey(normalizeSlice(dw.Key)),
-			Instance:     sd.instanceParts(*dw.Type, dw.Instance),
-			ConflictType: sd.tableIDs[*dw.Conflict.Type],
-			ConflictKey:  immutable.WrapKey(normalizeSlice(dw.Conflict.Key)),
-		}
+		dp := graph.DuplicateParts{Instance: sd.instanceParts(*dw.Type, dw.Instance)}
 		if dw.Relation != "" {
 			dp.ParentType = sd.tableIDs[*dw.ParentType]
 			dp.ParentKey = immutable.WrapKey(normalizeSlice(dw.ParentKey))
@@ -1490,7 +1644,6 @@ func (sd *streamDecoder) loadDocument(groups []instanceGroupWire, diags diagWire
 			SourceType: sd.tableIDs[*uw.SourceType],
 			SourceKey:  immutable.WrapKey(normalizeSlice(uw.SourceKey)),
 			Relation:   uw.Relation,
-			TargetType: sd.tableIDs[*uw.TargetType],
 			Reason:     uw.Reason,
 			Properties: immutable.WrapProperties(normalizeMap(uw.Properties)),
 		}

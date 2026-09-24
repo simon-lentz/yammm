@@ -89,8 +89,7 @@ func TestRebuildSnapshot_HoldsEveryInstanceRuleAtEveryDepth(t *testing.T) {
 				Types:     []schema.TypeID{root},
 				Instances: []graph.InstanceParts{node(root, "r1")},
 				Duplicates: []graph.DuplicateParts{{
-					Type: root, Key: immutable.WrapKey([]any{"r1"}), Instance: dup,
-					ConflictType: root, ConflictKey: immutable.WrapKey([]any{"r1"}),
+					Instance: dup,
 				}},
 			}
 		}},

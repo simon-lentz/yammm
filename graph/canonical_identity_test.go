@@ -205,7 +205,6 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 			Relation:   "FEED",
 			SourceType: sensorID,
 			SourceKey:  sensorKey,
-			TargetType: stationID,
 			TargetKey:  stationKey,
 			Properties: immutable.WrapProperties(map[string]any{"seen_at": when}),
 		}},

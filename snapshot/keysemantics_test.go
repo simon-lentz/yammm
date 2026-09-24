@@ -37,11 +37,11 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 	if len(built) != 1 {
 		t.Fatalf("fixture is vacuous: %d unresolved records, want 1", len(built))
 	}
-	if built[0].Reason != "absent" {
-		t.Fatalf("fixture is vacuous: reason %q, want %q", built[0].Reason, "absent")
+	if built[0].Reason() != "absent" {
+		t.Fatalf("fixture is vacuous: reason %q, want %q", built[0].Reason(), "absent")
 	}
-	if built[0].TargetKey != "" {
-		t.Fatalf("precondition: built TargetKey = %q, want empty", built[0].TargetKey)
+	if built[0].TargetKey() != "" {
+		t.Fatalf("precondition: built TargetKey = %q, want empty", built[0].TargetKey())
 	}
 
 	data, res := snapshot.Marshal(ctx, snap)
@@ -57,11 +57,11 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("loaded %d unresolved records, want 1", len(got))
 	}
-	if got[0].Reason != "absent" {
-		t.Errorf("loaded reason = %q, want %q", got[0].Reason, "absent")
+	if got[0].Reason() != "absent" {
+		t.Errorf("loaded reason = %q, want %q", got[0].Reason(), "absent")
 	}
-	if got[0].TargetKey != "" {
-		t.Errorf("loaded TargetKey = %q, want empty — a keyless key rendered as a key", got[0].TargetKey)
+	if got[0].TargetKey() != "" {
+		t.Errorf("loaded TargetKey = %q, want empty — a keyless key rendered as a key", got[0].TargetKey())
 	}
 }
 
@@ -253,7 +253,7 @@ func TestLoadVerify_EmptyConflictKeyAgreeWithTheGraph(t *testing.T) {
 	if n := len(loaded.Duplicates()); n != 1 {
 		t.Fatalf("loaded %d duplicates, want 1", n)
 	}
-	if conflict := loaded.Duplicates()[0].Conflict; conflict == nil {
+	if conflict := loaded.Duplicates()[0].Conflict(); conflict == nil {
 		t.Error("the duplicate's conflict pointer is nil — the slot address did not resolve")
 	}
 }
@@ -289,7 +289,7 @@ func TestLoad_StatedConflictKeySelectsAmongSiblings(t *testing.T) {
 	if n := len(loaded.Duplicates()); n != 1 {
 		t.Fatalf("loaded %d duplicates, want 1", n)
 	}
-	conflict := loaded.Duplicates()[0].Conflict
+	conflict := loaded.Duplicates()[0].Conflict()
 	if conflict == nil {
 		t.Fatal("the duplicate's conflict pointer is nil — the stated key selected nothing")
 	}
@@ -340,7 +340,6 @@ func TestMarshal_KeepsAnIntegerTargetKeyBeyondExactFloat(t *testing.T) {
 			SourceType: id,
 			SourceKey:  immutable.WrapKey([]any{"r1"}),
 			Relation:   "POINTS",
-			TargetType: id,
 			TargetKey:  immutable.WrapKey([]any{beyondExact}),
 			Reason:     "target_missing",
 		}},

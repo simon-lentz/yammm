@@ -61,13 +61,18 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //     re-indent, because re-indenting would require re-serializing the
 //     body and defeat the performance premise. Byte-identical round-trip
 //     is guaranteed ONLY for inputs produced by Marshal (with any
-//     supported Option combination). Hand-edited inputs with pathological
-//     whitespace round through without error but with best-effort indent
-//     fidelity.
+//     supported Option combination). A hand-edited input keeps its body's
+//     bytes; its header is written again in the indent that follows a
+//     newline directly after the opening brace, before the "yammm_snapshot"
+//     key, or compact otherwise. Whitespace before the opening brace draws
+//     Error E_SNAPSHOT_MALFORMED, and whitespace between the header's closing
+//     brace and the comma after it Fatal E_UPDATE_METADATA_BODY_OFFSET;
+//     [UpdateMetadataOrReMarshal] falls back to [Load] and [Marshal] for
+//     either input.
 //
 // Wire-format precondition. UpdateMetadata depends on the field-order
-// and body-suffix stability contracts documented in wire.go's package
-// Godoc. Future changes to those contracts must update or remove this
+// and body-suffix stability contracts documented in the comment block
+// that follows wire.go's imports. Future changes to those contracts must update or remove this
 // primitive in lockstep.
 //
 // Intended caller pattern:
@@ -102,9 +107,10 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //
 // Failure modes and error codes:
 //
-//   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse, its
-//     top-level keys are not the four the format fixes in their fixed order
-//     and none null, or its types table states one identity on two rows.
+//   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse or states
+//     a null features field, its top-level keys are not the four the format
+//     fixes in their fixed order and none null, or its types table states one
+//     identity on two rows.
 //   - [diag.E_SNAPSHOT_UNSUPPORTED_FEATURE] — the header names a feature this
 //     version does not implement. Refused rather than carried through, because
 //     the output would claim support it does not have.

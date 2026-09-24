@@ -272,7 +272,7 @@ type Doc {
 		Edges: []graph.EdgeParts{{
 			Relation:   "CITES",
 			SourceType: docID, SourceKey: immutable.WrapKey([]any{"d1"}),
-			TargetType: noteID, TargetKey: immutable.WrapKey([]any{"n1"}),
+			TargetKey:  immutable.WrapKey([]any{"n1"}),
 			Properties: immutable.WrapProperties(map[string]any{"seen_at": rawInstant}),
 		}},
 	}

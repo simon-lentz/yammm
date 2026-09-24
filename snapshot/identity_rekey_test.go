@@ -240,7 +240,6 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 			SourceType: basinID,
 			SourceKey:  immutable.WrapKey([]any{"b1"}),
 			Relation:   "NEAR",
-			TargetType: basinID,
 			TargetKey:  immutable.WrapKey([]any{"gone"}),
 			Reason:     "target_missing",
 		}},

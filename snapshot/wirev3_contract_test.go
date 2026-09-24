@@ -636,6 +636,10 @@ func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
 			},
 		},
+		// Graph.Add records a required association the data does not name.
+		Unresolved: []graph.UnresolvedParts{{
+			SourceType: populated, SourceKey: immutable.WrapKey([]any{"p1"}), Relation: "EMPLOYER", Reason: "absent",
+		}},
 	})
 	if res.HasErrors() {
 		t.Fatalf("assembling: %s", res)

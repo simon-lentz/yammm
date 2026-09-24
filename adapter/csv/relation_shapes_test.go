@@ -37,7 +37,7 @@ type Employee extends Staff {
 
 // kinSnapshot rebuilds one Employee and two Companies, with the edges given.
 // graph.RebuildSnapshot reconstructs a document and does not validate one.
-func kinSnapshot(t *testing.T, edges func(employee, company schema.TypeID) []graph.EdgeParts) (*graph.Snapshot, *schema.Schema) {
+func kinSnapshot(t *testing.T, edges func(employee schema.TypeID) []graph.EdgeParts) (*graph.Snapshot, *schema.Schema) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), kinSchema, "kin.yammm")
 	if res.HasErrors() {
@@ -61,7 +61,7 @@ func kinSnapshot(t *testing.T, edges func(employee, company schema.TypeID) []gra
 				Properties: immutable.WrapProperties(map[string]any{"staff_id": "e1"}),
 			},
 		},
-		Edges: edges(employeeT.ID(), companyT.ID()),
+		Edges: edges(employeeT.ID()),
 	})
 	if err := r.Err(); err != nil {
 		t.Fatalf("RebuildSnapshot refused the parts, so the case has no subject: %v", err)
@@ -69,10 +69,10 @@ func kinSnapshot(t *testing.T, edges func(employee, company schema.TypeID) []gra
 	return snap, s
 }
 
-func kinEdge(from, to schema.TypeID, rel string, key ...any) graph.EdgeParts {
+func kinEdge(from schema.TypeID, rel string, key ...any) graph.EdgeParts {
 	return graph.EdgeParts{
 		Relation: rel, SourceType: from, SourceKey: immutable.WrapKey([]any{"e1"}),
-		TargetType: to, TargetKey: immutable.WrapKey(key), Properties: immutable.WrapProperties(nil),
+		TargetKey: immutable.WrapKey(key), Properties: immutable.WrapProperties(nil),
 	}
 }
 
@@ -80,10 +80,10 @@ func kinEdge(from, to schema.TypeID, rel string, key ...any) graph.EdgeParts {
 // the list separator.
 func TestMarshalSnapshot_InheritedAssociationsOfBothMultiplicitiesAreWritten(t *testing.T) {
 	t.Parallel()
-	snap, s := kinSnapshot(t, func(e, c schema.TypeID) []graph.EdgeParts {
+	snap, s := kinSnapshot(t, func(e schema.TypeID) []graph.EdgeParts {
 		return []graph.EdgeParts{
-			kinEdge(e, c, "WORKS_AT", "c1", "eu"),
-			kinEdge(e, c, "ADVISES", "c1", "eu"), kinEdge(e, c, "ADVISES", "c2", "eu"),
+			kinEdge(e, "WORKS_AT", "c1", "eu"),
+			kinEdge(e, "ADVISES", "c1", "eu"), kinEdge(e, "ADVISES", "c2", "eu"),
 		}
 	})
 	files, err := New(WithSchema(s)).MarshalSnapshot(context.Background(), snap)

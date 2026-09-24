@@ -1267,10 +1267,10 @@ func TestMarshalLoad_DuplicateRoundTrip(t *testing.T) {
 	}
 
 	dup := loaded.Duplicates()[0]
-	if dup.Instance.TypeName() != "Company" {
-		t.Errorf("duplicate type: got %q, want %q", dup.Instance.TypeName(), "Company")
+	if dup.Instance().TypeName() != "Company" {
+		t.Errorf("duplicate type: got %q, want %q", dup.Instance().TypeName(), "Company")
 	}
-	if !dup.Diagnostic.IsZero() {
+	if !dup.Diagnostic().IsZero() {
 		t.Error("loaded duplicate should not have diagnostic")
 	}
 }
@@ -1324,7 +1324,7 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 
 	require.Len(t, loaded.Unresolved(), 1)
 	u := loaded.Unresolved()[0]
-	require.Equal(t, "target_missing", u.Reason)
+	require.Equal(t, "target_missing", u.Reason())
 
 	role, ok := u.Property("role")
 	require.True(t, ok, "Property(role) should round-trip")

@@ -68,6 +68,11 @@ func TestRebuildSnapshot_WithInstances(t *testing.T) {
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
 			},
 		},
+		// Graph.Add records a required association the data does not name.
+		Unresolved: []graph.UnresolvedParts{{
+			SourceType: mustTypeID(t, s, "Person"), SourceKey: immutable.WrapKey([]any{"p1"}),
+			Relation: "EMPLOYER", Reason: "absent",
+		}},
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
@@ -107,7 +112,6 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 				Relation:   "EMPLOYER",
 				SourceType: mustTypeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{"p1"}),
-				TargetType: mustTypeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c1"}),
 				Properties: immutable.Properties{},
 			},
@@ -156,7 +160,6 @@ func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 				Relation:   "EMPLOYER",
 				SourceType: mustTypeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{"p1"}),
-				TargetType: mustTypeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c1"}),
 			},
 		},
@@ -194,15 +197,11 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 		},
 		Duplicates: []graph.DuplicateParts{
 			{
-				Type: mustTypeID(t, s, "Company"),
-				Key:  immutable.WrapKey([]any{"c1"}),
 				Instance: graph.InstanceParts{
 					TypeID:     mustTypeID(t, s, "Company"),
 					PrimaryKey: immutable.WrapKey([]any{"c1"}),
 					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "title": "Acme Corp"}),
 				},
-				ConflictType: mustTypeID(t, s, "Company"),
-				ConflictKey:  immutable.WrapKey([]any{"c1"}),
 			},
 		},
 	}
@@ -218,13 +217,13 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 	}
 
 	dup := dups[0]
-	if dup.Instance.TypeName() != "Company" {
-		t.Errorf("duplicate type: got %q", dup.Instance.TypeName())
+	if dup.Instance().TypeName() != "Company" {
+		t.Errorf("duplicate type: got %q", dup.Instance().TypeName())
 	}
-	if !dup.Diagnostic.IsZero() {
+	if !dup.Diagnostic().IsZero() {
 		t.Error("loaded duplicate should not have diagnostic")
 	}
-	if dup.Conflict == nil {
+	if dup.Conflict() == nil {
 		t.Error("conflict should be resolved")
 	}
 }
@@ -236,15 +235,11 @@ func TestRebuildSnapshot_DuplicateConflictMissing(t *testing.T) {
 		Instances: []graph.InstanceParts{},
 		Duplicates: []graph.DuplicateParts{
 			{
-				Type: mustTypeID(t, s, "Company"),
-				Key:  immutable.WrapKey([]any{"c_missing"}),
 				Instance: graph.InstanceParts{
 					TypeID:     mustTypeID(t, s, "Company"),
 					PrimaryKey: immutable.WrapKey([]any{"c_missing"}),
 					Properties: immutable.WrapProperties(map[string]any{"id": "c_missing", "title": "Missing"}),
 				},
-				ConflictType: mustTypeID(t, s, "Company"),
-				ConflictKey:  immutable.WrapKey([]any{"c_missing"}),
 			},
 		},
 	}
@@ -274,7 +269,6 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 				SourceType: mustTypeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{"p1"}),
 				Relation:   "EMPLOYER",
-				TargetType: mustTypeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c99"}),
 				Reason:     "target_missing",
 			},
@@ -292,10 +286,10 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 	}
 
 	u := unresolved[0]
-	if u.Relation != "EMPLOYER" {
-		t.Errorf("unresolved relation: got %q", u.Relation)
+	if u.Relation() != "EMPLOYER" {
+		t.Errorf("unresolved relation: got %q", u.Relation())
 	}
-	if u.Source == nil {
+	if u.Source() == nil {
 		t.Error("source should be resolved")
 	}
 }
@@ -327,17 +321,14 @@ func TestRebuildSnapshot_OneSlotConflictResolvesThroughSlot(t *testing.T) {
 			},
 		},
 		Duplicates: []graph.DuplicateParts{{
-			Type: childID,
-			Key:  immutable.WrapKey([]any{"c2"}),
 			Instance: graph.InstanceParts{
 				TypeID:     childID,
 				PrimaryKey: immutable.WrapKey([]any{"c2"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "c2", "name": "second"}),
 			},
-			ConflictType: childID,
-			ParentType:   parentID,
-			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "CHILD",
+			ParentType: parentID,
+			ParentKey:  immutable.WrapKey([]any{"p1"}),
+			Relation:   "CHILD",
 		}},
 	}
 
@@ -350,7 +341,7 @@ func TestRebuildSnapshot_OneSlotConflictResolvesThroughSlot(t *testing.T) {
 	if len(dups) != 1 {
 		t.Fatalf("expected 1 duplicate, got %d", len(dups))
 	}
-	conflict := dups[0].Conflict
+	conflict := dups[0].Conflict()
 	if conflict == nil {
 		t.Fatal("conflict not resolved")
 	}
@@ -359,9 +350,10 @@ func TestRebuildSnapshot_OneSlotConflictResolvesThroughSlot(t *testing.T) {
 	}
 }
 
-// TestRebuildSnapshot_ManyConflictSelectsByStatedKey pins sibling selection
-// in a (many) slot: the stated conflict key picks the surviving sibling.
-func TestRebuildSnapshot_ManyConflictSelectsByStatedKey(t *testing.T) {
+// TestRebuildSnapshot_ManyConflictIsTheSiblingAtItsKey pins sibling selection
+// in a keyed (many) slot: the rejected child's own key picks the surviving
+// sibling, as Graph.AddComposed records it.
+func TestRebuildSnapshot_ManyConflictIsTheSiblingAtItsKey(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	parentID := mustTypeID(t, s, "Parent")
 	childID := mustTypeID(t, s, "Child")
@@ -384,14 +376,10 @@ func TestRebuildSnapshot_ManyConflictSelectsByStatedKey(t *testing.T) {
 			},
 		},
 		Duplicates: []graph.DuplicateParts{{
-			Type:         childID,
-			Key:          immutable.WrapKey([]any{"c1"}),
-			Instance:     child("c1", "rejected"),
-			ConflictType: childID,
-			ConflictKey:  immutable.WrapKey([]any{"c1"}),
-			ParentType:   parentID,
-			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "CHILDREN",
+			Instance:   child("c1", "rejected"),
+			ParentType: parentID,
+			ParentKey:  immutable.WrapKey([]any{"p1"}),
+			Relation:   "CHILDREN",
 		}},
 	}
 
@@ -400,7 +388,7 @@ func TestRebuildSnapshot_ManyConflictSelectsByStatedKey(t *testing.T) {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
 
-	conflict := snap.Duplicates()[0].Conflict
+	conflict := snap.Duplicates()[0].Conflict()
 	if conflict == nil {
 		t.Fatal("conflict not resolved")
 	}
@@ -416,10 +404,9 @@ func TestRebuildSnapshot_ManyConflictSelectsByStatedKey(t *testing.T) {
 	}
 }
 
-// TestRebuildSnapshot_ConflictTypeMismatchIsReported pins the cross-check on
-// the stated conflict type: a slot occupant of a different type never
-// resolves as the conflict.
-func TestRebuildSnapshot_ConflictTypeMismatchIsReported(t *testing.T) {
+// A composed duplicate is an instance of its slot's declared target, as
+// Graph.AddComposed refuses any other child before it records one.
+func TestRebuildSnapshot_RefusesAComposedDuplicateOutsideItsSlotsTarget(t *testing.T) {
 	s := testSchemaWithOneComposition(t)
 	parentID := mustTypeID(t, s, "Parent")
 	childID := mustTypeID(t, s, "Child")
@@ -439,64 +426,14 @@ func TestRebuildSnapshot_ConflictTypeMismatchIsReported(t *testing.T) {
 			},
 		},
 		Duplicates: []graph.DuplicateParts{{
-			Type: childID,
-			Key:  immutable.WrapKey([]any{"c2"}),
 			Instance: graph.InstanceParts{
-				TypeID:     childID,
-				PrimaryKey: immutable.WrapKey([]any{"c2"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "c2", "name": "second"}),
-			},
-			ConflictType: parentID,
-			ParentType:   parentID,
-			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "CHILD",
-		}},
-	}
-
-	snap, result := graph.RebuildSnapshot(s, parts)
-	if snap != nil {
-		t.Error("expected nil snapshot on error")
-	}
-	if !result.HasErrors() {
-		t.Error("expected error for a conflict type mismatch")
-	}
-}
-
-// TestRebuildSnapshot_KeyedConflictTypeMismatchIsReported pins the type
-// cross-check on keyed sibling selection: a matching key never resolves a
-// conflict whose stated type disagrees with the occupant's.
-func TestRebuildSnapshot_KeyedConflictTypeMismatchIsReported(t *testing.T) {
-	s := testSchemaWithComposition(t)
-	parentID := mustTypeID(t, s, "Parent")
-	childID := mustTypeID(t, s, "Child")
-
-	parts := graph.SnapshotParts{
-		Types: []schema.TypeID{parentID},
-		Instances: []graph.InstanceParts{
-			{
 				TypeID:     parentID,
-				PrimaryKey: immutable.WrapKey([]any{"p1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": "root"}),
-				Composed: map[string][]graph.InstanceParts{"CHILDREN": {{
-					TypeID:     childID,
-					PrimaryKey: immutable.WrapKey([]any{"c1"}),
-					Properties: immutable.WrapProperties(map[string]any{"id": "c1", "name": "first"}),
-				}}},
+				PrimaryKey: immutable.WrapKey([]any{"p2"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "p2", "name": "stray"}),
 			},
-		},
-		Duplicates: []graph.DuplicateParts{{
-			Type: childID,
-			Key:  immutable.WrapKey([]any{"c1"}),
-			Instance: graph.InstanceParts{
-				TypeID:     childID,
-				PrimaryKey: immutable.WrapKey([]any{"c1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "c1", "name": "again"}),
-			},
-			ConflictType: parentID,
-			ConflictKey:  immutable.WrapKey([]any{"c1"}),
-			ParentType:   parentID,
-			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "CHILDREN",
+			ParentType: parentID,
+			ParentKey:  immutable.WrapKey([]any{"p1"}),
+			Relation:   "CHILD",
 		}},
 	}
 
@@ -504,15 +441,12 @@ func TestRebuildSnapshot_KeyedConflictTypeMismatchIsReported(t *testing.T) {
 	if snap != nil {
 		t.Error("expected nil snapshot on error")
 	}
-	if !result.HasErrors() {
-		t.Error("expected error for a keyed conflict type mismatch")
-	}
+	requireFatalNaming(t, result, "the composition \"CHILD\" declares "+childID.String())
 }
 
-// TestRebuildSnapshot_RootConflictFollowsStatedAddress pins that a root
-// conflict resolves at the stated address, never at the duplicate's own
-// coordinates.
-func TestRebuildSnapshot_RootConflictFollowsStatedAddress(t *testing.T) {
+// A root duplicate collides with the root at its own type and key, as
+// Graph.Add records it; a record whose own key holds no root has no conflict.
+func TestRebuildSnapshot_RefusesARootDuplicateWithNoRootAtItsKey(t *testing.T) {
 	s := rebuildTestSchema(t)
 	companyID := mustTypeID(t, s, "Company")
 
@@ -526,35 +460,36 @@ func TestRebuildSnapshot_RootConflictFollowsStatedAddress(t *testing.T) {
 			},
 		},
 		Duplicates: []graph.DuplicateParts{{
-			Type: companyID,
-			Key:  immutable.WrapKey([]any{"c9"}),
 			Instance: graph.InstanceParts{
 				TypeID:     companyID,
 				PrimaryKey: immutable.WrapKey([]any{"c9"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "c9", "title": "Ghost"}),
 			},
-			ConflictType: companyID,
-			ConflictKey:  immutable.WrapKey([]any{"c1"}),
 		}},
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
-	if result.HasErrors() {
-		t.Fatalf("RebuildSnapshot: %s", result)
+	if snap != nil {
+		t.Error("expected nil snapshot on error")
 	}
-	conflict := snap.Duplicates()[0].Conflict
-	if conflict == nil {
-		t.Fatal("conflict not resolved")
-	}
-	if got, want := conflict.PrimaryKey().String(), graph.FormatKey("c1"); got != want {
-		t.Errorf("conflict key = %s, want %s", got, want)
-	}
+	requireFatalNaming(t, result, "no root is at its own type and key")
 }
 
-// TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant pins the strictness
-// of slot-alone addressing: with two occupants and no stated key, the
-// conflict is ambiguous and never guessed.
-func TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant(t *testing.T) {
+// requireFatalNaming requires a Fatal E_INTERNAL whose message holds phrase.
+func requireFatalNaming(t *testing.T, result diag.Result, phrase string) {
+	t.Helper()
+	for issue := range result.Issues() {
+		if issue.Severity() == diag.Fatal && issue.Code() == diag.E_INTERNAL && strings.Contains(issue.Message(), phrase) {
+			return
+		}
+	}
+	t.Errorf("want Fatal E_INTERNAL naming %q, got: %s", phrase, result)
+}
+
+// A keyed (many) duplicate collides only with the sibling at its own key, so a
+// record whose key no sibling holds has no conflict, however many siblings the
+// slot holds.
+func TestRebuildSnapshot_RefusesAManyDuplicateWithNoSiblingAtItsKey(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	parentID := mustTypeID(t, s, "Parent")
 	childID := mustTypeID(t, s, "Child")
@@ -577,13 +512,10 @@ func TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant(t *testing.T) {
 			},
 		},
 		Duplicates: []graph.DuplicateParts{{
-			Type:         childID,
-			Key:          immutable.WrapKey([]any{"c3"}),
-			Instance:     child("c3"),
-			ConflictType: childID,
-			ParentType:   parentID,
-			ParentKey:    immutable.WrapKey([]any{"p1"}),
-			Relation:     "CHILDREN",
+			Instance:   child("c3"),
+			ParentType: parentID,
+			ParentKey:  immutable.WrapKey([]any{"p1"}),
+			Relation:   "CHILDREN",
 		}},
 	}
 
@@ -591,9 +523,7 @@ func TestRebuildSnapshot_EmptyConflictKeyNeedsSoleOccupant(t *testing.T) {
 	if snap != nil {
 		t.Error("expected nil snapshot on error")
 	}
-	if !result.HasErrors() {
-		t.Error("expected error for an ambiguous slot-alone conflict address")
-	}
+	requireFatalNaming(t, result, `holds no child of the composition "CHILDREN" at its key`)
 }
 
 // TestRebuildSnapshot_ZeroIdentityPartsRejected pins identity totality at
@@ -654,28 +584,7 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 			name: "edge source",
 			want: "zero type identity at edge source position",
 			parts: graph.SnapshotParts{
-				Edges: []graph.EdgeParts{{Relation: "EMPLOYER", SourceKey: key, TargetType: companyID, TargetKey: key}},
-			},
-		},
-		{
-			name: "edge target",
-			want: "zero type identity at edge target position",
-			parts: graph.SnapshotParts{
-				Edges: []graph.EdgeParts{{Relation: "EMPLOYER", SourceType: companyID, SourceKey: key, TargetKey: key}},
-			},
-		},
-		{
-			name: "duplicate",
-			want: "zero type identity at duplicate position",
-			parts: graph.SnapshotParts{
-				Duplicates: []graph.DuplicateParts{{Key: key, Instance: company("c9"), ConflictType: companyID, ConflictKey: key}},
-			},
-		},
-		{
-			name: "duplicate conflict",
-			want: "zero type identity at duplicate conflict position",
-			parts: graph.SnapshotParts{
-				Duplicates: []graph.DuplicateParts{{Type: companyID, Key: key, Instance: company("c9")}},
+				Edges: []graph.EdgeParts{{Relation: "EMPLOYER", SourceKey: key, TargetKey: key}},
 			},
 		},
 		{
@@ -683,8 +592,7 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 			want: "zero type identity at duplicate parent position",
 			parts: graph.SnapshotParts{
 				Duplicates: []graph.DuplicateParts{{
-					Type: companyID, Key: key, Instance: company("c9"),
-					ConflictType: companyID, ConflictKey: key,
+					Instance:  company("c9"),
 					ParentKey: key, Relation: "children",
 				}},
 			},
@@ -694,8 +602,7 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 			want: "zero type identity at duplicate instance position",
 			parts: graph.SnapshotParts{
 				Duplicates: []graph.DuplicateParts{{
-					Type: companyID, Key: key, Instance: zeroInst("c9"),
-					ConflictType: companyID, ConflictKey: key,
+					Instance: zeroInst("c9"),
 				}},
 			},
 		},
@@ -703,14 +610,7 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 			name: "unresolved source",
 			want: "zero type identity at unresolved source position",
 			parts: graph.SnapshotParts{
-				Unresolved: []graph.UnresolvedParts{{SourceKey: key, Relation: "EMPLOYER", TargetType: companyID, TargetKey: key, Reason: "target_missing"}},
-			},
-		},
-		{
-			name: "unresolved target",
-			want: "zero type identity at unresolved target position",
-			parts: graph.SnapshotParts{
-				Unresolved: []graph.UnresolvedParts{{SourceType: companyID, SourceKey: key, Relation: "EMPLOYER", TargetKey: key, Reason: "target_missing"}},
+				Unresolved: []graph.UnresolvedParts{{SourceKey: key, Relation: "EMPLOYER", TargetKey: key, Reason: "target_missing"}},
 			},
 		},
 	}
@@ -802,21 +702,23 @@ func TestSnapshot_DuplicatesComeBackSorted(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "name": key}),
 		}
 	}
+	// Graph.Add records a required association the data does not name.
+	absent := func(key string) graph.UnresolvedParts {
+		return graph.UnresolvedParts{SourceType: personID, SourceKey: immutable.WrapKey([]any{key}), Relation: "EMPLOYER", Reason: "absent"}
+	}
+	// A rejected duplicate of each root, as Graph.Add records it.
 	dp := func(key string) graph.DuplicateParts {
-		return graph.DuplicateParts{
-			Type: personID, Key: immutable.WrapKey([]any{key}),
-			Instance:     ip(key),
-			ConflictType: personID, ConflictKey: immutable.WrapKey([]any{"anchor"}),
-		}
+		rejected := ip(key)
+		rejected.Properties = immutable.WrapProperties(map[string]any{"id": key, "name": "rejected " + key})
+		return graph.DuplicateParts{Instance: rejected}
 	}
 
 	// Handed in descending key order; the accessor must return ascending.
 	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{personID},
-		Instances: []graph.InstanceParts{
-			ip("anchor"),
-		},
+		Types:      []schema.TypeID{personID},
+		Instances:  []graph.InstanceParts{ip("d1"), ip("d2"), ip("d3")},
 		Duplicates: []graph.DuplicateParts{dp("d3"), dp("d1"), dp("d2")},
+		Unresolved: []graph.UnresolvedParts{absent("d1"), absent("d2"), absent("d3")},
 	})
 	if res.HasErrors() {
 		t.Fatalf("rebuild: %s", res.String())
@@ -824,7 +726,7 @@ func TestSnapshot_DuplicatesComeBackSorted(t *testing.T) {
 
 	var keys []string
 	for _, d := range snap.Duplicates() {
-		keys = append(keys, d.Instance.PrimaryKey().String())
+		keys = append(keys, d.Instance().PrimaryKey().String())
 	}
 	if !slices.IsSorted(keys) {
 		t.Errorf("Duplicates() is not in compareDuplicates order: %v", keys)

@@ -150,11 +150,11 @@
 //
 // [Graph.Add] never builds a snapshot that breaks the facts below, and every
 // other constructor of a snapshot refuses one that does: [RebuildSnapshot] over
-// parts, [NewFromSnapshot] and [NewBatchAssemblerFromSnapshot] over a snapshot
-// bound to another schema, and the snapshot package's reader over a document.
+// parts, and the snapshot package's reader over a document. [NewFromSnapshot]
+// and [NewBatchAssemblerFromSnapshot], over a snapshot bound to another schema,
+// refuse one that breaks any fact but Records, and derive its records again.
 // The facts are the whole promise: a shape they do not name, such as a
-// duplicate record whose conflict is of another type, can pass a constructor.
-// The facts are:
+// property value its constraint refuses, can pass a constructor. The facts are:
 //
 //   - Identity. Every type identity resolves in the schema.
 //   - Root and denoted types. See the two sections above.
@@ -167,24 +167,46 @@
 //     address.
 //   - Names. Every stored property and edge property name is declared.
 //   - Associations. Every edge and unresolved record is under an association
-//     its source's type declares, names that association's declared target,
-//     carries a target key of the target's arity, each component a scalar
-//     [ParseKey] reads back, where it names a target, and
-//     states a reason [UnresolvedEdge] documents; an "absent" or "empty"
-//     record carries no target key and no edge properties. A (one)
-//     association holds one record at most, edges and unresolved records
-//     together.
-//   - Duplicates. A duplicate record's type and key are its instance's, its
-//     instance holds no composed children, and a root duplicate's type can
-//     hold a root.
+//     its source's type declares. An edge's target is an instance of that
+//     association's declared target, and a record's target type is that
+//     declared target, derived from the association, never taken from a
+//     constructor's input. A record carries a target key of
+//     the target's arity, each component a scalar [ParseKey] reads back, where
+//     it names a target, and states a reason [UnresolvedEdge] documents; an
+//     "absent" or "empty" record carries no target key and no edge
+//     properties. A (one) association holds one record at most, edges and
+//     unresolved records together.
+//   - Records. The records are the ones [Graph.Add] derives from the data.
+//     Every root holds an edge or a record under each required association
+//     of its type. An "absent" or "empty" record stands alone, once, and only
+//     under a required association. A "target_missing" record names a target
+//     no root holds.
+//   - Duplicates. A duplicate's instance holds no composed children, and a
+//     root duplicate's type can hold a root. Its conflict is derived from its
+//     position, never taken from a constructor's input: for a root duplicate, the root at its own type and key; for a
+//     composed duplicate, whose type is its composition's declared target,
+//     the sole child of a (one) slot or the child of a keyed (many) slot at
+//     its own key. A duplicate with no such conflict, as under a keyless
+//     (many) slot, breaks the fact.
 //
-// Whether an association is required is read from the schema, never stored:
+// Whether an association is required is read from the schema, never taken from
+// a constructor's input:
 // [UnresolvedEdge.Required] is derived by every constructor, so a snapshot
 // imported under a schema that relaxes an association reports it under that
 // schema's rule.
 //
 // A snapshot bound to the importing schema already holds to every fact, so
-// the import walks only a snapshot built against another schema.
+// the import walks only a snapshot built against another schema. That import
+// derives the records again, as [Graph.Add] derives them from the snapshot's
+// data under the importing schema. A "target_missing" record whose target the
+// snapshot holds becomes an edge. An "absent" or "empty" record under an
+// association the schema makes optional, or an "absent" record under one it
+// drops, is dropped. A root holding no edge and no record under an association
+// the schema makes required gains an "absent" record there. A snapshot records
+// nothing for an empty list under an optional association, so that gained
+// record reads "absent" where [Graph.Add], given the list, records "empty". A
+// "target_missing" record names a target as an edge does, so under an
+// association the schema retargets both are refused.
 //
 // # Build Then Commit
 //
@@ -197,7 +219,8 @@
 //
 // A non-OK result therefore installs nothing of the record — no instance, child
 // or edge — and does so structurally rather than by two functions agreeing. A
-// rejection is itself recorded: a duplicate in [Snapshot.Duplicates], and
+// rejection is itself recorded: a root [Graph.Add] refuses at its key, or a
+// child [Graph.AddComposed] refuses at its slot, in [Snapshot.Duplicates], and
 // every refusal's issue in [Snapshot.Diagnostics]. The alternative,
 // installing first and rejecting during the walk, left a record in the graph
 // that the caller had been told had failed: [BatchAssembler.Count]
@@ -216,9 +239,10 @@
 //
 // # Composed Children
 //
-// A composed child is checked exactly as a root is — its edge names and
+// A composed child is checked as a root is — its edge names and
 // multiplicities, its own key, and its own composition tree — but its
-// association edges are never installed. A part type that declares or
+// association edges are never staged, so their target keys go unjudged, and
+// never installed. A part type that declares or
 // inherits an association therefore produces no [Edge], no
 // [UnresolvedEdge], and no effect on [Attestation]'s Associations dimension.
 // The check still runs, so data filed under a name the part type does not
@@ -388,9 +412,9 @@
 //
 // [RebuildSnapshot] and the import report a broken structural fact with the
 // code [Graph.Add] reports it with. The one exception is at [RebuildSnapshot]:
-// parts that break the identity, root, denoted-type, name, address, reason or
-// duplicate rule come only from a broken caller, so it reports them as Fatal
-// E_INTERNAL. [RebuildSnapshot] panics on a nil schema, as [New]
+// parts that break the identity, root, denoted-type, name, address, reason,
+// records or duplicate rule come only from a broken caller, so it reports them
+// as Fatal E_INTERNAL. [RebuildSnapshot] panics on a nil schema, as [New]
 // does.
 //
 // # Diagnostics Lifecycle

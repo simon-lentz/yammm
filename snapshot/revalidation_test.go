@@ -350,7 +350,7 @@ func TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation(t *testing.T) {
 		Edges: []graph.EdgeParts{{
 			Relation:   "BOGUS",
 			SourceType: thing.ID(), SourceKey: immutable.WrapKey([]any{"t1"}),
-			TargetType: target.ID(), TargetKey: immutable.WrapKey([]any{"x1"}),
+			TargetKey: immutable.WrapKey([]any{"x1"}),
 		}},
 	})
 	if !res.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {

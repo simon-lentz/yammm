@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"fmt"
+
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -9,8 +11,9 @@ import (
 // NewFromSnapshot creates a Graph pre-populated from a Snapshot's contents,
 // ready for [Graph.Add] calls that resolve against the imported instances.
 //
-// snap need not have been built against s, but it must hold to s under the
-// package doc's "Structural facts". A snapshot that breaks one is refused with
+// snap need not have been built against s, but it must hold to s under every
+// fact of the package doc's "Structural facts" but Records, whose records the
+// import derives again under s. A snapshot that breaks one is refused with
 // a nil Graph and a diagnostic naming each position, under the code
 // [Graph.Add] refuses it with; nothing is installed. A snapshot bound to s
 // already holds to them and is not walked.
@@ -31,8 +34,8 @@ func NewFromSnapshot(s *schema.Schema, snap *Snapshot, opts ...Option) (*Graph, 
 // validateImport holds snap to s through [structureRules], the definition
 // [RebuildSnapshot] applies, so an import cannot install what the rebuild path
 // refuses. snap's types include every root's type, so its types entries carry
-// the root rule. A record's reason and a duplicate record's own type and key
-// need no schema, and every constructor of snap held them, so the walk skips them.
+// the root rule. A record's reason needs no schema and every constructor of
+// snap held it, so the walk judges none; importSnapshot derives the records again.
 func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag.Result {
 	if snap.schema == s {
 		return diag.OK()
@@ -56,17 +59,43 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 		})
 	}
 	for i, dup := range snap.duplicates {
-		if dup.Parent == nil {
-			r.rootDuplicate(i, dup.Instance.typeID)
+		checkTree(r, "duplicate instance", dup.instance)
+		// A root duplicate's conflict is the root at its own type and key, which
+		// every constructor of snap held, and that root's type carries the root
+		// rule through the types entries. A composed duplicate's conflict depends
+		// on its slot's multiplicity and keys, which s can change.
+		if dup.relation == "" {
+			continue
 		}
-		checkTree(r, "duplicate instance", dup.Instance)
+		// An identity s cannot resolve is the identity rule's to report: a
+		// parent's through its type's entry, the instance's through checkTree.
+		if _, ok := s.TypeByID(dup.instance.typeID); !ok {
+			continue
+		}
+		if _, ok := s.TypeByID(dup.parent.typeID); !ok {
+			continue
+		}
+		if _, why := derivedConflict(s, canon, nil, dup.instance, dup.parent, dup.relation); why != "" {
+			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf("duplicate record %d, %s[%s], %s",
+				i, dup.instance.typeID, dup.instance.primaryKey.String(), why))
+		}
 	}
 	for _, u := range snap.unresolved {
-		r.identity(u.TargetType, positionAt("unresolved target", u.TargetKey))
-		r.association(associationRecord{
-			position: "unresolved record of", source: u.Source.typeID, sourceKey: u.Source.primaryKey, relation: u.Relation,
-			target: u.TargetType, targetKey: unresolvedTargetKey(u), reason: u.Reason, properties: u.properties,
-		})
+		// An absent record holds no data, so it names no field s can lack:
+		// importSnapshot drops it where s declares no such association.
+		if u.reason == "absent" && associationTarget(s, u.source.typeID, u.relation).IsZero() {
+			continue
+		}
+		rec := associationRecord{
+			position: "unresolved record of", source: u.source.typeID, sourceKey: u.source.primaryKey, relation: u.relation,
+			targetKey: unresolvedTargetKey(u), reason: u.reason, properties: u.properties,
+		}
+		// A target_missing record names a target, which holds to the declared
+		// target as an edge's does.
+		if u.reason == "target_missing" {
+			rec.target = u.targetType
+		}
+		r.association(rec)
 	}
 	r.oneOverflow()
 	return c.Result()
@@ -74,9 +103,10 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 
 // importSnapshot populates a mutable Graph from a Snapshot's contents,
 // bypassing the normal Add() pipeline. It does not perform duplicate
-// detection, edge resolution, or composition extraction — it directly
-// installs the snapshot's pre-resolved data into the graph's internal
-// structures.
+// detection or composition extraction — it directly installs the snapshot's
+// pre-resolved data into the graph's internal structures. Only for a snapshot
+// bound to another schema does it resolve an edge: deriveRecords turns a
+// target_missing record whose target it installed into one.
 //
 // After importSnapshot, the graph is ready for new Add() calls that
 // resolve against the imported instances. New instances with the same
@@ -134,73 +164,44 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 			g.canon.edgeProperties(edge.Source().TypeID(), edge.Relation(), edge.Properties())))
 	}
 
-	// Step 3: Install unresolved edges as pending.
-	// ALL reasons are reinstalled (target_missing, absent, empty) so they
-	// survive the import → add → snapshot cycle without data loss.
-	for _, unres := range snap.Unresolved() {
-		srcClone := cloneMap[unres.Source]
-
-		// Reverse the reason mapping from [Graph.Snapshot], which converts the
-		// empty reasonDetail [Graph.Add] stores into "target_missing".
-		reasonDetail := unres.Reason
-		if reasonDetail == "target_missing" {
-			reasonDetail = ""
+	// Step 3: Install the unresolved records. A snapshot bound to this schema
+	// holds Add's records already; one built under another schema holds the
+	// records Add derived there, so they are derived again here.
+	if snap.schema == g.schema {
+		for _, unres := range snap.unresolved {
+			g.installPending(cloneMap[unres.source], unres.relation, unres.targetKey, unres.reason, unres.properties)
 		}
-
-		// Read from THIS graph's schema, as Add reads them: the import rule
-		// holds the relation to an association of the source's type there.
-		// Resolved by identity, which reaches the whole closure where the
-		// source's tag form does not.
-		jsonField, required := "", false
-		if typ, ok := g.schema.TypeByID(unres.Source.TypeID()); ok {
-			if rel, ok := typ.Relation(unres.Relation); ok {
-				jsonField, required = rel.FieldName(), !rel.IsOptional()
-			}
-		}
-
-		// The pending index is read by the address Add installs, so the target
-		// key moves with the instances this same pass re-keyed.
-		targetKey := g.canon.address(unres.TargetType, unres.TargetKey)
-		pk := pendingKey{targetTypeID: unres.TargetType, targetKey: targetKey}
-		g.pending[pk] = append(g.pending[pk], &pendingEdge{
-			source:       srcClone,
-			relation:     unres.Relation,
-			jsonField:    jsonField,
-			targetType:   unres.TargetType,
-			targetKey:    targetKey,
-			properties:   g.canon.edgeProperties(unres.Source.TypeID(), unres.Relation, unres.Properties()),
-			isRequired:   required,
-			reasonDetail: reasonDetail,
-		})
+	} else {
+		g.deriveRecords(snap, cloneMap)
 	}
 
 	// Step 4: Install duplicates.
 	// Duplicates are rejected instances — NOT in g.instances. They are
 	// preserved in g.duplicates so Snapshot() includes them in output.
 	for _, dup := range snap.Duplicates() {
-		instClone := cloneMap[dup.Instance]
+		instClone := cloneMap[dup.instance]
 		if instClone == nil {
 			// Duplicate's Instance was rejected and is not in the snapshot's
 			// instance list. Clone it directly.
-			instClone = cloneInstance(dup.Instance, cloneMap)
+			instClone = cloneInstance(dup.instance, cloneMap)
 			g.rename(name, instClone)
 			g.canon.reinstance(instClone)
 		}
 
-		conflictClone := cloneMap[dup.Conflict]
+		conflictClone := cloneMap[dup.conflict]
 
 		var parentClone *Instance
-		if dup.Parent != nil {
-			parentClone = cloneMap[dup.Parent]
+		if dup.parent != nil {
+			parentClone = cloneMap[dup.parent]
 			if parentClone == nil {
-				parentClone = cloneInstance(dup.Parent, cloneMap)
+				parentClone = cloneInstance(dup.parent, cloneMap)
 				g.rename(name, parentClone)
 				g.canon.reinstance(parentClone)
 			}
 		}
 
 		// Diagnostic is zero-value for loaded snapshots.
-		g.duplicates = append(g.duplicates, newDuplicate(instClone, conflictClone, parentClone, dup.Relation, dup.Diagnostic))
+		g.duplicates = append(g.duplicates, newDuplicate(instClone, conflictClone, parentClone, dup.relation, dup.diagnostic))
 	}
 
 	// Step 5: Diagnostics — no-op.
@@ -224,12 +225,91 @@ func (g *Graph) rename(name func(schema.TypeID) string, inst *Instance) {
 // rendering. "absent" and "empty" records store none, and a rendering that
 // does not parse reads as no key, which the arity rule then refuses.
 func unresolvedTargetKey(u *UnresolvedEdge) immutable.Key {
-	if u.TargetKey == "" {
+	if u.targetKey == "" {
 		return immutable.Key{}
 	}
-	components, err := ParseKey(u.TargetKey)
+	components, err := ParseKey(u.targetKey)
 	if err != nil {
 		return immutable.Key{}
 	}
 	return immutable.WrapKey(components)
+}
+
+// installPending installs one unresolved record of source under relation as
+// [Graph.Add] stages it: the target key moves with the instances the import
+// re-keyed, and whether the association is required is read from this schema.
+func (g *Graph) installPending(source *Instance, relation, targetKey, reason string, props immutable.Properties) {
+	typ, _ := g.schema.TypeByID(source.typeID)
+	rel, _ := typ.Relation(relation)
+	targetType := rel.TargetID()
+	// Graph.Snapshot renders the empty reason Add stores as "target_missing".
+	if reason == "target_missing" {
+		reason = ""
+		targetKey = g.canon.address(targetType, targetKey)
+	}
+	pk := pendingKey{targetTypeID: targetType, targetKey: targetKey}
+	g.pending[pk] = append(g.pending[pk], &pendingEdge{
+		source:       source,
+		relation:     relation,
+		jsonField:    rel.FieldName(),
+		targetType:   targetType,
+		targetKey:    targetKey,
+		properties:   g.canon.edgeProperties(source.typeID, relation, props),
+		isRequired:   !rel.IsOptional(),
+		reasonDetail: reason,
+	})
+}
+
+// deriveRecords installs the records [Graph.Add] would derive from snap's data
+// under this schema. A target_missing record whose target this import
+// installed resolves into an edge; an absent or empty record under an optional
+// association, and an absent one under an association this schema does not
+// declare, is dropped; and a root with no edge and no record under a
+// required association gains an absent record, what Add derives when the data
+// names no target, as the snapshot's data names none.
+func (g *Graph) deriveRecords(snap *Snapshot, cloneMap map[*Instance]*Instance) {
+	type slot struct {
+		source   *Instance
+		relation string
+	}
+	held := make(map[slot]bool, len(g.edges)+len(snap.unresolved))
+	for _, e := range g.edges {
+		held[slot{e.source, e.relation}] = true
+	}
+	for _, unres := range snap.unresolved {
+		source := cloneMap[unres.source]
+		typ, _ := g.schema.TypeByID(source.typeID)
+		rel, ok := typ.Relation(unres.relation)
+		// validateImport let through only an absent record here.
+		if !ok || !rel.IsAssociation() {
+			continue
+		}
+		if unres.reason != "target_missing" {
+			if rel.IsOptional() {
+				continue
+			}
+		} else if target := g.findInstance(rel.TargetID(), g.canon.address(rel.TargetID(), unres.targetKey)); target != nil {
+			g.edges = append(g.edges, newEdge(unres.relation, source, target,
+				g.canon.edgeProperties(source.typeID, unres.relation, unres.properties)))
+			held[slot{source, unres.relation}] = true
+			continue
+		}
+		g.installPending(source, unres.relation, unres.targetKey, unres.reason, unres.properties)
+		held[slot{source, unres.relation}] = true
+	}
+	for _, id := range snap.types {
+		typ, ok := g.schema.TypeByID(id)
+		if !ok {
+			continue
+		}
+		for _, inst := range snap.instances[id] {
+			source := cloneMap[inst]
+			for rel := range typ.AllAssociations() {
+				if rel.IsOptional() || held[slot{source, rel.Name()}] {
+					continue
+				}
+				g.installPending(source, rel.Name(), "", "absent", immutable.Properties{})
+			}
+		}
+	}
 }

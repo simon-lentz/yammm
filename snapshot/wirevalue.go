@@ -100,37 +100,75 @@ func typeByWireID(s *schema.Schema, schemaName, name string) (*schema.Type, bool
 }
 
 // wireProps clones props and rewrites each value under its schema constraint
-// so float-bearing values emit with a float indicator. A nil clone stays nil
-// (the wire's "properties":null shape). Every name is declared: each
-// constructor of a snapshot refuses an undeclared one.
-func wireProps(props immutable.Properties, t *schema.Type) map[string]any {
+// so float-bearing values emit with a float indicator, and returns with it the
+// least property name whose value the wire cannot carry ([wireWritable]), or "".
+// A nil clone stays nil (the wire's "properties":null shape).
+func wireProps(props immutable.Properties, t *schema.Type) (map[string]any, string) {
 	m := props.Clone()
-	if len(m) == 0 || t == nil {
-		return m
-	}
+	bad := ""
 	for name, v := range m {
-		if prop, ok := t.Property(name); ok {
-			m[name] = wireValue(v, prop.Constraint())
+		if t != nil {
+			if prop, ok := t.Property(name); ok {
+				v = wireValue(v, prop.Constraint())
+				m[name] = v
+			}
+		}
+		if !wireWritable(v) && (bad == "" || name < bad) {
+			bad = name
 		}
 	}
-	return m
+	return m, bad
 }
 
 // wireEdgeProps is wireProps for edge properties, whose constraints hang off
 // the source type's relation rather than any target type. The resolved and
 // unresolved paths agree because both derive rel from the source instance's
 // own TypeID — the shared input, not the shared body.
-func wireEdgeProps(props immutable.Properties, rel *schema.Relation) map[string]any {
+func wireEdgeProps(props immutable.Properties, rel *schema.Relation) (map[string]any, string) {
 	m := props.Clone()
-	if len(m) == 0 || rel == nil {
-		return m
-	}
+	bad := ""
 	for name, v := range m {
-		if p, ok := rel.Property(name); ok {
-			m[name] = wireValue(v, p.Constraint())
+		if rel != nil {
+			if p, ok := rel.Property(name); ok {
+				v = wireValue(v, p.Constraint())
+				m[name] = v
+			}
+		}
+		if !wireWritable(v) && (bad == "" || name < bad) {
+			bad = name
 		}
 	}
-	return m
+	return m, bad
+}
+
+// wireWritable reports whether encoding/json writes v, a value wireValue
+// returned: no JSON number spells a non-finite float, and any other Go value is
+// judged by encoding/json itself, as adapter/json judges the same value.
+func wireWritable(v any) bool {
+	switch t := v.(type) {
+	case nil, string, bool, int64:
+		return true
+	case wireFloat:
+		return !math.IsNaN(float64(t)) && !math.IsInf(float64(t), 0)
+	case wireFloat32:
+		return !math.IsNaN(float64(t)) && !math.IsInf(float64(t), 0)
+	case []any:
+		for _, e := range t {
+			if !wireWritable(e) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		for _, e := range t {
+			if !wireWritable(e) {
+				return false
+			}
+		}
+		return true
+	}
+	_, err := json.Marshal(v)
+	return err == nil
 }
 
 // wireValue rewrites one cloned value under its resolved constraint kind. A

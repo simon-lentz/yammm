@@ -1,9 +1,11 @@
 // Package snapshot provides serialization and deserialization of [graph.Snapshot]
 // values to and from the yammm snapshot persistence format (.ys).
 //
-// The .ys format is a JSON-based persistence format that preserves full structural
+// The .ys format is a JSON-based persistence format that preserves structural
 // fidelity: instances with properties, primary keys, edges, compositions, provenance,
 // duplicates, and unresolved edge records all survive a Marshal/Load round-trip.
+// Provenance survives as source name and path, with a zero span, and a
+// duplicate's Diagnostic is not persisted.
 //
 // The format includes a schema structural hash for compatibility verification, an
 // integrity hash for corruption detection, and a features array for forward
@@ -28,8 +30,9 @@
 // [Load] refuses a document whose structure no caller of [graph.Graph.Add]
 // could have built: one that breaks a fact of the graph package doc's
 // "Structural facts" — type identity, root and denoted types, composition
-// slots, keys and their key properties, declared names, association shapes —
-// or holds two roots at one address ([diag.E_DUPLICATE_PK]). No option
+// slots, keys and their key properties, declared names, association shapes,
+// the unresolved records graph.Graph.Add derives, and each duplicate's derived
+// conflict — or holds two roots at one address ([diag.E_DUPLICATE_PK]). No option
 // excuses them, and [Verify] and [Info] run the same checks; a schema-less
 // read judges none that needs a schema.
 //
@@ -89,7 +92,8 @@
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
-// by default (no timestamp unless [WithCreatedAt] is used).
+// by default (no timestamp unless [WithCreatedAt] or [WithCreatedAtFrom] is
+// used).
 //
 // [Load] deserializes .ys bytes back to a *graph.Snapshot, verifying structural
 // integrity and schema compatibility.
@@ -182,6 +186,7 @@
 //
 //   - [WithIndent]: pretty-print JSON output with the given indent string
 //   - [WithCreatedAt]: embed a creation timestamp in the snapshot
+//   - [WithCreatedAtFrom]: embed the creation timestamp another header states
 //   - [WithMetadata]: embed arbitrary key-value metadata
 //
 // # Update Options
@@ -213,7 +218,10 @@
 //
 //   - Fatal: I/O failure, context cancellation, a body the metadata update
 //     cannot locate, or a broken invariant (E_INTERNAL)
-//   - Error: schema hash mismatch, integrity check failure, structural corruption
+//   - Error: schema hash mismatch, integrity check failure, structural
+//     corruption; and at [Marshal], a value the wire cannot carry, a tree
+//     nested past the reader's bound, an indent that is not whitespace, or a
+//     type whose schema is outside the entry schema's import closure
 //   - OK: success (may include warnings)
 //
 // # File Extension

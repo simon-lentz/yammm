@@ -79,10 +79,10 @@ func kinSnapshot(t *testing.T, shape func(p *graph.SnapshotParts, emp *graph.Ins
 	return snap
 }
 
-func kinEdge(ids kinIDs, rel string, to schema.TypeID, key ...any) graph.EdgeParts {
+func kinEdge(ids kinIDs, rel string, key ...any) graph.EdgeParts {
 	return graph.EdgeParts{
 		Relation: rel, SourceType: ids.employee, SourceKey: immutable.WrapKey([]any{"e1"}),
-		TargetType: to, TargetKey: immutable.WrapKey(key), Properties: immutable.WrapProperties(nil),
+		TargetKey: immutable.WrapKey(key), Properties: immutable.WrapProperties(nil),
 	}
 }
 
@@ -99,9 +99,9 @@ func TestMarshalObject_InheritedRelationsAreWritten(t *testing.T) {
 	t.Parallel()
 	snap := kinSnapshot(t, func(p *graph.SnapshotParts, emp *graph.InstanceParts, ids kinIDs) {
 		p.Edges = []graph.EdgeParts{
-			kinEdge(ids, "WORKS_AT", ids.company, "c1", "eu"),
-			kinEdge(ids, "ADVISES", ids.company, "c1", "eu"),
-			kinEdge(ids, "ADVISES", ids.company, "c2", "eu"),
+			kinEdge(ids, "WORKS_AT", "c1", "eu"),
+			kinEdge(ids, "ADVISES", "c1", "eu"),
+			kinEdge(ids, "ADVISES", "c2", "eu"),
 		}
 		emp.Composed = map[string][]graph.InstanceParts{"BADGES": {kinBadge(ids, "b1")}}
 	})

@@ -251,13 +251,13 @@ func TestNewFromSnapshot_ComposedDuplicate_KeepsItsComposingCoordinates(t *testi
 	if len(dups) != 1 {
 		t.Fatalf("seeded snapshot carries %d duplicates, want 1", len(dups))
 	}
-	if dups[0].Relation != "CHILD" {
-		t.Errorf("Duplicate.Relation = %q, want \"child\"", dups[0].Relation)
+	if dups[0].Relation() != "CHILD" {
+		t.Errorf("Duplicate.Relation() = %q, want \"child\"", dups[0].Relation())
 	}
-	if dups[0].Parent == nil || dups[0].Parent.PrimaryKey().String() != `["p1"]` {
+	if dups[0].Parent() == nil || dups[0].Parent().PrimaryKey().String() != `["p1"]` {
 		t.Error("the imported duplicate lost its composing parent")
 	}
-	if dups[0].Conflict == nil {
+	if dups[0].Conflict() == nil {
 		t.Error("the imported duplicate lost its conflict")
 	}
 }

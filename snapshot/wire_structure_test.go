@@ -168,7 +168,10 @@ func TestWireProbe_DuplicateTypeDiffersFromConflict(t *testing.T) {
 
 	edited := spliceOnce(t, data, `"duplicates":[{"type":0,`, `"duplicates":[{"type":1,`)
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]")
+	// The type mismatch: a composed duplicate is an instance of its slot's
+	// declared target, and the edited row names the parent's type.
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED error:E_SNAPSHOT_TYPE_MISMATCH] verify[error:E_SNAPSHOT_MALFORMED error:E_SNAPSHOT_TYPE_MISMATCH]",
+		"load["+loadSig+"] verify["+verifySig+"]")
 }
 
 // TestWireProbe_DuplicateRelationWithoutParent deletes a composed duplicate's
@@ -424,7 +427,6 @@ func edgeDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 			Relation:   "NEAR",
 			SourceType: basinID,
 			SourceKey:  immutable.WrapKey([]any{"b1"}),
-			TargetType: basinID,
 			TargetKey:  immutable.WrapKey([]any{"b2"}),
 			Properties: immutable.WrapProperties(map[string]any{"strength": float64(1)}),
 		}},
@@ -448,7 +450,6 @@ func unresolvedDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 			SourceType: basinID,
 			SourceKey:  immutable.WrapKey([]any{"b1"}),
 			Relation:   "NEAR",
-			TargetType: basinID,
 			TargetKey:  immutable.WrapKey([]any{"gone"}),
 			Reason:     "target_missing",
 			Properties: immutable.WrapProperties(map[string]any{"strength": float64(1)}),
@@ -471,11 +472,7 @@ func rootDupDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 			inst,
 		},
 		Duplicates: []graph.DuplicateParts{{
-			Type:         anchorID,
-			Key:          immutable.WrapKey([]any{"a9"}),
-			Instance:     inst,
-			ConflictType: anchorID,
-			ConflictKey:  immutable.WrapKey([]any{"a9"}),
+			Instance: inst,
 		}},
 	})
 }
@@ -510,7 +507,9 @@ func TestWireProbe_DuplicateKeyDisagreesWithItsInstance(t *testing.T) {
 	edited := spliceOnce(t, data, `"instance":{"key":["a9"]`, `"instance":{"key":["a8"]`)
 
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED x2] verify[error:E_SNAPSHOT_MALFORMED x2]",
+	// The third: a root duplicate's conflict is the root at its own key, and
+	// the stated conflict, a9, is not at the edited a8.
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED x3] verify[error:E_SNAPSHOT_MALFORMED x3]",
 		"load["+loadSig+"] verify["+verifySig+"]")
 }
 
@@ -537,11 +536,7 @@ func rootDupTwoRowDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byt
 			basin,
 		},
 		Duplicates: []graph.DuplicateParts{{
-			Type:         anchorID,
-			Key:          immutable.WrapKey([]any{"a9"}),
-			Instance:     inst,
-			ConflictType: anchorID,
-			ConflictKey:  immutable.WrapKey([]any{"a9"}),
+			Instance: inst,
 		}},
 	})
 }
@@ -685,7 +680,7 @@ func TestWireProbe_AbsentUnresolvedTargetType(t *testing.T) {
 	fact := ""
 	if loaded != nil {
 		for _, u := range loaded.Unresolved() {
-			fact = "; target bound to " + ident(u.TargetType)
+			fact = "; target bound to " + ident(u.TargetType())
 		}
 	}
 	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
@@ -1006,14 +1001,14 @@ func TestWireProbe_ComposedDuplicateSecondGeneration(t *testing.T) {
 	if dups := gen2.Duplicates(); len(dups) == 1 {
 		d := dups[0]
 		switch {
-		case d.Conflict == nil:
+		case d.Conflict() == nil:
 			fact = "gen2 conflict=nil"
-		case d.Parent == nil || d.Relation == "":
-			fact = fmt.Sprintf("gen2 parent=%v rel=%q", d.Parent != nil, d.Relation)
+		case d.Parent() == nil || d.Relation() == "":
+			fact = fmt.Sprintf("gen2 parent=%v rel=%q", d.Parent() != nil, d.Relation())
 		default:
 			fact = fmt.Sprintf("gen2 carries conflict %s[%s] under %s[%s].%s",
-				ident(d.Conflict.TypeID()), d.Conflict.PrimaryKey(),
-				ident(d.Parent.TypeID()), d.Parent.PrimaryKey(), d.Relation)
+				ident(d.Conflict().TypeID()), d.Conflict().PrimaryKey(),
+				ident(d.Parent().TypeID()), d.Parent().PrimaryKey(), d.Relation())
 		}
 	}
 	if !bytes.Equal(first, second) {

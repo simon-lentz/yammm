@@ -247,7 +247,7 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"id": key}),
 		}
 	}
-	withSource := func(sourceKey string) *graph.Snapshot {
+	withSource := func(sourceKey, other string) *graph.Snapshot {
 		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 			Types: []schema.TypeID{typeID(t, s, "Person")},
 			Instances: []graph.InstanceParts{
@@ -258,9 +258,14 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 				SourceType: typeID(t, s, "Person"),
 				SourceKey:  immutable.WrapKey([]any{sourceKey}),
 				Relation:   "EMPLOYER",
-				TargetType: typeID(t, s, "Company"),
 				TargetKey:  immutable.WrapKey([]any{"c99"}),
 				Reason:     "target_missing",
+			}, {
+				// Graph.Add records the other person's required EMPLOYER as absent.
+				SourceType: typeID(t, s, "Person"),
+				SourceKey:  immutable.WrapKey([]any{other}),
+				Relation:   "EMPLOYER",
+				Reason:     "absent",
 			}},
 		})
 		if res.HasErrors() {
@@ -270,7 +275,7 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 	}
 
 	probe := &testing.T{}
-	snapshottest.DiffSnapshots(probe, withSource("p1"), withSource("p2"))
+	snapshottest.DiffSnapshots(probe, withSource("p1", "p2"), withSource("p2", "p1"))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect an unresolved edge that moved to a different source instance")
 	}

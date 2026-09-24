@@ -123,26 +123,20 @@ func TestRebuildSnapshot_UnnameableRootRefused(t *testing.T) {
 }
 
 // TestRebuildSnapshot_UnnameableRootDuplicateRefused covers the other position
-// a root identity occupies. A root duplicate is a rejected root instance, so
-// its type must be able to hold one; a COMPOSED duplicate may name a part type
-// and is not held to the rule.
-//
-// Mutation: restricting the Addressable arm to parts.Instances turns this red.
+// a root identity occupies. A root duplicate is a rejected root instance, and
+// its conflict is the root at its own type and key; a type the entry schema
+// cannot name holds no root, so the record has no conflict. A COMPOSED
+// duplicate may name a part type and is judged against its slot instead.
 func TestRebuildSnapshot_UnnameableRootDuplicateRefused(t *testing.T) {
 	t.Parallel()
 	s, deepBeacon := unnameableFixture(t)
 
-	// ConflictType and ConflictKey are filled because validatePartsIdentity
-	// refuses a zero conflict identity on its own, which would make HasErrors
-	// below true whether or not the rule's duplicates arm exists.
+	// No types entry names the type, so the types-entry rule, which refuses it
+	// too, is not what refuses the record: a root duplicate's conflict is a
+	// root at its own type, and no root of this type can exist.
 	_, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{deepBeacon},
 		Duplicates: []graph.DuplicateParts{{
-			Type:         deepBeacon,
-			Key:          immutable.WrapKey([]any{"d1"}),
-			Instance:     beaconParts(deepBeacon, "d1"),
-			ConflictType: deepBeacon,
-			ConflictKey:  immutable.WrapKey([]any{"d1"}),
+			Instance: beaconParts(deepBeacon, "d1"),
 		}},
 	})
 	if !result.HasErrors() {
@@ -151,7 +145,7 @@ func TestRebuildSnapshot_UnnameableRootDuplicateRefused(t *testing.T) {
 	if !resultHasCode(result, diag.E_INTERNAL) {
 		t.Errorf("refusal reported %s, want %s", result, diag.E_INTERNAL)
 	}
-	if msg := result.String(); !strings.Contains(msg, "duplicate record") {
+	if msg := result.String(); !strings.Contains(msg, "duplicate record 0") || !strings.Contains(msg, "no root is at its own type and key") {
 		t.Errorf("refusal %q does not name the duplicate position", msg)
 	}
 	if msg := result.String(); strings.Contains(msg, "zero type identity") {

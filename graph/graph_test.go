@@ -664,11 +664,11 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 	}
 
 	// Should be sorted: Company < Person lexicographically
-	if dups[0].Instance.TypeName() != "Company" {
-		t.Errorf("First duplicate should be Company, got %s", dups[0].Instance.TypeName())
+	if dups[0].Instance().TypeName() != "Company" {
+		t.Errorf("First duplicate should be Company, got %s", dups[0].Instance().TypeName())
 	}
-	if dups[1].Instance.TypeName() != "Person" {
-		t.Errorf("Second duplicate should be Person, got %s", dups[1].Instance.TypeName())
+	if dups[1].Instance().TypeName() != "Person" {
+		t.Errorf("Second duplicate should be Person, got %s", dups[1].Instance().TypeName())
 	}
 }
 
@@ -709,11 +709,11 @@ func TestGraph_Unresolved_Ordering(t *testing.T) {
 	// the list fails rather than only one that moves the smallest key.
 	if !slices.IsSortedFunc(unresolved, func(a, b *graph.UnresolvedEdge) int {
 		return cmp.Or(
-			cmp.Compare(a.Source.TypeID().String(), b.Source.TypeID().String()),
-			cmp.Compare(a.Source.PrimaryKey().String(), b.Source.PrimaryKey().String()),
-			cmp.Compare(a.Relation, b.Relation),
-			cmp.Compare(a.TargetType.String(), b.TargetType.String()),
-			cmp.Compare(a.TargetKey, b.TargetKey),
+			cmp.Compare(a.Source().TypeID().String(), b.Source().TypeID().String()),
+			cmp.Compare(a.Source().PrimaryKey().String(), b.Source().PrimaryKey().String()),
+			cmp.Compare(a.Relation(), b.Relation()),
+			cmp.Compare(a.TargetType().String(), b.TargetType().String()),
+			cmp.Compare(a.TargetKey(), b.TargetKey()),
 		)
 	}) {
 		t.Errorf("Unresolved is not sorted by the documented tuple: %v", unresolved)
@@ -721,7 +721,7 @@ func TestGraph_Unresolved_Ordering(t *testing.T) {
 
 	foundA1 := false
 	for _, ur := range unresolved {
-		if ur.Source.TypeName() == "TypeA" && ur.Source.PrimaryKey().String() == `["a1"]` {
+		if ur.Source().TypeName() == "TypeA" && ur.Source().PrimaryKey().String() == `["a1"]` {
 			foundA1 = true
 		}
 	}

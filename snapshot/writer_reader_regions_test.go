@@ -247,7 +247,6 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 			Relation:   "DRAINS",
 			SourceType: anchorID,
 			SourceKey:  immutable.WrapKey([]any{"a1"}),
-			TargetType: basinID,
 			TargetKey:  immutable.WrapKey([]any{"b1"}),
 			Properties: immutable.WrapProperties(nil),
 		}},
@@ -387,7 +386,7 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 			edges = append(edges, graph.EdgeParts{
 				Relation:   "R" + string(r),
 				SourceType: id, SourceKey: immutable.WrapKey([]any{"n1"}),
-				TargetType: id, TargetKey: immutable.WrapKey([]any{"n2"}),
+				TargetKey:  immutable.WrapKey([]any{"n2"}),
 				Properties: immutable.WrapProperties(map[string]any{"w": weight}),
 			})
 		}

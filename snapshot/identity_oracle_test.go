@@ -57,6 +57,7 @@ type Anchor {
 type Site {
 	id String primary
 	*-> PARTS (many) Part
+	*-> MAIN (_:one) Part
 	*-> IMPORTED (many) base.Part
 }
 
@@ -280,26 +281,26 @@ func collectIdentities(snap *graph.Snapshot) []identityRecord {
 		}
 	}
 	for _, d := range snap.Duplicates() {
-		walk("duplicate", d.Instance)
+		walk("duplicate", d.Instance())
 		// A conflict re-resolving to a different instance is a loss the
 		// rejected instance's own record cannot show.
 		conflict, parent := "-", "-"
-		if d.Conflict != nil {
-			conflict = fmt.Sprintf("%s[%s]", d.Conflict.TypeID(), d.Conflict.PrimaryKey())
+		if d.Conflict() != nil {
+			conflict = fmt.Sprintf("%s[%s]", d.Conflict().TypeID(), d.Conflict().PrimaryKey())
 		}
-		if d.Parent != nil {
-			parent = fmt.Sprintf("%s[%s]", d.Parent.TypeID(), d.Parent.PrimaryKey())
+		if d.Parent() != nil {
+			parent = fmt.Sprintf("%s[%s]", d.Parent().TypeID(), d.Parent().PrimaryKey())
 		}
 		out = append(out, identityRecord(fmt.Sprintf(
 			"duplicate-coords | id=%s | pk=%s | conflict=%s | parent=%s | rel=%s",
-			d.Instance.TypeID(), d.Instance.PrimaryKey(), conflict, parent, d.Relation,
+			d.Instance().TypeID(), d.Instance().PrimaryKey(), conflict, parent, d.Relation(),
 		)))
 	}
 	for _, u := range snap.Unresolved() {
 		out = append(out, identityRecord(fmt.Sprintf(
 			"unresolved | source=%s | sourceId=%s | sourcePk=%s | rel=%s | target=%s | targetKey=%s | required=%t | reason=%s | props={%s}",
-			u.Source.TypeName(), u.Source.TypeID(), u.Source.PrimaryKey().String(), u.Relation,
-			u.TargetType, u.TargetKey, u.Required, u.Reason,
+			u.Source().TypeName(), u.Source().TypeID(), u.Source().PrimaryKey().String(), u.Relation(),
+			u.TargetType(), u.TargetKey(), u.Required(), u.Reason(),
 			renderProps(u.Properties().Clone()),
 		)))
 	}
@@ -330,7 +331,7 @@ func assertTagFormConsistent(t *testing.T, s *schema.Schema, snap *graph.Snapsho
 		}
 	}
 	for _, d := range snap.Duplicates() {
-		check("duplicate", d.Instance)
+		check("duplicate", d.Instance())
 	}
 }
 
@@ -482,7 +483,6 @@ func identityCases() []identityCase {
 						SourceType: id,
 						SourceKey:  immutable.WrapKey([]any{"b1"}),
 						Relation:   "NEAR",
-						TargetType: id,
 						TargetKey:  immutable.WrapKey([]any{"gone"}),
 						Reason:     "target_missing",
 						Properties: immutable.WrapProperties(map[string]any{"strength": float64(1)}),
@@ -568,8 +568,9 @@ func identityCases() []identityCase {
 			build:    duplicateCase("", "Anchor", "a9", map[string]any{"id": "a9", "depth": float64(4)}),
 		},
 		{
-			// The conflict's key differs from the rejected child's, so only
-			// the walker's conflict coordinate can see a re-derived conflict.
+			// A (one) slot's conflict is its sole occupant whatever its key, so
+			// the conflict's key differs from the rejected child's and only the
+			// walker's conflict coordinate can see a re-derived conflict.
 			name:     "duplicate_composed_slot",
 			origin:   "local",
 			position: "duplicate",
@@ -589,22 +590,18 @@ func identityCases() []identityCase {
 							TypeID:     siteID,
 							PrimaryKey: immutable.WrapKey([]any{"site9"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "site9"}),
-							Composed:   map[string][]graph.InstanceParts{"PARTS": {occupant}},
+							Composed:   map[string][]graph.InstanceParts{"MAIN": {occupant}},
 						},
 					},
 					Duplicates: []graph.DuplicateParts{{
-						Type: partID,
-						Key:  immutable.WrapKey([]any{"lp9"}),
 						Instance: graph.InstanceParts{
 							TypeID:     partID,
 							PrimaryKey: immutable.WrapKey([]any{"lp9"}),
 							Properties: partProps("", "lp9"),
 						},
-						ConflictType: partID,
-						ConflictKey:  immutable.WrapKey([]any{"lp1"}),
-						ParentType:   siteID,
-						ParentKey:    immutable.WrapKey([]any{"site9"}),
-						Relation:     "PARTS",
+						ParentType: siteID,
+						ParentKey:  immutable.WrapKey([]any{"site9"}),
+						Relation:   "MAIN",
 					}},
 				}
 			},
@@ -661,11 +658,7 @@ func duplicateCase(alias, typeName, key string, props map[string]any) func(*test
 				inst,
 			},
 			Duplicates: []graph.DuplicateParts{{
-				Type:         id,
-				Key:          immutable.WrapKey([]any{key}),
-				Instance:     inst,
-				ConflictType: id,
-				ConflictKey:  immutable.WrapKey([]any{key}),
+				Instance: inst,
 			}},
 		}
 	}
@@ -713,6 +706,15 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 		if _, res := graph.RebuildSnapshot(s, build(t, s)); !res.HasErrors() {
 			t.Errorf("RebuildSnapshot admitted %s, which Graph.Add refuses", name)
 		}
+	}
+	// Illegal rather than untested: a keyed (many) slot's duplicate collides with
+	// the sibling at its own key, so a conflict at another key is no record
+	// Graph.AddComposed makes.
+	crossKey := findCase(t, "duplicate_composed_slot").build(t, s)
+	crossKey.Instances[0].Composed = map[string][]graph.InstanceParts{"PARTS": crossKey.Instances[0].Composed["MAIN"]}
+	crossKey.Duplicates[0].Relation = "PARTS"
+	if _, res := graph.RebuildSnapshot(s, crossKey); !res.HasErrors() {
+		t.Error("RebuildSnapshot admitted a (many) duplicate whose conflict is at another key, which Graph.AddComposed never records")
 	}
 
 	for _, tc := range cases {
@@ -790,4 +792,16 @@ func asStrings(rs []identityRecord) []string {
 		out[i] = string(r)
 	}
 	return out
+}
+
+// findCase returns the identity case named name.
+func findCase(t *testing.T, name string) identityCase {
+	t.Helper()
+	for _, c := range identityCases() {
+		if c.name == name {
+			return c
+		}
+	}
+	t.Fatalf("no identity case %q", name)
+	return identityCase{}
 }

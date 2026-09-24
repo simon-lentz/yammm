@@ -527,13 +527,13 @@ func TestResult_Duplicates_IncludesComposedDuplicates_OneCardinality(t *testing.
 	}
 
 	dup := dups[0]
-	if dup.Diagnostic.Code() != diag.E_DUPLICATE_COMPOSED_PK {
-		t.Errorf("Expected E_DUPLICATE_COMPOSED_PK, got %s", dup.Diagnostic.Code())
+	if dup.Diagnostic().Code() != diag.E_DUPLICATE_COMPOSED_PK {
+		t.Errorf("Expected E_DUPLICATE_COMPOSED_PK, got %s", dup.Diagnostic().Code())
 	}
-	if dup.Instance == nil {
+	if dup.Instance() == nil {
 		t.Error("Duplicate.Instance should not be nil")
 	}
-	if dup.Conflict == nil {
+	if dup.Conflict() == nil {
 		t.Error("Duplicate.Conflict should not be nil")
 	}
 }
@@ -572,26 +572,26 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 	}
 
 	dup := dups[0]
-	if dup.Diagnostic.Code() != diag.E_DUPLICATE_COMPOSED_PK {
-		t.Errorf("Expected E_DUPLICATE_COMPOSED_PK, got %s", dup.Diagnostic.Code())
+	if dup.Diagnostic().Code() != diag.E_DUPLICATE_COMPOSED_PK {
+		t.Errorf("Expected E_DUPLICATE_COMPOSED_PK, got %s", dup.Diagnostic().Code())
 	}
-	if dup.Instance == nil {
+	if dup.Instance() == nil {
 		t.Error("Duplicate.Instance should not be nil")
 	}
-	if dup.Conflict == nil {
+	if dup.Conflict() == nil {
 		t.Error("Duplicate.Conflict should not be nil")
 	}
 	// The collision is on the key, so both carry it; what separates them is
 	// the payload, and a record that returned the attached child as its own
 	// rejected instance would carry no information.
-	if dup.Instance.PrimaryKey().String() != dup.Conflict.PrimaryKey().String() {
+	if dup.Instance().PrimaryKey().String() != dup.Conflict().PrimaryKey().String() {
 		t.Error("Instance and Conflict should have the same PK for this test")
 	}
-	if dup.Instance == dup.Conflict {
+	if dup.Instance() == dup.Conflict() {
 		t.Error("Instance and Conflict are the same object")
 	}
-	instName, _ := dup.Instance.Property("name")
-	conflictName, _ := dup.Conflict.Property("name")
+	instName, _ := dup.Instance().Property("name")
+	conflictName, _ := dup.Conflict().Property("name")
 	if instName.Unwrap() != "Child 1 Duplicate" {
 		t.Errorf("Duplicate.Instance is not the rejected child: name=%v", instName.Unwrap())
 	}

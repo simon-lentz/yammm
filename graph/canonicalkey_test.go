@@ -72,7 +72,7 @@ func TestGraph_EdgeResolvesAcrossKeySpellings(t *testing.T) {
 	if n := len(snap.Unresolved()); n != 0 {
 		t.Errorf("the edge did not resolve across two spellings of one instant: %d unresolved", n)
 		for _, u := range snap.Unresolved() {
-			t.Logf("  unresolved: %s -> %s reason=%s", u.Relation, u.TargetKey, u.Reason)
+			t.Logf("  unresolved: %s -> %s reason=%s", u.Relation(), u.TargetKey(), u.Reason())
 		}
 	}
 	if n := len(snap.Edges()); n != 1 {

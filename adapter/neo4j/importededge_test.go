@@ -64,7 +64,7 @@ func TestBatchEdgeQueries_ImportedSourceTypeWritesUnderClosureShape(t *testing.T
 		Edges: []graph.EdgeParts{{
 			Relation:   "NEAR",
 			SourceType: id, SourceKey: immutable.WrapKey([]any{"b1"}),
-			TargetType: id, TargetKey: immutable.WrapKey([]any{"b2"}),
+			TargetKey:  immutable.WrapKey([]any{"b2"}),
 			Properties: immutable.WrapProperties(map[string]any{"seen": "2026-08-17T12:00:00Z"}),
 		}},
 	})

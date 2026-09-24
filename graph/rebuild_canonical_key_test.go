@@ -169,7 +169,6 @@ func TestCanonicalization_AddAndRebuildAgree(t *testing.T) {
 			Relation:   "SITE",
 			SourceType: sensorID,
 			SourceKey:  immutable.WrapKey([]any{"s1"}),
-			TargetType: siteID,
 			TargetKey:  immutable.WrapKey([]any{spelled}),
 			Properties: immutable.WrapProperties(map[string]any{"label": "north"}),
 		}},
@@ -345,7 +344,7 @@ func rawKeyedEventParts(t *testing.T, s *schema.Schema, edgeSpelling string) gra
 		},
 		Edges: []graph.EdgeParts{{
 			Relation: "ABOUT", SourceType: noteID, SourceKey: immutable.WrapKey([]any{"n1"}),
-			TargetType: eventID, TargetKey: immutable.WrapKey([]any{edgeSpelling}),
+			TargetKey: immutable.WrapKey([]any{edgeSpelling}),
 		}},
 	}
 }

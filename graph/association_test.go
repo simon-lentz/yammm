@@ -177,17 +177,17 @@ func TestGraph_ForwardReference_Snapshot(t *testing.T) {
 	}
 
 	ur := unresolved[0]
-	if ur.Source.TypeName() != "Person" {
-		t.Errorf("Unresolved source should be Person, got %s", ur.Source.TypeName())
+	if ur.Source().TypeName() != "Person" {
+		t.Errorf("Unresolved source should be Person, got %s", ur.Source().TypeName())
 	}
-	if ur.Relation != "EMPLOYER" {
-		t.Errorf("Unresolved relation should be employer, got %s", ur.Relation)
+	if ur.Relation() != "EMPLOYER" {
+		t.Errorf("Unresolved relation should be employer, got %s", ur.Relation())
 	}
-	if ur.TargetType != mustTypeID(t, s, "Company") {
-		t.Errorf("Unresolved target type should be Company, got %s", ur.TargetType)
+	if ur.TargetType() != mustTypeID(t, s, "Company") {
+		t.Errorf("Unresolved target type should be Company, got %s", ur.TargetType())
 	}
-	if ur.TargetKey != `["acme"]` {
-		t.Errorf("Unresolved target key should be [\"acme\"], got %s", ur.TargetKey)
+	if ur.TargetKey() != `["acme"]` {
+		t.Errorf("Unresolved target key should be [\"acme\"], got %s", ur.TargetKey())
 	}
 }
 
@@ -212,11 +212,11 @@ func TestUnresolvedEdge_RequiredAndReasonFields(t *testing.T) {
 	}
 
 	ur := unresolved[0]
-	if !ur.Required {
+	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason != "target_missing" {
-		t.Errorf("Expected Reason='target_missing', got %q", ur.Reason)
+	if ur.Reason() != "target_missing" {
+		t.Errorf("Expected Reason='target_missing', got %q", ur.Reason())
 	}
 }
 
@@ -241,11 +241,11 @@ func TestUnresolvedEdge_OptionalAssociation(t *testing.T) {
 	}
 
 	ur := unresolved[0]
-	if ur.Required {
+	if ur.Required() {
 		t.Error("Expected Required=false for optional association")
 	}
-	if ur.Reason != "target_missing" {
-		t.Errorf("Expected Reason='target_missing', got %q", ur.Reason)
+	if ur.Reason() != "target_missing" {
+		t.Errorf("Expected Reason='target_missing', got %q", ur.Reason())
 	}
 }
 
@@ -269,14 +269,14 @@ func TestUnresolvedEdge_AbsentReason(t *testing.T) {
 	}
 
 	ur := unresolved[0]
-	if !ur.Required {
+	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason != "absent" {
-		t.Errorf("Expected Reason='absent', got %q", ur.Reason)
+	if ur.Reason() != "absent" {
+		t.Errorf("Expected Reason='absent', got %q", ur.Reason())
 	}
-	if ur.TargetKey != "" {
-		t.Errorf("Expected empty TargetKey for absent field, got %q", ur.TargetKey)
+	if ur.TargetKey() != "" {
+		t.Errorf("Expected empty TargetKey for absent field, got %q", ur.TargetKey())
 	}
 }
 
@@ -301,14 +301,14 @@ func TestUnresolvedEdge_EmptyReason(t *testing.T) {
 	}
 
 	ur := unresolved[0]
-	if !ur.Required {
+	if !ur.Required() {
 		t.Error("Expected Required=true for required association")
 	}
-	if ur.Reason != "empty" {
-		t.Errorf("Expected Reason='empty', got %q", ur.Reason)
+	if ur.Reason() != "empty" {
+		t.Errorf("Expected Reason='empty', got %q", ur.Reason())
 	}
-	if ur.TargetKey != "" {
-		t.Errorf("Expected empty TargetKey for empty array, got %q", ur.TargetKey)
+	if ur.TargetKey() != "" {
+		t.Errorf("Expected empty TargetKey for empty array, got %q", ur.TargetKey())
 	}
 }
 
@@ -574,8 +574,8 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 	}
 
 	u := unres[0]
-	if u.Reason != "target_missing" {
-		t.Errorf("Reason: got %q, want %q", u.Reason, "target_missing")
+	if u.Reason() != "target_missing" {
+		t.Errorf("Reason: got %q, want %q", u.Reason(), "target_missing")
 	}
 
 	role, ok := u.Property("role")
@@ -608,6 +608,16 @@ func TestUnresolvedEdge_NilReceiver(t *testing.T) {
 	}
 	if u.Properties().Len() != 0 {
 		t.Error("nil receiver Properties should return empty")
+	}
+	if u.Source() != nil || u.Relation() != "" || !u.TargetType().IsZero() || u.TargetKey() != "" || u.Required() || u.Reason() != "" {
+		t.Error("a nil UnresolvedEdge's accessors should return zero values")
+	}
+}
+
+func TestDuplicate_NilReceiver(t *testing.T) {
+	var d *graph.Duplicate
+	if d.Instance() != nil || d.Conflict() != nil || d.Parent() != nil || d.Relation() != "" || !d.Diagnostic().IsZero() {
+		t.Error("a nil Duplicate's accessors should return zero values")
 	}
 }
 
@@ -685,9 +695,9 @@ func TestGraph_ForwardReference_Multiple_Unresolved_Snapshot(t *testing.T) {
 	// Verify all 3 sources are represented
 	sources := make(map[string]bool)
 	for _, ur := range unresolved {
-		sources[ur.Source.PrimaryKey().String()] = true
-		if ur.TargetKey != `["acme"]` {
-			t.Errorf("Unresolved target key should be [\"acme\"], got %s", ur.TargetKey)
+		sources[ur.Source().PrimaryKey().String()] = true
+		if ur.TargetKey() != `["acme"]` {
+			t.Errorf("Unresolved target key should be [\"acme\"], got %s", ur.TargetKey())
 		}
 	}
 	for _, name := range []string{`["alice"]`, `["bob"]`, `["carol"]`} {

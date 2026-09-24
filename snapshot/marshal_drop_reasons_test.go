@@ -66,7 +66,7 @@ func TestRebuildSnapshot_RefusesATargetOnARecordWithNoTarget(t *testing.T) {
 			Unresolved: []graph.UnresolvedParts{{
 				Relation:   "LINK",
 				SourceType: sourceType.ID(), SourceKey: immutable.WrapKey([]any{"s1"}),
-				TargetType: targetType.ID(), TargetKey: tc.key,
+				TargetKey:  tc.key,
 				Properties: tc.props,
 				Reason:     "absent",
 			}},
@@ -102,7 +102,7 @@ func TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked(t *testing.T) {
 	if len(snap.Duplicates()) != 1 {
 		t.Fatalf("duplicates = %d, want 1", len(snap.Duplicates()))
 	}
-	if snap.Duplicates()[0].Diagnostic.Code() == (diag.Code{}) {
+	if snap.Duplicates()[0].Diagnostic().Code() == (diag.Code{}) {
 		t.Fatal("the duplicate carries no diagnostic, so this test asserts nothing")
 	}
 
@@ -114,7 +114,7 @@ func TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked(t *testing.T) {
 	if lres.HasErrors() {
 		t.Fatalf("load: %s", lres)
 	}
-	if got := loaded.Duplicates()[0].Diagnostic.Code(); got != (diag.Code{}) {
+	if got := loaded.Duplicates()[0].Diagnostic().Code(); got != (diag.Code{}) {
 		t.Errorf("the round trip kept the diagnostic as %q; the wire has no field for it", got)
 	}
 }

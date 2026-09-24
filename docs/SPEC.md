@@ -1804,7 +1804,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 
 **Snapshot** — persistence errors:
 
-- `E_SNAPSHOT_MALFORMED` — invalid JSON, missing required fields, or content a structural rule refuses: an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself
+- `E_SNAPSHOT_MALFORMED` — invalid JSON, missing required fields, or content a structural rule refuses: an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict. `snapshot.Marshal` raises it for input that would write such a file: an indent that is not whitespace, or a property value the wire cannot carry
 - `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch

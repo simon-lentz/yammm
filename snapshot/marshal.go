@@ -24,16 +24,16 @@ import (
 // start and once per type group during emission, returning Fatal
 // E_CONTEXT_CANCELLED on cancellation.
 //
-// A state the writer cannot serialize returns nil bytes with Fatal
-// E_INTERNAL. A value the wire cannot carry — a non-finite float, or a Go
-// value encoding/json refuses — is held only by an instance nothing validated,
-// through [graph.Graph.Add] or [graph.RebuildSnapshot]. An unresolved record
-// with no source instance, or with a target key [graph.ParseKey] cannot read,
-// is built by no constructor and made only by writing the record's exported
-// fields. A snapshot nested deeper than the reader accepts returns nil bytes
-// with Error E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader
-// raises, so the bound reads identically from both sides. Panics if snap is
-// nil.
+// A property value the wire cannot carry — a non-finite float, or a Go value
+// encoding/json refuses — returns nil bytes with Error E_SNAPSHOT_MALFORMED
+// naming the property and where it sits: the root or duplicate record by type
+// and key, and the composition path to a composed child. Only an instance no validator judged
+// holds one, reaching the snapshot through [graph.Graph.Add],
+// [graph.Graph.AddComposed] or [graph.RebuildSnapshot]. A snapshot nested
+// deeper than the reader accepts returns nil bytes with Error
+// E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises, so
+// the bound reads identically from both sides. Fatal E_INTERNAL marks only a
+// broken invariant of the snapshot itself. Panics if snap is nil.
 //
 // Two further refusals, both Error: an indent that is not whitespace, which
 // would produce bytes that are not JSON ([diag.E_SNAPSHOT_MALFORMED]); and a
@@ -276,9 +276,13 @@ func marshalInstance(
 	}
 	id := inst.TypeID()
 	t, _ := s.TypeByID(id)
+	props, bad := wireProps(inst.Properties(), t)
+	if bad != "" {
+		return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), property: bad}
+	}
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
-		Properties: wireProps(inst.Properties(), t),
+		Properties: props,
 	}
 
 	if carryType {
@@ -300,10 +304,14 @@ func marshalInstance(
 			if err != nil {
 				return instWire{}, err
 			}
+			eprops, bad := wireEdgeProps(e.Properties(), rel)
+			if bad != "" {
+				return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), relation: e.Relation(), property: bad}
+			}
 			ew := edgeWire{
 				TargetType: row,
 				TargetKey:  e.Target().PrimaryKey().Clone(),
-				Properties: wireEdgeProps(e.Properties(), rel),
+				Properties: eprops,
 			}
 			if ew.Properties == nil {
 				ew.Properties = map[string]any{}
@@ -319,8 +327,13 @@ func marshalInstance(
 		for _, relName := range compRels {
 			children := inst.Composed(relName)
 			childWires := make([]instWire, 0, len(children))
-			for _, child := range children {
+			for i, child := range children {
 				cw, err := marshalInstance(child, nil, s, tt, true, depth+1)
+				if ue, ok := errors.AsType[*unwritableValueError](err); ok {
+					// Readdressed at each level, so the refusal names the root.
+					ue.ref, ue.key = tt.ref(id), inst.PrimaryKey().String()
+					ue.path = append([]string{fmt.Sprintf("%s[%d]", relName, i)}, ue.path...)
+				}
 				if err != nil {
 					return instWire{}, err
 				}
@@ -341,85 +354,92 @@ func marshalInstance(
 func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diagWire, error) {
 	dupWires := make([]dupWire, 0, len(view.duplicates))
 	for _, d := range view.duplicates {
-		row, err := tt.rowRef(d.Instance.TypeID(), "duplicate type")
+		row, err := tt.rowRef(d.Instance().TypeID(), "duplicate type")
 		if err != nil {
 			return diagWire{}, err
 		}
-		inst, err := marshalInstance(d.Instance, nil, s, tt, false, 0)
+		inst, err := marshalInstance(d.Instance(), nil, s, tt, false, 0)
+		if ue, ok := errors.AsType[*unwritableValueError](err); ok {
+			ue.duplicate = true
+		}
 		if err != nil {
 			return diagWire{}, err
 		}
-		if d.Conflict == nil {
+		if d.Conflict() == nil {
 			return diagWire{}, fmt.Errorf("duplicate %s[%s] carries no conflict instance",
-				d.Instance.TypeID(), d.Instance.PrimaryKey())
+				d.Instance().TypeID(), d.Instance().PrimaryKey())
 		}
-		conflictRow, err := tt.rowRef(d.Conflict.TypeID(), "duplicate conflict type")
+		conflictRow, err := tt.rowRef(d.Conflict().TypeID(), "duplicate conflict type")
 		if err != nil {
 			return diagWire{}, err
 		}
 		conflict := &conflictWire{Type: conflictRow}
-		if key := d.Conflict.PrimaryKey(); key.Len() > 0 {
+		if key := d.Conflict().PrimaryKey(); key.Len() > 0 {
 			conflict.Key = key.Clone()
 		}
 		dw := dupWire{
 			Type:     row,
-			Key:      d.Instance.PrimaryKey().Clone(),
+			Key:      d.Instance().PrimaryKey().Clone(),
 			Instance: inst,
 			Conflict: conflict,
 		}
-		if d.Relation != "" {
-			if d.Parent == nil {
+		if d.Relation() != "" {
+			if d.Parent() == nil {
 				return diagWire{}, fmt.Errorf("duplicate %s[%s] carries relation %q with no parent",
-					d.Instance.TypeID(), d.Instance.PrimaryKey(), d.Relation)
+					d.Instance().TypeID(), d.Instance().PrimaryKey(), d.Relation())
 			}
-			parentRow, err := tt.rowRef(d.Parent.TypeID(), "duplicate parent type")
+			parentRow, err := tt.rowRef(d.Parent().TypeID(), "duplicate parent type")
 			if err != nil {
 				return diagWire{}, err
 			}
 			dw.ParentType = parentRow
-			dw.ParentKey = d.Parent.PrimaryKey().Clone()
-			dw.Relation = d.Relation
+			dw.ParentKey = d.Parent().PrimaryKey().Clone()
+			dw.Relation = d.Relation()
 		}
 		dupWires = append(dupWires, dw)
 	}
 
 	unresWires := make([]unresolvedWire, 0, len(view.unresolved))
 	for _, u := range view.unresolved {
-		if u.Source == nil {
-			return diagWire{}, fmt.Errorf("unresolved edge record for relation %q carries no source instance", u.Relation)
+		if u.Source() == nil {
+			return diagWire{}, fmt.Errorf("unresolved edge record for relation %q carries no source instance", u.Relation())
 		}
-		sourceID := u.Source.TypeID()
+		sourceID := u.Source().TypeID()
 		sourceRow, err := tt.rowRef(sourceID, "unresolved source type")
 		if err != nil {
 			return diagWire{}, err
 		}
-		targetRow, err := tt.rowRef(u.TargetType, "unresolved target type")
+		targetRow, err := tt.rowRef(u.TargetType(), "unresolved target type")
 		if err != nil {
 			return diagWire{}, err
 		}
 		uw := unresolvedWire{
 			SourceType: sourceRow,
-			SourceKey:  u.Source.PrimaryKey().Clone(),
-			Relation:   u.Relation,
+			SourceKey:  u.Source().PrimaryKey().Clone(),
+			Relation:   u.Relation(),
 			TargetType: targetRow,
-			Required:   u.Required,
-			Reason:     u.Reason,
+			Required:   u.Required(),
+			Reason:     u.Reason(),
 		}
-		switch u.Reason {
+		switch u.Reason() {
 		case "absent", "empty":
 			uw.TargetKey = nil
 		default:
-			key, err := parseTargetKey(u.TargetKey)
+			key, err := parseTargetKey(u.TargetKey())
 			if err != nil {
 				return diagWire{}, fmt.Errorf("unresolved record %s[%s].%s: %w",
-					tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, err)
+					tt.ref(sourceID), u.Source().PrimaryKey(), u.Relation(), err)
 			}
 			uw.TargetKey = key
 			var rel *schema.Relation
 			if srcType, ok := s.TypeByID(sourceID); ok {
-				rel, _ = srcType.Relation(u.Relation)
+				rel, _ = srcType.Relation(u.Relation())
 			}
-			uw.Properties = wireEdgeProps(u.Properties(), rel)
+			uprops, bad := wireEdgeProps(u.Properties(), rel)
+			if bad != "" {
+				return diagWire{}, &unwritableValueError{ref: tt.ref(sourceID), key: u.Source().PrimaryKey().String(), relation: u.Relation(), property: bad}
+			}
+			uw.Properties = uprops
 		}
 		unresWires = append(unresWires, uw)
 	}
@@ -738,10 +758,24 @@ func writeJSONString(b *strings.Builder, s string) {
 	b.Write(encoded)
 }
 
-// marshalFatalErr reports a marshal failure: Error E_SNAPSHOT_DEPTH_EXCEEDED
-// for a tree nested past the reader's bound, Fatal E_INTERNAL for any other.
+// marshalFatalErr reports a marshal failure: Error E_SNAPSHOT_MALFORMED for a
+// value the wire cannot carry, Error E_SNAPSHOT_DEPTH_EXCEEDED for a tree nested
+// past the reader's bound, Fatal E_INTERNAL for any other.
 func marshalFatalErr(section string, err error) diag.Result {
 	c := diag.NewCollector(0)
+	// A value the wire cannot carry is caller data held by an instance no
+	// validator judged, not a fault of the writer.
+	if ue, ok := errors.AsType[*unwritableValueError](err); ok {
+		b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+ue.Error()).
+			WithDetail(diag.DetailKeyTypeName, ue.ref).
+			WithDetail(diag.DetailKeyPrimaryKey, ue.key).
+			WithDetail(diag.DetailKeyPropertyName, ue.property)
+		if ue.relation != "" {
+			b = b.WithDetail(diag.DetailKeyRelationName, ue.relation)
+		}
+		c.Collect(b.Build())
+		return c.Result()
+	}
 	// The composed-nesting bound is a property of the snapshot, not of the
 	// writer, and the reader already names it. Reporting it as an internal
 	// failure would leave a caller unable to tell the two apart.

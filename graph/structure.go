@@ -18,8 +18,9 @@ type structureRules struct {
 	c     *diag.Collector
 	// op names the constructor in every message.
 	op string
-	// callerFacing reports Add's code at Error where [RebuildSnapshot], whose
-	// parts break these rules only through a broken caller, reports E_INTERNAL.
+	// callerFacing reports Add's code at Error for the rules [structureRules.refuse]
+	// carries, which [RebuildSnapshot], whose parts break them only through a
+	// broken caller, reports as Fatal E_INTERNAL.
 	callerFacing bool
 
 	// ones counts the records under each (one) association of a source, and is
@@ -137,28 +138,48 @@ func (r *structureRules) rootType(id schema.TypeID, n int) {
 	}
 }
 
-// rootDuplicate refuses record i, a ROOT duplicate, whose type cannot hold a
-// root instance. A composed duplicate is exempt: a part type is exactly what
-// belongs there.
-func (r *structureRules) rootDuplicate(i int, id schema.TypeID) {
-	if code, rule := rootIneligibility(r.s, id); rule != "" {
-		r.refuse(code, fmt.Sprintf("duplicate record %d is a root duplicate of type %s, which %s", i, id, rule))
+// derivedConflict returns the instance a duplicate of inst collided with, as
+// [Graph.Add] and [Graph.AddComposed] record it, or nil and the reason no
+// instance at its position is one: the root at inst's own type and key for a
+// root duplicate, and for a composed duplicate of parent under relation the
+// sole occupant of a (one) slot, or the child of a keyed (many) slot at inst's
+// key. Keys compare in canonical form under s, so it judges an imported
+// snapshot's records under the importing schema. root is read only for a root
+// duplicate, and a composed duplicate's parent type must resolve under s.
+func derivedConflict(s *schema.Schema, canon *canonicalizer, root func(schema.TypeID, string) *Instance,
+	inst, parent *Instance, relation string,
+) (*Instance, string) {
+	if relation == "" {
+		if c := root(inst.typeID, inst.primaryKey.String()); c != nil {
+			return c, ""
+		}
+		return nil, "is a root duplicate, and no root is at its own type and key"
 	}
-}
-
-// duplicateRecord refuses record i when its stated type or key is not its
-// instance's, as the snapshot reader refuses one: [Graph.Add] records the
-// rejected instance under its own type and key, and the root rule judges the
-// record's type.
-func (r *structureRules) duplicateRecord(i int, dp DuplicateParts) {
-	switch {
-	case dp.Type != dp.Instance.TypeID:
-		r.c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-			fmt.Sprintf("%s: duplicate record %d states type %s but its instance is of type %s", r.op, i, dp.Type, dp.Instance.TypeID)).Build())
-	case r.canon.key(dp.Type, dp.Key).String() != r.canon.key(dp.Type, dp.Instance.PrimaryKey).String():
-		r.c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-			fmt.Sprintf("%s: duplicate record %d states key %s but its instance carries %s", r.op, i, dp.Key.String(), dp.Instance.PrimaryKey.String())).Build())
+	pt, _ := s.TypeByID(parent.typeID)
+	rel, ok := pt.Relation(relation)
+	if !ok || rel.Kind() != schema.RelationComposition {
+		return nil, fmt.Sprintf("names %q, which %s does not declare as a composition", relation, parent.typeID)
 	}
+	if inst.typeID != rel.TargetID() {
+		return nil, fmt.Sprintf("is of type %s; the composition %q declares %s", inst.typeID, relation, rel.TargetID())
+	}
+	occupants := parent.composed[relation]
+	if !rel.IsMany() {
+		if len(occupants) == 1 {
+			return occupants[0], ""
+		}
+		return nil, fmt.Sprintf("is under the (one) composition %q, which holds %d children", relation, len(occupants))
+	}
+	if target, _ := s.TypeByID(rel.TargetID()); !target.HasPrimaryKey() {
+		return nil, fmt.Sprintf("is under the keyless (many) composition %q, where no child conflicts", relation)
+	}
+	want := canon.key(rel.TargetID(), inst.primaryKey).String()
+	for _, o := range occupants {
+		if canon.key(rel.TargetID(), o.primaryKey).String() == want {
+			return o, ""
+		}
+	}
+	return nil, fmt.Sprintf("holds no child of the composition %q at its key", relation)
 }
 
 // rootIneligibility names the package doc's "Root type eligibility" rule that
@@ -312,10 +333,12 @@ func (r *structureRules) names(position string, t *schema.Type, id schema.TypeID
 // a resolved edge, whose reason is "", or an unresolved record.
 type associationRecord struct {
 	// position names the record kind in every message.
-	position   string
-	source     schema.TypeID
-	sourceKey  immutable.Key
-	relation   string
+	position  string
+	source    schema.TypeID
+	sourceKey immutable.Key
+	relation  string
+	// target is the type of the instance an imported edge points at, and zero
+	// where the record's target is the association's own.
 	target     schema.TypeID
 	targetKey  immutable.Key
 	reason     string
@@ -344,8 +367,8 @@ func (r *structureRules) association(rec associationRecord) {
 		r.refuse(diag.E_UNKNOWN_EDGE_FIELD, fmt.Sprintf("%s holds edge property %q, which the association does not declare", at, name))
 	}
 	missing := rec.reason == "absent" || rec.reason == "empty"
-	if targetType, resolves := r.s.TypeByID(rec.target); resolves {
-		if rec.target != rel.TargetID() {
+	if targetType, resolves := r.s.TypeByID(rel.TargetID()); resolves {
+		if !rec.target.IsZero() && rec.target != rel.TargetID() {
 			r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
 				fmt.Sprintf("%s: %s targets %s; the association declares %s", r.op, at, rec.target, rel.TargetID())).
 				WithDetail(diag.DetailKeyTypeName, sourceName).
@@ -388,6 +411,81 @@ func (r *structureRules) unresolvedReason(reason string, targetKey immutable.Key
 	default:
 		r.c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 			fmt.Sprintf("%s: unresolved record states reason %q, which is not one of target_missing, absent or empty", r.op, reason)).Build())
+	}
+}
+
+// associationTarget returns the declared target of relation, an association of
+// source under s, or the zero identity when s declares no such association.
+func associationTarget(s *schema.Schema, source schema.TypeID, relation string) schema.TypeID {
+	t, ok := s.TypeByID(source)
+	if !ok {
+		return schema.TypeID{}
+	}
+	rel, ok := t.Relation(relation)
+	if !ok || !rel.IsAssociation() {
+		return schema.TypeID{}
+	}
+	return rel.TargetID()
+}
+
+// recordFacts holds parts to the facts [Graph.Add] derives its records by, which
+// no single record shows: every root holds an edge or a record under each
+// required association of its type; an absent or empty record stands alone,
+// once, and only under a required association; and a target_missing record
+// names a target no root holds, since Add resolves one that is present.
+// Each break is a caller's, so it is Fatal E_INTERNAL.
+func recordFacts(r *structureRules, parts SnapshotParts) {
+	at := func(id schema.TypeID, k immutable.Key, relation string) oneSlot {
+		return oneSlot{source: id, key: r.canon.key(id, k).String(), relation: relation}
+	}
+	internal := func(format string, args ...any) {
+		r.c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, r.op+": "+fmt.Sprintf(format, args...)).Build())
+	}
+	held := make(map[oneSlot]int, len(parts.Edges)+len(parts.Unresolved))
+	missing := make(map[oneSlot]int)
+	for _, ep := range parts.Edges {
+		held[at(ep.SourceType, ep.SourceKey, ep.Relation)]++
+	}
+	for _, up := range parts.Unresolved {
+		if up.Reason == "absent" || up.Reason == "empty" {
+			missing[at(up.SourceType, up.SourceKey, up.Relation)]++
+		} else {
+			held[at(up.SourceType, up.SourceKey, up.Relation)]++
+		}
+	}
+	reported := make(map[oneSlot]bool)
+	for i, up := range parts.Unresolved {
+		slot := at(up.SourceType, up.SourceKey, up.Relation)
+		switch up.Reason {
+		case "absent", "empty":
+			switch {
+			case !requiredUnder(r.s, up.SourceType, up.Relation):
+				internal("unresolved record %d states reason %q under %q of %s[%s], which is optional, where Graph.Add records none",
+					i, up.Reason, up.Relation, up.SourceType, slot.key)
+			case !reported[slot] && (missing[slot] > 1 || held[slot] > 0):
+				reported[slot] = true
+				internal("%q of %s[%s] holds an %s record beside another record, where Graph.Add records it alone",
+					up.Relation, up.SourceType, slot.key, up.Reason)
+			}
+		case "target_missing":
+			target := associationTarget(r.s, up.SourceType, up.Relation)
+			if !target.IsZero() && r.addresses[oneSlot{source: target, key: r.canon.key(target, up.TargetKey).String()}] {
+				internal("unresolved record %d names target %s[%s], which a root holds, where Graph.Add resolves an edge",
+					i, target, r.canon.key(target, up.TargetKey).String())
+			}
+		}
+	}
+	for _, ip := range parts.Instances {
+		t, ok := r.s.TypeByID(ip.TypeID)
+		if !ok {
+			continue
+		}
+		for rel := range t.AllAssociations() {
+			if slot := at(ip.TypeID, ip.PrimaryKey, rel.Name()); !rel.IsOptional() && held[slot]+missing[slot] == 0 {
+				internal("root %s[%s] holds no edge and no record under the required association %q, where Graph.Add records an absent one",
+					ip.TypeID, slot.key, rel.Name())
+			}
+		}
 	}
 }
 

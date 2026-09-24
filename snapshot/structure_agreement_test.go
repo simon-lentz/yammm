@@ -244,14 +244,14 @@ func validInstanceOf(t *testing.T, snap *graph.Snapshot, inst *graph.Instance) *
 		targets[e.Relation()] = append(targets[e.Relation()], instance.NewValidEdgeTarget(e.Target().PrimaryKey(), e.Properties()))
 	}
 	for _, u := range snap.Unresolved() {
-		if u.Source.TypeID() != inst.TypeID() || u.Source.PrimaryKey().String() != inst.PrimaryKey().String() {
+		if u.Source().TypeID() != inst.TypeID() || u.Source().PrimaryKey().String() != inst.PrimaryKey().String() {
 			continue
 		}
-		vals, err := graph.ParseKey(u.TargetKey)
+		vals, err := graph.ParseKey(u.TargetKey())
 		if err != nil {
-			t.Fatalf("parse %s: %v", u.TargetKey, err)
+			t.Fatalf("parse %s: %v", u.TargetKey(), err)
 		}
-		targets[u.Relation] = append(targets[u.Relation], instance.NewValidEdgeTarget(immutable.WrapKey(vals), u.Properties()))
+		targets[u.Relation()] = append(targets[u.Relation()], instance.NewValidEdgeTarget(immutable.WrapKey(vals), u.Properties()))
 	}
 	var edges map[string]*instance.ValidEdgeData
 	for rel, ts := range targets {
@@ -357,7 +357,15 @@ func wantRules(r revision) map[string][][2]string {
 		both(diag.E_GRAPH_UNKNOWN_RELATION, `under "WORKS_AT", which its type does not declare as an association`)
 		load(diag.E_GRAPH_UNKNOWN_RELATION, `under "WORKS_AT", which the type does not declare as an association`)
 	case 2:
-		both(diag.E_GRAPH_UNKNOWN_RELATION, "the association declares string://rev.yammm:Office")
+		// Parts state no target type, so the rebuild resolves the edge's key under
+		// the declared target, Office, where no instance holds it. It judges every
+		// part before it resolves an edge, so any other move refuses first.
+		if r.legalAtAdd() {
+			want["RebuildSnapshot"] = append(want["RebuildSnapshot"],
+				[2]string{diag.E_INTERNAL.String(), "edge target string://rev.yammm:Office"})
+		}
+		want["NewFromSnapshot"] = append(want["NewFromSnapshot"],
+			[2]string{diag.E_GRAPH_UNKNOWN_RELATION.String(), "the association declares string://rev.yammm:Office"})
 		load(diag.E_SNAPSHOT_TYPE_MISMATCH, "which the association declares as")
 	}
 	if r.mentors == 1 {

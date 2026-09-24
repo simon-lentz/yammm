@@ -168,8 +168,8 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 		}
 	}
 	for _, unres := range snap.Unresolved() {
-		if _, ok := snap.InstanceByKey(unres.Source.TypeID(), unres.Source.PrimaryKey().String()); !ok {
-			t.Errorf("Unresolved source %s/%s not in graph", unres.Source.TypeID(), unres.Source.PrimaryKey())
+		if _, ok := snap.InstanceByKey(unres.Source().TypeID(), unres.Source().PrimaryKey().String()); !ok {
+			t.Errorf("Unresolved source %s/%s not in graph", unres.Source().TypeID(), unres.Source().PrimaryKey())
 		}
 	}
 }

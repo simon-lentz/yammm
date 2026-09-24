@@ -84,38 +84,6 @@ func TestRebuildSnapshot_RefusesAnUnresolvableRootInstance(t *testing.T) {
 	requireIdentityRefusal(t, res, "unresolvable type identity "+ghost.String()+` at instance position, key ["g1"]`)
 }
 
-// The identity reaches the writers through an edge as well as through a group,
-// and the edge endpoint is the position that carried it to adapter/json's
-// unresolvable-target arm.
-func TestRebuildSnapshot_RefusesAnUnresolvableEdgeEndpoint(t *testing.T) {
-	t.Parallel()
-	s, ghost := unresolvableFixture(t)
-	empT, _ := s.Type("Employee")
-	empKey := immutable.WrapKey([]any{"e1"})
-
-	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{empT.ID()},
-		Instances: []graph.InstanceParts{
-			{
-				TypeID: empT.ID(), PrimaryKey: empKey,
-				Properties: immutable.WrapProperties(map[string]any{"employee_id": "e1"}),
-			},
-		},
-		Edges: []graph.EdgeParts{{
-			Relation: "WORKS_AT", SourceType: empT.ID(), SourceKey: empKey,
-			TargetType: ghost, TargetKey: immutable.WrapKey([]any{"g1"}),
-			Properties: immutable.WrapProperties(nil),
-		}},
-	})
-
-	if res.Err() == nil {
-		t.Fatal("an edge naming a target type the schema cannot resolve was accepted")
-	}
-	// The whole phrase, because an edge whose target instance is merely absent
-	// is refused for a different reason and would satisfy a looser match.
-	requireIdentityRefusal(t, res, "unresolvable type identity "+ghost.String()+" at edge target position")
-}
-
 // A composed child's type need not be a root type, so the root-type rule never
 // judged it; the identity rule does, at every depth.
 func TestRebuildSnapshot_RefusesAnUnresolvableComposedChild(t *testing.T) {
@@ -171,7 +139,7 @@ func TestRebuildSnapshot_AcceptsResolvableIdentitiesAtEveryPosition(t *testing.T
 		},
 		Edges: []graph.EdgeParts{{
 			Relation: "WORKS_AT", SourceType: empT.ID(), SourceKey: empKey,
-			TargetType: compT.ID(), TargetKey: compKey,
+			TargetKey:  compKey,
 			Properties: immutable.WrapProperties(nil),
 		}},
 	})
@@ -181,11 +149,11 @@ func TestRebuildSnapshot_AcceptsResolvableIdentitiesAtEveryPosition(t *testing.T
 	}
 }
 
-// A duplicate record and an unresolved record carry identities too, and an
-// unresolved record's was the way a snapshot the .ys writer would write and its
-// own reader refuse got built. Each case asserts the identity rule's own phrase
-// and its position, because a duplicate naming an absent conflict is already
-// refused by the instance-index lookup and would satisfy a looser match.
+// A duplicate record and an unresolved record carry identities too: a
+// duplicate's instance and parent, an unresolved record's source and an edge's
+// source. Each case asserts the identity rule's own phrase and its position,
+// because a record whose position holds no conflict or no instance is refused
+// for another reason and would satisfy a looser match.
 func TestRebuildSnapshot_RefusesAnUnresolvableIdentityInARecord(t *testing.T) {
 	t.Parallel()
 	s, ghost := unresolvableFixture(t)
@@ -204,31 +172,13 @@ func TestRebuildSnapshot_RefusesAnUnresolvableIdentityInARecord(t *testing.T) {
 		{"unresolved source", func(p *graph.SnapshotParts) {
 			p.Unresolved = []graph.UnresolvedParts{{
 				SourceType: ghost, SourceKey: ghostKey, Relation: "WORKS_AT",
-				TargetType: empT.ID(), TargetKey: empKey, Reason: "target_missing",
-			}}
-		}},
-		{"unresolved target", func(p *graph.SnapshotParts) {
-			p.Unresolved = []graph.UnresolvedParts{{
-				SourceType: empT.ID(), SourceKey: empKey, Relation: "WORKS_AT",
-				TargetType: ghost, TargetKey: ghostKey, Reason: "target_missing",
-			}}
-		}},
-		{"duplicate", func(p *graph.SnapshotParts) {
-			p.Duplicates = []graph.DuplicateParts{{
-				Type: ghost, Key: empKey, Instance: emp,
-				ConflictType: empT.ID(), ConflictKey: empKey,
-			}}
-		}},
-		{"duplicate conflict", func(p *graph.SnapshotParts) {
-			p.Duplicates = []graph.DuplicateParts{{
-				Type: empT.ID(), Key: empKey, Instance: emp,
-				ConflictType: ghost, ConflictKey: ghostKey,
+				TargetKey: empKey, Reason: "target_missing",
 			}}
 		}},
 		{"edge source", func(p *graph.SnapshotParts) {
 			p.Edges = []graph.EdgeParts{{
 				Relation: "WORKS_AT", SourceType: ghost, SourceKey: ghostKey,
-				TargetType: empT.ID(), TargetKey: empKey,
+				TargetKey:  empKey,
 				Properties: immutable.WrapProperties(nil),
 			}}
 		}},
@@ -241,14 +191,12 @@ func TestRebuildSnapshot_RefusesAnUnresolvableIdentityInARecord(t *testing.T) {
 			stray := emp
 			stray.TypeID = ghost
 			p.Duplicates = []graph.DuplicateParts{{
-				Type: empT.ID(), Key: empKey, Instance: stray,
-				ConflictType: empT.ID(), ConflictKey: empKey,
+				Instance: stray,
 			}}
 		}},
 		{"duplicate parent", func(p *graph.SnapshotParts) {
 			p.Duplicates = []graph.DuplicateParts{{
-				Type: empT.ID(), Key: empKey, Instance: emp,
-				ConflictType: empT.ID(), ConflictKey: empKey,
+				Instance:   emp,
 				ParentType: ghost, ParentKey: ghostKey, Relation: "PIECES",
 			}}
 		}},

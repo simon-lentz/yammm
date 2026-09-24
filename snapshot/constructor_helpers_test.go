@@ -29,31 +29,31 @@ func partsOf(t *testing.T, snap *graph.Snapshot) graph.SnapshotParts {
 	for _, e := range snap.Edges() {
 		parts.Edges = append(parts.Edges, graph.EdgeParts{
 			Relation: e.Relation(), SourceType: e.Source().TypeID(), SourceKey: e.Source().PrimaryKey(),
-			TargetType: e.Target().TypeID(), TargetKey: e.Target().PrimaryKey(), Properties: e.Properties(),
+			TargetKey: e.Target().PrimaryKey(), Properties: e.Properties(),
 		})
 	}
 	for _, d := range snap.Duplicates() {
 		dp := graph.DuplicateParts{
-			Type: d.Instance.TypeID(), Key: d.Instance.PrimaryKey(), Instance: instanceParts(d.Instance),
-			ConflictType: d.Conflict.TypeID(), ConflictKey: d.Conflict.PrimaryKey(), Relation: d.Relation,
+			Instance: instanceParts(d.Instance()),
+			Relation: d.Relation(),
 		}
-		if d.Parent != nil {
-			dp.ParentType, dp.ParentKey = d.Parent.TypeID(), d.Parent.PrimaryKey()
+		if d.Parent() != nil {
+			dp.ParentType, dp.ParentKey = d.Parent().TypeID(), d.Parent().PrimaryKey()
 		}
 		parts.Duplicates = append(parts.Duplicates, dp)
 	}
 	for _, u := range snap.Unresolved() {
 		var key immutable.Key
-		if u.TargetKey != "" {
-			vals, err := graph.ParseKey(u.TargetKey)
+		if u.TargetKey() != "" {
+			vals, err := graph.ParseKey(u.TargetKey())
 			if err != nil {
-				t.Fatalf("parse unresolved key %s: %v", u.TargetKey, err)
+				t.Fatalf("parse unresolved key %s: %v", u.TargetKey(), err)
 			}
 			key = immutable.WrapKey(vals)
 		}
 		parts.Unresolved = append(parts.Unresolved, graph.UnresolvedParts{
-			SourceType: u.Source.TypeID(), SourceKey: u.Source.PrimaryKey(), Relation: u.Relation,
-			TargetType: u.TargetType, TargetKey: key, Reason: u.Reason, Properties: u.Properties(),
+			SourceType: u.Source().TypeID(), SourceKey: u.Source().PrimaryKey(), Relation: u.Relation(),
+			TargetKey: key, Reason: u.Reason(), Properties: u.Properties(),
 		})
 	}
 	return parts
