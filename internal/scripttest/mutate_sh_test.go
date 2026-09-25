@@ -173,7 +173,8 @@ func TestMutateScript_RecordsAGreenBaselineOncePerTreeAndEnvironment(t *testing.
 }
 
 // TestMutateScript_NamesTheTestThatKilledTheMutant runs the mutant after 25
-// passing packages, whose ok lines come first in go test's output.
+// passing packages and one with no test files, whose lines come first in go
+// test's output.
 func TestMutateScript_NamesTheTestThatKilledTheMutant(t *testing.T) {
 	t.Parallel()
 	f, _ := mutateFixture(t, "3")
@@ -183,17 +184,39 @@ func TestMutateScript_NamesTheTestThatKilledTheMutant(t *testing.T) {
 		f.write(name+"/"+name+"_test.go", "package "+name+"\n\nimport \"testing\"\n\nfunc TestPasses(t *testing.T) {}\n")
 		pkgs = append(pkgs, "./"+name+"/")
 	}
+	f.write("nt/nt.go", "package nt\n")
 	f.index()
-	pkgs = append(pkgs, "./m/")
+	pkgs = append(pkgs, "./nt/", "./m/")
 
 	r := f.run("mutate.sh", append([]string{"m/m.go", "a + b", "a - b"}, pkgs...)...)
 	r.wantCode(t, 0)
 	r.wantStdout(t, "mutate: MUTANT KILLED")
 	r.wantStdout(t, "--- FAIL: TestAdd")
 	r.wantStdout(t, "FAIL\t"+fixtureModule+"/m")
-	if strings.Contains(r.stdout, "\nok ") {
-		t.Errorf("stdout lists passing packages after the kill; want the failures alone\nstdout:\n%s", r.stdout)
+	if strings.Contains(r.stdout, "\nok ") || strings.Contains(r.stdout, "\n?   \t") {
+		t.Errorf("stdout lists passing packages or packages with no test files after the kill; want the failures alone\nstdout:\n%s", r.stdout)
 	}
+	f.wantRestored()
+}
+
+// A kill keeps what each failing test reported, so a kill a test outside the
+// mutation's reach caused can be told from a real one.
+func TestMutateScript_KeepsWhatTheKillingTestReported(t *testing.T) {
+	t.Parallel()
+	f, _ := mutateFixture(t, "3")
+	// A line of the test's own output that starts with "ok" is not go test's
+	// line for a passing package.
+	f.write("m/m_test.go", "package m\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\n"+
+		"func TestAdd(t *testing.T) {\n\tfmt.Println(\"ok, Add(1, 2) is\", Add(1, 2))\n"+
+		"\tif Add(1, 2) != 3 {\n\t\tt.Fatal(\"Add(1, 2) is wrong\")\n\t}\n}\n")
+	f.index()
+
+	r := f.mutate()
+
+	r.wantCode(t, 0)
+	r.wantStdout(t, "mutate: MUTANT KILLED")
+	r.wantStdout(t, "Add(1, 2) is wrong")
+	r.wantStdout(t, "\nok, Add(1, 2) is -1\n")
 	f.wantRestored()
 }
 

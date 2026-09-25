@@ -202,5 +202,8 @@ if [ "${ran}" -eq 0 ]; then
 fi
 
 printf 'mutate: MUTANT KILLED (exit %d)\n' "${rc}"
-printf '%s\n' "${test_out}" | grep -E '^[[:space:]]*--- FAIL|^FAIL' || true
+# Everything but go test's line for a package that passed or has no test files:
+# what each failing test reported tells a kill caused outside the mutation's
+# reach from a real one.
+printf '%s\n' "${test_out}" | grep -v -e $'^ok  \t' -e $'^?   \t' || true
 exit 0

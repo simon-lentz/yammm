@@ -53,6 +53,23 @@ workers=${4:-4}
 case "$workers" in
 '' | *[!0-9]* | 0) echo "workers must be a positive integer, got '$workers'" >&2; exit 2 ;;
 esac
+[ "$out" != "$src" ] || { echo "the out directory $out is the checkout" >&2; exit 2; }
+
+# An out directory inside the checkout is left out of every worker's copy: a
+# later copy would otherwise hold an earlier worker's tree, whose .git a
+# mutant's baseline key cannot hash. rsync reads the path as a pattern, and
+# reads a backslash as an escape only in a pattern holding a wildcard ([, * or
+# ?), so the path is escaped only then; a ] alone is no wildcard.
+copy_excludes=(--exclude '/.claude/' --exclude 'node_modules/' --exclude '.vscode-test/')
+case "$out" in
+"$src"/*)
+	rel=${out#"$src"/}
+	case "$rel" in
+	*[[*?]*) rel=$(printf '%s' "$rel" | sed 's/[][*?\\]/\\&/g') ;;
+	esac
+	copy_excludes+=(--exclude "/$rel/")
+	;;
+esac
 
 git -C "$src" diff --quiet || { echo "the checkout's unstaged tree is not clean" >&2; exit 2; }
 
@@ -86,16 +103,52 @@ rm -f "$out"/work/queue.* "$out"/work/results.w*.tsv "$out"/work/worker.*.out
 
 pids=()
 
+# live holds the process groups cleanup signalled that may still have a member.
+live=()
+
+# prune_live keeps in live only the groups that still have a member. A group's
+# ID is not reused while a member lives, so a group is dropped the first time
+# it is found empty and never probed or signalled again.
+# shellcheck disable=SC2329 # cleanup, which the EXIT trap invokes, calls it
+prune_live() {
+	local g
+	local kept=()
+	for g in ${live[@]+"${live[@]}"}; do
+		if kill -0 -- "-$g" 2>/dev/null; then kept+=("$g"); fi
+	done
+	live=(${kept[@]+"${kept[@]}"})
+}
+
 # The workers stop before the removal: one that still builds writes back what
-# the removal takes. A worker's own child outlives the signal path, so a run
-# killed mid-build can leave part of the cache behind. Only a job bash still
-# lists as running is signalled: bash reaps a finished worker before any
-# `wait` names it, and the system may then give its PID to another process.
+# the removal takes. Each worker leads its own process group, so one signal
+# reaches every process it started that stays in that group; a worker's go
+# test otherwise outlives it (bash 5) or holds the worker's own exit until it
+# returns (bash 3.2). A run of this script inside a worker starts groups of its
+# own, which only that run's cleanup reaches. A group still running after four
+# to five seconds (SECONDS counts whole seconds) is killed. Only a job bash
+# still lists as running is signalled: bash reaps a finished worker before any
+# `wait` names it, and the system may then give its PID to another process. A
+# second INT or TERM is ignored, so it cannot cut the stop or the removal short.
 # shellcheck disable=SC2329 # the EXIT trap below is what invokes it
 cleanup() {
-	local p d
+	local p d end
+	trap '' INT TERM
 	for p in $(jobs -pr); do
-		kill "$p" 2>/dev/null || true
+		kill -TERM -- "-$p" 2>/dev/null || true
+		live+=("$p")
+	done
+	prune_live
+	end=$((SECONDS + 5))
+	while [ "${#live[@]}" -gt 0 ] && [ "$SECONDS" -lt "$end" ]; do
+		sleep 0.1
+		prune_live
+	done
+	for p in ${live[@]+"${live[@]}"}; do
+		kill -KILL -- "-$p" 2>/dev/null || true
+	done
+	while [ "${#live[@]}" -gt 0 ]; do
+		sleep 0.1
+		prune_live
 	done
 	wait 2>/dev/null || true
 	rm -rf -- "$out/work/gocache"
@@ -175,7 +228,7 @@ echo "mutants: $i, workers: $workers"
 
 for w in $(seq 1 "$workers"); do
 	[ -f "$out/work/queue.$w" ] || continue
-	rsync -a --delete --exclude '/.claude/' --exclude 'node_modules/' --exclude '.vscode-test/' "$src/" "$out/work/w$w/"
+	rsync -a --delete "${copy_excludes[@]}" "$src/" "$out/work/w$w/"
 done
 
 worker() {
@@ -235,11 +288,14 @@ worker() {
 }
 
 began=$(date +%s)
+# Job control gives each worker the process group cleanup signals.
+set -m
 for w in $(seq 1 "$workers"); do
 	[ -f "$out/work/queue.$w" ] || continue
 	worker "$w" >"$out/work/worker.$w.out" 2>&1 &
 	pids+=("$!")
 done
+set +m
 status=0
 for p in "${pids[@]}"; do
 	wait "$p" || status=1

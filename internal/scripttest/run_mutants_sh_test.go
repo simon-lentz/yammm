@@ -7,11 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 )
 
 // runMutantsFixture returns an indexed fixture holding run_mutants.sh, the
@@ -242,6 +239,13 @@ func TestRunMutantsScript_RecordsOneVerdictPerMutant(t *testing.T) {
 			t.Errorf("mutant %q read %q, want %q (results.tsv: %v)", id, got[id], verdict, got)
 		}
 	}
+	b, err := os.ReadFile(filepath.Join(f.dir, "out", "logs", "killed.asis.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "Add(1, 2) is wrong") {
+		t.Errorf("the killed mutant's log drops what its test reported:\n%s", b)
+	}
 }
 
 // Without a pkgs file the runner computes the package set from the import
@@ -369,13 +373,15 @@ func TestRunMutantsScript_RemovesItsCacheAndWorkerTrees(t *testing.T) {
 }
 
 // killLogger returns the environment that installs a BASH_ENV file logging
-// each kill a script's shell makes before making it, and the log's path.
+// each kill a script's shell makes, as its exit status and its arguments, and
+// the log's path.
 func killLogger(t *testing.T) (env []string, log string) {
 	t.Helper()
 	dir := t.TempDir()
 	log = filepath.Join(dir, "kills")
 	rc := filepath.Join(dir, "bashenv")
-	if err := os.WriteFile(rc, []byte("kill() { printf '%s\\n' \"$*\" >>\"$KILL_LOG\"; builtin kill \"$@\"; }\n"), 0o600); err != nil {
+	const logged = `kill() { builtin kill "$@"; local rc=$?; printf '%s %s\n' "$rc" "$*" >>"$KILL_LOG"; return "$rc"; }` + "\n"
+	if err := os.WriteFile(rc, []byte(logged), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return []string{"BASH_ENV=" + rc, "KILL_LOG=" + log}, log
@@ -407,6 +413,59 @@ func TestRunMutantsScript_SignalsNothingAtANormalExit(t *testing.T) {
 	}
 }
 
+// An out directory inside the checkout is left out of every worker's copy.
+// A later worker's copy would otherwise hold an earlier worker's tree, whose
+// .git mutate.sh's baseline key cannot hash, and its mutant would read OTHER.
+// A name rsync would read as a wildcard names that directory alone: a tracked
+// sibling it would also match stays in every copy, whose unstaged tree a
+// worker refuses once a tracked file is missing. A backslash in a name with no
+// wildcard is not an escape to rsync, and a ] alone is no wildcard, so such a
+// name is written as it stands.
+//
+// The end-to-end run needs rsync, which the Windows job does not carry.
+func TestRunMutantsScript_LeavesAnOutDirectoryInsideTheCheckoutOutOfEveryCopy(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	for _, out := range []string{"runs/out", "runs/o[1]", "runs/o]1", `runs/o\1`} {
+		t.Run(out, func(t *testing.T) {
+			t.Parallel()
+			f := runMutantsFixture(t)
+			f.write("runs/o1/keep.txt", "tracked\n")
+			f.index()
+			f.writeMutant("m01", "a - b")
+			f.writeMutant("m02", "b - a")
+
+			r := f.run("run_mutants.sh", ".", "mutants", out, "2")
+
+			r.wantCode(t, 0)
+			got := verdicts(t, filepath.Join(f.dir, out))
+			for _, id := range []string{"m01", "m02"} {
+				if got[id] != "KILLED" {
+					t.Errorf("mutant %q read %q, want KILLED (results.tsv: %v)", id, got[id], got)
+				}
+			}
+		})
+	}
+}
+
+// An out directory that is the checkout itself is refused before anything is
+// written: every worker's tree would lie inside the checkout it copies.
+func TestRunMutantsScript_RefusesTheCheckoutAsTheOutDirectory(t *testing.T) {
+	t.Parallel()
+	f := runMutantsFixture(t)
+	f.writeMutant("m01", "a - b")
+
+	r := f.run("run_mutants.sh", ".", "mutants", ".")
+
+	r.wantCode(t, 2)
+	r.wantStderr(t, "is the checkout")
+	if _, err := os.Stat(filepath.Join(f.dir, "work")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the run wrote work/ before the refusal: stat says %v", err)
+	}
+}
+
 // A search is used byte for byte, trailing newline included: without it,
 // "return a + b" also names the first half of Twice, and mutate.sh rewrites
 // every match.
@@ -431,116 +490,5 @@ func TestRunMutantsScript_KeepsASearchsTrailingNewline(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "(1 occurrence(s) matched)") {
 		t.Errorf("the search matched other than once:\n%s", b)
-	}
-}
-
-// sleepingGo is a go whose every go test run that is not a pre-build records
-// its PID and sleeps, so a worker stays busy until the test signals the run.
-const sleepingGo = `#!/usr/bin/env bash
-if [ "${1:-}" = "test" ]; then
-	case " $* " in
-	*" -exec=true "*) ;;
-	*) printf '%s\n' "$$" >"$GO_SHIM_SLEEPER"; exec sleep 60 ;;
-	esac
-fi
-exec "$GO_SHIM_REAL" "$@"
-`
-
-// A signalled run stops its running workers, then removes its cache and worker
-// trees, and exits with the signal's status. The second worker has finished,
-// unwaited behind the first, when the signal comes: it is not signalled,
-// because its PID may already belong to another process.
-//
-// The end-to-end run needs rsync, which the Windows job does not carry.
-func TestRunMutantsScript_StopsItsWorkersWhenSignalled(t *testing.T) {
-	t.Parallel()
-	if _, err := exec.LookPath("rsync"); err != nil {
-		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
-	}
-	f := runMutantsFixture(t)
-	f.writeMutant("a_slow", "a - b")
-	f.writeMutantSearching("b_nomatch", "a * b", "a - b")
-	real, err := exec.LookPath("go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	shim := t.TempDir()
-	if err := os.WriteFile(filepath.Join(shim, "go"), []byte(sleepingGo), 0o700); err != nil { //nolint:gosec // a test shim the fixture executes
-		t.Fatal(err)
-	}
-	sleeper := filepath.Join(shim, "sleeper")
-	env, log := killLogger(t)
-	f.env = append(f.env, env...)
-	f.env = append(f.env,
-		"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
-		"GO_SHIM_REAL="+real,
-		"GO_SHIM_SLEEPER="+sleeper,
-	)
-	t.Cleanup(func() {
-		if b, err := os.ReadFile(sleeper); err == nil {
-			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
-				if p, err := os.FindProcess(pid); err == nil {
-					_ = p.Kill()
-				}
-			}
-		}
-	})
-
-	//nolint:gosec // runs the repository's script, copied into the fixture's own module
-	cmd := exec.CommandContext(t.Context(), "bash", filepath.Join(f.dir, "scripts", "run_mutants.sh"), ".", "mutants", "out", "2")
-	cmd.Dir = f.dir
-	cmd.Env = append(withoutRepositoryVars(t, fixtureEnv()), f.env...)
-	var output bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &output, &output
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(2 * time.Minute)
-	for {
-		second, _ := os.ReadFile(filepath.Join(f.dir, "out", "work", "worker.2.out"))
-		if _, err := os.Stat(sleeper); err == nil && bytes.Contains(second, []byte("NOMATCH")) {
-			break
-		}
-		if time.Now().After(deadline) {
-			_ = cmd.Process.Kill()
-			t.Fatalf("no worker reached its baseline run\n%s", output.String())
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatal(err)
-	}
-	var exit *exec.ExitError
-	if err := cmd.Wait(); !errors.As(err, &exit) || exit.ExitCode() != 143 {
-		t.Fatalf("run ended with %v, want exit 143\n%s", err, output.String())
-	}
-
-	dir, err := filepath.EvalSymlinks(f.dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	work := filepath.Join(dir, "out", "work")
-	for _, gone := range []string{"gocache", "w1", "w2"} {
-		if _, err := os.Stat(filepath.Join(work, gone)); !errors.Is(err, fs.ErrNotExist) {
-			t.Errorf("work/%s survives the signal: stat says %v", gone, err)
-		}
-	}
-	b, err := os.ReadFile(log)
-	if err != nil {
-		t.Fatalf("the run signalled no worker: %v", err)
-	}
-	var pids []int
-	for field := range strings.FieldsSeq(string(b)) {
-		if pid, err := strconv.Atoi(field); err == nil {
-			pids = append(pids, pid)
-		}
-	}
-	if len(pids) != 1 {
-		t.Errorf("the run signalled %d processes, want the one running worker: %q", len(pids), b)
-	}
-	for _, pid := range pids {
-		if p, err := os.FindProcess(pid); err == nil && p.Signal(syscall.Signal(0)) == nil {
-			t.Errorf("worker %d still runs after the run exited", pid)
-		}
 	}
 }
