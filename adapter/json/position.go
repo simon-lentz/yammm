@@ -11,8 +11,9 @@ import (
 // positionTable converts a byte offset in one document to a [location.Position].
 //
 // Build it over the document's own bytes, never over the buffer jsonc returns:
-// jsonc replaces each comment byte with one space, so a multibyte rune inside a
-// comment moves every later rune column on that line.
+// jsonc writes one byte for each comment byte, and one more after a "/*" that
+// ends the input, so a multibyte rune inside a comment moves every later rune
+// column on that line.
 //
 // A column is counted from the nearest checkpoint at or before the offset, not
 // from the line start, so a document written on one line costs a bounded scan

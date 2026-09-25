@@ -231,16 +231,14 @@ func TestParseObject_DiagnosticSpansPinTheColumn(t *testing.T) {
 		{"value is not an array", "{\n  \"Person\":\n    42\n}\n", 3, 5},
 		// The element's start, not the end of the token the decoder rejected.
 		{"element of the wrong type", "{\n  \"Person\": [\n    42\n  ]\n}\n", 3, 5},
-		// The element the decoder was reading, not a byte inside it: the
-		// offset encoding/json reports for a syntax error is not the same
-		// position in every Go release, and the element's start is.
-		{"syntax error inside an element", "{\"A\": [{oops}]}", 1, 8},
-		// A fault while reading the VALUE reports where the value began.
-		{"syntax error at a line end", "{\"A\": \"abc\nx\"}", 1, 7},
+		// The byte the decoder cannot read on from, not the element's start.
+		{"syntax error inside an element", "{\"A\": [{oops}]}", 1, 9},
+		// A line break inside a string is the fault, not the string's start.
+		{"syntax error at a line end", "{\"A\": \"abc\nx\"}", 1, 11},
 		// The trailing token's start, not its end.
 		{"trailing content", "{}\n12345\n", 2, 1},
-		// The root refusal points at the first byte of the document.
-		{"root is not an object", "  [\n]\n", 1, 1},
+		// The root refusal points at the root value, past white space.
+		{"root is not an object", "  [\n]\n", 1, 3},
 		// A null element is reported where the element is, not where its array
 		// began.
 		{"element is null", "{\n  \"Person\": [\n    null\n  ]\n}\n", 3, 5},

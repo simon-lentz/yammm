@@ -50,6 +50,7 @@ type step struct {
 	Name            string            `yaml:"name"`
 	Uses            string            `yaml:"uses"`
 	Run             string            `yaml:"run"`
+	With            map[string]any    `yaml:"with"`
 	Env             map[string]string `yaml:"env"`
 	If              string            `yaml:"if"`
 	ContinueOnError any               `yaml:"continue-on-error"`
@@ -1176,5 +1177,47 @@ func TestSkippedHooks(t *testing.T) {
 		if got := skippedHooks(skip); !slices.Equal(got, want) {
 			t.Errorf("skippedHooks(%q) = %q, want %q", skip, got, want)
 		}
+	}
+}
+
+// extensionCachePath matches the line that builds the directory runTest.mjs
+// downloads VS Code to, and extensionRunTests the call that hands it on.
+var (
+	extensionCachePath = regexp.MustCompile(`const cachePath = path\.join\(os\.homedir\(\), '([^']+)', '([^']+)'\);`)
+	extensionRunTests  = regexp.MustCompile(`runTests\(\{\s*cachePath,`)
+)
+
+// TestCIWorkflow_CachesWhereTheExtensionTestsDownload holds the VS Code
+// integration job's cache to the directory runTest.mjs downloads VS Code to:
+// a cache anywhere else restores nothing the harness reads.
+func TestCIWorkflow_CachesWhereTheExtensionTestsDownload(t *testing.T) {
+	t.Parallel()
+	var wf workflow
+	decodeYAML(t, fromRoot(".github/workflows/ci.yaml"), &wf)
+	var cached []string
+	for _, j := range wf.Jobs {
+		for _, s := range j.Steps {
+			if strings.HasPrefix(s.Uses, "actions/cache@") && strings.Contains(fmt.Sprint(s.With["key"]), "vscode-test") {
+				cached = append(cached, fmt.Sprint(s.With["path"]))
+			}
+		}
+	}
+	if len(cached) != 1 {
+		t.Fatalf("ci.yaml caches the VS Code test install in %d steps, want 1: %q", len(cached), cached)
+	}
+
+	script, err := os.ReadFile(fromRoot("lsp/editors/vscode/tests/integration/runTest.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := extensionCachePath.FindSubmatch(script)
+	if m == nil {
+		t.Fatal("runTest.mjs builds no cachePath under the home directory as this check reads it")
+	}
+	if !extensionRunTests.Match(script) {
+		t.Error("runTest.mjs does not pass cachePath to runTests")
+	}
+	if want := "~/" + path.Join(string(m[1]), string(m[2])); cached[0] != want {
+		t.Errorf("ci.yaml caches %q, runTest.mjs downloads to %q", cached[0], want)
 	}
 }

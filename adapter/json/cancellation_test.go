@@ -188,6 +188,30 @@ func TestParseObject_CancelledParseKeepsWhatItRead(t *testing.T) {
 	}
 }
 
+// The cancellation message counts the top-level keys read, and a key that
+// yields no entry is read as much as one that does.
+func TestParseObject_CancelledParseCountsTheKeysItRead(t *testing.T) {
+	t.Parallel()
+	doc := []byte(`{"a b": [], "Person": 5, "Person": [], "Company": []}`)
+	// Live for three polls: the refused name, the value that is not an array
+	// and the repeated key are read; the fourth key is not.
+	_, res := New().ParseObject(&cancelAfterPolls{after: 4}, location.NewSourceID("c.json"), doc)
+	var msg string
+	for iss := range res.Issues() {
+		if iss.Code() == diag.E_CONTEXT_CANCELLED {
+			msg = iss.Message()
+			// The diagnostic names no place in the document: the parse stopped
+			// between keys, not at a byte.
+			if iss.HasSpan() {
+				t.Errorf("the cancellation carries a span, %v", iss.Span())
+			}
+		}
+	}
+	if want := "json parse cancelled after 3 top-level keys"; msg != want {
+		t.Errorf("message %q, want %q", msg, want)
+	}
+}
+
 // An empty snapshot has no type group, so buildOutput's loop never polls the
 // context and the marshal succeeds. The check before the write is the only
 // one that can stop it, and without that check a cancelled run writes "{}".

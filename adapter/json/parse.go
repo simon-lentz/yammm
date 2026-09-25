@@ -26,30 +26,33 @@ var byteOrderMark = []byte("\uFEFF")
 // ParseObject parses JSON data structured as one top-level key per type name,
 // each holding an array of instances — {"Person": [...], "Company": [...]}.
 // Returns a map of type name -> slice of RawInstance, with an entry for every
-// key whose value is an array, an empty one included. Data can start with one
-// UTF-8 byte order mark.
+// valid type name whose value is an array, an empty one included, read before
+// any fault that stops the parse. Data can start with one UTF-8 byte order mark.
 //
 // Every instance carries a [location.Provenance] naming source, its path in
-// the document ($.Person[0]) and the span of its opening brace, and every
-// diagnostic carries a span in source. Positions count runes from the line
-// start of the bytes passed in.
+// the document ($.Person[0]) and the span of its opening brace. A parse
+// diagnostic carries a span in source wherever its offset lies in data or at its end,
+// and a fault the decoder cannot read past is placed at the first byte no
+// continuation of the document repairs, or at the end of data when data ends
+// too soon. Positions count runes from the line start of the bytes passed in.
 //
 // ParseObject checks ctx once per top-level key, the unit it reads, and returns
-// the types read so far beside a Fatal E_CONTEXT_CANCELLED.
+// the types read so far beside a Fatal E_CONTEXT_CANCELLED, which carries no
+// span.
 func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 	result := make(map[string][]instance.RawInstance)
 
-	// jsonc tolerates comments and trailing commas, writing one space per
+	// jsonc tolerates comments and trailing commas, writing one byte per
 	// comment byte, so an offset into the rewritten buffer is an offset into
 	// data once the mark's length is added back — but a column must be counted
 	// over data, where a multibyte rune in a comment still occupies one column.
 	//
-	// The mapping is not a length guarantee: recovering an unterminated trailing
-	// block comment appends a byte, so the buffer can be one longer than data.
-	// spanAt range-checks every offset against data and yields no span rather
-	// than a wrong one, which is why the extra byte costs a position and not a
-	// lie.
+	// The mapping is not a length guarantee: a block comment the input ends
+	// inside, with nothing after its "/*", gains a byte, so the buffer can be
+	// one longer than data. That byte is a space at the buffer offset where data
+	// ends, where only a document that ends too soon is placed; spanAt
+	// range-checks every offset against data all the same.
 	trimmed := bytes.TrimPrefix(data, byteOrderMark)
 	pc := &parseContext{
 		source:    source,
@@ -67,11 +70,11 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	// Read opening brace
 	tok, err := dec.Token()
 	if err != nil {
-		collector.Collect(pc.parseError(pc.spanAt(0), "invalid JSON", err.Error()))
+		collector.Collect(pc.parseError(pc.faultSpan(), "invalid JSON", err.Error()))
 		return nil, collector.Result()
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		collector.Collect(pc.parseError(pc.spanAt(0), "expected object at root", "expected object"))
+		collector.Collect(pc.parseError(pc.spanAt(pc.readStart(0)), "expected object at root", "expected object"))
 		return nil, collector.Result()
 	}
 
@@ -79,24 +82,26 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	// decoder cannot read on: a later token would be read from the middle of
 	// the value that failed, and would name a fault the document does not have.
 	seen := make(map[string]struct{})
+	keys := 0
 	for dec.More() {
 		// Checked per top-level key, the unit of work this loop reads, as the
 		// CSV parser checks per record. Fatal because HasFatal is documented to
 		// mean the run did not finish.
 		if err := ctx.Err(); err != nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
-				fmt.Sprintf("json parse cancelled after %d type keys", len(result))).Build())
+				fmt.Sprintf("json parse cancelled after %d top-level keys", keys)).Build())
 			return result, collector.Result()
 		}
 
-		keySpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
+		keySpan := pc.spanAt(pc.readStart(int(dec.InputOffset())))
 
 		// Read type name
 		keyTok, err := dec.Token()
 		if err != nil {
-			collector.Collect(pc.parseError(keySpan, "error reading key", err.Error()))
+			collector.Collect(pc.parseError(pc.faultSpan(), "error reading key", err.Error()))
 			return result, collector.Result()
 		}
+		keys++
 		// The decoder returns a member name as a string or fails; the arm holds
 		// that contract rather than trusting it.
 		typeName, ok := keyTok.(string)
@@ -107,7 +112,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 
 		if err := typetag.Validate(typeName); err != nil {
 			collector.Collect(typeTagError(keySpan, typeName, err))
-			if !pc.skipMember(dec, keySpan, collector) {
+			if !pc.skipMember(dec, collector) {
 				return result, collector.Result()
 			}
 			continue
@@ -135,9 +140,8 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	}
 
 	// Read closing brace
-	closeSpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 	if _, err := dec.Token(); err != nil {
-		collector.Collect(pc.parseError(closeSpan, "error reading closing brace", err.Error()))
+		collector.Collect(pc.parseError(pc.faultSpan(), "error reading closing brace", err.Error()))
 		return result, collector.Result()
 	}
 
@@ -157,10 +161,10 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 // skipMember reads past the value of a member that is refused, reporting a
 // value the decoder cannot read. It returns false when the decoder cannot read
 // on.
-func (pc *parseContext) skipMember(dec *json.Decoder, keySpan location.Span, collector *diag.Collector) bool {
+func (pc *parseContext) skipMember(dec *json.Decoder, collector *diag.Collector) bool {
 	var skip json.RawMessage
 	if err := dec.Decode(&skip); err != nil {
-		collector.Collect(pc.parseError(keySpan, "error skipping value", err.Error()))
+		collector.Collect(pc.parseError(pc.faultSpan(), "error skipping value", err.Error()))
 		return false
 	}
 	return true
@@ -179,7 +183,7 @@ type parseContext struct {
 
 	// frames is repeatedMembers' stack, kept between elements so a scan
 	// reuses what the last one grew.
-	frames []memberFrame
+	frames []nameFrame
 }
 
 // spanAt returns the point span at an offset into the decoder's buffer.
@@ -192,25 +196,37 @@ func (pc *parseContext) spanAt(bufOffset int) location.Span {
 	return location.PointWithByte(pc.source, pos.Line, pos.Column, byteOffset)
 }
 
-// significantFrom returns the offset of the next byte that is neither a
-// separator nor white space.
-//
-// [json.Decoder.More] leaves the offset on the comma for every element after
-// the first, and the offset after a member's key sits on its colon, so a span
-// taken at either would start on the punctuation and not the value. jsonc has
-// already rewritten a closed comment as white space, so this skips one too; an
-// unterminated trailing comment it writes back verbatim halts the scan, which
-// is the document's last byte either way.
-func (pc *parseContext) significantFrom(bufOffset int) int {
+// readStart returns the offset of the first byte a successful read from
+// bufOffset takes, past white space and the one comma or colon the decoder
+// leaves its offset before; jsonc has already written every comment but an
+// unclosed block comment as blank bytes.
+func (pc *parseContext) readStart(bufOffset int) int {
+	bufOffset = pc.skipSpace(bufOffset)
+	if bufOffset < len(pc.buf) && (pc.buf[bufOffset] == ',' || pc.buf[bufOffset] == ':') {
+		bufOffset = pc.skipSpace(bufOffset + 1)
+	}
+	return bufOffset
+}
+
+func (pc *parseContext) skipSpace(bufOffset int) int {
 	for bufOffset < len(pc.buf) {
 		switch pc.buf[bufOffset] {
-		case ',', ':', ' ', '\t', '\r', '\n':
+		case ' ', '\t', '\r', '\n':
 			bufOffset++
 		default:
 			return bufOffset
 		}
 	}
 	return bufOffset
+}
+
+// faultSpan returns the span of the byte a failed decoder read is placed at:
+// faultOffset's byte, or the end of the input when the input only ends early.
+func (pc *parseContext) faultSpan() location.Span {
+	if at, ok := faultOffset(pc.src); ok {
+		return pc.spanAt(at)
+	}
+	return pc.spanAt(len(pc.src))
 }
 
 // trailingFrom returns the offset of the first byte at or after off in src that
@@ -260,17 +276,17 @@ func describeByte(b []byte) string {
 // span beside it.
 func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector *diag.Collector) ([]instance.RawInstance, bool) {
 	// Read opening bracket
-	arraySpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
+	valueStart := int(dec.InputOffset())
 	tok, err := dec.Token()
 	if err != nil {
-		collector.Collect(pc.parseError(arraySpan, "error reading array", err.Error()))
+		collector.Collect(pc.parseError(pc.faultSpan(), "error reading array", err.Error()))
 		return nil, false
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '[' {
-		collector.Collect(pc.parseError(arraySpan, "expected array", "expected array"))
+		collector.Collect(pc.parseError(pc.spanAt(pc.readStart(valueStart)), "expected array", "expected array"))
 		// Skip the remainder of the value to keep decoder synchronized
 		if err := skipValue(dec, tok); err != nil {
-			collector.Collect(pc.parseError(arraySpan, "error skipping value", err.Error()))
+			collector.Collect(pc.parseError(pc.faultSpan(), "error skipping value", err.Error()))
 			return nil, false
 		}
 		return nil, true
@@ -279,18 +295,19 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 	result := []instance.RawInstance{}
 
 	for index := 0; dec.More(); index++ {
-		elemStart := pc.significantFrom(int(dec.InputOffset()))
+		elemStart := pc.readStart(int(dec.InputOffset()))
 		elemSpan := pc.spanAt(elemStart)
 
 		var obj map[string]any
 		if err := dec.Decode(&obj); err != nil {
-			collector.Collect(pc.parseError(elemSpan, "error reading array element", err.Error()))
-
 			// Decode reads the whole value before it converts it, so only a
-			// conversion failure leaves the decoder past the element.
+			// conversion failure leaves the decoder past the element, whose
+			// start the diagnostic names.
 			if typeErr, _ := errors.AsType[*json.UnmarshalTypeError](err); typeErr == nil {
+				collector.Collect(pc.parseError(pc.faultSpan(), "error reading array element", err.Error()))
 				return result, false
 			}
+			collector.Collect(pc.parseError(elemSpan, "error reading array element", err.Error()))
 			continue
 		}
 
@@ -301,9 +318,9 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 		}
 
 		// A repeated member is reported and the instance is kept: the object
-		// holds the value the decoder kept, which is the one every JSON reader
-		// keeps, and a parser that dropped it would lose data the document
-		// states over a fault the diagnostic already names.
+		// holds the value encoding/json keeps, the last, and a parser that
+		// dropped it would lose data the document states over a fault the
+		// diagnostic already names.
 		for _, r := range pc.repeatedMembers(elemStart, int(dec.InputOffset())) {
 			first := pc.spanAt(r.first).Start
 			collector.Collect(pc.parseError(pc.spanAt(r.at), fmt.Sprintf("repeated member %q", r.name),
@@ -324,9 +341,8 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 	}
 
 	// Read closing bracket
-	bracketSpan := pc.spanAt(pc.significantFrom(int(dec.InputOffset())))
 	if _, err := dec.Token(); err != nil {
-		collector.Collect(pc.parseError(bracketSpan, "error reading closing bracket", err.Error()))
+		collector.Collect(pc.parseError(pc.faultSpan(), "error reading closing bracket", err.Error()))
 		return result, false
 	}
 
@@ -340,11 +356,11 @@ type repeatedMember struct {
 	at, first int
 }
 
-// memberFrame is one open object or array of the value repeatedMembers scans.
+// nameFrame is one open object or array of the value repeatedMembers scans.
 // An object's names are compared in place while it has few, and through an
-// index once it has more, so a small object allocates nothing and a large one
-// is not scanned quadratically.
-type memberFrame struct {
+// index once it has more, so a small object makes no map and a large one is
+// not scanned quadratically.
+type nameFrame struct {
 	object    bool
 	expectKey bool
 	names     []memberName
@@ -372,7 +388,7 @@ func (pc *parseContext) repeatedMembers(start, end int) []repeatedMember {
 		switch pc.buf[i] {
 		case '{', '[':
 			if depth == len(pc.frames) {
-				pc.frames = append(pc.frames, memberFrame{})
+				pc.frames = append(pc.frames, nameFrame{})
 			}
 			f := &pc.frames[depth]
 			f.object, f.expectKey = pc.buf[i] == '{', pc.buf[i] == '{'
@@ -402,7 +418,7 @@ func (pc *parseContext) repeatedMembers(start, end int) []repeatedMember {
 	return repeats
 }
 
-func (f *memberFrame) lookup(name []byte) (int, bool) {
+func (f *nameFrame) lookup(name []byte) (int, bool) {
 	if len(f.names) > indexedAbove {
 		at, ok := f.index[string(name)]
 		return at, ok
@@ -415,7 +431,7 @@ func (f *memberFrame) lookup(name []byte) (int, bool) {
 	return 0, false
 }
 
-func (f *memberFrame) add(name []byte, at int) {
+func (f *nameFrame) add(name []byte, at int) {
 	f.names = append(f.names, memberName{text: name, at: at})
 	switch {
 	case len(f.names) == indexedAbove+1:

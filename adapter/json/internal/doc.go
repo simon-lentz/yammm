@@ -2,4 +2,8 @@
 // that pin the behaviour of github.com/tidwall/jsonc the JSON adapter's parser
 // depends on, kept apart from the adapter's own suite because they test a
 // dependency.
+//
+// Run them before a release that upgrades the dependency:
+//
+//	go test ./adapter/json/internal/...
 package internal

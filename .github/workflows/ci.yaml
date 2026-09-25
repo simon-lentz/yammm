@@ -68,7 +68,7 @@ jobs:
       - name: Cache VS Code test install
         uses: actions/cache@v6
         with:
-          path: lsp/editors/vscode/.vscode-test
+          path: ~/.cache/yammm-vscode-test
           key: vscode-test-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}
       - name: Integration tests
         working-directory: lsp/editors/vscode

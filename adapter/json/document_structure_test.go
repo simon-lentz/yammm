@@ -262,8 +262,7 @@ func TestParseObject_ARepeatedMemberIsReported(t *testing.T) {
 		if len(rows) != 1 {
 			t.Fatalf("got %d instances, want 1", len(rows))
 		}
-		// encoding/json keeps the last value of a repeated name, and so does
-		// every other JSON reader the document will meet.
+		// encoding/json keeps the last value of a repeated name.
 		if got := rows[0].Properties["id"]; got != "b" {
 			t.Errorf("id is %v, want \"b\"", got)
 		}

@@ -68,7 +68,13 @@ async function main() {
     // limit on macOS. A short fixed temp path keeps the socket addressable.
     const userDataDir = path.join(os.tmpdir(), 'yammm-vscode-test');
     fs.mkdirSync(userDataDir, { recursive: true });
+    // The download defaults to .vscode-test under the working directory, where
+    // every copy of the checkout carries it. CI caches this path. The harness
+    // creates only the last path element, so the parents are made here.
+    const cachePath = path.join(os.homedir(), '.cache', 'yammm-vscode-test');
+    fs.mkdirSync(cachePath, { recursive: true });
     await runTests({
+        cachePath,
         extensionDevelopmentPath: extensionRoot,
         extensionTestsPath: path.join(outDir, 'suite', 'index.js'),
         launchArgs: [

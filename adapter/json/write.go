@@ -86,9 +86,9 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Sn
 	if err != nil {
 		return 0, err
 	}
-	// A cancellation during the build already returned above, from
-	// [Adapter.buildOutput]. This covers the remaining window — the encode
-	// itself — so a run cancelled there writes nothing rather than a whole
+	// [Adapter.buildOutput] returns a cancellation it sees before a type group.
+	// This check covers what follows the last one — that group's build and the
+	// encode — so a run cancelled there writes nothing rather than a whole
 	// document nobody waited for.
 	if err := ctx.Err(); err != nil {
 		return 0, fmt.Errorf("json write object: %w", err)
