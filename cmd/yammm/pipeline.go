@@ -1,66 +1,123 @@
 package main
 
 import (
+	"slices"
+	"unicode/utf8"
+
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// loadGraph assembles the graph as [assembleGraph] does and reports a summary
-// line on success.
-func loadGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, dataPath, fromFormat, typeName, typeColumn string) (diag.Result, *graph.Graph, error) {
-	result, g, parsed, err := assembleGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
-	if err != nil {
-		return diag.Result{}, nil, err
-	}
-	if !result.HasErrors() {
-		instanceCount := 0
-		for _, raws := range parsed {
-			instanceCount += len(raws)
-		}
-		sink.Statusf("loaded %d instances of %d types\n", instanceCount, len(parsed))
-	}
-	return result, g, nil
+// dataInput is what a data command reads: its data files, each file's format,
+// and the CSV type flags.
+type dataInput struct {
+	paths      []string
+	formats    []string
+	typeName   string
+	typeColumn string
 }
 
-// assembleGraph runs the whole data pipeline — detect the format, parse,
-// validate every instance, build the graph — and returns the merged result,
-// the graph, the parsed instances by type, and a usage or I/O error, which
-// returns no graph. Building the graph is what checks primary-key uniqueness and
-// resolves associations, so every data command runs it.
-func assembleGraph(cmd *cobra.Command, s *schema.Schema, dataPath, fromFormat, typeName, typeColumn string) (diag.Result, *graph.Graph, map[string][]instance.RawInstance, error) {
-	if fromFormat == "" {
-		var err error
-		fromFormat, err = cli.DetectFormat(dataPath)
-		if err != nil {
-			return diag.Result{}, nil, nil, err
+// dataInputOf reads the data flags every data command registers and decides
+// each file's format from --from or its name. It reads no file, so a command
+// that calls it before its first read reports a usage error alone.
+func dataInputOf(cmd *cobra.Command, paths ...string) (dataInput, error) {
+	from, _ := cmd.Flags().GetString("from")
+	typeName, _ := cmd.Flags().GetString("type")
+	typeColumn, _ := cmd.Flags().GetString("type-column")
+	in := dataInput{paths: paths, formats: make([]string, len(paths)), typeName: typeName, typeColumn: typeColumn}
+	for i, path := range paths {
+		// The two operand refusals location.ResolveSourcePath makes before any
+		// lookup, made here so they precede the command's first read.
+		switch {
+		case path == "":
+			return dataInput{}, cli.Usagef("resolve data file %q: %w", path, location.ErrEmptyPath)
+		case !utf8.ValidString(path):
+			return dataInput{}, cli.Usagef("resolve data file %q: %w: %q", path, location.ErrInvalidUTF8Path, path)
 		}
-	}
-
-	var parsed map[string][]instance.RawInstance
-	var parseResult diag.Result
-	var err error
-
-	switch fromFormat {
-	case "json":
-		parsed, parseResult, err = cli.LoadAndParseJSON(cmd.Context(), dataPath)
-	case "csv":
-		if typeName == "" && typeColumn == "" {
-			return diag.Result{}, nil, nil, cli.Usagef("CSV data requires --type or --type-column flag")
+		format := from
+		if format == "" {
+			var err error
+			if format, err = cli.DetectFormat(path); err != nil {
+				return dataInput{}, err
+			}
 		}
-		parsed, parseResult, err = cli.LoadAndParseCSV(cmd.Context(), dataPath, typeName, typeColumn, s)
-	default:
-		return diag.Result{}, nil, nil, cli.Usagef("unsupported format %q", fromFormat)
+		switch format {
+		case "json":
+		case "csv":
+			if typeName == "" && typeColumn == "" {
+				return dataInput{}, cli.Usagef("CSV data requires --type or --type-column flag")
+			}
+		default:
+			return dataInput{}, cli.Usagef("unsupported format %q", format)
+		}
+		in.formats[i] = format
 	}
+	return in, nil
+}
+
+// assembly is what the data pipeline hands a command: the graph, and how many
+// instances of how many type names the document lists.
+type assembly struct {
+	graph     *graph.Graph
+	instances int
+	types     int
+}
+
+// loadGraph assembles the graph as [assembleGraph] does and, when nothing the
+// invocation diagnosed is an error, reports a summary line.
+func loadGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, in dataInput) (*graph.Graph, error) {
+	a, err := assembleGraph(cmd, sink, s, in, nil)
 	if err != nil {
-		return diag.Result{}, nil, nil, err
+		return nil, err
+	}
+	if !sink.Result().HasErrors() {
+		sink.Statusf("loaded %d instances of %d types\n", a.instances, a.types)
+	}
+	return a.graph, nil
+}
+
+// assembleGraph is the one data pipeline: the files are one document, and its
+// valid instances go into base or a new graph ([cli.BuildGraph]). A --type the
+// schema lacks, given for CSV data without --type-column, is refused before any
+// file is read, and each file's parse diagnostics reach sink as it is read.
+func assembleGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, in dataInput, base *graph.Graph) (assembly, error) {
+	if in.typeColumn == "" && slices.Contains(in.formats, "csv") {
+		if _, ok := s.ResolveTypeName(in.typeName); !ok {
+			return assembly{}, cli.Usagef("type %q not found in schema", in.typeName)
+		}
+	}
+	parsed := make(map[string][]instance.RawInstance)
+	for i, path := range in.paths {
+		var fileParsed map[string][]instance.RawInstance
+		var parseResult diag.Result
+		var err error
+		if in.formats[i] == "json" {
+			fileParsed, parseResult, err = cli.LoadAndParseJSON(cmd.Context(), path)
+		} else {
+			fileParsed, parseResult, err = cli.LoadAndParseCSV(cmd.Context(), path, in.typeName, in.typeColumn, s)
+		}
+		if err != nil {
+			return assembly{}, err
+		}
+		sink.Add(parseResult)
+		for typeName, raws := range fileParsed {
+			parsed[typeName] = append(parsed[typeName], raws...)
+		}
 	}
 
-	valids, validateResult := cli.ValidateInstances(cmd.Context(), s, parsed)
-	g, graphResult := cli.BuildGraph(cmd.Context(), s, valids)
-	return cli.MergeResults(parseResult, validateResult, graphResult), g, parsed, nil
+	doc, validateResult := cli.ValidateInstances(cmd.Context(), s, parsed)
+	g, graphResult := cli.BuildGraph(cmd.Context(), s, base, doc)
+	sink.Add(validateResult, graphResult)
+
+	a := assembly{graph: g, types: len(parsed)}
+	for _, raws := range parsed {
+		a.instances += len(raws)
+	}
+	return a, nil
 }

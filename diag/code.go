@@ -399,8 +399,10 @@ var (
 // Graph codes.
 var (
 	// E_DUPLICATE_PK indicates a primary key stated twice for one type: by two
-	// instances added to a graph, or by two root instances in a snapshot that
-	// snapshot.Load, Verify or Info reads.
+	// instances added to a graph, by two root instances in a snapshot that a graph
+	// imports under another schema or snapshot.Load, Verify or Info reads, or by
+	// two root instances a yammm data command reads from its data files and
+	// --into file, one of them refused.
 	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
 
 	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a

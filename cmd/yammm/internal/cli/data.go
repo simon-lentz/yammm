@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/adapter/csv"
@@ -120,41 +122,85 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 	return map[string][]instance.RawInstance{typeName: raws}, result, nil
 }
 
-// ValidateInstances validates parsed instances against the schema.
-// Returns all valid instances and a merged diagnostic result.
-func ValidateInstances(ctx context.Context, s *schema.Schema, parsed map[string][]instance.RawInstance) ([]*instance.ValidInstance, diag.Result) {
-	v := instance.NewValidator(s)
-	collector := diag.NewCollectorUnlimited()
-	var allValid []*instance.ValidInstance
+// Validated is a document's instances after validation, in the order they
+// were validated: type names sorted, and each type's instances in the order the
+// document lists them.
+type Validated struct {
+	validator *instance.Validator
+	batches   []validatedBatch
+}
 
-	for typeName, raws := range parsed {
-		valids, result := v.Validate(ctx, typeName, raws)
+// validatedBatch is one type name's instances and the validator's answer for
+// each: valids holds one entry per raw, nil where the validator refused it, and
+// is nil when the batch was refused whole or did not complete.
+type validatedBatch struct {
+	typeName string
+	raws     []instance.RawInstance
+	valids   []*instance.ValidInstance
+}
+
+// ValidateInstances validates parsed instances against the schema and returns
+// them with the merged diagnostics.
+func ValidateInstances(ctx context.Context, s *schema.Schema, parsed map[string][]instance.RawInstance) (Validated, diag.Result) {
+	doc := Validated{validator: instance.NewValidator(s)}
+	collector := diag.NewCollectorUnlimited()
+	for _, typeName := range slices.Sorted(maps.Keys(parsed)) {
+		raws := parsed[typeName]
+		valids, result := doc.validator.Validate(ctx, typeName, raws)
 		collector.Merge(result)
-		for _, valid := range valids {
+		doc.batches = append(doc.batches, validatedBatch{typeName: typeName, raws: raws, valids: valids})
+	}
+	return doc, collector.Result()
+}
+
+// Valids returns the instances the validator accepted, in validation order.
+func (d Validated) Valids() []*instance.ValidInstance {
+	var out []*instance.ValidInstance
+	for _, b := range d.batches {
+		for _, valid := range b.valids {
 			if valid != nil {
-				allValid = append(allValid, valid)
+				out = append(out, valid)
 			}
 		}
 	}
-
-	return allValid, collector.Result()
+	return out
 }
 
-// BuildGraph creates a graph from validated instances, adds them all,
-// and runs graph-level checks.
-func BuildGraph(ctx context.Context, s *schema.Schema, valids []*instance.ValidInstance) (*graph.Graph, diag.Result) {
-	g := graph.New(s)
+// BuildGraph adds the document's valid instances to base, or to a new graph
+// when base is nil, runs the graph-level checks, and returns the graph with a
+// verdict about the document (see [documentVerdict]).
+func BuildGraph(ctx context.Context, s *schema.Schema, base *graph.Graph, doc Validated) (*graph.Graph, diag.Result) {
+	g := base
+	if g == nil {
+		g = graph.New(s)
+	}
 	collector := diag.NewCollectorUnlimited()
-
+	valids := doc.Valids()
+	added := make(map[*instance.ValidInstance]diag.Result, len(valids))
+	refusals := false
 	for _, valid := range valids {
 		result := g.Add(ctx, valid)
 		collector.Merge(result)
+		added[valid] = result
+		refusals = refusals || result.HasErrors()
 	}
-
-	checkResult := g.Check(ctx)
-	collector.Merge(checkResult)
-
+	check := g.Check(ctx)
+	if ctx.Err() == nil && (refusals || len(valids) < doc.rootCount()) {
+		verdict := documentVerdict(s, g, base != nil, doc, added)
+		check = verdict.explain(check)
+		collector.Merge(verdict.duplicates)
+	}
+	collector.Merge(check)
 	return g, collector.Result()
+}
+
+// rootCount is the number of root instances the document lists.
+func (d Validated) rootCount() int {
+	n := 0
+	for _, b := range d.batches {
+		n += len(b.raws)
+	}
+	return n
 }
 
 // MergeResults merges multiple diagnostic results into one.

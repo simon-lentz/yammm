@@ -29,13 +29,14 @@ Targets:
                    upper-case extra acronyms (e.g. GUID,JWT) in generated
                    identifiers; they merge with the default golint acronym set.
 
-  --to jsonschema  A JSON Schema draft 2020-12 document describing the
-                   instance-data JSON accepted by 'yammm check': one key per
-                   type a data file can hold at its top level, each an array
-                   of instances. Wire it into an editor through a
-                   json.schemas mapping in VS Code settings for completion
-                   and validation while authoring data files; a JSON data
-                   file cannot carry a "$schema" member.
+  --to jsonschema  A JSON Schema draft 2020-12 document describing the JSON
+                   object form 'yammm check' reads: one key per type a data
+                   file can hold at its top level, each an array of
+                   instances. It does not reproduce yammm's validation;
+                   'yammm check' gives the verdict. Wire it into an editor
+                   through a json.schemas mapping in VS Code settings for
+                   completion and validation while authoring data files; a
+                   JSON data file cannot carry a "$schema" member.
                    Use --schema-id to set the document's "$id" (omitted when
                    unset).
 

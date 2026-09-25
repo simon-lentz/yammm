@@ -111,7 +111,7 @@ yammm check schema.yammm data.csv --type-column '$type'
 yammm check --from csv schema.yammm data.tsv --type User
 ```
 
-Validates data against a schema as `load` does, and writes nothing: every instance, primary-key uniqueness, and every association's target. Reports constraint violations, missing fields, invariant failures, duplicate primary keys and unresolved required associations. Every command that reads data treats a `.tsv` file as CSV input whose fields split on tabs, with CSV quoting still in force; any other CSV file splits on commas.
+Validates data against a schema as `load` does, and writes nothing: every instance, primary-key uniqueness, and every required association's target. Reports constraint violations, missing fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the data file: a target the file holds but the validator refuses is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data treats a `.tsv` file as CSV input whose fields split on tabs, with CSV quoting still in force; any other CSV file splits on commas.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -125,7 +125,7 @@ Validates data against a schema as `load` does, and writes nothing: every instan
 yammm load schema.yammm data.json
 ```
 
-Loads data into an in-memory graph, validates it as `check` does, and prints a summary. Same flags as `check`.
+Loads data into an in-memory graph, validates it as `check` does, and in text output prints a summary line when the data loads without error. Same flags as `check`.
 
 ---
 
@@ -140,11 +140,11 @@ yammm snapshot save -o output.ys --into existing.ys schema.yammm new_data.json
 yammm snapshot save -o output.ys -m env=prod -m version=2 schema.yammm data.json
 ```
 
-Builds a graph snapshot from one or more data files and persists it as a `.ys` file.
+Builds a graph snapshot from one or more data files and persists it as a `.ys` file. The data files are validated as one document, as `check` validates one file, and under `--into` the merged file's instances hold their keys too. Every data file's path is refused if it is empty or not UTF-8, and its format is decided, before the schema or any file is read. A `--type` the schema lacks, given for CSV data without `--type-column`, is refused before any data file is read. So a data usage error names nothing about the data, and a data file that cannot be read keeps the parse diagnostics the files before it drew.
 
 | Flag | Description |
 | ---- | ----------- |
-| `-o, --output` | Output path for `.ys` file (required) |
+| `-o, --output` | Output path for the `.ys` file; required unless `--into` is given, which defaults it to the merged file |
 | `--from` | Input format override |
 | `--type` | Type name for single-type CSV |
 | `--type-column` | Column for multi-type CSV |

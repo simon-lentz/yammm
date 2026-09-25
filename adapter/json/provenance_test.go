@@ -231,7 +231,7 @@ func TestParseObject_DiagnosticSpansPinTheColumn(t *testing.T) {
 		{"value is not an array", "{\n  \"Person\":\n    42\n}\n", 3, 5},
 		// The element's start, not the end of the token the decoder rejected.
 		{"element of the wrong type", "{\n  \"Person\": [\n    42\n  ]\n}\n", 3, 5},
-		// The byte the decoder cannot read on from, not the element's start.
+		// The first byte no continuation repairs, not the element's start.
 		{"syntax error inside an element", "{\"A\": [{oops}]}", 1, 9},
 		// A line break inside a string is the fault, not the string's start.
 		{"syntax error at a line end", "{\"A\": \"abc\nx\"}", 1, 11},

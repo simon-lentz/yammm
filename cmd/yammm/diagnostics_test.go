@@ -59,17 +59,22 @@ func TestDiagnosticsSurviveEveryEarlyReturn(t *testing.T) {
 
 	dir := t.TempDir()
 	missingData := filepath.Join(dir, "nonexistent.json")
+	for name, body := range map[string]string{"rows.csv": "id\na\n", "empty.json": "{}"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	tests := []struct {
 		name string
 		args []string
 	}{
 		{"check, unreadable data file", []string{"check", shadowedSchema, missingData}},
-		{"check, undetectable data format", []string{"check", "--from", "xml", shadowedSchema, missingData}},
+		{"check, a CSV type the schema lacks", []string{"check", "--type", "Nope", shadowedSchema, filepath.Join(dir, "rows.csv")}},
 		{"export, unreadable data file", []string{"export", "--to", "json", shadowedSchema, missingData}},
 		{"load, unreadable data file", []string{"load", shadowedSchema, missingData}},
-		{"snapshot save, undetectable data format", []string{
-			"snapshot", "save", "-o", filepath.Join(dir, "out.ys"), shadowedSchema, shadowedSchema,
+		{"snapshot save, an unreadable second data file", []string{
+			"snapshot", "save", "-o", filepath.Join(dir, "out.ys"), shadowedSchema, filepath.Join(dir, "empty.json"), missingData,
 		}},
 	}
 

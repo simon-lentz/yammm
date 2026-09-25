@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -15,7 +14,6 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -49,9 +47,6 @@ merged file's own created_at forward.`,
 
 func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	outputPath, _ := cmd.Flags().GetString("output")
-	fromFormat, _ := cmd.Flags().GetString("from")
-	typeName, _ := cmd.Flags().GetString("type")
-	typeColumn, _ := cmd.Flags().GetString("type-column")
 	metadataRaw, _ := cmd.Flags().GetStringArray("metadata")
 	timestamp, _ := cmd.Flags().GetBool("timestamp")
 	indent, _ := cmd.Flags().GetBool("indent")
@@ -72,7 +67,10 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	schemaPath := args[0]
-	dataPaths := args[1:]
+	in, err := dataInputOf(cmd, args[1:]...)
+	if err != nil {
+		return err
+	}
 
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
@@ -113,24 +111,11 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		imported = header
 	}
 
-	// Parse all data files.
-	allParsed, parseResult, err := parseDataFiles(cmd, s, dataPaths, fromFormat, typeName, typeColumn)
+	a, err := assembleGraph(cmd, sink, s, in, g)
 	if err != nil {
 		return err
 	}
-
-	// Validate instances.
-	valids, validateResult := cli.ValidateInstances(cmd.Context(), s, allParsed)
-
-	// Build graph: fresh build or add to imported graph.
-	var graphResult diag.Result
-	if g != nil {
-		graphResult = addInstancesToGraph(cmd.Context(), g, valids)
-	} else {
-		g, graphResult = cli.BuildGraph(cmd.Context(), s, valids)
-	}
-
-	sink.Add(parseResult, validateResult, graphResult)
+	g = a.graph
 	// The data file's own read failure rides this result for a streamed format,
 	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
@@ -212,68 +197,6 @@ func mergeMetadata(imported *snapshot.HeaderInfo, flags map[string]string) map[s
 	}
 	maps.Copy(merged, flags)
 	return merged
-}
-
-// addInstancesToGraph adds validated instances to an existing graph and runs
-// graph-level checks. Used for the --into workflow.
-func addInstancesToGraph(ctx context.Context, g *graph.Graph, valids []*instance.ValidInstance) diag.Result {
-	collector := diag.NewCollectorUnlimited()
-	for _, valid := range valids {
-		result := g.Add(ctx, valid)
-		collector.Merge(result)
-	}
-	checkResult := g.Check(ctx)
-	collector.Merge(checkResult)
-	return collector.Result()
-}
-
-// parseDataFiles parses multiple data files into a merged instance map.
-func parseDataFiles(cmd *cobra.Command, s *schema.Schema, dataPaths []string, fromFormat, typeName, typeColumn string) (map[string][]instance.RawInstance, diag.Result, error) {
-	allParsed := make(map[string][]instance.RawInstance)
-	collector := diag.NewCollectorUnlimited()
-
-	for _, dataPath := range dataPaths {
-		absDataPath, err := filepath.Abs(dataPath)
-		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("resolve path %q: %w", dataPath, err)
-		}
-
-		// Detect format per file if not overridden.
-		format := fromFormat
-		if format == "" {
-			format, err = cli.DetectFormat(absDataPath)
-			if err != nil {
-				return nil, diag.Result{}, err
-			}
-		}
-
-		var parsed map[string][]instance.RawInstance
-		var parseResult diag.Result
-
-		switch format {
-		case "json":
-			parsed, parseResult, err = cli.LoadAndParseJSON(cmd.Context(), absDataPath)
-		case "csv":
-			if typeName == "" && typeColumn == "" {
-				return nil, diag.Result{}, errors.New("CSV data requires --type or --type-column flag")
-			}
-			parsed, parseResult, err = cli.LoadAndParseCSV(cmd.Context(), absDataPath, typeName, typeColumn, s)
-		default:
-			return nil, diag.Result{}, fmt.Errorf("unsupported format %q for %s", format, dataPath)
-		}
-		if err != nil {
-			return nil, diag.Result{}, err
-		}
-
-		collector.Merge(parseResult)
-
-		// Merge parsed instances.
-		for typeName, instances := range parsed {
-			allParsed[typeName] = append(allParsed[typeName], instances...)
-		}
-	}
-
-	return allParsed, collector.Result(), nil
 }
 
 // parseMetadata parses key=value metadata pairs from --metadata flag values.

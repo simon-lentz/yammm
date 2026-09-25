@@ -1023,6 +1023,12 @@ func TestValidator_NilReceiver(t *testing.T) {
 			v.ValidateForComposition(t.Context(), "Parent", "CHILDREN", nil)
 		})
 	})
+
+	t.Run("PrimaryKeyOf", func(t *testing.T) {
+		require.PanicsWithValue(t, "instance.PrimaryKeyOf: nil validator receiver", func() {
+			v.PrimaryKeyOf("Test", instance.RawInstance{})
+		})
+	})
 }
 
 func TestNewValidator_NilSchemaPanics(t *testing.T) {

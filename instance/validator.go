@@ -948,6 +948,46 @@ func (v *Validator) extractPrimaryKey(typ *schema.Type, props map[string]any) []
 	return pkComponents
 }
 
+// PrimaryKeyOf returns the type and primary key raw would carry as a valid root
+// instance of typeName, whether or not the validator accepts the rest of raw:
+// each key property is read, checked and coerced as [Validator.Validate] reads
+// it. It reports false when typeName names no type that can hold a root, or a
+// key component is absent, collided or fails its constraint. Panics if the
+// receiver is nil.
+func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeID, immutable.Key, bool) {
+	if v == nil {
+		panic("instance.PrimaryKeyOf: nil validator receiver")
+	}
+	typ, err := v.resolveType(typeName)
+	if err != nil {
+		return schema.TypeID{}, immutable.Key{}, false
+	}
+	if _, refused := instantiationRefusal(typ, typeName, false, nil); refused {
+		return schema.TypeID{}, immutable.Key{}, false
+	}
+	claims := claimObject(typ, slices.Sorted(maps.Keys(raw.Properties)), v.cfg.strictPropertyNames)
+	var components []any
+	for pk := range typ.PrimaryKeys() {
+		inputName, claimed := claims.props[pk.Name()]
+		if !claimed {
+			return schema.TypeID{}, immutable.Key{}, false
+		}
+		val := raw.Properties[inputName]
+		if isAbsent(val) || v.checkValueWithRecovery(val, pk.Constraint()) != nil {
+			return schema.TypeID{}, immutable.Key{}, false
+		}
+		coerced, err := v.coerceValueWithRecovery(val, pk.Constraint())
+		if err != nil {
+			return schema.TypeID{}, immutable.Key{}, false
+		}
+		components = append(components, coerced)
+	}
+	if len(components) == 0 {
+		return schema.TypeID{}, immutable.Key{}, false
+	}
+	return typ.ID(), immutable.WrapKey(components, immutable.WithClone(true)), true
+}
+
 // withProvenance sets an issue's path and source name, and its span when the
 // provenance carries one. pathStr is the issue's own location in the input
 // document; prov supplies the document's name and span.

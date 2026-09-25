@@ -13,7 +13,7 @@ func newCheckCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check <schema.yammm> <data-file>",
 		Short: "Validate data against a schema",
-		Long:  "Validate JSON or CSV data against a yammm schema: every instance, primary-key uniqueness, and every association's target, as load does. Nothing is written. Input format is auto-detected from file extension.",
+		Long:  "Validate JSON or CSV data against a yammm schema: every instance, primary-key uniqueness, and every required association's target, as load does. A target the data holds but refuses is reported by its own refusal, not as missing. Nothing is written. Input format is auto-detected from file extension.",
 		Args:  cobra.ExactArgs(2),
 		RunE:  withDiagnostics(runCheck),
 	}
@@ -27,12 +27,12 @@ func newCheckCmd() *cobra.Command {
 }
 
 func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
-	fromFormat, _ := cmd.Flags().GetString("from")
-	typeName, _ := cmd.Flags().GetString("type")
-	typeColumn, _ := cmd.Flags().GetString("type-column")
-
 	schemaPath := args[0]
 	dataPath := args[1]
+	in, err := dataInputOf(cmd, dataPath)
+	if err != nil {
+		return err
+	}
 
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
@@ -49,11 +49,9 @@ func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error
 		return err
 	}
 
-	result, _, _, err := assembleGraph(cmd, s, dataPath, fromFormat, typeName, typeColumn)
-	if err != nil {
+	if _, err := assembleGraph(cmd, sink, s, in, nil); err != nil {
 		return err
 	}
-	sink.Add(result)
 
 	exitCode := cli.ExitForResult(sink.Result())
 	if exitCode != cli.ExitOK {

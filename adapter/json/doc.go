@@ -109,7 +109,7 @@
 // Every instance carries a [location.Provenance]: the source the caller named,
 // the instance's path in the document ($.Person[0]), and a point span at its
 // opening brace. A parse diagnostic carries a span in that source wherever its
-// offset lies inside the data; the cancellation diagnostic carries none.
+// offset lies in the data or at its end; the cancellation diagnostic carries none.
 //
 // The path indexes the document's own array, so $.Person[2] addresses the
 // document even where element 1 failed to decode. [adapter/csv] indexes by the

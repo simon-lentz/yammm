@@ -47,9 +47,6 @@ $props, $rows) and is not directly executable in Neo4j Browser or cypher-shell.`
 
 func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	toFormat, _ := cmd.Flags().GetString("to")
-	fromFormat, _ := cmd.Flags().GetString("from")
-	typeName, _ := cmd.Flags().GetString("type")
-	typeColumn, _ := cmd.Flags().GetString("type-column")
 	outputPath, _ := cmd.Flags().GetString("output")
 	outputDir, _ := cmd.Flags().GetString("output-dir")
 
@@ -85,13 +82,15 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 		return exportFromSnapshot(cmd, sink, s, dataPath, target, outputPath, outputDir)
 	}
 
-	// Parse, validate, and build graph
-	graphResult, g, err := loadGraph(cmd, sink, s, dataPath, fromFormat, typeName, typeColumn)
+	in, err := dataInputOf(cmd, dataPath)
+	if err != nil {
+		return err
+	}
+	g, err := loadGraph(cmd, sink, s, in)
 	if err != nil {
 		return err
 	}
 
-	sink.Add(graphResult)
 	sink.Flush()
 	// The data file's own read failure rides this result for a streamed format,
 	// so the exit rule decides: an I/O failure outranks a validation one.

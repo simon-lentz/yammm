@@ -15,7 +15,7 @@ func newLoadCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "load <schema.yammm> <data-file>",
 		Short: "Load data into an in-memory graph and validate",
-		Long:  "Load JSON or CSV data into a schema-validated graph. Reports diagnostics and a summary; 'yammm check' runs the same validation and prints none.",
+		Long:  "Load JSON or CSV data into a schema-validated graph. Reports diagnostics and, in text output when the data loads without error, a summary line; 'yammm check' runs the same validation and prints no summary.",
 		Args:  cobra.ExactArgs(2),
 		RunE:  withDiagnostics(runLoad),
 	}
@@ -29,12 +29,12 @@ func newLoadCmd() *cobra.Command {
 }
 
 func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
-	fromFormat, _ := cmd.Flags().GetString("from")
-	typeName, _ := cmd.Flags().GetString("type")
-	typeColumn, _ := cmd.Flags().GetString("type-column")
-
 	schemaPath := args[0]
 	dataPath := args[1]
+	in, err := dataInputOf(cmd, dataPath)
+	if err != nil {
+		return err
+	}
 	absSchemaPath, err := filepath.Abs(schemaPath)
 	if err != nil {
 		return cli.Usagef("resolve path %q: %v", schemaPath, err)
@@ -50,12 +50,9 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 		return err
 	}
 
-	// Parse, validate, and build graph
-	graphResult, _, err := loadGraph(cmd, sink, s, dataPath, fromFormat, typeName, typeColumn)
-	if err != nil {
+	if _, err := loadGraph(cmd, sink, s, in); err != nil {
 		return err
 	}
-	sink.Add(graphResult)
 
 	if exitCode := cli.ExitForResult(sink.Result()); exitCode != cli.ExitOK {
 		return &cli.ExitError{Code: exitCode}
