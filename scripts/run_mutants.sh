@@ -59,13 +59,14 @@ esac
 # later copy would otherwise hold an earlier worker's tree, whose .git a
 # mutant's baseline key cannot hash. rsync reads the path as a pattern, and
 # reads a backslash as an escape only in a pattern holding a wildcard ([, * or
-# ?), so the path is escaped only then; a ] alone is no wildcard.
+# ?), so the path is escaped only then; a ] alone is no wildcard. The sed
+# reads the path byte-wise, since a file name may hold bytes that are not UTF-8.
 copy_excludes=(--exclude '/.claude/' --exclude 'node_modules/' --exclude '.vscode-test/')
 case "$out" in
 "$src"/*)
 	rel=${out#"$src"/}
 	case "$rel" in
-	*[[*?]*) rel=$(printf '%s' "$rel" | sed 's/[][*?\\]/\\&/g') ;;
+	*[[*?]*) rel=$(printf '%s' "$rel" | LC_ALL=C sed 's/[][*?\\]/\\&/g') ;;
 	esac
 	copy_excludes+=(--exclude "/$rel/")
 	;;
@@ -278,7 +279,10 @@ worker() {
 			*"matched NOTHING"* | *"did not apply"*) verdict=NOMATCH ;;
 			*) verdict="OTHER(rc=$rc)" ;;
 			esac
-			fails=$(printf '%s\n' "$output" | sed -nE 's/^ *--- FAIL: ([^ ]+).*/\1/p' | LC_ALL=C sort -u | tr '\n' ' ')
+			# Byte-wise: a test's output may hold bytes that are not UTF-8,
+			# which macOS sed and tr refuse under a UTF-8 locale, stopping the
+			# worker.
+			fails=$(printf '%s\n' "$output" | LC_ALL=C sed -nE 's/^ *--- FAIL: ([^ ]+).*/\1/p' | LC_ALL=C sort -u | LC_ALL=C tr '\n' ' ')
 			printf '%s\t%s\t%s\t%s\tw%s\t%s\t%s\n' "$id" "$spell" "$verdict" "$secs" "$w" "$fails" \
 				"$(printf '%s' "$pkgs" | tr '\n' ' ')" >>"$out/work/results.w$w.tsv"
 			echo "$id $spell $verdict ${secs}s"
@@ -301,9 +305,14 @@ for p in "${pids[@]}"; do
 	wait "$p" || status=1
 done
 
+# A worker that stopped before its first verdict wrote no results file; the
+# summary still runs, so the run reports it.
+shopt -s nullglob
+parts=("$out"/work/results.w*.tsv)
+shopt -u nullglob
 {
 	printf 'id\tspelling\tverdict\tseconds\tworker\tfailing tests\tpackages\n'
-	cat "$out"/work/results.w*.tsv 2>/dev/null | LC_ALL=C sort
+	if [ "${#parts[@]}" -gt 0 ]; then LC_ALL=C sort "${parts[@]}"; fi
 } >"$out/results.tsv"
 echo "wall clock: $(($(date +%s) - began))s"
 awk -F'\t' 'NR > 1 { n[$3]++; s += $4 } END { for (v in n) printf "  %s: %d\n", v, n[v]; printf "  run seconds, summed: %d\n", s }' "$out/results.tsv"

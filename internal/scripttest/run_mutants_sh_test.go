@@ -248,6 +248,107 @@ func TestRunMutantsScript_RecordsOneVerdictPerMutant(t *testing.T) {
 	}
 }
 
+// A kill whose test prints a byte that is not UTF-8 keeps its verdict, its
+// failing test and that test's output, and every later mutant still gets a
+// verdict: the byte after the failing test's line, before it, and inside a
+// line the failing-test list reads. The run is under a UTF-8 locale, where
+// macOS sed and tr refuse such input and GNU grep drops the line that holds
+// the byte.
+func TestRunMutantsScript_ReadsTestOutputThatIsNotUTF8(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	f := runMutantsFixture(t)
+	f.env = append(f.env, "LC_ALL=C.UTF-8")
+	const assertion = "if Add(1, 2) != 3 {\n\t\tt.Fatal(\"Add(1, 2) is wrong\")"
+	for id, replace := range map[string]string{
+		"a-after":  "if Add(1, 2) == 3 {\n\t\tt.Fatal(\"Add(1, 2) is \\xff\")",
+		"a-before": "println(\"early \\xff\")\n\tif Add(1, 2) == 3 {\n\t\tt.Fatal(\"Add(1, 2) is wrong\")",
+		"a-inline": "if Add(1, 2) == 3 {\n\t\tt.Fatal(\"Add(1, 2) is wrong\\n--- FAIL: \\xff\")",
+	} {
+		dir := f.writeMutantSearching(id, assertion, replace)
+		if err := os.WriteFile(filepath.Join(dir, "file"), []byte("m/m_test.go"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.writeMutant("b-killed", "a - b")
+	f.writeMutant("c-survived", "b + a")
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	if r.code != 0 {
+		t.Fatalf("exit code %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
+	}
+	out := filepath.Join(f.dir, "out")
+	rows := resultRows(t, out)
+	for id, want := range map[string]struct{ verdict, fails string }{
+		"a-after":    {"KILLED", "TestAdd "},
+		"a-before":   {"KILLED", "TestAdd "},
+		"a-inline":   {"KILLED", "TestAdd \xff "},
+		"b-killed":   {"KILLED", "TestAdd "},
+		"c-survived": {"SURVIVED", ""},
+	} {
+		if row := rows[id]; len(row) < 6 || row[2] != want.verdict || row[5] != want.fails {
+			t.Errorf("mutant %q's row is %q, want verdict %q and failing tests %q", id, row, want.verdict, want.fails)
+		}
+	}
+	for id, line := range map[string]string{
+		"a-after":  "Add(1, 2) is \xff",
+		"a-before": "early \xff",
+		"a-inline": "--- FAIL: \xff",
+	} {
+		log, err := os.ReadFile(filepath.Join(out, "logs", id+".asis.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(log, []byte(line)) {
+			t.Errorf("%s's log drops the line its test printed, %q:\n%q", id, line, log)
+		}
+	}
+}
+
+// resultRows maps each mutant id in results.tsv to its columns.
+func resultRows(t *testing.T, out string) map[string][]string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(out, "results.tsv"))
+	if err != nil {
+		t.Fatalf("read results.tsv: %v", err)
+	}
+	rows := map[string][]string{}
+	for line := range strings.SplitSeq(strings.TrimRight(string(b), "\n"), "\n") {
+		cols := strings.Split(line, "\t")
+		if cols[0] != "id" {
+			rows[cols[0]] = cols
+		}
+	}
+	return rows
+}
+
+// A worker that stops before its first verdict writes no results file. The
+// run still writes its summary and says a worker stopped, and exits non-zero.
+func TestRunMutantsScript_ReportsAWorkerThatStoppedBeforeItsFirstVerdict(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	f := runMutantsFixture(t)
+	dir := f.writeMutant("unknown", "a - b")
+	if err := os.WriteFile(filepath.Join(dir, "spell"), []byte("sideways"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	r.wantCode(t, 1)
+	if !strings.Contains(r.stderr, "a worker stopped early") || !strings.Contains(r.stdout, "wall clock:") {
+		t.Errorf("the run did not report the stopped worker\nstdout:\n%s\nstderr:\n%s", r.stdout, r.stderr)
+	}
+	if rows := resultRows(t, filepath.Join(f.dir, "out")); len(rows) != 0 {
+		t.Errorf("results.tsv holds rows for a run that judged nothing: %v", rows)
+	}
+}
+
 // Without a pkgs file the runner computes the package set from the import
 // graph. The fixture module has no docs package, so the computed set is the
 // import graph alone.

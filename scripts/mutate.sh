@@ -184,9 +184,13 @@ fi
 # run that started, and this reads that as a kill. A test that prints such a
 # line itself, at the start of a line, reads as not run: a miss, never a
 # false kill.
+#
+# Every grep over the test output reads it byte-wise: a test may print bytes
+# that are not UTF-8, and under a UTF-8 locale GNU grep drops a line that
+# holds them.
 ran_re='^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9]+\.[0-9]+s$'
-notrun=$(printf '%s\n' "${test_out}" | grep -E '^FAIL[[:space:]]|^fork/exec |^exec: "' | grep -vE "${ran_re}" || true)
-ran=$(printf '%s\n' "${test_out}" | grep -cE "${ran_re}" || true)
+notrun=$(printf '%s\n' "${test_out}" | LC_ALL=C grep -E '^FAIL[[:space:]]|^fork/exec |^exec: "' | LC_ALL=C grep -vE "${ran_re}" || true)
+ran=$(printf '%s\n' "${test_out}" | LC_ALL=C grep -cE "${ran_re}" || true)
 
 if [ -n "${notrun}" ]; then
 	printf 'mutate: NO TEST RAN in a named package, so this is not a kill\n' >&2
@@ -205,5 +209,5 @@ printf 'mutate: MUTANT KILLED (exit %d)\n' "${rc}"
 # Everything but go test's line for a package that passed or has no test files:
 # what each failing test reported tells a kill caused outside the mutation's
 # reach from a real one.
-printf '%s\n' "${test_out}" | grep -v -e $'^ok  \t' -e $'^?   \t' || true
+printf '%s\n' "${test_out}" | LC_ALL=C grep -v -e $'^ok  \t' -e $'^?   \t' || true
 exit 0

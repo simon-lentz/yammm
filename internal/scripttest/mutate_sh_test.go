@@ -409,9 +409,11 @@ func (f *fixture) shimArgs() []string {
 }
 
 // A non-zero verdict exit is not a kill. go test gives a package a duration
-// when its test binary ran and a bracketed reason when nothing ran there, and
-// it reports both forms in one run, so one package that ran does not make the
-// run judgeable.
+// when its test binary ran, a bracketed reason when nothing ran there, and a
+// start error before the duration when its binary never started; one run can
+// report a package that ran beside one that did not, so one package that ran
+// does not make the run judgeable. Every row runs under a UTF-8 locale, where
+// GNU grep drops a line holding a byte that is not UTF-8.
 func TestMutateScript_NeedsAPackageThatRanItsTests(t *testing.T) {
 	t.Parallel()
 	const pkg = fixtureModule + "/m"
@@ -441,6 +443,11 @@ func TestMutateScript_NeedsAPackageThatRanItsTests(t *testing.T) {
 			code:    1, want: "mutate: NO TEST RAN",
 		},
 		{
+			name:    "a binary that never started, at a path that is not UTF-8, is not a kill",
+			verdict: "fork/exec /tmp/\xff/m.test: no such file or directory\nFAIL\t" + pkg + "\t0.001s\nFAIL\n",
+			code:    1, want: "mutate: NO TEST RAN",
+		},
+		{
 			name:    "a runner found on no PATH is not a kill",
 			verdict: "exec: \"myrun\": executable file not found in $PATH\nFAIL\t" + pkg + "\t0.000s\nFAIL\n",
 			code:    1, want: "mutate: NO TEST RAN",
@@ -464,6 +471,7 @@ func TestMutateScript_NeedsAPackageThatRanItsTests(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			f, runLog := mutateFixture(t, "3")
+			f.env = append(f.env, "LC_ALL=C.UTF-8")
 			f.shimVerdictRun(c.verdict)
 
 			r := f.mutate()
