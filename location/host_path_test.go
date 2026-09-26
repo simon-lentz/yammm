@@ -541,23 +541,47 @@ func TestCanonicalize_RefusesAnEmptyPath(t *testing.T) {
 // A typed path that is valid UTF-8 can resolve to one that is not: through a
 // dangling link's target, or through a directory named on disk in other bytes.
 // The identity would reach both JSON wires, so every constructor refuses it.
+// Each fixture is made twice: with the byte 0xFF, and with a lone surrogate in
+// its WTF-8 form. On Windows Go writes U+FFFD for 0xFF, so that row runs only
+// where the fixture reads back in the bytes it was given. Go keeps the
+// surrogate on every host, so its row runs wherever the host makes the fixture.
 func TestResolveHostPath_RefusesAResolutionThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cases := map[string]string{}
-	link := filepath.Join(dir, "dangling.yammm")
-	if err := os.Symlink("missing-\xff-name.yammm", link); err == nil {
-		cases["a dangling link's target"] = link
-	}
-	named := filepath.Join(dir, "caf\xe9")
-	if err := os.Mkdir(named, 0o750); err == nil {
-		through := filepath.Join(dir, "through")
-		if err := os.Symlink(named, through); err == nil {
-			cases["a directory named on disk"] = filepath.Join(through, "s.yammm")
+	for i, bad := range []struct {
+		name, bytes string
+		kept        bool
+	}{
+		{"the byte 0xFF", "\xff", false},
+		{"a lone surrogate", "\xed\xa0\x80", true},
+	} {
+		link := filepath.Join(dir, "dangling"+strconv.Itoa(i)+".yammm")
+		target := "missing-" + bad.bytes + "-name.yammm"
+		if err := os.Symlink(target, link); err == nil {
+			switch got, err := os.Readlink(link); {
+			case err == nil && got == target:
+				cases["a dangling link's target, "+bad.name] = link
+			case bad.kept:
+				t.Errorf("os.Readlink(%q) = %q, %v; want the target %q", link, got, err, target)
+			}
+		}
+		dirName := "caf" + bad.bytes
+		named := filepath.Join(dir, dirName)
+		if err := os.Mkdir(named, 0o750); err == nil {
+			switch {
+			case holdsName(t, dir, dirName):
+				through := filepath.Join(dir, "through"+strconv.Itoa(i))
+				if err := os.Symlink(named, through); err == nil {
+					cases["a directory named on disk, "+bad.name] = filepath.Join(through, "s.yammm")
+				}
+			case bad.kept:
+				t.Errorf("%s does not list %q after os.Mkdir made it", dir, dirName)
+			}
 		}
 	}
 	if len(cases) == 0 {
-		t.Skip("this host makes neither a link nor a name that is not valid UTF-8")
+		t.Skip("this host makes neither a symbolic link nor a name in bytes that are not valid UTF-8")
 	}
 	for name, p := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -573,6 +597,16 @@ func TestResolveHostPath_RefusesAResolutionThatIsNotValidUTF8(t *testing.T) {
 			}
 		})
 	}
+}
+
+// holdsName reports whether dir lists an entry named name, byte for byte.
+func holdsName(t *testing.T, dir, name string) bool {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == name })
 }
 
 // TestCanonicalize_RefusesAPathThatIsNotValidUTF8 holds every identity to text

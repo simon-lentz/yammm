@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -82,9 +83,10 @@ func TestWrite_DotDotAfterASymlinkLandsWhereTheLoaderReads(t *testing.T) {
 }
 
 // A link whose target climbs out of a linked directory, u.json ->
-// lr/../u.real with lr a link, names the file the kernel reaches: the parent
-// of the directory lr reached. Every write path writes that file, which the
-// loader's resolver names too, and leaves the file beside the link alone.
+// lr/../u.real with lr a link, names the file the kernel reaches. On Unix that
+// is in the parent of the directory lr reached; Windows takes the target's ".."
+// on the text, so it is the file beside the link. Every write path writes that
+// file, which the loader's resolver names too, and leaves the other alone.
 func TestWrite_ALinkTargetClimbsFromTheDirectoryItsLinkReached(t *testing.T) {
 	sep := string(filepath.Separator)
 	for _, tc := range writePaths() {
@@ -94,12 +96,15 @@ func TestWrite_ALinkTargetClimbsFromTheDirectoryItsLinkReached(t *testing.T) {
 			linkedDirFixture(t, dir)
 			name := filepath.Base(out) + ".real"
 			kernelFile := filepath.Join(dir, "real", "deep", name)
-			besideFile := filepath.Join(dir, name)
+			otherFile := filepath.Join(dir, name)
+			if runtime.GOOS == "windows" {
+				kernelFile, otherFile = otherFile, kernelFile
+			}
 			seed := readOrAbsent(t, out)
 			if seed == nil {
 				seed = []byte("placeholder\n")
 			}
-			for _, p := range []string{kernelFile, besideFile} {
+			for _, p := range []string{kernelFile, otherFile} {
 				if err := os.WriteFile(p, seed, 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -123,8 +128,8 @@ func TestWrite_ALinkTargetClimbsFromTheDirectoryItsLinkReached(t *testing.T) {
 			if got := readOrAbsent(t, kernelFile); bytes.Equal(got, seed) {
 				t.Errorf("%s, the file the link names, was not written", kernelFile)
 			}
-			if got := readOrAbsent(t, besideFile); !bytes.Equal(got, seed) {
-				t.Errorf("%s, which the link does not name, changed", besideFile)
+			if got := readOrAbsent(t, otherFile); !bytes.Equal(got, seed) {
+				t.Errorf("%s, which the link does not name, changed", otherFile)
 			}
 		})
 	}

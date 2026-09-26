@@ -92,8 +92,8 @@ func TestWriteFileSet_RefusesItsNamesBeforeCreatingAnything(t *testing.T) {
 				t.Errorf("a refused set created %s (stat: %v)", dir, serr)
 			}
 			want := names[len(names)-1]
-			if want == "" {
-				want = `""`
+			if row.why == "not a file name" {
+				want = fmt.Sprintf("%q", want)
 			}
 			if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), row.why) {
 				t.Errorf("error %q does not name %q and say it is %s", err, want, row.why)
