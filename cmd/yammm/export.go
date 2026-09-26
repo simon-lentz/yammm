@@ -3,8 +3,9 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -170,7 +171,7 @@ func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Sna
 
 	// If --output-dir specified, always use directory output
 	if outputDir != "" {
-		return exportCSVToDir(cmd, sink, adapter, snapshot, types, outputDir)
+		return exportCSVToDir(cmd, sink, adapter, snapshot, outputDir)
 	}
 
 	// One destination holds one type. --output does not change that: the
@@ -196,25 +197,22 @@ func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Sna
 	return nil
 }
 
-func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.Adapter, snapshot *graph.Snapshot, types []schema.TypeID, outputDir string) error {
-	staged, err := cli.NewStagedFiles(outputDir)
+func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.Adapter, snapshot *graph.Snapshot, outputDir string) error {
+	// Every file is rendered before the disk is touched, so a snapshot the
+	// writer refuses creates no directory and no file.
+	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
 	if err != nil {
-		return cli.Runtimef("%v", err)
+		return cli.Runtimef("marshal csv: %v", err)
 	}
-	defer staged.Rollback()
-
-	writerFor := func(typeName string) (io.Writer, error) {
-		return staged.Create(typeName + ".csv")
+	files := make([]cli.NamedFile, 0, len(data))
+	for _, typeName := range slices.Sorted(maps.Keys(data)) {
+		files = append(files, cli.NamedFile{Name: typeName + ".csv", Data: data[typeName]})
 	}
-
-	if err := adapter.WriteSnapshot(cmd.Context(), writerFor, snapshot); err != nil {
-		return cli.Runtimef("write csv snapshot: %v", err)
-	}
-	if err := staged.Commit(); err != nil {
+	if err := cli.WriteFileSet(outputDir, files); err != nil {
 		return cli.Runtimef("write csv snapshot: %v", err)
 	}
 
-	sink.Statusf("wrote %d CSV files to %s\n", len(types), outputDir)
+	sink.Statusf("wrote %d CSV files to %s\n", len(files), outputDir)
 	return nil
 }
 

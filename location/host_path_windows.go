@@ -86,6 +86,6 @@ func dropExtendedPrefix(p string) string {
 }
 
 // linkTarget is lexicalTarget: Windows evaluates a target's ".." on the text.
-func linkTarget(dir, target string) string {
-	return lexicalTarget(dir, target)
+func linkTarget(dir, target string) (string, error) {
+	return lexicalTarget(dir, target), nil
 }

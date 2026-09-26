@@ -310,10 +310,10 @@ func TestWriteFile_TargetKinds(t *testing.T) {
 	}
 }
 
-// TestStagedFiles_TargetKinds judges a one-file set by the same table. A set
+// TestWriteFileSet_TargetKinds judges a one-file set by the same table. A set
 // is replaced by renames, so a target only written through — a FIFO, a device,
 // a path under /dev/ — is refused.
-func TestStagedFiles_TargetKinds(t *testing.T) {
+func TestWriteFileSet_TargetKinds(t *testing.T) {
 	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores the write bit")
@@ -345,27 +345,14 @@ func TestStagedFiles_TargetKinds(t *testing.T) {
 			default:
 				failure = tc.check(dir, target, err)
 			}
-			checkRepairState(t, "StagedFiles: "+tc.name, failure)
+			checkRepairState(t, "WriteFileSet: "+tc.name, failure)
 		})
 	}
 }
 
-// stageOne writes one file through a StagedFiles set and commits it.
+// stageOne writes one file as a set into its directory.
 func stageOne(target, content string) error {
-	set, err := NewStagedFiles(filepath.Dir(target))
-	if err != nil {
-		return err
-	}
-	w, err := set.Create(filepath.Base(target))
-	if err != nil {
-		set.Rollback()
-		return err
-	}
-	if _, err := io.WriteString(w, content); err != nil {
-		set.Rollback()
-		return err
-	}
-	return set.Commit()
+	return WriteFileSet(filepath.Dir(target), []NamedFile{{Name: filepath.Base(target), Data: []byte(content)}})
 }
 
 // expectWritten reports the target not holding the payload at mode after a
@@ -460,10 +447,10 @@ func TestWriteFile_DescriptorPathContinuesItsStream(t *testing.T) {
 	}
 }
 
-// TestStagedFiles_DescriptorPathIsRefused pins the /dev/ rule for a set:
+// TestWriteFileSet_DescriptorPathIsRefused pins the /dev/ rule for a set:
 // /dev/fd/N stats as the regular file its descriptor holds, and a rename over
 // that file would leave the descriptor writing to a file no path reaches.
-func TestStagedFiles_DescriptorPathIsRefused(t *testing.T) {
+func TestWriteFileSet_DescriptorPathIsRefused(t *testing.T) {
 	t.Parallel()
 
 	f, path := heldDescriptorPath(t)

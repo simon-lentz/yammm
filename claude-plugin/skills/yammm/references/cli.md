@@ -35,18 +35,26 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 ### Writing files
 
 Every command that writes a file you name — `--output`, `--output-dir`, `-o`,
-`fmt -w`, `snapshot update-metadata` — writes it the same way. The path's
-symlinks are followed, so a link survives and the file it names is written. A
+`fmt -w`, `snapshot update-metadata` — writes it the same way, but for the one
+`--output-dir` exception stated below. A `..` in the
+path is evaluated on its text first, as for every path yammm reads, so
+`link/../f` is the `f` beside `link` and the file `yammm check` reads for that
+spelling, where on Unix the shell's `cat link/../f` reads the one beside the
+directory `link` reaches. The path's symlinks are then followed, each link's own target
+as the kernel follows it, so a link survives and the file it names is written. A
 regular file, or one that does not exist yet, is replaced atomically: the
 content is staged beside it and renamed over it, so an interrupted write leaves
 the previous file. A new file is created at `0600` on Unix (Windows honours
 only a mode's write bit); an existing one keeps its mode. A FIFO, a device or
 a path under `/dev/` — `--output /dev/stdout`, say — is written through,
 continuing its stream: behind `>> log` the bytes are
-appended and the log keeps its history. Anything else is refused at exit 3, naming the path: a
+appended and the log keeps its history. `--output-dir` refuses such a file at
+exit 3, since it puts its files in place together by renames. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
 hold the staging file, which `gofmt -w` refuses too. Omit `--output` to write
-to stdout.
+to stdout. `--output-dir` renders every file before it touches the disk, so a
+graph the CSV writer refuses creates no directory; a directory it made before
+the filesystem refused a file stays, as `mkdir -p` leaves it.
 
 ---
 

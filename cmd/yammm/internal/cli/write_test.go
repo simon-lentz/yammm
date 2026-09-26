@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"errors"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -160,31 +159,23 @@ func TestWriteFile_ADirectoryTargetIsRefusedAndNothingIsWritten(t *testing.T) {
 	assertNoDebris(t, dir, path)
 }
 
-func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
+func TestWriteFileSet_EveryFileArrivesOrNoneDoes(t *testing.T) {
 	t.Parallel()
+	ab := []NamedFile{{Name: "a.csv", Data: []byte("a.csv")}, {Name: "b.csv", Data: []byte("b.csv")}}
 
-	t.Run("commit puts them all in place", func(t *testing.T) {
+	t.Run("every file is put in place", func(t *testing.T) {
 		t.Parallel()
 		dir := filepath.Join(t.TempDir(), "out")
-		staged, err := NewStagedFiles(dir)
-		if err != nil {
-			t.Fatalf("stage: %v", err)
+		if err := WriteFileSet(dir, ab); err != nil {
+			t.Fatalf("write set: %v", err)
 		}
-		for _, name := range []string{"a.csv", "b.csv"} {
-			w, err := staged.Create(name)
-			if err != nil {
-				t.Fatalf("create %s: %v", name, err)
+		for _, nf := range ab {
+			path := filepath.Join(dir, nf.Name)
+			if got, err := os.ReadFile(path); err != nil || string(got) != string(nf.Data) {
+				t.Errorf("%s holds %q (%v), want %q", nf.Name, got, err, nf.Data)
 			}
-			if _, err := io.WriteString(w, name); err != nil {
-				t.Fatalf("write %s: %v", name, err)
-			}
-		}
-		if err := staged.Commit(); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
-		if runtime.GOOS != "windows" {
-			for _, name := range []string{"a.csv", "b.csv"} {
-				assertPerm(t, filepath.Join(dir, name), NewFileMode)
+			if runtime.GOOS != "windows" {
+				assertPerm(t, path, NewFileMode)
 			}
 		}
 		assertNoDebris(t, dir, filepath.Join(dir, "a.csv"), filepath.Join(dir, "b.csv"))
@@ -193,33 +184,13 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 	t.Run("one blocked target leaves the directory as it was", func(t *testing.T) {
 		t.Parallel()
 		dir := filepath.Join(t.TempDir(), "out")
-		staged, err := NewStagedFiles(dir)
-		if err != nil {
-			t.Fatalf("stage: %v", err)
-		}
 		blocker := filepath.Join(dir, "b.csv")
-		if err := os.Mkdir(blocker, 0o750); err != nil {
+		if err := os.MkdirAll(blocker, 0o750); err != nil {
 			t.Fatalf("mkdir blocker: %v", err)
 		}
-		// The blocker is refused when its file is staged, or at Commit when it
-		// appears afterwards; either way nothing may be renamed into place.
-		refused := false
-		for _, name := range []string{"a.csv", "b.csv"} {
-			w, err := staged.Create(name)
-			if err != nil {
-				refused = true
-				break
-			}
-			if _, err := io.WriteString(w, name); err != nil {
-				t.Fatalf("write %s: %v", name, err)
-			}
+		if err := WriteFileSet(dir, ab); err == nil {
+			t.Fatal("a blocked target reported success")
 		}
-		if !refused {
-			if err := staged.Commit(); err == nil {
-				t.Fatal("a blocked target reported success")
-			}
-		}
-		staged.Rollback()
 		// a.csv must NOT have been renamed into place: a partial set reads as
 		// a complete export with one type quietly missing.
 		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
@@ -228,27 +199,18 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 		assertNoDebris(t, dir, blocker)
 	})
 
-	t.Run("a directory that appears after Create is refused at Commit", func(t *testing.T) {
+	t.Run("a directory that appears after staging is refused before any rename", func(t *testing.T) {
 		t.Parallel()
 		dir := filepath.Join(t.TempDir(), "out")
-		staged, err := NewStagedFiles(dir)
+		set, err := stageFileSet(dir, ab)
 		if err != nil {
 			t.Fatalf("stage: %v", err)
-		}
-		for _, name := range []string{"a.csv", "b.csv"} {
-			w, err := staged.Create(name)
-			if err != nil {
-				t.Fatalf("create %s: %v", name, err)
-			}
-			if _, err := io.WriteString(w, name); err != nil {
-				t.Fatalf("write %s: %v", name, err)
-			}
 		}
 		blocker := filepath.Join(dir, "b.csv")
 		if err := os.Mkdir(blocker, 0o750); err != nil {
 			t.Fatalf("mkdir blocker: %v", err)
 		}
-		err = staged.Commit()
+		err = set.commit()
 		if err == nil {
 			t.Fatal("a directory standing where b.csv belongs reported success")
 		}
@@ -261,7 +223,7 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 		assertNoDebris(t, dir, blocker)
 	})
 
-	t.Run("a rename refused at Commit names the file, not its staging name", func(t *testing.T) {
+	t.Run("a refused rename names the file, not its staging name", func(t *testing.T) {
 		t.Parallel()
 		if runtime.GOOS == "windows" {
 			t.Skip(noDirPermissionsOnWindows)
@@ -271,22 +233,15 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 		}
 		base := unsealedTempDir(t)
 		dir := filepath.Join(base, "out")
-		staged, err := NewStagedFiles(dir)
+		set, err := stageFileSet(dir, ab[:1])
 		if err != nil {
 			t.Fatalf("stage: %v", err)
-		}
-		w, err := staged.Create("a.csv")
-		if err != nil {
-			t.Fatalf("create: %v", err)
-		}
-		if _, err := io.WriteString(w, "a"); err != nil {
-			t.Fatalf("write: %v", err)
 		}
 		// Sealed after staging, so the rename itself is what fails.
 		if err := sealDir(dir); err != nil {
 			t.Fatalf("seal: %v", err)
 		}
-		err = staged.Commit()
+		err = set.commit()
 		if err == nil {
 			t.Fatal("a rename into a sealed directory reported success")
 		}
@@ -298,53 +253,74 @@ func TestStagedFiles_EveryFileArrivesOrNoneDoes(t *testing.T) {
 		}
 	})
 
-	t.Run("rollback without commit leaves nothing", func(t *testing.T) {
+	t.Run("a refused rename removes every staging file not yet renamed", func(t *testing.T) {
 		t.Parallel()
-		dir := filepath.Join(t.TempDir(), "out")
-		staged, err := NewStagedFiles(dir)
+		if runtime.GOOS == "windows" {
+			t.Skip(noDirPermissionsOnWindows)
+		}
+		if os.Geteuid() == 0 {
+			t.Skip("root ignores the write bit")
+		}
+		base := unsealedTempDir(t)
+		dir := filepath.Join(base, "out")
+		other := filepath.Join(base, "other")
+		for _, d := range []string{dir, other} {
+			if err := os.Mkdir(d, 0o750); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := os.Symlink(filepath.Join(other, "a.csv"), filepath.Join(dir, "a.csv")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		set, err := stageFileSet(dir, ab)
 		if err != nil {
 			t.Fatalf("stage: %v", err)
 		}
-		for _, name := range []string{"a.csv", "b.csv"} {
-			w, err := staged.Create(name)
-			if err != nil {
-				t.Fatalf("create %s: %v", name, err)
-			}
-			if _, err := io.WriteString(w, name); err != nil {
-				t.Fatalf("write %s: %v", name, err)
-			}
+		// Sealed after staging, so a.csv's rename fails and b.csv's never runs.
+		if err := sealDir(other); err != nil {
+			t.Fatal(err)
 		}
-		// The caller abandoned the set — what a failure between Create and
-		// Commit does. Nothing staged may outlive it, and neither may the
-		// directory NewStagedFiles created for it.
-		staged.Rollback()
-		if _, err := os.Stat(dir); !os.IsNotExist(err) {
-			t.Errorf("a rolled-back set left %s behind (stat: %v)", dir, err)
+		if err := set.commit(); err == nil {
+			t.Fatal("a rename into a sealed directory reported success")
 		}
+		assertNoDebris(t, dir, "a.csv")
 	})
 
-	t.Run("rollback is safe after commit", func(t *testing.T) {
+	t.Run("a link to a directory that appears after staging is refused before any rename", func(t *testing.T) {
 		t.Parallel()
 		dir := filepath.Join(t.TempDir(), "out")
-		staged, err := NewStagedFiles(dir)
+		set, err := stageFileSet(dir, ab)
 		if err != nil {
 			t.Fatalf("stage: %v", err)
 		}
-		w, err := staged.Create("a.csv")
+		if err := os.Mkdir(filepath.Join(dir, "elsewhere"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("elsewhere", filepath.Join(dir, "b.csv")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if err := set.commit(); err == nil || !strings.Contains(err.Error(), "b.csv") {
+			t.Fatalf("error %v, want a refusal naming b.csv", err)
+		}
+		if info, err := os.Lstat(filepath.Join(dir, "b.csv")); err != nil || info.Mode()&fs.ModeSymlink == 0 {
+			t.Errorf("the link at b.csv was replaced (%v)", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err == nil {
+			t.Error("a.csv was renamed into place; the set is partial and nothing says so")
+		}
+		assertNoDebris(t, dir, "b.csv", "elsewhere")
+	})
+
+	t.Run("a discarded set leaves no staging file", func(t *testing.T) {
+		t.Parallel()
+		dir := filepath.Join(t.TempDir(), "out")
+		set, err := stageFileSet(dir, ab)
 		if err != nil {
-			t.Fatalf("create: %v", err)
+			t.Fatalf("stage: %v", err)
 		}
-		if _, err := io.WriteString(w, "a"); err != nil {
-			t.Fatalf("write: %v", err)
-		}
-		if err := staged.Commit(); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
-		staged.Rollback()
-		staged.Rollback()
-		if _, err := os.Stat(filepath.Join(dir, "a.csv")); err != nil {
-			t.Errorf("rollback after commit removed the committed file: %v", err)
-		}
+		set.discard()
+		set.discard()
+		assertNoDebris(t, dir)
 	})
 }
 
@@ -374,45 +350,5 @@ func assertNoDebris(t *testing.T, dir string, expected ...string) {
 		if _, ok := keep[e.Name()]; !ok {
 			t.Errorf("left behind: %q", e.Name())
 		}
-	}
-}
-
-// TestStagedFiles_RefusesNamesDifferingOnlyInCase pins the refusal that keeps a
-// staged set whole on a case-insensitive filesystem. There, "Item.csv" and
-// "ITEM.csv" are one file: the second rename replaces the first's contents
-// while the directory keeps the first's spelling, so the set ends one file
-// short and the survivor carries one member's name over another's data —
-// reported as a complete export at exit 0.
-//
-// The refusal is unconditional, and deliberately so. The directory is a
-// portable artefact, and this suite runs on a case-sensitive filesystem, so a
-// refusal gated on the filesystem's behaviour would be untestable here.
-func TestStagedFiles_RefusesNamesDifferingOnlyInCase(t *testing.T) {
-	t.Parallel()
-
-	dir := filepath.Join(t.TempDir(), "out")
-	staged, err := NewStagedFiles(dir)
-	if err != nil {
-		t.Fatalf("stage: %v", err)
-	}
-	defer staged.Rollback()
-
-	if _, err := staged.Create("Item.csv"); err != nil {
-		t.Fatalf("create Item.csv: %v", err)
-	}
-
-	_, err = staged.Create("ITEM.csv")
-	if err == nil {
-		t.Fatal("two names differing only in case were staged into one directory")
-	}
-	for _, want := range []string{"Item.csv", "ITEM.csv"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not name %s", err, want)
-		}
-	}
-
-	// A name that differs by more than case is unaffected.
-	if _, err := staged.Create("Other.csv"); err != nil {
-		t.Errorf("a distinct name was refused: %v", err)
 	}
 }

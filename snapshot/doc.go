@@ -130,11 +130,23 @@
 // matching schema version.
 //
 // [WriteFile] writes bytes to a path atomically. It stages the bytes in a
-// file of its own beside the path, fsyncs and closes it, then renames it into
-// place. Concurrent writers of one path never share a staging file, so each
+// file of its own beside the file it replaces, fsyncs and closes it, then
+// renames it into place. Concurrent writers of one path never share a staging file, so each
 // rename commits one writer's bytes whole, and the last rename wins. The
-// staging name is the path's stem, a random token, the path's extension and
-// [TmpSuffix], as snap.12345.ys.tmp for snap.ys.
+// staging name is the replaced file's stem, a random token, its extension and
+// [TmpSuffix], as snap.12345.ys.tmp for snap.ys; through a symbolic link the
+// replaced file is the one the link names.
+//
+// WriteFile evaluates a ".." in the path on its text first, as the schema
+// loader evaluates it: the path is cleaned, so a ".." cancels the element before
+// it rather than following a symbolic link, and a relative path that climbs out
+// of the working directory is made absolute from it as [filepath.Abs] spells
+// it. A symbolic link at the path is then followed, as a chain, and the link
+// survives: the file it names is written, and a dangling link creates that
+// file. A link's target is read as the kernel reads it: on Unix a ".." in the
+// target takes the parent of the directory reached on disk, and on Windows it
+// is evaluated on the text. The staging file is made in the directory of the
+// file the rename replaces.
 //
 // On an error during the write, WriteFile removes its own staging file and
 // returns the error wrapped with the failing step. It never removes a staging
@@ -155,7 +167,9 @@
 // cancellation); per-file failures (corrupt header, per-file I/O)
 // surface on [ScanEntry.Result] and iteration continues. Files whose
 // basename ends with [TmpSuffix] are skipped so crash-residual
-// staging files are not confused for complete snapshots.
+// staging files are not confused for complete snapshots. The directory is
+// cleaned before it is read, so each [ScanEntry.Path] names an entry of the
+// directory the scan listed.
 // [ScanDirSlice] is the materializing convenience wrapper.
 // [ScanDirWith] and [ScanDirSliceWith] are the same two under [ScanOption]
 // values, where [WithScanFilter] rejects a file before it is opened.
@@ -214,7 +228,8 @@
 // # Error Handling
 //
 // The read, write and update functions return [diag.Result]; [WriteFile]
-// returns an error, and [ScanDir] and [ScanDirWith] yield one per entry:
+// returns an error, and [ScanDir] and [ScanDirWith] yield a [diag.Result] per
+// entry, in [ScanEntry.Result]:
 //
 //   - Fatal: I/O failure, context cancellation, a body the metadata update
 //     cannot locate, or a broken invariant (E_INTERNAL)
@@ -267,7 +282,7 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value
+//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value, internal/hostpath
 //
 // The instance edge exists for [WithRevalidation], whose re-validation runs
 // the real validator, so the option's fidelity is the validator's own, and for

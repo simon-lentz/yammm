@@ -61,7 +61,7 @@ func runFmt(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 // fmtPath formats one path and reports what went wrong with it, or nil. A
 // syntax error is a diagnostic, added to sink, as validate reports it.
 func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, check bool) error {
-	content, err := os.ReadFile(path)
+	content, err := cli.ReadFile(path)
 	if err != nil {
 		return err
 	}

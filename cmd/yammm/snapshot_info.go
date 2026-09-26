@@ -47,7 +47,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	if headerOnly, _ := cmd.Flags().GetBool("header-only"); headerOnly {
-		f, err := os.Open(args[0])
+		f, err := cli.Open(args[0])
 		if err != nil {
 			return cli.Runtimef("open file: %v", err)
 		}
@@ -74,7 +74,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return nil
 	}
 
-	data, err := os.ReadFile(args[0])
+	data, err := cli.ReadFile(args[0])
 	if err != nil {
 		return cli.Runtimef("read file: %v", err)
 	}
@@ -353,7 +353,13 @@ func diagnosticWire(result diag.Result) json.RawMessage {
 }
 
 func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath string) error {
-	entries, result := snapshot.ScanDirSlice(cmd.Context(), dirPath)
+	// A directory that climbs out of the working directory is made absolute
+	// first, so the scan reads the directory the loader's rule names.
+	host, err := cli.HostPath(dirPath)
+	if err != nil {
+		return cli.Runtimef("open dir %q: %v", dirPath, err)
+	}
+	entries, result := snapshot.ScanDirSlice(cmd.Context(), host)
 	sink.Add(result)
 	if result.HasErrors() {
 		return &cli.ExitError{Code: cli.ExitRuntime}

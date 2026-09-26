@@ -2,7 +2,6 @@ package main
 
 import (
 	"maps"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -62,7 +61,7 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 	}
 
 	path := args[0]
-	data, err := os.ReadFile(path)
+	data, err := cli.ReadFile(path)
 	if err != nil {
 		return cli.Runtimef("read %q: %v", path, err)
 	}

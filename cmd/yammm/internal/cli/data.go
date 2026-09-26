@@ -228,7 +228,7 @@ func WriteTo(data []byte, path string, w io.Writer) error {
 // Returns (false, nil) for non-snapshot files (including non-JSON files).
 // Returns (false, err) only for genuine I/O errors.
 func IsSnapshotFile(path string) (bool, error) {
-	f, err := os.Open(path)
+	f, err := Open(path)
 	if err != nil {
 		return false, fmt.Errorf("open file: %w", err)
 	}
@@ -267,7 +267,7 @@ func IsSnapshotFile(path string) (bool, error) {
 // (T, diag.Result, error) following the CLI helper convention: error captures
 // I/O failures, diag.Result captures semantic issues.
 func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, *snapshot.HeaderInfo, diag.Result, error) {
-	data, err := os.ReadFile(path)
+	data, err := ReadFile(path)
 	if err != nil {
 		return nil, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
 	}

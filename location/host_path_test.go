@@ -3,6 +3,7 @@ package location
 import (
 	"bytes"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -258,6 +259,42 @@ func TestResolveHostPath_DanglingLinkKeepsItsIdentityWhenItsTargetIsCreated(t *t
 	}
 }
 
+// On Unix a dangling link whose target takes a ".." past a component the
+// kernel cannot enter names no file: the kernel refuses the path, so the
+// resolver refuses it rather than cancel the component on the text.
+func TestResolveHostPath_RefusesALinkTargetThatClimbsPastWhatTheKernelCannotEnter(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows evaluates a target's .. on the text, so the text's answer is the kernel's")
+	}
+	for _, row := range []struct {
+		name, target string
+		want         error
+	}{
+		{"a missing component", "m/../e.json", fs.ErrNotExist},
+		{"a missing component, then more", "m/x/../../e.json", fs.ErrNotExist},
+		{"a regular file", "f/../e.json", syscall.ENOTDIR},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			base := diskSpelling(t, t.TempDir())
+			for _, f := range []string{"e.json", "f"} {
+				if err := os.WriteFile(filepath.Join(base, f), []byte(f), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			link := filepath.Join(base, "u.json")
+			symlink(t, filepath.FromSlash(row.target), link)
+			if _, err := os.ReadFile(link); err == nil {
+				t.Fatalf("the kernel reads through %s -> %s", link, row.target)
+			}
+			if host, err := ResolveHostPath(link); !errors.Is(err, row.want) {
+				t.Errorf("ResolveHostPath(%s -> %s) = %q, %v; want an error wrapping %v", link, row.target, host, err, row.want)
+			}
+		})
+	}
+}
+
 // TestResolveHostPath_LinkNamesTheFileTheHostReaches holds a link whose target
 // names a symlinked directory before a ".." to the file the host opens through
 // it. Unix follows that directory and takes its parent on disk; Windows
@@ -499,6 +536,43 @@ func TestCanonicalize_RefusesAnEmptyPath(t *testing.T) {
 			t.Errorf("CanonicalizePathForSourceID(\"\") error = %v; want ErrEmptyPath", err)
 		}
 	})
+}
+
+// A typed path that is valid UTF-8 can resolve to one that is not: through a
+// dangling link's target, or through a directory named on disk in other bytes.
+// The identity would reach both JSON wires, so every constructor refuses it.
+func TestResolveHostPath_RefusesAResolutionThatIsNotValidUTF8(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	cases := map[string]string{}
+	link := filepath.Join(dir, "dangling.yammm")
+	if err := os.Symlink("missing-\xff-name.yammm", link); err == nil {
+		cases["a dangling link's target"] = link
+	}
+	named := filepath.Join(dir, "caf\xe9")
+	if err := os.Mkdir(named, 0o750); err == nil {
+		through := filepath.Join(dir, "through")
+		if err := os.Symlink(named, through); err == nil {
+			cases["a directory named on disk"] = filepath.Join(through, "s.yammm")
+		}
+	}
+	if len(cases) == 0 {
+		t.Skip("this host makes neither a link nor a name that is not valid UTF-8")
+	}
+	for name, p := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if host, err := ResolveHostPath(p); !errors.Is(err, ErrInvalidUTF8Path) {
+				t.Errorf("ResolveHostPath(%q) = %q, %v; want ErrInvalidUTF8Path", p, host, err)
+			}
+			if cp, err := NewCanonicalPath(p); !errors.Is(err, ErrInvalidUTF8Path) {
+				t.Errorf("NewCanonicalPath(%q) = %q, %v; want ErrInvalidUTF8Path", p, cp.String(), err)
+			}
+			if id, _, err := ResolveSourcePath(p); !errors.Is(err, ErrInvalidUTF8Path) {
+				t.Errorf("ResolveSourcePath(%q) = %v, %v; want ErrInvalidUTF8Path", p, id, err)
+			}
+		})
+	}
 }
 
 // TestCanonicalize_RefusesAPathThatIsNotValidUTF8 holds every identity to text

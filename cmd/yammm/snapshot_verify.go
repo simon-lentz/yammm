@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -59,7 +58,7 @@ func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSi
 	}
 
 	// Read snapshot file.
-	data, err := os.ReadFile(snapshotPath)
+	data, err := cli.ReadFile(snapshotPath)
 	if err != nil {
 		return cli.Runtimef("read snapshot file: %v", err)
 	}

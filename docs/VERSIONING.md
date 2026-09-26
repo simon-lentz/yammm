@@ -943,7 +943,7 @@ replace and six parts fields a snapshot derives, taking the incompatible count t
 **fifty**. The JSON adapter group removes `json.Option` and changes `json.New`,
 taking the incompatible count to **thirty-two**. The CLI pipeline group adds
 `instance.Validator.PrimaryKeyOf`, taking the compatible count to
-**fifty-one**.
+**fifty-one**, and the CLI path rule group moves no declaration.
 
 ### Unit 8 — one addressability rule, and every root held to it
 
@@ -1009,7 +1009,7 @@ taking the incompatible count to **thirty-two**. The CLI pipeline group adds
 ### Unit 8 — the CSV writers refuse a composed child
 
 - **Behaviour — `csv.MarshalSnapshot` and `csv.WriteSnapshot` return an error for a snapshot in which any instance holds a composed child.** They wrote the file without the child subtree and reported success, so `yammm export --to csv` of a graph with compositions produced files that silently lacked every child. The error names the type, the instance and the composition, and comes before any output: `WriteSnapshot` requests no writer, and `yammm export --to csv` exits 3 and writes no file, under `--output` and `--output-dir` alike. A composition declared on a type whose instances hold no children loses nothing, and such a snapshot is still written. Another format — `--to json`, or a `.ys` snapshot — carries compositions.
-- **Behaviour — a failed `yammm export --to csv --output-dir <dir>` no longer leaves behind a directory it created.** The command created the directory, and any missing parent, before writing, and a refusal or a write failure removed the staged files but not the directories, so a failed export left an empty `<dir>` where none had been. It now removes every directory it created that is still empty; a directory that existed before, or that holds a file, is kept.
+- **Behaviour — a refused `yammm export --to csv --output-dir <dir>` no longer leaves behind a directory it created.** The command created the directory, and any missing parent, before it wrote a file, so a refused export left `<dir>` behind where none had been. It now renders every file before it creates anything (unit 8's path rule group, below), so a refusal creates no directory.
 - **Consumer impact: none, measured.** rdata's schemas declare no composition, and it imports no `adapter/csv` package and runs no `yammm export`.
 
 ### Unit 8 — a CSV header resolves by the validator's rule, and a malformed record neither stops nor mangles a parse
@@ -1336,6 +1336,18 @@ taking the incompatible count to **thirty-two**. The CLI pipeline group adds
 - **Documentation — the data commands' help says what they print.** `check`'s help says it resolves every required association's target, where it said every association's: an optional association naming no instance passes. `load`'s help says its summary line is printed in text output when the data loads without error, and that `check` prints no summary, where it said `check` "prints none". `gen`'s help for `--to jsonschema` describes the JSON object form `check` reads and says the schema does not reproduce yammm's validation, as the generator's own description does. The plugin's CLI reference says the same of `check` and `load`, and states that `snapshot save`'s `--output` is required unless `--into` is given.
 - **Consumer impact: none, measured.** rdata runs `yammm fmt` and `yammm validate` alone, and calls no command or declaration this block changes.
 
+### Unit 8 — every CLI path evaluates a `..` on its text, and a CSV directory export creates nothing it refuses
+
+- **Behaviour — a `..` in any path the CLI reads or writes is evaluated on the path's text before a symbolic link is followed**, as the schema loader evaluates it, so `link/../f` names the `f` beside `link` on every command. At `v0.21.0` the call that read a path decided: `filepath.Abs`, which cleans, gave the text's answer, for a schema path, `--module-root` and `snapshot save`'s data operands; a raw open gave the kernel's, the `f` beside the directory `link` reaches; and `--output-dir` and `snapshot info --dir` reached their directory by the kernel's answer and their files by the text's, so `--output-dir` failed at exit 3 when no directory of that name stood beside `link`, and `snapshot info --dir` reported a file only in the listed directory as an I/O error; the data operands of `check`, `load` and `export` took the text from the provenance group above. The rest take it now: `--output`, `--output-dir`, `snapshot save -o` and `--into`, `fmt` and `fmt -w`, `snapshot update-metadata`, `snapshot info` on a file and on `--dir`, `snapshot verify`, and `export`'s read of a `.ys` data file. So every command reaches one file for one spelling. At `v0.21.0` `fmt -w link/../f.yammm` rewrote a file `validate link/../f.yammm` does not compile; from the provenance group until this one, `check` read back another file than `export --output` wrote for one spelling, and `export` asked whether one file was a snapshot and parsed the other. On Windows the host evaluates a `..` on the text too, so nothing moves there. On Unix these spellings now name another file than the shell's `cat link/../f` does, a case the `location` package documentation names.
+- **Behaviour — a link's own target is followed as the kernel follows it.** A `..` in a link's target takes the parent of the directory reached on disk, and the staging file is made beside the file the rename replaces, as `v0.21.0` wrote it; unit 6's write model had read such a target on its text, writing a file beside the link that neither rule names, at exit 0.
+- **Behaviour — `export --to csv --output-dir` renders every file before it touches the disk, and removes no directory.** A graph the CSV writer refuses creates no directory and no file, and the error reads `marshal csv: …` where it read `write csv snapshot: …`; the exit code does not move. A directory the command made before the filesystem refused a file stays, as `mkdir -p` leaves it; the CSV writers' composition group had removed every directory it made that was still empty, and one export could then remove a directory another export was writing into. Measured on a three-type export of 300,000 instances per type (63 MB of CSV), the peak resident memory rose from about 3.2 GB to about 3.4 GB and the time did not move: the graph, not the files, holds most of it.
+- **Behaviour — `snapshot.WriteFile` evaluates a `..` on its path's text and follows a symbolic link at it.** A `..` cancels the element before it, and a relative path that climbs out of the working directory climbs from `filepath.Abs`'s spelling of it, as the schema loader evaluates both. A link at the path, or a chain of links, survives, and the file it names is written; a dangling link creates that file; a cycle of links at the path is refused with an error wrapping `syscall.ELOOP`, tagged `resolve target`; a link to a device is followed too, and the staging file is made in the device's directory: `/dev` refuses it to an ordinary user, and a directory that admits it has the device replaced by a regular file. At `v0.21.0` the rename replaced the link with a regular file and left the file it named unchanged, and a path with a `..` after a linked directory wrote the file the kernel reaches. The unit 7 staging name had staged such a path in the directory its text names and renamed into the one the kernel reaches, refused (`create temp: … permission denied`) where only the second could be written.
+- **Behaviour — `snapshot.ScanDir`, `ScanDirWith`, `ScanDirSlice` and `ScanDirSliceWith` read the directory cleaned.** At `v0.21.0` a directory spelled with a `..` after a linked directory was listed where the kernel reached it and each name opened beside the link, so a file only in the listed directory drew a per-file `E_SNAPSHOT_IO`.
+- **Behaviour — a path that resolves to one that is not valid UTF-8 is refused with `location.ErrInvalidUTF8Path`** by `location.ResolveHostPath` and every file-backed identity constructor, completing unit 7's refusal of a path whose own bytes are not valid UTF-8. A typed path in valid UTF-8 can resolve through a dangling link's target, a name on disk or the working directory into bytes that are not, and its identity carried them to both JSON wires, where `encoding/json` writes U+FFFD.
+- **Behaviour — on Unix, a dangling link whose target takes a `..` past a component that does not exist, or past a regular file, is refused** by `location.ResolveHostPath` and every file-backed identity constructor, with an error wrapping `fs.ErrNotExist` or `syscall.ENOTDIR`. The resolver cancelled that component on the target's text and named a file the kernel does not reach, so `check` read a file through `u.json -> m/../e.json` that `cat u.json` cannot open; the kernel refuses the path, and so does the resolver now. Windows evaluates a target's `..` on the text, and nothing moves there.
+- **Behaviour — `export --to csv --output-dir` refuses two type files that reach one file** through links the directory already holds, at exit 3, naming both. `v0.21.0` wrote both through the links into that one file, and the directory then held one type's rows under two names.
+- **Consumer impact:** rdata calls `snapshot.WriteFile` and `snapshot.ScanDir` with paths built by `filepath.Join`, which holds no `..` after a directory name, and runs `yammm fmt` and `yammm validate` on the clean, repository-relative paths pre-commit passes.
+
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
 Measured through binaries built from `v0.21.0`'s tree and from the candidate,
@@ -1353,6 +1365,11 @@ one probe per row.
 | a missing path on `fmt`, or a missing data file, a dangling symlink or a path through a regular file on `check`, `load` or `snapshot save` (the last 2 on Windows) | 2 | 3 | the same |
 | CSV export of two types whose file names differ only in case | 0, one file short | 3 | the two names cannot share one directory |
 | `--output` naming a writable file in a read-only directory | 0, written in place | 3 | the write cannot be staged beside its target |
+| `--output` naming a file that does not exist under `/dev/`, as under Linux's `/dev/shm` | 0, created | 3 | `write …: no such file or directory` |
+| `snapshot update-metadata` on a read-only snapshot | 0, the file replaced | 3 | `write …: permission denied` |
+| `snapshot save --into` a read-only snapshot, writing it | 0, the file replaced | 3 | `write output: write …: permission denied` |
+| `export --to csv --output-dir` where a type's file is a FIFO or a device | 0, written through | 3 | `not a regular file, so a set of files cannot replace it` |
+| `export --to csv --output-dir` where two types' files are links to one file (unit 8) | 0, that file holding the last type's rows | 3 | `… and … name one file, …` |
 | `neo4j constraints` or `indexes` with an empty `--separator` | 0 | 2 | refused before any work |
 | the same with a `--prefix` or `--separator` that composes no Neo4j identifier | 1 | 2 | refused before any work |
 | `neo4j diff` with an empty `--separator` | 3 | 2 | refused before the connection |
@@ -1362,6 +1379,7 @@ one probe per row.
 | `check`, `load`, `export` or `snapshot save` over a JSON data file holding an Integer value written as a whole decimal or exponent literal, such as `5.0`, `1e2` or `-9223372036854775809.0` (unit 8) | 0 | 1 | `E_TYPE_MISMATCH`, a float |
 | `gen --to go` or `--to jsonschema` over a schema with a type and a data type of one name (unit 8) | 3 | 0 | the later one takes a numeric suffix |
 | `check`, `load` or `snapshot save` with a data usage error (a format no name or `--from` value decides, or CSV data with neither type flag) beside a schema that does not load or an `--into` file that cannot be read (unit 8) | 1, or 3 for the `--into` file | 2 | the usage error alone, before anything is read |
+| `export --to csv --output-dir <link>/../<dir>`, where `<link>` is a symbolic link to a directory elsewhere and no `<dir>` stands beside `<link>` (unit 8) | 3, having made `<dir>` beside the directory `<link>` reaches | 0 | writes `<dir>` beside `<link>` |
 
 Unchanged, measured the same way: an unknown top-level command (2); `snapshot
 info` on a missing file (3); a read-only target, through `--output` or
@@ -1730,18 +1748,25 @@ byte-identical to the previous commit on all 241 tracked schemas, and outside
 
 **No exported declaration moves.** Every file the CLI writes to a path the
 operator named — `--output`, `--output-dir`, `-o`, `fmt -w`, `snapshot
-update-metadata` — is written by one rule. The path's symlinks are followed, and
-then:
+update-metadata` — is written by one rule, which `--output-dir` narrows for a
+FIFO, a device or a path under `/dev/` (below). A `..` in the path is evaluated on
+its text (unit 8's path rule group, above), the path's symlinks are followed,
+and then:
 
 - **A regular file, or one that does not exist yet, is replaced atomically,**
   staged beside the file the path resolves to. A symlink survives and the file
-  it names is written, as `v0.21.0` wrote it; this unit's earlier fix pass
+  it names is written, as `v0.21.0` wrote it for every command but `snapshot
+  update-metadata` and `snapshot save` writing its `--into` file, which replaced
+  the link with a regular file; this unit's earlier fix pass
   replaced the link with a regular file and left the file it named unchanged,
   for every write command and for `--output-dir`. A dangling symlink creates the
   file it names.
 - **A FIFO, a device or any path under `/dev/` is written through in place,
-  continuing its stream.** `--output /dev/stdout` works again, redirected to a
-  file or into a pipe, and a FIFO's reader receives the bytes. The earlier fix
+  continuing its stream, except as a file of `--output-dir`.** `--output
+  /dev/stdout` works again, redirected to a file or into a pipe, and a FIFO's
+  reader receives the bytes. `--output-dir` puts its files in place together by
+  renames, so it refuses such a file at exit 3, where `v0.21.0` wrote through
+  it. The earlier fix
   pass exited 3 on `/dev/stdout` and `/dev/null`, and replaced a FIFO with a
   regular file at exit 0 while its reader received nothing.
 - **On Linux, `--output /dev/stdout >> log` keeps the log's history.** Linux
@@ -1754,8 +1779,11 @@ then:
   read-only `Person.csv` at exit 0 — a directory, a looping symlink, which the
   earlier fix pass replaced at exit 0, and a file whose directory cannot hold
   the staging file. A failed write names the operator's path and its cause,
-  never the staging file.
-- **The staging name has a fixed length**, `.yammm-<random>.tmp`, so a basename
+  never the staging file; under `--output-dir` a directory that cannot be made
+  is named as the level `mkdir` refused, and a file by its name, or by the
+  directory and its name joined and cleaned.
+- **The staging name's length does not depend on the target's name**,
+  `.yammm-<random>.tmp`, so a basename
   near the filesystem's name limit is written again; the earlier fix pass
   refused a 245-byte name at exit 3.
 - **A file `export --output-dir` creates is owner-only (0600) on Unix**, as a
@@ -1763,9 +1791,22 @@ then:
   files 0644. Windows honours only a mode's write bit. An existing file keeps
   its mode.
 
-**Measured against `v0.21.0`, every target kind behaves as it did, with one
-deliberate exception: a writable file in a read-only directory is refused at
-exit 3, where `v0.21.0` wrote it in place.** A write that cannot be staged
+**Against `v0.21.0`, a write lands and fails as the bullets above state, and
+these are the moves an operator meets.** `--output`, `-o` without `--into`,
+`fmt -w` and `--output-dir` wrote in place at `v0.21.0`, and now stage and
+rename: a writable file in a read-only directory is refused at exit 3, where
+`v0.21.0` wrote it, and another hard link to a file they replace keeps the old
+contents, where every link saw the new ones. A command that rewrites its own file by rename — `snapshot update-metadata`, and
+`snapshot save` writing its `--into` file — now follows a symlink it replaced
+with a regular file and refuses at exit 3 a read-only file it replaced at exit
+0. A path under `/dev/` is written through and appended to, where `v0.21.0`
+truncated it: behind `/dev/stdout` a `>> log` keeps its history on Linux, a
+regular file that exists there, as under Linux's `/dev/shm`, is appended to
+rather than replaced, and one that does not exist there is refused at exit 3,
+where `v0.21.0` created it. `--output-dir` refuses a FIFO, a device and any path
+under `/dev/` as one of its files, which `v0.21.0` wrote through or created. The
+moves a `..` after a symbolic link makes, and `--output-dir`'s refusal of two
+type files that reach one file, are unit 8's path rule group's, above. A write that cannot be staged
 beside its target could only truncate the file in place, which an interrupted
 write or a full disk turns into a lost file; `gofmt -w` refuses the same
 target. Omit `--output` to write to stdout. The earlier fix pass's other three

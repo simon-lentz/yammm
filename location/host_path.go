@@ -42,6 +42,18 @@ func ResolveSourcePath(p string) (SourceID, string, error) {
 // resolveHostPath is ResolveHostPath, where requireExist refuses a path whose
 // leaf the process cannot find rather than keeping it as typed.
 func resolveHostPath(p string, requireExist bool) (string, error) {
+	host, err := walkHostPath(p, requireExist)
+	if err == nil && !utf8.ValidString(host) {
+		// The working directory, a name on disk or a dangling link's target
+		// can hold bytes the typed path does not.
+		return "", fmt.Errorf("%w: %q resolves to %q", ErrInvalidUTF8Path, p, host)
+	}
+	return host, err
+}
+
+// walkHostPath resolves p as resolveHostPath describes, before the result is
+// judged.
+func walkHostPath(p string, requireExist bool) (string, error) {
 	if p == "" {
 		return "", ErrEmptyPath
 	}
@@ -129,7 +141,11 @@ func danglingTarget(p string) (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("resolve the directory of link %q: %w", p, err)
 	}
-	return linkTarget(dir, target), true, nil
+	resolved, err := linkTarget(dir, target)
+	if err != nil {
+		return "", false, err
+	}
+	return resolved, true, nil
 }
 
 // lexicalTarget resolves the target of a link in the directory dir as the

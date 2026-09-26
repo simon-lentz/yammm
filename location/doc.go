@@ -37,8 +37,9 @@
 // file — and every file-backed identity is that answer, normalized. The
 // constructors [SourceIDFromPath], [ResolveSourcePath], [NewCanonicalPath],
 // [CanonicalPath.Join] and [CanonicalizePathForSourceID] all resolve. Two
-// spellings that name one file therefore give one identity, and it is the
-// spelling the filesystem holds.
+// spellings that resolve to one host path therefore give one identity, and it
+// is the spelling the filesystem holds. A file that two host paths reach — a
+// hard link, a firmlink or a bind mount — keeps two identities.
 //
 // # A ".." is evaluated on the text, and only a ".."
 //
@@ -47,18 +48,22 @@
 // anything is looked up, so "dir/link/../x" names "dir/x" whatever "dir/link"
 // resolves to.
 //
-// This is a decision, not an oversight, and it is the same decision on every
-// host. Windows normalizes a Win32 path's ".." textually before the object
-// manager sees it, so the text rule IS the host rule there. A POSIX kernel
-// instead takes the parent of the directory it actually reached, so on Unix
-// this package and the shell can name two different files for one path. That is
-// the one case where they part.
+// This is a decision, not an oversight, and for a ".." the path itself holds it
+// is the same decision on every host. A ".." inside a link's target is another
+// matter, stated below. Windows normalizes a Win32 path's ".." textually before
+// the object manager sees it, so the text rule IS the host rule there. A POSIX
+// kernel instead takes the parent of the directory it actually reached, so on
+// Unix this package and the shell can name two different files for one path.
+// That is where they part on a ".." the path holds; the consequences below and
+// a Windows junction case named further down are the other places this package
+// and the kernel answer differently.
 //
 // The reason is agreement. The schema loader resolves a "../" import through
 // filepath.Join, on the text; an editor resolves the file it is editing through
-// this package; a data file resolves through it too. One rule for all three
-// lands them on one file, and a resolver that followed the kernel here would
-// send the editor to a file the loader does not compile.
+// this package; a data file resolves through it too, and the command-line tool
+// evaluates a ".." the same way in every path it reads or writes. One rule for
+// all of them lands them on one file, and a resolver that followed the kernel
+// here would send the editor to a file the loader does not compile.
 // [TestResolveHostPath_KeepsWhatTheLSPDependsOn] holds the rule.
 //
 // Two consequences follow, and both are intended. A ".." after a symbolic link
@@ -96,8 +101,10 @@
 // identity minted for a file before it is written therefore equals the one
 // minted after, which is what lets an in-memory source key match the file it
 // will become. A component the process cannot traverse ends the resolution the
-// same way. A path under a regular file can never exist and is refused, as is
-// a cycle of dangling links, and so is an existing path whose resolved form is
+// same way. A path under a regular file can never exist and is refused, as is,
+// on Unix, a dangling link whose target takes a ".." past a component the
+// kernel cannot enter, one that does not exist or is not a directory, since the
+// kernel reaches no file through it; so is a cycle of dangling links, and so is an existing path whose resolved form is
 // longer than the host allows a path to be (PATH_MAX, 1024 bytes on darwin).
 //
 // # SourceID
