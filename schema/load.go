@@ -64,8 +64,17 @@ type rootLoader struct {
 	rootPath string // Canonical absolute path for SourceID construction
 }
 
-// newRootLoader creates a rootLoader for sandboxed import file access.
+// newRootLoader creates a rootLoader for sandboxed import file access. It
+// refuses a root that is not a directory before opening it: os.OpenRoot opens
+// a FIFO without O_NONBLOCK, which blocks until a writer attaches.
 func newRootLoader(moduleRoot string) (*rootLoader, error) {
+	info, err := os.Stat(moduleRoot)
+	if err == nil && !info.IsDir() {
+		err = syscall.ENOTDIR
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open module root %q: %w", moduleRoot, err)
+	}
 	root, err := os.OpenRoot(moduleRoot)
 	if err != nil {
 		return nil, fmt.Errorf("open module root %q: %w", moduleRoot, err)
@@ -300,6 +309,14 @@ func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.R
 	// Create loader and load the schema
 	ldr := newLoader(cfg, moduleRoot, "", rootOrigin)
 	defer ldr.Close() // Release rootLoader resources when done
+
+	// An explicit root is opened now, not at the first import: a root that can
+	// serve no import would otherwise pass every load that imports nothing.
+	if rootOrigin == diag.ModuleRootExplicit {
+		if err := ldr.ensureRootLoader(); err != nil {
+			return fatalResult(fmt.Errorf("invalid module root %q: %w", cfg.moduleRoot, err), diag.Result{})
+		}
+	}
 
 	s, result, err := ldr.loadFile(ctx, sourceID, absPath, content)
 	if err != nil {
@@ -1435,13 +1452,14 @@ func importCandidates(relativePath string) []string {
 }
 
 // candidateImportSourceIDs returns the SourceIDs readImportFile could produce
-// for the given relative path, without performing any file I/O. Used by the
+// for the given relative path, without reading any file. Used by the
 // cross-Load short-circuit in loadImport to detect already-registered imports
 // before paying the read cost.
 //
 // It derives its candidates from [importCandidates], the same function
 // readImportFile reads through, and emits an identity for each of the two code
-// paths readImportFile exercises: the in-memory lookup joins l.moduleRoot, and
+// paths readImportFile exercises: the in-memory lookup joins a relative key to
+// l.moduleRoot, or to l.syntheticRoot under a synthetic root, and
 // rootLoader.readFile joins the root it resolved when it opened. Both forms are
 // emitted so a Registry populated by either path hits on the short-circuit. Paths that fail canonicalization are silently dropped;
 // they would fail again in readImportFile with a uniform diagnostic.

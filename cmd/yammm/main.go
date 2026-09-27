@@ -41,6 +41,7 @@ func run() int {
 // cobra's own — an unknown command or flag, a wrong operand count — and is a
 // usage error.
 func execute(cmd *cobra.Command) error {
+	initHelpAndCompletion(cmd)
 	err := cmd.Execute()
 	if _, ok := errors.AsType[*cli.ExitError](err); err != nil && !ok {
 		return &cli.ExitError{Code: cli.ExitUsage, Err: err}

@@ -46,7 +46,7 @@ s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot, op
 | Option | Description |
 | ------ | ----------- |
 | `WithRegistry` | Schema registry for cross-schema type resolution |
-| `WithModuleRoot` | Root directory for module-style imports. It is the first rung of the ladder in [Module root discovery](#module-root-discovery), and under it no `yammm.mod` marker is read at all |
+| `WithModuleRoot` | Root directory for module-style imports. It is the first rung of the ladder in [Module root discovery](#module-root-discovery), and under it no `yammm.mod` marker is read at all. `Load` refuses a root that is not a directory it can open with a Fatal `E_LOAD_IO_FAILURE`, whether or not the schema imports anything |
 | `WithIssueLimit` | Maximum diagnostic issues to collect (default: 100) |
 | `WithLogger` | Structured logger for load diagnostics |
 | `CaptureSources(&dst)` | Store the load's sources in `dst` before the load reads anything, so a caller can render excerpts for a load that fails and returns no schema; a load that fails before it reads anything leaves `dst` holding that load's empty sources |

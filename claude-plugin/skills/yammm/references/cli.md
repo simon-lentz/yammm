@@ -262,7 +262,7 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 | `--package` | go target: generated package name (default: derived from schema name). A value that is not a Go identifier, or is a keyword or `_`, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
 | `--output` | Output file path (default: stdout) |
 | `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
-| `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes` |
+| `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes`. A root that is not a directory the loader can open exits 3 before the schema is parsed, whether or not the schema imports anything |
 | `--schema-id` | jsonschema target: value for the emitted `"$id"` (omitted when unset) |
 | `--no-class-diagram` | md target: omit the Mermaid class-diagram section |
 | `--no-class-members` | md target: keep the diagram and omit the member lines inside each class |
@@ -422,7 +422,9 @@ annotation. **Do not read a zero exit code as "no diagnostics."** Read the
 output.
 
 With `--format json`, each command writes exactly one JSON document to stderr,
-a clean run included, so a consumer parses stderr unconditionally. `help`,
-`completion` and `--version` are cobra's own and write no document. A failure that is not itself a diagnostic — a bad flag, an
+a clean run included, so a consumer parses stderr unconditionally. A `help`,
+`completion` or `--version` that succeeds writes no document; `help` given a
+topic no command answers, and `completion` given no shell or one it does not
+know, exit 2 and write the refusal as any usage error. A failure that is not itself a diagnostic — a bad flag, an
 unreadable path, a lost connection — is inside that document as an
 `E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code.

@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -21,7 +22,8 @@ Global flags:
               "snapshot info". Under "json" a command writes exactly one JSON
               document to stderr, a clean run included, and suppresses its
               status summary; "snapshot info" writes its payload to stdout.
-              "help", "completion" and --version write no document.
+              A "help", "completion" or --version that succeeds writes
+              no document.
   --no-color  Disable ANSI color in diagnostic output.
 
 Data commands (check, load, export, snapshot save) also accept:
@@ -50,6 +52,32 @@ Data commands (check, load, export, snapshot save) also accept:
 	)
 
 	return cmd
+}
+
+// initHelpAndCompletion adds cobra's help and completion commands to root and
+// makes each refuse what it cannot answer: cobra's help exits 0 for a topic no
+// command answers, printing the usage or the nearest command's help, and its
+// completion parent prints help and exits 0. [execute]
+// calls it once the caller has set root's streams, since each shell command
+// binds its output when it is created.
+func initHelpAndCompletion(root *cobra.Command) {
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	for _, c := range root.Commands() {
+		switch c.Name() {
+		case "help":
+			show := c.Run
+			c.RunE = func(c *cobra.Command, args []string) error {
+				if _, rest, err := c.Root().Find(args); err != nil || len(rest) > 0 {
+					return cli.Usagef("unknown help topic %q; run %q to list the commands", strings.Join(args, " "), c.Root().Name()+" --help")
+				}
+				show(c, args)
+				return nil
+			}
+		case "completion":
+			c.RunE = requireSubcommand
+		}
+	}
 }
 
 // withDiagnostics adapts a command that diagnoses to cobra's RunE. It admits

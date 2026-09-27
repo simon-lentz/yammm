@@ -1359,7 +1359,7 @@ Measured against `v0.21.0` through binaries built from its tree and from the can
 - **Behaviour — a writer's refusal of the data exits 1, and any other writer failure 3.** `export` answers `csv.ErrUnrepresentable` and `json.ErrUnrepresentable` at 1, as it answers any other refusal of its input; `export --to csv` of a graph holding a composed child exits 1 where `v0.21.0` wrote the file without the child at 0. `snapshot save` answers `snapshot.Marshal`'s result through the exit rule, so its refusal of a value the wire cannot carry exits 1.
 - **Behaviour — a failure a command does not classify exits 3, not 2.** Every usage refusal is marked as one, so exit 2 means the invocation was wrong and nothing else; cobra's own refusals, an unknown command or flag and a wrong operand count, still exit 2. A `--uri` the Neo4j driver refuses before it dials, such as one with an unsupported scheme, exits 2 on `neo4j diff` and `neo4j introspect`, where it exited 3; a server that cannot be reached still exits 3. A result holding `diag.E_INTERNAL` or `diag.E_CONTEXT_CANCELLED` exits 3, a failure outside the input, where it exited 1, counted even when a full collector dropped it.
 - **Behaviour — `snapshot.HeaderOnlyRead` reports a reader that fails as `E_SNAPSHOT_IO` at Fatal**, where it reported `E_SNAPSHOT_MALFORMED`; a truncation is still `E_SNAPSHOT_MALFORMED`. So `snapshot info --header-only <dir>` exits 3, as `snapshot info <dir>` does, where it exited 1. `ScanDir`'s per-file results take the same code.
-- **Behaviour — under `--format json` a command writes exactly one JSON document to stderr, a clean run included**, `{"issues":[]}` for a run that found nothing, where at `v0.21.0` a clean run wrote nothing to stderr, or a status line alone; `help`, `completion` and `--version` write no document. The root help says so, and says `snapshot info` writes its payload to stdout.
+- **Behaviour — under `--format json` a command writes exactly one JSON document to stderr, a clean run included**, `{"issues":[]}` for a run that found nothing, where at `v0.21.0` a clean run wrote nothing to stderr, or a status line alone; a `help`, `completion` or `--version` that succeeds writes no document, and one that refuses its operands writes the refusal as one (the help and completion group, below). The root help says so, and says `snapshot info` writes its payload to stdout.
 - **Additive — `gogen.CheckPackageName`**, the rule `Marshal` applies to `WithPackageName`, for a caller that checks a name before it loads a schema. `gen --to go --package <name>` judges the name with it before the load, so a bad name exits 2 whatever the schema holds; `v0.21.0` refused a schema that did not load at 1 before it judged the name, and a bad name after a load at 3.
 - **Consumer impact:** rdata calls `snapshot.HeaderOnlyRead` at five sites and gates each call on `HasErrors`, which counts a Fatal, matching no code; its hooks run `yammm fmt` and `yammm validate` on clean paths, which exit 0 as before, and it passes no `--format json`.
 
@@ -1368,6 +1368,13 @@ Measured against `v0.21.0` through binaries built from its tree and from the can
 - **Behaviour — `/dev/stdout`, `/dev/stderr` and `/dev/fd/N` are written through by their name; every other path under `/dev/` is decided by the file it reaches.** A regular file there, as under Linux's `/dev/shm`, is replaced like any other and created when it does not exist, where the rule before this group appended to it and refused a new one at exit 3; `--output-dir` puts a set of files in a directory there. A FIFO or a device, such as `/dev/null`, is still written through. Against `v0.21.0`, which created such a file and truncated one that exists, the move is the one every regular file takes: it is staged beside the file and renamed over it.
 - **Behaviour — a descriptor path is recognised by the directory the kernel reaches, not by its spelling.** On Linux `/dev/fd` links to `/proc/self/fd`, and every descriptor table procfs holds counts as `/dev/fd`, so `/proc/self/fd/N`, `/proc/thread-self/fd/N`, `/proc/<pid>/fd/N`, `/proc/<pid>/task/<tid>/fd/N` and `fd/N` under a link to `/dev` are written through and appended to. The rule before this group replaced the file such a path's descriptor held, so behind `>> log` the log lost its history and the command's later output reached a file no path names, and it refused a descriptor holding a pipe at exit 3 (`stage replacement: … no such file or directory`); `v0.21.0` truncated a regular file there and wrote into a pipe. `stdout` or `stderr` under a link to `/dev` is written through, as before.
 - **Consumer impact:** none. rdata writes no file under `/dev/` or `/proc/`.
+
+### Unit 8 — a module root that is not a directory, and a help topic or shell no command answers, stop exiting 0
+
+- **Behaviour — `schema.Load` opens a `WithModuleRoot` value as a directory before it parses the schema, and refuses one it cannot open** — a missing path, a regular file, a FIFO, a device, a directory it may not read — with one Fatal `E_LOAD_IO_FAILURE` naming it, whether or not the schema imports anything. So `--module-root` naming such a path exits 3 on every command that loads a schema, where `v0.21.0` exited 0 for a schema that imports nothing, and for one that imports exited 1 (`E_IMPORT_RESOLVE` at the import) or, for a FIFO, never returned. The root was opened only when the load resolved an import.
+- **Behaviour — no load blocks on a module root that is a FIFO.** A root is refused as not a directory before it is opened, because `os.OpenRoot` opens a FIFO without `O_NONBLOCK` and waits for a writer. `LoadSourcesWithEntry`, unless it is sources-only, tries to open its root at each import and ignores a failure until an import falls back to disk, since the root names in-memory sources and may name no directory; with a FIFO root a load that imports now returns, and an import that falls back to disk fails with `E_IMPORT_RESOLVE`, where `v0.21.0` never returned.
+- **Behaviour — `yammm help` refuses a topic no command answers, and `yammm completion` requires a shell it knows**, each at exit 2 with nothing on stdout, where `v0.21.0` printed usage or help and exited 0: `help nosuch`, `help snapshot nosuch`, `help validate extra`, `completion` and `completion nosuch`. Under `--format json` the refusal is one document, as every usage error's is. `help`, `help <command>` and `completion <shell>` still print to stdout and exit 0; the help `completion` prints gains its usage line, `yammm completion [flags]`, as the `snapshot` and `neo4j` parents' help has.
+- **Consumer impact:** none. rdata's `LoadRegisteredSchema` loads through `LoadSourcesWithEntry` under a synthetic root; its generators under `internal/tools` and its tests pass `WithModuleRoot` the repository root or another directory that exists; its hooks run `yammm fmt` and `yammm validate` with no `--module-root`.
 
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
@@ -1381,6 +1388,9 @@ one probe per row.
 | `export --output … --output-dir …` | 0 | 2 | `--output and --output-dir are mutually exclusive` |
 | `yammm snapshot` or `yammm neo4j` with no subcommand | 0, help | 2 | the parent requires a subcommand |
 | `yammm snapshot <unknown>` | 0, help | 2 | `unknown command "…" for "yammm snapshot"` |
+| `yammm completion` with no shell (unit 8) | 0, help | 2 | the parent requires a subcommand |
+| `yammm completion <unknown>` (unit 8) | 0, help | 2 | `unknown command "…" for "yammm completion"` |
+| `yammm help <topic no command answers>`, such as `help nosuch`, `help snapshot nosuch` or `help validate extra` (unit 8) | 0, the usage or the nearest command's help | 2 | `unknown help topic "…"` |
 | `fmt --format bogus` | 0, the flag ignored | 2 | `invalid output format "bogus"` |
 | a missing schema path on `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j indexes` or `neo4j diff` | 1 | 3 | an input that cannot be read is a runtime failure, not an invalid document |
 | an empty or non-UTF-8 schema path on any command that loads one (unit 8) | 1; on Linux a non-UTF-8 file that exists was loaded and the command went on, exiting 0 where nothing else failed | 2 | refused before any lookup, naming `location.ErrEmptyPath` or `location.ErrInvalidUTF8Path` |
@@ -1389,6 +1399,8 @@ one probe per row.
 | `snapshot save --into ""` beside `-o` (unit 8) | 0, the flag ignored | 2 | refused before any lookup, naming `location.ErrEmptyPath` |
 | `--module-root` given empty (unit 8) | 0, the flag ignored | 2 | refused before any lookup, naming `location.ErrEmptyPath` |
 | `--module-root` given in bytes that are not UTF-8 (unit 8) | taken as the root | 2 | refused before any lookup, naming `location.ErrInvalidUTF8Path` |
+| `--module-root` naming a missing path, a regular file, a FIFO, a device or a directory the command may not read, on a schema that imports nothing (unit 8) | 0 | 3 | `invalid module root "…"`, a Fatal `E_LOAD_IO_FAILURE` |
+| the same on a schema that imports (unit 8) | 1, `E_IMPORT_RESOLVE` at the import; a FIFO never returned | 3 | the same |
 | `snapshot info --dir "" <file>` (unit 8) | 0, the file read | 2 | `--dir is mutually exclusive with a positional file argument` |
 | `gen --to go --package ""` (unit 8) | 0, the name derived | 2 | `invalid --package ""`, naming the rule |
 | `neo4j diff` or `neo4j introspect` with a `--uri` the driver refuses before it dials (unit 8) | 3 | 2 | `URI scheme … is not supported` |
@@ -2160,12 +2172,14 @@ existing declaration.
   darwin it reads the on-disk spelling through `realpath(3)` (the second fix
   pass replaced `fcntl(F_GETPATH)`; see its block), because
   `filepath.EvalSymlinks` there keeps the case as typed; Linux is
-  case-sensitive and Go's Windows implementation already spells each component
-  on disk. **What this repairs:** on a case-insensitive volume a
+  case-sensitive, and on Windows the resolver reads the final path of a handle
+  (`GetFinalPathNameByHandleW`), which spells each component on disk. **What this repairs:** on a case-insensitive volume a
   `--module-root` or entry path typed in another case failed a valid import
   with `E_PATH_ESCAPE`, and a diagnostic's location rendered as an absolute
   path. **What it moves:** an identity changes only where a path was typed in a
-  spelling the filesystem does not use — which is exactly the input that failed.
+  spelling the filesystem does not use: the inputs that failed above, and ones
+  that loaded, such as an entry with no relative import, whose identity now
+  takes the on-disk case.
 - **An identity minted before a file exists equals the one minted after.** A
   path that does not exist yet resolves to its deepest existing ancestor with
   the missing tail kept as typed, where the whole path was left unresolved. A
@@ -2187,7 +2201,8 @@ existing declaration.
   `E_LOAD_IO_FAILURE`, where it loaded at `v0.21.0` (measured on Linux; darwin's
   volumes refuse such a name), and so does every `schema.LoadSourcesWithEntry`
   source key — absolute, relative, or under a synthetic root — with its module
-  root, and the CLI.
+  root. The CLI refuses such a schema, data or module-root path before any
+  lookup, at exit 2 (unit 8's exit rule, above).
 - **Deleted in the resolver's favour:** `schema`'s own entry-path
   canonicalizer, which was unexported, and the LSP's `lsputil.CanonicalPath`,
   which was exported from an internal package. The editor and the loader now
@@ -2195,8 +2210,8 @@ existing declaration.
   its file's on-disk spelling.
 - **CI runs the whole suite on Linux, Windows and macOS.** The darwin branch of
   the resolver runs on the macOS job alone.
-- **Consumer reach: none measured.** rdata's suite against this tree differs
-  from its run against `v0.21.0` by nothing.
+- **Consumer reach: none measured.** rdata's suite against this block's tree
+  differed from its run against `v0.21.0` by nothing.
 
 ### Unit 7, the slate fix pass — spans and paths refuse what they cannot mean
 

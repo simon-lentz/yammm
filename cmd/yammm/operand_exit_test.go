@@ -152,6 +152,16 @@ func TestExitCodes_EveryPathOperandByFailure(t *testing.T) {
 		{"snapshot verify OP SNAP", ".yammm", false, true},
 		{"snapshot verify SCHEMA OP", ".ys", false, false},
 		{"snapshot update-metadata -s k=v OP", ".ys", false, false},
+		// The schema imports nothing, so only the root's own judgment can refuse it.
+		{"validate --module-root OP SCHEMA", "", true, true},
+		{"check --module-root OP SCHEMA DATA", "", true, true},
+		{"load --module-root OP SCHEMA DATA", "", true, true},
+		{"export --to json --module-root OP SCHEMA DATA", "", true, true},
+		{"gen --to go --module-root OP SCHEMA", "", true, true},
+		{"neo4j constraints --module-root OP SCHEMA", "", true, true},
+		{"neo4j indexes --module-root OP SCHEMA", "", true, true},
+		{"snapshot save -o OUT --module-root OP SCHEMA DATA", "", true, true},
+		{"snapshot verify --module-root OP SCHEMA SNAP", "", true, true},
 	}
 	for _, c := range commands {
 		for _, f := range operandFailures(c.dir, c.source) {

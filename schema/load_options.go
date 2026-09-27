@@ -95,7 +95,9 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 //
 // Under this option no marker is read at all — not even a malformed one, which
 // would otherwise fail the load. That is what "explicit wins" means: a caller
-// can always override a marker it did not put there.
+// can always override a marker it did not put there. [Load] refuses a root that
+// is not a directory it can open with a Fatal E_LOAD_IO_FAILURE, whether or not
+// the schema imports anything.
 //
 // The root is the import sandbox's boundary. A discovered root therefore
 // widens what a load may read: committing a marker at a repository root grants

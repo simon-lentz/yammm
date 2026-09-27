@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -155,12 +156,62 @@ func TestExitCodes_CobraRefusalsAreUsage(t *testing.T) {
 			walk(sub)
 		}
 	}
-	walk(newRootCmd("test"))
+	root := newRootCmd("test")
+	initHelpAndCompletion(root)
+	walk(root)
 	for _, args := range lines {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Parallel()
 			if code, _, stderr := executeCmdOutput(t, args...); code != cli.ExitUsage {
 				t.Errorf("exit %d, want %d: %s", code, cli.ExitUsage, stderr)
+			}
+		})
+	}
+}
+
+// TestExitCodes_HelpAndCompletionRefuseWhatTheyCannotAnswer pins that help
+// given a topic no command answers, and completion given no shell or one it
+// does not know, exit 2, print nothing to stdout and name what they refused,
+// and that help, help for a command and for a shell, and completion bash
+// print their own text and exit 0.
+func TestExitCodes_HelpAndCompletionRefuseWhatTheyCannotAnswer(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		args []string
+		want int
+		// text is what stdout holds after exit 0, or the refusal's message.
+		text string
+	}{
+		{[]string{"help", "no-such-topic"}, cli.ExitUsage, `unknown help topic "no-such-topic"`},
+		{[]string{"help", "snapshot", "no-such-topic"}, cli.ExitUsage, `unknown help topic "snapshot no-such-topic"`},
+		{[]string{"help", "validate", "extra"}, cli.ExitUsage, `unknown help topic "validate extra"`},
+		{[]string{"completion"}, cli.ExitUsage, `"yammm completion" requires a subcommand`},
+		{[]string{"completion", "no-such-shell"}, cli.ExitUsage, `unknown command "no-such-shell"`},
+		{[]string{"help"}, cli.ExitOK, "yammm is a schema validation DSL"},
+		{[]string{"help", "snapshot"}, cli.ExitOK, "Build, inspect, and validate persisted graph snapshots"},
+		{[]string{"help", "completion", "bash"}, cli.ExitOK, "the bash shell"},
+		{[]string{"completion", "bash"}, cli.ExitOK, "bash completion"},
+	} {
+		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			root := newRootCmd("test")
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetArgs(c.args)
+			err := execute(root)
+			if code := cli.ExitForError(err); code != c.want {
+				t.Errorf("exit %d, want %d: %v", code, c.want, err)
+			}
+			printed, where := stdout.String(), "stdout"
+			if c.want != cli.ExitOK {
+				if stdout.Len() != 0 {
+					t.Errorf("stdout %q after a refusal", stdout.String())
+				}
+				printed, where = fmt.Sprint(err), "the refusal"
+			}
+			if !strings.Contains(printed, c.text) {
+				t.Errorf("%s %q does not hold %q", where, printed, c.text)
 			}
 		})
 	}
