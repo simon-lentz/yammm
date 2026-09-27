@@ -45,14 +45,19 @@ as the kernel follows it, so a link survives and the file it names is written. A
 regular file, or one that does not exist yet, is replaced atomically: the
 content is staged beside it and renamed over it, so an interrupted write leaves
 the previous file. A new file is created at `0600` on Unix (Windows honours
-only a mode's write bit); an existing one keeps its mode. A FIFO, a device or
-a path under `/dev/` — `--output /dev/stdout`, say — is written through,
-continuing its stream: behind `>> log` the bytes are
+only a mode's write bit); an existing one keeps its mode. A FIFO, a device,
+`/dev/stdout`, `/dev/stderr` or `/dev/fd/N` is written through, continuing its
+stream, however the path reaches that directory: through a link to `/dev`, or
+on Linux through any descriptor table under `/proc`, such as `/proc/self/fd/N`.
+Behind `>> log` the bytes are
 appended and the log keeps its history. `--output-dir` refuses such a file at
-exit 3, since it puts its files in place together by renames. Anything else is refused at exit 3, naming the path: a
+exit 3, since it puts its files in place together by renames. Any other path
+under `/dev/`, such as a file under Linux's `/dev/shm`, is decided by the file
+it reaches. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
-hold the staging file, which `gofmt -w` refuses too. Omit `--output` to write
-to stdout. `--output-dir` renders every file before it touches the disk, so a
+hold the staging file, which `gofmt -w` refuses too. `export`, `gen` and
+`neo4j introspect` write to stdout when `--output` is omitted; `snapshot save`
+needs `-o` or `--into`. `--output-dir` renders every file before it touches the disk, so a
 graph the CSV writer refuses creates no directory; a directory it made before
 the filesystem refused a file stays, as `mkdir -p` leaves it.
 

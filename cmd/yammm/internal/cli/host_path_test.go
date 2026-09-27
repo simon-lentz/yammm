@@ -372,8 +372,8 @@ func TestWriteFile_StagesBesideTheFileALinkReaches(t *testing.T) {
 	checkStagesBesideTheFileALinkReaches(t, func(path string) error { return WriteFile(path, []byte(targetPayload)) })
 }
 
-// A link whose target climbs out of a linked directory into /dev/ reaches a
-// path under /dev/, which is written through: /dev/fd/N stats as the regular
+// A link whose target climbs out of a linked directory into /dev/ reaches
+// /dev/fd/N, which is written through by its name: /dev/fd/N stats as the regular
 // file its descriptor holds, and a rename over it would leave the descriptor
 // writing to a file no path reaches. The target's ".." is taken as the kernel
 // takes it, from /usr to /, where its text would name dir/dev/fd/N.
@@ -382,7 +382,8 @@ func TestWriteFile_ALinkIntoDevThroughALinkedDotDotIsWrittenThrough(t *testing.T
 	if resolved, err := filepath.EvalSymlinks("/usr"); err != nil || resolved != "/usr" {
 		t.Skip("/usr is not a directory directly under /")
 	}
-	f, fdPath := heldDescriptorPath(t)
+	f, spellings := heldDescriptor(t)
+	fdPath := spellings[0]
 	dir := t.TempDir()
 	sep := string(filepath.Separator)
 	if err := os.Symlink("/usr", filepath.Join(dir, "u")); err != nil {
@@ -400,11 +401,13 @@ func TestWriteFile_ALinkIntoDevThroughALinkedDotDotIsWrittenThrough(t *testing.T
 	}
 }
 
-// underDev takes a path under /dev/ however it reaches there: through two "..",
-// the second after a link, each taken on disk; through a ".." climbing out of a
-// working directory entered through a link, taken from the directory reached;
-// and through a link to /dev itself, which the text never spells.
-func TestUnderDev_SeesAPathTheKernelTakesIntoDev(t *testing.T) {
+// descriptorPath takes a descriptor path however the kernel reaches its
+// directory: through two "..", the second after a link, each taken on disk;
+// through a ".." climbing out of a working directory entered through a link;
+// through a link to /dev, which the text never spells; and on Linux through
+// every descriptor table procfs holds. Any other path under /dev, and a
+// directory named fd anywhere else, is decided by its file.
+func TestDescriptorPath_SeesAPathTheKernelTakesIntoDev(t *testing.T) {
 	if resolved, err := filepath.EvalSymlinks("/usr"); err != nil || resolved != "/usr" {
 		t.Skip("/usr is not a directory directly under /")
 	}
@@ -416,27 +419,56 @@ func TestUnderDev_SeesAPathTheKernelTakesIntoDev(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, "a"), 0o750); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(filepath.Join(root, "fd"), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	for name, target := range map[string]string{"u": "/usr", "devl": "/dev", "lnk": "/usr"} {
 		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
 			t.Skipf("symlinks unavailable: %v", err)
 		}
 	}
-	for _, p := range []string{
+	descriptors := []string{
 		root + sep + "a" + sep + ".." + sep + "u" + sep + ".." + sep + "dev" + sep + "stdout",
-		// On Linux /dev/fd is a link out of /dev, so only the text sees this one.
 		root + sep + "a" + sep + ".." + sep + "u" + sep + ".." + sep + "dev" + sep + "fd" + sep + "0",
-		root + sep + "devl" + sep + "stdout",
-	} {
-		if !underDev(p) {
-			t.Errorf("underDev(%q) = false, where the kernel reaches /dev", p)
+		root + sep + "devl" + sep + "stderr",
+		// On Linux /dev/fd links out of /dev, so the link to /dev reaches /proc/self/fd.
+		root + sep + "devl" + sep + "fd" + sep + "0",
+		"/dev/fd/12",
+	}
+	if paths := procDescriptorPaths(t, 0); paths != nil {
+		descriptors = append(descriptors, paths...)
+		// A link named other than fd, to a descriptor table /dev/fd is not.
+		if err := os.Symlink("/proc/thread-self/fd", filepath.Join(root, "tfd")); err != nil {
+			t.Fatal(err)
+		}
+		descriptors = append(descriptors, root+sep+"tfd"+sep+"0")
+	}
+	for _, p := range descriptors {
+		if !descriptorPath(p) {
+			t.Errorf("descriptorPath(%q) = false, where the kernel reaches a descriptor path", p)
 		}
 	}
-	if underDev(root + sep + "a" + sep + "stdout") {
-		t.Errorf("underDev(%q) = true for a plain directory", root+sep+"a"+sep+"stdout")
+	for _, p := range []string{
+		root + sep + "a" + sep + "stdout",
+		"/dev/null",
+		"/dev/stdin",
+		"/dev/shm/x",
+		"/dev/stdout.json",
+		"/dev/fd",
+		"/dev/fd/1a",
+		"/dev/fd/-1",
+		root + sep + "devl" + sep + "null",
+		root + sep + "devl" + sep + "shm" + sep + "stdout",
+		root + sep + "fd" + sep + "3",
+		"/proc/self/fdinfo/0",
+	} {
+		if descriptorPath(p) {
+			t.Errorf("descriptorPath(%q) = true for a path its file decides", p)
+		}
 	}
 	t.Chdir(filepath.Join(root, "lnk"))
-	if rel := "." + sep + ".." + sep + "dev" + sep + "stdout"; !underDev(rel) {
-		t.Errorf("underDev(%q) from %s = false, where the kernel climbs from /usr into /dev", rel, filepath.Join(root, "lnk"))
+	if rel := "." + sep + ".." + sep + "dev" + sep + "stdout"; !descriptorPath(rel) {
+		t.Errorf("descriptorPath(%q) from %s = false, where the kernel climbs from /usr into /dev", rel, filepath.Join(root, "lnk"))
 	}
 }
 

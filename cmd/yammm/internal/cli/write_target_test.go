@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -192,7 +193,7 @@ func writeTargetCases() []writeTargetCase {
 			},
 		},
 		{
-			name:        "a link to a path under /dev/ is written through",
+			name:        "a link to a device is written through",
 			windowsSkip: noNULLinkOnWindows,
 			setup: func(dir string) (string, error) {
 				link := filepath.Join(dir, "null")
@@ -312,7 +313,7 @@ func TestWriteFile_TargetKinds(t *testing.T) {
 
 // TestWriteFileSet_TargetKinds judges a one-file set by the same table. A set
 // is replaced by renames, so a target only written through — a FIFO, a device,
-// a path under /dev/ — is refused.
+// a descriptor path — is refused.
 func TestWriteFileSet_TargetKinds(t *testing.T) {
 	t.Parallel()
 	if os.Geteuid() == 0 {
@@ -335,7 +336,7 @@ func TestWriteFileSet_TargetKinds(t *testing.T) {
 			switch tc.name {
 			case "a FIFO receives the bytes and stays a FIFO",
 				"the null device is written through",
-				"a link to a path under /dev/ is written through":
+				"a link to a device is written through":
 				if !errors.Is(err, errNotReplaceable) {
 					failure = fmt.Sprintf("staging a target no rename can replace: error %v, want %v", err, errNotReplaceable)
 				}
@@ -396,11 +397,15 @@ func expectDevice(path string) string {
 // earlierOutput is what a held descriptor's file holds before a write reaches it.
 const earlierOutput = "earlier output\n"
 
-// heldDescriptorPath opens a regular file holding earlierOutput and returns it
-// with the /dev/fd path of its descriptor, skipping where that path does not exist.
-func heldDescriptorPath(t *testing.T) (*os.File, string) {
+// heldDescriptor opens a regular file for appending, as a shell's ">>" opens
+// stdout, writes earlierOutput to it and returns it with the spellings of its
+// descriptor's path the tests judge: /dev/fd/N, the same through a link to /dev,
+// and those [procDescriptorPaths] returns. It skips where /dev/fd/N does not
+// exist.
+func heldDescriptor(t *testing.T) (f *os.File, spellings []string) {
 	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "held-*.txt")
+	dir := t.TempDir()
+	f, err := os.OpenFile(filepath.Join(dir, "held.txt"), os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -412,53 +417,154 @@ func heldDescriptorPath(t *testing.T) (*os.File, string) {
 	if _, err := f.WriteString(earlierOutput); err != nil {
 		t.Fatalf("write earlier output: %v", err)
 	}
-	path := fmt.Sprintf("/dev/fd/%d", f.Fd())
-	if _, err := os.Stat(path); err != nil {
-		t.Skipf("%s is not available here: %v", path, err)
+	fdPath := fmt.Sprintf("/dev/fd/%d", f.Fd())
+	if _, err := os.Stat(fdPath); err != nil {
+		t.Skipf("%s is not available here: %v", fdPath, err)
 	}
-	return f, path
+	spellings = []string{fdPath}
+	devl := filepath.Join(dir, "devl")
+	if err := os.Symlink("/dev", devl); err != nil {
+		t.Fatalf("link to /dev: %v", err)
+	}
+	spellings = append(spellings, filepath.Join(devl, "fd", fmt.Sprint(f.Fd())))
+	return f, append(spellings, procDescriptorPaths(t, f.Fd())...)
 }
 
-// TestWriteFile_DescriptorPathContinuesItsStream pins the /dev/ rule where it
-// is needed: /dev/fd/N stats as whatever the descriptor holds — a regular file
-// here, as /dev/stdout does under a shell redirect — and the bytes must continue
-// that stream, in the file the descriptor holds, after what it already wrote.
+// procDescriptorPaths returns every spelling of descriptor fd's path through a
+// procfs descriptor table that exists here: /proc/self/fd/N, /proc/<pid>/fd/N,
+// /proc/thread-self/fd/N and /proc/<pid>/task/<tid>/fd/N. It returns none
+// where there is no procfs.
+func procDescriptorPaths(t *testing.T, fd uintptr) []string {
+	t.Helper()
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		return nil
+	}
+	n := fmt.Sprint(fd)
+	paths := []string{
+		filepath.Join("/proc/self/fd", n),
+		filepath.Join("/proc", strconv.Itoa(os.Getpid()), "fd", n),
+	}
+	thread, err := filepath.EvalSymlinks("/proc/thread-self")
+	if err != nil {
+		return paths
+	}
+	return append(paths, filepath.Join("/proc/thread-self/fd", n), filepath.Join(thread, "fd", n))
+}
+
+// TestWriteFile_DescriptorPathContinuesItsStream pins the descriptor rule
+// where it is needed: /dev/fd/N stats as whatever the descriptor holds — a
+// regular file here, as /dev/stdout does under a shell redirect — and the bytes
+// must continue that stream, in the file the descriptor holds, after what it
+// already wrote, under each spelling [heldDescriptor] returns.
 func TestWriteFile_DescriptorPathContinuesItsStream(t *testing.T) {
 	t.Parallel()
-
-	f, path := heldDescriptorPath(t)
-	before, err := os.Stat(f.Name())
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-
-	if err := WriteFile(path, []byte(targetPayload)); err != nil {
-		t.Fatalf("WriteFile(%s): %v", path, err)
-	}
-	after, err := os.Stat(f.Name())
-	if err != nil {
-		t.Fatalf("stat after: %v", err)
-	}
-	if !os.SameFile(before, after) {
-		t.Error("the file the descriptor holds was replaced, so the descriptor now names a file no path reaches")
-	}
-	if got, _ := os.ReadFile(f.Name()); string(got) != earlierOutput+targetPayload {
-		t.Errorf("the descriptor's file holds %q, want %q: the payload must continue the stream", got, earlierOutput+targetPayload)
+	_, spellings := heldDescriptor(t)
+	for i := range spellings {
+		f, paths := heldDescriptor(t)
+		path := paths[i]
+		before, err := os.Stat(f.Name())
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if err := WriteFile(path, []byte(targetPayload)); err != nil {
+			t.Errorf("WriteFile(%s): %v", path, err)
+			continue
+		}
+		if _, err := f.WriteString("later output\n"); err != nil {
+			t.Fatalf("write later output: %v", err)
+		}
+		after, err := os.Stat(f.Name())
+		if err != nil {
+			t.Fatalf("stat after: %v", err)
+		}
+		if !os.SameFile(before, after) {
+			t.Errorf("WriteFile(%s) replaced the file the descriptor holds, so the descriptor now names a file no path reaches", path)
+		}
+		if got, _ := os.ReadFile(f.Name()); string(got) != earlierOutput+targetPayload+"later output\n" {
+			t.Errorf("after WriteFile(%s) the descriptor's file holds %q, want %q: the payload must continue the stream", path, got, earlierOutput+targetPayload+"later output\n")
+		}
 	}
 }
 
-// TestWriteFileSet_DescriptorPathIsRefused pins the /dev/ rule for a set:
+// TestWriteFileSet_DescriptorPathIsRefused pins the descriptor rule for a set:
 // /dev/fd/N stats as the regular file its descriptor holds, and a rename over
 // that file would leave the descriptor writing to a file no path reaches.
 func TestWriteFileSet_DescriptorPathIsRefused(t *testing.T) {
 	t.Parallel()
-
-	f, path := heldDescriptorPath(t)
-	if err := stageOne(path, targetPayload); !errors.Is(err, errNotReplaceable) {
-		t.Errorf("staging %s: error %v, want %v", path, err, errNotReplaceable)
+	f, spellings := heldDescriptor(t)
+	for _, path := range spellings {
+		if err := stageOne(path, targetPayload); !errors.Is(err, errNotReplaceable) {
+			t.Errorf("staging %s: error %v, want %v", path, err, errNotReplaceable)
+		}
 	}
 	if got, _ := os.ReadFile(f.Name()); string(got) != earlierOutput {
 		t.Errorf("the descriptor's file holds %q after a refused set, want %q", got, earlierOutput)
+	}
+}
+
+// devDirectory returns a new directory under Linux's /dev/shm, a directory in
+// /dev that holds regular files, skipping where /dev/shm is missing or cannot be
+// written.
+func devDirectory(t *testing.T) string {
+	t.Helper()
+	info, err := os.Stat("/dev/shm")
+	if err != nil || !info.IsDir() {
+		t.Skip("this host has no /dev/shm")
+	}
+	dir, err := os.MkdirTemp("/dev/shm", "yammm-test-*") //nolint:usetesting // t.TempDir cannot place a directory under /dev/shm
+	if err != nil {
+		t.Skipf("/dev/shm is not writable here: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(dir); err != nil {
+			t.Errorf("remove %s: %v", dir, err)
+		}
+	})
+	return dir
+}
+
+// TestWriteFile_ARegularFileUnderDevIsReplaced pins that a path under /dev is
+// decided by its file unless it names a descriptor: a regular file there is
+// replaced like any other, and a file that does not exist there is created.
+func TestWriteFile_ARegularFileUnderDevIsReplaced(t *testing.T) {
+	t.Parallel()
+	dir := devDirectory(t)
+	paths := []string{filepath.Join(dir, "new.json")}
+	// "1" and "stdout" are a descriptor's names in another directory.
+	for _, name := range []string{"existing.json", "1", "stdout"} {
+		existing := filepath.Join(dir, name)
+		if err := os.WriteFile(existing, []byte(earlierOutput), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, existing)
+	}
+	for _, path := range paths {
+		if err := WriteFile(path, []byte(targetPayload)); err != nil {
+			t.Errorf("WriteFile(%s): %v", path, err)
+			continue
+		}
+		if got := expectPayload(path); got != "" {
+			t.Error(got)
+		}
+	}
+}
+
+// TestWriteFileSet_WritesIntoADirectoryUnderDev pins the same rule for a set:
+// a directory under /dev that holds regular files takes a set of them.
+func TestWriteFileSet_WritesIntoADirectoryUnderDev(t *testing.T) {
+	t.Parallel()
+	dir := devDirectory(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.csv"), []byte(earlierOutput), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files := []NamedFile{{Name: "a.csv", Data: []byte(targetPayload)}, {Name: "b.csv", Data: []byte(targetPayload)}}
+	if err := WriteFileSet(dir, files); err != nil {
+		t.Fatalf("WriteFileSet(%s): %v", dir, err)
+	}
+	for _, nf := range files {
+		if got := expectPayload(filepath.Join(dir, nf.Name)); got != "" {
+			t.Error(got)
+		}
 	}
 }
 

@@ -1363,6 +1363,12 @@ Measured against `v0.21.0` through binaries built from its tree and from the can
 - **Additive — `gogen.CheckPackageName`**, the rule `Marshal` applies to `WithPackageName`, for a caller that checks a name before it loads a schema. `gen --to go --package <name>` judges the name with it before the load, so a bad name exits 2 whatever the schema holds; `v0.21.0` refused a schema that did not load at 1 before it judged the name, and a bad name after a load at 3.
 - **Consumer impact:** rdata calls `snapshot.HeaderOnlyRead` at five sites and gates each call on `HasErrors`, which counts a Fatal, matching no code; its hooks run `yammm fmt` and `yammm validate` on clean paths, which exit 0 as before, and it passes no `--format json`.
 
+### Unit 8 — only a descriptor path is written through by its name
+
+- **Behaviour — `/dev/stdout`, `/dev/stderr` and `/dev/fd/N` are written through by their name; every other path under `/dev/` is decided by the file it reaches.** A regular file there, as under Linux's `/dev/shm`, is replaced like any other and created when it does not exist, where the rule before this group appended to it and refused a new one at exit 3; `--output-dir` puts a set of files in a directory there. A FIFO or a device, such as `/dev/null`, is still written through. Against `v0.21.0`, which created such a file and truncated one that exists, the move is the one every regular file takes: it is staged beside the file and renamed over it.
+- **Behaviour — a descriptor path is recognised by the directory the kernel reaches, not by its spelling.** On Linux `/dev/fd` links to `/proc/self/fd`, and every descriptor table procfs holds counts as `/dev/fd`, so `/proc/self/fd/N`, `/proc/thread-self/fd/N`, `/proc/<pid>/fd/N`, `/proc/<pid>/task/<tid>/fd/N` and `fd/N` under a link to `/dev` are written through and appended to. The rule before this group replaced the file such a path's descriptor held, so behind `>> log` the log lost its history and the command's later output reached a file no path names, and it refused a descriptor holding a pipe at exit 3 (`stage replacement: … no such file or directory`); `v0.21.0` truncated a regular file there and wrote into a pipe. `stdout` or `stderr` under a link to `/dev` is written through, as before.
+- **Consumer impact:** none. rdata writes no file under `/dev/` or `/proc/`.
+
 ### Unit 6 — every exit code that moves against `v0.21.0`
 
 Measured through binaries built from `v0.21.0`'s tree and from the candidate,
@@ -1377,7 +1383,7 @@ one probe per row.
 | `yammm snapshot <unknown>` | 0, help | 2 | `unknown command "…" for "yammm snapshot"` |
 | `fmt --format bogus` | 0, the flag ignored | 2 | `invalid output format "bogus"` |
 | a missing schema path on `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j indexes` or `neo4j diff` | 1 | 3 | an input that cannot be read is a runtime failure, not an invalid document |
-| an empty or non-UTF-8 schema path on any command that loads one (unit 8) | 1 | 2 | refused before any lookup, naming `location.ErrEmptyPath` or `location.ErrInvalidUTF8Path` |
+| an empty or non-UTF-8 schema path on any command that loads one (unit 8) | 1; on Linux a non-UTF-8 file that exists was loaded and the command went on, exiting 0 where nothing else failed | 2 | refused before any lookup, naming `location.ErrEmptyPath` or `location.ErrInvalidUTF8Path` |
 | an empty path as `export`'s data operand, `snapshot info`'s file (with or without `--header-only`), `snapshot update-metadata`'s file or `snapshot verify`'s snapshot (unit 8) | 3 | 2 | refused before any lookup, naming `location.ErrEmptyPath` |
 | `fmt` on a missing path whose name is not UTF-8, on macOS (unit 8) | 2 | 3 | the filesystem's answer |
 | `snapshot save --into ""` beside `-o` (unit 8) | 0, the flag ignored | 2 | refused before any lookup, naming `location.ErrEmptyPath` |
@@ -1392,10 +1398,9 @@ one probe per row.
 | `export --to csv` of one type holding a composed child, to stdout, `--output` or `--output-dir` (unit 8) | 0, the children dropped | 1 | the composition named; nothing written |
 | CSV export of two types whose file names differ only in case | 0, one file short | 3 | the two names cannot share one directory |
 | `--output` naming a writable file in a read-only directory | 0, written in place | 3 | the write cannot be staged beside its target |
-| `--output` naming a file that does not exist under `/dev/`, as under Linux's `/dev/shm` | 0, created | 3 | `write …: no such file or directory` |
 | `snapshot update-metadata` on a read-only snapshot | 0, the file replaced | 3 | `write …: permission denied` |
 | `snapshot save --into` a read-only snapshot, writing it | 0, the file replaced | 3 | `write output: write …: permission denied` |
-| `export --to csv --output-dir` where a type's file is a FIFO or a device | 0, written through | 3 | `not a regular file, so a set of files cannot replace it` |
+| `export --to csv --output-dir` where a type's file is a FIFO, a device or a link to a descriptor path such as `/dev/stdout` | 0, written through | 3 | `not a regular file, so a set of files cannot replace it` |
 | `export --to csv --output-dir` where two types' files are links to one file (unit 8) | 0, that file holding the last type's rows | 3 | `… and … name one file, …` |
 | `neo4j constraints` or `indexes` with an empty `--separator` | 0 | 2 | refused before any work |
 | the same with a `--prefix` or `--separator` that composes no Neo4j identifier | 1 | 2 | refused before any work |
@@ -1776,7 +1781,7 @@ byte-identical to the previous commit on all 241 tracked schemas, and outside
 **No exported declaration moves.** Every file the CLI writes to a path the
 operator named — `--output`, `--output-dir`, `-o`, `fmt -w`, `snapshot
 update-metadata` — is written by one rule, which `--output-dir` narrows for a
-FIFO, a device or a path under `/dev/` (below). A `..` in the path is evaluated on
+FIFO, a device or a descriptor path (below). A `..` in the path is evaluated on
 its text (unit 8's path rule group, above), the path's symlinks are followed,
 and then:
 
@@ -1788,8 +1793,12 @@ and then:
   replaced the link with a regular file and left the file it named unchanged,
   for every write command and for `--output-dir`. A dangling symlink creates the
   file it names.
-- **A FIFO, a device or any path under `/dev/` is written through in place,
-  continuing its stream, except as a file of `--output-dir`.** `--output
+- **A FIFO, a device or a descriptor path — `/dev/stdout`, `/dev/stderr` or
+  `/dev/fd/N`, decided by its name in the directory the kernel reaches — is
+  written through in place, continuing its stream, except as a file of
+  `--output-dir`.** Any other path under
+  `/dev/` is decided by the file it reaches (unit 8's descriptor path group,
+  above). `--output
   /dev/stdout` works again, redirected to a file or into a pipe, and a FIFO's
   reader receives the bytes. `--output-dir` puts its files in place together by
   renames, so it refuses such a file at exit 3, where `v0.21.0` wrote through
@@ -1813,10 +1822,11 @@ and then:
   `.yammm-<random>.tmp`, so a basename
   near the filesystem's name limit is written again; the earlier fix pass
   refused a 245-byte name at exit 3.
-- **A file `export --output-dir` creates is owner-only (0600) on Unix**, as a
-  file `--output` creates already was at `v0.21.0`, which created per-type CSV
-  files 0644. Windows honours only a mode's write bit. An existing file keeps
-  its mode.
+- **A file the CLI creates is owner-only (0600) on Unix.** At `v0.21.0`
+  `export --to json`, `gen`, `neo4j introspect` and `snapshot save` created
+  their output file 0600, but `export --to csv` and `--to cypher` created their
+  `--output` file 0644, and `--output-dir` its per-type CSV files 0644. Windows
+  honours only a mode's write bit. An existing file keeps its mode.
 
 **Against `v0.21.0`, a write lands and fails as the bullets above state, and
 these are the moves an operator meets.** `--output`, `-o` without `--into`,
@@ -1826,17 +1836,16 @@ rename: a writable file in a read-only directory is refused at exit 3, where
 contents, where every link saw the new ones. A command that rewrites its own file by rename — `snapshot update-metadata`, and
 `snapshot save` writing its `--into` file — now follows a symlink it replaced
 with a regular file and refuses at exit 3 a read-only file it replaced at exit
-0. A path under `/dev/` is written through and appended to, where `v0.21.0`
-truncated it: behind `/dev/stdout` a `>> log` keeps its history on Linux, a
-regular file that exists there, as under Linux's `/dev/shm`, is appended to
-rather than replaced, and one that does not exist there is refused at exit 3,
-where `v0.21.0` created it. `--output-dir` refuses a FIFO, a device and any path
-under `/dev/` as one of its files, which `v0.21.0` wrote through or created. The
+0. A descriptor path is written through and appended to, where `v0.21.0`
+truncated it on Linux: behind `/dev/stdout` a `>> log` keeps its history there.
+`--output-dir` refuses a FIFO, a device and a descriptor path as one of its
+files, which `v0.21.0` wrote through. The
 moves a `..` after a symbolic link makes, and `--output-dir`'s refusal of two
 type files that reach one file, are unit 8's path rule group's, above. A write that cannot be staged
 beside its target could only truncate the file in place, which an interrupted
 write or a full disk turns into a lost file; `gofmt -w` refuses the same
-target. Omit `--output` to write to stdout. The earlier fix pass's other three
+target. `export`, `gen` and `neo4j introspect` write to stdout when `--output`
+is omitted; `snapshot save` needs `-o` or `--into`. The earlier fix pass's other three
 exit moves are withdrawn: `/dev/stdout` and a 245-byte basename went from 0 to
 3, and a looping symlink from 3 to 0.
 

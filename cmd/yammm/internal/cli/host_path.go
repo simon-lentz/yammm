@@ -4,8 +4,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"path/filepath"
-	"runtime"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/hostpath"
@@ -76,37 +74,4 @@ func renamePathError(err error, path string) error {
 		return &fs.PathError{Op: pe.Op, Path: path, Err: pe.Err}
 	}
 	return err
-}
-
-// kernelText returns p with each ".." taken as the kernel takes it: the part up
-// to its last ".." is resolved on disk and the rest kept as written, and on
-// Windows, whose kernel takes a ".." on the text, p cleaned. p is returned
-// unchanged when it holds no "..", and cleaned when that part cannot be
-// resolved.
-func kernelText(p string) string {
-	if runtime.GOOS == "windows" {
-		return filepath.Clean(p)
-	}
-	last := -1
-	for i := 0; i+2 <= len(p); i++ {
-		if p[i:i+2] == ".." && (i == 0 || os.IsPathSeparator(p[i-1])) && (i+2 == len(p) || os.IsPathSeparator(p[i+2])) {
-			last = i + 2
-		}
-	}
-	if last < 0 {
-		return p
-	}
-	prefix := p[:last]
-	if !filepath.IsAbs(prefix) {
-		wd, err := os.Getwd()
-		if err != nil {
-			return filepath.Clean(p)
-		}
-		prefix = wd + string(filepath.Separator) + prefix
-	}
-	resolved, err := filepath.EvalSymlinks(prefix)
-	if err != nil {
-		return filepath.Clean(p)
-	}
-	return resolved + p[last:]
 }

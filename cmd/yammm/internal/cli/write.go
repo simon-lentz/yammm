@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -42,13 +43,16 @@ type writeTarget struct {
 
 // resolveWriteTarget follows the symlinks of path, which [HostPath] gave, and
 // decides how a write to it lands: an absent or regular file is replaced; a
-// FIFO, a device or a path under /dev/ is written through; anything else is
-// refused. /dev/ is decided by the path, because /dev/stdout stats as whatever
-// its descriptor holds.
+// descriptor path, or any file that is neither regular nor a directory, such as
+// a FIFO or a device, is written through; a directory, a loop of links, a
+// regular file it cannot open for writing and a path it cannot stat or read as
+// a link are refused. A descriptor path is decided by its name, because
+// /dev/stdout stats as whatever its descriptor holds; every other path by the
+// file it reaches.
 func resolveWriteTarget(path string) (writeTarget, error) {
 	resolved := path
 	for hops := 0; ; hops++ {
-		if underDev(resolved) {
+		if descriptorPath(resolved) {
 			return writeTarget{path: path, through: true}, nil
 		}
 		info, err := os.Lstat(resolved)
@@ -85,28 +89,44 @@ func resolveWriteTarget(path string) (writeTarget, error) {
 	}
 }
 
-// underDev reports whether path names something under /dev/: its text, each
-// ".." in it taken as the kernel takes it, or the directory holding it once
-// resolved on disk, which a link to /dev reaches without spelling it.
-func underDev(path string) bool {
-	if abs, err := filepath.Abs(kernelText(path)); err == nil && strings.HasPrefix(abs, "/dev/") {
-		return true
+// descriptorPath reports whether path names /dev/stdout, /dev/stderr or
+// /dev/fd/N, judged by the directory holding it as the kernel reaches it, each
+// link and ".." in it taken on disk: a link to /dev is seen, and on Linux every
+// descriptor table procfs holds counts as /dev/fd. Such a path names an open
+// descriptor's file, which a rename would take away from the descriptor.
+func descriptorPath(path string) bool {
+	// Windows reads "/dev" as a directory of the current drive.
+	if runtime.GOOS == "windows" {
+		return false
 	}
-	dir, err := filepath.EvalSymlinks(hostpath.Parent(path))
-	if err == nil {
-		dir, err = filepath.Abs(dir)
+	dir := hostpath.Parent(path)
+	switch base := filepath.Base(path); {
+	case base == "stdout" || base == "stderr":
+		return sameFile(dir, "/dev")
+	case strings.Trim(base, "0123456789") == "":
+		return sameFile(dir, "/dev/fd") || procDescriptorTable(dir)
 	}
-	return err == nil && (dir == "/dev" || strings.HasPrefix(dir, "/dev/"))
+	return false
 }
 
-// WriteFile writes data to path and never leaves a regular file half-written.
+// sameFile reports whether a and b both stat and name one file.
+func sameFile(a, b string) bool {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	return err == nil && os.SameFile(ai, bi)
+}
+
+// WriteFile writes data to path and never leaves a file it replaces half-written.
 //
 // It writes the file [HostPath] gives for path, the one `yammm check` reads.
 // It follows that path's symlinks, so a link survives and the file it names is
 // written. A regular file, or one that does not exist yet, is replaced: the
 // payload is staged beside it, synced, given its mode and renamed over it. A
-// FIFO, a device or a path under /dev/ is written through, since no rename can
-// stand in for one. Anything else is refused, and every error names path.
+// FIFO, a device, /dev/stdout, /dev/stderr or /dev/fd/N is written through,
+// since no rename can stand in for one. Anything else is refused, and every error names path.
 func WriteFile(path string, data []byte) error {
 	host, err := HostPath(path)
 	var t writeTarget
