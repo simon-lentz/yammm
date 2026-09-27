@@ -372,14 +372,15 @@ func executeCmdCombined(t *testing.T, args ...string) string {
 	return buf.String()
 }
 
-// TestStderrIsOneJSONDocument is the invariant reportSchemaLoad's godoc states
-// and nothing enforced: one invocation renders one result, so under
-// --format json stderr carries exactly one complete JSON document or nothing at
-// all. Two documents concatenated are not parseable by any JSON reader.
+// TestStderrIsOneJSONDocument pins the rule DiagnosticSink.Close states: under
+// --format json stderr carries exactly one complete JSON document. Two
+// documents concatenated fail a reader that parses one document, and an empty
+// stream reads the same for a clean run and a process that died before it
+// rendered.
 //
-// It covers every command in newRootCmd's tree and every failure mode reachable
-// without a database, which is what makes it an invariant rather than a
-// regression test for the paths that happened to be found broken.
+// It runs each command that diagnoses over failure modes reachable without a
+// database, so it pins the rule across the tree rather than on the paths that
+// happened to be found broken.
 func TestStderrIsOneJSONDocument(t *testing.T) {
 	t.Parallel()
 
@@ -433,7 +434,7 @@ func TestStderrIsOneJSONDocument(t *testing.T) {
 			t.Parallel()
 			args := append([]string{"--format", "json"}, strings.Fields(tt.cmd)...)
 			_, _, stderr := executeCmdOutput(t, args...)
-			assertAtMostOneJSONDocument(t, stderr)
+			assertOneJSONDocument(t, stderr)
 		})
 	}
 }
@@ -456,6 +457,9 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 		name string
 		args []string
 	}{
+		{"validate, clean", []string{"validate", "--format", "json", "testdata/valid.yammm"}},
+		{"check, clean", []string{"check", "--format", "json", "testdata/valid.yammm", "testdata/data.json"}},
+		{"fmt --check, clean", []string{"fmt", "--format", "json", "--check", "testdata/valid.yammm"}},
 		{"load, whose pipeline reports a count", []string{
 			"load", "--format", "json", shadowedSchema, "testdata/annotation_shadowed_good.json",
 		}},
@@ -482,7 +486,7 @@ func TestStderrIsOneJSONDocumentOnSuccess(t *testing.T) {
 			if code != cli.ExitOK {
 				t.Fatalf("exit code = %d, want %d; stderr:\n%s", code, cli.ExitOK, stderr)
 			}
-			assertAtMostOneJSONDocument(t, stderr)
+			assertOneJSONDocument(t, stderr)
 		})
 	}
 }
@@ -527,18 +531,15 @@ func TestNonYSExtensionIsADiagnostic(t *testing.T) {
 	}
 }
 
-// assertAtMostOneJSONDocument reports stderr that is neither empty nor exactly
-// one JSON document. Prose beside a document fails the same way a second
-// document does: a machine consumer reads the stream, not the intent.
-func assertAtMostOneJSONDocument(t *testing.T, stderr string) {
+// assertOneJSONDocument reports stderr that is not exactly one complete JSON
+// document. Prose beside a document fails the same way a second document does:
+// a machine consumer reads the stream, not the intent.
+func assertOneJSONDocument(t *testing.T, stderr string) {
 	t.Helper()
-	if strings.TrimSpace(stderr) == "" {
-		return
-	}
 	dec := json.NewDecoder(strings.NewReader(stderr))
 	var doc json.RawMessage
 	if err := dec.Decode(&doc); err != nil {
-		t.Fatalf("stderr is neither empty nor a JSON document: %v\ngot:\n%s", err, stderr)
+		t.Fatalf("stderr is not a JSON document: %v\ngot:\n%q", err, stderr)
 	}
 	if err := dec.Decode(&doc); !errors.Is(err, io.EOF) {
 		t.Errorf("stderr carries more than one JSON document (second decode: %v); got:\n%s", err, stderr)

@@ -7,16 +7,18 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
 )
 
-// ConnectNeo4j creates a new Neo4j driver with basic authentication.
+// ConnectNeo4j creates a new Neo4j driver with basic authentication. A URI the
+// driver refuses before it dials, such as one with an unsupported scheme, is a
+// usage error; a server that cannot be reached is a runtime one.
 func ConnectNeo4j(ctx context.Context, uri, username, password string) (neo4j.Driver, error) {
 	driver, err := neo4j.NewDriver(uri, neo4j.BasicAuth(username, password, ""))
 	if err != nil {
-		return nil, fmt.Errorf("connect to neo4j at %s: %w", uri, err)
+		return nil, Usagef("connect to neo4j at %s: %w", uri, err)
 	}
 
 	if err := driver.VerifyConnectivity(ctx); err != nil {
 		_ = driver.Close(ctx)
-		return nil, fmt.Errorf("verify neo4j connectivity at %s: %w", uri, err)
+		return nil, Runtimef("verify neo4j connectivity at %s: %w", uri, err)
 	}
 
 	return driver, nil

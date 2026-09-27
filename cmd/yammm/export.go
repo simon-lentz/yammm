@@ -2,9 +2,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -58,9 +58,12 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 
 	schemaPath := args[0]
 	dataPath := args[1]
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
+	}
+	if err := cli.CheckOperand("data file", dataPath); err != nil {
+		return err
 	}
 
 	// Load schema
@@ -152,7 +155,7 @@ func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap *graph.Snaps
 func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string) error {
 	data, err := adapterjson.New().MarshalObject(cmd.Context(), snapshot, adapterjson.WithIndent("\t"))
 	if err != nil {
-		return cli.Runtimef("marshal json: %v", err)
+		return writerFailure("marshal json", err)
 	}
 	data = append(data, '\n')
 
@@ -184,7 +187,7 @@ func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Sna
 
 	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
 	if err != nil {
-		return cli.Runtimef("marshal csv: %v", err)
+		return writerFailure("marshal csv", err)
 	}
 
 	var out []byte
@@ -202,7 +205,7 @@ func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.A
 	// writer refuses creates no directory and no file.
 	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
 	if err != nil {
-		return cli.Runtimef("marshal csv: %v", err)
+		return writerFailure("marshal csv", err)
 	}
 	files := make([]cli.NamedFile, 0, len(data))
 	for _, typeName := range slices.Sorted(maps.Keys(data)) {
@@ -214,6 +217,16 @@ func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.A
 
 	sink.Statusf("wrote %d CSV files to %s\n", len(files), outputDir)
 	return nil
+}
+
+// writerFailure reports a writer's error as the exit it earns: a refusal of
+// the data, a value the format cannot represent, exits 1 as any other refusal
+// of the input does, and anything else is a failure outside the input, 3.
+func writerFailure(what string, err error) error {
+	if errors.Is(err, adapterjson.ErrUnrepresentable) || errors.Is(err, csv.ErrUnrepresentable) {
+		return cli.Validationf("%s: %v", what, err)
+	}
+	return cli.Runtimef("%s: %v", what, err)
 }
 
 // exportCypher writes parameterized Cypher statements to the output.
@@ -235,7 +248,7 @@ func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.
 	shapes, result := adapter.ShapeForSchema(cmd.Context(), s)
 	sink.Add(result)
 	if result.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(result)}
 	}
 	sink.Flush()
 
@@ -293,7 +306,7 @@ func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.
 	sink.Add(snapResult)
 	sink.Flush()
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
 	}
 
 	return writeExport(cmd, sink, snap, s, target, outputPath, outputDir)

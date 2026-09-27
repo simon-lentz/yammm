@@ -70,3 +70,23 @@ func TestMarshal_DerivedPackageNameIsNeverMain(t *testing.T) {
 		t.Errorf("a schema named Main does not derive package main_:\n%s", got[:min(len(got), 200)])
 	}
 }
+
+// TestCheckPackageName_IsMarshalsRule pins that CheckPackageName answers each
+// name in its table as Marshal answers it through WithPackageName. The empty
+// name is not among them: WithPackageName("") asks for the derived name, and
+// CheckPackageName refuses it as no name at all.
+func TestCheckPackageName_IsMarshalsRule(t *testing.T) {
+	s := loadSchema(t, "scalars")
+	for _, name := range []string{"my-model", "type", "2models", "_", "go.pkg", "a b", "main", "init", "gen", "ñame", "_x", "string"} {
+		t.Run(name, func(t *testing.T) {
+			_, marshalErr := gogen.Marshal(s, gogen.WithPackageName(name))
+			checkErr := gogen.CheckPackageName(name)
+			if errors.Is(checkErr, gogen.ErrInvalidPackageName) != errors.Is(marshalErr, gogen.ErrInvalidPackageName) {
+				t.Errorf("CheckPackageName(%q) = %v, but Marshal returns %v", name, checkErr, marshalErr)
+			}
+			if checkErr != nil && !errors.Is(checkErr, gogen.ErrInvalidPackageName) {
+				t.Errorf("CheckPackageName(%q) = %v, not marked ErrInvalidPackageName", name, checkErr)
+			}
+		})
+	}
+}

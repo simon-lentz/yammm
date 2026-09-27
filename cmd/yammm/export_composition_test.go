@@ -11,9 +11,10 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
-// A CSV export of a graph holding composed children is refused, as a runtime
-// failure naming the composition, and writes nothing to any destination. It
-// reads run()'s own stderr through runCLI, so it does not run in parallel.
+// A CSV export of a graph holding composed children is refused, as a refusal
+// of the data (exit 1) naming the composition, and writes nothing to any
+// destination. It reads run()'s own stderr through runCLI, so it does not run
+// in parallel.
 func TestExport_CSVRefusesComposedChildrenAndWritesNothing(t *testing.T) {
 	dir := t.TempDir()
 	schemaPath := filepath.Join(dir, "orders.yammm")
@@ -52,8 +53,8 @@ part type Line {
 			out := t.TempDir()
 			args := append([]string{"export", "--to", "csv"}, c.args(out)...)
 			code, stdout, stderr := runCLI(t, append(args, schemaPath, dataPath)...)
-			if code != cli.ExitRuntime {
-				t.Errorf("exit %d, want %d", code, cli.ExitRuntime)
+			if code != cli.ExitValidation {
+				t.Errorf("exit %d, want %d", code, cli.ExitValidation)
 			}
 			if !strings.Contains(stderr, `composition "LINES"`) {
 				t.Errorf("stderr does not name the composition: %q", stderr)
@@ -112,8 +113,8 @@ func TestExport_CSVRefusalLeavesNoDirectoryHoweverTheOutputDirIsSpelled(t *testi
 			}
 			before := listTree(t, out)
 			code, _, stderr := runCLI(t, "export", "--to", "csv", "--output-dir", out+sep+c.rel, schemaPath, dataPath)
-			if code != cli.ExitRuntime {
-				t.Errorf("exit %d, want %d: %s", code, cli.ExitRuntime, stderr)
+			if code != cli.ExitValidation {
+				t.Errorf("exit %d, want %d: %s", code, cli.ExitValidation, stderr)
 			}
 			if after := listTree(t, out); !slices.Equal(after, before) {
 				t.Errorf("a refused export changed the tree:\nbefore %q\nafter  %q", before, after)

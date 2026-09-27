@@ -48,12 +48,6 @@ func goPackageName(name string) string {
 	return out
 }
 
-// validPackageName reports whether name can head a package clause: a Go
-// identifier that is not a keyword and not the blank identifier.
-func validPackageName(name string) bool {
-	return token.IsIdentifier(name) && name != "_"
-}
-
 // nameTable holds the Go names of every top-level declaration, all in the one
 // package-block namespace that taken records. It keeps the initialism set its
 // names were derived with, so every later derivation uses the same set.

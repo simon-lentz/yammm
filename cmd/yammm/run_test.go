@@ -167,16 +167,15 @@ func TestRun_EveryFailurePrints(t *testing.T) {
 	}
 }
 
-// TestRun_UnclassifiedErrorExitsUsage pins run()'s fallback. A bad --format is
-// a plain error carrying no exit code, so it exercises the arm a mutation of
-// the fallback constant changes.
-func TestRun_UnclassifiedErrorExitsUsage(t *testing.T) {
+// TestRun_ABadFormatFlagExitsUsage pins that a --format value the CLI does not
+// know is refused as a usage error, through run(), naming the flag's value.
+func TestRun_ABadFormatFlagExitsUsage(t *testing.T) {
 	code, _, errOut := runCLI(t, "validate", "--format", "bogus", "testdata/valid.yammm")
 	if code != cli.ExitUsage {
 		t.Errorf("exit code = %d, want %d", code, cli.ExitUsage)
 	}
-	if !strings.Contains(errOut, "invalid output format") {
-		t.Errorf("stderr does not mention %q:\n%s", "invalid output format", errOut)
+	if !strings.Contains(errOut, `invalid output format "bogus"`) {
+		t.Errorf("stderr does not name the value:\n%s", errOut)
 	}
 }
 

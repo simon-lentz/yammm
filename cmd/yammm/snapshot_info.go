@@ -36,14 +36,21 @@ func newSnapshotInfoCmd() *cobra.Command {
 }
 
 func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
-	if dirPath, _ := cmd.Flags().GetString("dir"); dirPath != "" {
+	if cmd.Flags().Changed("dir") {
+		dirPath, _ := cmd.Flags().GetString("dir")
 		if len(args) > 0 {
 			return cli.Usagef("--dir is mutually exclusive with a positional file argument")
+		}
+		if err := cli.CheckOperand("snapshot directory", dirPath); err != nil {
+			return err
 		}
 		return runSnapshotInfoDir(cmd, sink, dirPath)
 	}
 	if len(args) == 0 {
 		return cli.Usagef("either --dir or a positional .ys file is required")
+	}
+	if err := cli.CheckOperand("snapshot file", args[0]); err != nil {
+		return err
 	}
 
 	if headerOnly, _ := cmd.Flags().GetBool("header-only"); headerOnly {
@@ -56,7 +63,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		header, result := snapshot.HeaderOnlyRead(cmd.Context(), f)
 		sink.Add(result)
 		if result.HasErrors() {
-			return &cli.ExitError{Code: cli.ExitValidation}
+			return &cli.ExitError{Code: cli.ExitForResult(result)}
 		}
 
 		sink.Flush()
@@ -82,7 +89,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	info, result := snapshot.Info(cmd.Context(), data)
 	sink.Add(result)
 	if result.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(result)}
 	}
 
 	sink.Flush()
@@ -362,7 +369,7 @@ func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath st
 	entries, result := snapshot.ScanDirSlice(cmd.Context(), host)
 	sink.Add(result)
 	if result.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return &cli.ExitError{Code: cli.ExitForResult(result)}
 	}
 
 	sink.Flush()
@@ -388,22 +395,18 @@ func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath st
 //
 // ScanDirSlice's own result covers reading the directory, not reading the files
 // in it, so gating on that alone exits 0 over a directory whose every entry is
-// malformed — while the same file named on its own exits 1. The entry's own
-// result decides, so an I/O failure and a malformed file keep the codes they
-// have everywhere else.
+// malformed — while the same file named on its own exits 1. The entries'
+// results decide together, so an I/O failure outranks a malformed file as it
+// does everywhere else.
 func dirEntriesExit(entries []snapshot.ScanEntry) error {
-	worst := cli.ExitOK
+	results := make([]diag.Result, 0, len(entries))
 	for _, entry := range entries {
-		if code := cli.ExitForResult(entry.Result); code != cli.ExitOK {
-			if worst == cli.ExitOK || code == cli.ExitRuntime {
-				worst = code
-			}
-		}
+		results = append(results, entry.Result)
 	}
-	if worst == cli.ExitOK {
-		return nil
+	if code := cli.ExitForResult(cli.MergeResults(results...)); code != cli.ExitOK {
+		return &cli.ExitError{Code: code}
 	}
-	return &cli.ExitError{Code: worst}
+	return nil
 }
 
 func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {

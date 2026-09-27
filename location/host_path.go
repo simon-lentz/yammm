@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"syscall"
 	"unicode/utf8"
 )
 
@@ -72,9 +73,10 @@ func walkHostPath(p string, requireExist bool) (string, error) {
 		info, err := os.Stat(current)
 		if err == nil {
 			// Windows reports a path under a regular file absent rather than
-			// ENOTDIR, so this is where its half of that refusal lands.
+			// ENOTDIR, so this is where its half of that refusal lands, as the
+			// same path error the Unix kernel returns.
 			if len(missing) > 0 && !info.IsDir() {
-				return "", fmt.Errorf("resolve %q: %q is not a directory", p, current)
+				return "", fmt.Errorf("resolve %q: %w", p, &fs.PathError{Op: "stat", Path: current, Err: syscall.ENOTDIR})
 			}
 			spelled, serr := spellOnDisk(current)
 			if serr == nil {

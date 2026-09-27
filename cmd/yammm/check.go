@@ -1,8 +1,6 @@
 package main
 
 import (
-	"path/filepath"
-
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
@@ -34,9 +32,9 @@ func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error
 		return err
 	}
 
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
 	}
 
 	// Load schema

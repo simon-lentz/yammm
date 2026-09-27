@@ -35,9 +35,9 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 	if err != nil {
 		return err
 	}
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
 	}
 
 	// Load schema

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,7 +62,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// Parse metadata key=value pairs.
 	metadata, err := parseMetadata(metadataRaw)
 	if err != nil {
-		return cli.Usagef("%v", err)
+		return err
 	}
 
 	schemaPath := args[0]
@@ -72,9 +71,15 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return err
 	}
 
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
+	}
+	// Judged when given, as an empty value is: it names no file either.
+	if cmd.Flags().Changed("into") {
+		if err := cli.CheckOperand("snapshot file", intoPath); err != nil {
+			return err
+		}
 	}
 
 	// Load schema.
@@ -87,10 +92,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return err
 	}
 
-	// Load existing snapshot if --into is set. A warning here (an unsupported
-	// hash algorithm, say) means the imported snapshot's integrity was not fully
-	// verified, and it reaches the operator whether or not this command gets as
-	// far as writing anything.
+	// Load existing snapshot if --into is set. A warning the load raises (a
+	// provenance path that falls back, say) reaches the operator whether or not
+	// this command gets as far as writing anything.
 	var g *graph.Graph
 	var imported *snapshot.HeaderInfo
 	if intoPath != "" {
@@ -100,7 +104,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		}
 		sink.Add(loadResult)
 		if loadResult.HasErrors() {
-			return &cli.ExitError{Code: cli.ExitValidation}
+			return &cli.ExitError{Code: cli.ExitForResult(loadResult)}
 		}
 		var importResult diag.Result
 		g, importResult = graph.NewFromSnapshot(s, snap)
@@ -141,12 +145,12 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		opts = append(opts, snapshot.WithMetadata(merged))
 	}
 
-	// Marshal reports a failure as an Error and a value it could not put on the
-	// wire as a Warning; both are diagnostics, so both reach the sink.
+	// Marshal reports a failure, a value it could not put on the wire included,
+	// as a diagnostic, so it reaches the sink and the exit rule decides.
 	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
 	sink.Add(marshalResult)
 	if marshalResult.Err() != nil {
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return &cli.ExitError{Code: cli.ExitForResult(marshalResult)}
 	}
 
 	// One primitive whether or not --into names the same file, so the write is
@@ -209,10 +213,10 @@ func parseMetadata(raw []string) (map[string]string, error) {
 	for _, kv := range raw {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok {
-			return nil, fmt.Errorf("invalid metadata %q: expected key=value format", kv)
+			return nil, cli.Usagef("invalid metadata %q: expected key=value format", kv)
 		}
 		if k == "" {
-			return nil, fmt.Errorf("invalid metadata %q: key must not be empty", kv)
+			return nil, cli.Usagef("invalid metadata %q: key must not be empty", kv)
 		}
 		m[k] = v
 	}

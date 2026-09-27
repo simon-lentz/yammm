@@ -26,8 +26,8 @@ import (
 // wire carries, and nothing deeper is ever written or read.
 const maxComposedDepth = instance.MaxComposedDepth
 
-// streamDecoder is the shared infrastructure for Verify, Load, Info, and
-// HeaderOnlyRead. Byte-based callers set data; reader-based callers set
+// streamDecoder is the shared infrastructure of the package's readers.
+// Byte-based callers set data; reader-based callers set
 // reader and can only invoke decodeHeader, because decodeSections and
 // verifyIntegrity require the full byte slice.
 type streamDecoder struct {
@@ -48,7 +48,7 @@ type streamDecoder struct {
 	// loadCfg holds deserialization options (e.g., skip integrity check).
 	loadCfg loadConfig
 
-	// schema is the provided schema (nil for Info and HeaderOnlyRead).
+	// schema is the provided schema, nil for a reader that validates against none.
 	schema *schema.Schema
 
 	// revalidator is non-nil only when WithRevalidation was passed and a

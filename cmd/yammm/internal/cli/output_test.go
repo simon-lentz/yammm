@@ -30,6 +30,7 @@ func TestParseOutputFormat(t *testing.T) {
 			got, err := ParseOutputFormat(tt.input)
 			if tt.wantErr {
 				require.Error(t, err)
+				assert.Equal(t, ExitUsage, ExitForError(err), "an unknown format is the invocation's mistake")
 				return
 			}
 			require.NoError(t, err)
@@ -49,7 +50,7 @@ func TestExitForResult(t *testing.T) {
 	t.Run("error result", func(t *testing.T) {
 		t.Parallel()
 		c := diag.NewCollectorUnlimited()
-		c.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "test error").Build())
+		c.Collect(diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "test error").Build())
 		assert.Equal(t, ExitValidation, ExitForResult(c.Result()))
 	})
 }

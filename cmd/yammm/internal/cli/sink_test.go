@@ -85,20 +85,27 @@ func TestDiagnosticSink_RendersOneJSONDocument(t *testing.T) {
 	}
 }
 
-// TestDiagnosticSink_EmptyRendersNothing keeps a command that diagnosed nothing
-// silent, which is what lets the wrapper render unconditionally.
-func TestDiagnosticSink_EmptyRendersNothing(t *testing.T) {
+// An empty sink writes nothing as text, and exactly one JSON document holding
+// no issue under --format json, so a JSON consumer parses stderr whatever the
+// run found.
+func TestDiagnosticSink_EmptyRendersNothingAsTextAndOneDocumentAsJSON(t *testing.T) {
 	t.Parallel()
 
-	for _, format := range []OutputFormat{FormatText, FormatJSON} {
-		t.Run(string(format), func(t *testing.T) {
+	for _, c := range []struct {
+		format OutputFormat
+		want   string
+	}{
+		{FormatText, ""},
+		{FormatJSON, "{\"issues\":[]}\n"},
+	} {
+		t.Run(string(c.format), func(t *testing.T) {
 			t.Parallel()
 			var out strings.Builder
-			sink := NewDiagnosticSink(&out, format, true, false)
+			sink := NewDiagnosticSink(&out, c.format, true, false)
 			sink.Add(diag.OK())
 			_ = sink.Close(nil)
-			if out.String() != "" {
-				t.Errorf("an empty sink wrote %q", out.String())
+			if out.String() != c.want {
+				t.Errorf("an empty sink wrote %q, want %q", out.String(), c.want)
 			}
 		})
 	}

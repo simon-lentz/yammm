@@ -25,7 +25,7 @@ func ParseOutputFormat(s string) (OutputFormat, error) {
 	case "json":
 		return FormatJSON, nil
 	default:
-		return "", fmt.Errorf("invalid output format %q: must be \"text\" or \"json\"", s)
+		return "", Usagef("invalid output format %q: must be \"text\" or \"json\"", s)
 	}
 }
 
@@ -67,13 +67,10 @@ func NewRenderer(format OutputFormat, isTTY, noColor bool, provider diag.SourceP
 func RenderResult(w io.Writer, renderer *diag.Renderer, format OutputFormat, result diag.Result) error {
 	switch format {
 	case FormatJSON:
-		// The JSON wire object carries limitReached/droppedCount, so it is
-		// the single truncation surface for JSON: emit it whenever there is
-		// anything to report — any issue at any severity, or a truncation that an
-		// issue-free result would otherwise render as nothing.
-		if result.Len() == 0 && !result.LimitReached() {
-			return nil
-		}
+		// One document for every result, a clean one included, so a consumer
+		// parses unconditionally: an empty stream would read the same for a
+		// clean run and for a process that died before it rendered. The wire
+		// object carries limitReached/droppedCount, the one truncation surface.
 		return writeResultJSON(w, renderer, result)
 	default:
 		// Every retained issue renders, not only failures: a Warning or Info is

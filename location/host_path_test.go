@@ -655,11 +655,13 @@ func TestResolveHostPath_RefusesAPathUnderARegularFile(t *testing.T) {
 	}
 	under := filepath.Join(file, "child.yammm")
 
-	if _, err := ResolveHostPath(under); err == nil {
-		t.Errorf("ResolveHostPath(%q) = nil error; want a refusal", under)
+	// Every host reports it as the Unix kernel does, so a caller tells it from
+	// a missing path by errors.Is.
+	if _, err := ResolveHostPath(under); !errors.Is(err, syscall.ENOTDIR) {
+		t.Errorf("ResolveHostPath(%q) = %v; want an error wrapping ENOTDIR", under, err)
 	}
-	if _, err := NewCanonicalPath(under); err == nil {
-		t.Errorf("NewCanonicalPath(%q) = nil error; want a refusal", under)
+	if _, err := NewCanonicalPath(under); !errors.Is(err, syscall.ENOTDIR) {
+		t.Errorf("NewCanonicalPath(%q) = %v; want an error wrapping ENOTDIR", under, err)
 	}
 }
 

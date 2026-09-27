@@ -261,7 +261,8 @@
 //   - the schema is not source-backed (e.g. built via
 //     [github.com/simon-lentz/yammm/schema.NewBuilder] without retained source);
 //   - the [WithPackageName] value cannot head a package clause
-//     ([ErrInvalidPackageName]);
+//     ([ErrInvalidPackageName]; [CheckPackageName] applies the same rule
+//     before a schema is loaded);
 //   - a source is imported by two paths under two keys, two sources take one
 //     key, a source has no path relative to the root, a LoadString name has
 //     no base, or a key is one the re-load's key rule refuses (see Embedded

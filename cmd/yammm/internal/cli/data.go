@@ -37,7 +37,7 @@ func DetectFormat(path string) (string, error) {
 	case ".csv", ".tsv":
 		return "csv", nil
 	default:
-		return "", fmt.Errorf("cannot detect data format for %q: use --from to specify json or csv", path)
+		return "", Usagef("cannot detect data format for %q: use --from to specify json or csv", path)
 	}
 }
 
@@ -61,9 +61,11 @@ func CSVDelimiter(path string) rune {
 // Returns (T, diag.Result, error) because the error return captures the
 // failures that stop a read — a path that names no file, one that cannot be
 // read — which are distinct from semantic parse issues reported through the
-// diag.Result. A path the resolver refuses is a usage failure and reaches a
-// different exit code from a file that cannot be read; [ExitForError] decides.
-// This is an internal CLI helper, not a public API.
+// diag.Result. The caller refuses an empty path or one that is not valid UTF-8
+// first ([CheckSourceOperand], exit 2), so every error this returns is a path the
+// filesystem answered — one under a regular file, or one that resolves into
+// bytes that are not UTF-8, included — and exits 3. This is an internal CLI
+// helper, not a public API.
 func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.RawInstance, diag.Result, error) {
 	sourceID, hostPath, err := location.ResolveSourcePath(path)
 	if err != nil {
@@ -116,7 +118,7 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 	// uncoerced and refused row by row downstream.
 	schemaType, ok := s.ResolveTypeName(typeName)
 	if !ok {
-		return nil, diag.Result{}, fmt.Errorf("type %q not found in schema", typeName)
+		return nil, diag.Result{}, Usagef("type %q not found in schema", typeName)
 	}
 	raws, result := csv.New(csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path))).ParseTyped(ctx, sourceID, typeName, f, schemaType)
 	return map[string][]instance.RawInstance{typeName: raws}, result, nil

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -35,9 +34,9 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.Diagnostic
 	}
 
 	schemaPath := args[0]
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
 	}
 
 	// Load schema
@@ -56,7 +55,7 @@ func runNeo4jConstraints(cmd *cobra.Command, args []string, sink *cli.Diagnostic
 	sink.Add(constraintResult)
 	sink.Flush()
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
 	}
 
 	// Print each statement

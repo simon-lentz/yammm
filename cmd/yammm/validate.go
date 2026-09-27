@@ -1,8 +1,6 @@
 package main
 
 import (
-	"path/filepath"
-
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
@@ -22,9 +20,9 @@ func newValidateCmd() *cobra.Command {
 
 func runValidate(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	path := args[0]
-	absPath, err := filepath.Abs(path)
+	absPath, err := schemaOperand(path)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", path, err)
+		return err
 	}
 
 	moduleRoot, loadOpts, err := moduleRootOptions(cmd, sink)

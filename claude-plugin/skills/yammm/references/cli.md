@@ -254,7 +254,7 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 | Flag | Description |
 | ---- | ----------- |
 | `--to` | Target: `go`, `jsonschema`, or `md` (required) |
-| `--package` | go target: generated package name (default: derived from schema name). Once the schema loads, a value that is not a Go identifier, or is a keyword or `_`, is a usage error (exit 2) |
+| `--package` | go target: generated package name (default: derived from schema name). A value that is not a Go identifier, or is a keyword or `_`, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
 | `--output` | Output file path (default: stdout) |
 | `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
 | `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes` |
@@ -381,9 +381,9 @@ unbound parameters.
 | Code | Meaning |
 | ---- | ------- |
 | 0 | Success (no errors) |
-| 1 | Errors in input (validation failures, constraint violations) |
-| 2 | Usage error (bad flags, missing arguments) |
-| 3 | Runtime error (connection failure, I/O error) |
+| 1 | Errors in input (validation failures, constraint violations, a value an export format cannot represent) |
+| 2 | Usage error (bad flags, missing arguments, an empty path operand, a schema, data or module-root path that is not valid UTF-8; `export` looks its data operand up first, since it may be a snapshot) |
+| 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, an internal fault, a failure the command did not classify) |
 
 ---
 
@@ -416,8 +416,8 @@ subtype's property re-declaration dropped an inherited `@writeOnce` or `@index`
 annotation. **Do not read a zero exit code as "no diagnostics."** Read the
 output.
 
-With `--format json`, each invocation writes exactly one JSON document to
-stderr, so a warnings-only run now produces a wire object where it previously
-produced nothing. A failure that is not itself a diagnostic — a bad flag, an
+With `--format json`, each command writes exactly one JSON document to stderr,
+a clean run included, so a consumer parses stderr unconditionally. `help`,
+`completion` and `--version` are cobra's own and write no document. A failure that is not itself a diagnostic — a bad flag, an
 unreadable path, a lost connection — is inside that document as an
 `E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code.

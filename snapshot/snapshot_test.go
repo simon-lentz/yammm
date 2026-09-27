@@ -1019,32 +1019,71 @@ type errReader struct{ err error }
 func (er *errReader) Read(_ []byte) (int, error) { return 0, er.err }
 
 func TestHeaderOnlyRead_ReaderErrors(t *testing.T) {
-	// Every reader-error class should surface as E_SNAPSHOT_MALFORMED
-	// on the returned diag.Result, not as a bare error return. The
-	// library's uniform diagnostic surface is load-bearing for
-	// dispatch callers that want one error shape across on-disk and
-	// in-transit truncation.
+	// A reader error surfaces on the returned diag.Result, never as a bare
+	// error return. A truncation is a malformed document whether it happened
+	// on disk or in transit; any other reader error is an I/O failure, which
+	// the CLI exits 3 on where a malformed document exits 1.
 	cases := []struct {
 		name string
 		err  error
+		want diag.Code
 	}{
-		{"io.EOF", io.EOF},
-		{"io.ErrUnexpectedEOF", io.ErrUnexpectedEOF},
-		{"arbitrary I/O error", errors.New("synthetic disk failure")},
+		{"io.EOF", io.EOF, diag.E_SNAPSHOT_MALFORMED},
+		{"io.ErrUnexpectedEOF", io.ErrUnexpectedEOF, diag.E_SNAPSHOT_MALFORMED},
+		{"an error wrapping io.EOF", fmt.Errorf("gz: %w", io.EOF), diag.E_SNAPSHOT_MALFORMED},
+		{"arbitrary I/O error", errors.New("synthetic disk failure"), diag.E_SNAPSHOT_IO},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, result := snapshot.HeaderOnlyRead(context.Background(), &errReader{err: tc.err})
 			require.True(t, result.HasErrors(), "reader error should error")
-			var found bool
+			var issues []diag.Issue
 			for issue := range result.Errors() {
-				if issue.Code() == diag.E_SNAPSHOT_MALFORMED {
-					found = true
-				}
+				issues = append(issues, issue)
 			}
-			assert.True(t, found, "%s should surface as E_SNAPSHOT_MALFORMED", tc.name)
+			require.Len(t, issues, 1, "%s", tc.name)
+			assert.Equal(t, tc.want, issues[0].Code(), "%s", tc.name)
+			if tc.want == diag.E_SNAPSHOT_IO {
+				assert.Equal(t, diag.Fatal, issues[0].Severity(), "an I/O failure is Fatal")
+				assert.Equal(t, "read header: "+tc.err.Error(), issues[0].Message())
+				assert.Contains(t, issues[0].Details(), diag.Detail{Key: diag.DetailKeyDetail, Value: tc.err.Error()})
+			}
 		})
 	}
+}
+
+// bytesThenErrors returns data with the first error, then each later error in
+// turn with no data.
+type bytesThenErrors struct {
+	data []byte
+	errs []error
+}
+
+func (r *bytesThenErrors) Read(p []byte) (int, error) {
+	if len(r.errs) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	err := r.errs[0]
+	r.errs = r.errs[1:]
+	return n, err
+}
+
+// TestHeaderOnlyRead_ReportsTheFirstReaderError pins that the failure reported
+// is the first one the reader returned, a failure returned beside data
+// included, which the JSON decoder itself drops.
+func TestHeaderOnlyRead_ReportsTheFirstReaderError(t *testing.T) {
+	first, second := errors.New("first failure"), errors.New("second failure")
+	r := &bytesThenErrors{data: []byte(`{"yammm_snapshot":`), errs: []error{first, second}}
+	_, result := snapshot.HeaderOnlyRead(context.Background(), r)
+	var got []string
+	for issue := range result.Errors() {
+		if issue.Code() == diag.E_SNAPSHOT_IO {
+			got = append(got, issue.Message())
+		}
+	}
+	assert.Equal(t, []string{"read header: first failure"}, got)
 }
 
 func TestHeaderOnlyRead_MalformedJSON(t *testing.T) {

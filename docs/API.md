@@ -900,7 +900,7 @@ type HeaderInfo struct {
 }
 ```
 
-`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 16 * 1024 * 1024` bytes (16 MiB — headroom for consumers that carry large work-set arrays in header metadata). Larger headers are rejected with an Error-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. Reader errors (`io.EOF`, `io.ErrUnexpectedEOF`, or arbitrary I/O errors) during the header read surface uniformly as `E_SNAPSHOT_MALFORMED` rather than as a bare error return. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
+`HeaderOnlyRead` accepts any `io.Reader` and reads at most `snapshot.MaxHeaderSize = 16 * 1024 * 1024` bytes (16 MiB — headroom for consumers that carry large work-set arrays in header metadata). Larger headers are rejected with an Error-severity `E_SNAPSHOT_MALFORMED` issue whose message begins `header exceeded MaxHeaderSize` — distinguished from generic JSON-parse failures so operators can diagnose the cause. A header cut short (`io.EOF` or `io.ErrUnexpectedEOF` from the reader, or an error wrapping either) surfaces as `E_SNAPSHOT_MALFORMED`, and any other reader error as a Fatal `E_SNAPSHOT_IO` carrying the first such error as a detail, rather than as a bare error return. Context cancellation is checked once at function entry; individual `Read` calls on the passed reader are not cancellable mid-read.
 
 #### SchemaHashMatches — dispatch-site cross-check
 
@@ -1001,7 +1001,7 @@ yammm writes UTC at second precision, so a time given to `WithCreatedAt` does no
 **Error surface, in two categories:**
 
 - The iterator's second yielded value (the `error`) is non-nil ONLY for operation-level failures that end iteration: a dir-open error (`ENOENT`, `EACCES`, `ENOTDIR`, ...) is yielded as a single `(ScanEntry{}, err)` pair wrapping the underlying `os` error; context cancellation observed between files is yielded as `(ScanEntry{}, ctx.Err())`. The zero-value `ScanEntry` signals "no file was reached." Cancellation observed between files takes precedence over any concurrent per-file failure.
-- Per-file failures (corrupt header, per-file `os.Open` / `Read` failure) live on `ScanEntry.Result`; the iterator's error is `nil` for those and iteration continues. A failed `os.Open` surfaces as a Fatal `E_SNAPSHOT_IO`, synthesized by the scan. Everything after the handle exists — a corrupt header, and any read error partway through it — comes from `HeaderOnlyRead` as an Error-severity `E_SNAPSHOT_MALFORMED`; that function never emits `E_SNAPSHOT_IO`.
+- Per-file failures (corrupt header, per-file `os.Open` / `Read` failure) live on `ScanEntry.Result`; the iterator's error is `nil` for those and iteration continues. A failed `os.Open` surfaces as a Fatal `E_SNAPSHOT_IO`, synthesized by the scan. Everything after the handle exists comes from `HeaderOnlyRead`: a corrupt or truncated header is an Error-severity `E_SNAPSHOT_MALFORMED`, and a read that fails with an error that is not and does not wrap `io.EOF` or `io.ErrUnexpectedEOF` is a Fatal `E_SNAPSHOT_IO` carrying the reader's error as a detail.
 
 **Filtering:**
 
@@ -1039,7 +1039,7 @@ for entry, err := range snapshot.ScanDirWith(ctx, dir, recent) {
 
 `ScanDirSlice` materializes the full iteration into a slice plus an outer `diag.Result`. The outer Result surfaces operation-level errors only (dir does not exist → Fatal `E_SNAPSHOT_IO`; context cancellation → Fatal `E_CONTEXT_CANCELLED`); per-file errors remain on each `ScanEntry.Result`. Context cancellation returns *partial* results — the returned slice contains entries processed before cancellation, and callers who want fail-fast-on-cancel check `result.HasFatal()` before consuming the slice. `ScanDirSliceWith` is the same wrapper under the same `ScanOption` values the iterator takes — a filter's rejections are simply absent from the slice and contribute nothing to the outer Result.
 
-**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, file_size, mod_time, header, issues}` JSON array (`mod_time` is RFC 3339 in UTC, empty when the file could not be stat'd). The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
+**CLI integration.** `yammm snapshot info --dir <path>` wraps `ScanDirSlice` to produce a tabular per-file summary (text) or a `[]{name, path, file_size, mod_time, header, diagnostics}` JSON array (`diagnostics` is the entry's result on the diagnostic stream's wire) (`mod_time` is RFC 3339 in UTC, empty when the file could not be stat'd). The flag is mutually exclusive with the positional file argument; single-file mode continues to work unchanged.
 
 ### Metadata Updates
 
@@ -1680,7 +1680,7 @@ data, err := gogen.Marshal(s, gogen.WithPackageName("model"))
 
 | Option | Description |
 | ------ | ----------- |
-| `WithPackageName` | Override the generated package name (default: derived from the schema name; a derived `main` or `init` takes a `_` suffix). The name must be a Go identifier that is not a keyword and not `_`; `Marshal` refuses any other with `ErrInvalidPackageName` |
+| `WithPackageName` | Override the generated package name (default: derived from the schema name; a derived `main` or `init` takes a `_` suffix). The name must be a Go identifier that is not a keyword and not `_`; `Marshal` refuses any other with `ErrInvalidPackageName`, and `CheckPackageName` applies the same rule before a schema is loaded |
 | `WithInitialisms` | Extra acronyms (e.g. `"GUID"`, `"JWT"`) upper-cased wholesale in exported Go identifiers; merged with the default golint set, matched case-insensitively |
 
 `WithInitialisms` is how a downstream generator injects its own domain vocabulary, so domain acronyms live at the call site and never in yammm. gogen's default set is the canonical golint `commonInitialisms` list (`id`→`ID`, `url`→`URL`, `json`→`JSON`, …).
@@ -1748,7 +1748,7 @@ Generated source is run through `go/format` and then type-checked with `go/types
 yammm gen --to go <schema.yammm> [--package <name>] [--output <path>] [--initialisms GUID,JWT] [--module-root <dir>]
 ```
 
-The `gen` command loads the schema (resolving imports), generates Go, and writes it to stdout or the `--output` path. Once the schema loads, a `--package` value `WithPackageName` refuses is a usage error (exit 2).
+The `gen` command loads the schema (resolving imports), generates Go, and writes it to stdout or the `--output` path. A `--package` value `WithPackageName` refuses is a usage error (exit 2), judged by `CheckPackageName` before the schema is loaded.
 
 ## JSON Schema Generation
 

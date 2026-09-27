@@ -1,8 +1,6 @@
 package main
 
 import (
-	"errors"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -101,10 +99,17 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	if err := rejectInapplicableFlags(cmd, target); err != nil {
 		return err
 	}
+	// A flag refused before any lookup is a usage error whatever the schema
+	// holds, so --package is judged before the load, and when given empty too.
+	if pkgName, _ := cmd.Flags().GetString("package"); cmd.Flags().Changed("package") {
+		if err := gogen.CheckPackageName(pkgName); err != nil {
+			return cli.Usagef("invalid --package %q: a Go package name is an identifier that is not a keyword and not \"_\"", pkgName)
+		}
+	}
 
-	absSchemaPath, err := filepath.Abs(args[0])
+	absSchemaPath, err := schemaOperand(args[0])
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", args[0], err)
+		return err
 	}
 
 	moduleRootAbs, loadOpts, err := moduleRootOptions(cmd, sink)
@@ -145,10 +150,6 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 		data, err = markdown.Marshal(s,
 			markdown.WithClassDiagram(!noDiagram),
 			markdown.WithClassMembers(!noMembers))
-	}
-	if errors.Is(err, gogen.ErrInvalidPackageName) {
-		pkgName, _ := cmd.Flags().GetString("package")
-		return cli.Usagef("invalid --package %q: a Go package name is an identifier that is not a keyword and not \"_\"", pkgName)
 	}
 	if err != nil {
 		return cli.Runtimef("generate %s: %v", target, err)

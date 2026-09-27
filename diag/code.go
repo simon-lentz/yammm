@@ -559,11 +559,13 @@ var (
 
 	// --- v0.3.0 additions ---
 
-	// E_SNAPSHOT_IO indicates a filesystem I/O failure during a directory
-	// scan: a directory that fails to read (os.ReadDir, reported by
-	// snapshot.ScanDirSlice) or a file that fails to open (os.Open, on
-	// ScanDir's per-file path). A read error inside a file that opened is
-	// HeaderOnlyRead's Error-severity E_SNAPSHOT_MALFORMED, never this code.
+	// E_SNAPSHOT_IO indicates an I/O failure reading a snapshot: a directory
+	// that fails to read (os.ReadDir, reported by snapshot.ScanDirSlice), a
+	// file that fails to open (os.Open, on ScanDir's per-file path), or a
+	// reader that fails inside snapshot.HeaderOnlyRead with an error that is
+	// not and does not wrap io.EOF or io.ErrUnexpectedEOF. A header that ends
+	// early is HeaderOnlyRead's Error-severity E_SNAPSHOT_MALFORMED, never
+	// this code.
 	// Per-file emissions land on ScanEntry.Result so the iterator
 	// continues to the next file rather than aborting; dir-level
 	// emissions surface on the outer Result returned by ScanDirSlice.

@@ -33,6 +33,18 @@ func WithPackageName(name string) Option {
 	return func(c *config) { c.packageName = name }
 }
 
+// CheckPackageName refuses a package name that is not a Go identifier, is a
+// keyword, or is "_", with an error marked [ErrInvalidPackageName]. It is the
+// rule [Marshal] applies to a [WithPackageName] value, for a caller that checks
+// a name before it loads a schema; the empty name, which WithPackageName reads
+// as no override, it refuses as no name at all.
+func CheckPackageName(name string) error {
+	if !token.IsIdentifier(name) || name == "_" {
+		return fmt.Errorf("%w: WithPackageName(%q) must be a Go identifier that is not a keyword and not \"_\"", ErrInvalidPackageName, name)
+	}
+	return nil
+}
+
 // WithInitialisms registers additional acronyms (e.g. "GUID", "JWT") that the
 // name-mapper upper-cases wholesale in exported Go identifiers. They MERGE with
 // gogen's default golint set (they do not replace it) and are matched
@@ -95,11 +107,10 @@ func newGenerator(s *schema.Schema, opts ...Option) (*generator, error) {
 		o(&cfg)
 	}
 	pkg := cfg.packageName
-	switch {
-	case pkg == "":
+	if pkg == "" {
 		pkg = goPackageName(s.Name())
-	case !validPackageName(pkg):
-		return nil, fmt.Errorf("%w: WithPackageName(%q) must be a Go identifier that is not a keyword and not \"_\"", ErrInvalidPackageName, pkg)
+	} else if err := CheckPackageName(pkg); err != nil {
+		return nil, err
 	}
 	names := buildNameTable(s, mergedInitialisms(cfg.initialisms))
 	keys, err := resolveKeyRoot(s)

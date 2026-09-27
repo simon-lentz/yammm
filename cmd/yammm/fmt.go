@@ -51,6 +51,16 @@ func runFmt(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 		sink.SetSource(nil, wd)
 	}
 
+	// Every operand is judged before any file is formatted, so a refused one
+	// leaves every file as it was; each refusal is named.
+	refusals := make([]error, 0, len(args))
+	for _, path := range args {
+		refusals = append(refusals, cli.CheckOperand("schema file", path))
+	}
+	if err := cli.JoinExitErrors(refusals...); err != nil {
+		return err
+	}
+
 	errs := make([]error, 0, len(args))
 	for _, path := range args {
 		errs = append(errs, fmtPath(cmd, sink, path, write, check))
@@ -70,7 +80,7 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 	if syntaxErr, ok := errors.AsType[*format.SyntaxError](err); ok {
 		if result, ok := syntaxResult(path, syntaxErr.Issue); ok {
 			sink.Add(result)
-			return &cli.ExitError{Code: cli.ExitValidation}
+			return &cli.ExitError{Code: cli.ExitForResult(result)}
 		}
 	}
 	if err != nil {

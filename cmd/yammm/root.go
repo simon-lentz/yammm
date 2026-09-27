@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -17,8 +18,10 @@ func newRootCmd(version string) *cobra.Command {
 Global flags:
   --format    Output format: "text" (default) or "json". It shapes the
               diagnostics every command writes, and the stdout payload of
-              "snapshot info". Under "json" a command writes one JSON
-              document per stream and suppresses its status summary.
+              "snapshot info". Under "json" a command writes exactly one JSON
+              document to stderr, a clean run included, and suppresses its
+              status summary; "snapshot info" writes its payload to stdout.
+              "help", "completion" and --version write no document.
   --no-color  Disable ANSI color in diagnostic output.
 
 Data commands (check, load, export, snapshot save) also accept:
@@ -54,6 +57,10 @@ Data commands (check, load, export, snapshot save) also accept:
 // command's error after it returns, so no command works under a format the CLI
 // does not know, no return path leaves a diagnostic unwritten, and under
 // --format json the failure is inside the one document.
+//
+// Every error it returns is a [cli.ExitError]: one the command did not classify
+// takes [cli.ExitForError]'s code here, so [run] can tell a command's failure
+// from one cobra raised before any command ran.
 func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		formatStr, _ := cmd.Flags().GetString("format")
@@ -65,7 +72,11 @@ func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) err
 		// The terminal test reads the process stream while the writer is
 		// cobra's, as it was when every render built its own renderer.
 		sink := cli.NewDiagnosticSink(cmd.ErrOrStderr(), format, noColor, cli.IsTTY(os.Stderr.Fd()))
-		return sink.Close(run(cmd, args, sink))
+		err = run(cmd, args, sink)
+		if _, ok := errors.AsType[*cli.ExitError](err); err != nil && !ok {
+			err = &cli.ExitError{Code: cli.ExitForError(err), Err: err}
+		}
+		return sink.Close(err)
 	}
 }
 

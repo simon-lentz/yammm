@@ -306,9 +306,9 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 const MaxHeaderSize = 16 * 1024 * 1024
 
 // HeaderOnlyRead reads header metadata from a .ys stream without
-// materializing the instance body. Equivalent to [HeaderOnly] but accepts
-// an io.Reader, avoiding the caller-side requirement to read the entire
-// document into memory before dispatch.
+// materializing the instance body. It is [HeaderOnly]'s counterpart for an
+// io.Reader, avoiding the caller-side requirement to read the entire document
+// into memory before dispatch; the differences are stated below.
 //
 // HeaderOnlyRead reads at most [MaxHeaderSize] bytes from r. Inputs whose
 // header section exceeds this bound are rejected with E_SNAPSHOT_MALFORMED
@@ -324,12 +324,15 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // sites. Callers that need schema-hash verification inside the read call
 // should materialize the bytes first and use [HeaderOnly] or [Info].
 //
-// Read-error handling: a reader that returns io.EOF,
-// io.ErrUnexpectedEOF, or any other error partway through the header
-// surfaces as E_SNAPSHOT_MALFORMED on the returned diag.Result, not as
-// a bare error return. This preserves the library's uniform diagnostic
-// surface: a truncated header is a malformed document, whether the
-// truncation is on disk or in transit.
+// Read-error handling: a reader that returns io.EOF or
+// io.ErrUnexpectedEOF, or an error wrapping either, partway through the
+// header surfaces as Error-severity
+// E_SNAPSHOT_MALFORMED on the returned diag.Result, not as a bare error
+// return: a truncated header is a malformed document, whether the
+// truncation is on disk or in transit. Any other reader error is an I/O
+// failure and surfaces as Fatal E_SNAPSHOT_IO, the first such error as a
+// detail, so a file that opens and cannot be read is not reported as a
+// document that is wrong.
 //
 // ctx cancellation is checked at function entry; individual Read calls
 // on r are not cancellable mid-read. Readers backed by slow or network
@@ -369,6 +372,13 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
+		if lr.readErr != nil {
+			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO,
+				"read header: "+lr.readErr.Error()).
+				WithDetail(diag.DetailKeyDetail, lr.readErr.Error()).
+				Build())
+			return nil, sd.collector.Result()
+		}
 		msg := err.Error()
 		if lr.exceeded {
 			msg = fmt.Sprintf("header exceeded MaxHeaderSize (%d bytes)", MaxHeaderSize)

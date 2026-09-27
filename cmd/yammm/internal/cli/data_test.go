@@ -36,6 +36,7 @@ func TestDetectFormat(t *testing.T) {
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), "cannot detect data format")
+				assert.Equal(t, ExitUsage, ExitForError(err), "an undetectable format is the invocation's mistake")
 				return
 			}
 			require.NoError(t, err)

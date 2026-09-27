@@ -205,7 +205,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content |
 | `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Error on body-reading surfaces, Warning on header-only reads (v0.15+) |
 | `W_SNAPSHOT_PATH_FALLBACK` | Provenance path could not be parsed (Warning) |
-| `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, or a directory `ScanDirSlice` fails to read (v0.3+) |
+| `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `ScanDirSlice` fails to read (v0.3+), or a reader `snapshot.HeaderOnlyRead` reads failing with an error that is not a truncation, Fatal (from the release after v0.21.0) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
 | `W_SNAPSHOT_VALUE_NONCONFORMING` | A stored `Timestamp`, `Date` or `UUID` value does not conform to its schema constraint; reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |

@@ -80,4 +80,7 @@ func TestLoadAndParseCSV_UnknownTypeIsAnError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `"Nope"`) {
 		t.Fatalf("err = %v, want one naming the type", err)
 	}
+	if code := ExitForError(err); code != ExitUsage {
+		t.Errorf("ExitForError = %d, want %d: an unknown type is the invocation's mistake", code, ExitUsage)
+	}
 }

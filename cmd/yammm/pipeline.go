@@ -2,7 +2,6 @@ package main
 
 import (
 	"slices"
-	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -10,7 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
-	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -32,13 +30,8 @@ func dataInputOf(cmd *cobra.Command, paths ...string) (dataInput, error) {
 	typeColumn, _ := cmd.Flags().GetString("type-column")
 	in := dataInput{paths: paths, formats: make([]string, len(paths)), typeName: typeName, typeColumn: typeColumn}
 	for i, path := range paths {
-		// The two operand refusals location.ResolveSourcePath makes before any
-		// lookup, made here so they precede the command's first read.
-		switch {
-		case path == "":
-			return dataInput{}, cli.Usagef("resolve data file %q: %w", path, location.ErrEmptyPath)
-		case !utf8.ValidString(path):
-			return dataInput{}, cli.Usagef("resolve data file %q: %w: %q", path, location.ErrInvalidUTF8Path, path)
+		if err := cli.CheckSourceOperand("data file", path); err != nil {
+			return dataInput{}, err
 		}
 		format := from
 		if format == "" {
