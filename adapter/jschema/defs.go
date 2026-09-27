@@ -2,9 +2,6 @@ package jschema
 
 import (
 	"fmt"
-	"maps"
-	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -21,21 +18,10 @@ type edgeRec struct {
 	target *schema.Type
 }
 
-// defsTable holds the collision-free $defs keys for every entity that becomes
-// (or may be referenced as) a $defs entry: types, datatypes, and EDGE_
-// association entries, all sharing one $defs namespace. It also records the
-// per-property DataType resolution (property pointer -> datatype $defs key)
-// that schemaForProperty's dtRef callback consumes, and the same resolution
-// for a datatype whose own constraint lists another datatype.
-//
-// Unlike gogen's nameTable there is no identifier casing: keys are raw schema
-// names, unqualified where unique across the closure and
-// "<schemaName>.<Name>"-qualified on collision. A qualified key that is
-// already taken — a type and a datatype sharing a name in one schema (the
-// loader permits this), or same-named entities in two schemas that share a
-// schema name — takes the first free numeric suffix, as an EDGE_ key does.
+// defsTable holds the $defs key of every type, datatype and EDGE_ entry, all
+// in one namespace, and the datatype key each DataType-typed property and
+// each datatype listing another datatype resolves to.
 type defsTable struct {
-	taken     map[string]bool
 	types     map[schema.TypeID]string
 	dataTypes map[*schema.DataType]string
 	dtProps   map[*schema.Property]string
@@ -48,14 +34,12 @@ type defsTable struct {
 	orderedEdges     []edgeRec
 }
 
-// buildDefsTable walks the closure (entry + transitively imported schemas)
-// and assigns every type and datatype a collision-free $defs key, registers
-// one EDGE_ entry per declared association, and resolves every
+// buildDefsTable walks the closure (entry + transitively imported schemas),
+// keys every type, datatype and declared association, and resolves every
 // DataType-typed property (type properties and association edge properties)
 // and every datatype listing another datatype in its declaring schema.
 func buildDefsTable(s *schema.Schema) (*defsTable, error) {
 	table := &defsTable{
-		taken:     map[string]bool{},
 		types:     map[schema.TypeID]string{},
 		dataTypes: map[*schema.DataType]string{},
 		dtProps:   map[*schema.Property]string{},
@@ -68,8 +52,7 @@ func buildDefsTable(s *schema.Schema) (*defsTable, error) {
 		table.orderedTypes = append(table.orderedTypes, sc.TypesSlice()...)
 		table.orderedDataTypes = append(table.orderedDataTypes, sc.DataTypesSlice()...)
 	}
-	table.assignNames()
-	if err := table.registerEdges(); err != nil {
+	if err := table.assignKeys(); err != nil {
 		return nil, err
 	}
 	if err := table.registerDataTypeProps(); err != nil {
@@ -78,93 +61,71 @@ func buildDefsTable(s *schema.Schema) (*defsTable, error) {
 	return table, nil
 }
 
-// assignNames resolves $defs keys for types and datatypes together (they can
-// legally share a name, and both land in the one $defs namespace). Bare name
-// when it has a single claimant across the closure; "<schemaName>.<Name>" for
-// every claimant on collision; a qualified key that is still taken — a type
-// and a datatype of one schema sharing a name — takes the first free numeric
-// suffix, types before datatypes in declaration order. Candidates are taken
-// in sorted order so keys are deterministic.
-func (dt *defsTable) assignNames() {
-	type origin struct {
-		kind       string // "type" | "datatype"
-		schemaName string
-		id         schema.TypeID
-		d          *schema.DataType
-	}
-	byCandidate := map[string][]origin{}
-	for _, sc := range dt.orderedSchemas {
-		for _, t := range sc.TypesSlice() {
-			byCandidate[t.Name()] = append(byCandidate[t.Name()], origin{kind: "type", schemaName: sc.Name(), id: t.ID()})
-		}
-		for _, d := range sc.DataTypesSlice() {
-			byCandidate[d.Name()] = append(byCandidate[d.Name()], origin{kind: "datatype", schemaName: sc.Name(), d: d})
-		}
-	}
-
-	assign := func(o origin, name string) {
-		dt.taken[name] = true
-		if o.kind == "type" {
-			dt.types[o.id] = name
-		} else {
-			dt.dataTypes[o.d] = name
-		}
-	}
-
-	for _, cand := range slices.Sorted(maps.Keys(byCandidate)) {
-		origins := byCandidate[cand]
-		if len(origins) == 1 && !dt.taken[cand] {
-			assign(origins[0], cand)
-			continue
-		}
-		for _, o := range origins {
-			assign(o, dt.reserve(o.schemaName+"."+cand))
-		}
-	}
+// keyClaim is one entity's two spellings and where its assigned key is kept.
+type keyClaim struct {
+	bare, exact string
+	assign      func(key string)
 }
 
-// registerEdges assigns every DECLARED association its
-// "EDGE_<ownerKey>_<field>_<targetKey>" $defs key, built from the
-// collision-resolved keys of the declaring (owner) type and the target,
-// resolved in the DECLARING schema. The key shares the $defs namespace with
-// types, datatypes and other edges, and "_" joins parts that may themselves
-// hold one: type EDGE_Car_owner_Person, or A's b_x association and A_b's x
-// association to one target, spell the same key. Edges register after every
-// type and datatype, so a declared name keeps its key and a taken edge key
-// takes the first free numeric suffix, in closure and declaration order.
-func (dt *defsTable) registerEdges() error {
+// assignKeys keys every type, datatype and declared association by the rule
+// the package doc's "Names, $defs, and Imports" section states. Every bare
+// spelling is counted before any key is assigned, so a key depends on the set
+// of claims and never on their order.
+func (dt *defsTable) assignKeys() error {
+	var claims []keyClaim
 	for _, sc := range dt.orderedSchemas {
 		for _, t := range sc.TypesSlice() {
-			ownerKey, ok := dt.types[t.ID()]
-			if !ok {
-				return fmt.Errorf("jschema: no $defs key for type %q", t.Name())
-			}
+			id := t.ID()
+			claims = append(claims, keyClaim{bare: t.Name(), exact: typeExactKey(sc.Name(), t.Name()), assign: func(key string) { dt.types[id] = key }})
+		}
+		for _, d := range sc.DataTypesSlice() {
+			claims = append(claims, keyClaim{bare: d.Name(), exact: dataTypeExactKey(sc.Name(), d.Name()), assign: func(key string) { dt.dataTypes[d] = key }})
+		}
+	}
+	for _, sc := range dt.orderedSchemas {
+		for _, t := range sc.TypesSlice() {
 			for _, rel := range t.AssociationsSlice() { // OWN associations only
 				target, ok := sc.ResolveType(rel.Target())
 				if !ok {
 					return fmt.Errorf("jschema: association %q target %q unresolved", rel.Name(), rel.Target().String())
 				}
-				targetKey, ok := dt.types[target.ID()]
-				if !ok {
-					return fmt.Errorf("jschema: association %q target type %q has no $defs key", rel.Name(), target.Name())
-				}
-				dt.edges[rel] = dt.reserve("EDGE_" + ownerKey + "_" + rel.FieldName() + "_" + targetKey)
+				claims = append(claims, keyClaim{
+					bare:   "EDGE_" + t.Name() + "_" + rel.FieldName() + "_" + target.Name(),
+					exact:  edgeExactKey(sc.Name(), t.Name(), rel.Name()),
+					assign: func(key string) { dt.edges[rel] = key },
+				})
 				dt.orderedEdges = append(dt.orderedEdges, edgeRec{rel: rel, target: target})
 			}
+		}
+	}
+	claimants := map[string]int{}
+	for _, c := range claims {
+		claimants[c.bare]++
+	}
+	for _, c := range claims {
+		if claimants[c.bare] == 1 {
+			c.assign(c.bare)
+		} else {
+			c.assign(c.exact)
 		}
 	}
 	return nil
 }
 
-// reserve returns the first free key in "<base>", "<base>2", … and records it
-// as taken.
-func (dt *defsTable) reserve(base string) string {
-	key := base
-	for i := 2; dt.taken[key]; i++ {
-		key = base + strconv.Itoa(i)
-	}
-	dt.taken[key] = true
-	return key
+// typeExactKey is a type's exact $defs key. The name after the last "." is an
+// upper-case identifier, never "datatype" or "edge".
+func typeExactKey(schemaName, name string) string {
+	return schemaName + "." + name
+}
+
+// dataTypeExactKey is a datatype's exact $defs key.
+func dataTypeExactKey(schemaName, name string) string {
+	return schemaName + "." + name + ".datatype"
+}
+
+// edgeExactKey is a declared association's exact $defs key.
+func edgeExactKey(schemaName, owner, relation string) string {
+	return schemaName + "." + owner + "." + relation + ".edge"
 }
 
 // registerDataTypeProps resolves the datatype $defs key for every member

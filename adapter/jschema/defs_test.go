@@ -219,11 +219,12 @@ type Region {
 		t.Error("imported common.Region not in orderedTypes")
 	}
 
-	// The edge key uses the qualified target name.
+	// The edge key's bare spelling is built from the names as written, and
+	// nothing else claims it.
 	county := mustType(t, s, "County")
 	edgeName, ok := table.edgeDefName(county.AssociationsSlice()[0])
-	if !ok || edgeName != "EDGE_County_in_region_common.Region" {
-		t.Errorf("edge def name %q ok=%v, want EDGE_County_in_region_common.Region", edgeName, ok)
+	if !ok || edgeName != "EDGE_County_in_region_Region" {
+		t.Errorf("edge def name %q ok=%v, want EDGE_County_in_region_Region", edgeName, ok)
 	}
 }
 
@@ -342,8 +343,8 @@ type Person extends Member {
 }
 
 // A type and a datatype sharing a name in one schema is a legal schema, and
-// qualification cannot separate them, so the datatype takes a suffix.
-func TestBuildDefsTable_SameSchemaTypeAndDataTypeTakeASuffix(t *testing.T) {
+// each takes its exact spelling, which names its kind.
+func TestBuildDefsTable_SameSchemaTypeAndDataTypeTakeTheirExactSpellings(t *testing.T) {
 	src := `schema "geo"
 
 type Region = String [2, 2]
@@ -365,12 +366,14 @@ type Region {
 	if !ok {
 		t.Fatal("no datatype Region")
 	}
-	if got := table.dataTypes[d]; got != "geo.Region2" {
-		t.Errorf("the datatype's key = %q, want geo.Region2", got)
+	if got := table.dataTypes[d]; got != "geo.Region.datatype" {
+		t.Errorf("the datatype's key = %q, want geo.Region.datatype", got)
 	}
 }
 
-func TestBuildDefsTable_EdgeKeyTakenByATypeTakesASuffix(t *testing.T) {
+// A type named as an association's EDGE_ key claims that key too, so both
+// take their exact spellings.
+func TestBuildDefsTable_ATypeAndAnEdgeSharingAKeyBothTakeExact(t *testing.T) {
 	src := `schema "fleet"
 
 type EDGE_Car_owner_Person {
@@ -391,17 +394,17 @@ type Car {
 	if err != nil {
 		t.Fatalf("buildDefsTable: %v", err)
 	}
-	if got := mustDefName(t, table, mustType(t, s, "EDGE_Car_owner_Person")); got != "EDGE_Car_owner_Person" {
-		t.Errorf("the declared type's key = %q, want its own name", got)
+	if got := mustDefName(t, table, mustType(t, s, "EDGE_Car_owner_Person")); got != "fleet.EDGE_Car_owner_Person" {
+		t.Errorf("the declared type's key = %q, want fleet.EDGE_Car_owner_Person", got)
 	}
 	car := mustType(t, s, "Car")
-	if got, _ := table.edgeDefName(car.AssociationsSlice()[0]); got != "EDGE_Car_owner_Person2" {
-		t.Errorf("the edge key = %q, want EDGE_Car_owner_Person2", got)
+	if got, _ := table.edgeDefName(car.AssociationsSlice()[0]); got != "fleet.Car.OWNER.edge" {
+		t.Errorf("the edge key = %q, want fleet.Car.OWNER.edge", got)
 	}
 }
 
 // "_" joins an edge key's parts and may occur inside them, so two declared
-// associations can spell one key.
+// associations can spell one bare key, and each takes its exact spelling.
 func TestMarshal_EdgeKeysSpelledAlikeStayDistinct(t *testing.T) {
 	src := `schema "p"
 
@@ -426,8 +429,8 @@ type A_b {
 	}
 	first, _ := table.edgeDefName(mustType(t, s, "A").AssociationsSlice()[0])
 	second, _ := table.edgeDefName(mustType(t, s, "A_b").AssociationsSlice()[0])
-	if first != "EDGE_A_b_x_C" || second != "EDGE_A_b_x_C2" {
-		t.Errorf("edge keys = %q, %q; want EDGE_A_b_x_C, EDGE_A_b_x_C2", first, second)
+	if first != "p.A.B_X.edge" || second != "p.A_b.X.edge" {
+		t.Errorf("edge keys = %q, %q; want p.A.B_X.edge, p.A_b.X.edge", first, second)
 	}
 	compileEmitted(t, s)
 }

@@ -1724,7 +1724,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 **Schema** — schema compilation errors:
 
 - `E_DUPLICATE_TYPE` — type name conflicts
-- `E_DUPLICATE_SCHEMA` — two schemas in one registry declare one name
+- `E_DUPLICATE_SCHEMA` — two schemas in one registry, or in one import closure, declare one name
 - `E_INHERIT_CYCLE` — circular inheritance chain
 - `E_UNKNOWN_TYPE` — unresolvable type reference
 - `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — property definition errors

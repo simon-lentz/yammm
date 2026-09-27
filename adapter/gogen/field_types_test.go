@@ -127,7 +127,8 @@ type Person {
 // TestMarshal_JSONTagsOmitOnlyWhatIsAbsent pins each field's json option: an
 // optional pointer omits nil, an optional slice omits only nil so a present
 // empty list survives a re-encode, a required property carries none, and every
-// relation omits an unset field, since the parser refuses a null relation.
+// relation omits an unset field, since instance validation refuses a null
+// relation.
 func TestMarshal_JSONTagsOmitOnlyWhatIsAbsent(t *testing.T) {
 	t.Parallel()
 
@@ -185,10 +186,10 @@ func TestMarshal_DocCommentContinuationLinesAreDedented(t *testing.T) {
 	assertHolds(t, deeperFirst, []string{"// Usage\n//\n//\tcar.Drive()\n//\n// drives it.\ntype Car struct {"}, nil)
 }
 
-// TestMarshal_EnumConstNamesAreReserved pins that an enum value constant takes
-// the shared namespace's suffix when its name is a type's, or a sibling
-// value's, so the file declares no name twice.
-func TestMarshal_EnumConstNamesAreReserved(t *testing.T) {
+// TestMarshal_AContestedEnumConstTakesItsExactSpelling pins that an enum value
+// constant whose bare spelling a type's, or a sibling value's, also claims
+// takes its exact spelling, as every other claimant does.
+func TestMarshal_AContestedEnumConstTakesItsExactSpelling(t *testing.T) {
 	t.Parallel()
 
 	got := marshalString(t, `schema "e"
@@ -201,18 +202,19 @@ type TierGold {
 }
 `)
 	assertHolds(t, got, []string{
-		"type TierGold struct",
-		`TierGold2  Tier = "gold"`,
-		`TierGoldVAB  TierGoldV = "a-b"`,
-		`TierGoldVAB2 TierGoldV = "a b"`,
-	}, nil)
+		"type Type_e__TierGold struct",
+		`Const_DataType_e__Tier__gold Tier = "gold"`,
+		`TierSilver                   Tier = "silver"`,
+		`Const_Enum_e__TierGold__v__a_2D_b TierGoldV = "a-b"`,
+		`Const_Enum_e__TierGold__v__a_20_b TierGoldV = "a b"`,
+	}, []string{"TierGold2", "TierGoldVAB"})
 }
 
-// TestMarshal_FieldNamesTheTransformMergesAreSuffixed pins that two members
-// the identifier transform maps to one Go name are separated in one struct,
-// and that a later member whose own name is an earlier one's suffixed name
-// takes the next suffix rather than colliding with it.
-func TestMarshal_FieldNamesTheTransformMergesAreSuffixed(t *testing.T) {
+// TestMarshal_FieldNamesTheTransformMergesTakeTheirWireKeys pins that members
+// the identifier transform maps to one Go name each take "Field_" and their
+// wire key, and that no member takes a name another member's spelling
+// suggests: foo_bar2 keeps its bare FooBar2 beside foo_bar and foo__bar.
+func TestMarshal_FieldNamesTheTransformMergesTakeTheirWireKeys(t *testing.T) {
 	t.Parallel()
 
 	got := marshalString(t, `schema "f"
@@ -227,36 +229,36 @@ type Doc {
 }
 `)
 	assertHolds(t, got, []string{
-		"Foo1     *string `json:\"foo_1,omitempty\"`",
-		"Foo12    *string `json:\"foo1,omitempty\"`",
-		"FooBar   *string `json:\"foo_bar,omitempty\"`",
-		"FooBar2  *string `json:\"foo__bar,omitempty\"`",
-		"FooBar22 *string `json:\"foo_bar2,omitempty\"`",
-	}, nil)
+		"Field_foo_1    *string `json:\"foo_1,omitempty\"`",
+		"Field_foo1     *string `json:\"foo1,omitempty\"`",
+		"Field_foo_bar  *string `json:\"foo_bar,omitempty\"`",
+		"Field_foo__bar *string `json:\"foo__bar,omitempty\"`",
+		"FooBar2        *string `json:\"foo_bar2,omitempty\"`",
+	}, []string{"Foo12", "FooBar22"})
 }
 
-// TestMarshal_EveryReservedNameIsQualifiedAway pins each identifier the
-// generator emits or once emitted: a schema type of that name takes its
-// schema-qualified Go name, never the reserved one.
-func TestMarshal_EveryReservedNameIsQualifiedAway(t *testing.T) {
+// TestMarshal_EveryReservedNameIsAClaimant pins each identifier the generator
+// emits or once emitted but Date, a DSL keyword: a schema type of that name
+// takes its exact spelling, never the reserved one.
+func TestMarshal_EveryReservedNameIsAClaimant(t *testing.T) {
 	t.Parallel()
 
 	for _, name := range []string{"Graph", "SerializedModel", "SerializedModelEntry", "SerializedSources", "SerializedEntry", "SchemaHash"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got := marshalString(t, "schema \"geo\"\n\ntype "+name+" {\n\tid String primary\n}\n")
-			assertHolds(t, got, []string{"type Geo" + name + " struct {\n\tID string"}, []string{"type " + name + " struct {\n\tID string"})
+			assertHolds(t, got, []string{"type Type_geo__" + name + " struct {\n\tID string"}, []string{"type " + name + " struct {\n\tID string"})
 		})
 	}
 }
 
 // TestMarshal_OneSchemaSharingACandidateGenerates pins that two entities of one
-// schema mapping to one Go name generate, the second taking the suffix.
+// schema mapping to one Go name generate, each under its exact spelling.
 func TestMarshal_OneSchemaSharingACandidateGenerates(t *testing.T) {
 	t.Parallel()
 
 	got := marshalString(t, "schema \"geo\"\n\ntype Region = String\n\ntype Region {\n\tid String primary\n\tr Region\n}\n")
-	assertHolds(t, got, []string{"type GeoRegion2 string", "type GeoRegion struct", "R  *GeoRegion2 "}, nil)
+	assertHolds(t, got, []string{"type DataType_geo__Region string", "type Type_geo__Region struct", "R  *DataType_geo__Region "}, nil)
 }
 
 // TestMarshal_WithInitialismsIsScopedToItsCall pins that an injected acronym
@@ -338,10 +340,35 @@ type Person {
 	}, nil)
 }
 
-// TestMarshal_InlineEnumIsNamedForItsOwnersGoName pins that an inline enum's
-// type takes its owner's Go name, which the initialisms shape, not the
-// owner's schema name.
-func TestMarshal_InlineEnumIsNamedForItsOwnersGoName(t *testing.T) {
+// TestMarshal_AnInheritedInlineEnumIsNamedPerOwner pins that an inline enum
+// a type inherits is its own named type, as the declaring type's is, with its
+// own constants.
+func TestMarshal_AnInheritedInlineEnumIsNamedPerOwner(t *testing.T) {
+	t.Parallel()
+
+	got := marshalString(t, `schema "h"
+
+abstract type Base {
+	kind Enum["a", "b"]
+}
+
+type Child extends Base {
+	id String primary
+}
+`)
+	assertHolds(t, got, []string{
+		"type BaseKind string",
+		`BaseKindA BaseKind = "a"`,
+		"type ChildKind string",
+		`ChildKindA ChildKind = "a"`,
+		"Kind *ChildKind ",
+	}, nil)
+}
+
+// TestMarshal_InlineEnumIsNamedForItsOwnersBareSpelling pins that an inline
+// enum's bare spelling starts with its owner's, which the initialisms shape,
+// not with the owner's name as written.
+func TestMarshal_InlineEnumIsNamedForItsOwnersBareSpelling(t *testing.T) {
 	t.Parallel()
 
 	got := marshalString(t, "schema \"k\"\n\ntype Api_key {\n\tid String primary\n\tkind Enum[\"a\", \"b\"]\n}\n")
@@ -382,11 +409,11 @@ type Post {
 	}, []string{"[]string", "[][]string"})
 }
 
-// TestMarshal_ListEnumNamesAreReservedAfterTheLayouts pins that a List inline
-// enum's name and a List DataType's Element name are reserved at emission,
-// after the per-layout Timestamp types, so a layout whose base equals one of
-// them keeps the base and the enum takes the suffix.
-func TestMarshal_ListEnumNamesAreReservedAfterTheLayouts(t *testing.T) {
+// TestMarshal_ListEnumNamesAreClaimantsBesideTheLayouts pins that a List inline
+// enum's name and a List DataType's Element name claim their bare spellings as
+// a per-layout type does, so a layout whose base equals one of them and the
+// enum both take their exact spellings.
+func TestMarshal_ListEnumNamesAreClaimantsBesideTheLayouts(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a List inline enum on a property", func(t *testing.T) {
@@ -400,11 +427,11 @@ type Timestamp2006 {
 }
 `)
 		assertHolds(t, got, []string{
-			"type Timestamp2006X struct{ time.Time }",
-			"type Timestamp2006X2 string",
-			"X  []Timestamp2006X2 `json:\"x,omitzero\"`",
-			"T  *Timestamp2006X   `json:\"t,omitempty\"`",
-		}, []string{"Timestamp_2006_20_X"})
+			"type Timestamp_2006_20_X struct{ time.Time }",
+			"type Enum_p__Timestamp2006__x string",
+			"X  []Enum_p__Timestamp2006__x `json:\"x,omitzero\"`",
+			"T  *Timestamp_2006_20_X       `json:\"t,omitempty\"`",
+		}, []string{"Timestamp2006X "})
 	})
 
 	t.Run("a List DataType's inline element", func(t *testing.T) {
@@ -420,10 +447,10 @@ type Row {
 }
 `)
 		assertHolds(t, got, []string{
-			"type Timestamp2006Element struct{ time.Time }",
-			"type Timestamp2006Element2 string",
-			"type Timestamp2006 []Timestamp2006Element2",
-			"T  *Timestamp2006Element `json:\"t,omitempty\"`",
-		}, []string{"Timestamp_2006_20_Element"})
+			"type Timestamp_2006_20_Element struct{ time.Time }",
+			"type Element_p__Timestamp2006 string",
+			"type Timestamp2006 []Element_p__Timestamp2006",
+			"T  *Timestamp_2006_20_Element `json:\"t,omitempty\"`",
+		}, []string{"Timestamp2006Element "})
 	})
 }

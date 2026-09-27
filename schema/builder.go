@@ -144,7 +144,9 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // # Import Requirements
 //
 // AddImport() requires a non-zero source ID, set with WithSourceID() before or
-// after it. Without one, Build returns E_MISSING_SOURCE_ID.
+// after it. Without one, Build returns E_MISSING_SOURCE_ID. An import closure
+// holds one schema per name, as a loaded one does, so a built schema whose
+// closure holds two schemas of one name is E_DUPLICATE_SCHEMA.
 type Builder struct {
 	name           string
 	sourceID       location.SourceID
@@ -402,6 +404,11 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 
 	// Wire import schema pointers and seal imports
 	b.wireImports(s)
+
+	if issue, clash := closureNameClash(s); clash {
+		collector.Collect(issue)
+		return nil, collector.Result()
+	}
 
 	// Seal the schema to prevent further mutation
 	s.seal()
@@ -998,6 +1005,26 @@ func (b *Builder) wireImports(s *Schema) {
 		}
 		imp.seal()
 	}
+}
+
+// closureNameClash reports two members of s's import closure that declare one
+// schema name, at s's declaration. The loader and the Builder each check the
+// closure they complete: an import can bring members no registry holds.
+func closureNameClash(s *Schema) (diag.Issue, bool) {
+	first := map[string]*Schema{}
+	for _, member := range s.Closure() {
+		prior, taken := first[member.Name()]
+		if !taken {
+			first[member.Name()] = member
+			continue
+		}
+		return diag.NewIssue(diag.Error, diag.E_DUPLICATE_SCHEMA,
+			fmt.Sprintf("schema name %q is declared by %s and by %s in one import closure; a closure holds one schema per name",
+				member.Name(), prior.SourceID(), member.SourceID())).
+			WithSpan(s.Span()).
+			WithDetail(diag.DetailKeySchemaName, member.Name()).Build(), true
+	}
+	return diag.Issue{}, false
 }
 
 // TypeBuilder provides a fluent API for building a type definition.

@@ -128,7 +128,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, or property datatype) |
 | `E_DUPLICATE_TYPE` | Type name defined multiple times |
-| `E_DUPLICATE_SCHEMA` | Two schemas in one registry declare one name |
+| `E_DUPLICATE_SCHEMA` | Two schemas in one registry, or in one import closure, declare one name |
 | `E_RELATION_COLLISION` | A type carries conflicting relation definitions under one name: inherited definitions that differ, or an association and a composition sharing a name |
 | `E_MISSING_SOURCE_ID` | Required SourceID is missing |
 | `E_INVALID_SYNTHETIC_ID` | Synthetic SourceID has invalid format |
@@ -143,7 +143,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation |
 | `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |
 | `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
-| `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so every value stored through it loses its UTC offset, its fractional second, or both (Warning, v0.13+) |
+| `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so a value stored through it can read back as another instant (Warning, v0.13+) |
 
 ### Instance Validation
 

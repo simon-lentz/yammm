@@ -200,7 +200,8 @@ var (
 	// E_DUPLICATE_TYPE indicates a type name is defined multiple times.
 	E_DUPLICATE_TYPE = NewCode("E_DUPLICATE_TYPE", CategorySchema)
 
-	// E_DUPLICATE_SCHEMA indicates two schemas in one registry declare one name.
+	// E_DUPLICATE_SCHEMA indicates two schemas in one registry, or in one
+	// import closure, declare one name.
 	E_DUPLICATE_SCHEMA = NewCode("E_DUPLICATE_SCHEMA", CategorySchema)
 
 	// E_RELATION_COLLISION indicates a type carries conflicting relation

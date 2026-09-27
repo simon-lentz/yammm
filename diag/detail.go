@@ -125,9 +125,8 @@ const (
 	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
 	DetailKeyActualHash = "actual_hash"
 
-	// DetailKeySchemaName is a schema's declared name: from the snapshot
-	// header for E_SNAPSHOT_INCOMPATIBLE_SCHEMA, and the colliding name for
-	// the E_DUPLICATE_SCHEMA two schemas registered under one name draw.
+	// DetailKeySchemaName is a schema's declared name: the snapshot header's for
+	// E_SNAPSHOT_INCOMPATIBLE_SCHEMA, the colliding one for E_DUPLICATE_SCHEMA.
 	DetailKeySchemaName = "schema_name"
 
 	// DetailKeyVersion is the format version number.

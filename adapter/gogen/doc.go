@@ -67,22 +67,14 @@
 // bare time.Time cannot decode. The generated Date and per-layout types are
 // structs embedding time.Time — so every time.Time method is promoted and a
 // value is built as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that
-// speak the stored form. A per-layout type is named "Timestamp" plus the
-// layout's letters and digits (Timestamp20060102150405 for "2006-01-02
-// 15:04:05") when nothing else claims that name. It is claimed when another
-// layout that a position renders as a generated type has the same letters and
-// digits, or when a declared type or data type, a reserved name or an EDGE_
-// struct holds it; an inline enum is named later and yields to the layout. A
-// layout named only by a temporal DataType claims nothing, since that DataType
-// is its own type. A layout whose name is claimed takes "Timestamp_" plus its
-// layout with every other rune written as its hexadecimal code point between
-// underscores (Timestamp_2006_2D_01_2D_02 for "2006-01-02"), a name nothing
-// else can hold.
-// A layout's name therefore never passes to another layout: a schema edit that
-// claims a bare name moves its layout to the exact name, which no other layout
-// can take. A default-layout Timestamp stays time.Time,
-// whose own codec already exchanges RFC 3339 with nanoseconds, the form the
-// library stores. A DataType resolving to any temporal kind is emitted as
+// speak the stored form. A per-layout type's bare spelling is "Timestamp" plus
+// the layout's letters and digits (Timestamp20060102150405 for "2006-01-02
+// 15:04:05"). When another entity claims that spelling, the layout takes its
+// exact spelling (Timestamp_2006_2D_01_2D_02 for "2006-01-02"); see Names. A
+// layout named only by a temporal DataType is no entity, since that DataType
+// is its own type. A default-layout Timestamp stays time.Time, whose own codec
+// already exchanges RFC 3339 with nanoseconds, the form the library stores. A
+// DataType resolving to any temporal kind is emitted as
 // struct{ time.Time } too, with the codec its layout needs.
 //
 // Named types are rendered faithfully rather than collapsed to their primitive: a
@@ -103,13 +95,14 @@
 // library keeps an empty list apart from an absent one; encoding/json reads
 // omitzero from Go 1.24, and a consumer built below it writes a nil slice as
 // null, which adapter/json reads as an absent optional. Every relation field
-// adds ,omitempty, required ones included: the parser refuses a null relation,
-// and a required relation left unset is refused where presence is checked.
+// adds ,omitempty, required ones included: instance validation refuses a null
+// relation, and a required relation left unset is refused where presence is
+// checked.
 //
 // # Associations and the Graph Aggregate
 //
-// Each declared association is emitted as one struct named
-// EDGE_<Owner>_<edge>_<Target>, carrying the target type's primary-key
+// Each declared association is emitted as one struct, whose bare spelling is
+// EDGE_<Owner>_<edge>_<Target> (see Names), carrying the target type's primary-key
 // fields under the parser's reserved "_target_" keys, with the association's
 // own edge properties beside them — the shape adapter/json's parser and
 // writer exchange:
@@ -149,17 +142,70 @@
 // gogen handles the full range of yammm schemas, including schemas with imports.
 // The entire import closure — the entry schema plus every transitively imported
 // schema, walked deterministically and deduped by source — is flattened into one
-// self-contained package. Go names are unqualified where they are unique across the
-// closure and schema-qualified (<Schema><Name>) on collision. Every unique name is
-// assigned before any qualified one, so a qualified name already taken — by another
-// type or data type, or by a reserved name such as SchemaHash — takes a numeric
-// suffix (AFoo2) rather than the other declaration's name.
-// Two entities of one schema that map to one Go name — a type and a data type
-// both named Region, or Url and URL under the initialisms — both qualify, and
-// the numeric suffix separates them in declaration order, types before data
-// types (GeoRegion, GeoRegion2). Inherited properties, associations, and
-// compositions resolve against their declaring schema, so a member inherited
-// from a cross-schema parent maps to the correct type.
+// self-contained package, whose names the Names section states: a name unique in
+// the closure stays bare, and two schemas' Region are Type_geo__Region and
+// Type_common__Region. Inherited properties, associations, and compositions
+// resolve against their declaring schema, so a member inherited from a
+// cross-schema parent maps to the correct type.
+//
+// # Names
+//
+// Every top-level declaration shares one Go package-block namespace: each type,
+// data type, per-layout type, EDGE_ struct, inline enum, List element enum and
+// enum value constant, and the names gogen emits or once emitted (Graph,
+// SchemaHash, SerializedSources, SerializedEntry, SerializedModel,
+// SerializedModelEntry and Date), which are reserved. Each entity has a bare
+// spelling, built from the names as the schema writes them:
+//
+//   - a type or a data type: its name as an exported identifier, under the
+//     initialisms (URL for Url);
+//   - a per-layout type: "Timestamp" and the layout's letters and digits;
+//   - an EDGE_ struct: EDGE_<Owner>_<edge>_<Target>, its owner's and its
+//     target's names as exported identifiers and its relation's field name
+//     (the name in lower case), so Url's and URL's LINK associations share one;
+//   - an inline enum: <Owner><Field>, where <Owner> is its type's bare
+//     spelling or its EDGE_ struct's;
+//   - the inline enum a List data type holds as its element: <DataType>Element;
+//   - an enum value constant: its enum's bare spelling and the value as an
+//     exported identifier ("a-b" gives AB).
+//
+// An entity takes its bare spelling when no other entity and no reserved name
+// has that spelling. Otherwise every claimant takes its exact spelling: a word
+// that names its family, "_", and the parts of its identity joined by "__",
+// each part with every rune other than a letter or a digit written "_<hex>_",
+// its code point in upper-case hexadecimal:
+//
+//	Type_<schema>__<Name>                                   a type
+//	DataType_<schema>__<Name>                               a data type
+//	Timestamp_<layout>                                      a per-layout type
+//	Association_<schema>__<Owner>__<RELATION>               an EDGE_ struct
+//	Enum_<schema>__<Owner>__<field>                         an inline enum on a type
+//	AssociationEnum_<schema>__<Owner>__<RELATION>__<field>  an inline enum on an edge
+//	Element_<schema>__<DataType>                            a List element enum
+//	Const_<its enum's exact spelling>__<value>              an enum value constant
+//
+// So Url and URL in schema geo are Type_geo__Url and Type_geo__URL, a type and a
+// data type Region are Type_geo__Region and DataType_geo__Region, and the values
+// "a-b" and "a_b" of data type Level are Const_DataType_geo__Level__a_2D_b and
+// Const_DataType_geo__Level__a_5F_b.
+//
+// A bare spelling either starts "EDGE_" or holds "_" only after a digit or an
+// "X" and before a digit. An exact spelling holds "_" directly after its word,
+// which ends in another letter and is never "EDGE", so no bare spelling is an
+// exact one. Past that first "_", an exact spelling holds "_" only in a
+// "_<hex>_" group, a "__" join, or, in a value constant's, after its enum's
+// word, which fixes how many parts follow; so it reads back to one family and
+// one identity, and no two entities share one. A name therefore depends on the set of claims, never on
+// declaration or import order, and adding a declaration never gives a name to
+// another entity: it can only move a claimant from its bare spelling to its
+// exact one.
+//
+// The fields of one struct share a namespace of their own. A field's bare
+// spelling is its property's name, or its relation's field name (the
+// relation's name in lower case), as an exported identifier, and
+// an EDGE_ struct's key field is "Target" and the key property's name. Two
+// fields whose bare spellings meet each take "Field_" and their wire key, which
+// their json tag also holds: Field_foo_1 and Field_foo1 for foo_1 and foo1.
 //
 // # Embedded Source
 //
@@ -244,10 +290,13 @@
 //
 //   - [WithPackageName]: override the generated package name. The default is derived
 //     from the schema name, sanitized to a valid lowercase identifier (falling back
-//     to "schema"); a keyword, "main" or "init" takes a "_" suffix, since a file of
-//     declarations alone cannot build as package main and a package named init
-//     cannot be imported without an alias. An explicit name must be a Go identifier
-//     that is not a keyword and not "_", and may be "main" or "init".
+//     to "schema"); a keyword, a predeclared identifier such as nil, string or len,
+//     "main" or "init" takes a "_" suffix, since a file importing a package named
+//     for a predeclared identifier can no longer use that identifier, a file of
+//     declarations alone cannot build as package main, and a package named init
+//     cannot be imported without an alias. An explicit name, the empty one
+//     included, must be a Go identifier that is not a keyword and not "_", and may
+//     be "main", "init" or a predeclared identifier.
 //   - [WithInitialisms]: register extra acronyms (e.g. "GUID", "JWT") the name mapper
 //     upper-cases wholesale in exported identifiers. They merge with gogen's default
 //     golint acronym set and are matched case-insensitively. This is how a downstream

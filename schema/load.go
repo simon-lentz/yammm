@@ -791,6 +791,13 @@ func (l *loader) loadSource(ctx context.Context, sourceID location.SourceID, con
 		imp.seal()
 	}
 
+	// A registry-cached import can bring closure members the registry never
+	// registered, whose names its name check cannot see.
+	if issue, clash := closureNameClash(s); clash {
+		l.collector.Collect(issue)
+		return nil, l.collector.Result(), nil
+	}
+
 	// Schema must be nil if this schema's load contributed any errors —
 	// its own findings or those of imports loaded on its behalf (the
 	// error-delta against the entry snapshot; errors collected before this

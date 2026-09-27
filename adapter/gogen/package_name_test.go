@@ -72,9 +72,8 @@ func TestMarshal_DerivedPackageNameIsNeverMain(t *testing.T) {
 }
 
 // TestCheckPackageName_IsMarshalsRule pins that CheckPackageName answers each
-// name in its table as Marshal answers it through WithPackageName. The empty
-// name is not among them: WithPackageName("") asks for the derived name, and
-// CheckPackageName refuses it as no name at all.
+// name in its table as Marshal answers it through WithPackageName; the empty
+// name's refusal by both is TestMarshal_AnEmptyPackageNameIsRefused.
 func TestCheckPackageName_IsMarshalsRule(t *testing.T) {
 	s := loadSchema(t, "scalars")
 	for _, name := range []string{"my-model", "type", "2models", "_", "go.pkg", "a b", "main", "init", "gen", "ñame", "_x", "string"} {

@@ -8,20 +8,20 @@ type Main struct {
 }
 
 type Left struct {
-	ID     string                          `json:"id"`
-	ToNode *EDGE_Left_to_node_LeftbaseNode `json:"to_node,omitempty"`
+	ID     string                  `json:"id"`
+	ToNode *EDGE_Left_to_node_Node `json:"to_node,omitempty"`
 }
 
 type Right struct {
-	ID     string                            `json:"id"`
-	ToNode *EDGE_Right_to_node_RightbaseNode `json:"to_node,omitempty"`
+	ID     string                   `json:"id"`
+	ToNode *EDGE_Right_to_node_Node `json:"to_node,omitempty"`
 }
 
-type LeftbaseNode struct {
+type Type_leftbase__Node struct {
 	ID string `json:"id"`
 }
 
-type RightbaseNode struct {
+type Type_rightbase__Node struct {
 	ID string `json:"id"`
 }
 
@@ -33,11 +33,11 @@ type EDGE_Main_to_right_Right struct {
 	TargetID string `json:"_target_id"`
 }
 
-type EDGE_Left_to_node_LeftbaseNode struct {
+type EDGE_Left_to_node_Node struct {
 	TargetID string `json:"_target_id"`
 }
 
-type EDGE_Right_to_node_RightbaseNode struct {
+type EDGE_Right_to_node_Node struct {
 	TargetID string `json:"_target_id"`
 }
 

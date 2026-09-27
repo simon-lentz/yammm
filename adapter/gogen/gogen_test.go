@@ -183,11 +183,11 @@ func TestMarshal_CrossSchemaInheritance(t *testing.T) {
 	}
 }
 
-// TestMarshal_CrossSchemaCollision pins the cross-schema name-collision QUALIFICATION
-// SUCCESS path (the complement of the hard-error path in names_test.go): two schemas in
+// TestMarshal_CrossSchemaCollision pins a cross-schema name collision: two schemas in
 // the closure both declare a type Region, so neither can take the bare Go name "Region"
-// — the name table schema-qualifies them (GeoRegion / CommonRegion), and the qualified
-// name flows through to the EDGE_ target and the Graph aggregate.
+// and each takes its exact spelling (Type_geo__Region / Type_common__Region), which the
+// Graph aggregate names. The EDGE_ struct's bare spelling is built from the target's
+// name, and nothing else claims it.
 func TestMarshal_CrossSchemaCollision(t *testing.T) {
 	s := loadSchema(t, "imports/collision_main")
 	got, err := gogen.Marshal(s)
@@ -195,9 +195,10 @@ func TestMarshal_CrossSchemaCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"type GeoRegion struct",                          // entry-schema Region, qualified
-		"type CommonRegion struct",                       // imported Region, qualified
-		"type EDGE_County_in_region_CommonRegion struct", // edge target uses the qualified name
+		"type Type_geo__Region struct",
+		"type Type_common__Region struct",
+		"type EDGE_County_in_region_Region struct",
+		"InRegion *EDGE_County_in_region_Region ",
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q", want)
@@ -205,7 +206,7 @@ func TestMarshal_CrossSchemaCollision(t *testing.T) {
 	}
 	// Neither Region may keep the bare, ambiguous Go name.
 	if bytes.Contains(got, []byte("type Region struct")) {
-		t.Error("a colliding Region kept the bare Go name; expected schema-qualification")
+		t.Error("a colliding Region kept the bare Go name; expected its exact spelling")
 	}
 }
 
@@ -459,10 +460,10 @@ func TestMarshal_TemporalInsideList(t *testing.T) {
 	}
 }
 
-// TestMarshal_LayoutNameReservedBeforeInlineEnum pins the shared namespace's
-// order: a per-layout type takes its name before an inline enum that derives
-// the same one, so the enum takes the suffix.
-func TestMarshal_LayoutNameReservedBeforeInlineEnum(t *testing.T) {
+// TestMarshal_ALayoutAndAnInlineEnumSharingABareSpellingBothTakeExact pins that
+// neither family comes first: a per-layout type and an inline enum deriving one
+// name both take their exact spellings.
+func TestMarshal_ALayoutAndAnInlineEnumSharingABareSpellingBothTakeExact(t *testing.T) {
 	t.Parallel()
 
 	s, res := schema.LoadString(context.Background(), `schema "order"
@@ -481,10 +482,10 @@ type TimestampMon {
 		t.Fatalf("Marshal: %v", err)
 	}
 	for _, want := range []string{
-		"type TimestampMonJan struct{ time.Time }",
-		"type TimestampMonJan2 string",
-		"TimestampMonJan2 `json:\"jan,omitempty\"`",
-		"TimestampMonJan  `json:\"at,omitempty\"`",
+		"type Timestamp_Mon_20_Jan struct{ time.Time }",
+		"type Enum_order__TimestampMon__jan string",
+		"*Enum_order__TimestampMon__jan `json:\"jan,omitempty\"`",
+		"*Timestamp_Mon_20_Jan          `json:\"at,omitempty\"`",
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q:\n%s", want, got)
@@ -635,7 +636,7 @@ var layoutDecl = regexp.MustCompile(`// (\w+) is exchanged as a JSON string in t
 // alias-qualified for a direct import. A type the entry schema reaches only
 // through another import has no such name and no Graph field, though its
 // struct is still emitted; and an entry type that shares its name with one
-// keeps its bare key rather than its schema-qualified Go name.
+// keeps its bare key rather than its exact Go spelling.
 func TestMarshal_GraphKeysAreAddressableTags(t *testing.T) {
 	cases := map[string]struct{ keys, absent, structs []string }{
 		"imports/main": {
@@ -647,13 +648,13 @@ func TestMarshal_GraphKeysAreAddressableTags(t *testing.T) {
 		},
 		"imports/tagform_collision_main": {
 			keys:    []string{"Main", "left.Left", "right.Right"},
-			absent:  []string{"LeftbaseNode", "RightbaseNode"},
-			structs: []string{"LeftbaseNode", "RightbaseNode"},
+			absent:  []string{"Type_leftbase__Node", "Type_rightbase__Node"},
+			structs: []string{"Type_leftbase__Node", "Type_rightbase__Node"},
 		},
 		"imports/entry_shadow_main": {
 			keys:    []string{"Node", "mid.Mid"},
-			absent:  []string{"EmainNode", "EleafNode"},
-			structs: []string{"EmainNode", "EleafNode"},
+			absent:  []string{"Type_emain__Node", "Type_eleaf__Node"},
+			structs: []string{"Type_emain__Node", "Type_eleaf__Node"},
 		},
 		"imports/diamond_main": {
 			keys:    []string{"Top", "left.Left", "right.Right"},
@@ -687,10 +688,10 @@ func TestMarshal_GraphKeysAreAddressableTags(t *testing.T) {
 	}
 }
 
-// TestMarshal_PerLayoutNameYieldsToSchemaType pins the precedence between a
-// schema-declared name and a synthesized per-layout name: the schema keeps
-// the bare identifier and the layout takes its layout-exact name.
-func TestMarshal_PerLayoutNameYieldsToSchemaType(t *testing.T) {
+// TestMarshal_ALayoutAndATypeSharingABareSpellingBothTakeExact pins that a
+// schema-declared type has no precedence over a per-layout type: both take
+// their exact spellings.
+func TestMarshal_ALayoutAndATypeSharingABareSpellingBothTakeExact(t *testing.T) {
 	s, res := schema.LoadString(context.Background(),
 		"schema \"clash\"\n\ntype Timestamp20060102150405 {\n\tid String primary\n\tat Timestamp[\"2006-01-02 15:04:05\"]\n}", "clash.yammm")
 	if res.HasErrors() {
@@ -701,7 +702,7 @@ func TestMarshal_PerLayoutNameYieldsToSchemaType(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"type Timestamp20060102150405 struct {\n",
+		"type Type_clash__Timestamp20060102150405 struct {\n",
 		"type Timestamp_2006_2D_01_2D_02_20_15_3A_04_3A_05 struct{ time.Time }",
 		"At *Timestamp_2006_2D_01_2D_02_20_15_3A_04_3A_05 ",
 	} {
@@ -781,8 +782,8 @@ func TestMarshal_RelativeImport(t *testing.T) {
 }
 
 // TestMarshal_SerializedEntryReserved pins the reservedNames addition: a schema
-// entity named SerializedEntry must be schema-qualified rather than taking the
-// emitted const's Go name, which would type-check-fail the whole file.
+// entity named SerializedEntry takes its exact spelling rather than the emitted
+// const's Go name, which would type-check-fail the whole file.
 func TestMarshal_SerializedEntryReserved(t *testing.T) {
 	t.Parallel()
 
@@ -790,8 +791,8 @@ func TestMarshal_SerializedEntryReserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if !bytes.Contains(got, []byte("type GeoSerializedEntry struct")) {
-		t.Errorf("expected the schema type to be qualified away from the reserved name:\n%s", got)
+	if !bytes.Contains(got, []byte("type Type_geo__SerializedEntry struct")) {
+		t.Errorf("expected the schema type to take its exact spelling:\n%s", got)
 	}
 	if bytes.Contains(got, []byte("type SerializedEntry struct")) {
 		t.Error("the schema type took the reserved SerializedEntry name")

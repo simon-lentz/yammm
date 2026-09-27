@@ -71,7 +71,7 @@
 //	Timestamp["layout"]   →  {"type":"string"} + a description carrying the source form
 //	Vector[N]             →  number array with minItems/maxItems N
 //	List<T>[min, max]     →  {"type":"array","items":<T>} + minItems/maxItems
-//	named DataType        →  {"$ref":"#/$defs/<Name>"}
+//	named DataType        →  {"$ref":"#/$defs/<its $defs key>"}
 //
 // Named DataTypes are rendered faithfully as $refs in every position —
 // scalar property, list element at any depth (List<List<FipsCode>> emits
@@ -96,22 +96,34 @@
 // # Names, $defs, and Imports
 //
 // The full import closure — the entry schema plus every transitively
-// imported schema — is flattened into one self-contained document. $defs
-// keys are raw schema names: unqualified where unique across the closure,
-// <schemaName>.<Name>-qualified on collision; a collision qualification
-// cannot separate (a type and a DataType sharing one name in one schema)
-// gives the later claimant, types before DataTypes in declaration order, the
-// first free numeric suffix (geo.Region2), as adapter/gogen does. A suffixed
-// key can be another entity's natural spelling, which then takes the next
-// suffix in turn. Each declared association gets one
-// EDGE_<ownerKey>_<field>_<targetKey> entry, shared by every subtype that
-// inherits it; when that key is already taken — by a type so named, or by
-// another association whose parts join to the same text — it takes the
-// first free numeric suffix (EDGE_A_b_x_C2). A $ref percent-encodes every
-// key character a URI fragment cannot hold. Abstract types get no $defs entry — associations must target
-// concrete non-part types and compositions must target part types, so
-// nothing can ever $ref an abstract type; its members reach the document
-// flattened into each subtype.
+// imported schema — is flattened into one self-contained document. Types,
+// DataTypes and EDGE_ entries share its one $defs namespace. A type's or a
+// DataType's bare key is its name as written, and a declared association's is
+// EDGE_<Owner>_<field>_<Target>, from its owner's and its target's names; the
+// entry is shared by every subtype that inherits the association. An entity
+// takes its bare key when no other entity claims it. Otherwise every claimant
+// takes its exact key, which names its schema and its kind:
+//
+//	<schemaName>.<Name>                    a type
+//	<schemaName>.<Name>.datatype           a DataType
+//	<schemaName>.<Owner>.<RELATION>.edge   a declared association
+//
+// A bare key holds no ".", so no bare key is an exact one. The names after the
+// schema name are identifiers, which hold no ".", so an exact key read from
+// the right names one kind and one identity; a closure holds one schema per
+// name. A key therefore depends on the set of claims, never on declaration or
+// import order, and adding a declaration never gives a key to another entity.
+// adapter/gogen names Go declarations by the same rule over more claimants:
+// its reserved names, inline enums, element enums, value constants and
+// per-layout types claim too, and it compares Go spellings after the
+// identifier transform. So Url and URL, or a type Graph, keep their bare keys
+// here and take exact Go names there.
+//
+// A $ref percent-encodes every key character a URI fragment cannot hold.
+// Abstract types get no $defs entry — associations must target concrete
+// non-part types and compositions must target part types, so nothing can ever
+// $ref an abstract type; its members reach the document flattened into each
+// subtype.
 //
 // # Fidelity Caveats
 //
@@ -242,8 +254,8 @@
 //     the mapper cannot render, or an emitted document that fails the
 //     self-check (invalid JSON or an unresolvable $ref).
 //
-// No name collision fails: every $defs key that is already taken takes a
-// numeric suffix.
+// No name collision fails: every claimant of a contested key takes its exact
+// key.
 //
 // # Thread Safety
 //
