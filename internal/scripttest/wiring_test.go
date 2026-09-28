@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -650,6 +651,140 @@ func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			f := mermaidJobFindings(tt.wf, tt.src, tt.tags, tt.ignore)
+			if len(f) != 1 || !strings.Contains(f[0], tt.want) {
+				t.Errorf("findings = %q, want one naming %q", f, tt.want)
+			}
+		})
+	}
+}
+
+// uploadArtifactOverwrite is the first major tag of actions/upload-artifact
+// whose release declares the overwrite input, which v4.2.0 added. The check
+// reads a major tag alone, so a pinned release or commit is refused.
+const uploadArtifactOverwrite = 4
+
+// durationsFindings reports each link of the test job's durations chain that
+// does not hold: the test step names a file in TEST_DURATIONS, and a later
+// step of an upload-artifact release that can overwrite uploads that file after
+// a failure too, once per host, replacing an earlier attempt's upload and
+// failing the job when the file is missing.
+func durationsFindings(wf workflow) []string {
+	j, ok := wf.Jobs["test"]
+	if !ok {
+		return []string{"jobs.test is not set"}
+	}
+	at := slices.IndexFunc(j.Steps, func(s step) bool { return s.Run == "scripts/test.sh" })
+	if at < 0 {
+		return []string{"no step of jobs.test runs scripts/test.sh"}
+	}
+	file := j.Steps[at].Env["TEST_DURATIONS"]
+	if file == "" {
+		return []string{"the test step sets no TEST_DURATIONS"}
+	}
+	up := slices.IndexFunc(j.Steps[at+1:], func(s step) bool {
+		return strings.HasPrefix(s.Uses, "actions/upload-artifact@") && fmt.Sprint(s.With["path"]) == file
+	})
+	if up < 0 {
+		return []string{"no step after the test step uploads " + file}
+	}
+	u := j.Steps[at+1+up]
+	var findings []string
+	major, err := strconv.Atoi(strings.TrimPrefix(u.Uses, "actions/upload-artifact@v"))
+	if err != nil || major < uploadArtifactOverwrite {
+		findings = append(findings, fmt.Sprintf("the upload uses %s; overwrite needs actions/upload-artifact@v%d or later", u.Uses, uploadArtifactOverwrite))
+	}
+	if u.ContinueOnError != nil {
+		findings = append(findings, fmt.Sprintf("the upload sets continue-on-error %v, so a missing file passes", u.ContinueOnError))
+	}
+	names := map[string]bool{}
+	for _, c := range j.Strategy.Matrix.combinations() {
+		if c["name"] == "" || names[c["name"]] {
+			findings = append(findings, fmt.Sprintf("the matrix name %q is empty or repeated, so two hosts' uploads collide", c["name"]))
+		}
+		names[c["name"]] = true
+	}
+	if u.If != "${{ !cancelled() }}" {
+		findings = append(findings, fmt.Sprintf("the upload runs if %q; it must run after the tests fail", u.If))
+	}
+	if !strings.Contains(fmt.Sprint(u.With["name"]), "${{ matrix.name }}") {
+		findings = append(findings, "the upload's name does not hold ${{ matrix.name }}, so the hosts' uploads collide")
+	}
+	if u.With["overwrite"] != true {
+		findings = append(findings, "the upload does not set overwrite: true, so a re-run job cannot upload")
+	}
+	if u.With["if-no-files-found"] != "error" {
+		findings = append(findings, "the upload does not set if-no-files-found: error, so a missing file passes")
+	}
+	return findings
+}
+
+// Each host's test job keeps its durations file.
+func TestTestWorkflow_KeepsEachHostsTestDurations(t *testing.T) {
+	t.Parallel()
+	var wf workflow
+	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
+	for _, f := range durationsFindings(wf) {
+		t.Error(f)
+	}
+}
+
+// The check itself, against each way the chain can break.
+func TestDurationsFindings_RefusesEachBrokenLink(t *testing.T) {
+	t.Parallel()
+	const file = "${{ runner.temp }}/test-durations.tsv"
+	upload := func(edit func(s *step)) step {
+		s := step{Uses: "actions/upload-artifact@v7", If: "${{ !cancelled() }}", With: map[string]any{
+			"name": "test-durations-${{ matrix.name }}", "path": file, "overwrite": true, "if-no-files-found": "error",
+		}}
+		if edit != nil {
+			edit(&s)
+		}
+		return s
+	}
+	test := step{Run: "scripts/test.sh", Env: map[string]string{"TEST_DURATIONS": file}}
+	hosts := func(names ...string) job {
+		var j job
+		for _, n := range names {
+			j.Strategy.Matrix.Include = append(j.Strategy.Matrix.Include, map[string]string{"name": n, "os": "os-" + n})
+		}
+		return j
+	}
+	onHosts := func(j job, steps ...step) workflow {
+		j.Steps = steps
+		return workflow{Jobs: map[string]job{"test": j}}
+	}
+	wfWith := func(steps ...step) workflow { return onHosts(hosts("Linux", "Windows"), steps...) }
+	if f := durationsFindings(wfWith(test, upload(nil))); len(f) != 0 {
+		t.Fatalf("a whole chain reports %q", f)
+	}
+	for _, tt := range []struct {
+		name, want string
+		wf         workflow
+	}{
+		{"no job", "is not set", workflow{Jobs: map[string]job{}}},
+		{"no test step", "runs scripts/test.sh", wfWith(upload(nil))},
+		{"no file named", "sets no TEST_DURATIONS", wfWith(step{Run: "scripts/test.sh"}, upload(nil))},
+		{"no upload", "uploads", wfWith(test)},
+		{"an upload before the tests", "uploads", wfWith(upload(nil), test)},
+		{"another file uploaded", "uploads", wfWith(test, upload(func(s *step) { s.With["path"] = "other.tsv" }))},
+		{"another action uploading the file", "uploads", wfWith(test, upload(func(s *step) { s.Uses = "actions/cache@v5" }))},
+		{"an upload skipped on failure", "after the tests fail", wfWith(test, upload(func(s *step) { s.If = "" }))},
+		{"an upload only on success", "after the tests fail", wfWith(test, upload(func(s *step) { s.If = "${{ success() }}" }))},
+		{"one name for every host", "collide", wfWith(test, upload(func(s *step) { s.With["name"] = "test-durations" }))},
+		{"a name per run, not per host", "collide", wfWith(test, upload(func(s *step) { s.With["name"] = "test-durations-${{ github.run_id }}" }))},
+		{"two hosts of one name", "repeated", onHosts(hosts("Linux", "Linux"), test, upload(nil))},
+		{"a host with no name", "empty", onHosts(hosts("Linux", ""), test, upload(nil))},
+		{"no overwrite", "re-run", wfWith(test, upload(func(s *step) { delete(s.With, "overwrite") }))},
+		{"overwrite off", "re-run", wfWith(test, upload(func(s *step) { s.With["overwrite"] = false }))},
+		{"a release with no overwrite", "or later", wfWith(test, upload(func(s *step) { s.Uses = "actions/upload-artifact@v3" }))},
+		{"a missing file passing by default", "missing file", wfWith(test, upload(func(s *step) { delete(s.With, "if-no-files-found") }))},
+		{"a missing file warned of", "missing file", wfWith(test, upload(func(s *step) { s.With["if-no-files-found"] = "warn" }))},
+		{"a missing file ignored", "missing file", wfWith(test, upload(func(s *step) { s.With["if-no-files-found"] = "ignore" }))},
+		{"an upload whose failure passes", "continue-on-error", wfWith(test, upload(func(s *step) { s.ContinueOnError = true }))},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := durationsFindings(tt.wf)
 			if len(f) != 1 || !strings.Contains(f[0], tt.want) {
 				t.Errorf("findings = %q, want one naming %q", f, tt.want)
 			}

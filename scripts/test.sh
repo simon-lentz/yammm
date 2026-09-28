@@ -9,15 +9,17 @@
 # between tests, and -count=1 runs every test rather than replaying a cached pass.
 # -timeout states Go's own default of ten minutes per test binary, so the CI
 # job's timeout can be held above it: a hung binary then prints its stack before
-# the job is killed.
+# the job is killed, and the summary prints that stack.
 #
 # The suite is scripts/packages.sh's. It runs through `go test -json`, and
 # internal/testsummary judges it: every package must report a result, and the
 # summary names each package that ran no test and every skipped test with its
 # reason. A test skipped through raceskip.Skip runs again without -race, and the
-# run fails unless it passes.
+# run fails unless it passes. When TEST_DURATIONS names a file, the summary
+# writes there the seconds of every package and of every test that reported a
+# result in the run under -race, a relative name read from the repository root.
 #
-# Usage: scripts/test.sh
+# Usage: [TEST_DURATIONS=FILE] scripts/test.sh
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -44,7 +46,7 @@ go build -o "${summary}" ./internal/testsummary
 status=0
 set +e
 go test -json -race -shuffle=on -count=1 -timeout=10m "${pkgs[@]}" 2>&1 |
-	"${summary}" -race-skips="${work}/race-skips" "${pkgs[@]}"
+	"${summary}" -race-skips="${work}/race-skips" -durations="${TEST_DURATIONS:-}" "${pkgs[@]}"
 codes=("${PIPESTATUS[@]}")
 set -e
 if [ "${codes[0]}" -ne 0 ] || [ "${codes[1]}" -ne 0 ]; then

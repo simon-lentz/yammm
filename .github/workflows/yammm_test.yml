@@ -99,9 +99,23 @@ jobs:
         # Each host vets its own build; the cross-vet job vets every other
         # target the module's build constraints select.
         run: scripts/vet.sh --host
+      # The durations file holds the seconds of each package and of each test
+      # that reported a result, so a package near its -timeout shows which
+      # tests spend it. It is kept when the tests fail, the run it matters
+      # most for.
       - name: Test
         if: ${{ !cancelled() }}
+        env:
+          TEST_DURATIONS: ${{ runner.temp }}/test-durations.tsv
         run: scripts/test.sh
+      - name: Keep the test durations
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-${{ matrix.name }}
+          path: ${{ runner.temp }}/test-durations.tsv
+          if-no-files-found: error
+          overwrite: true
   # Every target the module's build constraints select, in a job of its own.
   # scripts/vet.sh with no argument type-checks eleven targets where --host
   # checks two: inside a host job that step ran 255 to 382 s against the other

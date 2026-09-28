@@ -231,9 +231,10 @@ func withoutRepositoryVars(t *testing.T, env []string) []string {
 // fixtureEnv keeps a fixture's go commands inside the fixture module and off
 // the network, whatever the enclosing run sets. MUTATE_BASELINE_CACHE is
 // dropped because a fixture runs mutate.sh, which would otherwise read an
-// enclosing mutation run's recorded baseline.
+// enclosing mutation run's recorded baseline, and TEST_DURATIONS because every
+// fixture's test.sh would otherwise write the enclosing run's durations file.
 func fixtureEnv() []string {
-	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "MUTATE_BASELINE_CACHE"}
+	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "MUTATE_BASELINE_CACHE", "TEST_DURATIONS"}
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
 		return slices.ContainsFunc(dropped, func(p string) bool { return strings.EqualFold(p, name) })
