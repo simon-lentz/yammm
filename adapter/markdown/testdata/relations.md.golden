@@ -41,11 +41,11 @@ classDiagram
 
 **Associations**
 
-- `--> OWNER (one)` [Person](#person)
+-   `--> OWNER (one)` [Person](#person)
 
 **Compositions**
 
-- `*-> WHEELS (one:many)` [Wheel](#wheel)
+-   `*-> WHEELS (one:many)` [Wheel](#wheel)
 
 ### Wheel
 

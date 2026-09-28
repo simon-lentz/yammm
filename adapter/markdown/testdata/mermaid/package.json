@@ -1,0 +1,15 @@
+{
+  "name": "yammm-markdown-mermaid-oracle",
+  "private": true,
+  "type": "module",
+  "description": "Parses adapter/markdown's class diagrams with real Mermaid for the mermaid-tagged test.",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "jsdom": "29.1.1",
+    "mermaid10": "npm:mermaid@10.1.0",
+    "mermaid11": "npm:mermaid@11.17.2",
+    "mermaid12": "npm:mermaid@12.0.0"
+  }
+}

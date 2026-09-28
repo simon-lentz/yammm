@@ -2,7 +2,6 @@ package markdown
 
 import (
 	"bytes"
-	"strconv"
 	"testing"
 )
 
@@ -64,7 +63,12 @@ func TestSlug(t *testing.T) {
 	}
 }
 
-func TestEscapeCell(t *testing.T) {
+// TestDescriptionCell pins that a doc comment in a table cell changes only
+// where the table layer reads it: a line break folds to <br>, or to a space
+// inside a code span or raw HTML, a hard-break backslash gives way to the
+// <br>, and a pipe after an even backslash run gains one backslash, so it
+// renders as the doc comment's.
+func TestDescriptionCell(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -80,14 +84,30 @@ func TestEscapeCell(t *testing.T) {
 		{"bare cr", "line1\rline2", "line1<br>line2"},
 		{"pipe and newline", "a|b\nc", `a\|b<br>c`},
 		{"indentation around fold dropped", "line1: \n\tline2 indented", "line1:<br>line2 indented"},
-		{"lone backslash doubled", `a\b`, `a\\b`},
-		{"backslash before pipe keeps odd parity", `a\|b`, `a\\\|b`},
+		{"an author escape stays", `a\*b\*`, `a\*b\*`},
+		{"a lone backslash stays", `a\b`, `a\b`},
+		{"an escaped pipe stays escaped", `a\|b`, `a\|b`},
+		{"a pipe after an escaped backslash is escaped", `a\\|b`, `a\\\|b`},
+		{"a pipe after three backslashes stays", `a\\\|b`, `a\\\|b`},
+		{"leading pipe", "|x", `\|x`},
+		{"a pipe after an escape the run restarts at", `\*x|y`, `\*x\|y`},
+		{"a line-end backslash is the break", "C:\\\nnext", "C:<br>next"},
+		{"an escaped backslash at a line end stays", "C:\\\\\nnext", "C:\\\\<br>next"},
+		{"a code span across a line folds to a space", "a `x\ny` b", "a `x y` b"},
+		{"a code span's line-end backslash stays", "`x\\\ny`", "`x\\ y`"},
+		{"raw HTML across a line folds to a space", "<a\nhref=\"#x\">y</a>", "<a href=\"#x\">y</a>"},
+		{"an HTML block folds to spaces", "<div>\nx\n</div>", "<div> x </div>"},
+		{"a pre element keeps its breaks", "<pre>\na\n  b\n</pre>", "<pre>a<br>  b<br></pre>"},
+		{"a listing element keeps its breaks", "<listing>\na\nb\n</listing>", "<listing>a<br>b<br></listing>"},
+		{"a break after a tag inside pre is kept", "<pre>a<b>\nc</b>\nd</pre>", "<pre>a<b><br>c</b><br>d</pre>"},
+		{"a break after a pre element is white space", "<div><pre>a</pre>\nb\n</div>", "<div><pre>a</pre> b </div>"},
 	}
+	md := newParser()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := escapeCell(tt.in); got != tt.want {
-				t.Errorf("escapeCell(%q) = %q, want %q", tt.in, got, tt.want)
+			if got := descriptionCell(md, tt.in); got != tt.want {
+				t.Errorf("descriptionCell(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -146,6 +166,10 @@ func TestEscapeInline(t *testing.T) {
 		{"a `d`", "a \\`d\\`"},
 		{"*[]<>&~|!#", `\*\[\]\<\>\&\~\|\!\#`},
 		{"a (b) c.d", "a (b) c.d"},
+		{"www.x", "www<!---->.x"},
+		{"xWwW.y", "xWwW<!---->.y"},
+		{"ww.x", "ww.x"},
+		{"a:b@c", "a<!---->:b<!---->@c"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -235,6 +259,10 @@ func TestMermaidID(t *testing.T) {
 		{"a.Z0z", "a_Z0z"},
 		{"Person (R\u00e9gion)", "Person__R_gion_"},
 		{"Person (\u0663\U0001D49C)", "Person_____"},
+		{"Redirection", "Redirec_tion"},
+		{"redirection.Directions", "redirec_tion_Directions"},
+		{"directiondirection", "direc_tiondirec_tion"},
+		{"Direction", "Direction"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -246,26 +274,23 @@ func TestMermaidID(t *testing.T) {
 	}
 }
 
-func TestWriteTableHeader(t *testing.T) {
+func TestNewTable(t *testing.T) {
 	t.Parallel()
 
-	var b bytes.Buffer
 	var g generator
-	g.newTable(&b, "Property", "Type", "Modifiers", "Description")
-	want := "| Property | Type | Modifiers | Description |\n| --- | --- | --- | --- |\n"
-	if got := b.String(); got != want {
-		t.Errorf("newTable = %q, want %q", got, want)
+	g.newTable(0, "Property", "Type", "Modifiers", "Description").row(tableCell{md: "`vin`"}, tableCell{md: "`String`"}, tableCell{md: "primary"}, tableCell{})
+	want := "| Property | Type | Modifiers | Description |\n| --- | --- | --- | --- |\n| `vin` | `String` | primary |  |\n"
+	if got := g.buf.String(); got != want {
+		t.Errorf("table = %q, want %q", got, want)
 	}
-}
-
-func TestWriteTableRow(t *testing.T) {
-	t.Parallel()
-
-	var b bytes.Buffer
-	writeTableRow(&b, "`vin`", "`String`", "primary", "")
-	want := "| `vin` | `String` | primary |  |\n"
-	if got := b.String(); got != want {
-		t.Errorf("writeTableRow = %q, want %q", got, want)
+	var indented generator
+	indented.newTable(bulletIndent, "A").row(tableCell{md: "x", author: true})
+	want = "    | A |\n    | --- |\n    | x |\n"
+	if got := indented.buf.String(); got != want {
+		t.Errorf("indented table = %q, want %q", got, want)
+	}
+	if len(indented.authored) != 1 || indented.buf.String()[indented.authored[0].start:indented.authored[0].end] != "x" {
+		t.Errorf("authored spans = %+v, want the one description cell", indented.authored)
 	}
 }
 
@@ -296,50 +321,46 @@ func TestWriteFence(t *testing.T) {
 	}
 }
 
-// TestMermaidText pins the characters a diagram label writes as entity codes:
-// the quote that ends a class label, the colon and semicolon that end an edge
-// label, the percent sign that opens a comment or directive, the number sign
-// that opens an entity, the characters a rendered label reads as HTML, and the
-// first white space of a direction statement.
-func TestMermaidText(t *testing.T) {
+// TestMermaidChars pins the characters an edge label or a member line writes
+// as entity codes: the quote, the colon and semicolon that end an edge label,
+// the percent sign that opens a comment or directive, the number sign that
+// opens an entity, and the characters a rendered label reads as HTML.
+func TestMermaidChars(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct{ in, want string }{
-		{"common.Region", "common.Region"},
 		{"WHEELS (one:many)", "WHEELS (one#58;many)"},
 		{`a"b`, "a#quot;b"},
 		{"a;b", "a#59;b"},
 		{"%%{init}%%", "#37;#37;{init}#37;#37;"},
 		{"#quot;", "#35;quot#59;"},
 		{"<b>&amp;", "#60;b#62;#38;amp#59;"},
-		{"R\u00e9gion (x)", "R\u00e9gion (x)"},
-		{"P (a direction LR)", "P (a direction#32;LR)"},
-		{"xdirection\u00a0TB direction", "xdirection#160;TB direction"},
-		{"directions LR", "directions LR"},
-		{"P (direction String)", "P (direction String)"},
-		{"P (direction lr)", "P (direction lr)"},
-		{"P (direction  LR)", "P (direction#32; LR)"},
-		{"direction RL, direction BT", "direction#32;RL, direction#32;BT"},
 	} {
-		if got := mermaidText(tt.in); got != tt.want {
-			t.Errorf("mermaidText(%q) = %q, want %q", tt.in, got, tt.want)
+		if got := mermaidChars(tt.in); got != tt.want {
+			t.Errorf("mermaidChars(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
 
-// TestMermaidTextEscapesEveryDirectionSpace pins that each character
-// JavaScript's \s matches, which is what Mermaid's lexer reads between
-// "direction" and a direction keyword, is written as its entity code there.
-// The list is ECMAScript's WhiteSpace and LineTerminator sets, written out
-// here rather than read from jsSpace.
-func TestMermaidTextEscapesEveryDirectionSpace(t *testing.T) {
+// TestMermaidLabel pins the class label's allowlist: ASCII letters and
+// digits, a dot and an underscore between two ASCII letters or digits stay,
+// and every other character is its decimal entity code.
+func TestMermaidLabel(t *testing.T) {
 	t.Parallel()
 
-	for _, r := range []rune{'\u0009', '\u000a', '\u000b', '\u000c', '\u000d', '\u0020', '\u00a0', '\u1680', '\u2000', '\u2001', '\u2002', '\u2003', '\u2004', '\u2005', '\u2006', '\u2007', '\u2008', '\u2009', '\u200a', '\u2028', '\u2029', '\u202f', '\u205f', '\u3000', '\ufeff'} {
-		in := "P (direction" + string(r) + "TB)"
-		want := "P (direction#" + strconv.Itoa(int(r)) + ";TB)"
-		if got := mermaidText(in); got != want {
-			t.Errorf("mermaidText(%q) = %q, want %q", in, got, want)
+	for _, tt := range []struct{ in, want string }{
+		{"common.Region", "common.Region"},
+		{"a_b.C_2", "a_b.C_2"},
+		{"_a b_", "#95;a#32;b#95;"},
+		{"a__b", "a#95;#95;b"},
+		{"Person (sch)", "Person#32;#40;sch#41;"},
+		{`*b* $x$ \d "q" #1; :;%<>&`, "#42;b#42;#32;#36;x#36;#32;#92;d#32;#34;q#34;#32;#35;1#59;#32;#58;#59;#37;#60;#62;#38;"},
+		{"R\u00e9gion \u0663\U0001D49C", "R#233;gion#32;#1635;#119964;"},
+		{"x\ufb02\u00b0y\u00b6\u00dfz", "x#64258;#176;y#182;#223;z"},
+		{"direction LR", "direction#32;LR"},
+	} {
+		if got := mermaidLabel(tt.in); got != tt.want {
+			t.Errorf("mermaidLabel(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }

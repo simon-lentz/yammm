@@ -326,8 +326,8 @@ type Sign {
 		"        direction LR\n",
 		"        heading LR\n",
 		"        wind_direction Integer\n",
-		"    class Winddirection {\n",
-		"    Arrow --> Winddirection : POINTS (one)\n",
+		"    class Winddirec_tion[\"Winddirection\"] {\n",
+		"    Arrow --> Winddirec_tion : POINTS (one)\n",
 	} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("document has no member line %q:\n%s", want, doc)

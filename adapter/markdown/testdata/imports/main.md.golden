@@ -14,7 +14,7 @@ classDiagram
         code RegionCode
         name String
     }
-    class Basin__base_["Basin (base)"] {
+    class Basin__base_["Basin#32;#40;base#41;"] {
         id String
     }
     County --> common_Region : IN_REGION (one)
@@ -31,7 +31,7 @@ classDiagram
 
 **Associations**
 
-- `--> IN_REGION (one)` [common.Region](#commonregion)
+-   `--> IN_REGION (one)` [common.Region](#commonregion)
 
 ## Schema common (imported as common)
 
@@ -44,7 +44,7 @@ classDiagram
 
 **Associations**
 
-- `--> IN_BASIN (_)` [Basin (base)](#basin-base)
+-   `--> IN_BASIN (_)` [Basin (base)](#basin-base)
 
 ### Data Types
 

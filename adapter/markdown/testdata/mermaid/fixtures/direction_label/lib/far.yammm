@@ -1,0 +1,5 @@
+schema "dir:ction TB"
+
+type Beacon {
+	id String primary
+}

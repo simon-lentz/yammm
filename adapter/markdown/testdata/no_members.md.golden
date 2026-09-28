@@ -46,8 +46,8 @@ Extends: [Entity](#entity).
 
 **Associations**
 
-- `--> NEAR (many)` [Landmark](#landmark)
+-   `--> NEAR (many)` [Landmark](#landmark)
 
 **Compositions**
 
-- `*-> PARTS (many)` [Part](#part)
+-   `*-> PARTS (many)` [Part](#part)

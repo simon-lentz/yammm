@@ -38,6 +38,9 @@ lsp/editors/vscode/.vscode-test/
 lsp/editors/vscode/node_modules/
 lsp/editors/vscode/*.vsix
 
+# adapter/markdown's Mermaid oracle, installed by npm ci from its lock file
+adapter/markdown/testdata/mermaid/node_modules/
+
 # Binary build artifacts
 bin/
 /yammm

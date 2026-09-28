@@ -77,11 +77,11 @@ abstract type Named {
 	assertLines(t, doc,
 		"### c.Person",
 		"### Named (base)",
-		"- `--> BUYER (one)` [c.Person](#cperson)",
+		"-   `--> BUYER (one)` [c.Person](#cperson)",
 		"Extends: [Named (base)](#named-base).",
 		"| `name` | `String` | from Named (base) |  |",
 		`    class c_Person["c.Person"] {`,
-		`    class Named__base_["Named (base)"] {`,
+		`    class Named__base_["Named#32;#40;base#41;"] {`,
 		"    Order --> c_Person : BUYER (one)",
 		"    Named__base_ <|-- c_Person",
 	)
@@ -185,7 +185,7 @@ type Other {
 		t.Fatalf("Marshal: %v", err)
 	}
 	doc := string(out)
-	assertLines(t, doc, "## Types", "### Types", "- `--> LINK (one)` [Types](#types-1)")
+	assertLines(t, doc, "## Types", "### Types", "-   `--> LINK (one)` [Types](#types-1)")
 	assertAbsent(t, doc, "](#types)")
 }
 
@@ -227,19 +227,16 @@ type Person {
 		`# Schema app\*`,
 		`## Schema co"m \[z\](w)\*`,
 		`### Person (co"m \[z\](w)\*)`,
-		"- `--> OWNER (one)` [Person (co\"m \\[z\\](w)\\*)](#person-com-zw)",
-		`    class Person__co_m__z__w___["Person (co#quot;m [z](w)*)"] {`,
+		"-   `--> OWNER (one)` [Person (co\"m \\[z\\](w)\\*)](#person-com-zw)",
+		`    class Person__co_m__z__w___["Person#32;#40;co#34;m#32;#91;z#93;#40;w#41;#42;#41;"] {`,
 	)
 }
 
 // TestMarshal_DiagramTextIsMermaidText pins that schema-supplied text reaches
 // the class diagram only in forms Mermaid's classDiagram lexer reads: a class
-// id is ASCII letters, digits and underscores, since Mermaid's \w is ASCII and
-// its table of other letters is partial, and a class label writes each
-// character Mermaid reads as syntax, a directive or an entity as an entity
-// code, as it does the white space in "direction LR", which Mermaid reads as a
-// direction statement anywhere on a line outside a class body. An edge label
-// writes the
+// id is ASCII letters, digits and underscores, with every "direction" broken,
+// and a class label writes every character but an ASCII letter or digit, a dot,
+// and an underscore between two ASCII letters or digits as an entity code. An edge label writes the
 // multiplicity colon as an entity, because Mermaid's label token ends at a
 // colon.
 func TestMarshal_DiagramTextIsMermaidText(t *testing.T) {
@@ -273,8 +270,8 @@ type Person {
 	})
 
 	assertLines(t, doc,
-		"    class Person__x_y_z__35____init____b_____direction_LR_[\"Person (x#quot;y#58;z#59;#35;35#59;#37;#37;{init}#37;#37;#60;b#62;#38;é٣ direction#32;LR)\"] {",
-		"    m_Hub --> Person__x_y_z__35____init____b_____direction_LR_ : OWNERS (one#58;many)",
+		"    class Person__x_y_z__35____init____b_____direc_tion_LR_[\"Person#32;#40;x#34;y#58;z#59;#35;35#59;#37;#37;#123;init#125;#37;#37;#60;b#62;#38;#233;#1635;#32;direction#32;LR#41;\"] {",
+		"    m_Hub --> Person__x_y_z__35____init____b_____direc_tion_LR_ : OWNERS (one#58;many)",
 	)
 }
 
@@ -379,7 +376,7 @@ type Named {
 		`### Named (ba\\nse)`,
 		`Extends: [Named (ba\\nse)](#named-banse).`,
 		"| `name` | `String` | primary, from Named (ba\\\\nse) |  |",
-		`    class Named__ba_nse_["Named (ba\nse)"] {`,
+		`    class Named__ba_nse_["Named#32;#40;ba#92;nse#41;"] {`,
 	)
 }
 

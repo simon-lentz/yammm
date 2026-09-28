@@ -1,0 +1,122 @@
+{
+  "name": "\"cache\"",
+  "span": {
+    "s": 0,
+    "e": 14
+  },
+  "types": [
+    {
+      "name": "Base",
+      "name_span": {
+        "s": 21,
+        "e": 25
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 32,
+              "e": 38
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 29,
+            "e": 46
+          }
+        }
+      ],
+      "span": {
+        "s": 16,
+        "e": 48
+      }
+    },
+    {
+      "name": "Redirection",
+      "name_span": {
+        "s": 55,
+        "e": 66
+      },
+      "extends": [
+        {
+          "name": "Base",
+          "span": {
+            "s": 75,
+            "e": 79
+          }
+        }
+      ],
+      "props": [
+        {
+          "name": "location",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 92,
+              "e": 98
+            }
+          },
+          "span": {
+            "s": 83,
+            "e": 98
+          }
+        }
+      ],
+      "span": {
+        "s": 50,
+        "e": 100
+      }
+    },
+    {
+      "name": "LRUCache",
+      "name_span": {
+        "s": 107,
+        "e": 115
+      },
+      "props": [
+        {
+          "name": "key",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 123,
+              "e": 129
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 119,
+            "e": 137
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "TARGET",
+          "name_span": {
+            "s": 143,
+            "e": 149
+          },
+          "target": {
+            "name": "Redirection",
+            "span": {
+              "s": 156,
+              "e": 167
+            }
+          },
+          "span": {
+            "s": 139,
+            "e": 167
+          }
+        }
+      ],
+      "span": {
+        "s": 102,
+        "e": 169
+      }
+    }
+  ]
+}

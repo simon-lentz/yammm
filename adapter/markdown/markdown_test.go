@@ -181,13 +181,13 @@ func TestMarshal_NonSourceBacked(t *testing.T) {
 	if !strings.Contains(doc, "# Schema built") || !strings.Contains(doc, "### Thing") {
 		t.Errorf("document lacks expected skeleton:\n%s", doc)
 	}
-	if !strings.Contains(doc, "- \"always true\"") {
+	if !strings.Contains(doc, "-   \"always true\"") {
 		t.Errorf("invariant message missing:\n%s", doc)
 	}
 	if strings.Contains(doc, "```yammm") {
 		t.Errorf("source fence emitted for a non-source-backed schema:\n%s", doc)
 	}
-	if !strings.Contains(doc, "- `--> POINTS_AT (_)` [Other](#") {
+	if !strings.Contains(doc, "-   `--> POINTS_AT (_)` [Other](#") {
 		t.Errorf("relation target not rendered as a link:\n%s", doc)
 	}
 }
@@ -282,13 +282,13 @@ type Person {
 
 	t.Run("table cell holding a line break fails", func(t *testing.T) {
 		t.Parallel()
-		g := fresh()
-		var b bytes.Buffer
-		g.newTable(&b, "A", "B").row("1", "2\n3")
-		g.buf.WriteString("\n")
-		g.writeTable(b.String(), 0)
-		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "is read with") {
-			t.Errorf("finish = %v, want the split row refused", err)
+		for _, br := range []string{"\n", "\r"} {
+			g := fresh()
+			g.buf.WriteString("\n")
+			g.newTable(0, "A", "B").row(tableCell{md: "1"}, tableCell{md: "2" + br + "3"})
+			if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "holds a line break") {
+				t.Errorf("finish with %q in a cell = %v, want the split row refused", br, err)
+			}
 		}
 	})
 
@@ -307,13 +307,12 @@ type Person {
 		}
 	})
 
-	t.Run("a table the generator never wrote fails", func(t *testing.T) {
+	t.Run("a table not read where the generator wrote it fails", func(t *testing.T) {
 		t.Parallel()
 		g := fresh()
-		var b bytes.Buffer
-		g.newTable(&b, "A", "B").row("1", "2")
+		g.tables[0].offset = 0
 		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "not read as a table") {
-			t.Errorf("finish = %v, want the unwritten table refused", err)
+			t.Errorf("finish = %v, want the misplaced table refused", err)
 		}
 	})
 
@@ -350,10 +349,8 @@ type Person {
 	t.Run("table row of the wrong width fails", func(t *testing.T) {
 		t.Parallel()
 		g := fresh()
-		var b bytes.Buffer
-		g.newTable(&b, "A", "B", "C").row("1", "2")
 		g.buf.WriteString("\n")
-		g.writeTable(b.String(), 0)
+		g.newTable(0, "A", "B", "C").row(tableCell{md: "1"}, tableCell{md: "2"})
 		if _, err := g.finish(); err == nil || !strings.Contains(err.Error(), "has 2 cells") {
 			t.Errorf("finish = %v, want the short row refused although the parser fills it", err)
 		}
@@ -473,8 +470,9 @@ func TestCloseAuthorText(t *testing.T) {
 		{"a fence in the author's quote closes with the quote", "> ```\n> x", "> ```\n> x"},
 		{"an open HTML comment", "note <!-- no\n<!-- open", "note <!-- no\n<!-- open\n-->"},
 		{"an open pre element", "<pre>\nx", "<pre>\nx\n</pre>"},
-		{"an open script element takes its own end tag", "<script>\nx", "<script>\nx\n</script>"},
-		{"an upper-case opening tag takes its own end tag", "<SCRIPT>\nx", "<SCRIPT>\nx\n</script>"},
+		{"an open script element closes on the pre end tag", "<script>\nx", "<script>\nx\n</pre>"},
+		{"an open textarea closes on the pre end tag", "<TEXTAREA>\nx", "<TEXTAREA>\nx\n</pre>"},
+		{"an open style element closes on the pre end tag", "<style>\nx", "<style>\nx\n</pre>"},
 		{"an open processing instruction", "<?php\nx", "<?php\nx\n?>"},
 		{"an open declaration", "<!DOCTYPE html\nx", "<!DOCTYPE html\nx\n>"},
 		{"an open CDATA section", "<![CDATA[\nx", "<![CDATA[\nx\n]]>"},
@@ -505,7 +503,7 @@ func TestMarshal_DocCommentHeadingTakesItsAnchor(t *testing.T) {
 		t.Fatalf("Marshal = %v, want nil", err)
 	}
 	doc := string(out)
-	if !strings.Contains(doc, "- `--> TO (one)` [B](#b-2)\n") {
+	if !strings.Contains(doc, "-   `--> TO (one)` [B](#b-2)\n") {
 		t.Errorf("the link to B does not target #b-2:\n%s", doc)
 	}
 	if strings.Contains(doc, "](#b)") || strings.Contains(doc, "](#b-1)") {
@@ -530,7 +528,7 @@ func TestMarshal_ReemissionForgetsTheFirstEmissionsDocComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal = %v, want nil", err)
 	}
-	if !strings.Contains(string(out), "- `--> TO (one)` [C](#c)\n\n  note\n") {
+	if !strings.Contains(string(out), "-   `--> TO (one)` [C](#c)\n\n    note\n") {
 		t.Errorf("the link to C and its doc comment are not written:\n%s", out)
 	}
 }
@@ -563,7 +561,7 @@ func TestMarshal_AuthorFenceUnderABulletIsReadInItsItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal = %v, want nil", err)
 	}
-	if !strings.Contains(string(out), "\n  ```\n  x\n     ```\n") {
+	if !strings.Contains(string(out), "\n    ```\n    x\n       ```\n") {
 		t.Errorf("the doc comment is not written unsealed under its bullet:\n%s", out)
 	}
 }

@@ -2,17 +2,22 @@ package markdown
 
 import (
 	"bytes"
-	"cmp"
+	"crypto/rand"
 	"fmt"
-	"html"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
 	extast "github.com/yuin/goldmark/extension/ast"
+	"github.com/yuin/goldmark/renderer"
+	gmhtml "github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
+	"golang.org/x/net/html"
 )
 
 // newParser returns the reader every structural question about the document
@@ -96,22 +101,9 @@ func closers(block ast.Node, src []byte) []string {
 	case *ast.HTMLBlock:
 		switch b.HTMLBlockType {
 		case ast.HTMLBlockType1:
-			// Any of the four end tags closes the block; the one that opened it
-			// goes first, so the closer matches the element.
-			tags := []string{"pre", "script", "style", "textarea"}
-			first := ""
-			if b.Lines().Len() > 0 {
-				line := b.Lines().At(0)
-				first = strings.ToLower(string(line.Value(src)))
-			}
-			slices.SortStableFunc(tags, func(a, c string) int {
-				return cmp.Compare(openingIndex(first, a), openingIndex(first, c))
-			})
-			out := make([]string, len(tags))
-			for i, tag := range tags {
-				out[i] = "</" + tag + ">"
-			}
-			return out
+			// Any of the four end tags ends the block; GitHub's tag filter
+			// shows the other three as text, and </pre> as nothing.
+			return []string{"</pre>"}
 		case ast.HTMLBlockType2:
 			return []string{"-->"}
 		case ast.HTMLBlockType3:
@@ -123,15 +115,6 @@ func closers(block ast.Node, src []byte) []string {
 		}
 	}
 	return nil
-}
-
-// openingIndex returns where "<tag" first appears in line, or the line's
-// length when it does not.
-func openingIndex(line, tag string) int {
-	if i := strings.Index(line, "<"+tag); i >= 0 {
-		return i
-	}
-	return len(line)
 }
 
 // longestRun returns the length of the longest run of c in src.
@@ -148,10 +131,9 @@ func longestRun(src []byte, c byte) int {
 	return longest
 }
 
-// parsedHeading is one heading as the parser reads the document: where its
-// line starts (-1 for a heading with no text, which the generator never
-// writes), its level, whether it sits at the top level, and its text as a
-// browser shows it, which is what GitHub derives the anchor from.
+// parsedHeading is one heading element of the document: its Markdown line's
+// offset (-1 for raw HTML or no text), level and nesting, and its text
+// content, which GitHub derives the anchor from.
 type parsedHeading struct {
 	offset   int
 	level    int
@@ -159,35 +141,205 @@ type parsedHeading struct {
 	text     string
 }
 
-// headings returns every heading of the document in document order, those
-// inside doc comments and list items included.
-func headings(md goldmark.Markdown, root ast.Node, src []byte) ([]parsedHeading, error) {
-	var out []parsedHeading
-	err := ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+// headingReader reads a document's heading elements, raw HTML ones included,
+// since GitHub anchors every h1 to h6 element it renders. It renders the parsed
+// document to HTML and builds the tree an HTML5 parser builds from it. Each
+// Markdown heading carries a mark holding a per-reader nonce no text can forge;
+// rand.Text writes it in base32, which an unquoted attribute value can hold.
+type headingReader struct {
+	marker   *headingMarker
+	renderer renderer.Renderer
+}
+
+func newHeadingReader() headingReader {
+	m := &headingMarker{nonce: rand.Text()}
+	return headingReader{
+		marker: m,
+		renderer: goldmark.New(
+			goldmark.WithExtensions(extension.GFM),
+			goldmark.WithRendererOptions(
+				gmhtml.WithUnsafe(),
+				renderer.WithNodeRenderers(util.Prioritized(m, 100)),
+			),
+		).Renderer(),
+	}
+}
+
+// markAttr names the attribute that marks a Markdown heading element. An
+// attribute stays on its element wherever the tree builder moves it, and its
+// value is written unquoted, so the mark adds no quote to what an author's
+// open attribute reads, as GitHub's own heading tag adds none.
+const markAttr = "data-yammm-heading"
+
+// headingMarker renders a Markdown heading as goldmark does, its start tag
+// carrying markAttr=nonce-n, where n counts the render's Markdown headings
+// from 0.
+type headingMarker struct {
+	nonce string
+	count int
+}
+
+func (m *headingMarker) RegisterFuncs(reg renderer.NodeRendererFuncRegisterer) {
+	reg.Register(ast.KindHeading, func(w util.BufWriter, _ []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
 		h, ok := n.(*ast.Heading)
-		if !entering || !ok {
-			return ast.WalkContinue, nil
+		if !ok {
+			return ast.WalkStop, fmt.Errorf("rendering a heading: a %s node", n.Kind())
 		}
-		offset := -1
-		if h.Lines().Len() > 0 {
-			offset = lineStart(src, h.Lines().At(0).Start)
+		level := strconv.Itoa(h.Level)
+		tag := "</h" + level + ">\n"
+		if entering {
+			tag = "<h" + level + " " + markAttr + "=" + m.nonce + "-" + strconv.Itoa(m.count) + ">"
+			m.count++
 		}
-		text, err := textContent(md, h, src)
-		if err != nil {
-			return ast.WalkStop, err
+		if _, err := w.WriteString(tag); err != nil {
+			return ast.WalkStop, fmt.Errorf("rendering a heading: %w", err)
 		}
-		out = append(out, parsedHeading{
-			offset:   offset,
-			level:    h.Level,
-			topLevel: h.Parent() == root,
-			text:     text,
-		})
-		return ast.WalkSkipChildren, nil
+		return ast.WalkContinue, nil
 	})
+}
+
+// htmlClosers are the lines tried, in order, to close an HTML construct a doc
+// comment leaves open: a comment or a tag, a CDATA section, a quoted attribute
+// value of either quote, and a noscript element's text. Each is raw HTML to
+// Markdown and reads as nothing from a closed state: a comment, a bogus
+// comment, a void element, and an end tag no element matches.
+var htmlClosers = []string{"<!-- -->", "<![CDATA[ ]]>", `<wbr x='"'>`, "</noscript>"}
+
+// closeAuthorHTML returns doc with the HTML construct it leaves open closed, as
+// closeAuthorText closes a Markdown block: a comment, a CDATA section, a tag,
+// a quoted attribute value, or a noscript element's text. Left open, it would
+// take the tags the generator writes after it as its own content. The closer
+// follows doc after sep, a line break for a block and a space for a table
+// cell, and is kept only when an HTML5 parser then reads an element written
+// after doc.
+func (r headingReader) closeAuthorHTML(md goldmark.Markdown, doc, sep string) string {
+	if r.readsPast(md, doc) {
+		return doc
+	}
+	for _, closer := range htmlClosers {
+		if r.readsPast(md, doc+sep+closer) {
+			return doc + sep + closer
+		}
+	}
+	return doc
+}
+
+// readsPast reports whether an HTML5 parser reads the p element that follows
+// doc, after a blank line, in the HTML doc renders to. Its attribute alone is
+// not enough: an open tag takes a following tag's attributes as its own.
+func (r headingReader) readsPast(md goldmark.Markdown, doc string) bool {
+	const endAttr = "data-yammm-end"
+	src := []byte(doc + "\n\n<p " + endAttr + "=\"" + r.marker.nonce + "\"></p>\n")
+	var out bytes.Buffer
+	r.marker.count = 0
+	if err := r.renderer.Render(&out, src, parse(md, src)); err != nil {
+		return false
+	}
+	tree, err := html.Parse(bytes.NewReader(tagFilter(out.Bytes())))
 	if err != nil {
+		return false
+	}
+	for n := range tree.Descendants() {
+		if n.Type == html.ElementNode && n.Data == "p" && slices.Contains(n.Attr, html.Attribute{Key: endAttr, Val: r.marker.nonce}) {
+			return true
+		}
+	}
+	return false
+}
+
+// headings returns every heading element of the document in the tree's order:
+// the Markdown headings, those inside doc comments and list items included,
+// and the heading elements an author wrote as raw HTML. A Markdown heading
+// inside author text, where authored says, may be taken into an HTML
+// construct the author left open, and is then no heading, as on GitHub.
+func (r headingReader) headings(root ast.Node, src []byte, authored func(pos int) bool) ([]parsedHeading, error) {
+	var marked []parsedHeading
+	if err := ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if h, ok := n.(*ast.Heading); ok && entering {
+			offset := -1
+			if h.Lines().Len() > 0 {
+				offset = lineStart(src, h.Lines().At(0).Start)
+			}
+			marked = append(marked, parsedHeading{offset: offset, level: h.Level, topLevel: h.Parent() == root})
+		}
+		return ast.WalkContinue, nil
+	}); err != nil {
 		return nil, fmt.Errorf("reading headings: %w", err)
 	}
-	return out, nil
+	var out bytes.Buffer
+	r.marker.count = 0
+	if err := r.renderer.Render(&out, src, root); err != nil {
+		return nil, fmt.Errorf("reading headings: rendering the document: %w", err)
+	}
+	tree, err := html.Parse(bytes.NewReader(tagFilter(out.Bytes())))
+	if err != nil {
+		return nil, fmt.Errorf("reading headings: parsing the rendered document: %w", err)
+	}
+	var headings []parsedHeading
+	seen := make([]bool, len(marked))
+	for n := range tree.Descendants() {
+		if n.Type != html.ElementNode || !isHeadingName(n.Data) {
+			continue
+		}
+		k, ok := r.mark(n)
+		if !ok {
+			headings = append(headings, parsedHeading{offset: -1, text: textOf(n)})
+			continue
+		}
+		if k >= len(marked) || seen[k] {
+			return nil, fmt.Errorf("reading headings: Markdown heading %d is read twice or was never written", k)
+		}
+		seen[k] = true
+		h := marked[k]
+		h.text = textOf(n)
+		headings = append(headings, h)
+	}
+	for k, ok := range seen {
+		if !ok && (marked[k].offset < 0 || !authored(marked[k].offset)) {
+			return nil, fmt.Errorf("reading headings: Markdown heading %d is not read as a heading element", k)
+		}
+	}
+	return headings, nil
+}
+
+// mark returns the count a Markdown heading element's mark holds.
+func (r headingReader) mark(n *html.Node) (int, bool) {
+	for _, a := range n.Attr {
+		if a.Namespace != "" || a.Key != markAttr {
+			continue
+		}
+		count, ok := strings.CutPrefix(a.Val, r.marker.nonce+"-")
+		if !ok {
+			return 0, false
+		}
+		k, err := strconv.Atoi(count)
+		return k, err == nil && k >= 0
+	}
+	return 0, false
+}
+
+// textOf returns n's text content: the text of every text node under it.
+func textOf(n *html.Node) string {
+	var b strings.Builder
+	for d := range n.Descendants() {
+		if d.Type == html.TextNode {
+			b.WriteString(d.Data)
+		}
+	}
+	return b.String()
+}
+
+func isHeadingName(name string) bool {
+	return len(name) == 2 && name[0] == 'h' && '1' <= name[1] && name[1] <= '6'
+}
+
+// filteredTag matches a tag GitHub's tag filter escapes: GitHub writes its "<"
+// as "&lt;", so a browser builds no element from it and reads it as text.
+var filteredTag = regexp.MustCompile(`(?i)<(/?(?:title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext))([\t\n\f\r />]|$)`)
+
+// tagFilter applies GitHub's tag filter to rendered HTML.
+func tagFilter(out []byte) []byte {
+	return filteredTag.ReplaceAll(out, []byte("&lt;$1$2"))
 }
 
 // lineStart returns the offset of the line that holds pos.
@@ -196,51 +348,48 @@ func lineStart(src []byte, pos int) int {
 	return bytes.LastIndexByte(src[:pos], '\n') + 1
 }
 
-// textContent renders n's inline content to HTML and returns what a browser
-// shows of it: every tag dropped and every character reference decoded.
-func textContent(md goldmark.Markdown, n ast.Node, src []byte) (string, error) {
-	var b bytes.Buffer
-	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-		if err := md.Renderer().Render(&b, src, c); err != nil {
-			return "", fmt.Errorf("rendering a heading's text: %w", err)
-		}
-	}
-	return html.UnescapeString(stripTags(b.String())), nil
-}
-
-// stripTags drops every "<…>" run. The renderer writes a literal "<" as
-// "&lt;", so every "<" in its output opens a tag or a comment.
-func stripTags(s string) string {
-	var b strings.Builder
-	for {
-		i := strings.IndexByte(s, '<')
-		if i < 0 {
-			b.WriteString(s)
-			return b.String()
-		}
-		b.WriteString(s[:i])
-		j := strings.IndexByte(s[i:], '>')
-		if j < 0 {
-			return b.String()
-		}
-		s = s[i+j+1:]
-	}
-}
-
-// linkTargets counts each internal link destination "#anchor" the parser reads
-// in the document, leaving out a link whose text starts where skip says. A
-// link with no text has no position and is left out too; the generator never
-// writes one.
-func linkTargets(root ast.Node, skip func(pos int) bool) (map[string]int, error) {
+// linkTargets counts each internal link "#anchor" that starts where skip says
+// no. There the generator writes internal links alone, so any other link,
+// image or autolink, with text or without, is schema text read as syntax, and
+// is an error.
+func linkTargets(root ast.Node, src []byte, skip func(pos int) bool) (map[string]int, error) {
 	out := map[string]int{}
 	err := ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		l, ok := n.(*ast.Link)
-		if !entering || !ok {
+		if !entering {
 			return ast.WalkContinue, nil
 		}
-		dest := string(l.Destination)
-		if pos := firstTextStart(l); strings.HasPrefix(dest, "#") && pos >= 0 && !skip(pos) {
-			out[dest[1:]]++
+		switch l := n.(type) {
+		case *ast.Link:
+			pos := l.Pos()
+			if pos < 0 {
+				return ast.WalkStop, fmt.Errorf("a link to %q has no place in the document", l.Destination)
+			}
+			if skip(pos) {
+				return ast.WalkContinue, nil
+			}
+			dest := string(l.Destination)
+			if anchor, ok := strings.CutPrefix(dest, "#"); ok {
+				out[anchor]++
+				return ast.WalkContinue, nil
+			}
+			return ast.WalkStop, fmt.Errorf("text outside doc comments is read as a link to %q", dest)
+		case *ast.Image:
+			pos := l.Pos()
+			if pos < 0 {
+				return ast.WalkStop, fmt.Errorf("an image of %q has no place in the document", l.Destination)
+			}
+			if !skip(pos) {
+				return ast.WalkStop, fmt.Errorf("text outside doc comments is read as an image of %q", l.Destination)
+			}
+		case *ast.AutoLink:
+			label := l.Label(src)
+			pos, ok := offsetIn(src, label)
+			if !ok {
+				return ast.WalkStop, fmt.Errorf("an autolink %q has no place in the document", label)
+			}
+			if !skip(pos) {
+				return ast.WalkStop, fmt.Errorf("text outside doc comments is read as the autolink %q", l.URL(src))
+			}
 		}
 		return ast.WalkContinue, nil
 	})
@@ -250,17 +399,15 @@ func linkTargets(root ast.Node, skip func(pos int) bool) (map[string]int, error)
 	return out, nil
 }
 
-// firstTextStart returns the offset of the first text segment under n, or -1.
-func firstTextStart(n ast.Node) int {
-	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-		if t, ok := c.(*ast.Text); ok {
-			return t.Segment.Start
-		}
-		if pos := firstTextStart(c); pos >= 0 {
-			return pos
-		}
+// offsetIn returns where sub starts in src when sub is a subslice of src
+// holding the same bytes there. goldmark exposes an autolink's text only as
+// such a subslice.
+func offsetIn(src, sub []byte) (int, bool) {
+	off := cap(src) - cap(sub)
+	if off < 0 || off+len(sub) > len(src) || !bytes.Equal(src[off:off+len(sub)], sub) {
+		return 0, false
 	}
-	return -1
+	return off, true
 }
 
 // fencedCodeAt returns the body of the top-level fenced code block whose

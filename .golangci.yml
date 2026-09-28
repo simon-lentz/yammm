@@ -9,6 +9,7 @@ run:
   # the linter and its type checker.
   build-tags:
     - neo4j_integration
+    - mermaid
   # Don't let tools mutate go.mod/go.sum.
   modules-download-mode: readonly
   # golangci-lint refuses to start while another golangci-lint runs anywhere on

@@ -33,15 +33,15 @@ classDiagram
 
 **Associations**
 
-- `--> IN_STATE (one)` [State](#state)
+-   `--> IN_STATE (one)` [State](#state)
 
-  | Property | Type | Modifiers | Description |
-  | --- | --- | --- | --- |
-  | `since` | `Integer` | required |  |
-  | `notes` | `String` |  |  |
-  | `code_tag` | `StateCode` |  |  |
+    | Property | Type | Modifiers | Description |
+    | --- | --- | --- | --- |
+    | `since` | `Integer` | required |  |
+    | `notes` | `String` |  |  |
+    | `code_tag` | `StateCode` |  |  |
 
-- `--> BORDERS (many)` [County](#county)
+-   `--> BORDERS (many)` [County](#county)
 
 ## Data Types
 

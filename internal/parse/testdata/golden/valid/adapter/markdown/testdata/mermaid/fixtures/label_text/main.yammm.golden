@@ -1,0 +1,69 @@
+{
+  "name": "\"labels\"",
+  "span": {
+    "s": 0,
+    "e": 15
+  },
+  "imports": [
+    {
+      "path": "\"./lib/mid\"",
+      "alias": "mid",
+      "span": {
+        "s": 17,
+        "e": 42
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Post",
+      "name_span": {
+        "s": 49,
+        "e": 53
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 60,
+              "e": 66
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 57,
+            "e": 74
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "VIA",
+          "name_span": {
+            "s": 80,
+            "e": 83
+          },
+          "target": {
+            "qualifier": "mid",
+            "name": "Hop",
+            "span": {
+              "s": 90,
+              "e": 97
+            }
+          },
+          "span": {
+            "s": 76,
+            "e": 97
+          }
+        }
+      ],
+      "span": {
+        "s": 44,
+        "e": 99
+      }
+    }
+  ]
+}

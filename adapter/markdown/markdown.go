@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -70,7 +73,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 // allocates the same anchors.
 func (g *generator) reanchor() (bool, error) {
 	read := g.read()
-	parsed, err := headings(g.md, read.root, read.src)
+	parsed, err := g.headings.headings(read.root, read.src, g.inAuthorText)
 	if err != nil {
 		return false, fmt.Errorf("markdown: reading the emitted document: %w", err)
 	}
@@ -166,7 +169,7 @@ func (g *generator) emitDocument() {
 			g.buf.WriteString("# " + h.md + "\n")
 			if doc := g.entry.Documentation(); doc != "" {
 				g.buf.WriteString("\n")
-				g.writeAuthorText(doc, 0)
+				g.writeAuthorText(doc, false)
 				g.buf.WriteString("\n")
 			}
 		case kindClassDiagram:
@@ -181,38 +184,35 @@ func (g *generator) emitDocument() {
 				hashes = "###"
 			}
 			g.buf.WriteString(hashes + " " + h.md + "\n\n")
-			g.writeTable(g.dataTypeTable(h.schema.DataTypesSlice()), 0)
+			g.writeDataTypeTable(h.schema.DataTypesSlice())
 		case kindImportedSchema:
 			g.buf.WriteString("## " + h.md + "\n")
 			if doc := h.schema.Documentation(); doc != "" {
 				g.buf.WriteString("\n")
-				g.writeAuthorText(doc, 0)
+				g.writeAuthorText(doc, false)
 				g.buf.WriteString("\n")
 			}
 		}
 	}
 }
 
-// dataTypeTable renders the Name | Definition | Description table over a
+// writeDataTypeTable writes the Name | Definition | Description table over a
 // schema's named DataTypes.
-func (g *generator) dataTypeTable(dts []*schema.DataType) string {
-	var b bytes.Buffer
-	tw := g.newTable(&b, "Name", "Definition", "Description")
+func (g *generator) writeDataTypeTable(dts []*schema.DataType) {
+	tw := g.newTable(0, "Name", "Definition", "Description")
 	for _, dt := range dts {
-		tw.row(codeCell(dt.Name()), codeCell(dt.Constraint().String()), escapeCell(dt.Documentation()))
+		tw.row(codeCellOf(dt.Name()), codeCellOf(dt.Constraint().String()), g.descriptionCellOf(dt.Documentation()))
 	}
-	return b.String()
 }
 
 // selfCheck reads the emitted document with a CommonMark parser and verifies
-// the structure the generator wrote: nothing is left open at the end; every
+// the structure the generator wrote. Nothing is left open at the end. Every
 // outline heading is a top-level heading of its level whose text is the text
-// the generator meant, holding the anchor GitHub allocates it; every internal
-// link the generator wrote is read as a link to an outline heading; and every
-// table it wrote is read as a table of its columns and rows; and the class
-// diagram is read as a fenced code block whose every line is a form the
-// emitter writes, a subset of Mermaid's class-diagram grammar. Doc-comment text is the author's Markdown and is
-// not a subject. A failure is a generator bug.
+// the generator meant, holding the anchor GitHub allocates it. Outside doc
+// comments, the links read are the internal links the generator wrote, each
+// to an outline heading. Every table it wrote is read with its columns and
+// rows. The class diagram is read as a fenced code block whose every line is
+// a form the emitter writes. A failure is a generator bug.
 func (g *generator) selfCheck() error {
 	doc := g.read()
 	if _, open := doc.open(); open {
@@ -225,7 +225,7 @@ func (g *generator) selfCheck() error {
 	}
 	at := map[int]allocated{}
 	var alloc anchorAllocator
-	parsed, err := headings(g.md, root, out)
+	parsed, err := g.headings.headings(root, out, g.inAuthorText)
 	if err != nil {
 		return fmt.Errorf("markdown: self-check: %w", err)
 	}
@@ -252,16 +252,17 @@ func (g *generator) selfCheck() error {
 	for _, a := range g.links {
 		written[a]++
 	}
-	read, err := linkTargets(root, g.inAuthorText)
+	read, err := linkTargets(root, out, g.inAuthorText)
 	if err != nil {
 		return fmt.Errorf("markdown: self-check: %w", err)
 	}
-	for a, n := range read {
+	for _, a := range slices.Sorted(maps.Keys(read)) {
 		if written[a] == 0 {
-			return fmt.Errorf("markdown: self-check: internal link #%s is read %d times outside doc comments and written by no emitter", a, n)
+			return fmt.Errorf("markdown: self-check: internal link #%s is read %d times outside doc comments and written by no emitter", a, read[a])
 		}
 	}
-	for a, n := range written {
+	for _, a := range slices.Sorted(maps.Keys(written)) {
+		n := written[a]
 		if !anchors[a] {
 			return fmt.Errorf("markdown: self-check: internal link #%s resolves to no emitted heading", a)
 		}
@@ -297,11 +298,12 @@ func (g *generator) selfCheck() error {
 	return nil
 }
 
-// writeAuthorText writes a doc comment, indented by indent, with the block it
-// leaves open closed.
-func (g *generator) writeAuthorText(doc string, indent int) {
-	text := closeAuthorText(g.md, doc)
-	if indent > 0 {
+// writeAuthorText writes a doc comment, indented under its bullet when
+// underBullet is set, with its line endings made LF and the Markdown block
+// and the HTML construct it leaves open closed.
+func (g *generator) writeAuthorText(doc string, underBullet bool) {
+	text := g.headings.closeAuthorHTML(g.md, closeAuthorText(g.md, lineEndings.Replace(doc)), "\n")
+	if underBullet {
 		text = indentUnderBullet(text)
 	}
 	start := g.buf.Len()
@@ -323,54 +325,76 @@ func (g *generator) inAuthorText(pos int) bool {
 	return false
 }
 
-// writeTable writes text, which holds the one table last built by newTable,
-// indented by indent, and records where the table starts.
-func (g *generator) writeTable(text string, indent int) {
-	start := g.buf.Len()
-	if indent > 0 {
-		text = indentUnderBullet(text)
-	}
-	g.buf.WriteString(text)
-	for _, tw := range g.tables {
-		if tw.offset < 0 {
-			tw.offset = start
-		}
-	}
-}
-
-// tableWriter writes one table and records its shape: its column and row
-// counts, the offset writeTable placed it at, and a row whose cell count
-// differs from its header's, which the self-check reports. The parser cannot
-// see such a row, because GitHub's tables drop a surplus cell and fill a
-// missing one.
+// tableWriter writes one table into the document and records its shape: its
+// column and row counts, where its header line starts, and a row the
+// self-check reports because the parser cannot see it — a cell count other
+// than the header's, which GitHub's tables pad or trim, or a line break.
 type tableWriter struct {
-	b      *bytes.Buffer
+	g      *generator
+	indent string
 	cols   int
 	rows   int
 	offset int
 	bad    string
 }
 
-// newTable writes a table's header and separator rows and returns the writer
-// for its body rows.
-func (g *generator) newTable(b *bytes.Buffer, cols ...string) *tableWriter {
-	tw := &tableWriter{b: b, cols: len(cols), offset: -1}
+// tableCell is one cell's Markdown, and whether it holds a doc comment, which
+// the self-check leaves to its author.
+type tableCell struct {
+	md     string
+	author bool
+}
+
+func codeCellOf(s string) tableCell { return tableCell{md: codeCell(s)} }
+
+// descriptionCellOf writes a doc comment as a table cell, with the HTML
+// construct it leaves open closed on its line.
+func (g *generator) descriptionCellOf(doc string) tableCell {
+	return tableCell{md: g.headings.closeAuthorHTML(g.md, descriptionCell(g.md, doc), " "), author: true}
+}
+
+// newTable writes a table's header and separator rows, indented by indent,
+// and returns the writer for its body rows.
+func (g *generator) newTable(indent int, cols ...string) *tableWriter {
+	tw := &tableWriter{g: g, indent: strings.Repeat(" ", indent), cols: len(cols), offset: g.buf.Len()}
 	g.tables = append(g.tables, tw)
-	writeTableRow(b, cols...)
-	sep := make([]string, len(cols))
-	for i := range sep {
-		sep[i] = "---"
+	header := make([]tableCell, len(cols))
+	sep := make([]tableCell, len(cols))
+	for i, c := range cols {
+		header[i], sep[i] = tableCell{md: c}, tableCell{md: "---"}
 	}
-	writeTableRow(b, sep...)
+	tw.write(header)
+	tw.write(sep)
 	return tw
 }
 
-func (tw *tableWriter) row(cells ...string) {
-	if len(cells) != tw.cols && tw.bad == "" {
+func (tw *tableWriter) row(cells ...tableCell) {
+	switch {
+	case tw.bad != "":
+	case len(cells) != tw.cols:
 		tw.bad = fmt.Sprintf("table row has %d cells, its header %d", len(cells), tw.cols)
+	case slices.ContainsFunc(cells, func(c tableCell) bool { return strings.ContainsAny(c.md, "\r\n") }):
+		tw.bad = "a table cell holds a line break"
 	}
 	tw.rows++
-	writeTableRow(tw.b, cells...)
+	tw.write(cells)
+}
+
+// write writes one row of cells, which are Markdown already, and records each
+// doc comment's place in the document.
+func (tw *tableWriter) write(cells []tableCell) {
+	b := &tw.g.buf
+	b.WriteString(tw.indent + "|")
+	for _, c := range cells {
+		b.WriteByte(' ')
+		start := b.Len()
+		b.WriteString(c.md)
+		if c.author {
+			tw.g.authored = append(tw.g.authored, span{start: start, end: b.Len()})
+		}
+		b.WriteString(" |")
+	}
+	b.WriteByte('\n')
 }
 
 // typeEntry records how one type in the closure is addressed in the emitted
@@ -398,6 +422,7 @@ type generator struct {
 	cfg        config
 
 	md       goldmark.Markdown // the parser the self-check and the closing of doc comments read with
+	headings headingReader     // reads the heading elements of what md parses
 	parsed   *probe            // the emitted document as md reads it; nil until read
 	links    []string          // the anchor of every internal link emitted
 	authored []span            // every doc comment written, in document order
@@ -426,6 +451,7 @@ func newGenerator(s *schema.Schema, cfg config) *generator {
 		contents:   map[location.SourceID][]byte{},
 		cfg:        cfg,
 		md:         newParser(),
+		headings:   newHeadingReader(),
 		diagramAt:  -1,
 	}
 	mermaidIDs := map[string]bool{}
@@ -452,7 +478,7 @@ func newGenerator(s *schema.Schema, cfg config) *generator {
 // has no name a data file can use and so is never written as a tag.
 func (g *generator) displayName(sch *schema.Schema, t *schema.Type) (string, string) {
 	if tag, ok := schema.AddressableTag(g.entry, t.ID()); ok {
-		return tag, tag
+		return tag, escapeInline(tag)
 	}
 	name := printableName(sch.Name())
 	return t.Name() + " (" + name + ")", t.Name() + " (" + escapeInline(name) + ")"

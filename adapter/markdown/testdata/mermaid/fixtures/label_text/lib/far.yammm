@@ -1,0 +1,5 @@
+schema "*b* _c_ \\d $y$ ﬂ°x¶ß #1; <i>&amp; direction LR"
+
+type Mark {
+	id String primary
+}

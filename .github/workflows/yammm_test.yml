@@ -128,6 +128,35 @@ jobs:
           go-version-file: go.mod
       - name: Vet
         run: scripts/vet.sh
+  # adapter/markdown's self-check reads its class diagram through a Go model of
+  # Mermaid's lexer, and that model was measured wrong twice. This job hands
+  # every golden's and every fixture's diagram to Mermaid itself, the 10.1.0
+  # floor the document states, the last 11.x and the current release, pinned
+  # by the lock file in adapter/markdown/testdata/mermaid, and requires each to
+  # read what the schema says the diagram holds.
+  #
+  # Behind the mermaid build tag, so scripts/test.sh needs no Node. Linux only:
+  # Mermaid runs under Node, and the emitted diagram does not depend on the host.
+  mermaid:
+    name: Mermaid reads the diagrams
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install Mermaid
+        working-directory: adapter/markdown/testdata/mermaid
+        run: npm ci
+      - name: Parse the diagrams
+        run: go test -count=1 -tags mermaid -timeout 5m -v -run '^TestMarshal_MermaidReadsWhatTheEmitterMeant$' ./adapter/markdown/
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS

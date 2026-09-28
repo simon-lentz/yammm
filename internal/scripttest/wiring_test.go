@@ -50,6 +50,7 @@ type step struct {
 	Name            string            `yaml:"name"`
 	Uses            string            `yaml:"uses"`
 	Run             string            `yaml:"run"`
+	WorkDir         string            `yaml:"working-directory"`
 	With            map[string]any    `yaml:"with"`
 	Env             map[string]string `yaml:"env"`
 	If              string            `yaml:"if"`
@@ -387,10 +388,13 @@ func TestTestWorkflow_VetsEveryTargetInAJobOfItsOwn(t *testing.T) {
 // as the job takes to start its last test binary, so a hung binary prints its
 // stack before the job is killed. Measured over 25 CI runs, the test jobs'
 // Test step ended at most 688 s into the job and the integration job's test
-// step started at most 23 s in; each margin adds headroom to its measurement.
+// step started at most 23 s in. The mermaid job's test binary starts after npm
+// ci, which took 37 s from an empty npm cache, and a build, which took under
+// 6 s with a cold build cache. Each margin adds headroom to its measurement.
 var jobMargins = map[string]time.Duration{
 	"test":        15 * time.Minute,
 	"integration": 5 * time.Minute,
+	"mermaid":     5 * time.Minute,
 }
 
 // testlessJobs names, per job of the test workflow that runs no go test, what
@@ -541,6 +545,115 @@ func TestTestWorkflow_EveryJobTimesOutAfterItsTests(t *testing.T) {
 	}
 	for _, f := range timeoutFindings(wf, string(script), jobMargins, testlessJobs) {
 		t.Error(f)
+	}
+}
+
+// mermaidPkgDir is the npm package the mermaid job installs, and mermaidTest
+// the tagged test it runs.
+const (
+	mermaidPkgDir = "adapter/markdown/testdata/mermaid"
+	mermaidTest   = "TestMarshal_MermaidReadsWhatTheEmitterMeant"
+)
+
+// mermaidJobFindings reports each link of the mermaid job's chain that does
+// not hold: npm ci installs the lock-filed package, go test names the tag and
+// the test, the test exists behind that tag (a -run that matches nothing
+// passes), the linter reads the tag, and git ignores the installed package.
+func mermaidJobFindings(wf workflow, testSrc string, lintTags []string, gitignore string) []string {
+	var findings []string
+	j, ok := wf.Jobs["mermaid"]
+	if !ok {
+		return []string{"jobs.mermaid is not set"}
+	}
+	if !slices.ContainsFunc(j.Steps, func(s step) bool {
+		return s.WorkDir == mermaidPkgDir && strings.TrimSpace(s.Run) == "npm ci"
+	}) {
+		findings = append(findings, "no step of jobs.mermaid runs npm ci in "+mermaidPkgDir)
+	}
+	if !slices.ContainsFunc(j.Steps, func(s step) bool {
+		return goTestCall.MatchString(s.Run) && strings.Contains(s.Run, "-tags mermaid") &&
+			strings.Contains(s.Run, "-run '^"+mermaidTest+"$'") && strings.Contains(s.Run, "./adapter/markdown/")
+	}) {
+		findings = append(findings, "no step of jobs.mermaid runs go test -tags mermaid -run '^"+mermaidTest+"$' ./adapter/markdown/")
+	}
+	if !strings.HasPrefix(testSrc, "//go:build mermaid\n") || !strings.Contains(testSrc, "\nfunc "+mermaidTest+"(t *testing.T) {") {
+		findings = append(findings, "adapter/markdown/mermaid_parse_test.go does not declare "+mermaidTest+" behind the mermaid build tag")
+	}
+	if !slices.Contains(lintTags, "mermaid") {
+		findings = append(findings, "the linter's build-tags leave the mermaid-tagged test unread")
+	}
+	if !slices.Contains(strings.Split(gitignore, "\n"), mermaidPkgDir+"/node_modules/") {
+		findings = append(findings, ".gitignore does not ignore "+mermaidPkgDir+"/node_modules/")
+	}
+	return findings
+}
+
+// The mermaid job parses adapter/markdown's diagrams with real Mermaid only
+// when every link of its chain holds.
+func TestTestWorkflow_TheMermaidJobParsesTheDiagrams(t *testing.T) {
+	t.Parallel()
+	var wf workflow
+	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
+	src, err := os.ReadFile(fromRoot("adapter/markdown/mermaid_parse_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lint struct {
+		Run struct {
+			BuildTags []string `yaml:"build-tags"`
+		} `yaml:"run"`
+	}
+	decodeYAML(t, fromRoot(".golangci.yml"), &lint)
+	ignore, err := os.ReadFile(fromRoot(".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range mermaidJobFindings(wf, string(src), lint.Run.BuildTags, string(ignore)) {
+		t.Error(f)
+	}
+}
+
+// The check itself, against each way the chain can break.
+func TestMermaidJobFindings_RefusesEachBrokenLink(t *testing.T) {
+	t.Parallel()
+	const (
+		install = "npm ci"
+		run     = "go test -count=1 -tags mermaid -timeout 5m -v -run '^" + mermaidTest + "$' ./adapter/markdown/"
+		src     = "//go:build mermaid\n\npackage markdown\n\nfunc " + mermaidTest + "(t *testing.T) {\n}\n"
+		ignore  = "x\n" + mermaidPkgDir + "/node_modules/\n"
+	)
+	wfWith := func(workDir, install, run string) workflow {
+		return workflow{Jobs: map[string]job{"mermaid": {Steps: []step{{WorkDir: workDir, Run: install}, {Run: run}}}}}
+	}
+	good := wfWith(mermaidPkgDir, install, run)
+	if f := mermaidJobFindings(good, src, []string{"mermaid"}, ignore); len(f) != 0 {
+		t.Fatalf("a whole chain reports %q", f)
+	}
+	for _, tt := range []struct {
+		name, want string
+		wf         workflow
+		src        string
+		tags       []string
+		ignore     string
+	}{
+		{"no job", "is not set", workflow{Jobs: map[string]job{}}, src, []string{"mermaid"}, ignore},
+		{"npm install", "npm ci", wfWith(mermaidPkgDir, "npm install", run), src, []string{"mermaid"}, ignore},
+		{"another directory", "npm ci", wfWith("adapter/markdown", install, run), src, []string{"mermaid"}, ignore},
+		{"no tag", "runs go test", wfWith(mermaidPkgDir, install, strings.Replace(run, "-tags mermaid ", "", 1)), src, []string{"mermaid"}, ignore},
+		{"another test", "runs go test", wfWith(mermaidPkgDir, install, strings.Replace(run, mermaidTest, "TestX", 1)), src, []string{"mermaid"}, ignore},
+		{"another package", "runs go test", wfWith(mermaidPkgDir, install, strings.Replace(run, "./adapter/markdown/", "./...", 1)), src, []string{"mermaid"}, ignore},
+		{"an untagged test file", "build tag", good, strings.TrimPrefix(src, "//go:build mermaid\n"), []string{"mermaid"}, ignore},
+		{"no such test", "build tag", good, strings.Replace(src, mermaidTest, "TestX", 1), []string{"mermaid"}, ignore},
+		{"a linter blind to the tag", "linter", good, src, []string{"neo4j_integration"}, ignore},
+		{"node_modules tracked", ".gitignore", good, src, []string{"mermaid"}, "x\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := mermaidJobFindings(tt.wf, tt.src, tt.tags, tt.ignore)
+			if len(f) != 1 || !strings.Contains(f[0], tt.want) {
+				t.Errorf("findings = %q, want one naming %q", f, tt.want)
+			}
+		})
 	}
 }
 

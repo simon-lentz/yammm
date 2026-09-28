@@ -77,6 +77,13 @@ adapter/markdown/testdata/imports/common.yammm
 adapter/markdown/testdata/imports/main.yammm
 adapter/markdown/testdata/inheritance.yammm
 adapter/markdown/testdata/invariants.yammm
+adapter/markdown/testdata/mermaid/fixtures/direction_label/lib/far.yammm
+adapter/markdown/testdata/mermaid/fixtures/direction_label/lib/mid.yammm
+adapter/markdown/testdata/mermaid/fixtures/direction_label/main.yammm
+adapter/markdown/testdata/mermaid/fixtures/label_text/lib/far.yammm
+adapter/markdown/testdata/mermaid/fixtures/label_text/lib/mid.yammm
+adapter/markdown/testdata/mermaid/fixtures/label_text/main.yammm
+adapter/markdown/testdata/mermaid/fixtures/redirection.yammm
 adapter/markdown/testdata/named.yammm
 adapter/markdown/testdata/no_diagram.yammm
 adapter/markdown/testdata/no_members.yammm

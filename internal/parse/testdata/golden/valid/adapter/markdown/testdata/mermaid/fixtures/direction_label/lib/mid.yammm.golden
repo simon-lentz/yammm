@@ -1,0 +1,69 @@
+{
+  "name": "\"mid\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "imports": [
+    {
+      "path": "\"./far\"",
+      "alias": "far",
+      "span": {
+        "s": 14,
+        "e": 35
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Relay",
+      "name_span": {
+        "s": 42,
+        "e": 47
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 54,
+              "e": 60
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 51,
+            "e": 68
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "SIGNALS",
+          "name_span": {
+            "s": 74,
+            "e": 81
+          },
+          "target": {
+            "qualifier": "far",
+            "name": "Beacon",
+            "span": {
+              "s": 88,
+              "e": 98
+            }
+          },
+          "span": {
+            "s": 70,
+            "e": 98
+          }
+        }
+      ],
+      "span": {
+        "s": 37,
+        "e": 100
+      }
+    }
+  ]
+}

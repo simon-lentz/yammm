@@ -1,0 +1,8 @@
+schema "labels"
+
+import "./lib/mid" as mid
+
+type Post {
+	id String primary
+	--> VIA (one) mid.Hop
+}

@@ -66,6 +66,27 @@ type Unrelated {
 	if got, want := g.superLink(thing, ref), "Root"; got != want {
 		t.Errorf("superLink = %q, want the reference spelling %q", got, want)
 	}
+	// The spelling is schema text: an alias www would otherwise autolink.
+	www := schema.NewTypeRef("www", "Root", location.Span{})
+	if got, want := g.superLink(thing, www), "www<!---->.Root"; got != want {
+		t.Errorf("superLink = %q, want the escaped reference spelling %q", got, want)
+	}
+
+	aliased := loadSources(t, map[string][]byte{
+		"entry.yammm": []byte("schema \"e\"\nimport \"x.yammm\" as www\ntype T {\n  id String primary\n  --> AT (one) www.Other\n}\n"),
+		"x.yammm":     []byte("schema \"x\"\ntype Other {\n  id String primary\n}\n"),
+	})
+	tt, ok := aliased.Type("T")
+	if !ok {
+		t.Fatal("T missing from the aliased fixture")
+	}
+	at, ok := tt.Relation("AT")
+	if !ok {
+		t.Fatal("AT missing from T")
+	}
+	if got, want := g.relationTarget(at), "www<!---->.Other"; got != want {
+		t.Errorf("relationTarget = %q, want the escaped reference spelling %q", got, want)
+	}
 
 	// The control: over its own document both resolve to links, so the
 	// assertions above pin the fallback and not a renderer that never links.

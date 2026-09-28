@@ -1,0 +1,69 @@
+{
+  "name": "\"mid\"",
+  "span": {
+    "s": 0,
+    "e": 12
+  },
+  "imports": [
+    {
+      "path": "\"./far\"",
+      "alias": "far",
+      "span": {
+        "s": 14,
+        "e": 35
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Hop",
+      "name_span": {
+        "s": 42,
+        "e": 45
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 52,
+              "e": 58
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 49,
+            "e": 66
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "ENDS",
+          "name_span": {
+            "s": 72,
+            "e": 76
+          },
+          "target": {
+            "qualifier": "far",
+            "name": "Mark",
+            "span": {
+              "s": 83,
+              "e": 91
+            }
+          },
+          "span": {
+            "s": 68,
+            "e": 91
+          }
+        }
+      ],
+      "span": {
+        "s": 37,
+        "e": 93
+      }
+    }
+  ]
+}
