@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // sharedPattern rewrites a yammm pattern, which Go's regexp compiles as RE2,
@@ -126,7 +127,9 @@ func writeShared(sb *strings.Builder, re *syntax.Regexp) bool {
 }
 
 // writeAtom renders a repetition operand, grouping it unless it renders as a
-// single character or class.
+// single character or class. A character above U+FFFF is grouped too: an
+// engine without the "u" flag reads it as two UTF-16 code units and would
+// repeat the second alone.
 func writeAtom(sb *strings.Builder, re *syntax.Regexp) bool {
 	for re.Op == syntax.OpCapture {
 		re = re.Sub[0]
@@ -134,7 +137,16 @@ func writeAtom(sb *strings.Builder, re *syntax.Regexp) bool {
 	switch {
 	case re.Op == syntax.OpLiteral && len(re.Rune) == 1,
 		re.Op == syntax.OpCharClass, re.Op == syntax.OpAnyChar, re.Op == syntax.OpAnyCharNotNL:
-		return writeShared(sb, re)
+		var atom strings.Builder
+		if !writeShared(&atom, re) {
+			return false
+		}
+		text := atom.String()
+		if r, size := utf8.DecodeRuneInString(text); size == len(text) && r > 0xFFFF {
+			text = "(?:" + text + ")"
+		}
+		sb.WriteString(text)
+		return true
 	}
 	return writeGroup(sb, re)
 }

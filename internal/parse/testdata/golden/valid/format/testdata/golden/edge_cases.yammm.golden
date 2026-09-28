@@ -30,7 +30,7 @@
         "e": 176
       },
       "abstract": true,
-      "doc": "* DOC_COMMENT block:\n * This schema tests edge cases for the formatter.",
+      "doc": "* DOC_COMMENT block:\n* This schema tests edge cases for the formatter.",
       "props": [
         {
           "name": "created_at",

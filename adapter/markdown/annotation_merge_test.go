@@ -8,8 +8,8 @@ import (
 // TestPropertyTable_MergedAnnotationProperty pins the "from <Owner>" provenance
 // of a property whose annotations were merged across ancestors. Such a row is a
 // synthesized copy that appears in no type's own property slice, so a
-// pointer-keyed owner lookup misses it and silently falls back to the declaring
-// scope's bare name — "A" instead of the document's display name "base.A".
+// pointer-keyed owner lookup misses it, and the row would read "from " with no
+// owner where the document's display name "base.A" is meant.
 func TestPropertyTable_MergedAnnotationProperty(t *testing.T) {
 	t.Parallel()
 	s := loadSources(t, map[string][]byte{

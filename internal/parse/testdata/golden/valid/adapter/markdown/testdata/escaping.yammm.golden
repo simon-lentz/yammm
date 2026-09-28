@@ -49,7 +49,7 @@
         },
         {
           "name": "grade",
-          "doc": "Multi-line doc:\n\tline two with a | pipe.",
+          "doc": "Multi-line doc:\nline two with a | pipe.",
           "constraint": {
             "kind": "Alias",
             "args": [

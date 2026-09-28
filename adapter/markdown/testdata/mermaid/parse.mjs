@@ -19,13 +19,7 @@ const dom = new JSDOM('<!DOCTYPE html><body></body>', { pretendToBeVisual: true 
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 for (const k of ['Element', 'HTMLElement', 'SVGElement', 'Node', 'DOMParser', 'navigator', 'getComputedStyle', 'MutationObserver', 'XMLSerializer']) {
-  if (!(k in globalThis)) {
-    try {
-      globalThis[k] = dom.window[k];
-    } catch {
-      // navigator is a getter on some Node releases; the global one serves.
-    }
-  }
+  if (!(k in globalThis)) globalThis[k] = dom.window[k];
 }
 
 // Mermaid 10.1.0's render applies encodeEntities before getDiagramFromText,
@@ -72,10 +66,23 @@ async function load(pkg) {
   const { default: mermaid } = await import(pkg);
   mermaid.initialize({ startOnLoad: false });
   const version = JSON.parse(fs.readFileSync(new URL(`./node_modules/${pkg}/package.json`, import.meta.url))).version;
-  return { pkg, version, mermaid };
+  // Mermaid 10.1.0 keeps the direction in module state that clear() leaves
+  // alone, and every class diagram's db writes that one state, so this one
+  // sets it back to TB after each diagram, read or refused, as a fresh page
+  // starts at TB.
+  const directionDb = pkg === 'mermaid10' ? (await mermaid.mermaidAPI.getDiagramFromText('classDiagram\n  class A\n')).db : null;
+  return { pkg, version, mermaid, directionDb };
 }
 
-async function parseOne({ pkg, mermaid }, text) {
+async function parseOne(m, text) {
+  try {
+    return await readOne(m, text);
+  } finally {
+    m.directionDb?.setDirection('TB');
+  }
+}
+
+async function readOne({ pkg, mermaid }, text) {
   if (text.length > MAX_TEXT) {
     return { error: `render replaces a text of ${text.length} characters with its size message` };
   }
@@ -89,17 +96,13 @@ async function parseOne({ pkg, mermaid }, text) {
   const db = diagram.db;
   const classes = db.getClasses();
   const list = classes instanceof Map ? [...classes.values()] : Object.values(classes);
-  const result = {
+  return {
     error: '',
     type: diagram.type,
     direction: db.getDirection ? db.getDirection() : null,
     classes: list.map((c) => ({ id: c.id, label: shown(c.label), rawLabel: c.label })),
     relations: db.getRelations().map(relationOf),
   };
-  // Mermaid 10.1.0 keeps the direction in module state that clear() leaves
-  // alone; a browser page starts every diagram at TB, so the next one does.
-  if (pkg === 'mermaid10') db.setDirection('TB');
-  return result;
 }
 
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));

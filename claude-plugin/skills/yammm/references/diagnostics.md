@@ -113,17 +113,17 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_UNKNOWN_PROPERTY` | Referenced property not found on its type |
 | `E_DUPLICATE_PROPERTY` | Property defined more than once on a type |
 | `E_DUPLICATE_RELATION` | Relation defined more than once on a type |
-| `E_CASE_COLLISION` | Property/relation names differ only by case |
+| `E_CASE_COLLISION` | Two property names of a type, or two edge-property names of an association, differ only by case |
 | `E_PROPERTY_RELATION_COLLISION` | Property and relation share the same name |
 | `E_RESERVED_PREFIX` | Name uses a reserved prefix |
-| `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type |
+| `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type, or a part type declares or inherits an association |
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
 | `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
 | `E_INVALID_INVARIANT` | An invariant's expression or message is invalid |
 | `E_DUPLICATE_INVARIANT` | One invariant message declared twice on a type |
 | `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ |
 | `E_REVERSE_CLAUSE_REMOVED` | Schema carries the reverse clause removed in v0.15.0 (v0.15+) |
-| `E_INVALID_NAME` | Identifier has invalid format |
+| `E_INVALID_NAME` | A name the schema refuses: an identifier's format, an empty schema name, a member named `self`, a name the Builder takes that the DSL cannot state, or an invariant reading a relation in a casing other than its name or field name |
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, or property datatype) |
@@ -136,11 +136,11 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading |
-| `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines |
+| `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, or is larger than the size limit |
 | `E_LOAD_SOURCE_CHANGED` | A source a shared registry holds with content that differs from the load's: re-registered after an edit, or imported where the load's own bytes for it differ from the ones the registry compiled |
 | `E_UNKNOWN_ANNOTATION` | Annotation name not in the built-in registry for its placement |
 | `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
-| `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation |
+| `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation, or conflicting annotations a type inherits for one property |
 | `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |
 | `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
 | `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so a value stored through it can read back as another instant (Warning, v0.13+) |

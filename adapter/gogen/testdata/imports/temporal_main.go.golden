@@ -67,9 +67,9 @@ type Graph struct {
 	Event []*Event `json:"dep.Event,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// the name the re-load looks it up by, as verbatim .yammm text. Read it
-// through SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"temporal_dep.yammm":  "schema \"temporaldep\"\n\ntype Days = List<Date>\n\ntype Event {\n\tid String primary\n\ton List<List<Timestamp[\"15:04 MST\"]>>\n}\n",
 	"temporal_main.yammm": "schema \"temporalmain\"\n\nimport \"temporal_dep.yammm\" as dep\n\ntype Log {\n\tid String primary\n}\n",
@@ -78,8 +78,8 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "temporal_main.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// the name the re-load looks it up by. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))

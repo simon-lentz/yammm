@@ -61,9 +61,9 @@ type Graph struct {
 	Post []*Post `json:"Post,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// the name the re-load looks it up by, as verbatim .yammm text. Read it
-// through SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"inline_enum_list.yammm": "schema \"inlineenumlist\"\n\ntype Tags = List<Enum[\"red\", \"green\"]>\ntype Grid = List<List<Enum[\"on\", \"off\"]>>\ntype Tone = Enum[\"warm\", \"cool\"]\n\ntype Post {\n\tid     String primary\n\ttags   Tags\n\tlabels List<Enum[\"draft\", \"final\"]>\n\tmatrix List<List<Enum[\"yes\", \"no\"]>>\n\ttones  List<Tone>\n\tgrid   Grid\n\tmood   Enum[\"calm\", \"tense\"]\n}\n",
 }
@@ -71,8 +71,8 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "inline_enum_list.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// the name the re-load looks it up by. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))

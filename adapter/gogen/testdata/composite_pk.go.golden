@@ -22,9 +22,9 @@ type Graph struct {
 	Sensor []*Sensor `json:"Sensor,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// the name the re-load looks it up by, as verbatim .yammm text. Read it
-// through SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"composite_pk.yammm": "schema \"composite\"\n\ntype Region {\n\tcountry String primary\n\tcode String primary\n\tname String required\n}\n\ntype Sensor {\n\tid String primary\n\t--> LOCATED_IN (one) Region\n}\n",
 }
@@ -32,8 +32,8 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "composite_pk.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// the name the re-load looks it up by. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))

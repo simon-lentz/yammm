@@ -185,7 +185,9 @@ var (
 	// reverse clause ("/ name (mult)") the language removed in v0.15.0.
 	E_REVERSE_CLAUSE_REMOVED = NewCode("E_REVERSE_CLAUSE_REMOVED", CategorySchema)
 
-	// E_INVALID_NAME indicates an identifier has an invalid format.
+	// E_INVALID_NAME indicates a name the schema refuses: its format, a
+	// reserved spelling, one the Builder takes that the DSL cannot state, or an
+	// invariant's read of a relation in a casing other than its two spellings.
 	E_INVALID_NAME = NewCode("E_INVALID_NAME", CategorySchema)
 
 	// E_UPSTREAM_FAIL indicates an imported schema failed to compile.

@@ -137,16 +137,22 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // are quoted strings in the DSL and stay free-form, but a string value is valid
 // UTF-8 wherever the Builder takes one: E_INVALID_NAME for the schema name,
 // E_IMPORT_RESOLVE for an import path, E_INVALID_INVARIANT for an invariant's
-// message or string literal. A documentation string no doc comment can carry —
-// one holding "*/", a NUL, a byte order mark or bytes that are not UTF-8 — is
-// E_SYNTAX. Import aliases are validated during completion.
+// message or string literal. A documentation string is stored as the text a
+// doc comment holding it carries, by the rule the Comments section of
+// docs/SPEC.md states. One no doc comment can hold — with "*/", a NUL, a byte order mark or
+// bytes that are not UTF-8 — is E_SYNTAX. Import aliases are validated during
+// completion.
 //
 // # Import Requirements
 //
 // AddImport() requires a non-zero source ID, set with WithSourceID() before or
 // after it. Without one, Build returns E_MISSING_SOURCE_ID. An import closure
 // holds one schema per name, as a loaded one does, so a built schema whose
-// closure holds two schemas of one name is E_DUPLICATE_SCHEMA.
+// closure holds two schemas of one name is E_DUPLICATE_SCHEMA. An import that
+// resolves to the built schema's own source ID, or to a registered schema
+// whose closure holds that ID, is E_IMPORT_CYCLE, as a load refuses a cycle.
+// An import whose closure holds a source compiled from other bytes than an
+// earlier import's closure holds it is E_IMPORT_RESOLVE, as on a load.
 type Builder struct {
 	name           string
 	sourceID       location.SourceID
@@ -215,9 +221,10 @@ func (b *Builder) WithSourceID(id location.SourceID) *Builder {
 	return b
 }
 
-// WithDocumentation sets the schema-level documentation.
+// WithDocumentation sets the schema-level documentation, stored as the text a
+// doc comment holding doc carries.
 func (b *Builder) WithDocumentation(doc string) *Builder {
-	b.documentation = doc
+	b.documentation = parse.DocText(doc)
 	return b
 }
 
@@ -479,7 +486,9 @@ func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
 // names LC_WORD less the six excluded spellings, relation names UPPER_SNAKE less
 // UUID); every constraint argument [constraintFault] refuses, and a datatype
 // declared as another datatype alone; the Go type of every literal an invariant
-// holds, and that every string value is valid UTF-8; that every documentation
+// holds, and that every string it reads (an import path, an invariant's message
+// and string literals, an enum value, a Timestamp format) is valid UTF-8, where
+// Build has checked the schema name before it; that every documentation
 // string is one a doc comment can carry; and the property each
 // WithPropertyAnnotation names. An invariant's message and expression are
 // otherwise completion's to check.
@@ -492,7 +501,7 @@ func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
 //     another datatype alone
 //   - E_INVALID_INVARIANT for invalid invariant declarations
 //   - E_IMPORT_RESOLVE for an import path that is not valid UTF-8
-//   - E_SYNTAX for a documentation string no doc comment can carry
+//   - E_SYNTAX for a documentation string no doc comment can hold
 //   - E_UNKNOWN_ANNOTATION_TARGET for a property annotation naming no property
 func (b *Builder) validateInput(collector *diag.Collector) bool {
 	hasErrors := false
@@ -931,6 +940,7 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 	resolved := make(resolvedImportMap, len(b.imports))
 	// Track seen SourceIDs for duplicate detection
 	seenSourceIDs := make(map[location.SourceID]*importDecl)
+	compiles := make(map[location.SourceID]*Schema)
 	hasErrors := false
 	for _, imp := range b.imports {
 		// Keep-first: once an alias has resolved, a later declaration of the
@@ -979,7 +989,20 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 			hasErrors = true
 			continue
 		}
+		// A refused import is recorded too, so a second declaration of it draws
+		// E_DUPLICATE_IMPORT, as on a load, rather than a second refusal.
 		seenSourceIDs[resolvedID] = imp
+		if b.importClosesCycle(resolvedID) {
+			collector.Collect(importCycleIssue("", diag.ModuleRootNone, imp))
+			hasErrors = true
+			continue
+		}
+		if member, split := b.splitCompile(compiles, resolvedID); split {
+			collector.Collect(importResolveIssue("", diag.ModuleRootNone,
+				fmt.Sprintf("import %q holds %s in its closure compiled from different bytes than an earlier import's closure holds", imp.Path, member), imp))
+			hasErrors = true
+			continue
+		}
 		resolved[imp.Alias] = importResolution{sourceID: resolvedID}
 	}
 
@@ -987,6 +1010,50 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 		return nil
 	}
 	return resolved
+}
+
+// importClosesCycle reports whether the schema registered as id is the one
+// being built or holds its SourceID in its import closure, which the loader
+// refuses as a cycle.
+func (b *Builder) importClosesCycle(id location.SourceID) bool {
+	if id == b.sourceID {
+		return true
+	}
+	dep, ok := b.registry.LookupBySourceID(id)
+	return ok && slices.ContainsFunc(dep.Closure(), func(member *Schema) bool {
+		return member.SourceID() == b.sourceID
+	})
+}
+
+// splitCompile walks the closure of the schema registered as id by schema,
+// not by SourceID as [Schema.Closure] does, recording each member in compiles.
+// It reports a member whose SourceID compiles already holds as a schema
+// compiled from other bytes: the built closure would keep one and resolve the
+// other's references into it, which a load refuses.
+func (b *Builder) splitCompile(compiles map[location.SourceID]*Schema, id location.SourceID) (location.SourceID, bool) {
+	dep, ok := b.registry.LookupBySourceID(id)
+	if !ok {
+		return location.SourceID{}, false
+	}
+	visited := map[*Schema]bool{}
+	for queue := []*Schema{dep}; len(queue) > 0; queue = queue[1:] {
+		cur := queue[0]
+		if cur == nil || visited[cur] {
+			continue
+		}
+		visited[cur] = true
+		if prior, held := compiles[cur.SourceID()]; held {
+			if prior != cur && !sameSourceBytes(prior, cur) {
+				return cur.SourceID(), true
+			}
+		} else {
+			compiles[cur.SourceID()] = cur
+		}
+		for _, imp := range cur.imports {
+			queue = append(queue, imp.Schema())
+		}
+	}
+	return location.SourceID{}, false
 }
 
 // wireImports wires schema pointers and seals imports after completion.
@@ -1125,9 +1192,10 @@ func (t *TypeBuilder) AsAbstract() *TypeBuilder {
 	return t
 }
 
-// WithTypeDocumentation sets documentation for this type.
+// WithTypeDocumentation sets documentation for this type, stored as the text a
+// doc comment holding doc carries.
 func (t *TypeBuilder) WithTypeDocumentation(doc string) *TypeBuilder {
-	t.state.documentation = doc
+	t.state.documentation = parse.DocText(doc)
 	return t
 }
 
@@ -1135,7 +1203,8 @@ func (t *TypeBuilder) WithTypeDocumentation(doc string) *TypeBuilder {
 //
 // The name parameter is the user-facing message displayed when the invariant
 // fails validation. The e parameter is the compiled expression to evaluate.
-// The doc parameter is optional documentation for the invariant.
+// The doc parameter is optional documentation for the invariant, stored as the
+// text a doc comment holding it carries.
 //
 // Expressions are constructed with the expr package. Compiling one from source
 // text is internal to schema loading and is not reachable from here:
@@ -1145,7 +1214,7 @@ func (t *TypeBuilder) WithInvariant(name string, e expr.Expression, doc string) 
 	t.state.invariants = append(t.state.invariants, &invariantDecl{
 		Name:          name,
 		Expr:          e,
-		Documentation: doc,
+		Documentation: parse.DocText(doc),
 		Span:          location.Span{}, // Synthetic - no source location
 	})
 	return t

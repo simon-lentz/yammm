@@ -37,16 +37,22 @@
 //     SerializedEntry pair, and SchemaHash (see the Embedded Source section
 //     below).
 //
-// A type's or property's schema doc-comment becomes the Go declaration's
-// doc-comment, one "//" line for each of its lines. The indentation its
-// continuation lines share is removed, because the Go doc-comment formatter
-// reads an indented line as a code block. A line indented deeper than the rest
-// keeps the difference and is rendered as a code block: gofmt puts a blank
-// "//" line before it, and after it when text follows. A line Go would read as
-// a build line — "+build ignore" as a "//" line, which gofmt moves into the
-// file's build constraints — is written as a one-line /* */ comment in the
-// same comment group, which neither gofmt nor go vet reads as one, so the doc
-// reads unchanged; gofmt then leaves that group as written.
+// A type's or a property's schema doc-comment, an edge property's included,
+// becomes the Go declaration's doc-comment, one "//" line for each of its
+// lines; a data type's, a relation's and the schema's own are not written.
+// The text is the loaded schema's, whose continuation lines lost the
+// indentation they all share, byte for byte, when the parser read the comment,
+// so layout that indents every continuation line alike makes no code block;
+// lines indented by different bytes, such as a tab on one and spaces on
+// another, share none and keep theirs, which the Go doc-comment formatter
+// reads as a code block. A line
+// indented deeper than the rest keeps the difference and is rendered as a
+// code block: gofmt puts a blank "//" line before it, and after it when text
+// follows. A line Go would read as a build line — "+build ignore" as a "//"
+// line, which gofmt moves into the file's build constraints — is written as a
+// one-line /* */ comment in the same comment group, which neither gofmt nor go
+// vet reads as one, so the doc reads unchanged; gofmt then leaves that group
+// as written.
 //
 // # Type Mapping
 //
@@ -87,14 +93,17 @@
 // DataType holds as its innermost element becomes <DataType>Element, so
 // type Tags = List<Enum[...]> emits type TagsElement and type Tags
 // []TagsElement. An optional non-slice field becomes a pointer (*T); slices and
-// vectors stay nil-able as-is, since a nil slice already encodes absence.
+// vectors stay nil-able as-is, since a nil slice already encodes an absent
+// field. A nil inner slice of a nested List field is not absent: encoding/json
+// writes it as a null element, which instance validation refuses
+// (E_TYPE_MISMATCH).
 //
 // Every field carries a json tag preserving the wire name verbatim. An optional
 // pointer field adds ,omitempty. An optional slice field adds ,omitzero, which
 // leaves out a nil slice and writes a present empty list as [], since the
 // library keeps an empty list apart from an absent one; encoding/json reads
 // omitzero from Go 1.24, and a consumer built below it writes a nil slice as
-// null, which adapter/json reads as an absent optional. Every relation field
+// null, which instance validation reads as an absent optional. Every relation field
 // adds ,omitempty, required ones included: instance validation refuses a null
 // relation, and a required relation left unset is refused where presence is
 // checked.
@@ -213,9 +222,9 @@
 // schema can be re-loaded at runtime without the original files on disk. One
 // surface carries it, emitted identically whatever the source count:
 //
-//   - func SerializedSources() map[string][]byte returns every source in the
-//     closure by its key, and const SerializedEntry names the entry's key. The
-//     recommended re-load is
+//   - func SerializedSources() map[string][]byte returns every source the
+//     schema's load held, by its key, and const SerializedEntry names the
+//     entry's key. The recommended re-load is
 //     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with an empty
 //     module root, [github.com/simon-lentz/yammm/schema.WithSourcesOnly] and
 //     [github.com/simon-lentz/yammm/schema.WithSyntheticRoot], which gives type
@@ -224,7 +233,7 @@
 // The backing store is an unexported package-level map, so the identifiers a
 // consumer sees do not vary with how many files a schema happens to span.
 //
-// A key is the name the re-load looks a source up by, never an absolute
+// A key is the name the re-load registers a source under, never an absolute
 // generation-machine path, so the output is byte-reproducible across checkouts
 // and CI. The entry keys by its path under the load's recorded module root
 // ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — supplied by the

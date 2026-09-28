@@ -1,6 +1,6 @@
 {
   "name": "\"bench_wide\"",
-  "doc": "A broad schema: inheritance, relations, invariants and annotations\n   together, at the size a real consumer schema reaches. It is the largest\n   file in this directory, so the largest-fixture benchmark selects it.",
+  "doc": "A broad schema: inheritance, relations, invariants and annotations\ntogether, at the size a real consumer schema reaches. It is the largest\nfile in this directory, so the largest-fixture benchmark selects it.",
   "span": {
     "s": 0,
     "e": 239

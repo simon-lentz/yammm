@@ -202,10 +202,10 @@ func compositionFrag(rel *schema.Relation, table *defsTable) (val, error) {
 		{K: "items", V: refTo(childKey)},
 	}
 	if !rel.IsOptional() {
-		pairs = append(pairs, kv{K: "minItems", V: scalar(1)})
+		pairs = append(pairs, kv{K: "minItems", V: scalar(int64(1))})
 	}
 	if !rel.IsMany() {
-		pairs = append(pairs, kv{K: "maxItems", V: scalar(1)})
+		pairs = append(pairs, kv{K: "maxItems", V: scalar(int64(1))})
 	}
 	desc := fmt.Sprintf("Composition %s %s → %s.", rel.Name(), multiplicity(rel), childKey)
 	if doc := rel.Documentation(); doc != "" {

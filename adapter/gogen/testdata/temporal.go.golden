@@ -125,9 +125,9 @@ type Graph struct {
 	Sensor []*Sensor `json:"Sensor,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// the name the re-load looks it up by, as verbatim .yammm text. Read it
-// through SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"temporal.yammm": "schema \"temporal\"\n\ntype Day   = Date\ntype Stamp = Timestamp\ntype Wall  = Timestamp[\"2006-01-02 15:04:05\"]\n\npart type Reading {\n\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\ton Date\n}\n\npart type Casing {\n\tserial String primary\n}\n\ntype Sensor {\n\tid             String primary\n\tinstalled      Date required\n\tdecommissioned Date\n\tcreated_at     Timestamp required\n\tseen_wall      Timestamp[\"2006-01-02 15:04:05\"]\n\tseen_at        Timestamp[\"2006-01-02T15:04:05.000000000Z07:00\"] required\n\tday            Day\n\tstamp          Stamp\n\twall           Wall\n\tdays           List<Date>\n\twalls          List<Timestamp[\"2006-01-02 15:04:05\"]>\n\tlabels         List<String>\n\t*-> HAS_READING (many) Reading\n\t*-> IN_CASING (one) Casing\n\t--> FEEDS (one) Sensor {\n\t\tsince Timestamp[\"2006-01-02 15:04:05\"]\n\t}\n\t--> NEIGHBOURS (many) Sensor\n}\n",
 }
@@ -135,8 +135,8 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "temporal.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// the name the re-load looks it up by. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))

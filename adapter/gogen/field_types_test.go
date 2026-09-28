@@ -182,6 +182,12 @@ func TestMarshal_DocCommentContinuationLinesAreDedented(t *testing.T) {
 	nested := marshalString(t, "schema \"d\"\n\n/* Usage\n   Call it as\n     car.Drive()\n   and stop. */\ntype Car {\n\tid String primary\n}\n")
 	assertHolds(t, nested, []string{"// Usage\n// Call it as\n//\n//\tcar.Drive()\n//\n// and stop.\ntype Car struct {"}, nil)
 
+	crOnly := marshalString(t, "schema \"d\"\n\n/* Usage\r   Call it as\r   more */\ntype Car {\n\tid String primary\n}\n")
+	assertHolds(t, crOnly, []string{"// Usage\n// Call it as\n// more\ntype Car struct {"}, nil)
+
+	deeper := marshalString(t, "schema \"d\"\n\n/* Usage\n   Call it as\n      car.Drive() */\ntype Car {\n\tid String primary\n}\n")
+	assertHolds(t, deeper, []string{"// Usage\n// Call it as\n//\n//\tcar.Drive()\ntype Car struct {"}, nil)
+
 	deeperFirst := marshalString(t, "schema \"d\"\n\n/* Usage\n     car.Drive()\n   drives it. */\ntype Car {\n\tid String primary\n}\n")
 	assertHolds(t, deeperFirst, []string{"// Usage\n//\n//\tcar.Drive()\n//\n// drives it.\ntype Car struct {"}, nil)
 }

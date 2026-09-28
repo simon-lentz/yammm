@@ -59,9 +59,9 @@ type Graph struct {
 	MainBar        []*MainBar        `json:"b.MainBar,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// the name the re-load looks it up by, as verbatim .yammm text. Read it
-// through SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"qualified_name_a.yammm":    "schema \"a\"\n\ntype Foo {\n\tid String primary\n}\n\ntype Bar {\n\tid String primary\n}\n",
 	"qualified_name_b.yammm":    "schema \"b\"\n\ntype Foo {\n\tcode String primary\n}\n\ntype AFoo {\n\tkey String primary\n}\n\ntype MainBar {\n\tid String primary\n}\n",
@@ -71,8 +71,8 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "qualified_name_main.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// the name the re-load looks it up by. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))

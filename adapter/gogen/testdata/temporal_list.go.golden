@@ -73,9 +73,9 @@ type Graph struct {
 	Calendar []*Calendar `json:"Calendar,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// the name the re-load looks it up by, as verbatim .yammm text. Read it
-// through SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"temporal_list.yammm": "schema \"temporallist\"\n\ntype Day   = Date\ntype Wall  = Timestamp[\"2006-01-02 15:04:05\"]\ntype Days  = List<Date>\ntype Dates = List<Day>\ntype Walls = List<Wall>\n\ntype Calendar {\n\tid     String primary\n\tdays   Days\n\tgrid   List<List<Day>>\n\tshifts List<List<Wall>>\n}\n",
 }
@@ -83,8 +83,8 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "temporal_list.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// the name the re-load looks it up by. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))

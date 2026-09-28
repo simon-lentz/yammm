@@ -29,9 +29,9 @@ type Graph struct {
 	Comment []*Comment `json:"Comment,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// the name the re-load looks it up by, as verbatim .yammm text. Read it
-// through SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"shared_edge.yammm": "schema \"geo\"\n\ntype User {\n\tid UUID primary\n}\n\ntype Post {\n\tid UUID primary\n\t--> CREATED_BY (one) User\n}\n\ntype Comment {\n\tid UUID primary\n\t--> CREATED_BY (one) User\n}\n",
 }
@@ -39,8 +39,8 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "shared_edge.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// the name the re-load looks it up by. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))

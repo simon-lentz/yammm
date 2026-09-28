@@ -576,11 +576,28 @@ func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, ow
 		return t
 	}
 	if t, found := c.membersOf(owner)[strings.ToLower(name)]; found {
+		if !c.relationSpelled(owner, owner, name, inv) {
+			return unknownType
+		}
 		return t
 	}
 	c.invariantErrorf(inv, diag.E_UNKNOWN_PROPERTY,
 		"unknown property %q in invariant %q on type %q", name, inv.Name(), owner.Name())
 	return unknownType
+}
+
+// relationSpelled reports whether name, which reads a member of t by its
+// folded spelling in an invariant on owner, is a spelling docs/SPEC.md admits:
+// a property in any case, a relation by its UPPER_SNAKE name or its field name.
+func (c *completer) relationSpelled(owner, t *Type, name string, inv *Invariant) bool {
+	rel, ok := t.RelationByField(strings.ToLower(name))
+	if !ok || name == rel.Name() || name == rel.FieldName() {
+		return true
+	}
+	c.invariantErrorf(inv, diag.E_INVALID_NAME,
+		"relation %s on type %q is read as %q in invariant %q on type %q: a relation is read as %s or %s",
+		rel.Name(), t.Name(), name, inv.Name(), owner.Name(), rel.Name(), rel.FieldName())
+	return false
 }
 
 // typeVariable resolves a lambda parameter, a member of the owner, or a
@@ -700,6 +717,9 @@ func (c *completer) typeInstanceMember(recv staticType, name string, owner *Type
 					"unknown property %q on type %q, one of the types the value may be (%s), in invariant %q on type %q",
 					name, ty.Name(), recv.typeName(), inv.Name(), owner.Name())
 			}
+			return unknownType
+		}
+		if !c.relationSpelled(owner, ty, name, inv) {
 			return unknownType
 		}
 		declared = append(declared, t)

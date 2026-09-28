@@ -5,8 +5,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -453,17 +455,36 @@ func TestMarshal_SyntheticRootLoadWithARelativeImport(t *testing.T) {
 // implementation of the embedded-key contract. The generator derives keys; the
 // loader looks them up. It reads the store out of the generated file, never
 // out of the generator, and re-loads it through the printed recipe under a
-// root no generator code names, from a directory holding no schema.
+// root no generator code names, from a directory holding no schema. It covers
+// every fixture with a golden, and imports/entry_shadow_main, which has none.
 func TestMarshal_EmbeddedStoreReloadsThroughItsRecipe(t *testing.T) {
 	type input struct {
 		name string
 		s    *schema.Schema
 	}
-	var inputs []input
-	for _, name := range []string{"scalars", "full", "temporal", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "imports/rel_main", "imports/tagform_collision_main", "imports/qualified_name_main", "imports/temporal_main", "imports/entry_shadow_main"} {
+	inputs := []input{{"imports/entry_shadow_main", loadSchema(t, "imports/entry_shadow_main")}}
+	err := fs.WalkDir(os.DirFS("testdata"), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go.golden") {
+			return err
+		}
+		name := strings.TrimSuffix(path, ".go.golden")
+		if name == "modroot/entry" {
+			inputs = append(inputs, input{name, loadModrootSchema(t)})
+			return nil
+		}
 		inputs = append(inputs, input{name, loadSchema(t, name)})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	inputs = append(inputs, input{"modroot", loadModrootSchema(t)})
+	// Goldens sit at the top level and in the imports and modroot
+	// directories, so a walk that skips any of them drops a fixture here.
+	for _, want := range []string{"scalars", "imports/main", "modroot/entry"} {
+		if !slices.ContainsFunc(inputs, func(in input) bool { return in.name == want }) {
+			t.Fatalf("the walk found %d goldens and not %s's", len(inputs)-1, want)
+		}
+	}
 
 	t.Chdir(t.TempDir())
 	for _, in := range inputs {

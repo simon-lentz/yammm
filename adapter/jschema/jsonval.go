@@ -79,9 +79,10 @@ func (v val) stringValue() (string, bool) {
 
 // compact returns v's single-line rendering: `{ "k": v, ... }` for objects,
 // `[v, ...]` for arrays, and the raw fragment for scalars. Empty containers
-// render as {} and []. Recomputed per render decision; document trees are
-// small (one per schema type/relation), so the quadratic worst case is
-// irrelevant in practice.
+// render as {} and []. render calls it on each node it visits and visits a
+// node's children only when that rendering is too wide, so a subtree is
+// rendered again once for each expanded node above it; the depth grows with
+// the schema's List nesting, not with its size.
 func (v val) compact() string {
 	switch v.kind {
 	case kindObject:

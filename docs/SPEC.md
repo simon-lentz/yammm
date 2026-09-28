@@ -97,7 +97,7 @@ type Person {
 }
 ```
 
-Block comments immediately preceding a schema, type, property, association, composition, data type, invariant, or type-level annotation declaration become that element's documentation and are preserved in the parsed model.
+Block comments immediately preceding a schema, type, property, association, composition, data type, invariant, or type-level annotation declaration become that element's documentation and are preserved in the parsed model. The documentation is the text between `/*` and `*/` with its trailing white space removed and its leading white space removed up to the first text. Every line that begins after a newline is a continuation line. When a newline comes before the first text, the white space is removed only up to the start of that text's line, which is then a continuation line too. Each continuation line loses the leading spaces and tabs that every continuation line holding text shares. The shared indentation is compared byte by byte: a line indented by a tab and one indented by spaces share none. A line ends at a newline, U+000A or U+000D, a CR LF pair counting as one. In the example above, the documentation's second line is `that spans multiple lines`.
 
 A comment cannot start inside a string literal or inside another comment.
 
@@ -1010,9 +1010,15 @@ RelationName = upper_letter { upper_letter | decimal_digit | "_" } .
 
 A relation name is UPPER_SNAKE. Its **field name** — the key instance data
 carries the relation under, and the entry an invariant expression reads — is
-the name in lower case: `WORKS_AT` is read as `works_at`. The two spellings
-differ only by case, so a name in either case resolves to the one entry; any
-other casing is rejected at load with `E_INVALID_NAME`.
+the name in lower case: `WORKS_AT` is read as `works_at`. An invariant reads
+the relation by either spelling, as a bare name or as a member, and a read in
+any other casing is rejected at load with `E_INVALID_NAME` wherever the checker
+knows the value read from is an instance of a type holding the relation. A read
+from a value whose type it cannot tell, such as an element of a list literal
+that mixes kinds, folds at evaluation as a property name does. A variable names
+it by its field name alone (`$works_at`), since variable names are matched
+exactly. Instance data carries it under the field name, matched as a property
+name is.
 
 Examples:
 
@@ -1471,7 +1477,10 @@ Invariant expressions are checked **statically** at schema load. The checker typ
 **The nil guards are typed by one rule.** `Default`, `Coalesce` and `Lest` evaluate to one of their alternatives — the receiver, or the fallback that stands in for it when the receiver is nil — and `Then` to its body, or nil for an absent receiver. The checker types each as what every alternative agrees on, so the stage after the guard is typed by a value it predicted. Alternatives of different kinds — a string beside a number, a list beside a scalar, an instance beside either — are refused at load (`E_INVALID_INVARIANT`): `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` are refused as `(name -> Default(1)) -> Upper` is, and `note -> Lest { true }` is refused because with `note` present the invariant evaluates to a string. The nil literal stands in for any receiver and the empty list literal for any list. Two instance types agree on the members both declare, whatever their ancestry: after `(A_SLOT -> Default(B_SLOT))` a member declared on `A` and on `B` reads, and a member declared on one of them alone is `E_UNKNOWN_PROPERTY`, since the evaluator would read nil there on the input that selects the other. A conditional and a list literal join their branches the same way, and admit alternatives of different kinds as a value of unknown kind. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
 
 **Relations are in scope**, under the relation's field name — the UPPER_SNAKE
-name in lower case — so `WORKS_AT` and `works_at` read one entry. What a
+name in lower case — so `WORKS_AT` and `works_at` read one entry as a bare name
+or as a member, and any other casing there, such as `Works_At`, is rejected at
+load (`E_INVALID_NAME`) wherever the checker knows the value read from; a
+variable reads it as `$works_at` alone. What a
 relation evaluates to depends on where its data lives:
 
 - A **composition**'s children are part of the instance, so the relation
@@ -1736,7 +1745,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
 - `E_INVALID_CONSTRAINT` — constraint definition error
 - `E_INVALID_INVARIANT` — an invariant's expression or message is invalid
-- `E_INVALID_NAME` — invalid identifier format
+- `E_INVALID_NAME` — a name the schema refuses: an identifier whose format its production refuses, an empty schema name, a property or relation field named `self`, a name the `schema.Builder` takes that the DSL cannot state (a built-in type name as a type, datatype or relation name, or a schema name that is not UTF-8), or an invariant that reads a relation in a casing other than its name or its field name
 - `E_INVALID_PRIMARY_KEY_TYPE` — disallowed type for primary key
 - `E_NO_PRIMARY_KEY` — concrete type declares or inherits no primary key
 - `E_LIST_ON_EDGE` — List type used in relationship property

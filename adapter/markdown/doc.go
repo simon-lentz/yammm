@@ -152,8 +152,13 @@
 //
 // Doc-comment text is written as the Markdown its author wrote, so a link, a
 // table or a heading inside it is the author's own and is not checked; that
-// holds in a description cell too. Its line ends are written as LF, a CR LF
-// or a lone CR each being a line end to CommonMark. A block a doc comment
+// holds in a description cell too. The text is the schema's documentation,
+// whose continuation lines lost the indentation they all share, byte for byte,
+// when the parser read the comment or the Builder took the string, so layout
+// that indents every continuation line alike makes no indented code block;
+// lines indented by different bytes, such as a tab on one and spaces on
+// another, share none and keep theirs. Its line ends are written as LF, a CR LF or a lone CR each being a
+// line end to CommonMark. A block a doc comment
 // leaves open — a fenced code block, or an HTML block that a blank line does
 // not end — is closed at the end of that comment's block with the line the
 // parser reads as its end, and a raw-text element such as <textarea> with
@@ -246,10 +251,9 @@
 // ancestors carries the union of their annotations, so the merged view a
 // property table iterates yields a synthesized copy rather than the declared
 // *Property. The own-versus-inherited lookups therefore key through
-// [github.com/simon-lentz/yammm/schema.Property.Origin]; without it such a
-// row's provenance silently degrades from the ancestor's display name to the
-// declaring scope's bare name — "from A" where "from base.A" is meant, which
-// names a different type in any document with two schemas.
+// [github.com/simon-lentz/yammm/schema.Property.Origin]; without it the owner
+// lookup misses such a row, which would read "from " with no owner where
+// "from base.A" is meant.
 //
 // # Dependencies
 //

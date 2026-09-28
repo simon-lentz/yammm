@@ -67,12 +67,6 @@ func (g *generator) collectTemporalDemand() ([]string, error) {
 		}
 	}
 	for _, e := range g.edges {
-		targetOwner := g.typeOwner(e.target)
-		for _, pk := range e.target.PrimaryKeysSlice() {
-			if _, err := g.goFieldType(targetOwner, pk); err != nil {
-				return nil, err
-			}
-		}
 		owner := g.edgeOwner(e)
 		for _, p := range e.rel.PropertiesSlice() {
 			if _, err := g.goFieldType(owner, p); err != nil {

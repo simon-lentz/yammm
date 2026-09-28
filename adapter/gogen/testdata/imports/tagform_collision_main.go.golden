@@ -47,9 +47,9 @@ type Graph struct {
 	Right []*Right `json:"right.Right,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// the name the re-load looks it up by, as verbatim .yammm text. Read it
-// through SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"tagform_collision_main.yammm": "schema \"tcmain\"\n\nimport \"tc_left.yammm\" as left\nimport \"tc_right.yammm\" as right\n\ntype Main {\n\tid String primary\n\t--> TO_LEFT  (one) left.Left\n\t--> TO_RIGHT (one) right.Right\n}\n",
 	"tc_left.yammm":                "schema \"tcleft\"\n\nimport \"tc_leftbase.yammm\" as base\n\ntype Left {\n\tid String primary\n\t--> TO_NODE (one) base.Node\n}\n",
@@ -61,8 +61,8 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "tagform_collision_main.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// the name the re-load looks it up by. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))

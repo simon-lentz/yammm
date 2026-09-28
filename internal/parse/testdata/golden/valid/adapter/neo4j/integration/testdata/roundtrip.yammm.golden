@@ -327,7 +327,7 @@
         "s": 1108,
         "e": 1113
       },
-      "doc": "Carries one property per Neo4j type expression the adapter can emit that\n   Document and Note do not already cover, so every expression is applied to a\n   real server and read back. A TYPE constraint is compared against the\n   server's propertyType by exact string, and the two only agree because the\n   adapter spells them the way Neo4j does — a claim that is worth checking\n   against a server rather than against the mapping that makes it.\n\n   Deliberately not extending Tracked: it stays out of the inheritance and\n   annotation round-trips so those keep asserting over the shapes they were\n   written for.",
+      "doc": "Carries one property per Neo4j type expression the adapter can emit that\nDocument and Note do not already cover, so every expression is applied to a\nreal server and read back. A TYPE constraint is compared against the\nserver's propertyType by exact string, and the two only agree because the\nadapter spells them the way Neo4j does — a claim that is worth checking\nagainst a server rather than against the mapping that makes it.\n\nDeliberately not extending Tracked: it stays out of the inheritance and\nannotation round-trips so those keep asserting over the shapes they were\nwritten for.",
       "props": [
         {
           "name": "typed_id",

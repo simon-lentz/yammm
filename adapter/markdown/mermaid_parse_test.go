@@ -478,3 +478,27 @@ func describeReading(r mermaidReading) string {
 	}
 	return b.String()
 }
+
+// TestMermaidHarness_EachDiagramStartsAtTB pins that the harness reads every
+// diagram at TB unless it states a direction, as a fresh page does, even after
+// a diagram that set another direction and was then refused: Mermaid 10.1.0
+// keeps the direction in module state that its clear() leaves alone.
+func TestMermaidHarness_EachDiagramStartsAtTB(t *testing.T) {
+	requireMermaidPackage(t)
+	out := runMermaid(t, []string{
+		"classDiagram\n  direction LR\n  class A\n  A --> ",
+		"classDiagram\n  class B",
+		"classDiagram\n  direction RL\n  class C",
+		"classDiagram\n  class D",
+	})
+	for _, v := range out.Versions {
+		if v.Results[0].Error == "" {
+			t.Errorf("Mermaid %s read the unfinished relation", v.Version)
+		}
+		for _, i := range []int{1, 3} {
+			if got := v.Results[i].Direction; got != "TB" {
+				t.Errorf("Mermaid %s read diagram %d, which states no direction, at %q, want TB", v.Version, i, got)
+			}
+		}
+	}
+}

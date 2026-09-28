@@ -109,9 +109,6 @@ func (g *generator) emitInlineEnums(owner fieldOwner, props []*schema.Property) 
 // inline, whatever it resolves to.
 func inlineEnum(c schema.Constraint) (schema.EnumConstraint, bool) {
 	for {
-		if isAlias(c) {
-			return schema.EnumConstraint{}, false
-		}
 		lc, ok := c.(schema.ListConstraint)
 		if !ok {
 			ec, ok := c.(schema.EnumConstraint)
@@ -385,7 +382,7 @@ func (g *generator) emitEdgeStructs() error {
 	return nil
 }
 
-// emitSerializedModel embeds every source in the closure under its key, the
+// emitSerializedModel embeds every source the load held under its key, the
 // SerializedSources/SerializedEntry pair and SchemaHash. It records the store,
 // the entry key and the hash as emitted, which is what finish checks.
 func (g *generator) emitSerializedModel() error {
@@ -401,9 +398,9 @@ func (g *generator) emitSerializedModel() error {
 	g.entryKey = keys[g.schema.SourceID()]
 	g.embedded = make(map[string][]byte, len(ids))
 
-	g.buf.WriteString("// serializedSources holds every source in the import closure, keyed by\n")
-	g.buf.WriteString("// the name the re-load looks it up by, as verbatim .yammm text. Read it\n")
-	g.buf.WriteString("// through SerializedSources below.\n")
+	g.buf.WriteString("// serializedSources holds every source the schema's load held, keyed by\n")
+	g.buf.WriteString("// the name the re-load registers it under, as verbatim .yammm text. Read\n")
+	g.buf.WriteString("// it through SerializedSources below.\n")
 	g.buf.WriteString("var serializedSources = map[string]string{\n")
 	for _, id := range ids { // SourceIDs() is sorted/deterministic
 		content, ok := srcs.ContentBySource(id)
@@ -429,8 +426,8 @@ func (g *generator) emitUniformSources(entryKey string) {
 	g.buf.WriteString("// SerializedEntry is the entry-point key into SerializedSources.\n")
 	fmt.Fprintf(g.buf, "const SerializedEntry = %s\n\n", strconv.Quote(entryKey))
 
-	g.buf.WriteString("// SerializedSources returns every source in the import closure, keyed by\n")
-	g.buf.WriteString("// the name the re-load looks it up by. Re-load with:\n")
+	g.buf.WriteString("// SerializedSources returns every source the schema's load held, keyed by\n")
+	g.buf.WriteString("// the name the re-load registers it under. Re-load with:\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("//\tschema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, \"\",\n")
 	g.buf.WriteString("//\t\tschema.WithSourcesOnly(true), schema.WithSyntheticRoot(" + strconv.Quote(recipeRoot) + "))\n")
@@ -745,17 +742,19 @@ func jsonTag(name, opt string) string {
 	return fmt.Sprintf("`json:%q`", name)
 }
 
-// emitDoc writes a yammm doc-comment as Go line comments, one per line. The
-// indentation every continuation line shares is removed, since the doc-comment
-// formatter reads an indented line as a code block; deeper indentation stays.
-// A line Go would read as a build line ([buildLineHazard]) is written as a
-// one-line block comment instead, in the same comment group, so go/doc reads
-// the doc unchanged. No doc of a loaded schema holds "*/".
+// docLineEnds makes every CR LF and every lone CR an LF, since a doc's lines end
+// at each, as the parser splits them.
+var docLineEnds = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
+// emitDoc writes a yammm doc-comment as Go line comments, one per line. A line
+// Go would read as a build line ([buildLineHazard]) is written as a one-line
+// block comment instead, in the same comment group, so go/doc reads the doc
+// unchanged. No doc of a loaded schema holds "*/".
 func (g *generator) emitDoc(doc string) {
 	if doc == "" {
 		return
 	}
-	for line := range strings.SplitSeq(dedentContinuation(doc), "\n") {
+	for line := range strings.SplitSeq(docLineEnds.Replace(doc), "\n") {
 		line = strings.TrimRight(line, " \t")
 		if buildLineHazard(line) {
 			fmt.Fprintf(g.buf, "/*%s*/\n", line)
@@ -776,28 +775,4 @@ func buildLineHazard(line string) bool {
 		return true
 	}
 	return strings.Contains(text, "//go:build") && constraint.IsGoBuild("//"+strings.TrimSpace(text[2:]))
-}
-
-// dedentContinuation removes from every line after the first the leading
-// white space all of them that hold text share. A block comment's first line
-// follows its opening delimiter, so it carries none of that indentation.
-func dedentContinuation(doc string) string {
-	lines := strings.Split(doc, "\n")
-	prefix, found := "", false
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-		if !found {
-			prefix, found = indent, true
-		}
-		for !strings.HasPrefix(indent, prefix) {
-			prefix = prefix[:len(prefix)-1]
-		}
-	}
-	for i := 1; i < len(lines); i++ {
-		lines[i] = strings.TrimPrefix(lines[i], prefix)
-	}
-	return strings.Join(lines, "\n")
 }

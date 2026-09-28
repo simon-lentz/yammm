@@ -56,7 +56,8 @@ type Person {
 // 0, where closeAuthorText judges it. A line that starts with a tab is
 // indented code there, so it opens no fence, no HTML comment and no heading
 // that would swallow the edge-property table or the invariant's fence, or take
-// an anchor a type's heading needs.
+// an anchor a type's heading needs. Each comment holds a continuation line at
+// column 0, so its tabs are the doc's text and not layout the parser removes.
 func TestMarshal_DocCommentUnderABulletReadsAsAtColumnZero(t *testing.T) {
 	t.Parallel()
 
@@ -66,27 +67,27 @@ func TestMarshal_DocCommentUnderABulletReadsAsAtColumnZero(t *testing.T) {
 	}{
 		{
 			"a tab before a fence opener",
-			"schema \"s\"\n\ntype State {\n\tcode String primary\n}\n\ntype T {\n\tname String primary\n\t/* The fence syntax:\n\n\t``` opens a block */\n\t--> IN_STATE (one) State { since Date }\n}\n",
+			"schema \"s\"\n\ntype State {\n\tcode String primary\n}\n\ntype T {\n\tname String primary\n\t/* The fence syntax:\nsee below.\n\n\t``` opens a block */\n\t--> IN_STATE (one) State { since Date }\n}\n",
 			[]string{"\n    \t``` opens a block\n\n    | Property | Type | Modifiers | Description |\n"},
 		},
 		{
 			"a tab before a fence opener in an invariant's doc",
-			"schema \"s\"\n\ntype T {\n\tid String primary\n\tage Integer required\n\t/* The fence syntax:\n\n\t``` opens a block */\n\t! \"adults only\" age >= 18\n}\n",
+			"schema \"s\"\n\ntype T {\n\tid String primary\n\tage Integer required\n\t/* The fence syntax:\nsee below.\n\n\t``` opens a block */\n\t! \"adults only\" age >= 18\n}\n",
 			[]string{"\n    \t``` opens a block\n\n    ```yammm\n"},
 		},
 		{
 			"a tab before an HTML comment holding a heading",
-			"schema \"s\"\n\ntype Order {\n\tid String primary\n\t/* Buyer.\n\n\t<!--\n\t# Person\n\t--> */\n\t--> BUYER (one) Person\n}\n\ntype Person {\n\tname String primary\n}\n",
+			"schema \"s\"\n\ntype Order {\n\tid String primary\n\t/* Buyer.\nsee below.\n\n\t<!--\n\t# Person\n\t--> */\n\t--> BUYER (one) Person\n}\n\ntype Person {\n\tname String primary\n}\n",
 			[]string{"[Person](#person)\n"},
 		},
 		{
 			"a tab before an HTML comment left open",
-			"schema \"s\"\n\ntype State {\n\tcode String primary\n}\n\ntype T {\n\tname String primary\n\t/* Note.\n\n\t<!-- note */\n\t--> IN_STATE (one) State { since Date }\n}\n",
+			"schema \"s\"\n\ntype State {\n\tcode String primary\n}\n\ntype T {\n\tname String primary\n\t/* Note.\nsee below.\n\n\t<!-- note */\n\t--> IN_STATE (one) State { since Date }\n}\n",
 			[]string{"\n    \t<!-- note\n\n    | Property | Type | Modifiers | Description |\n"},
 		},
 		{
 			"a tab before a setext underline",
-			"schema \"s\"\n\ntype Order {\n\tid String primary\n\t/* Buyer.\n\n\tDetails\n\t--- */\n\t--> BUYER (one) Details\n}\n\ntype Details {\n\tname String primary\n}\n",
+			"schema \"s\"\n\ntype Order {\n\tid String primary\n\t/* Buyer.\nsee below.\n\n\tDetails\n\t--- */\n\t--> BUYER (one) Details\n}\n\ntype Details {\n\tname String primary\n}\n",
 			[]string{"[Details](#details)\n"},
 		},
 	} {
