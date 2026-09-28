@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -95,22 +96,193 @@ func hostPathTree(t *testing.T, root string) map[string]hostPathEntry {
 		if err != nil {
 			return err
 		}
-		e := hostPathEntry{kind: d.Type()}
-		switch {
-		case d.Type()&fs.ModeSymlink != 0:
-			e.body, err = os.Readlink(p)
-		case d.Type().IsRegular():
-			var b []byte
-			b, err = os.ReadFile(p)
-			e.body = string(b)
-		}
-		tree[rel] = e
+		tree[rel], err = readHostPathEntry(p, d.Type())
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return tree
+}
+
+// readHostPathEntry reads the entry at p, whose type is kind.
+func readHostPathEntry(p string, kind fs.FileMode) (hostPathEntry, error) {
+	e := hostPathEntry{kind: kind}
+	var err error
+	switch {
+	case kind&fs.ModeSymlink != 0:
+		e.body, err = os.Readlink(p)
+	case kind.IsRegular():
+		var b []byte
+		b, err = os.ReadFile(p)
+		e.body = string(b)
+	}
+	return e, err
+}
+
+// hostPathSite is one fixture a test or subtest builds once: its root, the
+// prefix a generated spelling is appended to, the root as the resolver spells
+// it, and the tree as built. Each case is measured against the pristine tree
+// and then restored to it, so a fixture serves every case of its test.
+type hostPathSite struct {
+	root, prefix, disk string
+	pristine           map[string]hostPathEntry
+	measured           bool // changes ran and restore has not
+}
+
+func newHostPathSite(t *testing.T, place hostPathPlace) *hostPathSite {
+	t.Helper()
+	root, prefix := place(t)
+	return &hostPathSite{root: root, prefix: prefix, disk: diskRoot(t, root), pristine: hostPathTree(t, root)}
+}
+
+// changes lists the entries that differ from the pristine tree. It refuses a
+// site measured and not restored since: one step's leftover can be exactly
+// what the next step should write, and would hide a writer that wrote nothing.
+func (s *hostPathSite) changes(t *testing.T) []string {
+	t.Helper()
+	if err := s.claim(); err != nil {
+		t.Fatal(err)
+	}
+	return hostPathChanges(s.pristine, hostPathTree(t, s.root))
+}
+
+// claim marks the site measured, and refuses one measured since its last
+// restore.
+func (s *hostPathSite) claim() error {
+	if s.measured {
+		return errors.New("the site was measured and not restored")
+	}
+	s.measured = true
+	return nil
+}
+
+// restore undoes changed, as changes listed it: every listed path is removed,
+// deepest first, and each the pristine tree holds is made again, shallowest
+// first, with the mode the fixture gave it.
+func (s *hostPathSite) restore(t *testing.T, changed []string) {
+	t.Helper()
+	s.measured = false
+	paths := make([]string, 0, len(changed))
+	for _, c := range changed {
+		paths = append(paths, strings.TrimPrefix(c, "-"))
+	}
+	depth := func(p string) int { return strings.Count(p, string(filepath.Separator)) }
+	slices.SortFunc(paths, func(a, b string) int { return depth(b) - depth(a) })
+	for _, p := range paths {
+		if err := os.RemoveAll(filepath.Join(s.root, p)); err != nil {
+			t.Fatalf("restore %s: %v", p, err)
+		}
+	}
+	for _, p := range slices.Backward(paths) {
+		e, ok := s.pristine[p]
+		if !ok {
+			continue
+		}
+		full := filepath.Join(s.root, p)
+		var err error
+		switch {
+		case e.kind&fs.ModeSymlink != 0:
+			err = os.Symlink(e.body, full)
+		case e.kind.IsDir():
+			err = os.Mkdir(full, 0o750)
+		default:
+			err = os.WriteFile(full, []byte(e.body), 0o600)
+		}
+		if err != nil {
+			t.Fatalf("restore %s: %v", p, err)
+		}
+	}
+}
+
+// restore returns a site to its pristine tree after every kind of change: a
+// file replaced by a rename (with another mode wherever the umask leaves a
+// group or other read bit), a file added, directories added with a file in
+// them, a file removed, a link replaced by a file, a link pointed elsewhere,
+// and a fixture directory removed with everything in it. The restored file's
+// and directory's modes are held to ones the fixture made that no step
+// touched.
+func TestHostPathSite_RestoresEveryKindOfChange(t *testing.T) {
+	t.Parallel()
+	if runtimeCannotLink(t) {
+		t.Skip("symlinks unavailable")
+	}
+	site := newHostPathSite(t, absoluteStart)
+	d := filepath.Join(site.root, "d")
+	for _, step := range []func() error{
+		func() error {
+			//nolint:gosec // the mode snapshot.WriteFile's staging file takes under a 022 umask, renamed over the file
+			return os.WriteFile(filepath.Join(d, "e.json.tmp"), []byte("new\n"), 0o644)
+		},
+		func() error { return os.Rename(filepath.Join(d, "e.json.tmp"), filepath.Join(d, "e.json")) },
+		func() error { return os.WriteFile(filepath.Join(d, "n.json"), []byte("new\n"), 0o600) },
+		func() error { return os.MkdirAll(filepath.Join(d, "m", "x"), 0o750) },
+		func() error { return os.WriteFile(filepath.Join(d, "m", "x", "Order.csv"), []byte("new\n"), 0o600) },
+		func() error { return os.Remove(filepath.Join(d, "f")) },
+		func() error { return os.Remove(filepath.Join(d, "r.json")) },
+		func() error { return os.WriteFile(filepath.Join(d, "r.json"), []byte("new\n"), 0o600) },
+		func() error { return os.Remove(filepath.Join(d, "lr")) },
+		func() error { return os.Symlink(".", filepath.Join(d, "lr")) },
+		func() error { return os.RemoveAll(filepath.Join(d, "d", "d", "d", "d", "d")) },
+	} {
+		if err := step(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changed := site.changes(t)
+	if len(changed) != 16 {
+		t.Fatalf("changes = %q, want the 16 entries the steps touched: seven, d/lr, and the removed directory with its 7 entries", changed)
+	}
+	site.restore(t, changed)
+	if left := site.changes(t); len(left) != 0 {
+		t.Errorf("restore left %q", left)
+	}
+	fixture, err := os.Stat(filepath.Join(d, "d", "e.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(d, "e.json")); err != nil || info.Mode().Perm() != fixture.Mode().Perm() {
+		t.Errorf("restore remade d/e.json with %v (%v), where the fixture made d/d/e.json with %v", info.Mode().Perm(), err, fixture.Mode().Perm())
+	}
+	fixtureDir, err := os.Stat(filepath.Join(d, "d"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(d, "d", "d", "d", "d", "d")); err != nil || info.Mode().Perm() != fixtureDir.Mode().Perm() {
+		t.Errorf("restore remade d/d/d/d/d/d with %v (%v), where the fixture made d/d with %v", info.Mode().Perm(), err, fixtureDir.Mode().Perm())
+	}
+}
+
+// A site measured and not restored is refused, so no step's leftover reaches
+// the next step's comparison; each check helper leaves its site as it found it.
+func TestHostPathSite_EveryStepRestoresItsSite(t *testing.T) {
+	t.Parallel()
+	var bare hostPathSite
+	if err := bare.claim(); err != nil {
+		t.Fatalf("a fresh site refused its first measure: %v", err)
+	}
+	if err := bare.claim(); err == nil {
+		t.Error("a site measured twice without a restore between was not refused")
+	}
+	bare.restore(t, nil)
+	if err := bare.claim(); err != nil {
+		t.Errorf("a restored site refused its next measure: %v", err)
+	}
+	if runtimeCannotLink(t) {
+		t.Skip("symlinks unavailable")
+	}
+	site := newHostPathSite(t, absoluteStart)
+	sep := string(filepath.Separator)
+	var f hostPathFailures
+	checkWriteLandsWhereTheLoaderReads(t, &f, WriteFile, site, site.prefix+sep+"m"+sep+"n.json", "/m/n.json")
+	checkSetLandsWhereTheLoaderReads(t, &f, site, sep+"m"+sep+"x", "m/x")
+	if len(f.list) != 0 {
+		t.Fatalf("the checks failed: %q", f.list)
+	}
+	if left := site.changes(t); len(left) != 0 {
+		t.Errorf("the checks left %q", left)
+	}
+	site.restore(t, nil)
 }
 
 // hostPathChanges lists the entries that differ between before and after.
@@ -184,23 +356,23 @@ func (f *hostPathFailures) report(t *testing.T) {
 	}
 }
 
-// checkWriteLandsWhereTheLoaderReads writes to typed with write and holds the
-// outcome to location.ResolveHostPath, the loader's own resolver: the write
-// succeeds exactly when the file the resolver names sits in a directory that
-// exists, and then that file, and nothing else in the tree, changes.
-func checkWriteLandsWhereTheLoaderReads(t *testing.T, f *hostPathFailures, write func(string, []byte) error, root, typed, shown string) {
+// checkWriteLandsWhereTheLoaderReads writes to typed on site with write and
+// holds the outcome to location.ResolveHostPath, the loader's own resolver: the
+// write succeeds exactly when the file the resolver names sits in a directory
+// that exists, and then that file, and nothing else in the tree, changes. The
+// site is restored before it returns.
+func checkWriteLandsWhereTheLoaderReads(t *testing.T, f *hostPathFailures, write func(string, []byte) error, site *hostPathSite, typed, shown string) {
 	t.Helper()
 	f.cases++
-	disk := diskRoot(t, root)
 	want, rerr := location.ResolveHostPath(typed)
 	parentIsDir := false
 	if rerr == nil {
 		info, err := os.Stat(filepath.Dir(want))
 		parentIsDir = err == nil && info.IsDir()
 	}
-	before := hostPathTree(t, root)
 	err := write(typed, []byte(targetPayload))
-	changed := hostPathChanges(before, hostPathTree(t, root))
+	changed := site.changes(t)
+	defer site.restore(t, changed)
 	if !parentIsDir {
 		if err == nil {
 			f.add(shown, "written, where the loader's resolver names no writable place (%v)", rerr)
@@ -214,7 +386,7 @@ func checkWriteLandsWhereTheLoaderReads(t *testing.T, f *hostPathFailures, write
 		f.add(shown, "refused (%v), where the loader reads %s", err, want)
 		return
 	}
-	rel, rerr := filepath.Rel(disk, want)
+	rel, rerr := filepath.Rel(site.disk, want)
 	if rerr != nil {
 		f.add(shown, "the loader reads %s, outside the fixture", want)
 		return
@@ -241,10 +413,10 @@ func TestWriteFile_LandsWhereTheLoaderReads(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			var f hostPathFailures
+			site := newHostPathSite(t, absoluteStart)
 			for _, rel := range hostPathSpellings("", 3) {
-				root, start := absoluteStart(t)
-				typed := start + rel + string(filepath.Separator) + name
-				checkWriteLandsWhereTheLoaderReads(t, &f, WriteFile, root, typed, rel+"/"+name)
+				typed := site.prefix + rel + string(filepath.Separator) + name
+				checkWriteLandsWhereTheLoaderReads(t, &f, WriteFile, site, typed, rel+"/"+name)
 			}
 			f.report(t)
 		})
@@ -264,10 +436,10 @@ func TestSnapshotWriteFile_LandsWhereTheLoaderReads(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			var f hostPathFailures
+			site := newHostPathSite(t, absoluteStart)
 			for _, rel := range hostPathSpellings("", 3) {
-				root, start := absoluteStart(t)
-				typed := start + rel + string(filepath.Separator) + name
-				checkWriteLandsWhereTheLoaderReads(t, &f, snapshot.WriteFile, root, typed, rel+"/"+name)
+				typed := site.prefix + rel + string(filepath.Separator) + name
+				checkWriteLandsWhereTheLoaderReads(t, &f, snapshot.WriteFile, site, typed, rel+"/"+name)
 			}
 			f.report(t)
 		})
@@ -310,12 +482,10 @@ func TestWriteFile_RelativeSpellingsLandWhereTheLoaderReads(t *testing.T) {
 	}
 	sep := string(filepath.Separator)
 	var f hostPathFailures
+	site := newHostPathSite(t, logicalStart)
 	for _, rel := range hostPathSpellings("", 3) {
 		for _, name := range hostPathFiles {
-			t.Run("file", func(t *testing.T) {
-				root, prefix := logicalStart(t)
-				checkWriteLandsWhereTheLoaderReads(t, &f, WriteFile, root, prefix+rel+sep+name, "."+rel+"/"+name)
-			})
+			checkWriteLandsWhereTheLoaderReads(t, &f, WriteFile, site, site.prefix+rel+sep+name, "."+rel+"/"+name)
 		}
 	}
 	f.report(t)

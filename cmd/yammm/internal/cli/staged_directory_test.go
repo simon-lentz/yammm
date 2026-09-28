@@ -219,38 +219,38 @@ func stageInto(dir string) error {
 	return WriteFileSet(dir, []NamedFile{{Name: "Order.csv", Data: []byte(targetPayload)}})
 }
 
-// loaderDirChanges makes, on a fresh fixture from place, the directory the
-// loader's resolver names for prefix+rel, as os.MkdirAll makes it, then writes
-// Order.csv there when file is set. It returns what changed and the first
-// error.
-func loaderDirChanges(t *testing.T, place hostPathPlace, rel string, file bool) ([]string, error) {
+// loaderDirChanges makes, on site, the directory the loader's resolver names
+// for its prefix+rel, as os.MkdirAll makes it, then writes Order.csv there when
+// file is set. It returns what changed and the first error, and restores the
+// site.
+func loaderDirChanges(t *testing.T, site *hostPathSite, rel string, file bool) ([]string, error) {
 	t.Helper()
-	root, prefix := place(t)
-	before := hostPathTree(t, root)
-	want, err := location.ResolveHostPath(prefix + rel)
+	want, err := location.ResolveHostPath(site.prefix + rel)
 	if err == nil {
 		err = os.MkdirAll(want, 0o750)
 	}
 	if err == nil && file {
 		err = os.WriteFile(want+string(filepath.Separator)+"Order.csv", []byte(targetPayload), 0o600)
 	}
-	return hostPathChanges(before, hostPathTree(t, root)), err
+	changed := site.changes(t)
+	site.restore(t, changed)
+	return changed, err
 }
 
-// checkSetLandsWhereTheLoaderReads writes a one-file set into prefix+rel on one
-// fixture and stages and discards one on another, and holds both to the
-// loader's resolver on twin fixtures: the written set makes exactly what
-// os.MkdirAll and a write at the resolved directory make, and the discarded
-// set exactly what os.MkdirAll alone makes, since no set removes a directory.
-func checkSetLandsWhereTheLoaderReads(t *testing.T, f *hostPathFailures, place hostPathPlace, rel, shown string) {
+// checkSetLandsWhereTheLoaderReads writes a one-file set into prefix+rel on
+// site, then stages and discards one, and holds both to the loader's resolver
+// on the same site: the written set makes exactly what os.MkdirAll and a write
+// at the resolved directory make, and the discarded set exactly what
+// os.MkdirAll alone makes, since no set removes a directory. The site is
+// restored after each step.
+func checkSetLandsWhereTheLoaderReads(t *testing.T, f *hostPathFailures, site *hostPathSite, rel, shown string) {
 	t.Helper()
 	f.cases++
 
-	wantChanged, twinErr := loaderDirChanges(t, place, rel, true)
-	root, prefix := place(t)
-	before := hostPathTree(t, root)
-	err := stageInto(prefix + rel)
-	changed := hostPathChanges(before, hostPathTree(t, root))
+	wantChanged, twinErr := loaderDirChanges(t, site, rel, true)
+	err := stageInto(site.prefix + rel)
+	changed := site.changes(t)
+	site.restore(t, changed)
 	switch {
 	case (err == nil) != (twinErr == nil):
 		f.add(shown, "set error %v, the loader's directory %v", err, twinErr)
@@ -258,14 +258,13 @@ func checkSetLandsWhereTheLoaderReads(t *testing.T, f *hostPathFailures, place h
 		f.add(shown, "changed %q, where the loader's directory takes %q", changed, wantChanged)
 	}
 
-	wantDirs, dirErr := loaderDirChanges(t, place, rel, false)
-	root, prefix = place(t)
-	before = hostPathTree(t, root)
-	set, err := stageFileSet(prefix+rel, []NamedFile{{Name: "Order.csv", Data: []byte(targetPayload)}})
+	wantDirs, dirErr := loaderDirChanges(t, site, rel, false)
+	set, err := stageFileSet(site.prefix+rel, []NamedFile{{Name: "Order.csv", Data: []byte(targetPayload)}})
 	if err == nil {
 		set.discard()
 	}
-	changed = hostPathChanges(before, hostPathTree(t, root))
+	changed = site.changes(t)
+	site.restore(t, changed)
 	switch {
 	case (err == nil) != (dirErr == nil):
 		f.add(shown, "staging error %v, the loader's directory %v", err, dirErr)
@@ -288,8 +287,9 @@ func TestWriteFileSet_LandsWhereTheLoaderReads(t *testing.T) {
 		t.Run(first, func(t *testing.T) {
 			t.Parallel()
 			var f hostPathFailures
+			site := newHostPathSite(t, absoluteStart)
 			for _, rel := range hostPathSpellings(sep+first, 2) {
-				checkSetLandsWhereTheLoaderReads(t, &f, absoluteStart, rel, strings.TrimPrefix(rel, sep))
+				checkSetLandsWhereTheLoaderReads(t, &f, site, rel, strings.TrimPrefix(rel, sep))
 			}
 			f.report(t)
 		})
@@ -304,10 +304,9 @@ func TestWriteFileSet_RelativeSpellingsLandWhereTheLoaderReads(t *testing.T) {
 		t.Skip("symlinks unavailable")
 	}
 	var f hostPathFailures
+	site := newHostPathSite(t, logicalStart)
 	for _, rel := range hostPathSpellings("", 3)[1:] {
-		t.Run("set", func(t *testing.T) {
-			checkSetLandsWhereTheLoaderReads(t, &f, logicalStart, rel, "."+rel)
-		})
+		checkSetLandsWhereTheLoaderReads(t, &f, site, rel, "."+rel)
 	}
 	f.report(t)
 }
