@@ -759,19 +759,26 @@ func (v *Validator) scopeOf(inst *ValidInstance) immutable.Map[string] {
 }
 
 // invariantScope builds the name→value map an invariant is evaluated against:
-// the validated properties, plus one entry per relation keyed by FieldName.
-// Every value is the instance's own immutable one, so nothing is cloned.
+// the validated properties, plus one entry per relation keyed by its
+// UPPER_SNAKE name. A property's entry is the instance's own immutable value,
+// not a copy; a composition's holds each child's memoised scope, shared, in a
+// list built for a many composition; an association's is built from cloned
+// target keys. A property name starts lower case, so the evaluator tells a
+// relation's entry by its key and reads it by its name or its field name alone
+// (eval's readMember), as docs/SPEC.md states.
 //
 // Relations belong here because the schema completer's membersOf index admits
-// their field names, so an invariant may reference one. The two relation
+// them, so an invariant may reference one. The two relation
 // kinds carry different amounts of information, and the difference is not
 // incidental:
 //
 //   - A COMPOSITION's children are part of this instance, so the entry is the
-//     child's own scope. `ITEMS -> Len`, and a lambda over a child's own
+//     single child's own scope, or the list of the children's scopes for a
+//     many composition. `ITEMS -> Len`, and a lambda over a child's own
 //     properties, both read real values.
 //   - An ASSOCIATION's target is a REFERENCE. The instance holds the foreign
-//     key, never the target's row, so the entry is the list of target keys.
+//     key, never the target's row, so the entry is the single target key, or
+//     the list of target keys for a many association.
 //     Presence and cardinality are answerable; the target's properties are not
 //     in this instance to answer with.
 //
@@ -798,7 +805,7 @@ func (v *Validator) invariantScope(inst *ValidInstance) map[string]any {
 		for t := range edge.TargetsIter() {
 			keys = append(keys, keyValue(t.TargetKey()))
 		}
-		scope[rel.FieldName()] = relationValue(rel, keys)
+		scope[rel.Name()] = relationValue(rel, keys)
 	}
 
 	for rel := range typ.AllCompositions() {
@@ -806,7 +813,7 @@ func (v *Validator) invariantScope(inst *ValidInstance) map[string]any {
 		if !ok {
 			continue
 		}
-		scope[rel.FieldName()] = v.composedScopeValue(rel, value.Unwrap())
+		scope[rel.Name()] = v.composedScopeValue(rel, value.Unwrap())
 	}
 
 	return scope

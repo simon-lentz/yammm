@@ -1015,7 +1015,8 @@ the relation by either spelling, as a bare name or as a member, and a read in
 any other casing is rejected at load with `E_INVALID_NAME` wherever the checker
 knows the value read from is an instance of a type holding the relation. A read
 from a value whose type it cannot tell, such as an element of a list literal
-that mixes kinds, folds at evaluation as a property name does. A variable names
+that mixes kinds, reads nothing in another casing at evaluation, as a member the
+instance lacks reads nothing. A variable names
 it by its field name alone (`$works_at`), since variable names are matched
 exactly. Instance data carries it under the field name, matched as a property
 name is.
@@ -1479,8 +1480,9 @@ Invariant expressions are checked **statically** at schema load. The checker typ
 **Relations are in scope**, under the relation's field name — the UPPER_SNAKE
 name in lower case — so `WORKS_AT` and `works_at` read one entry as a bare name
 or as a member, and any other casing there, such as `Works_At`, is rejected at
-load (`E_INVALID_NAME`) wherever the checker knows the value read from; a
-variable reads it as `$works_at` alone. What a
+load (`E_INVALID_NAME`) wherever the checker knows the value read from, and
+reads nothing at evaluation where it does not; a variable reads it as
+`$works_at` alone. What a
 relation evaluates to depends on where its data lives:
 
 - A **composition**'s children are part of the instance, so the relation

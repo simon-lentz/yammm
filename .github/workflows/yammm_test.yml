@@ -168,9 +168,9 @@ jobs:
           node-version: 22
       - name: Install Mermaid
         working-directory: adapter/markdown/testdata/mermaid
-        run: npm ci
+        run: npm ci --ignore-scripts
       - name: Parse the diagrams
-        run: go test -count=1 -tags mermaid -timeout 5m -v -run '^TestMarshal_MermaidReadsWhatTheEmitterMeant$' ./adapter/markdown/
+        run: go test -count=1 -tags mermaid -timeout 5m -v ./adapter/markdown/
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS

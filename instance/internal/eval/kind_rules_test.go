@@ -157,19 +157,33 @@ func hasAttrKey(records []slog.Record, key string) bool {
 	return false
 }
 
-// Member access folds by immutable.Properties' rule — ASCII only, the
-// alphabetically first key on a collision — and reads only the wrapped map
-// every production value is; a raw Go map is not a receiver.
+// Member access folds a property's name by immutable.Properties' rule — ASCII
+// only, the alphabetically first key on a collision — and reads a relation,
+// keyed by its UPPER_SNAKE name, by that name or its field name alone. It reads
+// only the wrapped map every production value is; a raw Go map is not a
+// receiver.
 func TestAccessMember_FoldsByThePropertiesRule(t *testing.T) {
 	t.Parallel()
-	m := immutable.WrapMap(map[string]any{"NAME": "upper", "Name": "mixed", "name": "lower", "É": "acute"})
+	m := immutable.WrapMap(map[string]any{"Name": "mixed", "name": "lower", "É": "acute", "WORKS_AT": "k", "ZONE_AT": "z"})
 	t.Run("exact match first", func(t *testing.T) {
 		t.Parallel()
 		evalEq(t, sx(".", lit(m), lit("name")), "lower")
 	})
 	t.Run("collision takes the alphabetically first key", func(t *testing.T) {
 		t.Parallel()
-		evalEq(t, sx(".", lit(m), lit("nAmE")), "upper")
+		evalEq(t, sx(".", lit(m), lit("nAmE")), "mixed")
+	})
+	t.Run("a relation by its name or its field name", func(t *testing.T) {
+		t.Parallel()
+		evalEq(t, sx(".", lit(m), lit("WORKS_AT")), "k")
+		evalEq(t, sx(".", lit(m), lit("works_at")), "k")
+		evalEq(t, sx(".", lit(m), lit("zone_at")), "z")
+	})
+	t.Run("a relation in another casing reads nothing", func(t *testing.T) {
+		t.Parallel()
+		evalEq(t, sx(".", lit(m), lit("Works_At")), nil)
+		evalEq(t, sx(".", lit(m), lit("wORKS_AT")), nil)
+		evalEq(t, sx(".", lit(m), lit("zONE_AT")), nil)
 	})
 	t.Run("the fold is ASCII only", func(t *testing.T) {
 		t.Parallel()
