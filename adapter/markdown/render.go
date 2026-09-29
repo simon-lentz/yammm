@@ -7,7 +7,11 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"golang.org/x/net/html"
 )
 
 // multiplicity renders the DSL multiplicity vocabulary for a relation's
@@ -28,117 +32,382 @@ func multiplicity(optional, many bool) string {
 	}
 }
 
-// slug derives the GitHub-style anchor for a heading: lowercase, spaces
-// become hyphens, and every other character outside letters, digits,
-// hyphens, and underscores is stripped (dots in qualified type names
-// disappear entirely). The self-check resolves emitted internal links
-// against anchors computed by this function.
+// slug derives a heading's anchor as GitHub does: the text lowercased, every
+// character outside \p{Word}, the hyphen and the space removed, and each space
+// made a hyphen. \p{Word} here is letters and every other alphabetic
+// character, marks, decimal digits and connector punctuation, read from the Go
+// release's Unicode tables; the join controls are removed, as GitHub removes
+// them. Lowercasing maps U+0130 to "i" and a combining dot, as GitHub's full
+// case mapping does.
 func slug(heading string) string {
 	var b strings.Builder
 	b.Grow(len(heading))
-	for _, r := range strings.ToLower(heading) {
+	for _, r := range strings.ToLower(strings.ReplaceAll(heading, "\u0130", "i\u0307")) {
 		switch {
 		case r == ' ':
 			b.WriteByte('-')
-		case r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r):
+		case r == '-' || isWordRune(r):
 			b.WriteRune(r)
 		}
 	}
 	return b.String()
 }
 
-// escapeCell returns s made safe for use inside a Markdown table cell:
-// backslashes and pipes are escaped so they cannot split the row, and
-// newlines fold to <br> so the cell stays on one line. Whitespace around
-// each folded line break is dropped — it is source-comment layout, not
-// content, and a cell cannot render it anyway.
-func escapeCell(s string) string {
-	if strings.ContainsAny(s, "\r\n") {
-		s = strings.ReplaceAll(s, "\r\n", "\n")
-		s = strings.ReplaceAll(s, "\r", "\n")
-		lines := strings.Split(s, "\n")
-		for i, line := range lines {
-			lines[i] = strings.TrimSpace(line)
-		}
-		s = strings.Join(lines, "<br>")
-	}
-	// Escape backslashes before pipes: a literal "\|" in content must become
-	// "\\\|" (odd backslash run, a genuinely escaped pipe) rather than "\\|"
-	// (even run), which a GFM table parser reads as an escaped backslash plus
-	// a live column delimiter — splitting the row. The <br> markers inserted
-	// above carry no backslash or pipe, so folding is unaffected.
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	return strings.ReplaceAll(s, "|", `\|`)
+// isWordRune reports whether r is a character GitHub keeps in an anchor.
+func isWordRune(r rune) bool {
+	return unicode.In(r, unicode.L, unicode.M, unicode.Nd, unicode.Nl, unicode.Pc, unicode.Other_Alphabetic)
 }
 
-// codeTagEscaper makes text safe inside a raw HTML <code> element:
-// HTML metacharacters are entity-escaped, and backticks become &#96; so
-// they cannot open a code span within the surrounding Markdown.
-var codeTagEscaper = strings.NewReplacer(
-	"&", "&amp;",
-	"<", "&lt;",
-	">", "&gt;",
-	"`", "&#96;",
-)
+// descriptionCell writes a doc comment into a table cell, changing only what
+// the table layer reads: its lines fold into one (foldLines), and a pipe after
+// an even backslash run gains one backslash, so the row keeps its cells and
+// the pipe renders as in the doc comment.
+func descriptionCell(md goldmark.Markdown, s string) string {
+	if s = lineEndings.Replace(s); strings.Contains(s, "\n") {
+		s = foldLines(md, s)
+	}
+	var b strings.Builder
+	run := 0
+	for i := range len(s) {
+		c := s[i]
+		if c == '|' && run%2 == 0 {
+			b.WriteByte('\\')
+		}
+		if c == '\\' {
+			run++
+		} else {
+			run = 0
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
 
-// codeCell renders s as code inside a Markdown table cell. The normal form
-// is a backtick code span with table-cell escaping applied; when s itself
-// contains a backtick the code span cannot represent it, so the cell
-// switches to an entity-escaped <code> element. Empty input yields an
-// empty cell, since a code span with no content is not valid Markdown.
+// foldLines joins a doc comment's lines into one cell line. A line break
+// inside a code span, raw HTML or an HTML block folds to a space, which a code
+// span and an HTML parser read it as. In a pre or listing element's text it is
+// a <br>, the line kept whole, save the one an HTML parser drops after the
+// element's start tag, which folds to nothing. Any other folds to <br>, the
+// white space around it dropped, and so does the backslash that made it a
+// hard break.
+func foldLines(md goldmark.Markdown, s string) string {
+	spans, kept, dropped := inlineSpans(md, s)
+	inside := func(pos int) bool {
+		return slices.ContainsFunc(spans, func(sp span) bool { return sp.start <= pos && pos < sp.end })
+	}
+	var out string
+	at := 0
+	for i, line := range strings.Split(s, "\n") {
+		switch {
+		case i == 0:
+			out = line
+		case slices.Contains(kept, at-1):
+			out += "<br>" + line
+		case slices.Contains(dropped, at-1):
+			out += line
+		case inside(at - 1):
+			out += " " + strings.TrimLeft(line, " \t")
+		default:
+			out = withoutHardBreak(strings.TrimRight(out, " \t")) + "<br>" + strings.TrimLeft(line, " \t")
+		}
+		at += len(line) + 1
+	}
+	return strings.TrimSpace(out)
+}
+
+// inlineSpans returns the byte ranges of s that Markdown reads as a code span,
+// raw HTML or an HTML block, and, from preformattedBreaks, the line breaks an
+// HTML block holds in pre or listing text and the ones a parser drops there.
+func inlineSpans(md goldmark.Markdown, s string) (spans []span, kept, dropped []int) {
+	if err := ast.Walk(parse(md, []byte(s)), func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch n := n.(type) {
+		case *ast.CodeSpan:
+			if first, ok := n.FirstChild().(*ast.Text); ok {
+				if last, ok := n.LastChild().(*ast.Text); ok {
+					spans = append(spans, span{start: first.Segment.Start, end: last.Segment.Stop})
+				}
+			}
+		case *ast.RawHTML:
+			if l := n.Segments.Len(); l > 0 {
+				spans = append(spans, span{start: n.Segments.At(0).Start, end: n.Segments.At(l - 1).Stop})
+			}
+		case *ast.HTMLBlock:
+			if l := n.Lines().Len(); l > 0 {
+				sp := span{start: n.Lines().At(0).Start, end: n.Lines().At(l - 1).Stop}
+				spans = append(spans, sp)
+				k, d := preformattedBreaks(s[sp.start:sp.end], sp.start)
+				kept, dropped = append(kept, k...), append(dropped, d...)
+			}
+		}
+		return ast.WalkContinue, nil
+	}); err != nil {
+		return nil, nil, nil
+	}
+	return spans, kept, dropped
+}
+
+// preformattedBreaks returns where block, which starts at base, holds a line
+// break in a pre or listing element's text, and where it holds the one line
+// break right after such an element's start tag, which an HTML parser drops.
+func preformattedBreaks(block string, base int) (kept, dropped []int) {
+	z := html.NewTokenizer(strings.NewReader(block))
+	depth, off, afterStart := 0, 0, false
+	for {
+		tt := z.Next()
+		if tt == html.ErrorToken {
+			return kept, dropped
+		}
+		raw := string(z.Raw())
+		opens := false
+		switch tt {
+		case html.TextToken:
+			for i := range len(raw) {
+				switch {
+				case raw[i] != '\n' || depth == 0:
+				case afterStart && i == 0:
+					dropped = append(dropped, base+off+i)
+				default:
+					kept = append(kept, base+off+i)
+				}
+			}
+		case html.StartTagToken, html.EndTagToken:
+			if name, _ := z.TagName(); string(name) == "pre" || string(name) == "listing" {
+				if tt == html.StartTagToken {
+					depth++
+					opens = true
+				} else {
+					depth = max(depth-1, 0)
+				}
+			}
+		}
+		afterStart = opens
+		off += len(raw)
+	}
+}
+
+// withoutHardBreak drops the backslash that ends s when it ends an odd run:
+// Markdown reads that backslash before a line break as the break itself.
+func withoutHardBreak(s string) string {
+	trimmed := strings.TrimRight(s, "\\")
+	if (len(s)-len(trimmed))%2 == 1 {
+		return s[:len(s)-1]
+	}
+	return s
+}
+
+// lineEndings makes every CR LF and every lone CR an LF. CommonMark ends a
+// line at each, and the parser the self-check reads with ends one at LF alone.
+var lineEndings = strings.NewReplacer("\r\n", "\n", "\r", "\n")
+
+// codeCell renders s as code inside a Markdown table cell, byte for byte.
+// A code span processes no backslash escape, so its content is written as is
+// with one exception: the table layer splits on every pipe a backslash does
+// not precede and then drops that backslash, so each pipe is written \|.
+// Three inputs a code span cannot carry exactly — a backtick, a backslash
+// before a pipe, a line break — take a <code> element instead, whose content
+// Markdown does parse, so codeTagText neutralizes every character that
+// parse or the table layer reads. Empty input yields an empty cell, since a
+// code span with no content is not valid Markdown.
 func codeCell(s string) string {
 	if s == "" {
 		return ""
 	}
-	if !strings.Contains(s, "`") {
-		return "`" + escapeCell(s) + "`"
+	if !strings.ContainsAny(s, "`\r\n") && !strings.Contains(s, `\|`) {
+		return "`" + strings.ReplaceAll(s, "|", `\|`) + "`"
 	}
-	return "<code>" + escapeCell(codeTagEscaper.Replace(s)) + "</code>"
+	return "<code>" + codeTagText(s) + "</code>"
 }
 
-// mermaidID sanitizes a display name into a valid Mermaid class
-// identifier: characters outside letters, digits, and underscores
-// (notably the dots in qualified type names) become underscores. When the
-// result differs from the input, the diagram emits the display-label form
-// `class id["display"]` so the rendered name keeps its original spelling.
+// codeTagText makes text literal inside a raw HTML <code> element in a table
+// cell: HTML metacharacters and inline syntax become entities, a pipe the
+// table layer's \|, a line break <br>, and a linkBreak stops each autolink.
+func codeTagText(s string) string {
+	rs := []rune(lineEndings.Replace(s))
+	var b strings.Builder
+	for i, r := range rs {
+		if breaksLinkAt(rs, i) {
+			b.WriteString(linkBreak)
+		}
+		if e, ok := codeTagEntities[r]; ok {
+			b.WriteString(e)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+var codeTagEntities = map[rune]string{
+	'&':  "&amp;",
+	'<':  "&lt;",
+	'>':  "&gt;",
+	'`':  "&#96;",
+	'\\': "&#92;",
+	'*':  "&#42;",
+	'_':  "&#95;",
+	'[':  "&#91;",
+	']':  "&#93;",
+	'~':  "&#126;",
+	'!':  "&#33;",
+	'|':  `\|`,
+	'\n': "<br>",
+}
+
+// linkBreak is an empty HTML comment. Inside a word it ends the text GitHub's
+// autolink extension scans, and a browser shows nothing for it.
+const linkBreak = "<!---->"
+
+// breaksLinkAt reports whether a linkBreak goes before rs[i], where GitHub
+// would read an autolink: a colon ends a URL scheme, an at sign joins an email
+// address, and a dot after "www", in any case, starts a www link.
+func breaksLinkAt(rs []rune, i int) bool {
+	switch rs[i] {
+	case ':', '@':
+		return true
+	case '.':
+		return i >= 3 && strings.EqualFold(string(rs[i-3:i]), "www")
+	}
+	return false
+}
+
+// escapeInline backslash-escapes the ASCII punctuation Markdown reads as
+// inline syntax, a table cell's pipe included, and writes a linkBreak where
+// GitHub would read an autolink, so text such as a schema name renders
+// literally in a heading, a link or a table cell. An underscore between two
+// letters or digits opens no emphasis in GFM and is left as is.
+func escapeInline(s string) string {
+	rs := []rune(s)
+	var b strings.Builder
+	for i, r := range rs {
+		if breaksLinkAt(rs, i) {
+			b.WriteString(linkBreak)
+		}
+		escape := strings.ContainsRune("\\`*[]<>&~|!#", r)
+		if r == '_' {
+			escape = i == 0 || i == len(rs)-1 || !isAlnum(rs[i-1]) || !isAlnum(rs[i+1])
+		}
+		if escape {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func isAlnum(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+// keepTrailingSpaces writes a heading's trailing spaces as character
+// references. An ATX heading drops trailing spaces from its text, so a schema
+// name that ends in one would otherwise not read as written.
+func keepTrailingSpaces(md string) string {
+	trimmed := strings.TrimRight(md, " ")
+	return trimmed + strings.Repeat("&#32;", len(md)-len(trimmed))
+}
+
+// printableName writes each control character of a schema name as its Go
+// escape (\n, \t, \x00), so a name holding a line break stays on one line in
+// a heading, a link, a table cell or a diagram label. The escape is text, so
+// the heading's anchor and the rendered heading slug alike.
+func printableName(s string) string {
+	if !strings.ContainsFunc(s, unicode.IsControl) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// mermaidID sanitizes a display name into a Mermaid class identifier: every
+// character outside ASCII letters, digits and underscores (notably the dots in
+// qualified type names) becomes an underscore. Mermaid's class-diagram lexer
+// reads an id as \w+, which is ASCII, and its table of other letters is partial,
+// so a non-ASCII letter or digit can fail to lex. Every "direction" becomes
+// "direc_tion": Mermaid reads a line ending in "direction", white space and a
+// direction keyword starting the next line as one direction statement, so an
+// id ending in "direction" would swallow the lines around it. uniqueMermaidID
+// makes the result unique. When the id differs from the display name, the
+// diagram emits the display-label form `class id["display"]` so the rendered
+// name keeps its original spelling.
 func mermaidID(name string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+	id := strings.Map(func(r rune) rune {
+		if r == '_' || isASCIIAlnum(r) {
 			return r
 		}
 		return '_'
 	}, name)
+	return strings.ReplaceAll(id, "direction", "direc_tion")
 }
 
-// writeTableRow writes one table row; cells must already be escaped (via
-// escapeCell or codeCell). An empty cell renders as the standard empty
-// Markdown cell.
-func writeTableRow(b *bytes.Buffer, cells ...string) {
-	b.WriteByte('|')
-	for _, cell := range cells {
-		b.WriteByte(' ')
-		b.WriteString(cell)
-		b.WriteString(" |")
+func isASCIIAlnum(r rune) bool {
+	return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9'
+}
+
+// mermaidLabel writes a class label with every character an entity code but
+// an ASCII letter or digit, a dot, and an underscore between two ASCII letters
+// or digits. Mermaid decodes each code when it renders, and Mermaid 11 reads a
+// label as Markdown, so no other character reaches a label as itself.
+func mermaidLabel(s string) string {
+	rs := []rune(s)
+	var b strings.Builder
+	for i, r := range rs {
+		keep := isASCIIAlnum(r) || r == '.'
+		if r == '_' {
+			keep = i > 0 && i < len(rs)-1 && isASCIIAlnum(rs[i-1]) && isASCIIAlnum(rs[i+1])
+		}
+		if keep {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteString("#" + strconv.Itoa(int(r)) + ";")
 	}
-	b.WriteByte('\n')
+	return b.String()
 }
 
-// writeTableHeader writes a table's header row followed by the separator
-// row the self-check verifies for column-count agreement.
-func writeTableHeader(b *bytes.Buffer, cols ...string) {
-	writeTableRow(b, cols...)
-	sep := make([]string, len(cols))
-	for i := range sep {
-		sep[i] = "---"
-	}
-	writeTableRow(b, sep...)
+// mermaidChars writes each character Mermaid reads as syntax in an edge label
+// or a member line as an entity code, which Mermaid decodes when it renders:
+// the quote, the colon and semicolon that end an edge label, the percent sign
+// that starts a comment or a directive, the number sign that starts an entity
+// code, and the characters a rendered label reads as HTML. Both hold schema
+// identifiers and the generator's own words, which carry no other syntax.
+func mermaidChars(s string) string {
+	return mermaidTextEscaper.Replace(s)
 }
 
-// indentUnderBullet indents every non-empty line of s by the two-space
-// list-item continuation indent. Blank lines stay blank so nested blocks
-// introduce no trailing whitespace.
+var mermaidTextEscaper = strings.NewReplacer(
+	`"`, "#quot;",
+	"#", "#35;",
+	":", "#58;",
+	";", "#59;",
+	"%", "#37;",
+	"<", "#60;",
+	">", "#62;",
+	"&", "#38;",
+)
+
+// bulletMarker starts a list item whose content sits at column 4, a tab stop,
+// so a doc comment written there reads as at column 0, where closeAuthorText
+// judges it, and a tab in it never lands partly inside the indent.
+const bulletMarker = "-   "
+
+// bulletIndent is the continuation indent of a bulletMarker item: text
+// indented by it sits inside the item.
+const bulletIndent = len(bulletMarker)
+
+// indentUnderBullet indents every non-empty line of s by the list-item
+// continuation indent. Blank lines stay blank so nested blocks introduce no
+// trailing whitespace.
 func indentUnderBullet(s string) string {
-	const prefix = "  "
+	prefix := strings.Repeat(" ", bulletIndent)
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		if line != "" {
@@ -151,45 +420,56 @@ func indentUnderBullet(s string) string {
 // emitTypeSection writes one type's reference section: heading, badges
 // line, documentation, flattened property table, association and
 // composition lists, and invariants. Blocks are separated by single blank
-// lines; empty blocks are omitted entirely. The heading's anchor is
-// registered for the self-check.
+// lines; empty blocks are omitted entirely. The blocks are written straight
+// to the document so each doc comment's place in it is recorded.
 func (g *generator) emitTypeSection(t *schema.Type) {
 	e := g.types[t.ID()]
-	g.anchors[e.anchor] = true
 
-	blocks := []string{"### " + e.display + "\n"}
+	g.buf.WriteString("### " + e.displayMD + "\n")
+	block := func() { g.buf.WriteString("\n") }
 	if b := g.typeBadges(t); b != "" {
-		blocks = append(blocks, b+"\n")
+		block()
+		g.buf.WriteString(b + "\n")
 	}
 	if doc := t.Documentation(); doc != "" {
-		blocks = append(blocks, doc+"\n")
+		block()
+		g.writeAuthorText(doc, false)
+		g.buf.WriteString("\n")
 	}
-	if tbl := g.propertyTable(t); tbl != "" {
-		blocks = append(blocks, tbl)
+	if props := t.AllPropertiesSlice(); len(props) > 0 {
+		block()
+		g.writePropertyTable(t, props)
 	}
 	// Associations and compositions share one relation namespace, so one
 	// resolver marks inherited relations of either kind.
 	relFrom := inheritedFrom(g, t, func(st *schema.Type) []*schema.Relation {
 		return slices.Concat(st.AssociationsSlice(), st.CompositionsSlice())
 	})
-	if list := g.relationList("**Associations**", t.AllAssociationsSlice(), relFrom); list != "" {
-		blocks = append(blocks, list)
+	for _, list := range []struct {
+		label string
+		rels  []*schema.Relation
+	}{
+		{"**Associations**", t.AllAssociationsSlice()},
+		{"**Compositions**", t.AllCompositionsSlice()},
+	} {
+		if len(list.rels) > 0 {
+			block()
+			g.writeRelationList(list.label, list.rels, relFrom)
+		}
 	}
-	if list := g.relationList("**Compositions**", t.AllCompositionsSlice(), relFrom); list != "" {
-		blocks = append(blocks, list)
+	if invs := t.AllInvariantsSlice(); len(invs) > 0 {
+		block()
+		g.writeInvariantList(t, invs)
 	}
-	if list := g.invariantList(t); list != "" {
-		blocks = append(blocks, list)
-	}
-	g.buf.WriteString(strings.Join(blocks, "\n"))
 }
 
 // inheritedOwners maps every member a type inherits — keyed by pointer — to the
-// display name of the ancestor that declares it, for the "from <Owner>"
+// Markdown display name of the ancestor that declares it, for the "from <Owner>"
 // provenance marker. own extracts a type's own members of the relevant kind;
 // members the type declares itself belong to no ancestor and are absent from
 // the result. Merge only pulls inherited members from resolved, closure-present
-// ancestors, so every inherited member resolves to a display name here.
+// ancestors, so every inherited member resolves to a display name here, and
+// each member has one declaring ancestor, which the linearization lists once.
 func inheritedOwners[T comparable](g *generator, t *schema.Type, own func(*schema.Type) []T) map[T]string {
 	owners := make(map[T]string)
 	for _, super := range t.SuperTypesSlice() {
@@ -198,9 +478,7 @@ func inheritedOwners[T comparable](g *generator, t *schema.Type, own func(*schem
 			continue
 		}
 		for _, m := range own(se.typ) {
-			if _, exists := owners[m]; !exists {
-				owners[m] = se.display
-			}
+			owners[m] = se.displayMD
 		}
 	}
 	return owners
@@ -208,8 +486,8 @@ func inheritedOwners[T comparable](g *generator, t *schema.Type, own func(*schem
 
 // inheritedFrom builds the provenance-suffix resolver for one kind of type
 // member: it returns " — from <Owner>" for a member the type inherits, naming
-// the declaring ancestor as displayed in this document (schema-qualified for an
-// imported ancestor), and "" for a member the type declares itself. This gives
+// the declaring ancestor by its Markdown display name (displayMD), and "" for a
+// member the type declares itself. This gives
 // relation bullets and invariant bullets the same provenance the property
 // table's "from <Owner>" modifier gives inherited rows.
 func inheritedFrom[T comparable](g *generator, t *schema.Type, own func(*schema.Type) []T) func(T) string {
@@ -244,24 +522,19 @@ func (g *generator) typeBadges(t *schema.Type) string {
 }
 
 // superLink resolves a declared extends reference to a link on the parent
-// type's section, falling back to the reference's own spelling when the parent
-// is absent from this document's type map.
+// type's section, falling back to the reference's own spelling, escaped as
+// schema text, when the parent is absent from this document's type map.
 func (g *generator) superLink(t *schema.Type, ref schema.TypeRef) string {
 	if e, ok := g.resolveSuper(t, ref); ok {
-		return "[" + e.display + "](#" + e.anchor + ")"
+		return g.link(e)
 	}
-	return ref.String()
+	return escapeInline(ref.String())
 }
 
-// propertyTable renders the flattened property table over the type's full
-// property set, own rows first. Inherited rows carry a "from <Owner>"
+// writePropertyTable writes the flattened property table over all, the type's
+// full property set, own rows first. Inherited rows carry a "from <Owner>"
 // modifier naming the declaring ancestor as displayed in this document.
-func (g *generator) propertyTable(t *schema.Type) string {
-	all := t.AllPropertiesSlice()
-	if len(all) == 0 {
-		return ""
-	}
-
+func (g *generator) writePropertyTable(t *schema.Type, all []*schema.Property) {
 	// One PropertiesSlice call: it clones the type's property slice, so calling
 	// it again just to size the map allocates and discards a whole slice per
 	// rendered type.
@@ -276,8 +549,7 @@ func (g *generator) propertyTable(t *schema.Type) string {
 	// so both lookups go through Origin() to reach the declared property.
 	ownerOf := inheritedOwners(g, t, (*schema.Type).PropertiesSlice)
 
-	var b bytes.Buffer
-	writeTableHeader(&b, "Property", "Type", "Modifiers", "Description")
+	tw := g.newTable(0, "Property", "Type", "Modifiers", "Description")
 	for _, p := range all {
 		var mods []string
 		switch {
@@ -287,125 +559,103 @@ func (g *generator) propertyTable(t *schema.Type) string {
 			mods = append(mods, "required")
 		}
 		if !own[p.Origin()] {
-			owner, ok := ownerOf[p.Origin()]
-			if !ok {
-				owner = p.DeclaringScope().String()
-			}
-			mods = append(mods, "from "+owner)
+			mods = append(mods, "from "+ownerOf[p.Origin()])
 		}
-		writePropertyRow(&b, p, strings.Join(mods, ", "))
+		writePropertyRow(tw, p, strings.Join(mods, ", "))
 	}
-	return b.String()
 }
 
-// edgePropertyTable renders the sub-table for a relation's edge
-// properties, using the same columns as the type property table.
-func edgePropertyTable(props []*schema.Property) string {
-	var b bytes.Buffer
-	writeTableHeader(&b, "Property", "Type", "Modifiers", "Description")
+// writeEdgePropertyTable writes the sub-table for a relation's edge properties
+// under its bullet, with the same columns as the type property table.
+func (g *generator) writeEdgePropertyTable(props []*schema.Property) {
+	tw := g.newTable(bulletIndent, "Property", "Type", "Modifiers", "Description")
 	for _, p := range props {
 		mods := ""
 		if p.IsRequired() {
 			mods = "required"
 		}
-		writePropertyRow(&b, p, mods)
+		writePropertyRow(tw, p, mods)
 	}
-	return b.String()
 }
 
 // writePropertyRow writes one property-table row; the Type cell renders
-// the constraint's DSL form (named DataTypes display their name).
-func writePropertyRow(b *bytes.Buffer, p *schema.Property, mods string) {
-	typeCell := ""
-	if c := p.Constraint(); c != nil {
-		typeCell = c.String()
-	}
-	writeTableRow(b, codeCell(p.Name()), codeCell(typeCell), escapeCell(mods), escapeCell(p.Documentation()))
+// the constraint's DSL form (named DataTypes display their name). mods is
+// Markdown already, its owner names escaped by escapeInline.
+func writePropertyRow(tw *tableWriter, p *schema.Property, mods string) {
+	tw.row(codeCellOf(p.Name()), codeCellOf(p.Constraint().String()), tableCell{md: mods}, tw.g.descriptionCellOf(p.Documentation()))
 }
 
-// relationList renders a labeled bullet list of relations in DSL notation
+// writeRelationList writes a labeled bullet list of relations in DSL notation
 // with linked targets. An inherited relation carries a " — from <Owner>"
 // marker via origin, mirroring the property table. A relation's documentation
-// and edge-property sub-table nest under its bullet. Returns "" for an empty
-// list.
-func (g *generator) relationList(label string, rels []*schema.Relation, origin func(*schema.Relation) string) string {
-	if len(rels) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(label + "\n")
+// and edge-property sub-table nest under its bullet.
+func (g *generator) writeRelationList(label string, rels []*schema.Relation, origin func(*schema.Relation) string) {
+	g.buf.WriteString(label + "\n")
 	for _, rel := range rels {
-		b.WriteString("\n")
+		g.buf.WriteString("\n")
 		arrow := "-->"
 		if rel.IsComposition() {
 			arrow = "*->"
 		}
 		mult := multiplicity(rel.IsOptional(), rel.IsMany())
-		b.WriteString("- `" + arrow + " " + rel.Name() + " (" + mult + ")` " + g.relationTarget(rel) + origin(rel) + "\n")
-
-		var nested []string
+		g.buf.WriteString(bulletMarker + "`" + arrow + " " + rel.Name() + " (" + mult + ")` " + g.relationTarget(rel) + origin(rel) + "\n")
 		if doc := rel.Documentation(); doc != "" {
-			nested = append(nested, indentUnderBullet(doc)+"\n")
+			g.buf.WriteString("\n")
+			g.writeAuthorText(doc, true)
+			g.buf.WriteString("\n")
 		}
 		if props := rel.PropertiesSlice(); len(props) > 0 {
-			nested = append(nested, indentUnderBullet(edgePropertyTable(props)))
-		}
-		for _, block := range nested {
-			b.WriteString("\n" + block)
+			g.buf.WriteString("\n")
+			g.writeEdgePropertyTable(props)
 		}
 	}
-	return b.String()
 }
 
 // relationTarget links the relation's target type; when the target is absent
 // from this document's type map it degrades to the reference's own spelling,
-// unlinked.
+// unlinked and escaped as schema text.
 func (g *generator) relationTarget(rel *schema.Relation) string {
 	if e, ok := g.types[rel.TargetID()]; ok {
-		return "[" + e.display + "](#" + e.anchor + ")"
+		return g.link(e)
 	}
-	return rel.Target().String()
+	return escapeInline(rel.Target().String())
 }
 
-// invariantList renders the type's invariants: the failure message as the
+// writeInvariantList writes the type's invariants: the failure message as the
 // bullet (an inherited invariant carries a " — from <Owner>" marker, mirroring
 // the property table), the documentation indented beneath it, then the
 // declaration source in a yammm fence when the span and source content allow
-// extraction. Returns "" when the type has no invariants.
-func (g *generator) invariantList(t *schema.Type) string {
-	invs := t.AllInvariantsSlice()
-	if len(invs) == 0 {
-		return ""
-	}
+// extraction.
+func (g *generator) writeInvariantList(t *schema.Type, invs []*schema.Invariant) {
 	from := inheritedFrom(g, t, (*schema.Type).InvariantsSlice)
-	var b strings.Builder
-	b.WriteString("**Invariants**\n")
+	g.buf.WriteString("**Invariants**\n")
 	for _, inv := range invs {
-		b.WriteString("\n- " + strconv.Quote(inv.Name()) + from(inv) + "\n")
+		g.buf.WriteString("\n" + bulletMarker + escapeInline(strconv.Quote(inv.Name())) + from(inv) + "\n")
 		if doc := inv.Documentation(); doc != "" {
-			b.WriteString("\n" + indentUnderBullet(doc) + "\n")
+			g.buf.WriteString("\n")
+			g.writeAuthorText(doc, true)
+			g.buf.WriteString("\n")
 		}
 		if src, ok := g.invariantSource(inv); ok {
 			var fence bytes.Buffer
 			writeFence(&fence, "yammm", src)
-			b.WriteString("\n" + indentUnderBullet(fence.String()))
+			g.buf.WriteString("\n" + indentUnderBullet(fence.String()))
 		}
 	}
-	return b.String()
 }
 
-// invariantSource extracts the invariant's declaration text from its
-// source. It returns ok=false — degrading the invariant to message-only —
-// when byte offsets are unknown or the schema carries no source content
-// (a Builder-built schema). The declaration span includes a leading doc
-// comment when one is present; since the documentation renders separately,
-// it is stripped from the fenced text.
+// invariantSource extracts the invariant's declaration text from its source,
+// and returns ok=false — degrading the invariant to message-only — when byte
+// offsets are unknown or the schema carries no source content (a
+// Builder-built schema). The comments the span starts with — the doc comment,
+// which renders separately, and any other before the "!" — are stripped,
+// whatever they hold, so the fence starts at the declaration.
 func (g *generator) invariantSource(inv *schema.Invariant) (string, bool) {
 	span := inv.Span()
 	if g.sources == nil || !span.Start.HasByte() || !span.End.HasByte() {
 		return "", false
 	}
-	content, ok := g.sources.ContentBySource(span.Source)
+	content, ok := g.sourceContent(span.Source)
 	if !ok {
 		return "", false
 	}
@@ -413,44 +663,77 @@ func (g *generator) invariantSource(inv *schema.Invariant) (string, bool) {
 	if start < 0 || end > len(content) || start >= end {
 		return "", false
 	}
-	text := string(content[start:end])
-	if inv.Documentation() != "" {
-		if i := strings.Index(text, "*/"); i >= 0 {
-			text = strings.TrimLeft(text[i+2:], " \t\r\n")
-		}
-	}
-	text = strings.TrimRight(dedent(text), " \t\r\n")
+	text := withoutLeadingComments(string(content[start:end]))
+	at := end - len(text)
+	text = strings.TrimRight(dedent(lineEndings.Replace(text), lineIndent(content, at)), " \t\n")
 	return text, text != ""
 }
 
-// dedent strips the longest common leading-whitespace prefix from every
-// continuation line. The first line starts at the declaration's own token,
-// so it carries no indentation to strip; continuation lines carry the
-// source file's, which would otherwise leak into the fence.
-func dedent(s string) string {
+// withoutLeadingComments returns text from its first character that is
+// neither white space nor inside a comment; when a comment does not end, it
+// returns text from that comment on.
+func withoutLeadingComments(text string) string {
+	for {
+		text = strings.TrimLeft(text, " \t\r\n")
+		if rest, ok := strings.CutPrefix(text, "/*"); ok {
+			_, after, closed := strings.Cut(rest, "*/")
+			if !closed {
+				return text
+			}
+			text = after
+			continue
+		}
+		if rest, ok := strings.CutPrefix(text, "//"); ok {
+			i := strings.IndexAny(rest, "\r\n")
+			if i < 0 {
+				return text
+			}
+			text = rest[i:]
+			continue
+		}
+		return text
+	}
+}
+
+// lineIndent returns the source line holding pos up to pos, with every
+// character but a tab written as a space: the indent that holds the
+// declaration's column, whatever precedes it on its line.
+func lineIndent(content []byte, pos int) string {
+	begin := bytes.LastIndexAny(content[:pos], "\r\n") + 1
+	return strings.Map(func(r rune) rune {
+		if r == '\t' {
+			return r
+		}
+		return ' '
+	}, string(content[begin:pos]))
+}
+
+// sourceContent returns a source's content, read from the schema once per
+// source: each read copies the whole source, and a source holds many
+// invariants.
+func (g *generator) sourceContent(id location.SourceID) ([]byte, bool) {
+	if content, ok := g.contents[id]; ok {
+		return content, true
+	}
+	content, ok := g.sources.ContentBySource(id)
+	if ok {
+		g.contents[id] = content
+	}
+	return content, ok
+}
+
+// dedent removes from each continuation line the part of indent, the
+// declaration line's own indentation, that the line starts with. The first
+// line starts at the declaration's token, so the fence shows the declaration
+// laid out as in its source.
+func dedent(s, indent string) string {
+	if indent == "" {
+		return s
+	}
 	lines := strings.Split(s, "\n")
-	if len(lines) < 2 {
-		return s
-	}
-	prefix := ""
-	first := true
-	for _, line := range lines[1:] {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-		if first {
-			prefix = indent
-			first = false
-			continue
-		}
-		prefix = commonPrefix(prefix, indent)
-	}
-	if prefix == "" {
-		return s
-	}
 	for i, line := range lines[1:] {
-		lines[i+1] = strings.TrimPrefix(line, prefix)
+		lead := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+		lines[i+1] = line[len(commonPrefix(indent, lead)):]
 	}
 	return strings.Join(lines, "\n")
 }

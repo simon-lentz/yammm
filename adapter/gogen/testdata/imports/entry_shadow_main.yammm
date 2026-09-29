@@ -1,0 +1,8 @@
+schema "emain"
+
+import "entry_shadow_mid.yammm" as mid
+
+type Node {
+	id String primary
+	--> TO_MID (one) mid.Mid
+}

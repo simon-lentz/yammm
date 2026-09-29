@@ -108,14 +108,14 @@ func TestWireV3_ComposedChildWithoutTypeIsReported(t *testing.T) {
 	}
 }
 
-// TestWireV3_TableIsOrderedByIdentity pins the table's ordering. Two types
-// can share a bare name, so ordering on a rendered name is not a total order
-// over the rows; ordering on the identity is.
+// TestWireV3_TableIsOrderedByIdentity pins the table's ordering. Two types can
+// share a bare name, so ordering on the name is not a total order over the
+// rows; ordering on the identity is.
 func TestWireV3_TableIsOrderedByIdentity(t *testing.T) {
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
 
-	built, _, _ := collidingBeacons(t, s)
+	built, _, _ := sameNameBeacons(t, s)
 	data, res := snapshot.Marshal(ctx, built)
 	if res.HasErrors() {
 		t.Fatalf("marshal: %v", res)
@@ -622,21 +622,24 @@ func TestWireV3_NegativeRowIndexIsMalformed(t *testing.T) {
 // both generations of the round trip.
 func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
 	ctx := context.Background()
-	s := testSchemaWithComposition(t)
+	s := testSchema(t)
 
-	populated := mustTypeID(t, s, "Parent")
-	empty := mustTypeID(t, s, "Child")
+	populated := mustTypeID(t, s, "Person")
+	empty := mustTypeID(t, s, "Company")
 
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{populated, empty},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			populated: {{
-				TypeName:   "Parent",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     populated,
 				PrimaryKey: immutable.WrapKey([]any{"p1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
-			}},
+			},
 		},
+		// Graph.Add records a required association the data does not name.
+		Unresolved: []graph.UnresolvedParts{{
+			SourceType: populated, SourceKey: immutable.WrapKey([]any{"p1"}), Relation: "EMPLOYER", Reason: "absent",
+		}},
 	})
 	if res.HasErrors() {
 		t.Fatalf("assembling: %s", res)
@@ -648,7 +651,7 @@ func TestWireV3_InstancelessTypeEmitsAnEmptyGroup(t *testing.T) {
 		t.Fatalf("marshal: %v", mres)
 	}
 	for i, e := range wireTypeTable(t, data) {
-		if e.Name == "Child" {
+		if e.Name == "Company" {
 			emptyRow = i
 		}
 	}

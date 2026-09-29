@@ -9,6 +9,7 @@ run:
   # the linter and its type checker.
   build-tags:
     - neo4j_integration
+    - mermaid
   # Don't let tools mutate go.mod/go.sum.
   modules-download-mode: readonly
   # golangci-lint refuses to start while another golangci-lint runs anywhere on
@@ -56,7 +57,7 @@ linters:
     # - gochecknoinits # ban init() functions
     # - gochecknoglobals # ban globals
     - exhaustive # enum-style switch exhaustiveness (scoped to //exhaustive:enforce)
-    - depguard # import denylist — enforces the testify freeze for new test code
+    - depguard # import denylists: the testify freeze for new test code, and library-imports-no-adapter
     - testifylint # testify API misuse guards for the grandfathered call sites
     - usetesting # t.TempDir()/t.Context()/t.Chdir() over os equivalents in tests
   disable:
@@ -70,6 +71,14 @@ linters:
       - std-error-handling
       - common-false-positives
     rules:
+      # depguard matches its own `files` globs against the absolute path, so a
+      # tree negation there turns the rule off for a checkout under any
+      # directory named adapter, cmd or lsp. The exclusion path is
+      # module-relative.
+      - path: "^(adapter|cmd|lsp)/"
+        linters:
+          - depguard
+        text: "library-imports-no-adapter"
       # VS Code extension embeds npm packages that may contain Go files.
       - path: "node_modules/"
         text: ".*"
@@ -164,7 +173,7 @@ linters:
       - path: "^adapter/json/(adapter|write)_test\\.go$"
         linters:
           - depguard
-      - path: "^adapter/json/internal/typetag/(validate)_test\\.go$"
+      - path: "^adapter/internal/typetag/(validate)_test\\.go$"
         linters:
           - depguard
       - path: "^adapter/neo4j/(diff|infer|introspect)_test\\.go$"
@@ -248,10 +257,22 @@ linters:
   settings:
     depguard:
       rules:
+        library-imports-no-adapter:
+          files:
+            - "!$test"
+          deny:
+            - pkg: github.com/simon-lentz/yammm/adapter
+              desc: "library packages never depend on adapters (doc.go, Package Structure)"
         testify-freeze:
           deny:
             - pkg: github.com/stretchr/testify
               desc: "testify is frozen for new code — use the stdlib plus internal/yammmtest (cmp + goldens); grandfathered files are enumerated in linters.exclusions.rules and that list only shrinks"
+    wrapcheck:
+      # adapter/internal/refusal.New CONSTRUCTS an error, as errors.New and
+      # fmt.Errorf do, so returning its result is not an unwrapped pass-through
+      # of a foreign error. The entry appends to the linter's default list.
+      extra-ignore-sigs:
+        - refusal.New(
     testifylint:
       disable:
         # The DSL contract pins exact float results (parsed literals,

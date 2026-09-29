@@ -1,6 +1,7 @@
 package eval_test
 
 import (
+	"encoding/json"
 	"math"
 	"regexp"
 	"testing"
@@ -56,11 +57,11 @@ func TestIsInteger(t *testing.T) {
 		{"string", "42", false},
 		{"bool", true, false},
 
-		// Float64 whole numbers are integers; fractions and non-finite are not.
-		{"float64_zero", float64(0.0), true},
-		{"float64_positive", float64(42.0), true},
-		{"float64_negative", float64(-42.0), true},
-		{"float64_large", float64(1000000.0), true},
+		// A float is never an integer, whole or not.
+		{"float64_zero", float64(0.0), false},
+		{"float64_positive", float64(42.0), false},
+		{"float64_negative", float64(-42.0), false},
+		{"float64_large", float64(1000000.0), false},
 		{"float64_fraction_half", float64(0.5), false},
 		{"float64_fraction_pi", float64(3.14), false},
 		{"float64_fraction_negative", float64(-2.5), false},
@@ -284,18 +285,19 @@ func TestCheckCoerce_Integer(t *testing.T) {
 		{"no_min", int64(-1000), schema.IntegerMax(100), false, int64(-1000), false},
 		{"no_max", int64(1000), schema.IntegerMin(0), false, int64(1000), false},
 
-		// Float64 whole numbers are integers; fractions and non-finite fail
-		// both checking and coercion.
-		{"float64_whole_zero", float64(0.0), schema.NewIntegerConstraint(), false, int64(0), false},
-		{"float64_whole_positive", float64(42.0), schema.NewIntegerConstraint(), false, int64(42), false},
-		{"float64_whole_negative", float64(-42.0), schema.NewIntegerConstraint(), false, int64(-42), false},
-		{"float64_whole_large", float64(1000000.0), schema.NewIntegerConstraint(), false, int64(1000000), false},
+		// A float fails both checking and coercion, whole or not and in bounds
+		// or not: a float is never an integer.
+		{"float64_whole_zero", float64(0.0), schema.NewIntegerConstraint(), true, nil, true},
+		{"float64_whole_positive", float64(42.0), schema.NewIntegerConstraint(), true, nil, true},
+		{"float64_whole_negative", float64(-42.0), schema.NewIntegerConstraint(), true, nil, true},
+		{"float64_whole_large", float64(1000000.0), schema.NewIntegerConstraint(), true, nil, true},
 		{"float64_fraction", float64(3.14), schema.NewIntegerConstraint(), true, nil, true},
 		{"float64_fraction_half", float64(0.5), schema.NewIntegerConstraint(), true, nil, true},
-		{"float64_min_ok", float64(10.0), schema.IntegerBetween(10, 100), false, int64(10), false},
-		{"float64_min_fail", float64(9.0), schema.IntegerBetween(10, 100), true, int64(9), false},
-		{"float64_max_ok", float64(100.0), schema.IntegerBetween(10, 100), false, int64(100), false},
-		{"float64_max_fail", float64(101.0), schema.IntegerBetween(10, 100), true, int64(101), false},
+		{"float64_in_bounds", float64(10.0), schema.IntegerBetween(10, 100), true, nil, true},
+		{"float32_whole", float32(42), schema.NewIntegerConstraint(), true, nil, true},
+		{"json_number_whole_decimal", json.Number("42.0"), schema.NewIntegerConstraint(), true, nil, true},
+		{"json_number_whole_exponent", json.Number("1e2"), schema.NewIntegerConstraint(), true, nil, true},
+		{"json_number_integer", json.Number("42"), schema.NewIntegerConstraint(), false, int64(42), false},
 		{"float64_nan", math.NaN(), schema.NewIntegerConstraint(), true, nil, true},
 		{"float64_inf", math.Inf(1), schema.NewIntegerConstraint(), true, nil, true},
 	}
@@ -841,9 +843,12 @@ func TestCoerceValue_List(t *testing.T) {
 	t.Run("coerce integer elements", func(t *testing.T) {
 		t.Parallel()
 		constraint := schema.NewListConstraint(schema.NewIntegerConstraint())
-		// float64 values (as from JSON) should coerce to int64
-		result, err := eval.CoerceValue([]any{float64(1), float64(2), float64(3)}, constraint)
+		// Integer literals from a JSON document coerce to int64; a float
+		// element is refused, whole or not.
+		result, err := eval.CoerceValue([]any{json.Number("1"), int32(2), int64(3)}, constraint)
 		require.NoError(t, err)
+		_, ferr := eval.CoerceValue([]any{int64(1), float64(2)}, constraint)
+		require.ErrorContains(t, ferr, "element [1]: cannot coerce float 2.0 to int64")
 		slice, ok := result.([]any)
 		require.True(t, ok)
 		assert.Len(t, slice, 3)

@@ -10,7 +10,12 @@
 # pattern matching nothing rewrites nothing, and "nothing red" then reads as
 # "mutant killed" when no mutant existed. The build MUST succeed: a mutation
 # that does not compile makes go test exit non-zero for an unrelated reason,
-# and that also reads as "killed".
+# and that also reads as "killed". The build includes the named packages' test
+# binaries and the vet checks go test runs, which `go build` does not reach: a
+# mutant that breaks only a test build, or fails that vet, fails go test before
+# any of the package's code runs. The check executes none of the binaries it
+# builds: a mutant that panics in init or fails in a TestMain is a kill for the
+# verdict run to report, and a TestMain that writes files runs only there.
 #
 # The named packages must pass before the mutation. When MUTATE_BASELINE_CACHE
 # names a directory, a passing baseline is recorded there under a key over the
@@ -18,6 +23,11 @@
 # and a later run with the same key skips the baseline. The harness restores
 # each mutated file byte for byte, so the key still matches after a mutant, and
 # any edit to the tree changes it.
+#
+# MUTATE_BASELINE_CACHE is dropped from the environment of the suite this script
+# runs. A package that shells out to this script would otherwise inherit the
+# cache directory and take the recorded-baseline path, which is how a run over
+# internal/scripttest read its own unmutated tree as red.
 #
 # Usage:
 #   scripts/mutate.sh <file> <search> <replace> <pkg> [pkg...]
@@ -38,6 +48,12 @@ pkgs=("$@")
 
 root=$(git rev-parse --show-toplevel)
 cd "${root}"
+
+# A verdict is a statement about the program CI judges, so the suite that
+# produces it runs the module's toolchain (scripts/toolchain.sh). Without the
+# pin a tree red under the module's Go and green under the host's yields a full
+# set of verdicts about a tree CI rejects.
+. scripts/toolchain.sh
 
 if [ ! -f "${file}" ]; then
 	printf 'mutate: %s does not exist\n' "${file}" >&2
@@ -66,6 +82,7 @@ baseline_key() {
 	{
 		printf '%s\n' "${pkgs[@]}"
 		printf 'TMPDIR=%s\n' "${TMPDIR:-}"
+		printf 'PATH=%s\n' "${PATH:-}"
 		env | grep '^YAMMM_' | LC_ALL=C sort || true
 		go env GOOS GOARCH CGO_ENABLED GOFLAGS GOEXPERIMENT
 		go version
@@ -86,7 +103,7 @@ fi
 if [ -n "${stamp}" ] && [ -f "${stamp}" ]; then
 	printf 'mutate: baseline green (recorded for this tree in %s)\n' "${MUTATE_BASELINE_CACHE}"
 else
-	if ! go test "${pkgs[@]}" >/dev/null 2>&1; then
+	if ! env -u MUTATE_BASELINE_CACHE go test "${pkgs[@]}" >/dev/null 2>&1; then
 		printf 'mutate: the UNMUTATED tree is already red in %s, so no verdict is possible\n' "${pkgs[*]}" >&2
 		exit 1
 	fi
@@ -124,10 +141,19 @@ if ! build_out=$(go build ./... 2>&1); then
 	printf '%s\n' "${build_out}" >&2
 	exit 1
 fi
+# -exec=true builds and vets each test binary, then runs `true` in its place.
+if ! build_out=$(env -u MUTATE_BASELINE_CACHE go test -exec=true "${pkgs[@]}" 2>&1); then
+	printf 'mutate: the mutated tree DOES NOT BUILD its tests or fails their vet, so the suite cannot judge it\n' >&2
+	printf '%s\n' "${build_out}" >&2
+	exit 1
+fi
 printf 'mutate: build ok\n'
 
+# -failfast=false overrides a GOFLAGS -failfast: once one package fails,
+# -failfast drops the line of every package that starts after it, a
+# "[build failed]" line included, and the rule below needs every line.
 set +e
-test_out=$(go test "${pkgs[@]}" 2>&1)
+test_out=$(env -u MUTATE_BASELINE_CACHE go test -failfast=false "${pkgs[@]}" 2>&1)
 rc=$?
 set -e
 
@@ -138,6 +164,50 @@ if [ "${rc}" -eq 0 ]; then
 	exit 1
 fi
 
+# A non-zero exit is not a kill. go test gives each named package one line: the
+# package and a duration when its test binary RAN — a failing test, a panic in
+# init or in a test, a TestMain exit, a timeout — and the package and a
+# bracketed reason ([build failed], [setup failed]) when nothing ran there.
+# The pre-build above judged these same packages, so a bracketed reason here
+# means the tree or the environment moved under the verdict run.
+#
+# One package that ran is not enough, because go test prints both forms in one
+# run: a genuine failure beside a package that never built still judges a tree
+# the pre-build never saw.
+#
+# A binary that never started also gets a duration. go test reports the start
+# failure first, on a line of its own: "fork/exec <path>: ..." for a program
+# given by path, `exec: "<name>": ...` for one looked up on PATH. Either line
+# is read as a package that did not run.
+#
+# Limits: a test binary killed from outside prints a duration like any other
+# run that started, and this reads that as a kill. A test that prints such a
+# line itself, at the start of a line, reads as not run: a miss, never a
+# false kill.
+#
+# Every grep over the test output reads it byte-wise: a test may print bytes
+# that are not UTF-8, and under a UTF-8 locale GNU grep drops a line that
+# holds them.
+ran_re='^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9]+\.[0-9]+s$'
+notrun=$(printf '%s\n' "${test_out}" | LC_ALL=C grep -E '^FAIL[[:space:]]|^fork/exec |^exec: "' | LC_ALL=C grep -vE "${ran_re}" || true)
+ran=$(printf '%s\n' "${test_out}" | LC_ALL=C grep -cE "${ran_re}" || true)
+
+if [ -n "${notrun}" ]; then
+	printf 'mutate: NO TEST RAN in a named package, so this is not a kill\n' >&2
+	printf '%s\n' "${notrun}" >&2
+	printf '  a package line carries a duration when its test binary ran; a bracketed reason or a start error means it did not\n' >&2
+	printf '  the pre-build passed, so the tree moved under the verdict run\n' >&2
+	exit 1
+fi
+if [ "${ran}" -eq 0 ]; then
+	printf 'mutate: NO TEST RAN — the verdict run named no package that ran, so this is not a kill\n' >&2
+	printf '%s\n' "${test_out}" >&2
+	exit 1
+fi
+
 printf 'mutate: MUTANT KILLED (exit %d)\n' "${rc}"
-printf '%s\n' "${test_out}" | grep -E '^[[:space:]]*--- FAIL|^FAIL' || true
+# Everything but go test's line for a package that passed or has no test files:
+# what each failing test reported tells a kill caused outside the mutation's
+# reach from a real one.
+printf '%s\n' "${test_out}" | LC_ALL=C grep -v -e $'^ok  \t' -e $'^?   \t' || true
 exit 0

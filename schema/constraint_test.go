@@ -116,15 +116,17 @@ func TestEnumConstraint_DefensiveCopy(t *testing.T) {
 	assert.Equal(t, "b", values2[1], "Values() should return defensive copy")
 }
 
-func TestPatternConstraint_MaxTwoPatterns(t *testing.T) {
+// A constraint holds what its caller gave it, so the Builder can refuse a third
+// pattern the DSL refuses rather than build a narrower constraint silently.
+func TestPatternConstraint_KeepsEveryPattern(t *testing.T) {
 	p1 := regexp.MustCompile("^a")
 	p2 := regexp.MustCompile("b$")
 	p3 := regexp.MustCompile("c")
 
 	c := schema.NewPatternConstraint([]*regexp.Regexp{p1, p2, p3})
-	patterns := c.Patterns()
 
-	assert.Len(t, patterns, 2, "PatternConstraint should limit to 2 patterns")
+	assert.Equal(t, []string{"^a", "b$", "c"}, c.Patterns())
+	assert.Equal(t, 3, c.PatternCount())
 }
 
 func TestAliasConstraint_ResolvesForEquality(t *testing.T) {

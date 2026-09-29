@@ -46,7 +46,7 @@ func runNeo4jIntrospect(cmd *cobra.Command, _ []string, _ *cli.DiagnosticSink) e
 	// Connect to database
 	driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
 	if err != nil {
-		return cli.Runtimef("%v", err)
+		return err
 	}
 	defer driver.Close(ctx)
 

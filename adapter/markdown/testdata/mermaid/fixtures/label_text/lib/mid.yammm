@@ -1,0 +1,8 @@
+schema "mid"
+
+import "./far" as far
+
+type Hop {
+	id String primary
+	--> ENDS (one) far.Mark
+}

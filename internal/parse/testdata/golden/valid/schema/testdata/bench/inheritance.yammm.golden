@@ -1,6 +1,6 @@
 {
   "name": "\"bench_inheritance\"",
-  "doc": "Abstract bases, a diamond, and a part type, so the benchmark pays the\n   linearization cost a real schema pays.",
+  "doc": "Abstract bases, a diamond, and a part type, so the benchmark pays the\nlinearization cost a real schema pays.",
   "span": {
     "s": 0,
     "e": 144

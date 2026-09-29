@@ -31,15 +31,10 @@ func loadSources(t *testing.T, sources map[string][]byte) *schema.Schema {
 	return s
 }
 
-// newTestGenerator builds a generator, failing the test on an anchor-collision
-// error (the corpus fixtures never collide).
+// newTestGenerator builds a generator with Marshal's default options.
 func newTestGenerator(t *testing.T, s *schema.Schema) *generator {
 	t.Helper()
-	g, err := newGenerator(s)
-	if err != nil {
-		t.Fatalf("newGenerator: %v", err)
-	}
-	return g
+	return newGenerator(s, config{classDiagram: true, classMembers: true})
 }
 
 // sectionFor renders the named type's section and returns it.
@@ -201,7 +196,7 @@ type Car {
 		"\n" +
 		"**Compositions**\n" +
 		"\n" +
-		"- `*-> WHEELS (one:many)` [Wheel](#wheel)\n"
+		"-   `*-> WHEELS (one:many)` [Wheel](#wheel)\n"
 	if car != wantCar {
 		t.Errorf("Car section = %q, want %q", car, wantCar)
 	}
@@ -231,9 +226,9 @@ type Car {
 		"\n" +
 		"**Associations**\n" +
 		"\n" +
-		"- `--> OWNER (one)` [Person](#person)\n" +
+		"-   `--> OWNER (one)` [Person](#person)\n" +
 		"\n" +
-		"  Current owner.\n"
+		"    Current owner.\n"
 	if got != want {
 		t.Errorf("section = %q, want %q", got, want)
 	}
@@ -266,12 +261,12 @@ type County {
 		"\n" +
 		"**Associations**\n" +
 		"\n" +
-		"- `--> IN_STATE (one)` [State](#state)\n" +
+		"-   `--> IN_STATE (one)` [State](#state)\n" +
 		"\n" +
-		"  | Property | Type | Modifiers | Description |\n" +
-		"  | --- | --- | --- | --- |\n" +
-		"  | `since` | `Date` | required | Assignment date. |\n" +
-		"  | `note` | `String` |  |  |\n"
+		"    | Property | Type | Modifiers | Description |\n" +
+		"    | --- | --- | --- | --- |\n" +
+		"    | `since` | `Date` | required | Assignment date. |\n" +
+		"    | `note` | `String` |  |  |\n"
 	if got != want {
 		t.Errorf("section = %q, want %q", got, want)
 	}
@@ -301,20 +296,38 @@ type Person {
 		"\n" +
 		"**Invariants**\n" +
 		"\n" +
-		"- \"adults only\"\n" +
+		"-   \"adults only\"\n" +
 		"\n" +
-		"  ```yammm\n" +
-		"  ! \"adults only\" age >= 18\n" +
-		"  ```\n" +
+		"    ```yammm\n" +
+		"    ! \"adults only\" age >= 18\n" +
+		"    ```\n" +
 		"\n" +
-		"- \"age in bounds\"\n" +
+		"-   \"age in bounds\"\n" +
 		"\n" +
-		"  ```yammm\n" +
-		"  ! \"age in bounds\" age >= 0 &&\n" +
-		"  age <= 150\n" +
-		"  ```\n"
+		"    ```yammm\n" +
+		"    ! \"age in bounds\" age >= 0 &&\n" +
+		"    \tage <= 150\n" +
+		"    ```\n"
 	if got != want {
 		t.Errorf("section = %q, want %q", got, want)
+	}
+}
+
+// TestEmitTypeSection_InvariantKeepsItsSourceLayout pins that each
+// continuation line loses the declaration line's own indentation and keeps
+// the rest, so the fence shows the declaration as laid out in its source.
+func TestEmitTypeSection_InvariantKeepsItsSourceLayout(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, "schema \"people\"\n\ntype Person {\n\tid UUID primary\n\tage Integer\n\n\t! \"age in bounds\" age >= 0 &&\n\t\t\tage <= 150 &&\n\t\tage != 99\n}\n")
+	got := sectionFor(t, s, "Person")
+	want := "    ```yammm\n" +
+		"    ! \"age in bounds\" age >= 0 &&\n" +
+		"    \t\tage <= 150 &&\n" +
+		"    \tage != 99\n" +
+		"    ```\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("section %q does not contain the dedented fence %q", got, want)
 	}
 }
 
@@ -334,18 +347,40 @@ type Person {
 	got := sectionFor(t, s, "Person")
 	wantBlock := "**Invariants**\n" +
 		"\n" +
-		"- \"adults only\"\n" +
+		"-   \"adults only\"\n" +
 		"\n" +
-		"  Enforced at intake.\n" +
+		"    Enforced at intake.\n" +
 		"\n" +
-		"  ```yammm\n" +
-		"  ! \"adults only\" age >= 18\n" +
-		"  ```\n"
+		"    ```yammm\n" +
+		"    ! \"adults only\" age >= 18\n" +
+		"    ```\n"
 	if !strings.Contains(got, wantBlock) {
 		t.Errorf("section %q does not contain invariant block %q", got, wantBlock)
 	}
 	if strings.Contains(got, "Enforced at intake. */") || strings.Contains(got, "/*") {
 		t.Errorf("fence retains doc-comment text: %q", got)
+	}
+}
+
+// TestEmitTypeSection_InvariantMessageIsLiteral pins that an invariant's
+// message renders as the string it is: emphasis, raw HTML and a link inside
+// it are escaped, not rendered.
+func TestEmitTypeSection_InvariantMessageIsLiteral(t *testing.T) {
+	t.Parallel()
+
+	s := loadSchema(t, `schema "people"
+
+type Person {
+	id UUID primary
+	age Integer
+
+	! "a*b*c and <b>x</b> [l](#person)" age >= 0
+}
+`)
+	got := sectionFor(t, s, "Person")
+	want := "\n-   \"a\\*b\\*c and \\<b\\>x\\</b\\> \\[l\\](\\#person)\"\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("section %q does not contain the bullet %q", got, want)
 	}
 }
 
@@ -371,7 +406,7 @@ func TestEmitTypeSection_BuilderInvariantDegradesToMessage(t *testing.T) {
 		"\n" +
 		"**Invariants**\n" +
 		"\n" +
-		"- \"always true\"\n"
+		"-   \"always true\"\n"
 	if got != want {
 		t.Errorf("section = %q, want %q", got, want)
 	}
@@ -414,7 +449,7 @@ abstract type Located {
 		"\n" +
 		"**Associations**\n" +
 		"\n" +
-		"- `--> IN_REGION (one)` [common.Region](#commonregion) — from common.Located\n"
+		"-   `--> IN_REGION (one)` [common.Region](#commonregion) — from common.Located\n"
 	if got != want {
 		t.Errorf("section = %q, want %q", got, want)
 	}
@@ -459,13 +494,13 @@ type Car extends Vehicle {
 		"\n" +
 		"**Associations**\n" +
 		"\n" +
-		"- `--> DEALER (one)` [Person](#person)\n" +
+		"-   `--> DEALER (one)` [Person](#person)\n" +
 		"\n" +
-		"- `--> OWNER (one)` [Person](#person) — from Vehicle\n" +
+		"-   `--> OWNER (one)` [Person](#person) — from Vehicle\n" +
 		"\n" +
 		"**Compositions**\n" +
 		"\n" +
-		"- `*-> WHEELS (one:many)` [Wheel](#wheel) — from Vehicle\n"
+		"-   `*-> WHEELS (one:many)` [Wheel](#wheel) — from Vehicle\n"
 	if got != want {
 		t.Errorf("section = %q, want %q", got, want)
 	}
@@ -494,17 +529,17 @@ type Person extends Base {
 	// declaring ancestor.
 	wantInv := "**Invariants**\n" +
 		"\n" +
-		"- \"positive score\"\n" +
+		"-   \"positive score\"\n" +
 		"\n" +
-		"  ```yammm\n" +
-		"  ! \"positive score\" score >= 0\n" +
-		"  ```\n" +
+		"    ```yammm\n" +
+		"    ! \"positive score\" score >= 0\n" +
+		"    ```\n" +
 		"\n" +
-		"- \"adults only\" — from Base\n" +
+		"-   \"adults only\" — from Base\n" +
 		"\n" +
-		"  ```yammm\n" +
-		"  ! \"adults only\" age >= 18\n" +
-		"  ```\n"
+		"    ```yammm\n" +
+		"    ! \"adults only\" age >= 18\n" +
+		"    ```\n"
 	if !strings.Contains(got, wantInv) {
 		t.Errorf("section %q does not contain expected invariant block %q", got, wantInv)
 	}
@@ -520,8 +555,8 @@ type Person {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitTypeSection(findType(t, g, "Person"))
-	if !g.anchors["person"] {
-		t.Errorf("anchors = %v, want %q registered", g.anchors, "person")
+	person := findType(t, g, "Person")
+	if got := g.types[person.ID()].anchor; got != "person" {
+		t.Errorf("Person's anchor = %q, want %q", got, "person")
 	}
 }

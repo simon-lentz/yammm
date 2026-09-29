@@ -1,0 +1,247 @@
+{
+  "name": "\"inlineenumlist\"",
+  "span": {
+    "s": 0,
+    "e": 23
+  },
+  "datatypes": [
+    {
+      "name": "Tags",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "Enum",
+          "args": [
+            "\"red\"",
+            "\"green\""
+          ],
+          "span": {
+            "s": 42,
+            "e": 62
+          }
+        },
+        "span": {
+          "s": 37,
+          "e": 63
+        }
+      },
+      "span": {
+        "s": 25,
+        "e": 63
+      }
+    },
+    {
+      "name": "Grid",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "List",
+          "elem": {
+            "kind": "Enum",
+            "args": [
+              "\"on\"",
+              "\"off\""
+            ],
+            "span": {
+              "s": 86,
+              "e": 103
+            }
+          },
+          "span": {
+            "s": 81,
+            "e": 104
+          }
+        },
+        "span": {
+          "s": 76,
+          "e": 105
+        }
+      },
+      "span": {
+        "s": 64,
+        "e": 105
+      }
+    },
+    {
+      "name": "Tone",
+      "constraint": {
+        "kind": "Enum",
+        "args": [
+          "\"warm\"",
+          "\"cool\""
+        ],
+        "span": {
+          "s": 118,
+          "e": 138
+        }
+      },
+      "span": {
+        "s": 106,
+        "e": 138
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Post",
+      "name_span": {
+        "s": 145,
+        "e": 149
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 160,
+              "e": 166
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 153,
+            "e": 174
+          }
+        },
+        {
+          "name": "tags",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Tags"
+            ],
+            "span": {
+              "s": 183,
+              "e": 187
+            }
+          },
+          "span": {
+            "s": 176,
+            "e": 187
+          }
+        },
+        {
+          "name": "labels",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Enum",
+              "args": [
+                "\"draft\"",
+                "\"final\""
+              ],
+              "span": {
+                "s": 201,
+                "e": 223
+              }
+            },
+            "span": {
+              "s": 196,
+              "e": 224
+            }
+          },
+          "span": {
+            "s": 189,
+            "e": 224
+          }
+        },
+        {
+          "name": "matrix",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Enum",
+                "args": [
+                  "\"yes\"",
+                  "\"no\""
+                ],
+                "span": {
+                  "s": 243,
+                  "e": 260
+                }
+              },
+              "span": {
+                "s": 238,
+                "e": 261
+              }
+            },
+            "span": {
+              "s": 233,
+              "e": 262
+            }
+          },
+          "span": {
+            "s": 226,
+            "e": 262
+          }
+        },
+        {
+          "name": "tones",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Alias",
+              "args": [
+                "Tone"
+              ],
+              "span": {
+                "s": 276,
+                "e": 280
+              }
+            },
+            "span": {
+              "s": 271,
+              "e": 281
+            }
+          },
+          "span": {
+            "s": 264,
+            "e": 281
+          }
+        },
+        {
+          "name": "grid",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Grid"
+            ],
+            "span": {
+              "s": 290,
+              "e": 294
+            }
+          },
+          "span": {
+            "s": 283,
+            "e": 294
+          }
+        },
+        {
+          "name": "mood",
+          "constraint": {
+            "kind": "Enum",
+            "args": [
+              "\"calm\"",
+              "\"tense\""
+            ],
+            "span": {
+              "s": 303,
+              "e": 324
+            }
+          },
+          "span": {
+            "s": 296,
+            "e": 324
+          }
+        }
+      ],
+      "span": {
+        "s": 140,
+        "e": 326
+      }
+    }
+  ]
+}

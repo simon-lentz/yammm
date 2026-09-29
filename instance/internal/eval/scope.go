@@ -2,6 +2,7 @@ package eval
 
 import (
 	"maps"
+	"strings"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema/expr"
@@ -37,8 +38,9 @@ type Scope interface {
 	// For variable scopes, this looks up bound variables.
 	Lookup(name string) (immutable.Value, bool)
 
-	// LookupFold returns the value bound to name using case-insensitive matching.
-	// Returns (zero, false) if not found.
+	// LookupFold returns the value a bare name reads: a variable of exactly
+	// that name, then a property matched case-insensitively or a relation by
+	// its name or its field name. Returns (zero, false) if not found.
 	LookupFold(name string) (immutable.Value, bool)
 
 	// WithVar returns a new Scope with the additional variable binding.
@@ -105,23 +107,72 @@ type propertyScope struct {
 	vars  map[string]immutable.Value
 }
 
+// Lookup resolves a variable's name: a variable of exactly that name, then a
+// member spelled exactly, which reads a relation by its name, then a relation
+// by its field name.
 func (s *propertyScope) Lookup(name string) (immutable.Value, bool) {
-	// Variables take precedence over properties
 	if v, ok := s.vars[name]; ok {
 		return v, true
 	}
-	// Fall back to properties
-	return s.props.Get(name)
+	if v, ok := s.props.Get(name); ok {
+		return v, true
+	}
+	if key := toUpperASCII(name); key != name && name == toLowerASCII(key) {
+		return s.props.Get(key)
+	}
+	return immutable.Value{}, false
 }
 
 // LookupFold resolves a bare name the way docs/SPEC.md's scope chain states:
-// a variable of exactly that name first, then a property matched
-// case-insensitively. Variable names never fold; property names always do.
+// a variable of exactly that name first, then a member by [readMember].
+// Variable names never fold.
 func (s *propertyScope) LookupFold(name string) (immutable.Value, bool) {
 	if v, ok := s.vars[name]; ok {
 		return v, true
 	}
-	return s.props.GetFold(name)
+	return readMember(s.props, name)
+}
+
+// readMember reads name from an instance's entries: a property by its name in
+// any ASCII casing, a relation by its UPPER_SNAKE name or its field name alone.
+// The entries key a relation by its name, and a property name starts lower
+// case, so name upper-cased finds a relation's key and no property's; a read
+// of it in another casing reads nothing, and the fold that follows reaches
+// properties alone.
+func readMember(props immutable.Properties, name string) (immutable.Value, bool) {
+	if v, ok := props.Get(name); ok {
+		return v, true
+	}
+	if key := toUpperASCII(name); key != name {
+		if v, ok := props.Get(key); ok {
+			if name == toLowerASCII(key) {
+				return v, true
+			}
+			return immutable.Value{}, false
+		}
+	}
+	return props.GetFold(name)
+}
+
+// toUpperASCII maps the ASCII letters a-z to A-Z and leaves every other rune,
+// as GetFold's ASCII-only fold does.
+func toUpperASCII(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'a' <= r && r <= 'z' {
+			return r - 'a' + 'A'
+		}
+		return r
+	}, s)
+}
+
+// toLowerASCII maps the ASCII letters A-Z to a-z.
+func toLowerASCII(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r - 'A' + 'a'
+		}
+		return r
+	}, s)
 }
 
 func (s *propertyScope) WithVar(name string, value any) Scope {

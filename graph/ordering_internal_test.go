@@ -27,8 +27,7 @@ func orderingTypeID(name string) schema.TypeID {
 
 func orderingInstance(t *testing.T, name, key string) *Instance {
 	t.Helper()
-	return rebuildInstance(InstanceParts{
-		TypeName:   name,
+	return rebuildInstance(tagForms(nil), InstanceParts{
 		TypeID:     orderingTypeID(name),
 		PrimaryKey: immutable.WrapKey([]any{key}),
 		Properties: immutable.WrapProperties(map[string]any{"id": key}),
@@ -200,8 +199,7 @@ func TestCompareDuplicates_PropertiesDiscriminate(t *testing.T) {
 	t.Parallel()
 
 	withName := func(name string) *Instance {
-		return rebuildInstance(InstanceParts{
-			TypeName:   "Person",
+		return rebuildInstance(tagForms(nil), InstanceParts{
 			TypeID:     orderingTypeID("Person"),
 			PrimaryKey: immutable.WrapKey([]any{"p1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": name}),

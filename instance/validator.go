@@ -52,9 +52,11 @@ func NewValidator(s *schema.Schema, opts ...Option) *Validator {
 //   - valids: one entry per input instance; non-nil for successes, nil for failures
 //   - result: merged diagnostics for the entire batch (OK when all instances pass)
 //
-// Every diagnostic carries one [diag.DetailKeyInstanceIndex] detail naming the
-// element of raws it belongs to, and the batch result carries each instance's
-// truncation facts ([diag.Result.LimitReached], [diag.Result.DroppedCount]).
+// A diagnostic about one element of raws carries one
+// [diag.DetailKeyInstanceIndex] detail naming it; one about typeName itself —
+// a name that does not resolve, or an abstract or part type named by an empty
+// batch — carries none. The batch result carries each instance's truncation
+// facts ([diag.Result.LimitReached], [diag.Result.DroppedCount]).
 //
 // Panics if the receiver is nil or if ctx is nil.
 func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawInstance) ([]*ValidInstance, diag.Result) {
@@ -74,10 +76,15 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 	if err != nil {
 		return nil, typeResolutionResultForBatch(err, raws)
 	}
-	if raws == nil {
-		return nil, diag.OK()
-	}
 	if len(raws) == 0 {
+		// An empty batch names a type that must be able to hold a root, as a
+		// row of it must: an abstract or part type name is refused either way.
+		if res, refused := instantiationRefusal(typ, typeName, false, nil); refused {
+			return nil, res
+		}
+		if raws == nil {
+			return nil, diag.OK()
+		}
 		return []*ValidInstance{}, diag.OK()
 	}
 
@@ -401,16 +408,22 @@ func typeResolutionResultForBatch(err error, raws []RawInstance) diag.Result {
 // document, which every diagnostic's path is built from; depth is its
 // composed depth, 0 for a root.
 func (v *Validator) validateComposedInstance(ctx context.Context, typeName string, typ *schema.Type, raw RawInstance, base path.Builder, allowPartType bool, depth int) (*ValidInstance, diag.Result) {
-	// Check instantiation eligibility
-	if typ.IsAbstract() {
-		return nil, createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), raw.Provenance)
+	if res, refused := instantiationRefusal(typ, typeName, allowPartType, raw.Provenance); refused {
+		return nil, res
 	}
-
-	if !allowPartType && typ.IsPart() {
-		return nil, createErrorResult(ErrPartTypeDirect, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), raw.Provenance)
-	}
-
 	return v.validateProperties(ctx, typ, typeName, raw, base, depth)
+}
+
+// instantiationRefusal refuses an abstract type, and a part type unless
+// allowPartType holds, reporting whether it refused.
+func instantiationRefusal(typ *schema.Type, typeName string, allowPartType bool, prov *location.Provenance) (diag.Result, bool) {
+	switch {
+	case typ.IsAbstract():
+		return createErrorResult(ErrAbstractType, fmt.Sprintf("cannot instantiate abstract type %q", typeName), prov), true
+	case !allowPartType && typ.IsPart():
+		return createErrorResult(ErrPartTypeDirect, fmt.Sprintf("part type %q cannot be instantiated directly", typeName), prov), true
+	}
+	return diag.Result{}, false
 }
 
 // validateProperties validates all members of an instance: properties, then
@@ -418,18 +431,19 @@ func (v *Validator) validateComposedInstance(ctx context.Context, typeName strin
 func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, typeName string, raw RawInstance, base path.Builder, depth int) (*ValidInstance, diag.Result) {
 	collector := diag.NewCollector(v.cfg.maxIssuesPerInstance)
 	prov := raw.Provenance
-	input := v.indexInput(raw.Properties)
+	names := slices.Sorted(maps.Keys(raw.Properties))
 
 	// Build the member index: every schema property and relation resolved
 	// to the input key it is read from, once, by one fold rule. Every
 	// collision it finds is reported HERE, before any pass, so no pass has to
 	// carry the report and no gate can swallow it.
-	propMapping, accounted := v.buildPropertyMapping(ctx, typ, input, collector, prov, base)
-	relInputs := v.buildRelationMapping(typ, input, accounted, collector, prov, base)
+	claims := claimObject(typ, names, v.cfg.strictPropertyNames)
+	propMapping := v.buildPropertyMapping(ctx, typ, claims, collector, prov, base)
+	relInputs := buildRelationMapping(claims, raw.Properties, collector, prov, base)
 
 	// Check for unknown fields
 	if !v.cfg.allowUnknownFields {
-		v.checkUnknownFields(typ, typeName, input, propMapping, accounted, collector, prov, base)
+		v.checkUnknownFields(typ, typeName, names, claims, collector, prov, base)
 	}
 
 	// Each pass is gated on ITS OWN errors, taken as a count before and after —
@@ -578,38 +592,13 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 	return validInstance, collector.Result()
 }
 
-// inputKeys is one instance's input object with its keys indexed by their
-// ASCII fold, so every member lookup — property, relation field, edge property
-// — answers in O(1) under the default mode instead of rescanning the object
-// once per member. names is the keys in sorted order, for deterministic
-// diagnostics; byFold is nil under strict property names, where no fold is
-// attempted.
-type inputKeys struct {
-	props  map[string]any
-	names  []string
-	byFold map[string][]string
-}
-
-func (v *Validator) indexInput(props map[string]any) inputKeys {
-	in := inputKeys{props: props, names: slices.Sorted(maps.Keys(props))}
-	if v.cfg.strictPropertyNames {
-		return in
-	}
-	in.byFold = make(map[string][]string, len(props))
-	for _, name := range in.names {
-		if lower, ok := foldKey(name); ok {
-			in.byFold[lower] = append(in.byFold[lower], name)
-		}
-	}
-	return in
-}
-
-// foldKey returns the case-fold of an input key, or false for a key no schema
-// name can match under the fold. Identifiers are ASCII by the language's
-// grammar, so the fold is ASCII lowercasing and a key carrying any non-ASCII
-// byte folds to nothing: strings.ToLower would map a KELVIN SIGN onto "k" and
-// match a field the caller never wrote.
-func foldKey(key string) (string, bool) {
+// FoldKey returns the case-fold the validator matches an input key by, or
+// false for a key no schema name can match under the fold. It is the rule
+// [WithStrictPropertyNames] switches off, and a parser that resolves names
+// before validation reads it so the two agree. Identifiers are ASCII, so a key
+// with a non-ASCII byte folds to nothing: [strings.ToLower] would map a KELVIN
+// SIGN onto "k" and match a field the caller never wrote.
+func FoldKey(key string) (string, bool) {
 	var b []byte
 	for i := range len(key) {
 		c := key[i]
@@ -648,47 +637,19 @@ type relationInput struct {
 	candidates []string // relationCollided: the keys that folded to the field
 }
 
-// buildRelationMapping resolves each of typ's relations to the input key its
-// value is under, by the rule properties follow: the exact field name first,
-// then under the default mode the one unclaimed key that folds to it; two
-// keys folding to it is a collision, recorded in the entry and reported by
-// the member index, before any pass runs, so both member kinds report from one
-// site and no pass's gate can swallow the report.
-// Every key a relation claims is added to accounted, so the unknown-field
-// check does not report it again — and a key that folds onto a claimed field
-// is not claimed by it, so that check does.
-func (v *Validator) buildRelationMapping(typ *schema.Type, in inputKeys, accounted map[string]bool, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[*schema.Relation]relationInput {
-	rels := make(map[*schema.Relation]relationInput)
-	resolve := func(rel *schema.Relation) {
-		if val, ok := in.props[rel.FieldName()]; ok {
-			rels[rel] = relationInput{state: relationPresent, key: rel.FieldName(), value: val}
-			accounted[rel.FieldName()] = true
-			return
-		}
-		if in.byFold == nil {
-			return
-		}
-		candidates := in.byFold[rel.FieldName()]
-		switch len(candidates) {
-		case 0:
-			return
-		case 1:
-			rels[rel] = relationInput{state: relationPresent, key: candidates[0], value: in.props[candidates[0]]}
-			accounted[candidates[0]] = true
-			return
-		}
-		for _, c := range candidates {
-			accounted[c] = true
-		}
-		in := relationInput{state: relationCollided, candidates: candidates}
-		rels[rel] = in
-		reportRelationCollision(rel, in, collector, prov, base)
+// buildRelationMapping reads each relation's entry from the member index:
+// present under the key that claims it, or collided, reported here once at the
+// object before any pass runs, so both member kinds report from one site and no
+// pass's gate can swallow the report.
+func buildRelationMapping(claims objectClaims, props map[string]any, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[*schema.Relation]relationInput {
+	rels := make(map[*schema.Relation]relationInput, len(claims.rels)+len(claims.relCollisions))
+	for rel, key := range claims.rels {
+		rels[rel] = relationInput{state: relationPresent, key: key, value: props[key]}
 	}
-	for rel := range typ.AllAssociations() {
-		resolve(rel)
-	}
-	for rel := range typ.AllCompositions() {
-		resolve(rel)
+	for _, c := range claims.relCollisions {
+		in := relationInput{state: relationCollided, candidates: c.keys}
+		rels[c.rel] = in
+		reportRelationCollision(c.rel, in, collector, prov, base)
 	}
 	return rels
 }
@@ -710,83 +671,38 @@ func reportRelationCollision(rel *schema.Relation, in relationInput, collector *
 	collector.Collect(issue.Build())
 }
 
-// buildPropertyMapping maps each schema property to the input key it is read
-// from: exact matches first, then under the default mode case-fold matches,
-// where two unclaimed keys folding to one property are an E_CASE_FOLD_COLLISION
-// at the object and neither is mapped. accounted is every key the mapping
-// spoke for, so the unknown-field check does not report it again.
-func (v *Validator) buildPropertyMapping(ctx context.Context, typ *schema.Type, in inputKeys, collector *diag.Collector, prov *location.Provenance, base path.Builder) (mapping map[string]string, accounted map[string]bool) {
-	mapping = make(map[string]string, len(in.names))
-	accounted = make(map[string]bool, len(in.names))
-
-	for _, inputName := range in.names {
-		if _, found := typ.Property(inputName); found {
-			mapping[inputName] = inputName
-			accounted[inputName] = true
-		}
+// buildPropertyMapping reads each schema property's input key from the member
+// index, reporting each collision there as an E_CASE_FOLD_COLLISION at the
+// object, where neither key is mapped.
+func (v *Validator) buildPropertyMapping(ctx context.Context, typ *schema.Type, claims objectClaims, collector *diag.Collector, prov *location.Provenance, base path.Builder) map[string]string {
+	for _, c := range claims.propCollisions {
+		issue := diag.NewIssue(
+			diag.Error,
+			ErrCaseFoldCollision,
+			fmt.Sprintf("multiple input fields %v fold to schema property %q", c.keys, c.prop),
+		).WithDetail(diag.DetailKeyPropertyName, c.prop)
+		withProvenance(issue, prov, base.String())
+		collector.Collect(issue.Build())
 	}
-	if in.byFold == nil {
-		return mapping, accounted
-	}
-
-	// Fold pass: schema property → the unclaimed keys folding to it, in sorted
-	// order because in.names is sorted.
-	folded := make(map[string][]string)
-	var foldedNames []string
-	for _, inputName := range in.names {
-		if accounted[inputName] {
-			continue
-		}
-		lower, ok := foldKey(inputName)
-		if !ok {
-			continue
-		}
-		schemaName, found := typ.CanonicalPropertyName(lower)
-		if !found || mapping[schemaName] != "" {
-			continue // unknown, or shadowed by an exact match: the unknown-field check names it
-		}
-		if _, seen := folded[schemaName]; !seen {
-			foldedNames = append(foldedNames, schemaName)
-		}
-		folded[schemaName] = append(folded[schemaName], inputName)
-	}
-
-	for _, schemaName := range foldedNames {
-		inputs := folded[schemaName]
-		if len(inputs) > 1 {
-			issue := diag.NewIssue(
-				diag.Error,
-				ErrCaseFoldCollision,
-				fmt.Sprintf("multiple input fields %v fold to schema property %q", inputs, schemaName),
-			).WithDetail(diag.DetailKeyPropertyName, schemaName)
-			withProvenance(issue, prov, base.String())
-			collector.Collect(issue.Build())
-			for _, inputName := range inputs {
-				accounted[inputName] = true
-			}
-			continue
-		}
-		inputName := inputs[0]
-		mapping[schemaName] = inputName
-		accounted[inputName] = true
+	for _, schemaName := range claims.folded {
 		// Through the package's ctx-taking helper, not slog.Logger.Debug, which
 		// the standard library hard-codes to context.Background: WithLogger
 		// promises every record carries the context passed to Validate.
 		trace.Debug(ctx, v.cfg.logger, "property name normalized",
 			slog.String(diag.DetailKeyTypeName, typ.Name()),
-			slog.String("input", inputName),
+			slog.String("input", claims.props[schemaName]),
 			slog.String("resolved", schemaName),
 		)
 	}
-	return mapping, accounted
+	return claims.props
 }
 
-// checkUnknownFields reports each input key that is neither a property the
-// mapping spoke for nor a relation field, in sorted order so the set that
-// survives a truncated collector is a function of the input.
-func (v *Validator) checkUnknownFields(typ *schema.Type, typeName string, in inputKeys, mapping map[string]string, accounted map[string]bool, collector *diag.Collector, prov *location.Provenance, base path.Builder) {
-	for _, inputName := range in.names {
-		if accounted[inputName] {
+// checkUnknownFields reports each input key no member claims and no collision
+// names, in sorted order so the set that survives a truncated collector is a
+// function of the input.
+func (v *Validator) checkUnknownFields(typ *schema.Type, typeName string, names []string, claims objectClaims, collector *diag.Collector, prov *location.Provenance, base path.Builder) {
+	for _, inputName := range names {
+		if claims.accounted[inputName] {
 			continue
 		}
 		issue := diag.NewIssue(
@@ -794,7 +710,7 @@ func (v *Validator) checkUnknownFields(typ *schema.Type, typeName string, in inp
 			ErrUnknownField,
 			fmt.Sprintf("unknown field %q", inputName),
 		).WithDetails(diag.TypeField(typeName, inputName)...)
-		if shadowed, ok := v.exactMatchShadowing(typ, inputName, mapping); ok {
+		if shadowed, ok := v.exactMatchShadowing(typ, inputName, claims.props); ok {
 			issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").
 				WithDetail(diag.DetailKeyPropertyName, shadowed)
 		}
@@ -814,7 +730,7 @@ func (v *Validator) exactMatchShadowing(typ *schema.Type, inputName string, mapp
 	if v.cfg.strictPropertyNames {
 		return "", false
 	}
-	lower, ok := foldKey(inputName)
+	lower, ok := FoldKey(inputName)
 	if !ok {
 		return "", false
 	}
@@ -843,19 +759,26 @@ func (v *Validator) scopeOf(inst *ValidInstance) immutable.Map[string] {
 }
 
 // invariantScope builds the name→value map an invariant is evaluated against:
-// the validated properties, plus one entry per relation keyed by FieldName.
-// Every value is the instance's own immutable one, so nothing is cloned.
+// the validated properties, plus one entry per relation keyed by its
+// UPPER_SNAKE name. A property's entry is the instance's own immutable value,
+// not a copy; a composition's holds each child's memoised scope, shared, in a
+// list built for a many composition; an association's is built from cloned
+// target keys. A property name starts lower case, so the evaluator tells a
+// relation's entry by its key and reads it by its name or its field name alone
+// (eval's readMember), as docs/SPEC.md states.
 //
 // Relations belong here because the schema completer's membersOf index admits
-// their field names, so an invariant may reference one. The two relation
+// them, so an invariant may reference one. The two relation
 // kinds carry different amounts of information, and the difference is not
 // incidental:
 //
 //   - A COMPOSITION's children are part of this instance, so the entry is the
-//     child's own scope. `ITEMS -> Len`, and a lambda over a child's own
+//     single child's own scope, or the list of the children's scopes for a
+//     many composition. `ITEMS -> Len`, and a lambda over a child's own
 //     properties, both read real values.
 //   - An ASSOCIATION's target is a REFERENCE. The instance holds the foreign
-//     key, never the target's row, so the entry is the list of target keys.
+//     key, never the target's row, so the entry is the single target key, or
+//     the list of target keys for a many association.
 //     Presence and cardinality are answerable; the target's properties are not
 //     in this instance to answer with.
 //
@@ -882,7 +805,7 @@ func (v *Validator) invariantScope(inst *ValidInstance) map[string]any {
 		for t := range edge.TargetsIter() {
 			keys = append(keys, keyValue(t.TargetKey()))
 		}
-		scope[rel.FieldName()] = relationValue(rel, keys)
+		scope[rel.Name()] = relationValue(rel, keys)
 	}
 
 	for rel := range typ.AllCompositions() {
@@ -890,7 +813,7 @@ func (v *Validator) invariantScope(inst *ValidInstance) map[string]any {
 		if !ok {
 			continue
 		}
-		scope[rel.FieldName()] = v.composedScopeValue(rel, value.Unwrap())
+		scope[rel.Name()] = v.composedScopeValue(rel, value.Unwrap())
 	}
 
 	return scope
@@ -1030,6 +953,46 @@ func (v *Validator) extractPrimaryKey(typ *schema.Type, props map[string]any) []
 	}
 
 	return pkComponents
+}
+
+// PrimaryKeyOf returns the type and primary key raw would carry as a valid root
+// instance of typeName, whether or not the validator accepts the rest of raw:
+// each key property is read, checked and coerced as [Validator.Validate] reads
+// it. It reports false when typeName names no type that can hold a root, or a
+// key component is absent, collided or fails its constraint. Panics if the
+// receiver is nil.
+func (v *Validator) PrimaryKeyOf(typeName string, raw RawInstance) (schema.TypeID, immutable.Key, bool) {
+	if v == nil {
+		panic("instance.PrimaryKeyOf: nil validator receiver")
+	}
+	typ, err := v.resolveType(typeName)
+	if err != nil {
+		return schema.TypeID{}, immutable.Key{}, false
+	}
+	if _, refused := instantiationRefusal(typ, typeName, false, nil); refused {
+		return schema.TypeID{}, immutable.Key{}, false
+	}
+	claims := claimObject(typ, slices.Sorted(maps.Keys(raw.Properties)), v.cfg.strictPropertyNames)
+	var components []any
+	for pk := range typ.PrimaryKeys() {
+		inputName, claimed := claims.props[pk.Name()]
+		if !claimed {
+			return schema.TypeID{}, immutable.Key{}, false
+		}
+		val := raw.Properties[inputName]
+		if isAbsent(val) || v.checkValueWithRecovery(val, pk.Constraint()) != nil {
+			return schema.TypeID{}, immutable.Key{}, false
+		}
+		coerced, err := v.coerceValueWithRecovery(val, pk.Constraint())
+		if err != nil {
+			return schema.TypeID{}, immutable.Key{}, false
+		}
+		components = append(components, coerced)
+	}
+	if len(components) == 0 {
+		return schema.TypeID{}, immutable.Key{}, false
+	}
+	return typ.ID(), immutable.WrapKey(components, immutable.WithClone(true)), true
 }
 
 // withProvenance sets an issue's path and source name, and its span when the

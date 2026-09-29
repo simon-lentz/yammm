@@ -21,7 +21,7 @@ import (
 //
 // Primary keys are canonicalized too, and every position that ADDRESSES an
 // instance is canonicalized with them — an instance's own key, an edge's
-// endpoint keys, a duplicate's key, its conflict and parent, an unresolved
+// endpoint keys, a duplicate's key and its parent's, an unresolved
 // record's endpoints. That is the whole of the rule: a key moves only if every
 // reference to it moves in the same pass.
 //
@@ -36,7 +36,10 @@ type canonicalizer struct {
 	byType    map[schema.TypeID][]*schema.Property
 	byEdge    map[edgeKey][]*schema.Property
 	byKeyType map[schema.TypeID][]keyPosition
-	inactive  bool
+	// byTarget is each association's declared target, the type its records'
+	// target keys are canonicalized under.
+	byTarget map[edgeKey]schema.TypeID
+	inactive bool
 }
 
 // keyPosition names one primary-key component whose kind canonicalizes: its
@@ -60,6 +63,7 @@ func newCanonicalizer(s *schema.Schema) *canonicalizer {
 		byType:    make(map[schema.TypeID][]*schema.Property),
 		byEdge:    make(map[edgeKey][]*schema.Property),
 		byKeyType: make(map[schema.TypeID][]keyPosition),
+		byTarget:  make(map[edgeKey]schema.TypeID),
 		inactive:  true,
 	}
 	if s == nil {
@@ -94,6 +98,9 @@ func newCanonicalizer(s *schema.Schema) *canonicalizer {
 						}
 					}
 					c.byEdge[edgeKey{source: id, relation: rel.Name()}] = eps
+					if rel.IsAssociation() {
+						c.byTarget[edgeKey{source: id, relation: rel.Name()}] = rel.TargetID()
+					}
 					c.inactive = c.inactive && len(eps) == 0
 				}
 			}
@@ -283,18 +290,17 @@ func (c *canonicalizer) edge(ep EdgeParts) EdgeParts {
 	// Both endpoints move with the instances they address, or the edge stops
 	// resolving against an index whose keys this same pass rewrote.
 	ep.SourceKey = c.key(ep.SourceType, ep.SourceKey)
-	ep.TargetKey = c.key(ep.TargetType, ep.TargetKey)
+	ep.TargetKey = c.key(c.byTarget[edgeKey{source: ep.SourceType, relation: ep.Relation}], ep.TargetKey)
 	return ep
 }
 
-// duplicate rewrites a duplicate record's three addresses.
+// duplicate rewrites a duplicate record's two addresses: its instance's key and
+// its parent's.
 func (c *canonicalizer) duplicate(dp DuplicateParts) DuplicateParts {
 	if c.inactive {
 		return dp
 	}
 	dp.Instance = c.instance(dp.Instance)
-	dp.Key = c.key(dp.Type, dp.Key)
-	dp.ConflictKey = c.key(dp.ConflictType, dp.ConflictKey)
 	dp.ParentKey = c.key(dp.ParentType, dp.ParentKey)
 	return dp
 }
@@ -311,6 +317,6 @@ func (c *canonicalizer) unresolved(up UnresolvedParts) UnresolvedParts {
 	}
 	up.Properties = c.edgeProperties(up.SourceType, up.Relation, up.Properties)
 	up.SourceKey = c.key(up.SourceType, up.SourceKey)
-	up.TargetKey = c.key(up.TargetType, up.TargetKey)
+	up.TargetKey = c.key(c.byTarget[edgeKey{source: up.SourceType, relation: up.Relation}], up.TargetKey)
 	return up
 }

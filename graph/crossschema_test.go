@@ -28,7 +28,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 		"User",
 		userType.ID(),
 		immutable.WrapKey([]any{"u1"}),
-		immutable.WrapProperties(map[string]any{"username": "alice"}),
+		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
 		nil, nil, nil,
 	)
 
@@ -46,7 +46,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 		"Entity",
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"name": "Entity 1"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
 		nil, nil, nil,
 	)
 
@@ -75,7 +75,7 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 		"c.Entity", // Qualified name matches the import alias
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"name": "Entity 1"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
 		nil, nil, nil,
 	)
 
@@ -104,7 +104,7 @@ func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
 		"unknown.SomeType",
 		unknownType,
 		immutable.WrapKey([]any{"x1"}),
-		immutable.WrapProperties(map[string]any{}),
+		immutable.WrapProperties(map[string]any{"id": "x1"}),
 		nil, nil, nil,
 	)
 
@@ -128,7 +128,7 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 		"c.Entity",
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"name": "Entity 1"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
 		nil, nil, nil,
 	)
 
@@ -166,7 +166,7 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 		"User",
 		userType.ID(),
 		immutable.WrapKey([]any{"u1"}),
-		immutable.WrapProperties(map[string]any{"username": "alice"}),
+		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
 		nil, nil, nil,
 	)
 
@@ -178,7 +178,7 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 		"c.Entity",
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"name": "Entity 1"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
 		nil, nil, nil,
 	)
 
@@ -218,7 +218,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 		"c.Entity",
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"name": "Entity 1"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
 		nil, nil, nil,
 	)
 
@@ -239,7 +239,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 		"User",
 		userType.ID(),
 		immutable.WrapKey([]any{"u1"}),
-		immutable.WrapProperties(map[string]any{"username": "alice"}),
+		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
 		edges,
 		nil,
 		nil,
@@ -334,7 +334,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 		"b.Resource",
 		resourceB.ID(),
 		immutable.WrapKey([]any{"r1"}),
-		immutable.WrapProperties(map[string]any{"nameB": "Resource from B"}),
+		immutable.WrapProperties(map[string]any{"id": "r1", "nameB": "Resource from B"}),
 		nil, nil, nil,
 	)
 
@@ -346,7 +346,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 		"c.Resource",
 		resourceC.ID(),
 		immutable.WrapKey([]any{"r1"}), // Same PK is OK - different types
-		immutable.WrapProperties(map[string]any{"nameC": "Resource from C"}),
+		immutable.WrapProperties(map[string]any{"id": "r1", "nameC": "Resource from C"}),
 		nil, nil, nil,
 	)
 

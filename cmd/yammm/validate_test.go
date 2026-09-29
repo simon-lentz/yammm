@@ -51,7 +51,7 @@ func executeCmdOutput(t *testing.T, args ...string) (int, string, string) {
 
 	// The same mapping run() uses, called rather than repeated: a second copy
 	// is a place for the harness and the binary to disagree about an exit code.
-	err := cmd.Execute()
+	err := execute(cmd)
 	return cli.ExitForError(err), outBuf.String(), errBuf.String()
 }
 
@@ -75,6 +75,8 @@ func TestExitCodes(t *testing.T) {
 		{"validate missing file", []string{"validate", "testdata/nonexistent.yammm"}, cli.ExitRuntime},
 		{"check missing data file", []string{"check", "testdata/valid.yammm", "testdata/nonexistent.json"}, cli.ExitRuntime},
 		{"check csv without type", []string{"check", "testdata/valid.yammm", "testdata/data.csv"}, cli.ExitUsage},
+		{"check unknown format", []string{"check", "--from", "xml", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
+		{"load unknown format", []string{"load", "--from", "xml", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
 		{"gen unsupported target", []string{"gen", "--to", "rust", "testdata/county.yammm"}, cli.ExitUsage},
 		{"gen go-only flag with jsonschema target", []string{"gen", "--to", "jsonschema", "--package", "foo", "testdata/county.yammm"}, cli.ExitUsage},
 		{"gen jsonschema-only flag with go target", []string{"gen", "--to", "go", "--schema-id", "https://example.com/x.json", "testdata/county.yammm"}, cli.ExitUsage},
@@ -83,6 +85,15 @@ func TestExitCodes(t *testing.T) {
 		{"snapshot save without output or into", []string{"snapshot", "save", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
 		{"snapshot info without arg or dir", []string{"snapshot", "info"}, cli.ExitUsage},
 		{"snapshot info nonexistent dir", []string{"snapshot", "info", "--dir", "/does/not/exist/yammm-cli-test"}, cli.ExitRuntime},
+		{"snapshot info --dir empty beside a file", []string{"snapshot", "info", "--dir", "", "testdata/valid_snapshot.ys"}, cli.ExitUsage},
+		{"update-metadata --set with an empty key", []string{"snapshot", "update-metadata", "-s", "=v", "testdata/valid_snapshot.ys"}, cli.ExitUsage},
+		{"snapshot save --metadata with no value", []string{"snapshot", "save", "-o", "/nonexistent/out.ys", "--metadata", "novalue", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
+		{"snapshot save --metadata with an empty key", []string{"snapshot", "save", "-o", "/nonexistent/out.ys", "--metadata", "=v", "testdata/valid.yammm", "testdata/data.json"}, cli.ExitUsage},
+		{"neo4j diff with a URI the driver refuses", []string{"neo4j", "diff", "--uri", "notascheme://x", "testdata/valid.yammm"}, cli.ExitUsage},
+		{"--module-root given empty", []string{"validate", "--module-root", "", "testdata/valid.yammm"}, cli.ExitUsage},
+		{"--module-root not UTF-8", []string{"validate", "--module-root", "x\xff", "testdata/valid.yammm"}, cli.ExitUsage},
+		{"gen --package refused before a schema that fails", []string{"gen", "--to", "go", "--package", "type", "/nonexistent/x.yammm"}, cli.ExitUsage},
+		{"gen --package given empty", []string{"gen", "--to", "go", "--package", "", "testdata/county.yammm"}, cli.ExitUsage},
 		{"update-metadata missing file arg", []string{"snapshot", "update-metadata", "-s", "k=v"}, cli.ExitUsage},
 		{"update-metadata nonexistent file", []string{"snapshot", "update-metadata", "-s", "k=v", "/nonexistent/path.ys"}, cli.ExitRuntime},
 		{"neo4j diff requires uri", []string{"neo4j", "diff", "testdata/valid.yammm"}, cli.ExitUsage},

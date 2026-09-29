@@ -86,7 +86,15 @@ schema.Load(ctx, path,
     schema.WithLogger(logger),
     schema.WithImportsAllowed(false),
     schema.WithRegistry(registry),
-    schema.WithSourcesOnly(true), // hermetic: imports resolve only against in-memory sources — pair with LoadSourcesWithEntry, which seeds them
+)
+```
+
+Two options apply to `LoadSourcesWithEntry` alone; `Load` and `LoadString` refuse `WithSyntheticRoot` and `WithSourcesOnly(true)`:
+
+```go
+schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "",
+    schema.WithSourcesOnly(true),               // hermetic: imports resolve only against the in-memory sources
+    schema.WithSyntheticRoot("embedded://app"), // identities under a root no checkout or mount point moves
 )
 ```
 
@@ -109,7 +117,7 @@ s, result := schema.NewBuilder().
     Build()
 ```
 
-`Build()` validates declared names against the DSL's own productions (`E_INVALID_NAME`): type and datatype names start with an uppercase letter and property names with a lowercase letter, both continuing with letters, digits, or underscores; relation names are UPPER_SNAKE — an uppercase letter, then uppercase letters, digits, or underscores. Schema names and invariant names are free-form strings.
+`Build()` validates declared names against the DSL's own productions (`E_INVALID_NAME`): type and datatype names start with an uppercase letter and property names with a lowercase letter, both continuing with letters, digits, or underscores; relation names are UPPER_SNAKE — an uppercase letter, then uppercase letters, digits, or underscores. No type, datatype or relation name is one of the eleven built-in type names (`List`, `String`, `UUID` and the rest), and no property name is `as`, `part`, `in`, `nil`, `true` or `false`. Schema names and invariant names are free-form strings, and like every string value the Builder takes they are valid UTF-8. A documentation string holding `*/`, a NUL, a byte order mark or bytes that are not UTF-8 is `E_SYNTAX`, since no doc comment can carry it.
 
 ### Schema Type (Read API)
 
@@ -325,7 +333,7 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 - **Validated instances** (`*instance.ValidInstance`) are immutable
 - **Graph snapshots** (`*graph.Snapshot`) are immutable
 - **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns an immutable snapshot
-- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state). See the Batch Assembly section of `docs/API.md`
+- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and refuses a snapshot that breaks the schema's structural facts). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---
@@ -348,9 +356,9 @@ if result.HasErrors() {
     return result.Err()
 }
 
-// 2. Parse data (using JSON adapter; nil registry — location tracking off)
-adapter, _ := jsonAdapter.New(nil)
-parsed, result := adapter.ParseObject(ctx, loc, jsonData)
+// 2. Parse data with the JSON adapter; the SourceID names the document in diagnostics
+adapter := jsonAdapter.New()
+parsed, result := adapter.ParseObject(ctx, location.MustNewSourceID("data://inventory.json"), jsonData)
 if result.HasErrors() {
     return result.Err()
 }

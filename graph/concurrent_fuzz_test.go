@@ -105,7 +105,7 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 				"Person",
 				personType.ID(),
 				immutable.WrapKey(pk),
-				immutable.WrapProperties(map[string]any{"name": formatName(workerID, id)}),
+				immutable.WrapProperties(map[string]any{"id": pk[0], "name": formatName(workerID, id)}),
 				edges, nil, nil,
 			)
 			// Ignore results - we just want to test for races/panics
@@ -168,8 +168,8 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 		}
 	}
 	for _, unres := range snap.Unresolved() {
-		if _, ok := snap.InstanceByKey(unres.Source.TypeID(), unres.Source.PrimaryKey().String()); !ok {
-			t.Errorf("Unresolved source %s/%s not in graph", unres.Source.TypeID(), unres.Source.PrimaryKey())
+		if _, ok := snap.InstanceByKey(unres.Source().TypeID(), unres.Source().PrimaryKey().String()); !ok {
+			t.Errorf("Unresolved source %s/%s not in graph", unres.Source().TypeID(), unres.Source().PrimaryKey())
 		}
 	}
 }
@@ -202,7 +202,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 				"Person",
 				personType.ID(),
 				immutable.WrapKey(pk),
-				immutable.WrapProperties(map[string]any{"name": "Person-" + string(rune('0'+id))}),
+				immutable.WrapProperties(map[string]any{"id": pk[0], "name": "Person-" + string(rune('0'+id))}),
 				nil, nil, nil,
 			)
 			g.Add(ctx, inst)

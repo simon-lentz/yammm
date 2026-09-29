@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -138,24 +139,38 @@ func TestWithSyntheticRoot_ModuleStyleImportResolves(t *testing.T) {
 	}
 }
 
-// TestWithSyntheticRoot_RelativeImportRejected pins the documented limitation:
-// a relative import resolves through the importing source's canonical path,
-// which no synthetic identity has.
-func TestWithSyntheticRoot_RelativeImportRejected(t *testing.T) {
+// TestWithSyntheticRoot_RelativeImportResolvesByKey pins that a relative
+// import under a synthetic root resolves against the importing source's key,
+// as text: "./dep" from "main.yammm" is "dep.yammm", "../dep" from
+// "sub/main.yammm" is "dep.yammm", and one climbing above the root keeps its
+// "..".
+func TestWithSyntheticRoot_RelativeImportResolvesByKey(t *testing.T) {
 	t.Parallel()
 
-	sources := map[string][]byte{
-		"dep.yammm": []byte("schema \"core\"\n\ntype Region {\n\tcode String primary\n}\n"),
-		"main.yammm": []byte("schema \"app\"\n\nimport \"./dep\" as core\n\n" +
-			"type County {\n\tfips String primary\n\t--> IN_REGION (one) core.Region\n}\n"),
+	dep := []byte("schema \"core\"\n\ntype Region {\n\tcode String primary\n}\n")
+	main := func(imp string) []byte {
+		return []byte("schema \"app\"\n\nimport \"" + imp + "\" as core\n\n" +
+			"type County {\n\tfips String primary\n\t--> IN_REGION (one) core.Region\n}\n")
 	}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", "",
-		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
-	if !res.HasErrors() {
-		t.Fatal("expected a relative import under a synthetic root to fail")
-	}
-	if msg := firstError(res); !strings.Contains(msg, "relative imports require a file-based source") {
-		t.Errorf("expected the file-based-source error, got: %s", msg)
+	for _, tc := range []struct {
+		name, entry, imp, depKey, wantID string
+	}{
+		{"sibling", "main.yammm", "./dep", "dep.yammm", "embedded://app/dep.yammm"},
+		{"parent", "sub/main.yammm", "../dep", "dep.yammm", "embedded://app/dep.yammm"},
+		{"above the root", "main.yammm", "../dep", "../dep.yammm", "embedded://app/../dep.yammm"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sources := map[string][]byte{tc.depKey: dep, tc.entry: main(tc.imp)}
+			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, tc.entry, "",
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
+			if res.HasErrors() {
+				t.Fatalf("load: %s", firstError(res))
+			}
+			if got := s.ImportsSlice()[0].ResolvedSourceID().String(); got != tc.wantID {
+				t.Errorf("import resolved to %q, want %q", got, tc.wantID)
+			}
+		})
 	}
 }
 
@@ -182,17 +197,38 @@ func TestWithSyntheticRoot_KeyResolvingToRootIsError(t *testing.T) {
 
 // TestWithSyntheticRoot_AbsoluteKeyIsError pins the documented exception to
 // LoadSourcesWithEntry's absolute-entry-path form.
+// The keys that look absolute only once cleaned or in NFC were accepted, and
+// their normalized spellings refused, so one source took two verdicts.
 func TestWithSyntheticRoot_AbsoluteKeyIsError(t *testing.T) {
 	t.Parallel()
 
-	sources := map[string][]byte{"/abs/main.yammm": []byte("schema \"s\"\n\ntype T {\n\tid String primary\n}\n")}
-	_, res := schema.LoadSourcesWithEntry(t.Context(), sources, "/abs/main.yammm", "",
-		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
-	if !res.HasErrors() {
-		t.Fatal("expected an absolute key to be rejected")
+	for _, key := range []string{"/abs/main.yammm", "C:/main.yammm", "./C:/main.yammm", "a/../C:/main.yammm", "\u212a:/main.yammm"} {
+		sources := map[string][]byte{key: []byte("schema \"s\"\n\ntype T {\n\tid String primary\n}\n")}
+		_, res := schema.LoadSourcesWithEntry(t.Context(), sources, key, "",
+			schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
+		if !res.HasErrors() {
+			t.Errorf("expected the key %q to be rejected", key)
+			continue
+		}
+		if msg := firstError(res); !strings.Contains(msg, "must be relative to the synthetic root") {
+			t.Errorf("key %q: expected the relative-key error, got: %s", key, msg)
+		}
 	}
-	if msg := firstError(res); !strings.Contains(msg, "must be relative to the synthetic root") {
-		t.Errorf("expected the relative-key error, got: %s", msg)
+}
+
+// TestWithSyntheticRoot_KeyNamingADirectoryAboveTheRootIsError pins that a key
+// names a file: one cleaning to ".." or ending in ".." names a directory above
+// the root, as "." names the root itself.
+func TestWithSyntheticRoot_KeyNamingADirectoryAboveTheRootIsError(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"..", "../..", "a/../..", "../x/.."} {
+		sources := map[string][]byte{key: []byte("schema \"s\"\n\ntype T {\n\tid String primary\n}\n")}
+		_, res := schema.LoadSourcesWithEntry(t.Context(), sources, key, "",
+			schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
+		if msg := firstError(res); !strings.Contains(msg, "names a directory above the synthetic root") {
+			t.Errorf("key %q: expected the directory error, got: %s", key, msg)
+		}
 	}
 }
 
@@ -221,8 +257,8 @@ func TestWithSyntheticRoot_DotSlashKeyMatchesBareKey(t *testing.T) {
 }
 
 // TestWithSyntheticRoot_KeyEscapingRootResolves pins the decision to permit a
-// key outside the root: adapter/gogen's sourceKey emits one for an entry that
-// sits outside the module root, a layout it documents as legal. The identity
+// key outside the root: adapter/gogen writes one for an entry that sits
+// outside the module root, a layout it documents as legal. The identity
 // keeps the "..", because the joined string is never cleaned.
 func TestWithSyntheticRoot_KeyEscapingRootResolves(t *testing.T) {
 	t.Parallel()
@@ -245,13 +281,28 @@ func TestWithSyntheticRoot_KeyEscapingRootResolves(t *testing.T) {
 	}
 }
 
-// TestWithSyntheticRoot_TrailingSlashTrimmed pins the trim: two spellings of one
-// root must give one identity, or a consumer that adds a slash re-keys its whole
-// snapshot corpus.
-func TestWithSyntheticRoot_TrailingSlashTrimmed(t *testing.T) {
+// TestWithSyntheticRoot_NormalizedRootMintsOneIdentity pins the root's one
+// form: spellings that differ only in scheme case, slashes, dot segments or
+// NFC must give one identity, or a consumer that
+// adds a slash or capitalizes the scheme re-keys its whole snapshot corpus.
+func TestWithSyntheticRoot_NormalizedRootMintsOneIdentity(t *testing.T) {
 	t.Parallel()
 
-	for _, root := range []string{"embedded://root", "embedded://root/", "embedded://root///"} {
+	for root, want := range map[string]string{
+		"embedded://root":          "embedded://root/main.yammm",
+		"embedded://root/":         "embedded://root/main.yammm",
+		"embedded://root///":       "embedded://root/main.yammm",
+		"embedded://root/.":        "embedded://root/main.yammm",
+		"EMBEDDED://root":          "embedded://root/main.yammm",
+		"embedded://root/sub":      "embedded://root/sub/main.yammm",
+		"embedded://root/sub///":   "embedded://root/sub/main.yammm",
+		"embedded://root//sub":     "embedded://root/sub/main.yammm",
+		"embedded://root/./sub":    "embedded://root/sub/main.yammm",
+		"embedded://root/sub/x/..": "embedded://root/sub/main.yammm",
+		"Embedded://root/sub":      "embedded://root/sub/main.yammm",
+		"embedded://cafe\u0301":    "embedded://caf\u00e9/main.yammm",
+		"embedded://caf\u00e9":     "embedded://caf\u00e9/main.yammm",
+	} {
 		t.Run("root="+root, func(t *testing.T) {
 			t.Parallel()
 			s, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
@@ -259,8 +310,66 @@ func TestWithSyntheticRoot_TrailingSlashTrimmed(t *testing.T) {
 			if res.HasErrors() {
 				t.Fatalf("load: %s", firstError(res))
 			}
-			if got, want := s.SourceID().String(), "embedded://root/main.yammm"; got != want {
+			if got := s.SourceID().String(); got != want {
 				t.Errorf("entry identity = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// TestWithSyntheticRoot_RootNamesAnAuthority pins the root's form,
+// scheme://authority. Without an authority "embedded://" and "embedded:" both
+// joined main.yammm as "embedded:/main.yammm", and a root with no scheme, such
+// as ".", reads as a directory.
+func TestWithSyntheticRoot_RootNamesAnAuthority(t *testing.T) {
+	t.Parallel()
+
+	for _, root := range []string{
+		"embedded://", "embedded:///", "embedded:///app", "embedded:", "embedded:app",
+		".", "app", "C:app", "://app", "1x://app", "em bedded://app", "C://app",
+		`embedded://app\sub`, `embedded://a\pp`, "embedded://app/..", "embedded://app/../x", "embedded://app/sub/../../x",
+	} {
+		t.Run("root="+root, func(t *testing.T) {
+			t.Parallel()
+			_, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
+			if !res.HasErrors() {
+				t.Fatalf("expected root %q to be rejected", root)
+			}
+			if msg := firstError(res); !strings.Contains(msg, "invalid synthetic root") {
+				t.Errorf("expected the invalid-root error, got: %s", msg)
+			}
+		})
+	}
+	for _, root := range []string{"embedded://app", "x-y.z+1://app", "test://unit/fixtures"} {
+		if _, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
+			schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root)); res.HasErrors() {
+			t.Errorf("root %q: %s", root, firstError(res))
+		}
+	}
+}
+
+// TestWithSyntheticRoot_BackslashKeyIsRefusedOnEveryHost pins one reading of a
+// key on every host. Windows read a\b.yammm as a/b.yammm and every other host
+// as one file name, so one store named different sources on each.
+func TestWithSyntheticRoot_BackslashKeyIsRefusedOnEveryHost(t *testing.T) {
+	t.Parallel()
+
+	src := syntheticRootSources()
+	for _, tc := range []struct{ name, entry, dep string }{
+		{"the entry", `sub\main.yammm`, "a/b/x.yammm"},
+		{"an imported source's key", "main.yammm", `a\b/x.yammm`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sources := map[string][]byte{tc.entry: src["main.yammm"], tc.dep: src["a/b/x.yammm"]}
+			_, res := schema.LoadSourcesWithEntry(t.Context(), sources, tc.entry, "",
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
+			if !res.HasErrors() {
+				t.Fatal("expected a key holding a backslash to be rejected")
+			}
+			if msg := firstError(res); !strings.Contains(msg, "holds a backslash") || !strings.Contains(msg, "under synthetic root embedded://app") {
+				t.Errorf("expected the backslash error under the root, got: %s", msg)
 			}
 		})
 	}
@@ -342,6 +451,35 @@ func TestWithSyntheticRoot_RejectedByLoadAndLoadString(t *testing.T) {
 	})
 }
 
+// TestWithSourcesOnly_RefusedByLoadAndLoadString pins the refusal on the two
+// entry points that cannot serve the option: under it an import of a Load
+// failed as not pre-registered unless a shared registry already held it, and
+// on a LoadString it was a no-op.
+func TestWithSourcesOnly_RefusedByLoadAndLoadString(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.yammm")
+	if err := os.WriteFile(path, []byte("schema \"s\"\n\ntype T {\n\tid String primary\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const refusal = "WithSourcesOnly applies to LoadSourcesWithEntry only"
+	if _, res := schema.Load(t.Context(), path, schema.WithSourcesOnly(true)); !strings.Contains(firstError(res), refusal) {
+		t.Errorf("Load: expected the option rejection, got: %s", firstError(res))
+	}
+	if _, res := schema.LoadString(t.Context(), "schema \"s\"\n", "s.yammm", schema.WithSourcesOnly(true)); !strings.Contains(firstError(res), refusal) {
+		t.Errorf("LoadString: expected the option rejection, got: %s", firstError(res))
+	}
+
+	// false is the default, so passing it changes nothing and is accepted.
+	if _, res := schema.Load(t.Context(), path, schema.WithSourcesOnly(false)); res.HasErrors() {
+		t.Errorf("Load with WithSourcesOnly(false): %s", firstError(res))
+	}
+	if _, res := schema.LoadString(t.Context(), "schema \"s\"\n", "s.yammm", schema.WithSourcesOnly(false)); res.HasErrors() {
+		t.Errorf("LoadString with WithSourcesOnly(false): %s", firstError(res))
+	}
+}
+
 // TestWithSyntheticRoot_EmptyRootIsNotSilentlyIgnored pins that passing an empty
 // root is an error rather than a no-op, which is what separates "the option was
 // not given" from "the option was given a bad value".
@@ -352,5 +490,76 @@ func TestWithSyntheticRoot_EmptyRootIsNotSilentlyIgnored(t *testing.T) {
 		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(""))
 	if !res.HasErrors() {
 		t.Fatal("expected an empty synthetic root to be rejected")
+	}
+}
+
+// TestSyntheticImportKey_IsTheLoadersLookup holds SyntheticImportKey to the
+// loader it states: for each import, a load under a synthetic root registers
+// the imported source under exactly the key the function returns, and where the
+// function refuses, the load refuses too. The importer key is read as the
+// loader reads it.
+func TestSyntheticImportKey_IsTheLoadersLookup(t *testing.T) {
+	t.Parallel()
+
+	if got, err := schema.SyntheticImportKey("a/main.yammm", "./x.yammm/.."); err != nil || got != "a.yammm" {
+		t.Errorf(`SyntheticImportKey("a/main.yammm", "./x.yammm/..") = (%q, %v), want "a.yammm"`, got, err)
+	}
+
+	const root = "embedded://app"
+	dep := []byte("schema \"core\"\n\ntype Region {\n\tcode String primary\n}\n")
+	for _, tc := range []struct {
+		name, importer, imp, want string
+	}{
+		{"module-style", "main.yammm", "dep", "dep.yammm"},
+		{"module-style with the extension", "main.yammm", "lib/dep.yammm", "lib/dep.yammm"},
+		{"module-style from a nested importer", "a/b/main.yammm", "lib/dep", "lib/dep.yammm"},
+		{"a sibling", "a/b/main.yammm", "./dep", "a/b/dep.yammm"},
+		{"a parent", "a/b/main.yammm", "../dep", "a/dep.yammm"},
+		{"above the root", "a/main.yammm", "../../dep", "../dep.yammm"},
+		{"from an importer above the root", "../x/main.yammm", "./dep", "../x/dep.yammm"},
+		{"cleaned", "main.yammm", "lib/./x/../dep", "lib/dep.yammm"},
+		{"a decomposed name", "main.yammm", "café/dep", "café/dep.yammm"},
+		{"a backslash", "main.yammm", `lib\dep`, ""},
+		{"an importer key the loader cleans", "sub/main.yammm/", "./dep", "sub/dep.yammm"},
+		{"an importer key with a dot segment", "sub/./main.yammm", "../dep", "dep.yammm"},
+		{"an importer key holding a backslash", `sub\main.yammm`, "./dep", ""},
+		{"an absolute importer key", "/abs/main.yammm", "./dep", ""},
+		{"an importer key that cleans to a drive", "./C:/main.yammm", "./dep", ""},
+		{"an import NFC turns into a drive", "main.yammm", "\u212a:/x", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := schema.SyntheticImportKey(tc.importer, tc.imp)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("SyntheticImportKey = %q, want an error", got)
+				}
+			} else if err != nil || got != tc.want {
+				t.Fatalf("SyntheticImportKey = (%q, %v), want %q", got, err, tc.want)
+			}
+
+			main := []byte("schema \"app\"\n\nimport \"" + strings.ReplaceAll(tc.imp, `\`, `\\`) + "\" as core\n\n" +
+				"type County {\n\tfips String primary\n\t--> IN_REGION (one) core.Region\n}\n")
+			sources := map[string][]byte{tc.importer: main}
+			if tc.want != "" {
+				sources[tc.want] = dep
+			} else {
+				sources[tc.imp+".yammm"] = dep
+			}
+			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, tc.importer, "",
+				schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
+			if tc.want == "" {
+				if !res.HasErrors() {
+					t.Fatal("the loader accepted an import SyntheticImportKey refuses")
+				}
+				return
+			}
+			if res.HasErrors() {
+				t.Fatalf("load: %s", firstError(res))
+			}
+			if id := s.ImportsSlice()[0].ResolvedSourceID().String(); id != root+"/"+tc.want {
+				t.Errorf("the loader resolved %q to %q, want %q", tc.imp, id, root+"/"+tc.want)
+			}
+		})
 	}
 }

@@ -152,7 +152,6 @@ func nestedParts(nodeID schema.TypeID, depth int) []graph.InstanceParts {
 		return nil
 	}
 	node := graph.InstanceParts{
-		TypeName:   "Node",
 		TypeID:     nodeID,
 		PrimaryKey: immutable.WrapKey([]any{fmt.Sprintf("n%d", depth)}),
 		Properties: immutable.WrapProperties(map[string]any{"id": fmt.Sprintf("n%d", depth)}),
@@ -187,15 +186,16 @@ func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
 	build := func(chain int) *graph.Snapshot {
 		t.Helper()
 		root := graph.InstanceParts{
-			TypeName:   "Trunk",
 			TypeID:     trunk.ID(),
 			PrimaryKey: immutable.WrapKey([]any{"t1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "t1"}),
 			Composed:   map[string][]graph.InstanceParts{"KIDS": nestedParts(node.ID(), chain)},
 		}
 		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-			Types:     []schema.TypeID{trunk.ID(), node.ID()},
-			Instances: map[schema.TypeID][]graph.InstanceParts{trunk.ID(): {root}},
+			Types: []schema.TypeID{trunk.ID()},
+			Instances: []graph.InstanceParts{
+				root,
+			},
 		})
 		if res.HasErrors() {
 			t.Fatalf("assembling a %d-deep chain: %s", chain, res)
@@ -254,5 +254,28 @@ func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
 	if !found {
 		t.Errorf("Marshal did not report %s for a tree past the bound: %v",
 			diag.E_SNAPSHOT_DEPTH_EXCEEDED, deepRes)
+	}
+}
+
+// Marshal refuses an unresolved record whose target key graph.ParseKey cannot
+// read, as an invariant break: no constructor builds one and no caller can
+// write one, so the guard is reached here alone.
+func TestParseTargetKey_RefusesAKeyParseKeyCannotRead(t *testing.T) {
+	t.Parallel()
+	for _, keyStr := range []string{`[["nested"]]`, `[{"a":1}]`, `["unterminated`, `[1e400]`} {
+		if got, err := parseTargetKey(keyStr); err == nil {
+			t.Errorf("parseTargetKey(%q) = %v with no error; a key ParseKey cannot read must be refused", keyStr, got)
+		} else if !strings.Contains(err.Error(), keyStr) {
+			t.Errorf("parseTargetKey(%q) error %q does not name the key", keyStr, err)
+		}
+	}
+	for _, keyStr := range []string{"", "[]"} {
+		if got, err := parseTargetKey(keyStr); err != nil || got != nil {
+			t.Errorf("parseTargetKey(%q) = %v, %v; a keyless form yields nil", keyStr, got, err)
+		}
+	}
+	got, err := parseTargetKey(`["r9",2]`)
+	if err != nil || len(got) != 2 || got[0] != "r9" {
+		t.Errorf(`parseTargetKey(["r9",2]) = %v, %v`, got, err)
 	}
 }

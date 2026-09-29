@@ -2,6 +2,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -25,7 +26,7 @@ func main() {
 // one cobra raised before any command ran, and it becomes a document.
 func run() int {
 	rootCmd := newRootCmd(buildversion.Resolve(version))
-	err := rootCmd.Execute()
+	err := execute(rootCmd)
 	stderr := rootCmd.ErrOrStderr()
 	if failure, ok := cli.FailureResult(err); ok && jsonRequested(os.Args[1:]) {
 		_ = cli.RenderResult(stderr, cli.NewRenderer(cli.FormatJSON, false, true, nil, ""), cli.FormatJSON, failure)
@@ -33,6 +34,19 @@ func run() int {
 		cli.ReportError(stderr, err)
 	}
 	return cli.ExitForError(err)
+}
+
+// execute runs cmd and classifies what it returns. Every error a command
+// returns is a [cli.ExitError] ([withDiagnostics]), so any other error is
+// cobra's own — an unknown command or flag, a wrong operand count — and is a
+// usage error.
+func execute(cmd *cobra.Command) error {
+	initHelpAndCompletion(cmd)
+	err := cmd.Execute()
+	if _, ok := errors.AsType[*cli.ExitError](err); err != nil && !ok {
+		return &cli.ExitError{Code: cli.ExitUsage, Err: err}
+	}
+	return err
 }
 
 // jsonRequested reports whether args ask for --format json. It parses that

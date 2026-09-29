@@ -132,6 +132,7 @@ func TestPropertyScopeFromMap(t *testing.T) {
 func TestPropertyScope_LookupFold(t *testing.T) {
 	props := map[string]any{
 		"UserName": "Alice",
+		"WORKS_AT": "k",
 	}
 	scope := eval.PropertyScopeFromMap(props)
 
@@ -144,6 +145,9 @@ func TestPropertyScope_LookupFold(t *testing.T) {
 		{"exact", "UserName", "Alice", true},
 		{"lowercase", "username", "Alice", true},
 		{"uppercase", "USERNAME", "Alice", true},
+		{"a relation by its name", "WORKS_AT", "k", true},
+		{"a relation by its field name", "works_at", "k", true},
+		{"a relation in another casing", "Works_At", "", false},
 	}
 
 	for _, tt := range tests {

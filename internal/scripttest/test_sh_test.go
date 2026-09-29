@@ -1,6 +1,9 @@
 package scripttest
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -163,5 +166,66 @@ func TestTestScript_RunsEveryTestRatherThanReplayingACachedResult(t *testing.T) 
 	r.wantCode(t, 0)
 	if strings.Contains(r.stdout, "(cached)") {
 		t.Errorf("the second run replayed a cached result\nstdout:\n%s", r.stdout)
+	}
+}
+
+// The file holds the run under -race: a race-skipped test's plain rerun, which
+// runs one package, writes nothing over it.
+func TestTestScript_WritesTheDurationsTestDurationsNames(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write("ratio/r.go", "package ratio\n")
+	f.write("ratio/r_test.go", ratioTests("func TestFloor(t *testing.T) { raceskip.Skip(t) }\n"))
+	f.index()
+	file := filepath.Join(t.TempDir(), "durations.tsv")
+	f.env = append(f.env, "TEST_DURATIONS="+file)
+
+	r := f.run("test.sh")
+	r.wantCode(t, 0)
+	r.wantStdout(t, "again without the race detector")
+	got, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read durations: %v", err)
+	}
+	for _, want := range []string{
+		"package\ttest\tresult\tseconds\tscheduling\n",
+		fixtureModule + "/ok\tTestOK\tpass\t",
+		fixtureModule + "/ok\t\tpass\t",
+		fixtureModule + "/ratio\tTestFloor\tskip\t",
+	} {
+		if !strings.Contains(string(got), want) {
+			t.Errorf("durations do not hold %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestTestScript_WritesNoDurationsUnlessNamed(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.index()
+
+	f.run("test.sh").wantCode(t, 0)
+	for _, args := range [][]string{{"ls-files", "--others"}, {"diff", "--name-only"}} {
+		cmd := exec.CommandContext(t.Context(), "git", args...)
+		cmd.Dir = f.dir
+		cmd.Env = withoutRepositoryVars(t, os.Environ())
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+		if len(out) != 0 {
+			t.Errorf("a run with no TEST_DURATIONS wrote into the module (git %v):\n%s", args, out)
+		}
+	}
+}
+
+// Not parallel: it sets TEST_DURATIONS for the whole process, as CI's test
+// step does for internal/scripttest's own run.
+func TestFixtureEnv_DropsTheEnclosingRunsDurationsFile(t *testing.T) {
+	t.Setenv("TEST_DURATIONS", filepath.Join(t.TempDir(), "enclosing.tsv"))
+	for _, kv := range fixtureEnv() {
+		if strings.HasPrefix(kv, "TEST_DURATIONS=") {
+			t.Errorf("a fixture inherits %s", kv)
+		}
 	}
 }

@@ -21,16 +21,34 @@ func registerModuleRootFlag(cmd *cobra.Command) {
 // moduleRootOptions returns --module-root as an absolute root and the load
 // options for it, including the sink's source capture so a failed load renders
 // its excerpt. An unset flag yields "" and no root option, so the loader
-// discovers the root; a root that cannot be made absolute is a usage error.
+// discovers the root; a given root is judged as a path operand is, and a
+// working directory that cannot be read is a filesystem answer.
 func moduleRootOptions(cmd *cobra.Command, sink *cli.DiagnosticSink) (string, []schema.LoadOption, error) {
 	root, _ := cmd.Flags().GetString("module-root")
 	capture := sink.CaptureSchemaSources()
-	if root == "" {
+	if !cmd.Flags().Changed("module-root") {
 		return "", []schema.LoadOption{capture}, nil
+	}
+	if err := cli.CheckSourceOperand("module root", root); err != nil {
+		return "", nil, err
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
-		return "", nil, cli.Usagef("resolve module root %q: %v", root, err)
+		return "", nil, cli.Runtimef("resolve module root %q: %v", root, err)
 	}
 	return abs, []schema.LoadOption{schema.WithModuleRoot(abs), capture}, nil
+}
+
+// schemaOperand returns the absolute path of a schema operand, refusing one
+// [cli.CheckSourceOperand] refuses. A working directory that cannot be read is a
+// filesystem answer, so it exits 3.
+func schemaOperand(path string) (string, error) {
+	if err := cli.CheckSourceOperand("schema file", path); err != nil {
+		return "", err
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", cli.Runtimef("resolve schema file %q: %v", path, err)
+	}
+	return abs, nil
 }

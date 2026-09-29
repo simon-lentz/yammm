@@ -658,7 +658,7 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 		seedRecord{"Person", personRaw("alice", "Alice")},
 	)
 
-	ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+	ba := mustSeed(t, ctx, s, seed)
 	// bob's employer reference resolves against the SEEDED acme.
 	if err := ba.Add("Person", personRawWithEmployer("bob", "Bob", "acme")); err != nil {
 		t.Fatalf("Add(bob): %v", err)
@@ -716,7 +716,7 @@ func TestNewBatchAssemblerFromSnapshot_ResolvesSeededUnresolved(t *testing.T) {
 		t.Fatalf("seed unresolved: got %d, want 1", got)
 	}
 
-	ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+	ba := mustSeed(t, ctx, s, seed)
 	if err := ba.Add("Company", companyRaw("acme", "ACME")); err != nil {
 		t.Fatalf("Add(acme): %v", err)
 	}
@@ -748,7 +748,7 @@ func TestNewBatchAssemblerFromSnapshot_SeededUnresolvedFailsFinalize(t *testing.
 	)
 
 	// Add nothing: the imported unresolved REQUIRED edge must fail Check.
-	ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+	ba := mustSeed(t, ctx, s, seed)
 	res, err := ba.Finalize(ctx)
 	if err == nil {
 		t.Fatal("expected Finalize error from seeded unresolved required association")
@@ -792,7 +792,7 @@ func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
 		seedRecord{"Person", personRaw("alice", "Alice")},
 	)
 
-	ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+	ba := mustSeed(t, ctx, s, seed)
 	err := ba.Add("Person", personRaw("alice", "Alice The Second"))
 	if err == nil {
 		t.Fatal("expected duplicate-PK error against seeded instance")
@@ -864,7 +864,7 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 	}
 
 	// Manual path: NewFromSnapshot + validator loop + Check + Snapshot.
-	g := graph.NewFromSnapshot(s, seed)
+	g := mustImport(t, s, seed)
 	v := instance.NewValidator(s)
 	for _, rec := range resumeRecords {
 		valid, vRes := v.ValidateOne(ctx, rec.typeName, rec.raw)
@@ -886,7 +886,7 @@ func TestNewBatchAssemblerFromSnapshot_EquivalentToManualSeededLoop(t *testing.T
 
 	{
 		t.Run("default", func(t *testing.T) {
-			ba := graph.NewBatchAssemblerFromSnapshot(ctx, s, seed)
+			ba := mustSeed(t, ctx, s, seed)
 			for _, rec := range resumeRecords {
 				if err := ba.Add(rec.typeName, rec.raw); err != nil {
 					t.Fatalf("Add(%s): %v", rec.typeName, err)
@@ -944,7 +944,7 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 		t.Fatalf("run 2: loaded snapshot diagnostics not OK: %s", loaded.Diagnostics().String())
 	}
 
-	ba2 := graph.NewBatchAssemblerFromSnapshot(ctx, s, loaded)
+	ba2 := mustSeed(t, ctx, s, loaded)
 	if err := ba2.Add("Person", personRawWithEmployer("bob", "Bob", "acme")); err != nil {
 		t.Fatalf("run 2: Add(bob): %v", err)
 	}

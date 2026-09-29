@@ -1,6 +1,8 @@
 package graph_test
 
 import (
+	"context"
+	"maps"
 	"strings"
 	"testing"
 
@@ -37,6 +39,32 @@ func testSchemaWithAssociation(t *testing.T) *schema.Schema {
 
 	if result.HasErrors() {
 		t.Fatalf("Failed to build association schema: %s", result.String())
+	}
+	return s
+}
+
+// testSchemaWithEdgeProperties is testSchemaWithAssociation with EMPLOYER
+// declaring the edge properties role and since.
+func testSchemaWithEdgeProperties(t *testing.T) *schema.Schema {
+	t.Helper()
+	s, result := schema.LoadString(t.Context(), `schema "association"
+
+type Company {
+	id String primary
+	name String
+}
+
+type Person {
+	id String primary
+	name String
+	--> EMPLOYER (one) Company {
+		role String
+		since Integer
+	}
+}
+`, "association.yammm")
+	if result.HasErrors() {
+		t.Fatalf("Failed to load edge-property schema: %s", result.String())
 	}
 	return s
 }
@@ -384,8 +412,29 @@ func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 	)
+}
+
+// keyedProps returns props holding each primary-key property the key states,
+// where props does not state it, so a fixture instance holds its key the way a
+// validated one does. A key property the fixture states is kept as written.
+func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
+	t.Helper()
+	typ, ok := s.Type(typeName)
+	if !ok {
+		t.Fatalf("Type %q not found in schema", typeName)
+	}
+	out := make(map[string]any, len(props)+len(pk))
+	maps.Copy(out, props)
+	i := 0
+	for p := range typ.PrimaryKeys() {
+		if _, stated := out[p.Name()]; !stated && i < len(pk) {
+			out[p.Name()] = pk[i]
+		}
+		i++
+	}
+	return out
 }
 
 // mustValidInstanceWithEdge creates a ValidInstance with edge data.
@@ -403,7 +452,7 @@ func mustValidInstanceWithEdge(
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 		instancetest.Edges(edgeData(relationName, nil, targetKeys...)),
 	)
 }
@@ -424,7 +473,7 @@ func mustValidInstanceWithEdgeProps(
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 		instancetest.Edges(edgeData(relationName, edgeProps, targetKey)),
 	)
 }
@@ -443,7 +492,7 @@ func mustValidInstanceWithEmptyEdge(
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 		instancetest.Edges(map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(nil)}),
 	)
 }
@@ -462,7 +511,7 @@ func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk [
 		typeName,
 		instancetest.TypeID(typ.ID()),
 		instancetest.PK(pk...),
-		instancetest.Props(props),
+		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
 	)
 }
 
@@ -654,4 +703,26 @@ func countCode(result diag.Result, code diag.Code) int {
 		}
 	}
 	return count
+}
+
+// mustImport imports snap into a new graph bound to s and fails the test when
+// the import is refused.
+func mustImport(tb testing.TB, s *schema.Schema, snap *graph.Snapshot) *graph.Graph {
+	tb.Helper()
+	g, res := graph.NewFromSnapshot(s, snap)
+	if res.HasErrors() {
+		tb.Fatalf("NewFromSnapshot: %s", res)
+	}
+	return g
+}
+
+// mustSeed seeds a new assembler bound to s from snap and fails the test when
+// the seed is refused.
+func mustSeed(tb testing.TB, ctx context.Context, s *schema.Schema, snap *graph.Snapshot) *graph.BatchAssembler {
+	tb.Helper()
+	ba, res := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)
+	if res.HasErrors() {
+		tb.Fatalf("NewBatchAssemblerFromSnapshot: %s", res)
+	}
+	return ba
 }

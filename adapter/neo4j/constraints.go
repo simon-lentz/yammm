@@ -164,9 +164,10 @@ func (a *Adapter) constraintsForType(ctx context.Context, t *schema.Type, label 
 	// One gate because they are one kind of statement. A `Vector[4]` and a
 	// `List<Float>` emit the SAME expression, `IS :: LIST<FLOAT NOT NULL>`, and
 	// gating them differently meant an option suppressed the constraint for one
-	// declaration and not for the other. It is also the switch an operator on a
-	// server older than Neo4j 5.9 needs: property-type constraints do not exist
-	// there, and nothing else in this package turns them all off.
+	// declaration and not for the other. It is also the switch an operator on an
+	// Enterprise server older than Neo4j 5.9 needs, where property-type
+	// constraints do not exist, or older than 5.10, where a LIST type does not;
+	// only the Community edition's gating also drops them all.
 	if a.config.scalarTypeConstraints {
 		constraints = append(constraints, a.listTypeConstraints(t, label, collector)...)
 		constraints = append(constraints, a.scalarTypeConstraints(t, label, collector)...)
@@ -608,8 +609,9 @@ func neo4jScalarType(c schema.Constraint) (string, bool) {
 	case schema.KindVector:
 		// A Vector maps to a list of floats, NOT to Neo4j's native vector
 		// property type, because a list of floats is what this adapter actually
-		// writes: the write path passes a Vector through as a driver-native list
-		// (the KindVector arm of [Coerce]), and valueType() on the stored property
+		// writes: the write path types a []any Vector as []float64 ([coerceSlice])
+		// and passes any other Vector value through the KindVector arm of
+		// [coerceScalar], and valueType() on the stored property
 		// returns exactly LIST<FLOAT NOT NULL>.
 		//
 		// Neo4j 5.x has no vector property type at all. Neo4j 2026.x does — spelled

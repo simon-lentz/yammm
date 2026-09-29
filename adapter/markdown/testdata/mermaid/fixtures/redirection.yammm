@@ -1,0 +1,14 @@
+schema "cache"
+
+type Base {
+	id String primary
+}
+
+type Redirection extends Base {
+	location String
+}
+
+type LRUCache {
+	key String primary
+	--> TARGET (one) Redirection
+}

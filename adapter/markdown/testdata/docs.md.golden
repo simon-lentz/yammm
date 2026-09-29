@@ -51,15 +51,15 @@ County is a US county node.
 
 **Associations**
 
-- `--> IN_STATE (one)` [State](#state)
+-   `--> IN_STATE (one)` [State](#state)
 
-  IN_STATE records the county's state.
+    IN_STATE records the county's state.
 
 **Compositions**
 
-- `*-> HAS_DISTRICT (many)` [District](#district)
+-   `*-> HAS_DISTRICT (many)` [District](#district)
 
-  HAS_DISTRICT holds electoral districts.
+    HAS_DISTRICT holds electoral districts.
 
 ## Data Types
 

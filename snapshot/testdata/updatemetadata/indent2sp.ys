@@ -5,7 +5,7 @@
     "schema_source": "test://test.yammm",
     "schema_hash": "sha256:fa0cde371d426aaa451d3a5d7891b85a631c56ffafc68424556f40165739b936",
     "schema_hash_algorithm": 4,
-    "integrity_hash": "sha256:60e1da07b6c6d596d61e8117430c225cca90c381eb4fb3bc355bdf40e038ad01",
+    "integrity_hash": "sha256:271c9cc1d2338f891ea1fe4b404e86853627f7ecf9efc092c66525cc4bb25486",
     "features": [],
     "attestation": {
       "values": false,
@@ -31,6 +31,7 @@
             "p1"
           ],
           "properties": {
+            "id": "p1",
             "name": "Alice"
           },
           "provenance": null

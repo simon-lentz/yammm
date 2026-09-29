@@ -10,7 +10,7 @@ import (
 
 // LoadAndParseCSV must pass the --type-column flag value into the adapter:
 // ParseWithTypeColumn refuses to run when WithTypeColumn was never set, so a
-// bare adapter turns every multi-type CSV invocation into E_CSV_COERCE.
+// bare adapter turns every multi-type CSV invocation into E_CSV_CONFIG.
 func TestLoadAndParseCSV_TypeColumnReachesAdapter(t *testing.T) {
 	t.Parallel()
 	s, result := schema.LoadString(t.Context(), `schema "cli"

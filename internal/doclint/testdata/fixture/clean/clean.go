@@ -14,7 +14,8 @@ func (Widget) Spin() {}
 //
 // It names [Widget], [Widget.Size] and [Widget.Spin]; the qualified
 // [doclintfixture/rotten.Gadget]; the whole package [doclintfixture/rotten];
-// and an out-of-module [fmt.Stringer] this gate does not resolve.
+// and the out-of-module [fmt.Stringer] and [doclintfixturemore/pkg.Name], which
+// share no path with the module and this gate does not resolve.
 // [TestWidget_Builds] anchors the regression, and helper is a lowercase name
 // the parser never linkifies.
 func Build() Widget { return Widget{} }

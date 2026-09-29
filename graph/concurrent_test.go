@@ -55,7 +55,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 					"Person",
 					personType.ID(),
 					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"name": pk}),
+					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 					nil, nil, nil,
 				)
 
@@ -98,7 +98,7 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 				"Person",
 				personType.ID(),
 				immutable.WrapKey([]any{sharedKey}),
-				immutable.WrapProperties(map[string]any{"name": fmt.Sprintf("Alice %d", i)}),
+				immutable.WrapProperties(map[string]any{"id": sharedKey, "name": fmt.Sprintf("Alice %d", i)}),
 				nil, nil, nil,
 			)
 
@@ -155,7 +155,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 					"Person",
 					personType.ID(),
 					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"name": pk}),
+					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 					nil, nil, nil,
 				)
 
@@ -173,7 +173,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 					"Company",
 					companyType.ID(),
 					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"name": pk}),
+					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 					nil, nil, nil,
 				)
 
@@ -225,7 +225,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 					"Person",
 					personType.ID(),
 					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"name": pk}),
+					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 					nil, nil, nil,
 				)
 
@@ -284,7 +284,7 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 				"Person",
 				personType.ID(),
 				immutable.WrapKey([]any{pk}),
-				immutable.WrapProperties(map[string]any{"name": pk}),
+				immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 				nil, nil, nil,
 			)
 
@@ -335,7 +335,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 						"Person",
 						personType.ID(),
 						immutable.WrapKey([]any{pk}),
-						immutable.WrapProperties(map[string]any{"name": pk}),
+						immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 						nil, nil, nil,
 					)
 
@@ -398,7 +398,7 @@ func BenchmarkGraph_Add_Concurrent(b *testing.B) {
 					"Person",
 					personType.ID(),
 					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"name": pk}),
+					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 					nil, nil, nil,
 				)
 				g.Add(ctx, inst)
@@ -425,7 +425,7 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 		"c.BaseType",
 		baseType.ID(),
 		immutable.WrapKey([]any{"base1"}),
-		immutable.WrapProperties(map[string]any{"value": "base value"}),
+		immutable.WrapProperties(map[string]any{"id": "base1", "value": "base value"}),
 		nil, nil, nil,
 	)
 
@@ -438,7 +438,7 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 		"b.MiddleType",
 		middleType.ID(),
 		immutable.WrapKey([]any{"mid1"}),
-		immutable.WrapProperties(map[string]any{"name": "middle value"}),
+		immutable.WrapProperties(map[string]any{"id": "mid1", "name": "middle value"}),
 		nil, nil, nil,
 	)
 
@@ -447,7 +447,7 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 		"TopType",
 		topType.ID(),
 		immutable.WrapKey([]any{"top1"}),
-		immutable.WrapProperties(map[string]any{"label": "top value"}),
+		immutable.WrapProperties(map[string]any{"id": "top1", "label": "top value"}),
 		nil, nil, nil,
 	)
 
@@ -583,7 +583,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 				person := instance.NewValidInstance(
 					"Person", personType.ID(),
 					immutable.WrapKey([]any{pk}),
-					immutable.WrapProperties(map[string]any{"name": pk}),
+					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
 					nil, nil, nil,
 				)
 				g.Add(ctx, person)
@@ -593,7 +593,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 				company := instance.NewValidInstance(
 					"Company", companyType.ID(),
 					immutable.WrapKey([]any{ck}),
-					immutable.WrapProperties(map[string]any{"name": ck}),
+					immutable.WrapProperties(map[string]any{"id": ck, "name": ck}),
 					nil, nil, nil,
 				)
 				g.Add(ctx, company)

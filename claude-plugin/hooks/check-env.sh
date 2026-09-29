@@ -74,7 +74,8 @@ check_binary_version() {
   fi
 }
 
-plugin_root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+# CDPATH= keeps cd from printing the directory it chose into the capture.
+plugin_root="${CLAUDE_PLUGIN_ROOT:-$(CDPATH='' cd "$(dirname "$0")/.." && pwd)}"
 manifest="$plugin_root/.claude-plugin/plugin.json"
 
 if command -v jq >/dev/null 2>&1 && [ -f "$manifest" ]; then

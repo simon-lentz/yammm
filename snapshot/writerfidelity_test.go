@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
@@ -130,13 +131,10 @@ func TestWriter_PreservesAnEmptyProvenancePath(t *testing.T) {
 	}
 }
 
-// TestWriter_RefusesATargetKeyItCannotParse pins that a target key
-// [graph.ParseKey] cannot read is an internal failure, not a Warning that
-// drops the address. UnresolvedEdge.TargetKey is written from
-// immutable.Key.String on every library path and ParseKey is its pinned
-// inverse, so the only way to reach the arm is caller-assembled parts whose
-// key holds a non-scalar component — the state Marshal's contract assigns to
-// Fatal E_INTERNAL.
+// A target key [graph.ParseKey] cannot read is refused where a snapshot is
+// built, by RebuildSnapshot and by Graph.Add, so no snapshot Marshal receives
+// holds one: an unresolved record's fields are read through methods alone.
+// TestParseTargetKey_RefusesAKeyParseKeyCannotRead pins Marshal's own guard.
 func TestWriter_RefusesATargetKeyItCannotParse(t *testing.T) {
 	t.Parallel()
 
@@ -154,44 +152,32 @@ func TestWriter_RefusesATargetKeyItCannotParse(t *testing.T) {
 	if _, err := graph.ParseKey(nested.String()); err == nil {
 		t.Fatalf("fixture is vacuous: ParseKey reads %s", nested)
 	}
-	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{id},
-		Instances: map[schema.TypeID][]graph.InstanceParts{id: {{
-			TypeName:   "Ref",
-			TypeID:     id,
-			PrimaryKey: immutable.WrapKey([]any{"r1"}),
-			Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
-		}}},
+	r1 := graph.InstanceParts{
+		TypeID:     id,
+		PrimaryKey: immutable.WrapKey([]any{"r1"}),
+		Properties: immutable.WrapProperties(map[string]any{"id": "r1"}),
+	}
+	_, res = graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types:     []schema.TypeID{id},
+		Instances: []graph.InstanceParts{r1},
 		Unresolved: []graph.UnresolvedParts{{
 			SourceType: id,
 			SourceKey:  immutable.WrapKey([]any{"r1"}),
 			Relation:   "POINTS",
-			TargetType: id,
 			TargetKey:  nested,
 			Reason:     "target_missing",
 		}},
 	})
-	if res.HasErrors() {
-		t.Fatalf("assembling: %s", res)
+	if !res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(res.String(), "is not a scalar") {
+		t.Errorf("RebuildSnapshot = %s, want the target key refused", res)
 	}
-
-	data, mres := snapshot.Marshal(t.Context(), built)
-	if data != nil {
-		t.Errorf("Marshal wrote %d bytes over a key it cannot read back", len(data))
-	}
-	if !mres.HasFatal() || !mres.HasCode(diag.E_INTERNAL) {
-		t.Fatalf("want Fatal E_INTERNAL, got: %s", mres)
-	}
-	if mres.HasCode(diag.W_SNAPSHOT_VALUE_DROPPED) {
-		t.Errorf("the key was dropped under a Warning instead of refused: %s", mres)
-	}
-	named := false
-	for issue := range mres.Issues() {
-		if strings.Contains(issue.Message(), nested.String()) {
-			named = true
-		}
-	}
-	if !named {
-		t.Errorf("the failure does not name the key %s: %s", nested, mres)
+	g := graph.New(s)
+	add := g.Add(t.Context(), instance.NewValidInstance("Ref", id, immutable.WrapKey([]any{"r1"}),
+		immutable.WrapProperties(map[string]any{"id": "r1"}),
+		map[string]*instance.ValidEdgeData{"POINTS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			instance.NewValidEdgeTarget(nested, immutable.Properties{}),
+		})}, nil, nil))
+	if !add.HasCode(diag.E_GRAPH_INVALID_PK) {
+		t.Errorf("Graph.Add = %s, want the target key refused", add)
 	}
 }

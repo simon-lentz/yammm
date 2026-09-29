@@ -57,13 +57,13 @@ type Anchor {
 type Site {
 	id String primary
 	*-> PARTS (many) Part
+	*-> MAIN (_:one) Part
 	*-> IMPORTED (many) base.Part
 }
 
-// Beacon is declared here and in deep, and both render the bare tag "Beacon"
-// because the entry schema holds no alias for deep. Unlike the two Part
-// declarations it is not a part type, so it can be added to a graph directly —
-// which is the only way to reach the collision through Graph.Snapshot.
+// Beacon is declared here, in base and in deep. The entry schema names the
+// first two, and their tags differ; it cannot name deep's, which base alone
+// imports, so that one cannot hold a root here at all.
 type Beacon {
 	id String primary
 	power Float
@@ -79,6 +79,7 @@ import "deep.yammm" as deep
 part type Part {
 	name String primary
 	mass Float
+	*-> DEEP (many) deep.Part
 }
 
 type Basin {
@@ -94,6 +95,16 @@ type Basin {
 // cannot resolve locally and more than one closure schema declares.
 type Marker {
 	id String primary
+}
+
+// Beacon is declared here and in the entry schema. Both are addressable — the
+// entry schema names this one "base.Beacon" and its own one "Beacon" — so the
+// two tags differ while the bare NAME does not. That is identity keying without
+// a collision: a position keyed by TypeID separates them and one keyed by the
+// bare name merges them.
+type Beacon {
+	id String primary
+	power Float
 }
 `
 
@@ -179,8 +190,7 @@ func mustTypeIDIn(t *testing.T, s *schema.Schema, alias, name string) schema.Typ
 // mustTransitiveTypeID resolves a type the entry schema reaches only through
 // an intermediate import, which is the position tagForm renders as a bare
 // name because the entry schema holds no alias for it.
-func mustTransitiveTypeID(t *testing.T, s *schema.Schema, viaAlias, thenAlias, name string) schema.TypeID { //nolint:unparam // the intermediate hop is an ingredient, kept explicit
-
+func mustTransitiveTypeID(t *testing.T, s *schema.Schema, viaAlias, thenAlias, name string) schema.TypeID {
 	t.Helper()
 	via, ok := s.ImportByAlias(viaAlias)
 	if !ok {
@@ -271,26 +281,26 @@ func collectIdentities(snap *graph.Snapshot) []identityRecord {
 		}
 	}
 	for _, d := range snap.Duplicates() {
-		walk("duplicate", d.Instance)
+		walk("duplicate", d.Instance())
 		// A conflict re-resolving to a different instance is a loss the
 		// rejected instance's own record cannot show.
 		conflict, parent := "-", "-"
-		if d.Conflict != nil {
-			conflict = fmt.Sprintf("%s[%s]", d.Conflict.TypeID(), d.Conflict.PrimaryKey())
+		if d.Conflict() != nil {
+			conflict = fmt.Sprintf("%s[%s]", d.Conflict().TypeID(), d.Conflict().PrimaryKey())
 		}
-		if d.Parent != nil {
-			parent = fmt.Sprintf("%s[%s]", d.Parent.TypeID(), d.Parent.PrimaryKey())
+		if d.Parent() != nil {
+			parent = fmt.Sprintf("%s[%s]", d.Parent().TypeID(), d.Parent().PrimaryKey())
 		}
 		out = append(out, identityRecord(fmt.Sprintf(
 			"duplicate-coords | id=%s | pk=%s | conflict=%s | parent=%s | rel=%s",
-			d.Instance.TypeID(), d.Instance.PrimaryKey(), conflict, parent, d.Relation,
+			d.Instance().TypeID(), d.Instance().PrimaryKey(), conflict, parent, d.Relation(),
 		)))
 	}
 	for _, u := range snap.Unresolved() {
 		out = append(out, identityRecord(fmt.Sprintf(
 			"unresolved | source=%s | sourceId=%s | sourcePk=%s | rel=%s | target=%s | targetKey=%s | required=%t | reason=%s | props={%s}",
-			u.Source.TypeName(), u.Source.TypeID(), u.Source.PrimaryKey().String(), u.Relation,
-			u.TargetType, u.TargetKey, u.Required, u.Reason,
+			u.Source().TypeName(), u.Source().TypeID(), u.Source().PrimaryKey().String(), u.Relation(),
+			u.TargetType(), u.TargetKey(), u.Required(), u.Reason(),
 			renderProps(u.Properties().Clone()),
 		)))
 	}
@@ -321,7 +331,7 @@ func assertTagFormConsistent(t *testing.T, s *schema.Schema, snap *graph.Snapsho
 		}
 	}
 	for _, d := range snap.Duplicates() {
-		check("duplicate", d.Instance)
+		check("duplicate", d.Instance())
 	}
 }
 
@@ -358,13 +368,12 @@ func identityCases() []identityCase {
 				id := mustTypeIDIn(t, s, "", "Anchor")
 				return graph.SnapshotParts{
 					Types: []schema.TypeID{id},
-					Instances: map[schema.TypeID][]graph.InstanceParts{
-						id: {{
-							TypeName:   tagForm(s, id),
+					Instances: []graph.InstanceParts{
+						{
 							TypeID:     id,
 							PrimaryKey: immutable.WrapKey([]any{"a1"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": float64(3)}),
-						}},
+						},
 					},
 				}
 			},
@@ -378,13 +387,12 @@ func identityCases() []identityCase {
 				id := mustTypeIDIn(t, s, "base", "Basin")
 				return graph.SnapshotParts{
 					Types: []schema.TypeID{id},
-					Instances: map[schema.TypeID][]graph.InstanceParts{
-						id: {{
-							TypeName:   tagForm(s, id),
+					Instances: []graph.InstanceParts{
+						{
 							TypeID:     id,
 							PrimaryKey: immutable.WrapKey([]any{"b1"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(7)}),
-						}},
+						},
 					},
 				}
 			},
@@ -402,28 +410,19 @@ func identityCases() []identityCase {
 			build:    composedCase("IMPORTED", "base", "Part", "p2"),
 		},
 		{
-			// Child type base.Part under a relation targeting geo.Part: a
-			// rule comparing names alone rebinds it to the wrong schema.
+			// geo.Part and base.Part share a name and sit side by side, each
+			// under the relation that targets it: a rule comparing names alone
+			// rebinds one to the other's schema.
 			name:     "composed_collided_name_across_schemas",
 			origin:   "collided",
 			position: "composed",
-			build:    composedCase("PARTS", "base", "Part", "p3"),
-		},
-		{
-			// The mirror of the case above: a locally declared Part sitting
-			// under the relation that targets the imported one.
-			name:     "composed_collided_name_reversed",
-			origin:   "collided",
-			position: "composed",
-			build:    composedCase("IMPORTED", "", "Part", "p4"),
-		},
-		{
-			// No declared relation, so the decoder has no target to recover
-			// from and the child's type_id is the only thing carrying it.
-			name:     "composed_under_undeclared_relation",
-			origin:   "local",
-			position: "composed",
-			build:    composedCase("GHOST", "", "Part", "p5"),
+			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+				t.Helper()
+				parts := composedCase("PARTS", "", "Part", "p3")(t, s)
+				imported := composedCase("IMPORTED", "base", "Part", "p4")(t, s)
+				parts.Instances[0].Composed["IMPORTED"] = imported.Instances[0].Composed["IMPORTED"]
+				return parts
+			},
 		},
 		{
 			// A child of a child: the one position where the parent's own
@@ -438,21 +437,18 @@ func identityCases() []identityCase {
 				segmentID := mustTypeIDIn(t, s, "", "Segment")
 				return graph.SnapshotParts{
 					Types: []schema.TypeID{siteID},
-					Instances: map[schema.TypeID][]graph.InstanceParts{
-						siteID: {{
-							TypeName:   tagForm(s, siteID),
+					Instances: []graph.InstanceParts{
+						{
 							TypeID:     siteID,
 							PrimaryKey: immutable.WrapKey([]any{"site2"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "site2"}),
 							Composed: map[string][]graph.InstanceParts{
 								"PARTS": {{
-									TypeName:   tagForm(s, partID),
 									TypeID:     partID,
 									PrimaryKey: immutable.WrapKey([]any{"p6"}),
 									Properties: immutable.WrapProperties(map[string]any{"name": "p6", "weight": float64(2)}),
 									Composed: map[string][]graph.InstanceParts{
 										"SEGMENTS": {{
-											TypeName:   tagForm(s, segmentID),
 											TypeID:     segmentID,
 											PrimaryKey: immutable.WrapKey([]any{"sg1"}),
 											Properties: immutable.WrapProperties(map[string]any{"id": "sg1", "span": float64(0.5)}),
@@ -460,7 +456,7 @@ func identityCases() []identityCase {
 									},
 								}},
 							},
-						}},
+						},
 					},
 				}
 			},
@@ -474,22 +470,19 @@ func identityCases() []identityCase {
 			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				id := mustTypeIDIn(t, s, "base", "Basin")
-				tag := tagForm(s, id)
 				return graph.SnapshotParts{
 					Types: []schema.TypeID{id},
-					Instances: map[schema.TypeID][]graph.InstanceParts{
-						id: {{
-							TypeName:   tag,
+					Instances: []graph.InstanceParts{
+						{
 							TypeID:     id,
 							PrimaryKey: immutable.WrapKey([]any{"b1"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(7)}),
-						}},
+						},
 					},
 					Unresolved: []graph.UnresolvedParts{{
 						SourceType: id,
 						SourceKey:  immutable.WrapKey([]any{"b1"}),
 						Relation:   "NEAR",
-						TargetType: id,
 						TargetKey:  immutable.WrapKey([]any{"gone"}),
 						Reason:     "target_missing",
 						Properties: immutable.WrapProperties(map[string]any{"strength": float64(1)}),
@@ -499,58 +492,71 @@ func identityCases() []identityCase {
 		},
 		{
 			// Reachable only through base, so the entry schema holds no alias
-			// and the tag form falls back to the bare name.
-			name:     "root_transitively_imported",
+			// and no name form. It is legal as a composed child under base.Part's
+			// DEEP and nowhere else, and this is the oracle that the child
+			// survives the trip.
+			name:     "composed_transitively_imported",
 			origin:   "transitive",
-			position: "root",
+			position: "composed",
 			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
 				t.Helper()
-				id := mustTransitiveTypeID(t, s, "base", "deep", "Probe")
-				tag := tagForm(s, id)
+				siteID := mustTypeIDIn(t, s, "", "Site")
+				basePartID := mustTypeIDIn(t, s, "base", "Part")
+				childID := mustTransitiveTypeID(t, s, "base", "deep", "Part")
 				return graph.SnapshotParts{
-					Types: []schema.TypeID{id},
-					Instances: map[schema.TypeID][]graph.InstanceParts{
-						id: {{
-							TypeName:   tag,
-							TypeID:     id,
-							PrimaryKey: immutable.WrapKey([]any{"pr1"}),
-							Properties: immutable.WrapProperties(map[string]any{"id": "pr1", "reading": float64(2)}),
-						}},
+					Types: []schema.TypeID{siteID},
+					Instances: []graph.InstanceParts{
+						{
+							TypeID:     siteID,
+							PrimaryKey: immutable.WrapKey([]any{"site1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "site1"}),
+							Composed: map[string][]graph.InstanceParts{
+								"IMPORTED": {{
+									TypeID:     basePartID,
+									PrimaryKey: immutable.WrapKey([]any{"bp1"}),
+									Properties: partProps("base", "bp1"),
+									Composed: map[string][]graph.InstanceParts{
+										"DEEP": {{
+											TypeID:     childID,
+											PrimaryKey: immutable.WrapKey([]any{"dp1"}),
+											Properties: immutable.WrapProperties(map[string]any{"name": "dp1", "density": float64(1)}),
+										}},
+									},
+								}},
+							},
+						},
 					},
 				}
 			},
 		},
 		{
-			// A local Beacon and a transitively imported one render the same
-			// bare tag, so a name-keyed form cannot tell the two groups apart.
+			// One bare name, two schemas, both addressable: the entry schema's
+			// own Beacon and the one it imports as base. Their tags differ and
+			// their names do not, so a position keyed by the bare name merges
+			// the two groups and one keyed by identity separates them.
 			//
 			// Beacon rather than Part because a root group's type must be able
-			// to hold a root: a part type is addressed through its parent and
-			// both RebuildSnapshot and Load refuse one here. The Part pair
-			// carries the same collision in the position parts belong in —
-			// see composed_collided_name_across_schemas.
-			name:     "root_tag_collision_local_and_transitive",
-			origin:   "transitive",
+			// to hold a root, and a part type is addressed through its parent.
+			name:     "root_one_name_two_schemas",
+			origin:   "collided",
 			position: "root",
 			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				localID := mustTypeIDIn(t, s, "", "Beacon")
-				deepID := mustTransitiveTypeID(t, s, "base", "deep", "Beacon")
+				importedID := mustTypeIDIn(t, s, "base", "Beacon")
 				return graph.SnapshotParts{
-					Types: []schema.TypeID{localID, deepID},
-					Instances: map[schema.TypeID][]graph.InstanceParts{
-						localID: {{
-							TypeName:   tagForm(s, localID),
+					Types: []schema.TypeID{localID, importedID},
+					Instances: []graph.InstanceParts{
+						{
 							TypeID:     localID,
 							PrimaryKey: immutable.WrapKey([]any{"lb1"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "lb1", "power": float64(1)}),
-						}},
-						deepID: {{
-							TypeName:   tagForm(s, deepID),
-							TypeID:     deepID,
-							PrimaryKey: immutable.WrapKey([]any{"db1"}),
-							Properties: immutable.WrapProperties(map[string]any{"id": "db1", "power": float64(2)}),
-						}},
+						},
+						{
+							TypeID:     importedID,
+							PrimaryKey: immutable.WrapKey([]any{"ib1"}),
+							Properties: immutable.WrapProperties(map[string]any{"id": "ib1", "power": float64(2)}),
+						},
 					},
 				}
 			},
@@ -562,8 +568,9 @@ func identityCases() []identityCase {
 			build:    duplicateCase("", "Anchor", "a9", map[string]any{"id": "a9", "depth": float64(4)}),
 		},
 		{
-			// The conflict's key differs from the rejected child's, so only
-			// the walker's conflict coordinate can see a re-derived conflict.
+			// A (one) slot's conflict is its sole occupant whatever its key, so
+			// the conflict's key differs from the rejected child's and only the
+			// walker's conflict coordinate can see a re-derived conflict.
 			name:     "duplicate_composed_slot",
 			origin:   "local",
 			position: "duplicate",
@@ -572,36 +579,29 @@ func identityCases() []identityCase {
 				siteID := mustTypeIDIn(t, s, "", "Site")
 				partID := mustTypeIDIn(t, s, "", "Part")
 				occupant := graph.InstanceParts{
-					TypeName:   tagForm(s, partID),
 					TypeID:     partID,
 					PrimaryKey: immutable.WrapKey([]any{"lp1"}),
 					Properties: partProps("", "lp1"),
 				}
 				return graph.SnapshotParts{
 					Types: []schema.TypeID{siteID},
-					Instances: map[schema.TypeID][]graph.InstanceParts{
-						siteID: {{
-							TypeName:   tagForm(s, siteID),
+					Instances: []graph.InstanceParts{
+						{
 							TypeID:     siteID,
 							PrimaryKey: immutable.WrapKey([]any{"site9"}),
 							Properties: immutable.WrapProperties(map[string]any{"id": "site9"}),
-							Composed:   map[string][]graph.InstanceParts{"PARTS": {occupant}},
-						}},
+							Composed:   map[string][]graph.InstanceParts{"MAIN": {occupant}},
+						},
 					},
 					Duplicates: []graph.DuplicateParts{{
-						Type: partID,
-						Key:  immutable.WrapKey([]any{"lp9"}),
 						Instance: graph.InstanceParts{
-							TypeName:   tagForm(s, partID),
 							TypeID:     partID,
 							PrimaryKey: immutable.WrapKey([]any{"lp9"}),
 							Properties: partProps("", "lp9"),
 						},
-						ConflictType: partID,
-						ConflictKey:  immutable.WrapKey([]any{"lp1"}),
-						ParentType:   siteID,
-						ParentKey:    immutable.WrapKey([]any{"site9"}),
-						Relation:     "PARTS",
+						ParentType: siteID,
+						ParentKey:  immutable.WrapKey([]any{"site9"}),
+						Relation:   "MAIN",
 					}},
 				}
 			},
@@ -625,21 +625,19 @@ func composedCase(relation, childAlias, childType, childKey string) func(*testin
 		childID := mustTypeIDIn(t, s, childAlias, childType)
 		return graph.SnapshotParts{
 			Types: []schema.TypeID{siteID},
-			Instances: map[schema.TypeID][]graph.InstanceParts{
-				siteID: {{
-					TypeName:   tagForm(s, siteID),
+			Instances: []graph.InstanceParts{
+				{
 					TypeID:     siteID,
 					PrimaryKey: immutable.WrapKey([]any{"site1"}),
 					Properties: immutable.WrapProperties(map[string]any{"id": "site1"}),
 					Composed: map[string][]graph.InstanceParts{
 						relation: {{
-							TypeName:   tagForm(s, childID),
 							TypeID:     childID,
 							PrimaryKey: immutable.WrapKey([]any{childKey}),
 							Properties: partProps(childAlias, childKey),
 						}},
 					},
-				}},
+				},
 			},
 		}
 	}
@@ -649,22 +647,18 @@ func duplicateCase(alias, typeName, key string, props map[string]any) func(*test
 	return func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
 		t.Helper()
 		id := mustTypeIDIn(t, s, alias, typeName)
-		tag := tagForm(s, id)
 		inst := graph.InstanceParts{
-			TypeName:   tag,
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(props),
 		}
 		return graph.SnapshotParts{
-			Types:     []schema.TypeID{id},
-			Instances: map[schema.TypeID][]graph.InstanceParts{id: {inst}},
+			Types: []schema.TypeID{id},
+			Instances: []graph.InstanceParts{
+				inst,
+			},
 			Duplicates: []graph.DuplicateParts{{
-				Type:         id,
-				Key:          immutable.WrapKey([]any{key}),
-				Instance:     inst,
-				ConflictType: id,
-				ConflictKey:  immutable.WrapKey([]any{key}),
+				Instance: inst,
 			}},
 		}
 	}
@@ -684,11 +678,11 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 	for _, tc := range cases {
 		covered[tc.position+"/"+tc.origin] = true
 	}
-	// The floor is the ingredient matrix: every pair below must have at
-	// least one generated document, so a deleted case names its hole.
+	// The floor is the ingredient matrix: a deleted case names its hole.
 	for _, want := range []string{
-		"root/local", "root/imported", "root/transitive",
+		"root/local", "root/imported", "root/collided",
 		"composed/local", "composed/imported", "composed/collided",
+		"composed/transitive",
 		"nested/local",
 		"duplicate/local", "duplicate/imported",
 		"unresolved/imported",
@@ -696,6 +690,31 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 		if !covered[want] {
 			t.Fatalf("the oracle generates no %s document; the ingredient matrix has a hole", want)
 		}
+	}
+	// Illegal rather than untested: a root is keyed by name and the entry
+	// schema cannot name a transitively imported type.
+	if covered["root/transitive"] {
+		t.Fatal("the oracle generates a root/transitive document, which every constructor refuses")
+	}
+	// Illegal rather than untested: a composed child is an instance of its
+	// slot's declared target, and a slot is a composition its parent declares.
+	for name, build := range map[string]func(*testing.T, *schema.Schema) graph.SnapshotParts{
+		"base.Part under PARTS":           composedCase("PARTS", "base", "Part", "p3"),
+		"geo.Part under IMPORTED":         composedCase("IMPORTED", "", "Part", "p4"),
+		"geo.Part under undeclared GHOST": composedCase("GHOST", "", "Part", "p5"),
+	} {
+		if _, res := graph.RebuildSnapshot(s, build(t, s)); !res.HasErrors() {
+			t.Errorf("RebuildSnapshot admitted %s, which Graph.Add refuses", name)
+		}
+	}
+	// Illegal rather than untested: a keyed (many) slot's duplicate collides with
+	// the sibling at its own key, so a conflict at another key is no record
+	// Graph.AddComposed makes.
+	crossKey := findCase(t, "duplicate_composed_slot").build(t, s)
+	crossKey.Instances[0].Composed = map[string][]graph.InstanceParts{"PARTS": crossKey.Instances[0].Composed["MAIN"]}
+	crossKey.Duplicates[0].Relation = "PARTS"
+	if _, res := graph.RebuildSnapshot(s, crossKey); !res.HasErrors() {
+		t.Error("RebuildSnapshot admitted a (many) duplicate whose conflict is at another key, which Graph.AddComposed never records")
 	}
 
 	for _, tc := range cases {
@@ -773,4 +792,16 @@ func asStrings(rs []identityRecord) []string {
 		out[i] = string(r)
 	}
 	return out
+}
+
+// findCase returns the identity case named name.
+func findCase(t *testing.T, name string) identityCase {
+	t.Helper()
+	for _, c := range identityCases() {
+		if c.name == name {
+			return c
+		}
+	}
+	t.Fatalf("no identity case %q", name)
+	return identityCase{}
 }

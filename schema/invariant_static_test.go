@@ -1,8 +1,10 @@
 package schema_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -635,4 +637,91 @@ func issueWithCode(res diag.Result, code diag.Code) (diag.Issue, bool) {
 		}
 	}
 	return diag.Issue{}, false
+}
+
+// TestStaticInvariant_RelationIsReadInItsTwoSpellings pins docs/SPEC.md's
+// rule: an invariant reads a relation by its UPPER_SNAKE name or its field
+// name, whether bare or as a member, and any other casing is refused at load
+// with E_INVALID_NAME; a property is read in any casing.
+func TestStaticInvariant_RelationIsReadInItsTwoSpellings(t *testing.T) {
+	t.Parallel()
+
+	for _, inv := range []string{
+		`PLACED_BY != nil`, `placed_by != nil`,
+		`MAIN_LINE.ITEM != nil`, `MAIN_LINE.item != nil`,
+		`LINES -> All |$l| { $l.ITEM != nil }`,
+		`Name != ""`, `MAIN_LINE.QTY > 0`,
+	} {
+		t.Run("accepts "+inv, func(t *testing.T) {
+			t.Parallel()
+			if res := loadInvariant(t, inv); res.Err() != nil {
+				t.Errorf("legal invariant refused: %v", res.Err())
+			}
+		})
+	}
+	// Each refusal is one diagnostic: a read after the miscased relation is not
+	// typed on, and a second read of it in one invariant is the same mistake.
+	for _, c := range []struct{ inv, relation, holder, read string }{
+		{`Placed_By != nil`, "PLACED_BY", "Order", "Placed_By"},
+		{`pLACED_BY != nil`, "PLACED_BY", "Order", "pLACED_BY"},
+		{`Main_Line != nil`, "MAIN_LINE", "Order", "Main_Line"},
+		{`MAIN_LINE.Item != nil`, "ITEM", "Line", "Item"},
+		{`LINES -> All |$l| { $l.iTEM != nil }`, "ITEM", "Line", "iTEM"},
+		{`MAIN_LINE.Item.nope != nil`, "ITEM", "Line", "Item"},
+		{`Main_Line.nope != nil`, "MAIN_LINE", "Order", "Main_Line"},
+		{`Placed_By != nil && Placed_By != nil`, "PLACED_BY", "Order", "Placed_By"},
+	} {
+		t.Run("refuses "+c.inv, func(t *testing.T) {
+			t.Parallel()
+			res := loadInvariant(t, c.inv)
+			issues := slices.Collect(res.Issues())
+			if len(issues) != 1 || issues[0].Code() != diag.E_INVALID_NAME || issues[0].Severity() != diag.Error {
+				t.Fatalf("result = %v, want one Error E_INVALID_NAME", res.Err())
+			}
+			want := fmt.Sprintf("relation %s on type %q is read as %q in invariant \"m\" on type \"Order\"", c.relation, c.holder, c.read)
+			if msg := issues[0].Message(); !strings.HasPrefix(msg, want) {
+				t.Errorf("message %q, want it to start %q", msg, want)
+			}
+		})
+	}
+}
+
+// TestStaticInvariant_RelationSpellingIsJudgedOnEveryTypeAValueMayBe pins that
+// a member read on a value that may be one of several types is judged against
+// each of them, whichever comes first: a miscased read that one type answers
+// as a property and another as a relation is refused for the relation.
+func TestStaticInvariant_RelationSpellingIsJudgedOnEveryTypeAValueMayBe(t *testing.T) {
+	t.Parallel()
+
+	const types = `schema "u"
+
+part type Leaf {
+    id String primary
+}
+
+part type WithProperty {
+    id String primary
+    item String
+}
+
+part type WithRelation {
+    id String primary
+    *-> ITEM (one) Leaf
+}
+
+type Owner {
+    id String primary
+    f Boolean
+    *-> P (one) WithProperty
+    *-> R (one) WithRelation
+`
+	for _, inv := range []string{`(f ? { P : R }).Item != nil`, `(f ? { R : P }).Item != nil`} {
+		t.Run(inv, func(t *testing.T) {
+			t.Parallel()
+			_, res := schema.LoadString(t.Context(), types+"    ! \"m\" "+inv+"\n}\n", "u.yammm")
+			if _, ok := issueWithCode(res, diag.E_INVALID_NAME); !ok {
+				t.Errorf("result = %v, want E_INVALID_NAME for the relation ITEM read as Item", res.Err())
+			}
+		})
+	}
 }

@@ -96,21 +96,23 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // takes no option that raises it; a caller needing every issue on a
 // heavily-malformed document reads it through [Load].
 //
-// Returns (nil, result) when the document cannot be summarized at all: an
-// unreadable header, an unsupported version, an unrecognized feature, an
-// unrecognized schema hash algorithm, an undecodable section, or a cancelled
-// context. A document that decodes but
-// fails a structural check returns a summary beside Error-severity
-// diagnostics — an integrity mismatch reports
-// IntegrityStatus "mismatch", and a reference naming no table row is reported
-// and left out of the counts. Read the result before the summary.
+// Returns (nil, result) when the header or the types table breaks a rule — an
+// unreadable or malformed header, an unsupported version, an unrecognized
+// feature, an unrecognized schema hash algorithm, a types table that states
+// one identity twice — when a section does not decode, or when the context is
+// cancelled. A document that decodes but fails a structural check returns a
+// summary beside Error-severity diagnostics — an integrity mismatch reports
+// IntegrityStatus "mismatch", and an instances group whose row names no table
+// entry is reported and left out of the instance counts, while an edge or a
+// record naming no row is reported and still counted. Read the result before
+// the summary.
 //
 // Info runs the structural validation [Load] and [Verify] run and stops before
 // materialization. It resolves no schema, so a document Info summarizes cleanly
-// can still fail Load or Verify on schema resolution, and on the two structural
-// checks that need a schema: a (one) slot a document fills twice, which raises
-// E_DUPLICATE_COMPOSED_PK, and two spellings of one timestamp, date or UUID
-// key, which Info compares as written and Load and Verify fold.
+// can still fail Load or Verify on schema resolution and on every structural
+// check that needs a schema: the graph package doc's "Structural facts", and two
+// spellings of one timestamp, date or UUID key, which Info compares as written
+// and Load and Verify fold.
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
 func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
@@ -214,10 +216,9 @@ type HeaderInfo struct {
 //
 // HeaderOnly is the right choice for dispatch-style workloads that scan
 // many .ys files to classify lifecycle state, compare schema hashes, or
-// inspect metadata annotations like CreatedAt. Its cost is proportional
-// to the header size (< 1 KiB for typical .ys files), not the total
-// file size — a property that [Info] cannot offer because it populates
-// instance counts and diagnostic counts by scanning the body.
+// inspect metadata annotations like CreatedAt. It decodes the header
+// alone, where [Info] decodes the body to populate its counts; its one pass
+// over the whole document checks the outermost shape, below.
 //
 // HeaderOnly holds the whole document, so it checks the outermost shape:
 // sections absent, repeated, out of order, or followed by trailing bytes are
@@ -305,9 +306,9 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 const MaxHeaderSize = 16 * 1024 * 1024
 
 // HeaderOnlyRead reads header metadata from a .ys stream without
-// materializing the instance body. Equivalent to [HeaderOnly] but accepts
-// an io.Reader, avoiding the caller-side requirement to read the entire
-// document into memory before dispatch.
+// materializing the instance body. It is [HeaderOnly]'s counterpart for an
+// io.Reader, avoiding the caller-side requirement to read the entire document
+// into memory before dispatch; the differences are stated below.
 //
 // HeaderOnlyRead reads at most [MaxHeaderSize] bytes from r. Inputs whose
 // header section exceeds this bound are rejected with E_SNAPSHOT_MALFORMED
@@ -323,12 +324,15 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // sites. Callers that need schema-hash verification inside the read call
 // should materialize the bytes first and use [HeaderOnly] or [Info].
 //
-// Read-error handling: a reader that returns io.EOF,
-// io.ErrUnexpectedEOF, or any other error partway through the header
-// surfaces as E_SNAPSHOT_MALFORMED on the returned diag.Result, not as
-// a bare error return. This preserves the library's uniform diagnostic
-// surface: a truncated header is a malformed document, whether the
-// truncation is on disk or in transit.
+// Read-error handling: a reader that returns io.EOF or
+// io.ErrUnexpectedEOF, or an error wrapping either, partway through the
+// header surfaces as Error-severity
+// E_SNAPSHOT_MALFORMED on the returned diag.Result, not as a bare error
+// return: a truncated header is a malformed document, whether the
+// truncation is on disk or in transit. Any other reader error is an I/O
+// failure and surfaces as Fatal E_SNAPSHOT_IO, the first such error as a
+// detail, so a file that opens and cannot be read is not reported as a
+// document that is wrong.
 //
 // ctx cancellation is checked at function entry; individual Read calls
 // on r are not cancellable mid-read. Readers backed by slow or network
@@ -368,6 +372,13 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
+		if lr.readErr != nil {
+			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_SNAPSHOT_IO,
+				"read header: "+lr.readErr.Error()).
+				WithDetail(diag.DetailKeyDetail, lr.readErr.Error()).
+				Build())
+			return nil, sd.collector.Result()
+		}
 		msg := err.Error()
 		if lr.exceeded {
 			msg = fmt.Sprintf("header exceeded MaxHeaderSize (%d bytes)", MaxHeaderSize)

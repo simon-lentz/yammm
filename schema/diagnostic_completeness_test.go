@@ -724,17 +724,15 @@ type V {
 
 // TestBuild_AliasCycleAndMissingPrimaryKey_BothReported pins cross-phase
 // accumulation through the alias-resolution phase, on the Builder path: a
-// cyclic datatype alias chain is only constructible programmatically (the
-// DSL grammar requires a builtin constraint on a datatype's right-hand
-// side), and its cycle findings must not suppress an unrelated type's
-// missing-primary-key finding from a later phase. Each datatype's
-// resolution reports the cycle from its own starting point.
+// datatype cycle through List elements must not suppress an unrelated type's
+// missing-primary-key finding from a later phase. The cycle is reported once
+// at each datatype on it.
 func TestBuild_AliasCycleAndMissingPrimaryKey_BothReported(t *testing.T) {
 	t.Parallel()
 	s, res := schema.NewBuilder().
 		WithName("main").
-		AddDataType("A", schema.NewAliasConstraint("B", nil)).
-		AddDataType("B", schema.NewAliasConstraint("A", nil)).
+		AddDataType("A", schema.NewListConstraint(schema.NewAliasConstraint("B", nil))).
+		AddDataType("B", schema.NewListConstraint(schema.NewAliasConstraint("A", nil))).
 		AddType("NoKey").
 		WithProperty("name", schema.NewStringConstraint()).
 		Done().
@@ -961,7 +959,7 @@ func TestBuild_RegistryQualifiedRelation_UndeclaredImport_Errors(t *testing.T) {
 }
 
 // TestBuild_RegistryQualifiedPropertyDatatype_UndeclaredImport_Errors pins the
-// same regression on a property's datatype reference (the resolveAliasChain
+// same regression on a property's datatype reference (the resolveReference
 // path, distinct from the extends/relation resolveTypeRef path).
 func TestBuild_RegistryQualifiedPropertyDatatype_UndeclaredImport_Errors(t *testing.T) {
 	t.Parallel()
@@ -984,7 +982,7 @@ func TestBuild_RegistryQualifiedPropertyDatatype_UndeclaredImport_Errors(t *test
 // E_UNKNOWN_TYPE from alias resolution. The primary-key type check defers to
 // that report (no E_INVALID_PRIMARY_KEY_TYPE), and absence-blame does not fire
 // (the property IS a declared primary). Without the coordinated primaryKeyType
-// Deferred change, the resolveAliasChain fix would double-report.
+// Deferred change, the resolveReference report would be doubled.
 func TestBuild_RegistryQualifiedPrimaryKey_UndeclaredImport_SingleError(t *testing.T) {
 	t.Parallel()
 	s, res := schema.NewBuilder().
@@ -1023,7 +1021,7 @@ func TestBuild_NoRegistryQualifiedExtends_Errors(t *testing.T) {
 }
 
 // TestBuild_NoRegistryQualifiedPrimaryKey_Errors pins the same rejection on the
-// resolveAliasChain path: a primary key typed by a dangling qualified datatype
+// resolveReference path: a primary key typed by a dangling qualified datatype
 // draws exactly one E_UNKNOWN_TYPE, with the primary-key type check deferring
 // to that report rather than stacking E_INVALID_PRIMARY_KEY_TYPE.
 func TestBuild_NoRegistryQualifiedPrimaryKey_Errors(t *testing.T) {
@@ -1042,17 +1040,15 @@ func TestBuild_NoRegistryQualifiedPrimaryKey_Errors(t *testing.T) {
 	})
 }
 
-// TestBuild_DatatypeAliasChainToUnknown_ReportedOnce pins that a datatype alias
-// chain bottoming out in an unknown name blames that name exactly once, even
-// though the chain is re-walked once per reference (the datatype's own
-// resolution plus every property that chains through it). Constructible only via
-// the Builder: the DSL grammar requires a builtin on a datatype's right-hand
-// side, so `type X = Mystery` is a parse error in .yammm text.
+// TestBuild_DatatypeAliasChainToUnknown_ReportedOnce pins that a datatype whose
+// List element names an unknown name blames that name exactly once, however
+// many properties reference the datatype: the datatype resolves once, and a
+// reference to one that failed adds no report.
 func TestBuild_DatatypeAliasChainToUnknown_ReportedOnce(t *testing.T) {
 	t.Parallel()
 	s, res := schema.NewBuilder().
 		WithName("main").
-		AddDataType("X", schema.NewAliasConstraint("Mystery", nil)).
+		AddDataType("X", schema.NewListConstraint(schema.NewAliasConstraint("Mystery", nil))).
 		AddType("Thing").
 		WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("a", schema.NewAliasConstraint("X", nil)).
@@ -1065,11 +1061,11 @@ func TestBuild_DatatypeAliasChainToUnknown_ReportedOnce(t *testing.T) {
 	})
 }
 
-// TestLoad_DistinctPropertiesSameUnknownDatatype_EachReported pins that the
-// chain-recursion suppression is scoped to the chain, not to direct references:
-// two properties typed by the same undeclared name draw two E_UNKNOWN_TYPE, one
-// per declaration site — mirroring how two relations to the same unknown target
-// each report. A datatype-mediated chain (above) is the only shape deduplicated.
+// TestLoad_DistinctPropertiesSameUnknownDatatype_EachReported pins that only a
+// datatype's own resolution is reported once: two properties typed by the same
+// undeclared name draw two E_UNKNOWN_TYPE, one per declaration site, as two
+// relations to the same unknown target each report. A reference through a
+// datatype that failed (above) adds no report.
 func TestLoad_DistinctPropertiesSameUnknownDatatype_EachReported(t *testing.T) {
 	t.Parallel()
 	res := loadStringErr(t, `schema "main"

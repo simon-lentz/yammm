@@ -89,7 +89,8 @@ const (
 
 	// DetailKeyTypeSchema is the identity of the schema a type is defined in,
 	// its SchemaPath, written as the identity and never relativized. Used with
-	// E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_PARENT_NOT_FOUND and E_INTERNAL.
+	// E_GRAPH_TYPE_NOT_FOUND, E_GRAPH_PARENT_NOT_FOUND, E_SNAPSHOT_UNNAMEABLE_TYPE
+	// and E_INTERNAL.
 	DetailKeyTypeSchema = "type_schema"
 
 	// DetailKeyFirstAlias is the first import alias in duplicate detection.
@@ -124,9 +125,8 @@ const (
 	// Used with E_SNAPSHOT_INCOMPATIBLE_SCHEMA and E_SNAPSHOT_INTEGRITY_MISMATCH.
 	DetailKeyActualHash = "actual_hash"
 
-	// DetailKeySchemaName is a schema's declared name: from the snapshot
-	// header for E_SNAPSHOT_INCOMPATIBLE_SCHEMA, and the colliding name for
-	// the E_DUPLICATE_SCHEMA two schemas registered under one name draw.
+	// DetailKeySchemaName is a schema's declared name: the snapshot header's for
+	// E_SNAPSHOT_INCOMPATIBLE_SCHEMA, the colliding one for E_DUPLICATE_SCHEMA.
 	DetailKeySchemaName = "schema_name"
 
 	// DetailKeyVersion is the format version number.

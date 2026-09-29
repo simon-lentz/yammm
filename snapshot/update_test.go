@@ -594,11 +594,13 @@ func seedCorpus(dir string) error {
 	inst := instance.NewValidInstance(
 		"Person", typ.ID(),
 		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
 		nil, nil, nil,
 	)
 	g := graph.New(s)
-	g.Add(ctx, inst)
+	if res := g.Add(ctx, inst); res.HasErrors() {
+		return res.Err()
+	}
 	snap := g.Snapshot()
 
 	// Four fixture shapes.

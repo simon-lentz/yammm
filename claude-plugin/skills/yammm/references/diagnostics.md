@@ -73,7 +73,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 5. **Invariant error** -- `E_INVARIANT_FAIL` (expression returned false) or `E_EVAL_ERROR` (expression bug).
 6. **Graph error** -- `E_DUPLICATE_PK` (duplicate key) or `E_UNRESOLVED_REQUIRED` (missing required association).
 7. **Snapshot error** -- See the Snapshot section. Corrupt, incompatible, or dangling references.
-8. **Adapter error** -- `E_ADAPTER_PARSE`, `E_CSV_COERCE`, or Neo4j-specific codes in the Adapter section.
+8. **Adapter error** -- `E_ADAPTER_PARSE` (the input is not well formed, in either data format), `E_ADAPTER_IO` (the input could not be read; exit 3), `E_CSV_COERCE` (a CSV cell), `E_CSV_CONFIG` (the CSV adapter's own settings), or Neo4j-specific codes in the Adapter section.
 
 ---
 
@@ -91,7 +91,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SYNTAX` | Syntax error in `.yammm` source |
+| `E_SYNTAX` | Syntax error in `.yammm` source, or a Builder documentation string no doc comment can carry |
 
 ### Import
 
@@ -113,22 +113,22 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_UNKNOWN_PROPERTY` | Referenced property not found on its type |
 | `E_DUPLICATE_PROPERTY` | Property defined more than once on a type |
 | `E_DUPLICATE_RELATION` | Relation defined more than once on a type |
-| `E_CASE_COLLISION` | Property/relation names differ only by case |
+| `E_CASE_COLLISION` | Two property names of a type, or two edge-property names of an association, differ only by case |
 | `E_PROPERTY_RELATION_COLLISION` | Property and relation share the same name |
 | `E_RESERVED_PREFIX` | Name uses a reserved prefix |
-| `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type |
+| `E_INVALID_ASSOCIATION_TARGET` | Association targets an invalid type, or a part type declares or inherits an association |
 | `E_INVALID_COMPOSITION_TARGET` | Composition targets an invalid type |
 | `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
-| `E_INVALID_INVARIANT` | Invariant expression is invalid |
+| `E_INVALID_INVARIANT` | An invariant's expression or message is invalid |
 | `E_DUPLICATE_INVARIANT` | One invariant message declared twice on a type |
 | `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ |
 | `E_REVERSE_CLAUSE_REMOVED` | Schema carries the reverse clause removed in v0.15.0 (v0.15+) |
-| `E_INVALID_NAME` | Identifier has invalid format |
+| `E_INVALID_NAME` | A name the schema refuses: an identifier's format, an empty schema name, a member named `self`, a name the Builder takes that the DSL cannot state, or an invariant reading a relation in a casing other than its name or field name |
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
 | `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, or property datatype) |
 | `E_DUPLICATE_TYPE` | Type name defined multiple times |
-| `E_DUPLICATE_SCHEMA` | Two schemas in one registry declare one name |
+| `E_DUPLICATE_SCHEMA` | Two schemas in one registry, or in one import closure, declare one name |
 | `E_RELATION_COLLISION` | A type carries conflicting relation definitions under one name: inherited definitions that differ, or an association and a composition sharing a name |
 | `E_MISSING_SOURCE_ID` | Required SourceID is missing |
 | `E_INVALID_SYNTHETIC_ID` | Synthetic SourceID has invalid format |
@@ -136,22 +136,22 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
 | `E_LOAD_IO_FAILURE` | I/O error during schema loading |
-| `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines |
+| `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, or is larger than the size limit |
 | `E_LOAD_SOURCE_CHANGED` | A source a shared registry holds with content that differs from the load's: re-registered after an edit, or imported where the load's own bytes for it differ from the ones the registry compiled |
 | `E_UNKNOWN_ANNOTATION` | Annotation name not in the built-in registry for its placement |
 | `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
-| `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation |
+| `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation, or conflicting annotations a type inherits for one property |
 | `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |
 | `W_ANNOTATION_SHADOWED` | A re-declaration silently drops an inherited property's annotations (warning) |
-| `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so every value stored through it loses its UTC offset, its fractional second, or both (Warning, v0.13+) |
+| `W_TIMESTAMP_LOSSY_FORMAT` | `Timestamp["layout"]` declares a layout that cannot reproduce an instant, so a value stored through it can read back as another instant (Warning, v0.13+) |
 
 ### Instance Validation
 
 | Code | Meaning |
 | ---- | ------- |
 | `E_INSTANCE_TYPE_NOT_FOUND` | Type referenced in instance data not found |
-| `E_ABSTRACT_TYPE` | Attempt to instantiate an abstract type |
-| `E_PART_TYPE_DIRECT` | Attempt to directly instantiate a part type |
+| `E_ABSTRACT_TYPE` | Attempt to instantiate an abstract type, an empty batch under its name included |
+| `E_PART_TYPE_DIRECT` | Attempt to directly instantiate a part type, an empty batch under its name included |
 | `E_TYPE_MISMATCH` | Value has wrong type for its property |
 | `E_MISSING_REQUIRED` | Required property is missing |
 | `E_UNKNOWN_FIELD` | Unexpected field in instance data |
@@ -165,7 +165,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_UNRESOLVED_REQUIRED_COMPOSITION` | Required composition is unresolved |
 | `E_COMPOSITION_NOT_FOUND` | Referenced composition not found |
 | `E_COMPOSITION_DEPTH_EXCEEDED` | Composed nesting deeper than the bound (32) |
-| `E_INVALID_TYPE_TAG` | `$type` tag has invalid format |
+| `E_INVALID_TYPE_TAG` | A JSON top-level key or CSV type-column value is not a type name |
 | `E_CASE_FOLD_COLLISION` | Input fields collide after case-folding |
 
 ### Graph
@@ -173,30 +173,31 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | Code | Meaning |
 | ---- | ------- |
 | `E_DUPLICATE_PK` | Duplicate primary key in graph |
-| `E_DUPLICATE_COMPOSED_PK` | Duplicate composed child primary key |
+| `E_DUPLICATE_COMPOSED_PK` | Two children of one `(many)` composition share a primary key, or a `(one)` composition holds several |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
 | `E_GRAPH_TYPE_NOT_FOUND` | Type not found in graph operations |
 | `E_GRAPH_PARENT_NOT_FOUND` | Parent node not found for composed child |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
-| `E_GRAPH_MISSING_PK` | Primary key missing in graph operations |
-| `E_GRAPH_CARDINALITY` | Association carries more targets than its `(one)` multiplicity allows (v0.15+) |
-| `E_GRAPH_UNKNOWN_RELATION` | Instance data under a relation name the type does not declare (v0.15+) |
+| `E_GRAPH_MISSING_PK` | A root whose type declares no primary key |
+| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: several targets at `Graph.Add`, several edges and unresolved records in a snapshot or `.ys` document (v0.15+) |
+| `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one (v0.15+) |
 | `E_GRAPH_ABSTRACT_TYPE` | Instance of an abstract type rejected by the graph (v0.15+) |
-| `E_GRAPH_INVALID_PK` | Instance primary key empty or disagreeing with its own key properties (v0.15+) |
+| `E_GRAPH_INVALID_PK` | Primary key empty, of the wrong arity, with a component `graph.ParseKey` cannot read back, with a key property absent or null, or disagreeing with its own key properties; or an association target key of the wrong arity or with such a component (v0.15+) |
 
 ### Snapshot
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON or wrong structure |
+| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, wrong structure, or content a structural rule refuses (an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict); from `snapshot.Marshal`, an indent that is not whitespace or a property value the wire cannot carry |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
 | `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema |
-| `E_SNAPSHOT_TYPE_MISMATCH` | Instances section inconsistent with the types table |
-| `E_SNAPSHOT_DANGLING_REFERENCE` | Edge target references non-existent instance |
-| `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges (invalid) |
-| `E_SNAPSHOT_INVALID_ROOT` | Instances group names a type that cannot be a root: abstract, part, or no primary key |
+| `E_SNAPSHOT_TYPE_MISMATCH` | A type row that contradicts its position: a root's that is not its group's, a duplicate instance's that is not its record's, a composed child's or association record's target row that is not the relation's declared target, or a composed duplicate's row that is not its composition's declared target |
+| `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict or parent, or an unresolved record's source names no instance |
+| `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children stand under a name the type does not declare as a composition |
+| `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a root duplicate record names a type that cannot be a root: abstract, part, or no primary key |
+| `E_SNAPSHOT_UNNAMEABLE_TYPE` | An instances group or a root duplicate record names a type the entry schema reaches only through an intermediate import, so it has no name form |
 | `W_SNAPSHOT_VALUE_DROPPED` | Writer held a value the wire cannot carry at that position and did not write it |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
@@ -204,19 +205,21 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content |
 | `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Error on body-reading surfaces, Warning on header-only reads (v0.15+) |
 | `W_SNAPSHOT_PATH_FALLBACK` | Provenance path could not be parsed (Warning) |
-| `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, or a directory `ScanDirSlice` fails to read (v0.3+) |
+| `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `ScanDirSlice` fails to read (v0.3+), or a reader `snapshot.HeaderOnlyRead` reads failing with an error that is not a truncation, Fatal (from the release after v0.21.0) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
 | `W_SNAPSHOT_VALUE_NONCONFORMING` | A stored `Timestamp`, `Date` or `UUID` value does not conform to its schema constraint; reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |
-| `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record for a `Required` association; reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
+| `W_SNAPSHOT_UNRESOLVED_REQUIRED` | A loaded document carries an unresolved record for an association the schema declares required (read from the schema, never the record); reported only under `snapshot.WithRevalidation`, at that option's severity (v0.15+) |
 | `W_SNAPSHOT_PATH_EXTENSION` | A snapshot was written to a path that does not end in `.ys`; the write succeeded, and a reader that discovers snapshots by extension will not find it |
 
 ### Adapter
 
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
-| `E_ADAPTER_PARSE` | All | Format-specific parsing error |
-| `E_CSV_COERCE` | CSV | Cell value could not be coerced to expected type |
+| `E_ADAPTER_PARSE` | JSON, CSV | The input is not well formed |
+| `E_ADAPTER_IO` | CSV | The reader a streamed parse reads from failed; Fatal, and the CLI exits 3 as for any I/O failure. Module-wide by name, as `E_ADAPTER_PARSE` is, but the CSV adapter is the one parser that streams: the JSON adapter takes bytes |
+| `E_CSV_COERCE` | CSV | A cell's text does not coerce to the type its member declares |
+| `E_CSV_CONFIG` | CSV | The adapter holds a setting this parse cannot use; no record is read |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
 | `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |

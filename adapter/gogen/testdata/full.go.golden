@@ -38,12 +38,12 @@ type County struct {
 	Tier       Tier                        `json:"tier"`
 	Status     CountyStatus                `json:"status"`
 	Population int64                       `json:"population"`
-	Centroid   []float64                   `json:"centroid,omitempty"`
-	Aliases    []FipsCode                  `json:"aliases,omitempty"`
+	Centroid   []float64                   `json:"centroid,omitzero"`
+	Aliases    []FipsCode                  `json:"aliases,omitzero"`
 	CreatedAt  time.Time                   `json:"created_at"`
 	UpdatedAt  *time.Time                  `json:"updated_at,omitempty"`
 	HasDetail  []*Detail                   `json:"has_detail,omitempty"`
-	InState    *EDGE_County_in_state_State `json:"in_state"`
+	InState    *EDGE_County_in_state_State `json:"in_state,omitempty"`
 }
 
 type EDGE_County_in_state_State struct {
@@ -56,9 +56,9 @@ type Graph struct {
 	County []*County `json:"County,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// module-root-relative path, as verbatim .yammm text. Read it through
-// SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"full.yammm": "schema \"full\"\n\ntype FipsCode = String [5, 5]\ntype Tier = Enum [\"gold\", \"silver\"]\n\nabstract type Auditable {\n\tcreated_at Timestamp required\n\tupdated_at Timestamp\n}\n\npart type Detail {\n\tnote String\n}\n\ntype State {\n\tcode String primary\n\tname String required\n}\n\ntype County extends Auditable {\n\tfips FipsCode primary\n\ttier Tier required\n\tstatus Enum [\"active\", \"merged\"] required\n\tpopulation Integer required\n\tcentroid Vector [2]\n\taliases List <FipsCode>\n\t--> IN_STATE (one) State {\n\t\tsince Integer required\n\t}\n\t*-> HAS_DETAIL (many) Detail\n}\n",
 }
@@ -66,15 +66,15 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "full.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// module-root-relative path. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
 //
-// The synthetic root is what keeps the loaded type identities stable. Passing
-// module root "." instead also re-loads, but "." canonicalizes against the
-// process working directory, which then lands inside every TypeID.
+// The synthetic root keeps the loaded type identities stable: no working
+// directory, checkout or mount point enters them. Any root of that form
+// serves; generation verified this one.
 func SerializedSources() map[string][]byte {
 	m := make(map[string][]byte, len(serializedSources))
 	for k, v := range serializedSources {

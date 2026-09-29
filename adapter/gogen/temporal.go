@@ -25,61 +25,71 @@ const dateLayout = time.DateOnly
 // layout. A default-layout Timestamp stays time.Time, whose own JSON codec
 // already speaks RFC 3339 with nanoseconds — the form the library stores.
 type temporalTypes struct {
-	date    string            // dateGoName once any non-alias Date position exists
-	layouts map[string]string // custom layout -> reserved Go type name
+	date    string            // dateGoName once emission names Date at some position
+	layouts map[string]string // custom layout -> the name table's Go type name
 	helpers bool              // any codec-bearing type is emitted
 }
 
-// registerTemporalTypes walks every constraint position goBaseType can reach
-// and assigns each custom layout its Go name in sorted-layout order, so a
-// name depends on the layout set alone. A DataType whose own kind is
-// temporal is its own carrier and is not noted.
-func (g *generator) registerTemporalTypes() {
-	set := map[string]bool{}
-	var note func(c schema.Constraint)
-	note = func(c schema.Constraint) {
-		if isAlias(c) {
-			return
-		}
-		switch c.Kind() {
-		case schema.KindDate:
-			g.temporal.date = dateGoName
-		case schema.KindTimestamp:
-			if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
-				set[tc.Format()] = true
-			}
-		case schema.KindList:
-			if lc, ok := c.(schema.ListConstraint); ok {
-				note(lc.Element())
-			}
-		}
-	}
+// temporalDemand collects the temporal types emission will name while
+// collectTemporalDemand dry-runs it.
+type temporalDemand struct {
+	date    bool
+	layouts map[string]bool
+}
+
+// collectTemporalDemand dry-runs emission's own type resolution in collect
+// mode over every position emission renders, so a Date or layout is demanded
+// exactly when emission reaches it. It returns the demanded layouts, sorted.
+func (g *generator) collectTemporalDemand() ([]string, error) {
+	g.collect = &temporalDemand{layouts: map[string]bool{}}
+	defer func() { g.collect = nil }()
 	for _, sc := range g.schema.Closure() {
 		for _, dt := range sc.DataTypesSlice() {
-			if lc, ok := dt.Constraint().(schema.ListConstraint); ok {
-				note(lc.Element())
-			}
+			// A temporal DataType is its own carrier (emitNamedTypes).
 			if temporalLayout(dt.Constraint()) != "" {
 				g.temporal.helpers = true
+				continue
 			}
-		}
-		for _, t := range sc.TypesSlice() {
-			for _, p := range t.PropertiesSlice() {
-				note(p.Constraint())
+			if isDefaultTimestamp(dt.Constraint()) {
+				continue
 			}
-			for _, rel := range t.AssociationsSlice() {
-				for _, ep := range rel.PropertiesSlice() {
-					note(ep.Constraint())
-				}
+			if _, err := g.dataTypeBase(sc, dt); err != nil {
+				return nil, fmt.Errorf("gogen: datatype %q: %w", dt.Name(), err)
 			}
 		}
 	}
-	g.temporal.layouts = make(map[string]string, len(set))
-	for _, layout := range slices.Sorted(maps.Keys(set)) {
-		g.temporal.layouts[layout] = g.names.reserve(layoutTypeBase(layout))
+	for _, t := range g.closureTypes() {
+		owner := g.typeOwner(t)
+		for _, p := range t.AllPropertiesSlice() {
+			if _, err := g.goFieldType(owner, p); err != nil {
+				return nil, fmt.Errorf("%s property %q: %w", owner.label, p.Name(), err)
+			}
+		}
 	}
-	if g.temporal.date != "" || len(set) > 0 {
+	for _, e := range g.edges {
+		owner := g.edgeOwner(e)
+		for _, p := range e.rel.PropertiesSlice() {
+			if _, err := g.goFieldType(owner, p); err != nil {
+				return nil, fmt.Errorf("%s property %q: %w", owner.label, p.Name(), err)
+			}
+		}
+	}
+	if g.collect.date {
+		g.temporal.date = dateGoName
+	}
+	layouts := slices.Sorted(maps.Keys(g.collect.layouts))
+	if g.temporal.date != "" || len(layouts) > 0 {
 		g.temporal.helpers = true
+	}
+	return layouts, nil
+}
+
+// registerTemporalTypes records the name table's name for every demanded
+// layout.
+func (g *generator) registerTemporalTypes(layouts []string) {
+	g.temporal.layouts = make(map[string]string, len(layouts))
+	for _, layout := range layouts {
+		g.temporal.layouts[layout] = g.names.layouts[layout]
 	}
 }
 
@@ -106,11 +116,8 @@ func isDefaultTimestamp(c schema.Constraint) bool {
 	return ok && tc.Format() == ""
 }
 
-// layoutTypeBase derives a per-layout type name from the layout alone:
-// "Timestamp" followed by every letter and digit of the layout, so the name
-// is a legal exported identifier that no unrelated schema edit can move.
-// The caller reserves it, so a schema type of the same name keeps the bare
-// identifier and the synthesized one takes the numbered suffix.
+// layoutTypeBase is a per-layout type's bare spelling: "Timestamp" and every
+// letter and digit of the layout.
 func layoutTypeBase(layout string) string {
 	var b strings.Builder
 	b.WriteString("Timestamp")
@@ -120,6 +127,12 @@ func layoutTypeBase(layout string) string {
 		}
 	}
 	return b.String()
+}
+
+// layoutTypeExact is a per-layout type's exact spelling, "Timestamp_" and the
+// layout written by [exactPart].
+func layoutTypeExact(layout string) string {
+	return exactSpelling(wordLayout, layout)
 }
 
 // emitTemporalTypes writes the codec helpers, the Date type and every

@@ -191,8 +191,8 @@ func TestChecks_VectorDimensionBoundariesAreAccepted(t *testing.T) {
 		dims string
 		want int
 	}{
-		{"1", minVectorDimensions},
-		{"65536", maxVectorDimensions},
+		{"1", MinVectorDimensions},
+		{"65536", MaxVectorDimensions},
 	}
 	for _, tc := range tests {
 		t.Run(tc.dims, func(t *testing.T) {
@@ -592,9 +592,9 @@ func TestChecks_PatternListIsTruncatedAtTheCap(t *testing.T) {
 		t.Fatalf("got %d issues, want 1: %v", len(issues), issues)
 	}
 	c := file.Types[0].Properties[1].Constraint
-	if got := len(c.PatternRegexps()); got != maxPatterns {
+	if got := len(c.PatternRegexps()); got != MaxPatterns {
 		t.Errorf("PatternRegexps() = %d, want %d — the list past the cap must not reach the constraint",
-			got, maxPatterns)
+			got, MaxPatterns)
 	}
 }
 

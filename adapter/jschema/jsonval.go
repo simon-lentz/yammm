@@ -48,9 +48,10 @@ func array(vs ...val) val { return val{kind: kindArray, arr: vs} }
 
 // scalar renders x as a JSON scalar with HTML escaping disabled, so text like
 // "endDate > startDate" survives into the output verbatim rather than as
-// > escapes. Inputs are generator-controlled (strings, int64s, float64s,
-// bools); anything unmarshalable is a generator bug and panics rather than
-// producing broken output.
+// \u003e escapes. Inputs are generator-controlled (strings, int64s, float64s,
+// bools), and a schema's Float bounds are finite because the DSL and the
+// Builder both refuse another; anything unmarshalable is a generator bug and
+// panics rather than producing broken output.
 func scalar(x any) val {
 	var sb strings.Builder
 	enc := json.NewEncoder(&sb)
@@ -76,15 +77,12 @@ func (v val) stringValue() (string, bool) {
 	return s, true
 }
 
-// raw wraps a pre-rendered JSON fragment verbatim. The fragment must be a
-// single-line value: it participates in compact-width measurement as-is.
-func raw(j json.RawMessage) val { return val{kind: kindRaw, raw: j} }
-
 // compact returns v's single-line rendering: `{ "k": v, ... }` for objects,
 // `[v, ...]` for arrays, and the raw fragment for scalars. Empty containers
-// render as {} and []. Recomputed per render decision; document trees are
-// small (one per schema type/relation), so the quadratic worst case is
-// irrelevant in practice.
+// render as {} and []. render calls it on each node it visits and visits a
+// node's children only when that rendering is too wide, so a subtree is
+// rendered again once for each expanded node above it; the depth grows with
+// the schema's List nesting, not with its size.
 func (v val) compact() string {
 	switch v.kind {
 	case kindObject:

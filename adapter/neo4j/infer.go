@@ -106,8 +106,10 @@ func (a *Adapter) InferSchema(
 		}
 		tgtSchema, tgtType, ok := a.parseLabel(rel.TargetLabels[0])
 		if !ok {
-			// A target this configuration did not write is kept as a
-			// cross-schema guess rather than dropped.
+			// A target this configuration did not write is read by its
+			// label's text rather than dropped: a cross-schema guess where its
+			// schema part is not empty and differs from the source's, this
+			// schema's type otherwise.
 			tgtSchema, tgtType, _ = strings.Cut(rel.TargetLabels[0], a.config.labelSeparator)
 		}
 

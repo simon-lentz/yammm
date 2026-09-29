@@ -81,10 +81,11 @@ func WithLabelPrefix(prefix string) Option {
 // gating them apart suppressed the constraint for one declaration and not for
 // an identical one.
 //
-// Property-type constraints require Neo4j 5.9, which is older than the 5.0
-// floor this adapter otherwise supports. On a server between 5.0 and 5.8 this
-// option is what turns them off; nothing else does, and the adapter has no
-// version input with which to decide for itself.
+// Property-type constraints require Neo4j 5.9, and one of a LIST type Neo4j
+// 5.10, each newer than the 5.0 floor this adapter otherwise supports. On an
+// Enterprise server older than that this option is what turns them off, and the
+// adapter has no version input with which to decide for itself. Under
+// [WithEdition]([Community]) none is emitted, as no kind but UNIQUE is.
 //
 // When enabled alongside WithRequiredOnlyTypeConstraints(true), only required
 // properties receive type constraints. See WithRequiredOnlyTypeConstraints
@@ -117,14 +118,14 @@ func WithRequiredOnlyTypeConstraints(enabled bool) Option {
 
 // WithNodeKeyConstraints controls whether NODE KEY constraints are used instead
 // of separate UNIQUE + NOT NULL for primary keys. NODE KEY is semantically
-// equivalent but expressed as a single constraint. Requires Neo4j 5.7+.
-// Requires Enterprise edition. Under [WithEdition]([Community]) the request
+// equivalent but expressed as a single constraint. Requires Enterprise
+// edition, as NODE KEY does on every Neo4j release this adapter supports. Under [WithEdition]([Community]) the request
 // cannot be honored — a Community server holds no NODE KEY — so primary keys
 // fall back to UNIQUE, the strongest kind that edition affords, and
 // [W_NEO4J_NODE_KEY_UNSUPPORTED] reports the substitution. Community output is
 // therefore identical whether or not this option is set.
 //
-// Default: false (generates separate UNIQUE + NOT NULL for broader compatibility).
+// Default: false (generates separate UNIQUE + NOT NULL).
 func WithNodeKeyConstraints(enabled bool) Option {
 	return func(c *adapterConfig) {
 		c.nodeKeyConstraints = enabled

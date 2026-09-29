@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/simon-lentz/yammm/internal/parse"
 )
 
 // ConstraintKind identifies the kind of constraint.
@@ -481,23 +483,41 @@ func (c EnumConstraint) NarrowsTo(child Constraint) bool {
 func (EnumConstraint) IsResolved() bool { return true }
 
 // PatternConstraint constrains string values to match one or more regex patterns.
-// All patterns must match (conjunction semantics). Maximum 2 patterns for performance.
+// All patterns must match (conjunction semantics). The DSL states at most two,
+// and [Builder.Build] refuses more.
 type PatternConstraint struct {
 	patterns []string         // source pattern strings (public API)
 	compiled []*regexp.Regexp // compiled patterns (internal validation)
+	invalid  string           // the first source regexp.Compile refuses, with its error
 }
 
-// NewPatternConstraint creates a PatternConstraint from compiled patterns.
-// Maximum 2 patterns are allowed; extras are silently ignored.
+// NewPatternConstraint creates a PatternConstraint holding every pattern given,
+// each non-nil. A pattern means [regexp.Compile] of its source text, as a
+// .yammm source compiles it, so each is compiled again from its source: a
+// regexp built with [regexp.CompilePOSIX] or [regexp.Regexp.Longest] matches
+// by the source's Perl reading. A source that reading refuses, which POSIX
+// syntax can accept (a**), is kept as given, and [Builder.Build] and
+// [CheckConstraint] refuse the constraint as the DSL refuses the pattern. They
+// refuse a pattern writing a surrogate code point with a \x{…} escape too.
 func NewPatternConstraint(patterns []*regexp.Regexp) PatternConstraint {
-	n := min(len(patterns), 2)
-	strs := make([]string, n)
-	compiled := make([]*regexp.Regexp, n)
-	for i := range n {
-		strs[i] = patterns[i].String()
-		compiled[i] = patterns[i]
+	c := PatternConstraint{
+		patterns: make([]string, len(patterns)),
+		compiled: make([]*regexp.Regexp, len(patterns)),
 	}
-	return PatternConstraint{patterns: strs, compiled: compiled}
+	for i, re := range patterns {
+		c.patterns[i] = re.String()
+		perl, err := regexp.Compile(c.patterns[i])
+		if err != nil {
+			perl = re
+			if c.invalid == "" {
+				c.invalid = fmt.Sprintf("invalid regex pattern %q: %v", c.patterns[i], err)
+			}
+		} else if r, found := parse.SurrogateEscape(c.patterns[i]); found && c.invalid == "" {
+			c.invalid = parse.SurrogateMessage(c.patterns[i], r)
+		}
+		c.compiled[i] = perl
+	}
+	return c
 }
 
 func (PatternConstraint) Kind() ConstraintKind { return KindPattern }
@@ -544,7 +564,6 @@ func (c PatternConstraint) Equal(other Constraint) bool {
 	if !ok || len(c.patterns) != len(o.patterns) {
 		return false
 	}
-	// Order-insensitive comparison (max 2 patterns)
 	cp := slices.Clone(c.patterns)
 	op := slices.Clone(o.patterns)
 	slices.Sort(cp)
@@ -594,22 +613,27 @@ type ListConstraint struct {
 	hasMax  bool
 }
 
-// NewListConstraint creates a ListConstraint with no length bounds.
+// NewListConstraint creates a ListConstraint with no length bounds. The
+// element must be non-nil: [Builder.Build] and [CheckConstraint] refuse a List
+// with no element, which is what the zero ListConstraint holds.
 func NewListConstraint(element Constraint) ListConstraint {
 	return ListConstraint{element: element}
 }
 
-// ListMinLen creates a ListConstraint with a minimum length bound.
+// ListMinLen creates a ListConstraint with a minimum length bound and a non-nil
+// element.
 func ListMinLen(element Constraint, lo int64) ListConstraint {
 	return ListConstraint{element: element, minLen: lo, hasMin: true}
 }
 
-// ListMaxLen creates a ListConstraint with a maximum length bound.
+// ListMaxLen creates a ListConstraint with a maximum length bound and a non-nil
+// element.
 func ListMaxLen(element Constraint, hi int64) ListConstraint {
 	return ListConstraint{element: element, maxLen: hi, hasMax: true}
 }
 
-// ListLenBetween creates a ListConstraint with both min and max length bounds.
+// ListLenBetween creates a ListConstraint with both min and max length bounds
+// and a non-nil element.
 func ListLenBetween(element Constraint, lo, hi int64) ListConstraint {
 	return ListConstraint{element: element, minLen: lo, maxLen: hi, hasMin: true, hasMax: true}
 }
@@ -691,7 +715,13 @@ type AliasConstraint struct {
 	resolved     Constraint // the resolved underlying constraint
 }
 
-// NewAliasConstraint creates an AliasConstraint referencing a DataType.
+// NewAliasConstraint creates an AliasConstraint referencing a DataType. The
+// resolved argument has one kind of reader: a raw-constraint caller with no
+// schema, such as [instance.CheckValue], [instance.CanonicalValue] or the
+// Neo4j adapter's Coerce, reads it as the alias's meaning. [Builder.Build] does not: it drops the argument at any List
+// depth and resolves the name through completion, as a loaded schema is
+// resolved, so a DataType reference means its declaration and nothing else.
+// [CheckConstraint] refuses a reference whose resolved argument is nil.
 func NewAliasConstraint(dataTypeName string, resolved Constraint) AliasConstraint {
 	return AliasConstraint{dataTypeName: dataTypeName, resolved: resolved}
 }

@@ -2,12 +2,15 @@ package scripttest
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -18,6 +21,44 @@ const fixtureModule = "github.com/simon-lentz/yammm"
 // repoRoot is the repository root relative to this package's directory, where
 // go test runs the package's tests.
 const repoRoot = "../.."
+
+// pinGoDirective rewrites the fixture's copied go.mod to declare the RUNNING
+// toolchain. A fixture that copies the repository's module file inherits its
+// pin, and the scripts refuse a toolchain that is not the module's, so a copy
+// would refuse every run under another release.
+func (f *fixture) pinGoDirective() {
+	f.t.Helper()
+	b, err := os.ReadFile(filepath.Join(f.dir, "go.mod"))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	lines := strings.Split(string(b), "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "go ") {
+			lines[i] = "go " + goDirective()
+			break
+		}
+	}
+	f.write("go.mod", strings.Join(lines, "\n"))
+}
+
+// goDirective returns the running toolchain's version as a go.mod go directive
+// spells it: "1.26.0" or "1.27rc1", never "go1.26.0", and never a suffix.
+func goDirective() string {
+	return directiveOf(runtime.Version())
+}
+
+// directiveOf spells a toolchain version as a go.mod go directive: the version
+// less its "go" prefix and any experiment or build suffix. scripts/toolchain.sh
+// compares "go" and the directive with `go env GOVERSION`, which spells a
+// release and a prerelease the same way.
+func directiveOf(version string) string {
+	v := strings.TrimPrefix(version, "go")
+	if i := strings.IndexAny(v, "-+ "); i >= 0 {
+		v = v[:i]
+	}
+	return v
+}
 
 // fromRoot returns a slash-separated repository path relative to this package.
 func fromRoot(rel string) string {
@@ -43,8 +84,11 @@ type result struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{t: t, dir: t.TempDir()}
-	f.write("go.mod", "module "+fixtureModule+"\n\ngo 1.26.0\n")
-	for _, name := range []string{"test.sh", "vet.sh", "packages.sh", "lintconfig.sh"} {
+	// The go directive is the RUNNING toolchain's version, not a literal: the
+	// scripts hold a run to go.mod's toolchain and refuse a mismatch, and a
+	// fixture pinned to one release would refuse every run under another.
+	f.write("go.mod", "module "+fixtureModule+"\n\ngo "+goDirective()+"\n")
+	for _, name := range []string{"test.sh", "vet.sh", "packages.sh", "lintconfig.sh", "toolchain.sh"} {
 		f.copyScript(name)
 	}
 	for _, dir := range []string{"internal/testsummary", "internal/raceskip"} {
@@ -124,6 +168,7 @@ func (f *fixture) git(args ...string) {
 	f.t.Helper()
 	cmd := exec.CommandContext(f.t.Context(), "git", args...)
 	cmd.Dir = f.dir
+	cmd.Env = withoutRepositoryVars(f.t, os.Environ())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		f.t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
@@ -131,10 +176,16 @@ func (f *fixture) git(args ...string) {
 
 func (f *fixture) run(script string, args ...string) result {
 	f.t.Helper()
+	return f.runFrom(f.dir, script, args...)
+}
+
+// runFrom runs one of the fixture's scripts with dir as the working directory.
+func (f *fixture) runFrom(dir, script string, args ...string) result {
+	f.t.Helper()
 	//nolint:gosec // runs one of the repository's scripts, copied into the fixture's own module
-	cmd := exec.CommandContext(f.t.Context(), "bash", append([]string{"scripts/" + script}, args...)...)
-	cmd.Dir = f.dir
-	cmd.Env = append(fixtureEnv(), f.env...)
+	cmd := exec.CommandContext(f.t.Context(), "bash", append([]string{filepath.Join(f.dir, "scripts", script)}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = append(withoutRepositoryVars(f.t, fixtureEnv()), f.env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	var r result
@@ -150,13 +201,43 @@ func (f *fixture) run(script string, args ...string) result {
 	return r
 }
 
+// repositoryVars returns the variables `git rev-parse --local-env-vars` names:
+// each sets the repository, index or configuration git uses, whatever the
+// working directory. A commit
+// with -a runs the pre-commit hook with GIT_INDEX_FILE naming the commit's
+// temporary index, and a fixture's git inheriting it locks, and can write, the
+// real repository's index.
+var repositoryVars = sync.OnceValues(func() ([]string, error) {
+	out, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--local-env-vars").Output()
+	if err != nil {
+		return nil, err
+	}
+	return strings.Fields(string(out)), nil
+})
+
+// withoutRepositoryVars returns env without the variables repositoryVars names.
+func withoutRepositoryVars(t *testing.T, env []string) []string {
+	t.Helper()
+	vars, err := repositoryVars()
+	if err != nil {
+		t.Fatalf("git rev-parse --local-env-vars: %v", err)
+	}
+	return slices.DeleteFunc(env, func(kv string) bool {
+		name, _, _ := strings.Cut(kv, "=")
+		return slices.Contains(vars, name)
+	})
+}
+
 // fixtureEnv keeps a fixture's go commands inside the fixture module and off
-// the network, whatever the enclosing run sets.
+// the network, whatever the enclosing run sets. MUTATE_BASELINE_CACHE is
+// dropped because a fixture runs mutate.sh, which would otherwise read an
+// enclosing mutation run's recorded baseline, and TEST_DURATIONS because every
+// fixture's test.sh would otherwise write the enclosing run's durations file.
 func fixtureEnv() []string {
-	pinned := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK"}
+	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "MUTATE_BASELINE_CACHE", "TEST_DURATIONS"}
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
-		return slices.ContainsFunc(pinned, func(p string) bool { return strings.EqualFold(p, name) })
+		return slices.ContainsFunc(dropped, func(p string) bool { return strings.EqualFold(p, name) })
 	})
 	return append(env, "GOFLAGS=-mod=mod", "GOPROXY=off", "GOTOOLCHAIN=local", "GOWORK=off")
 }

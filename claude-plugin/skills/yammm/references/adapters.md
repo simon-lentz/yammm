@@ -57,7 +57,7 @@ adapter := csvAdapter.New(
 )
 ```
 
-The delimiter is `,`, the first row is the header, and list values join on `|`.
+The delimiter is `,` unless `csvAdapter.WithDelimiter` sets another (`'\t'` for TSV), the first row is always the header, and list elements, vector elements and edge-column segments join on `|` unless `csvAdapter.WithListSeparator` sets another separator, which the parse side splits on too.
 
 ### Parsing
 
@@ -70,7 +70,9 @@ parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, reader, typeResolve
 
 ```
 
-Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, timestamps, UUIDs, lists). Coercion failures produce `E_CSV_COERCE` diagnostics.
+Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, lists and vectors); a number cell must be a JSON number literal, and an Integer cell an integer one. Dates and timestamps are checked against their layout and kept as text, as the JSON adapter keeps them. Coercion failures produce `E_CSV_COERCE` diagnostics. A fault in the file's structure — a header the parser cannot use, a record the reader refuses, an edge group whose columns disagree — produces `E_ADAPTER_PARSE`, the code the JSON adapter reports a malformed document under; a setting the adapter cannot use produces `E_CSV_CONFIG`, before any byte is read; and a reader that fails produces a Fatal `E_ADAPTER_IO`, on which the CLI exits 3.
+
+Column names resolve as the validator resolves JSON keys: exact first, then case-insensitively (ASCII), with each key kept as the header spells it; pass `csvAdapter.WithStrictPropertyNames(true)` when the validator is strict (`instance.RecommendedOptions()` is). A name the schema does not declare reaches the validator, which reports it. A header that repeats a name or leaves a column unnamed is refused. A malformed record is reported and skipped; a reader that fails stops the parse with a Fatal diagnostic.
 
 BOM stripping: UTF-8 BOM bytes at the start of input are automatically stripped.
 
@@ -180,7 +182,7 @@ params, err := neo4jAdapter.CoerceParams(params, types)  // whole parameter map
 relProps, err := neo4jAdapter.CoerceRelProps(props, rel)  // one edge's property map, returned as a copy
 ```
 
-This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints. `CoerceRelProps` reaches the `rel_props` map inside a `$rows` row of a hand-built relationship MERGE, one nesting level below what `CoerceParams` walks. A `time.Time` is sent in a location the driver can encode: `time.Local` and any zone name the host cannot resolve become an offset; a resolvable IANA name is kept.
+This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints; a float at an Integer is an error, whole or not. `CoerceRelProps` reaches the `rel_props` map inside a `$rows` row of a hand-built relationship MERGE, one nesting level below what `CoerceParams` walks. A `time.Time` is sent in a location the driver can encode: `time.Local` and any zone name the host cannot resolve become an offset; a resolvable IANA name is kept when its offset agrees with the value's, and becomes an offset otherwise.
 
 ### Label Management
 
@@ -253,7 +255,7 @@ import "github.com/simon-lentz/yammm/adapter/gogen"
 
 Schema-in, bytes-out: `gogen.Marshal` maps a loaded, resolved schema to formatted, type-checked Go source — one struct per type, named Enum/DataType types, a generated `Date` type and one type per custom `Timestamp` layout (each embedding `time.Time` with a JSON codec in the stored string form), `EDGE_` association structs, a Graph aggregate keyed as the JSON adapter keys its output, and the embedded schema source, reachable through `SerializedSources()` / `SerializedEntry`, which re-loads hermetically (`schema.WithSourcesOnly`, no filesystem participation). Generated output is stdlib-only (imports at most `time` and `encoding/json`) and byte-reproducible across checkouts. Unlike the data adapters it has no instance-data path and returns a plain `error` rather than a `diag.Result`.
 
-Schemas with imports are flattened into one self-contained package; cross-schema identifier collisions are resolved by schema-qualification (two schemas' `Region` becomes `GeoRegion` / `CommonRegion`); an unresolvable same-schema clash (a type and a datatype of the same name) is a hard error.
+Schemas with imports are flattened into one self-contained package. A name unique in the closure stays bare; a name two entities claim, or a reserved name such as `Graph` claims, gives every claimant its exact spelling, which names its kind and its identity (for a type, its schema and name): two schemas' `Region` become `Type_geo__Region` / `Type_common__Region`, and a type and a datatype `Region` of one schema become `Type_geo__Region` / `DataType_geo__Region`. No name depends on declaration order, and adding a declaration never hands a name to another entity.
 
 Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --to go` (see `cli.md`).
 
@@ -265,9 +267,9 @@ Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --t
 import "github.com/simon-lentz/yammm/adapter/jschema"
 ```
 
-Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` accepts — one top-level key per concrete type (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
+Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` reads (it does not reproduce yammm's validation; `adapter/jschema`'s Fidelity Caveats list where the two differ) — one top-level key per type a data file can hold (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
 
-Wire the generated document into an editor for completion and validation while authoring data files (e.g. `# yaml-language-server: $schema=./fleet.schema.json`).
+Wire the generated document into an editor for completion and validation while authoring data files. For a JSON data file, use a `json.schemas` mapping in the editor's settings. A JSON data file cannot carry a `"$schema"` member: the envelope admits no member but a type name, and `adapter/json` refuses the key as a type tag (`E_INVALID_TYPE_TAG`). A `# yaml-language-server: $schema=./fleet.schema.json` comment wires a YAML file, but yammm reads no YAML data file — its data commands read JSON, JSONC and CSV — so that file gets the editor's checks alone.
 
 Full API semantics: the JSON Schema Generation section of `docs/API.md`. CLI form: `yammm gen --to jsonschema` (see `cli.md`).
 
@@ -279,18 +281,33 @@ Full API semantics: the JSON Schema Generation section of `docs/API.md`. CLI for
 import "github.com/simon-lentz/yammm/adapter/markdown"
 ```
 
-Schema-in, bytes-out: `markdown.Marshal` maps a loaded, resolved schema to one self-contained Markdown reference document covering the whole import closure — a Mermaid class diagram (each type's own members as `name KindLabel` pairs, `<<Abstract>>`/`<<Part>>` stereotypes, DSL-labeled relation edges, `Parent <|-- Child` inheritance edges), per-type sections in declaration order (flattened property tables with `from <Owner>` inherited-row markers, DSL-form constraint rendering like `String[1, 100]`, relation bullets with linked targets and edge-property sub-tables, invariant source fences extracted from the schema source), and Name | Definition | Description data-type tables. Imported schemas get their own `## Schema <Name> (imported as <alias>)` sections with collision-proof `schemaName.TypeName` headings. Output is deterministic and structurally self-checked (fence balance, link→anchor resolution, table column counts) before return. Option: `WithClassDiagram(false)` omits the diagram. Plain `error`, no instance-data path, no source-backing requirement (on Builder-built schemas invariants degrade to message-only).
+Schema-in, bytes-out: `markdown.Marshal` maps a loaded, resolved schema to one self-contained Markdown reference document covering the whole import closure — a Mermaid class diagram (each type's own members as `name KindLabel` pairs, `<<Abstract>>`/`<<Part>>` stereotypes, DSL-labeled relation edges, `Parent <|-- Child` inheritance edges), per-type sections in declaration order (flattened property tables with `from <Owner>` inherited-row markers, DSL-form constraint rendering like `String[1, 100]`, relation bullets with linked targets and edge-property sub-tables, invariant source fences extracted from the schema source), and Name | Definition | Description data-type tables. Imported schemas get their own `## Schema <Name> (imported as <alias>)` sections, a transitive import, which has no alias, a plain `## Schema <Name>`. A type is named as the entry schema names it: bare when the entry declares it, `alias.TypeName` when the entry imports it directly, and `TypeName (schemaName)` when the entry reaches it only through another import. Headings take GitHub's anchors (`-1`, `-2` on a repeated slug), allocated over every heading element in the document, doc-comment headings and raw HTML `<h1>`–`<h6>` included, as GitHub anchors them, so no schema is refused for its names and every link lands on its heading. Schema text renders literally under GitHub-flavored Markdown: an empty HTML comment splits each colon, `@` and dot after `www` in a schema name, an invariant message or a `<code>` cell, since GitHub autolinks through escapes. Output is deterministic, is a versioned surface (`docs/VERSIONING.md`), and is self-checked before return by reading it with that parser (`github.com/yuin/goldmark`): every heading and table the generator wrote must read as written, outside doc comments the links read must be exactly the internal links it wrote, and every class-diagram line must be a form the emitter writes, a subset of Mermaid's class-diagram grammar (class ids are ASCII and never hold `direction`; a class label writes every character but an ASCII letter or digit, a dot, and an underscore between two ASCII letters or digits as an entity code, and an edge label writes each character Mermaid reads as syntax as one, so `one:many` labels an edge `one#58;many`); doc-comment text is the author's Markdown and is not checked, in a description cell too, and a code fence or HTML block it leaves open is closed at the end of its block. Options: `WithClassDiagram(false)` omits the diagram, and `WithClassMembers(false)` drops the member lines inside each class. Plain `error`, no instance-data path, no source-backing requirement (on Builder-built schemas invariants degrade to message-only).
 
 Full API semantics: the Markdown Documentation Generation section of `docs/API.md`. CLI form: `yammm gen --to md` (see `cli.md`).
 
 ---
+
+## Adapter Refusal Classes
+
+A write reports through an `error`, not a `diag.Result`, so the adapters carry sentinel classes a caller matches with `errors.Is` instead of matching message text.
+
+| Sentinel | Adapter | Meaning |
+| -------- | ------- | ------- |
+| `csv.ErrUnrepresentable` | CSV | The snapshot holds a value CSV cannot write so that its own parser reads it back unchanged: a composed child, a lone all-empty association, a cell holding a CR LF, a list of one empty element, a null list element, a composite value (a map, an array, a pointer or a struct) |
+| `csv.ErrConfig` | CSV | The adapter holds a setting it cannot use: a list separator the parser could not find again, or a delimiter `encoding/csv` refuses. Refused before any writer is requested. The parse-side twin is `E_CSV_CONFIG` |
+| `csv.ErrNilSnapshot`, `json.ErrNilResult` | CSV, JSON | A write method received a nil snapshot |
+| `json.ErrUnrepresentable` | JSON | The snapshot holds a value JSON cannot write: a non-finite float (NaN or an infinity) at any depth, which a validated `Float` never is, or a Go value `encoding/json` refuses |
+
+An I/O failure and a cancellation match none of these classes.
 
 ## Adapter Error Codes
 
 | Code | Adapter | Meaning |
 | ---- | ------- | ------- |
 | `E_ADAPTER_PARSE` | All | Format-specific parsing error |
-| `E_CSV_COERCE` | CSV | Cell value could not be coerced to expected type |
+| `E_ADAPTER_IO` | CSV | The reader a streamed parse reads from failed; Fatal, and the CLI exits 3 as for any I/O failure. Module-wide by name, as `E_ADAPTER_PARSE` is, but the CSV adapter is the one parser that streams: the JSON adapter takes bytes |
+| `E_CSV_COERCE` | CSV | A cell's text does not coerce to the type its member declares |
+| `E_CSV_CONFIG` | CSV | The adapter holds a setting this parse cannot use; no record is read |
 | `E_NEO4J_LABEL_COLLISION` | Neo4j | Two types produce the same Neo4j label |
 | `E_NEO4J_INVALID_IDENTIFIER` | Neo4j | Name not valid as Neo4j identifier |
 | `E_NEO4J_UNSUPPORTED_TYPE` | Neo4j | Constraint kind has no Neo4j type mapping |

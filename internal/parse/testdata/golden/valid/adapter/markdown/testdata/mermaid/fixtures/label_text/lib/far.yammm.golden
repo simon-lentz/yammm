@@ -1,0 +1,37 @@
+{
+  "name": "\"*b* _c_ \\\\d $y$ ﬂ°x¶ß #1; \u003ci\u003e\u0026amp; direction LR\"",
+  "span": {
+    "s": 0,
+    "e": 61
+  },
+  "types": [
+    {
+      "name": "Mark",
+      "name_span": {
+        "s": 68,
+        "e": 72
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 79,
+              "e": 85
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 76,
+            "e": 93
+          }
+        }
+      ],
+      "span": {
+        "s": 63,
+        "e": 95
+      }
+    }
+  ]
+}

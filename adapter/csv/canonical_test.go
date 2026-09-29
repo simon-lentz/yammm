@@ -25,9 +25,14 @@ const (
 )
 
 // bypassCanonicalSnapshot builds a graph through instance.NewValidInstance,
-// which receives no schema and runs no validation. It is the only way a
-// non-canonical value reaches a writer, and therefore the only thing that can
-// prove the writer's own arm runs.
+// which receives no schema and runs no validation, from native Go values.
+//
+// It does not prove the writer's canonicalization arm runs for these kinds:
+// Graph.Add rewrites a Timestamp, a Date and a UUID to its stored form before
+// any writer sees it, so discarding the writer's canonical form leaves every
+// test below green. They pin the END-TO-END text a native value exports as. The
+// writer's own arm is load-bearing for numbers alone, which Add leaves as they
+// arrived, and [TestListRendering_ABypassBuiltFloat32RendersAsAFloatDoes] pins it.
 func bypassCanonicalSnapshot(t *testing.T, s *schema.Schema) *graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
@@ -118,9 +123,9 @@ func marshalCanonicalFixture(t *testing.T) map[string]string {
 	return got
 }
 
-// TestMarshalSnapshot_CanonicalizesBypassBuiltProperties kills the property
-// arm. Without it a time.Time falls to fmt.Sprint and writes Go's default
-// layout into a cell whose schema declares RFC 3339.
+// TestMarshalSnapshot_CanonicalizesBypassBuiltProperties pins the text a
+// native property exports as: never Go's default time layout, in a cell whose
+// schema declares RFC 3339.
 func TestMarshalSnapshot_CanonicalizesBypassBuiltProperties(t *testing.T) {
 	t.Parallel()
 	sensor := marshalCanonicalFixture(t)["Sensor"]
@@ -135,9 +140,8 @@ func TestMarshalSnapshot_CanonicalizesBypassBuiltProperties(t *testing.T) {
 	}
 }
 
-// TestMarshalSnapshot_CanonicalizesListElements kills the list-element
-// recursion. A suite with only scalar cases cannot tell it from dead code,
-// because the scalar arm would keep every scalar assertion green.
+// TestMarshalSnapshot_CanonicalizesListElements pins the same for a list's
+// elements, which a suite of scalar cases would not reach.
 func TestMarshalSnapshot_CanonicalizesListElements(t *testing.T) {
 	t.Parallel()
 	sensor := marshalCanonicalFixture(t)["Sensor"]
@@ -148,10 +152,10 @@ func TestMarshalSnapshot_CanonicalizesListElements(t *testing.T) {
 	}
 }
 
-// TestMarshalSnapshot_CanonicalizesForeignKeyColumns kills the FK arm. The
-// value lives on the association's TARGET type, so the row's own type is not
-// enough to reach its constraint — and the target's key here is a
-// declared-layout Timestamp, which nothing else in the row renders.
+// TestMarshalSnapshot_CanonicalizesForeignKeyColumns pins the same for a
+// foreign key. The value lives on the association's TARGET type, so the row's
+// own type is not enough to reach its constraint — and the target's key here is
+// a declared-layout Timestamp, which nothing else in the row renders.
 func TestMarshalSnapshot_CanonicalizesForeignKeyColumns(t *testing.T) {
 	t.Parallel()
 	out := marshalCanonicalFixture(t)

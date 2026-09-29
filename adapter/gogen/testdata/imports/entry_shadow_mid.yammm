@@ -1,0 +1,8 @@
+schema "emid"
+
+import "entry_shadow_leaf.yammm" as leaf
+
+type Mid {
+	id String primary
+	--> TO_NODE (one) leaf.Node
+}

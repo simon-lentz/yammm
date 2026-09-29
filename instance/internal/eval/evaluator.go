@@ -279,7 +279,8 @@ func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error
 	return val.Unwrap(), nil
 }
 
-// evalProperty performs case-insensitive property lookup within the current scope.
+// evalProperty reads a bare name within the current scope by [Scope.LookupFold]:
+// a property in any ASCII casing, a relation by its name or its field name.
 //
 // Safety: Schema validation prevents types from having multiple properties
 // that fold to the same lowercase name (e.g., "Name" and "name" cannot coexist),
@@ -287,8 +288,8 @@ func (e *Evaluator) evalVar(children []expr.Expression, scope Scope) (any, error
 //
 // Missing optional properties evaluate to nil, enabling patterns like:
 //
-//	age lest 0        (default value)
-//	age then age > 18 (conditional validation)
+//	age -> Lest { 0 }                 (default value)
+//	age -> Then |$a| { $a > 18 }      (conditional validation)
 func (e *Evaluator) evalProperty(children []expr.Expression, scope Scope) (any, error) {
 	if len(children) != 1 {
 		return nil, errors.New("property lookup requires 1 operand")
@@ -327,10 +328,10 @@ func (e *Evaluator) evalMember(ctx context.Context, children []expr.Expression, 
 	return e.accessMember(obj, memberName)
 }
 
-// accessMember reads name from obj. Every object that reaches here is an
+// accessMember reads name from obj. A map a member is read from is an
 // immutable.Map[string] — a stored value unwraps to one and every scope wraps
-// its map — so that is the only receiver. A name with no exact match folds
-// by immutable.Properties' rule, the one property lookup uses.
+// its map — and it reads by [readMember], the rule a bare name reads by. Nil
+// reads nil, and any other value is an error.
 func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	if obj == nil {
 		return nil, nil //nolint:nilnil // member access on nil returns nil
@@ -339,10 +340,7 @@ func (e *Evaluator) accessMember(obj any, name string) (any, error) {
 	if !ok {
 		return nil, fmt.Errorf("cannot access member on %T", obj)
 	}
-	if val, exists := m.Get(name); exists {
-		return val.Unwrap(), nil
-	}
-	if val, exists := immutable.PropertiesOf(m).GetFold(name); exists {
+	if val, exists := readMember(immutable.PropertiesOf(m), name); exists {
 		return val.Unwrap(), nil
 	}
 	return nil, nil //nolint:nilnil // missing key returns nil

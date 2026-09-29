@@ -47,10 +47,7 @@ type Unrelated {
 	if result.HasErrors() {
 		t.Fatalf("elsewhere fixture must load: %v", result.Err())
 	}
-	g, err := newGenerator(other)
-	if err != nil {
-		t.Fatalf("newGenerator: %v", err)
-	}
+	g := newTestGenerator(t, other)
 
 	thing, ok := owner.Type("Thing")
 	if !ok {
@@ -69,13 +66,31 @@ type Unrelated {
 	if got, want := g.superLink(thing, ref), "Root"; got != want {
 		t.Errorf("superLink = %q, want the reference spelling %q", got, want)
 	}
+	// The spelling is schema text: an alias www would otherwise autolink.
+	www := schema.NewTypeRef("www", "Root", location.Span{})
+	if got, want := g.superLink(thing, www), "www<!---->.Root"; got != want {
+		t.Errorf("superLink = %q, want the escaped reference spelling %q", got, want)
+	}
+
+	aliased := loadSources(t, map[string][]byte{
+		"entry.yammm": []byte("schema \"e\"\nimport \"x.yammm\" as www\ntype T {\n  id String primary\n  --> AT (one) www.Other\n}\n"),
+		"x.yammm":     []byte("schema \"x\"\ntype Other {\n  id String primary\n}\n"),
+	})
+	tt, ok := aliased.Type("T")
+	if !ok {
+		t.Fatal("T missing from the aliased fixture")
+	}
+	at, ok := tt.Relation("AT")
+	if !ok {
+		t.Fatal("AT missing from T")
+	}
+	if got, want := g.relationTarget(at), "www<!---->.Other"; got != want {
+		t.Errorf("relationTarget = %q, want the escaped reference spelling %q", got, want)
+	}
 
 	// The control: over its own document both resolve to links, so the
 	// assertions above pin the fallback and not a renderer that never links.
-	gOwn, err := newGenerator(owner)
-	if err != nil {
-		t.Fatalf("newGenerator(owner): %v", err)
-	}
+	gOwn := newTestGenerator(t, owner)
 	if got := gOwn.relationTarget(rel); got == "Other" {
 		t.Error("relationTarget did not link a target its own document contains")
 	}

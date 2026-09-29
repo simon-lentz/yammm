@@ -13,12 +13,10 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// WithRevalidation is documented as the option that reports what Load admits:
-// "a .ys can hold a graph that fails the graph layer's Add-time relation
-// guards ... WithRevalidation is the option that reports all of it". These two
-// tests pin the half that was silent — a wire row naming a type the relation
-// does not declare, which revalidation derived from the SCHEMA and never
-// compared against the document.
+// A wire row naming a type the relation does not declare is a structural
+// fault: graph.Add stages every edge at its association's declared target and
+// matches a composed child to its composition's, so Load refuses the document
+// with no option. These two tests pin it for an edge and a composed child.
 
 const typeMismatchSchema = `schema "tmis"
 
@@ -38,6 +36,7 @@ type Sensor {
 	id String primary
 	--> FEED (_) Station
 	*-> CARDS (many) Card
+	*-> TAGS (many) Tag
 }
 `
 
@@ -59,10 +58,10 @@ func typeMismatchTypeID(t *testing.T, s *schema.Schema, n string) schema.TypeID 
 	return ty.ID()
 }
 
-// TestRevalidation_ReportsEdgeTargetTypeMismatch drives an edge whose wire row
-// names a type the association does not declare, with the target instance
-// present so the dangling-reference guard cannot fire instead.
-func TestRevalidation_ReportsEdgeTargetTypeMismatch(t *testing.T) {
+// TestLoad_RefusesEdgeTargetTypeMismatch drives an edge whose wire row names a
+// type the association does not declare, with the target instance present so
+// the dangling-reference guard cannot fire instead.
+func TestLoad_RefusesEdgeTargetTypeMismatch(t *testing.T) {
 	ctx := context.Background()
 	s := typeMismatchLoad(t)
 	v := instance.NewValidator(s)
@@ -104,35 +103,43 @@ func TestRevalidation_ReportsEdgeTargetTypeMismatch(t *testing.T) {
 		t.Fatalf("no target_type edit possible in %s", doc)
 	}
 
-	_, lres := snapshot.Load(ctx, []byte(edited), s,
-		snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+	_, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
 	if !lres.HasCode(diag.E_SNAPSHOT_TYPE_MISMATCH) {
-		t.Errorf("revalidation did not report an edge target contradicting the association: %s", lres)
+		t.Errorf("Load did not refuse an edge target contradicting the association: %s", lres)
 	}
 }
 
-// TestRevalidation_ReportsComposedChildTypeMismatch drives a composed child
-// whose wire row names a part type the composition does not declare.
-func TestRevalidation_ReportsComposedChildTypeMismatch(t *testing.T) {
+// TestLoad_RefusesComposedChildTypeMismatch drives a composed child whose wire
+// row names a part type the composition does not declare.
+func TestLoad_RefusesComposedChildTypeMismatch(t *testing.T) {
 	ctx := context.Background()
 	s := typeMismatchLoad(t)
 	sensor, card, tag := typeMismatchTypeID(t, s, "Sensor"), typeMismatchTypeID(t, s, "Card"), typeMismatchTypeID(t, s, "Tag")
 
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{sensor, card, tag},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			sensor: {{
-				TypeName:   "Sensor",
+		Types: []schema.TypeID{sensor},
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     sensor,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "s1"}),
 				Composed: map[string][]graph.InstanceParts{"CARDS": {{
-					TypeName:   "Card",
 					TypeID:     card,
 					PrimaryKey: immutable.WrapKey([]any{"4242"}),
 					Properties: immutable.WrapProperties(map[string]any{"last4": "4242"}),
 				}}},
-			}},
+			},
+			// Puts Tag in the types table, where the edit below can name it.
+			{
+				TypeID:     sensor,
+				PrimaryKey: immutable.WrapKey([]any{"s2"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "s2"}),
+				Composed: map[string][]graph.InstanceParts{"TAGS": {{
+					TypeID:     tag,
+					PrimaryKey: immutable.WrapKey([]any{"t1"}),
+					Properties: immutable.WrapProperties(map[string]any{"label": "t1"}),
+				}}},
+			},
 		},
 	})
 	if res.HasErrors() {
@@ -151,9 +158,8 @@ func TestRevalidation_ReportsComposedChildTypeMismatch(t *testing.T) {
 		t.Fatalf("no composed type edit possible in %s", doc)
 	}
 
-	_, lres := snapshot.Load(ctx, []byte(edited), s,
-		snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(diag.Error))
+	_, lres := snapshot.Load(ctx, []byte(edited), s, snapshot.WithIntegrityCheck(false))
 	if !lres.HasCode(diag.E_SNAPSHOT_TYPE_MISMATCH) {
-		t.Errorf("revalidation did not report a composed child contradicting the composition: %s", lres)
+		t.Errorf("Load did not refuse a composed child contradicting the composition: %s", lres)
 	}
 }

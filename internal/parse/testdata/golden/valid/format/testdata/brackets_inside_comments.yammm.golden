@@ -75,7 +75,7 @@
         },
         {
           "name": "name",
-          "doc": "note\n\tcontinued",
+          "doc": "note\ncontinued",
           "constraint": {
             "kind": "String",
             "span": {

@@ -1,0 +1,8 @@
+schema "mid"
+
+import "./far" as far
+
+type Relay {
+	id String primary
+	--> SIGNALS (one) far.Beacon
+}

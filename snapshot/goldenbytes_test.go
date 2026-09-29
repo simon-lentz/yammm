@@ -57,13 +57,12 @@ func loadFixture(t *testing.T) fixtureFile {
 // both, extracts the serialized "properties" JSON payload from each
 // location, and asserts byte-identical bytes.
 //
-// The fixture deliberately includes three distinct encoder-drift classes
-// (multi-scalar top-level keys, nested-map recursive encoding,
-// HTML-escape / UTF-8 handling) so a silent future change in the
+// The fixture deliberately includes two distinct encoder-drift classes
+// (multi-scalar top-level keys, HTML-escape / UTF-8 handling) so a silent future change in the
 // immutable.Properties → JSON conversion fails here before it reaches
 // consumer code.
 func TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes(t *testing.T) {
-	s := testSchema(t)
+	s := testSchemaWithEdgeProps(t)
 	ctx := context.Background()
 	fixture := loadFixture(t)
 

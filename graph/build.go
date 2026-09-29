@@ -70,6 +70,15 @@ func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, 
 	// that round-trips through Snapshot.Types.
 	typeName := graphInst.TypeName()
 
+	// The validator stores a value under its declared name alone, so an
+	// undeclared one arrives only from a bypass-built instance.
+	for _, name := range undeclaredNames(inst.Properties(), func(n string) bool { _, ok := typ.Property(n); return ok }) {
+		b.c.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_FIELD,
+			fmt.Sprintf("type %q declares no property %q", typeName, name)).
+			WithDetail(diag.DetailKeyTypeName, typeName).
+			WithDetail(diag.DetailKeyPropertyName, name).Build())
+	}
+
 	b.edges(typ, inst, typeName, stage)
 
 	for relationName, composedValue := range inst.Compositions() {
@@ -100,7 +109,9 @@ func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, 
 func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, typeName string, stage *[]stagedEdge) {
 	if stage == nil {
 		for relationName, edgeData := range inst.Edges() {
-			b.checkEdgeRelation(typ, typeName, relationName, edgeData)
+			if rel, ok := b.checkEdgeRelation(typ, typeName, relationName, edgeData); ok {
+				b.checkEdgeProperties(typeName, rel, edgeData)
+			}
 		}
 		return
 	}
@@ -111,6 +122,8 @@ func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, 
 		if !ok {
 			continue
 		}
+		b.checkEdgeProperties(typeName, rel, edgeData)
+		b.checkTargetKeys(typeName, rel, edgeData)
 		isRequired := !rel.IsOptional()
 		targetName := b.g.instanceTagForm(rel.TargetID())
 		for target := range edgeData.TargetsIter() {
@@ -191,6 +204,47 @@ func (b *instanceBuilder) checkEdgeRelation(
 		return nil, false
 	}
 	return rel, true
+}
+
+// checkEdgeProperties reports each edge property name the association does not
+// declare, on every target of the slot.
+func (b *instanceBuilder) checkEdgeProperties(typeName string, rel *schema.Relation, edgeData *instance.ValidEdgeData) {
+	for target := range edgeData.TargetsIter() {
+		for _, name := range undeclaredNames(target.Properties(), func(n string) bool { _, ok := rel.Property(n); return ok }) {
+			b.c.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_EDGE_FIELD,
+				fmt.Sprintf("association %q on type %q declares no edge property %q", rel.Name(), typeName, name)).
+				WithDetail(diag.DetailKeyTypeName, typeName).
+				WithDetail(diag.DetailKeyRelationName, rel.Name()).
+				WithDetail(diag.DetailKeyPropertyName, name).Build())
+		}
+	}
+}
+
+// checkTargetKeys reports each target key whose arity disagrees with the
+// target type's primary key, or whose component [ParseKey] cannot read back. No instance
+// can ever carry such a key, so the record would stay unresolved for the life
+// of the graph.
+func (b *instanceBuilder) checkTargetKeys(typeName string, rel *schema.Relation, edgeData *instance.ValidEdgeData) {
+	target, ok := b.g.schema.TypeByID(rel.TargetID())
+	if !ok {
+		return
+	}
+	declared := keyArity(target)
+	for t := range edgeData.TargetsIter() {
+		var msg string
+		if n := t.TargetKey().Len(); n != declared {
+			msg = fmt.Sprintf("association %q on type %q carries a %d-part target key; the target declares %d",
+				rel.Name(), typeName, n, declared)
+		} else if i := unreadableComponent(t.TargetKey()); i >= 0 {
+			msg = fmt.Sprintf("association %q on type %q carries a target key whose component %d is not a scalar graph.ParseKey reads back",
+				rel.Name(), typeName, i)
+		}
+		if msg != "" {
+			b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK, msg).
+				WithDetail(diag.DetailKeyTypeName, typeName).
+				WithDetail(diag.DetailKeyRelationName, rel.Name()).Build())
+		}
+	}
 }
 
 // slot checks one composition slot — its cardinality and the shape of what
@@ -292,8 +346,9 @@ func (b *instanceBuilder) child(
 //
 // Neither entry point reaches it: the child's identity must already equal the
 // relation's target, and a relation's target is resolved by the schema layer
-// at load, so it is always in the closure; a child from outside the closure
-// stops at the schema guard before either arm. Reaching this means the
+// at load, so it is always in the closure. A child from outside the closure is
+// refused first: by the target check on the inline path, and by
+// [Graph.AddComposed]'s schema guard on its own. Reaching this means the
 // closure and the relation disagree, which is why it is Fatal E_INTERNAL and
 // not a graph-category error — and why no test drives it. Dropping the subtree
 // in silence was the alternative, and that is the regression it exists to

@@ -98,10 +98,12 @@ func TestRebuildSnapshot_IndexKeyIsTheCanonicalKey(t *testing.T) {
 	const raw, canonical = "2020-01-02T03:04:05+00:00", `["2020-01-02T03:04:05Z"]`
 	rebuilt, res := RebuildSnapshot(s, SnapshotParts{
 		Types: []schema.TypeID{stamped.ID()},
-		Instances: map[schema.TypeID][]InstanceParts{stamped.ID(): {{
-			TypeName: "Stamped", TypeID: stamped.ID(), PrimaryKey: immutable.WrapKey([]any{raw}),
-			Properties: immutable.WrapProperties(map[string]any{"observed_at": raw}),
-		}}},
+		Instances: []InstanceParts{
+			{
+				TypeID: stamped.ID(), PrimaryKey: immutable.WrapKey([]any{raw}),
+				Properties: immutable.WrapProperties(map[string]any{"observed_at": raw}),
+			},
+		},
 	})
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)

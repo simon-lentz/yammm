@@ -1,15 +1,3 @@
-// Package internal contains tests that verify external dependency behavior.
-//
-// The jsonc_test.go file verifies that tidwall/jsonc preserves byte offsets
-// during preprocessing. These tests serve as a regression guard for dependency
-// upgrades — if jsonc changes behavior, these tests fail immediately rather
-// than causing subtle diagnostic accuracy issues.
-//
-// Upgrade policy: When tidwall/jsonc is upgraded, run:
-//
-//	go test ./adapter/json/internal/... -run "Jsonc|Offset|Preservation"
-//
-// to verify offset semantics are preserved before releasing.
 package internal
 
 import (
@@ -19,10 +7,10 @@ import (
 	"github.com/tidwall/jsonc"
 )
 
-// TestJsoncLengthPreservation verifies that jsonc.ToJSON always produces
-// output of exactly the same length as the input. This is foundational to
-// the JSON adapter's location tracking — byte offsets from json.Decoder.InputOffset()
-// must map directly to original source positions.
+// TestJsoncLengthPreservation verifies that jsonc.ToJSON writes as many bytes as
+// it reads for every line comment, closed block comment and trailing comma, so
+// an offset in its output addresses the same byte of its input.
+// [TestJsoncUnterminatedBlockComment] pins the inputs it lengthens.
 func TestJsoncLengthPreservation(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -306,6 +294,28 @@ func TestJsoncCommentReplacement(t *testing.T) {
 			t.Errorf("expected trailing comma replaced with space at offset 7, got %q", output[7])
 		}
 	})
+}
+
+// TestJsoncUnterminatedBlockComment pins how jsonc.ToJSON writes a block
+// comment the input never closes: the "/*" is kept, the rest is written as
+// spaces with its tabs and line breaks kept but its last byte a space, and a
+// single space is appended when nothing follows the "/*".
+func TestJsoncUnterminatedBlockComment(t *testing.T) {
+	tests := []struct{ input, want string }{
+		{`{"a": 1} /* abc`, `{"a": 1} /*    `},
+		{"{\"a\": [1, /* c\n d", "{\"a\": [1, /*  \n  "},
+		{`{"a": 1} /* `, `{"a": 1} /* `},
+		{`{"a": 1} /*`, `{"a": 1} /* `},
+		{`/*`, `/* `},
+		{"{} /* c\n", "{} /*   "},
+		{"{} /*\n", "{} /* "},
+		{"{} /* a\tb", "{} /*  \t "},
+	}
+	for _, tt := range tests {
+		if got := string(jsonc.ToJSON([]byte(tt.input))); got != tt.want {
+			t.Errorf("ToJSON(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
 }
 
 // TestJsoncToJSONInPlace verifies that ToJSONInPlace has identical semantics

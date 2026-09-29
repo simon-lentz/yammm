@@ -1,0 +1,13 @@
+schema "csv_edge_test"
+
+type Item {
+    item_id String primary
+    name String required
+}
+
+type Order {
+    order_id String primary
+    --> CARRIES (many) Item {
+        quantity Integer required
+    }
+}

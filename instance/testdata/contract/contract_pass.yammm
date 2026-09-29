@@ -127,7 +127,8 @@ type T {
 	! "p_typecheck_string_refuses_a_number" !(5 =~ String)
 	! "p_typecheck_timestamp_fraction" "2030-01-01T00:00:00.5Z" =~ Timestamp
 	! "d_int_matches_float" 5 =~ Float
-	! "d_wholefloat_matches_integer" 5.0 =~ Integer
+	! "d_wholefloat_is_not_integer" 5.0 !~ Integer
+	! "d_exponent_literal_is_not_integer" 1.0e2 !~ Integer
 	! "p_typecheck_date" "2030-01-01" =~ Date
 	! "p_typecheck_not_date" "x" !~ Date
 	! "p_typecheck_uuid" "550e8400-e29b-41d4-a716-446655440000" =~ UUID

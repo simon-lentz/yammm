@@ -25,9 +25,11 @@ type Sensor {
 	wall           Wall
 	days           List<Date>
 	walls          List<Timestamp["2006-01-02 15:04:05"]>
+	labels         List<String>
 	*-> HAS_READING (many) Reading
 	*-> IN_CASING (one) Casing
 	--> FEEDS (one) Sensor {
 		since Timestamp["2006-01-02 15:04:05"]
 	}
+	--> NEIGHBOURS (many) Sensor
 }

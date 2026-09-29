@@ -107,13 +107,50 @@ func start() error {
 	}
 	closeDriver = func(closeCtx context.Context) { _ = driver.Close(closeCtx) }
 
-	if err := driver.VerifyConnectivity(ctx); err != nil {
+	if err := awaitReachable(ctx, driver); err != nil {
 		return fmt.Errorf("cannot reach %s: %w", uri, err)
 	}
 
 	shared.driver = driver
 	shared.uri = uri
 	return nil
+}
+
+// readyTimeout bounds the wait for a started container to become a database
+// that can answer. It is not the container's start budget, which the caller's
+// context holds: this is the window between an open Bolt port and a served
+// routing table.
+const readyTimeout = 2 * time.Minute
+
+// awaitReachable retries VerifyConnectivity until the driver answers or
+// readyTimeout passes, and reports the last error.
+//
+// One call is not enough. The container is ready when its Bolt port accepts a
+// connection, and the `neo4j` database can still be assembling behind it: the
+// driver then returns Neo.TransientError.General.DatabaseUnavailable — "unable
+// to get a routing table" — which is retryable by its own class and which
+// failed one CI image for the whole suite.
+//
+// Every error is retried rather than only that one. A misconfiguration this
+// cannot fix, an unusable password among them, exhausts the window and is
+// reported with the same message a single call gave, which costs the operator
+// readyTimeout and tells them no less.
+func awaitReachable(ctx context.Context, driver neo4jdriver.Driver) error {
+	deadline := time.Now().Add(readyTimeout)
+	for attempt := 1; ; attempt++ {
+		err := driver.VerifyConnectivity(ctx)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return fmt.Errorf("after %d attempts over %s: %w", attempt, readyTimeout, err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("after %d attempts: %w", attempt, ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // isolatedDriver returns a driver with its own connection pool, closed when the

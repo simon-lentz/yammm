@@ -1,0 +1,8 @@
+schema "beacons"
+
+import "./lib/mid" as mid
+
+type Tower {
+	id String primary
+	--> RELAYS (one) mid.Relay
+}

@@ -84,11 +84,13 @@ func buildFuzzSeed(tb testing.TB, opts ...snapshot.Option) []byte {
 	inst := instance.NewValidInstance(
 		"Person", typ.ID(),
 		immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(map[string]any{"name": "Alice"}),
+		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
 		nil, nil, nil,
 	)
 	g := graph.New(s)
-	g.Add(context.Background(), inst)
+	if res := g.Add(context.Background(), inst); res.HasErrors() {
+		tb.Fatalf("fuzz seed add: %v", res.Err())
+	}
 	snap := g.Snapshot()
 	data, res := snapshot.Marshal(context.Background(), snap, opts...)
 	if res.HasErrors() {

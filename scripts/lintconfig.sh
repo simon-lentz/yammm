@@ -13,6 +13,10 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
+# The module's own toolchain (scripts/toolchain.sh) resolves the linter's
+# module and its schema, as CI's does.
+. scripts/toolchain.sh
+
 schema="$(go list -m -f '{{.Dir}}' github.com/golangci/golangci-lint/v2)/jsonschema/golangci.next.jsonschema.json"
 if [ ! -f "${schema}" ]; then
 	printf 'lintconfig: schema not found at %s\n' "${schema}" >&2

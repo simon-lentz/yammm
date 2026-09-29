@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -17,13 +19,17 @@ func newRootCmd(version string) *cobra.Command {
 Global flags:
   --format    Output format: "text" (default) or "json". It shapes the
               diagnostics every command writes, and the stdout payload of
-              "snapshot info". Under "json" a command writes one JSON
-              document per stream and suppresses its status summary.
+              "snapshot info". Under "json" a command writes exactly one JSON
+              document to stderr, a clean run included, and suppresses its
+              status summary; "snapshot info" writes its payload to stdout.
+              A "help", "completion" or --version that succeeds writes
+              no document.
   --no-color  Disable ANSI color in diagnostic output.
 
 Data commands (check, load, export, snapshot save) also accept:
   --from         Data input format override: "json" or "csv".
                  Auto-detected from the file extension when not specified.
+                 A .tsv file is CSV whose fields split on tabs.
   --type         Type name for single-type CSV data.
   --type-column  Column naming each row's type, for multi-type CSV.`,
 		Version:       version,
@@ -48,11 +54,41 @@ Data commands (check, load, export, snapshot save) also accept:
 	return cmd
 }
 
+// initHelpAndCompletion adds cobra's help and completion commands to root and
+// makes each refuse what it cannot answer: cobra's help exits 0 for a topic no
+// command answers, printing the usage or the nearest command's help, and its
+// completion parent prints help and exits 0. [execute]
+// calls it once the caller has set root's streams, since each shell command
+// binds its output when it is created.
+func initHelpAndCompletion(root *cobra.Command) {
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	for _, c := range root.Commands() {
+		switch c.Name() {
+		case "help":
+			show := c.Run
+			c.RunE = func(c *cobra.Command, args []string) error {
+				if _, rest, err := c.Root().Find(args); err != nil || len(rest) > 0 {
+					return cli.Usagef("unknown help topic %q; run %q to list the commands", strings.Join(args, " "), c.Root().Name()+" --help")
+				}
+				show(c, args)
+				return nil
+			}
+		case "completion":
+			c.RunE = requireSubcommand
+		}
+	}
+}
+
 // withDiagnostics adapts a command that diagnoses to cobra's RunE. It admits
 // the output-shaping flags before the command runs and closes the sink with the
 // command's error after it returns, so no command works under a format the CLI
 // does not know, no return path leaves a diagnostic unwritten, and under
 // --format json the failure is inside the one document.
+//
+// Every error it returns is a [cli.ExitError]: one the command did not classify
+// takes [cli.ExitForError]'s code here, so [run] can tell a command's failure
+// from one cobra raised before any command ran.
 func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		formatStr, _ := cmd.Flags().GetString("format")
@@ -64,7 +100,11 @@ func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) err
 		// The terminal test reads the process stream while the writer is
 		// cobra's, as it was when every render built its own renderer.
 		sink := cli.NewDiagnosticSink(cmd.ErrOrStderr(), format, noColor, cli.IsTTY(os.Stderr.Fd()))
-		return sink.Close(run(cmd, args, sink))
+		err = run(cmd, args, sink)
+		if _, ok := errors.AsType[*cli.ExitError](err); err != nil && !ok {
+			err = &cli.ExitError{Code: cli.ExitForError(err), Err: err}
+		}
+		return sink.Close(err)
 	}
 }
 

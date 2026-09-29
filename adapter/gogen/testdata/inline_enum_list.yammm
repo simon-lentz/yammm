@@ -1,0 +1,15 @@
+schema "inlineenumlist"
+
+type Tags = List<Enum["red", "green"]>
+type Grid = List<List<Enum["on", "off"]>>
+type Tone = Enum["warm", "cool"]
+
+type Post {
+	id     String primary
+	tags   Tags
+	labels List<Enum["draft", "final"]>
+	matrix List<List<Enum["yes", "no"]>>
+	tones  List<Tone>
+	grid   Grid
+	mood   Enum["calm", "tense"]
+}

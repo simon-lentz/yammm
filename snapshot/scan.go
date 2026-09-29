@@ -64,10 +64,15 @@ type ScanEntry struct {
 // not accept a misshapen document by omission — it does not see one. Use
 // [HeaderOnly], [Verify] or [Load] when that matters.
 //
+// dir is cleaned before it is read, so a ".." cancels the element before it
+// rather than following a symbolic link, and each yielded Path names an entry
+// of the directory listed.
+//
 // Filtering:
-//   - Only regular files are included. A symlink is followed and included
-//     when its target is a regular file; a directory, FIFO, socket, or
-//     device is skipped whatever its name.
+//   - Only regular files and broken symlinks are included. A symlink is
+//     followed and included when its target is a regular file or cannot
+//     be stat'd; a directory, FIFO, socket, or device is skipped whatever
+//     its name.
 //   - Of those, only files whose basename ends with ".ys" are included.
 //   - Files whose basename ends with [TmpSuffix] are skipped (the
 //     atomic-write staging files [WriteFile] leaves behind on crash).
@@ -121,7 +126,10 @@ func ScanDirWith(ctx context.Context, dir string, opts ...ScanOption) iter.Seq2[
 			yield(ScanEntry{}, err)
 			return
 		}
-		dirents, err := os.ReadDir(dir)
+		// Cleaned as the yielded paths are, so a ".." cancels the element
+		// before it rather than following a link, and each Path names an
+		// entry of the directory read.
+		dirents, err := os.ReadDir(filepath.Clean(dir))
 		if err != nil {
 			yield(ScanEntry{}, fmt.Errorf("open dir %q: %w", dir, err))
 			return

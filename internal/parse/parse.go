@@ -57,6 +57,7 @@ func parseSource(text string, sourceID location.SourceID, withTokens bool) (*Fil
 		lineStarts: lineStarts(text), file: &File{},
 	}
 	b.parseFile(plex)
+	b.checkSourceText()
 	slices.SortStableFunc(b.issues, compareIssues)
 
 	var stream []Token
@@ -75,6 +76,27 @@ func parseSource(text string, sourceID location.SourceID, withTokens bool) (*Fil
 		}
 	}
 	return b.file, stream, b.issues
+}
+
+// checkSourceText reports every run of text the source rules refuse inside a
+// comment or a string or regex literal, at the run itself. These four tokens
+// hold any character but their own delimiters, and all but a doc comment end
+// at a line break; anywhere else such a character lexes as ANY_OTHER, and the
+// construct holding it fails.
+func (b *builder) checkSourceText() {
+	tok := b.ps.tok
+	for i := range b.toks {
+		t := &b.toks[i]
+		switch t.Type {
+		case tok.docComment, tok.slComment, tok.str, tok.regexp:
+		default:
+			continue
+		}
+		for f, ok := nextTextFault(t.Value, 0); ok; f, ok = nextTextFault(t.Value, f.end) {
+			b.report(diag.Error, diag.E_SYNTAX,
+				b.spanFromOffsets(t.Pos.Offset+f.start, t.Pos.Offset+f.end), f.why)
+		}
+	}
 }
 
 // countingLexer records how many tokens passed through, which is the only way
@@ -846,16 +868,97 @@ func (b *builder) positionAt(offset int) lexer.Position {
 
 // ---- small helpers ----
 
-// stripDoc removes a doc comment's delimiters and trims the inner content.
+// stripDoc returns a doc comment's text, [DocText] of its content between
+// the delimiters.
 func stripDoc(d *string) string {
 	if d == nil {
 		return ""
 	}
 	s := *d
 	if len(s) >= 4 && strings.HasPrefix(s, "/*") && strings.HasSuffix(s, "*/") {
-		return strings.TrimSpace(s[2 : len(s)-2])
+		return DocText(s[2 : len(s)-2])
 	}
 	return s
+}
+
+// sourceWhiteSpace is the white space docs/SPEC.md defines.
+const sourceWhiteSpace = " \t\r\n"
+
+// DocText returns the documentation a doc comment holding content carries.
+// Trailing white space goes, and leading white space up to the first text, or
+// up to the start of its line when a line end precedes it. Then every line
+// that follows a line end loses the leading spaces and tabs all such lines
+// holding text share, compared byte for byte; docs/SPEC.md's Comments section
+// states the rule.
+func DocText(content string) string {
+	text := strings.TrimRight(content, sourceWhiteSpace)
+	lead := len(text) - len(strings.TrimLeft(text, sourceWhiteSpace))
+	// A first line that follows "/*" holds none of the indentation; one that
+	// starts a line is indented like every line after it.
+	first := 1
+	if end := strings.LastIndexAny(text[:lead], "\r\n"); end >= 0 {
+		text, first = text[end+1:], 0
+	} else {
+		text = text[lead:]
+	}
+	lines := splitLinesKeepingEnds(text)
+	var shared string
+	found := false
+	for _, line := range lines[first:] {
+		if strings.Trim(line, sourceWhiteSpace) == "" {
+			continue
+		}
+		lead := leadingBlanks(line)
+		if !found {
+			shared, found = lead, true
+			continue
+		}
+		shared = shared[:commonPrefixLen(shared, lead)]
+	}
+	if shared == "" {
+		return text
+	}
+	for i := first; i < len(lines); i++ {
+		lines[i] = lines[i][commonPrefixLen(shared, leadingBlanks(lines[i])):]
+	}
+	return strings.Join(lines, "")
+}
+
+// splitLinesKeepingEnds splits text after each CR LF, CR and LF, keeping each
+// line's end with it, so joining the lines gives text back.
+func splitLinesKeepingEnds(text string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '\r':
+			if i+1 < len(text) && text[i+1] == '\n' {
+				i++
+			}
+		case '\n':
+		default:
+			continue
+		}
+		lines = append(lines, text[start:i+1])
+		start = i + 1
+	}
+	return append(lines, text[start:])
+}
+
+// leadingBlanks returns the spaces and tabs line starts with.
+func leadingBlanks(line string) string {
+	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+}
+
+// commonPrefixLen returns the length of the longest common prefix of a and b.
+func commonPrefixLen(a, b string) int {
+	n := min(len(a), len(b))
+	for i := range n {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
 }
 
 // value returns the alias's spelling, whichever branch matched.

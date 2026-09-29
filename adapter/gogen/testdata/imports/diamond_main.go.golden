@@ -3,18 +3,18 @@ package top
 
 type Top struct {
 	ID      string                   `json:"id"`
-	ToLeft  *EDGE_Top_to_left_Left   `json:"to_left"`
-	ToRight *EDGE_Top_to_right_Right `json:"to_right"`
+	ToLeft  *EDGE_Top_to_left_Left   `json:"to_left,omitempty"`
+	ToRight *EDGE_Top_to_right_Right `json:"to_right,omitempty"`
 }
 
 type Left struct {
 	ID       string                      `json:"id"`
-	ToShared *EDGE_Left_to_shared_Shared `json:"to_shared"`
+	ToShared *EDGE_Left_to_shared_Shared `json:"to_shared,omitempty"`
 }
 
 type Right struct {
 	ID       string                       `json:"id"`
-	ToShared *EDGE_Right_to_shared_Shared `json:"to_shared"`
+	ToShared *EDGE_Right_to_shared_Shared `json:"to_shared,omitempty"`
 }
 
 type Shared struct {
@@ -38,15 +38,14 @@ type EDGE_Right_to_shared_Shared struct {
 }
 
 type Graph struct {
-	Top    []*Top    `json:"Top,omitempty"`
-	Left   []*Left   `json:"left.Left,omitempty"`
-	Right  []*Right  `json:"right.Right,omitempty"`
-	Shared []*Shared `json:"Shared,omitempty"`
+	Top   []*Top   `json:"Top,omitempty"`
+	Left  []*Left  `json:"left.Left,omitempty"`
+	Right []*Right `json:"right.Right,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// module-root-relative path, as verbatim .yammm text. Read it through
-// SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"diamond_base.yammm":  "schema \"base\"\n\ntype Shared {\n\tid String primary\n}\n",
 	"diamond_left.yammm":  "schema \"left\"\n\nimport \"diamond_base.yammm\" as base\n\ntype Left {\n\tid String primary\n\t--> TO_SHARED (one) base.Shared\n}\n",
@@ -57,15 +56,15 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "diamond_main.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// module-root-relative path. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
 //
-// The synthetic root is what keeps the loaded type identities stable. Passing
-// module root "." instead also re-loads, but "." canonicalizes against the
-// process working directory, which then lands inside every TypeID.
+// The synthetic root keeps the loaded type identities stable: no working
+// directory, checkout or mount point enters them. Any root of that form
+// serves; generation verified this one.
 func SerializedSources() map[string][]byte {
 	m := make(map[string][]byte, len(serializedSources))
 	for k, v := range serializedSources {

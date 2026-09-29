@@ -175,15 +175,13 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 
 	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{sensorID, stationID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			stationID: {{
-				TypeName:   "Station",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     stationID,
 				PrimaryKey: stationKey,
 				Properties: immutable.WrapProperties(map[string]any{"id": "st1"}),
-			}},
-			sensorID: {{
-				TypeName:   "Sensor",
+			},
+			{
 				TypeID:     sensorID,
 				PrimaryKey: sensorKey,
 				Properties: immutable.WrapProperties(map[string]any{
@@ -194,7 +192,6 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 				}),
 				Composed: map[string][]graph.InstanceParts{
 					"READINGS": {{
-						TypeName:   "Reading",
 						TypeID:     readingID,
 						PrimaryKey: immutable.WrapKey([]any{"r1"}),
 						Properties: immutable.WrapProperties(map[string]any{
@@ -202,13 +199,12 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 						}),
 					}},
 				},
-			}},
+			},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation:   "FEED",
 			SourceType: sensorID,
 			SourceKey:  sensorKey,
-			TargetType: stationID,
 			TargetKey:  stationKey,
 			Properties: immutable.WrapProperties(map[string]any{"seen_at": when}),
 		}},
@@ -253,9 +249,8 @@ func TestRebuildSnapshot_KeepsWhatItCannotRender(t *testing.T) {
 
 	snap, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{sensorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			sensorID: {{
-				TypeName:   "Sensor",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{"s1"}),
 				Properties: immutable.WrapProperties(map[string]any{
@@ -263,7 +258,7 @@ func TestRebuildSnapshot_KeepsWhatItCannotRender(t *testing.T) {
 					"created_at": "not-a-timestamp",
 					"run_id":     "not-a-uuid",
 				}),
-			}},
+			},
 		},
 	})
 	if result.HasErrors() {

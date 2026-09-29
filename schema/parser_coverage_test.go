@@ -1,7 +1,6 @@
 package schema_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -3170,7 +3169,7 @@ type Foo { id UUID primary }`,
 /* Line one
    Line two */
 type Foo { id UUID primary }`,
-			wantTypeDoc: "Line one\n   Line two",
+			wantTypeDoc: "Line one\nLine two",
 		},
 	}
 
@@ -3181,7 +3180,7 @@ type Foo { id UUID primary }`,
 			assert.True(t, result.OK(), "expected no errors")
 			require.NotNil(t, model)
 			require.Len(t, model.Types, 1)
-			assert.Contains(t, model.Types[0].Documentation, strings.TrimPrefix(tt.wantTypeDoc, "/* "))
+			assert.Equal(t, tt.wantTypeDoc, model.Types[0].Documentation)
 		})
 	}
 }

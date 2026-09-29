@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -56,9 +55,9 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	}
 
 	schemaPath := args[0]
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
 	}
 
 	// Load schema
@@ -76,7 +75,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	desired, constraintResult := adapter.ConstraintsStructured(cmd.Context(), s)
 	if constraintResult.HasErrors() {
 		sink.Add(constraintResult)
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(constraintResult)}
 	}
 
 	// Generate desired indexes (skipped in constraints-only mode so index-annotation
@@ -86,7 +85,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		di, indexResult := adapter.IndexesStructured(cmd.Context(), s)
 		if indexResult.HasErrors() {
 			sink.Add(indexResult)
-			return &cli.ExitError{Code: cli.ExitValidation}
+			return &cli.ExitError{Code: cli.ExitForResult(indexResult)}
 		}
 		desiredIndexes = di
 	}
@@ -95,7 +94,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	ctx := cmd.Context()
 	driver, err := cli.ConnectNeo4j(ctx, uri, username, password)
 	if err != nil {
-		return cli.Runtimef("%v", err)
+		return err
 	}
 	defer driver.Close(ctx)
 

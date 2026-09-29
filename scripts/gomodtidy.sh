@@ -15,9 +15,16 @@
 #
 # Usage: scripts/gomodtidy.sh
 set -euo pipefail
+# An exported CDPATH makes `cd` print the directory it chose, which the
+# $(cd ... && go mod tidy -diff) below would read as a diff.
+unset CDPATH
 
 root=$(git rev-parse --show-toplevel)
 cd "${root}"
+
+# The module's own toolchain (scripts/toolchain.sh) judges tidiness: another
+# release can resolve the module graph, and its go directive, differently.
+. scripts/toolchain.sh
 
 status=0
 errfile=$(mktemp)

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/adapter/csv"
@@ -20,31 +22,60 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
+// dataExtension is the one spelling of a data file's extension that
+// [DetectFormat] and [CSVDelimiter] both read, so a name that selects the CSV
+// format and a name that selects a tab are decided by one fold.
+func dataExtension(path string) string {
+	return strings.ToLower(filepath.Ext(path))
+}
+
 // DetectFormat returns "json" or "csv" based on the file extension.
 func DetectFormat(path string) (string, error) {
-	switch strings.ToLower(filepath.Ext(path)) {
+	switch dataExtension(path) {
 	case ".json", ".jsonc":
 		return "json", nil
 	case ".csv", ".tsv":
 		return "csv", nil
 	default:
-		return "", fmt.Errorf("cannot detect data format for %q: use --from to specify json or csv", path)
+		return "", Usagef("cannot detect data format for %q: use --from to specify json or csv", path)
 	}
+}
+
+// CSVDelimiter returns the field delimiter a CSV file's extension names: '\t'
+// for ".tsv" and ',' for every other name, the empty one included. The read
+// side and the write side both take it, so a file `export` writes under a
+// ".tsv" name is one `check` reads back.
+func CSVDelimiter(path string) rune {
+	if dataExtension(path) == ".tsv" {
+		return '\t'
+	}
+	return ','
 }
 
 // LoadAndParseJSON reads a JSON file and parses it into raw instances.
 //
-// Returns (T, diag.Result, error) because the error return captures I/O
-// failures (file not found, permission denied) which are distinct from
-// semantic parse issues reported through the diag.Result. This is an
-// internal CLI helper, not a public API.
+// The identity and the host path come out of one resolution, as the schema
+// loader takes them, so a data diagnostic and a schema diagnostic name one file
+// the same way.
+//
+// Returns (T, diag.Result, error) because the error return captures the
+// failures that stop a read — a path that names no file, one that cannot be
+// read — which are distinct from semantic parse issues reported through the
+// diag.Result. The caller refuses an empty path or one that is not valid UTF-8
+// first ([CheckSourceOperand], exit 2), so every error this returns is a path the
+// filesystem answered — one under a regular file, or one that resolves into
+// bytes that are not UTF-8, included — and exits 3. This is an internal CLI
+// helper, not a public API.
 func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.RawInstance, diag.Result, error) {
-	data, err := os.ReadFile(path)
+	sourceID, hostPath, err := location.ResolveSourcePath(path)
+	if err != nil {
+		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
+	}
+
+	data, err := os.ReadFile(hostPath)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("read data file: %w", err)
 	}
-
-	sourceID := location.NewSourceID("file://" + path)
 
 	parsed, result := adapterjson.New().ParseObject(ctx, sourceID, data)
 	return parsed, result, nil
@@ -54,20 +85,28 @@ func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.R
 // The typeName parameter specifies the schema type for the rows.
 // If typeColumn is non-empty, it is used instead of typeName for multi-type CSVs.
 //
+// The identity and the host path come out of one resolution, as
+// [LoadAndParseJSON] takes them; the handle is opened on the path it returns.
+// The delimiter is [CSVDelimiter]'s for path as the caller spelled it, the
+// spelling [DetectFormat] reads.
+//
 // Returns (T, diag.Result, error) because the error return captures I/O
 // failures (file open errors) which are distinct from semantic parse
 // issues reported through the diag.Result.
 func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *schema.Schema) (map[string][]instance.RawInstance, diag.Result, error) {
-	f, err := os.Open(path)
+	sourceID, hostPath, err := location.ResolveSourcePath(path)
+	if err != nil {
+		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
+	}
+
+	f, err := os.Open(hostPath)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("open data file: %w", err)
 	}
 	defer f.Close()
 
-	sourceID := location.NewSourceID("file://" + path)
-
 	if typeColumn != "" {
-		adapter := csv.New(csv.WithTypeColumn(typeColumn))
+		adapter := csv.New(csv.WithTypeColumn(typeColumn), csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path)))
 		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) *schema.Type {
 			t, _ := s.ResolveTypeName(name)
 			return t
@@ -79,47 +118,91 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 	// uncoerced and refused row by row downstream.
 	schemaType, ok := s.ResolveTypeName(typeName)
 	if !ok {
-		return nil, diag.Result{}, fmt.Errorf("type %q not found in schema", typeName)
+		return nil, diag.Result{}, Usagef("type %q not found in schema", typeName)
 	}
-	raws, result := csv.New().ParseTyped(ctx, sourceID, typeName, f, schemaType)
+	raws, result := csv.New(csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path))).ParseTyped(ctx, sourceID, typeName, f, schemaType)
 	return map[string][]instance.RawInstance{typeName: raws}, result, nil
 }
 
-// ValidateInstances validates parsed instances against the schema.
-// Returns all valid instances and a merged diagnostic result.
-func ValidateInstances(ctx context.Context, s *schema.Schema, parsed map[string][]instance.RawInstance) ([]*instance.ValidInstance, diag.Result) {
-	v := instance.NewValidator(s)
-	collector := diag.NewCollectorUnlimited()
-	var allValid []*instance.ValidInstance
+// Validated is a document's instances after validation, in the order they
+// were validated: type names sorted, and each type's instances in the order the
+// document lists them.
+type Validated struct {
+	validator *instance.Validator
+	batches   []validatedBatch
+}
 
-	for typeName, raws := range parsed {
-		valids, result := v.Validate(ctx, typeName, raws)
+// validatedBatch is one type name's instances and the validator's answer for
+// each: valids holds one entry per raw, nil where the validator refused it, and
+// is nil when the batch was refused whole or did not complete.
+type validatedBatch struct {
+	typeName string
+	raws     []instance.RawInstance
+	valids   []*instance.ValidInstance
+}
+
+// ValidateInstances validates parsed instances against the schema and returns
+// them with the merged diagnostics.
+func ValidateInstances(ctx context.Context, s *schema.Schema, parsed map[string][]instance.RawInstance) (Validated, diag.Result) {
+	doc := Validated{validator: instance.NewValidator(s)}
+	collector := diag.NewCollectorUnlimited()
+	for _, typeName := range slices.Sorted(maps.Keys(parsed)) {
+		raws := parsed[typeName]
+		valids, result := doc.validator.Validate(ctx, typeName, raws)
 		collector.Merge(result)
-		for _, valid := range valids {
+		doc.batches = append(doc.batches, validatedBatch{typeName: typeName, raws: raws, valids: valids})
+	}
+	return doc, collector.Result()
+}
+
+// Valids returns the instances the validator accepted, in validation order.
+func (d Validated) Valids() []*instance.ValidInstance {
+	var out []*instance.ValidInstance
+	for _, b := range d.batches {
+		for _, valid := range b.valids {
 			if valid != nil {
-				allValid = append(allValid, valid)
+				out = append(out, valid)
 			}
 		}
 	}
-
-	return allValid, collector.Result()
+	return out
 }
 
-// BuildGraph creates a graph from validated instances, adds them all,
-// and runs graph-level checks.
-func BuildGraph(ctx context.Context, s *schema.Schema, valids []*instance.ValidInstance) (*graph.Graph, diag.Result) {
-	g := graph.New(s)
+// BuildGraph adds the document's valid instances to base, or to a new graph
+// when base is nil, runs the graph-level checks, and returns the graph with a
+// verdict about the document (see [documentVerdict]).
+func BuildGraph(ctx context.Context, s *schema.Schema, base *graph.Graph, doc Validated) (*graph.Graph, diag.Result) {
+	g := base
+	if g == nil {
+		g = graph.New(s)
+	}
 	collector := diag.NewCollectorUnlimited()
-
+	valids := doc.Valids()
+	added := make(map[*instance.ValidInstance]diag.Result, len(valids))
+	refusals := false
 	for _, valid := range valids {
 		result := g.Add(ctx, valid)
 		collector.Merge(result)
+		added[valid] = result
+		refusals = refusals || result.HasErrors()
 	}
-
-	checkResult := g.Check(ctx)
-	collector.Merge(checkResult)
-
+	check := g.Check(ctx)
+	if ctx.Err() == nil && (refusals || len(valids) < doc.rootCount()) {
+		verdict := documentVerdict(s, g, base != nil, doc, added)
+		check = verdict.explain(check)
+		collector.Merge(verdict.duplicates)
+	}
+	collector.Merge(check)
 	return g, collector.Result()
+}
+
+// rootCount is the number of root instances the document lists.
+func (d Validated) rootCount() int {
+	n := 0
+	for _, b := range d.batches {
+		n += len(b.raws)
+	}
+	return n
 }
 
 // MergeResults merges multiple diagnostic results into one.
@@ -147,7 +230,7 @@ func WriteTo(data []byte, path string, w io.Writer) error {
 // Returns (false, nil) for non-snapshot files (including non-JSON files).
 // Returns (false, err) only for genuine I/O errors.
 func IsSnapshotFile(path string) (bool, error) {
-	f, err := os.Open(path)
+	f, err := Open(path)
 	if err != nil {
 		return false, fmt.Errorf("open file: %w", err)
 	}
@@ -186,7 +269,7 @@ func IsSnapshotFile(path string) (bool, error) {
 // (T, diag.Result, error) following the CLI helper convention: error captures
 // I/O failures, diag.Result captures semantic issues.
 func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, *snapshot.HeaderInfo, diag.Result, error) {
-	data, err := os.ReadFile(path)
+	data, err := ReadFile(path)
 	if err != nil {
 		return nil, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
 	}

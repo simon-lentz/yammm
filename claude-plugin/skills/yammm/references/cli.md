@@ -35,18 +35,31 @@ The `yammm` CLI provides schema validation, formatting, data checking, snapshot 
 ### Writing files
 
 Every command that writes a file you name — `--output`, `--output-dir`, `-o`,
-`fmt -w`, `snapshot update-metadata` — writes it the same way. The path's
-symlinks are followed, so a link survives and the file it names is written. A
+`fmt -w`, `snapshot update-metadata` — writes it the same way, but for the one
+`--output-dir` exception stated below. A `..` in the
+path is evaluated on its text first, as for every path yammm reads, so
+`link/../f` is the `f` beside `link` and the file `yammm check` reads for that
+spelling, where on Unix the shell's `cat link/../f` reads the one beside the
+directory `link` reaches. The path's symlinks are then followed, each link's own target
+as the kernel follows it, so a link survives and the file it names is written. A
 regular file, or one that does not exist yet, is replaced atomically: the
 content is staged beside it and renamed over it, so an interrupted write leaves
 the previous file. A new file is created at `0600` on Unix (Windows honours
-only a mode's write bit); an existing one keeps its mode. A FIFO, a device or
-a path under `/dev/` — `--output /dev/stdout`, say — is written through,
-continuing its stream: behind `>> log` the bytes are
-appended and the log keeps its history. Anything else is refused at exit 3, naming the path: a
+only a mode's write bit); an existing one keeps its mode. A FIFO, a device,
+`/dev/stdout`, `/dev/stderr` or `/dev/fd/N` is written through, continuing its
+stream, however the path reaches that directory: through a link to `/dev`, or
+on Linux through any descriptor table under `/proc`, such as `/proc/self/fd/N`.
+Behind `>> log` the bytes are
+appended and the log keeps its history. `--output-dir` refuses such a file at
+exit 3, since it puts its files in place together by renames. Any other path
+under `/dev/`, such as a file under Linux's `/dev/shm`, is decided by the file
+it reaches. Anything else is refused at exit 3, naming the path: a
 read-only file, a directory, a looping link, or a file whose directory cannot
-hold the staging file, which `gofmt -w` refuses too. Omit `--output` to write
-to stdout.
+hold the staging file, which `gofmt -w` refuses too. `export`, `gen` and
+`neo4j introspect` write to stdout when `--output` is omitted; `snapshot save`
+needs `-o` or `--into`. `--output-dir` renders every file before it touches the disk, so a
+graph the CSV writer refuses creates no directory; a directory it made before
+the filesystem refused a file stays, as `mkdir -p` leaves it.
 
 ---
 
@@ -111,7 +124,7 @@ yammm check schema.yammm data.csv --type-column '$type'
 yammm check --from csv schema.yammm data.tsv --type User
 ```
 
-Validates data against a schema without building a full graph. Reports constraint violations, missing fields, and invariant failures.
+Validates data against a schema as `load` does, and writes nothing: every instance, primary-key uniqueness, and every required association's target. Reports constraint violations, missing fields, invariant failures, duplicate primary keys and unresolved required associations. The verdict is about the data file: a target the file holds but the validator refuses is reported by that refusal and not as a missing target, and a key two instances state is a duplicate even where one of them is refused. Every command that reads data treats a `.tsv` file as CSV input whose fields split on tabs, with CSV quoting still in force; any other CSV file splits on commas.
 
 | Flag | Description |
 | ---- | ----------- |
@@ -125,7 +138,7 @@ Validates data against a schema without building a full graph. Reports constrain
 yammm load schema.yammm data.json
 ```
 
-Loads data into an in-memory graph and validates completeness (resolves associations, checks required relationships). Same flags as `check`.
+Loads data into an in-memory graph, validates it as `check` does, and in text output prints a summary line when the data loads without error. Same flags as `check`.
 
 ---
 
@@ -140,11 +153,11 @@ yammm snapshot save -o output.ys --into existing.ys schema.yammm new_data.json
 yammm snapshot save -o output.ys -m env=prod -m version=2 schema.yammm data.json
 ```
 
-Builds a graph snapshot from one or more data files and persists it as a `.ys` file.
+Builds a graph snapshot from one or more data files and persists it as a `.ys` file. The data files are validated as one document, as `check` validates one file, and under `--into` the merged file's instances hold their keys too. Every data file's path is refused if it is empty or not UTF-8, and its format is decided, before the schema or any file is read. A `--type` the schema lacks, given for CSV data without `--type-column`, is refused before any data file is read. So a data usage error names nothing about the data, and a data file that cannot be read keeps the parse diagnostics the files before it drew.
 
 | Flag | Description |
 | ---- | ----------- |
-| `-o, --output` | Output path for `.ys` file (required) |
+| `-o, --output` | Output path for the `.ys` file; required unless `--into` is given, which defaults it to the merged file |
 | `--from` | Input format override |
 | `--type` | Type name for single-type CSV |
 | `--type-column` | Column for multi-type CSV |
@@ -212,11 +225,13 @@ yammm export --to cypher schema.yammm data.json > import.cypher
 yammm export --to json --output result.json schema.yammm data.csv --type User
 ```
 
+`--to csv --output` writes tab-delimited fields when the file name ends in `.tsv`, so `check` reads it back; any other name, `--output-dir`'s per-type `.csv` files and stdout take commas. `--to csv` refuses a graph in which an instance holds composed children, since a CSV row has no column for them, and writes nothing; `--to json` carries them.
+
 | Flag | Description |
 | ---- | ----------- |
 | `--to` | Output format: `json`, `csv`, or `cypher` (required) |
 | `--from` | Input format override |
-| `--output` | Output file path (default: stdout) |
+| `--output` | Output file path (default: stdout); with `--to csv`, a `.tsv` name writes tab-delimited fields |
 | `--output-dir` | Output directory (CSV multi-type: one file per type) |
 | `--type` | Type name for single-type CSV input |
 | `--type-column` | Column for multi-type CSV input |
@@ -237,17 +252,17 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 
 `--to go` generates Go source via the `adapter/gogen` adapter: one struct per type, named Enum/DataType types, generated `Date` and per-layout `Timestamp` types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
 
-`--to jsonschema` generates a JSON Schema draft 2020-12 document via the `adapter/jschema` adapter, describing the instance-data JSON object form `yammm check` accepts — wire it into an editor (e.g. a `# yaml-language-server: $schema=…` header or a VS Code `json.schemas` mapping) for completion, hover documentation, and validation while authoring data files. Same closure flattening; output is deterministic and self-checked before being written.
+`--to jsonschema` generates a JSON Schema draft 2020-12 document via the `adapter/jschema` adapter, describing the instance-data JSON object form `yammm check` reads, without reproducing yammm's validation — wire it into an editor through a VS Code `json.schemas` mapping for completion, hover documentation, and validation while authoring JSON data files. A JSON data file cannot carry a `"$schema"` member, because `adapter/json` reads every top-level key as a type name. A `# yaml-language-server: $schema=…` header wires a YAML file, but yammm reads no YAML data file, so that file gets the editor's checks alone. Same closure flattening; output is deterministic and self-checked before being written.
 
 `--to md` (alias `markdown`) generates a Markdown reference document via the `adapter/markdown` adapter: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
 
 | Flag | Description |
 | ---- | ----------- |
 | `--to` | Target: `go`, `jsonschema`, or `md` (required) |
-| `--package` | go target: generated package name (default: derived from schema name) |
+| `--package` | go target: generated package name (default: derived from schema name). A value that is not a Go identifier, or is a keyword or `_`, an empty one included, is a usage error (exit 2), judged before the schema is loaded |
 | `--output` | Output file path (default: stdout) |
 | `--initialisms` | go target: extra acronyms to upper-case in generated names, e.g. `GUID,JWT` |
-| `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes` |
+| `--module-root` | Root directory for module-style imports (default: the nearest ancestor holding a `yammm.mod` marker, else the schema's directory). Shared by every command that loads a schema: `validate`, `check`, `load`, `export`, `gen`, `snapshot save`, `snapshot verify`, `neo4j constraints`, `neo4j diff`, `neo4j indexes`. A root that is not a directory the loader can open exits 3 before the schema is parsed, whether or not the schema imports anything |
 | `--schema-id` | jsonschema target: value for the emitted `"$id"` (omitted when unset) |
 | `--no-class-diagram` | md target: omit the Mermaid class-diagram section |
 | `--no-class-members` | md target: keep the diagram and omit the member lines inside each class |
@@ -281,8 +296,8 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 | ---- | ------- | ----------- |
 | `--edition` | `enterprise` | `enterprise` or `community` |
 | `--named` | `true` | Generate named constraints |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
-| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar properties |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
+| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
@@ -316,8 +331,8 @@ Compares desired schema constraints **and indexes** against the live database (i
 | `--indexes` | `true` | Include index drift in the diff and the exit code; `--indexes=false` is constraints-only |
 | `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed, on **both** sides) |
 | `--named` | `true` | Named constraints; with `false` every pairing falls through to semantic identity |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
-| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar properties |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
+| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
@@ -371,9 +386,9 @@ unbound parameters.
 | Code | Meaning |
 | ---- | ------- |
 | 0 | Success (no errors) |
-| 1 | Errors in input (validation failures, constraint violations) |
-| 2 | Usage error (bad flags, missing arguments) |
-| 3 | Runtime error (connection failure, I/O error) |
+| 1 | Errors in input (validation failures, constraint violations, a value an export format cannot represent) |
+| 2 | Usage error (bad flags, missing arguments, an empty path operand, a schema, data or module-root path that is not valid UTF-8; `export` looks its data operand up first, since it may be a snapshot) |
+| 3 | Runtime error (connection failure, I/O error, a path the filesystem refuses, an internal fault, a failure the command did not classify) |
 
 ---
 
@@ -406,8 +421,10 @@ subtype's property re-declaration dropped an inherited `@writeOnce` or `@index`
 annotation. **Do not read a zero exit code as "no diagnostics."** Read the
 output.
 
-With `--format json`, each invocation writes exactly one JSON document to
-stderr, so a warnings-only run now produces a wire object where it previously
-produced nothing. A failure that is not itself a diagnostic — a bad flag, an
+With `--format json`, each command writes exactly one JSON document to stderr,
+a clean run included, so a consumer parses stderr unconditionally. A `help`,
+`completion` or `--version` that succeeds writes no document; `help` given a
+topic no command answers, and `completion` given no shell or one it does not
+know, exit 2 and write the refusal as any usage error. A failure that is not itself a diagnostic — a bad flag, an
 unreadable path, a lost connection — is inside that document as an
 `E_COMMAND_FAILED` error whose `exit_code` detail is the process exit code.

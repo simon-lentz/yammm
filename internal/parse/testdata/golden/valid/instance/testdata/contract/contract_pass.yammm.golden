@@ -1334,261 +1334,273 @@
           }
         },
         {
-          "msg": "\"d_wholefloat_matches_integer\"",
-          "expr": "(=~ 5 (dt Integer))",
+          "msg": "\"d_wholefloat_is_not_integer\"",
+          "expr": "(!~ 5 (dt Integer))",
           "expr_span": {
-            "s": 5414,
-            "e": 5428
+            "s": 5413,
+            "e": 5427
           },
           "span": {
             "s": 5381,
-            "e": 5428
+            "e": 5427
+          }
+        },
+        {
+          "msg": "\"d_exponent_literal_is_not_integer\"",
+          "expr": "(!~ 100 (dt Integer))",
+          "expr_span": {
+            "s": 5467,
+            "e": 5483
+          },
+          "span": {
+            "s": 5429,
+            "e": 5483
           }
         },
         {
           "msg": "\"p_typecheck_date\"",
           "expr": "(=~ \"2030-01-01\" (dt Date))",
           "expr_span": {
-            "s": 5451,
-            "e": 5471
+            "s": 5506,
+            "e": 5526
           },
           "span": {
-            "s": 5430,
-            "e": 5471
+            "s": 5485,
+            "e": 5526
           }
         },
         {
           "msg": "\"p_typecheck_not_date\"",
           "expr": "(!~ \"x\" (dt Date))",
           "expr_span": {
-            "s": 5498,
-            "e": 5509
+            "s": 5553,
+            "e": 5564
           },
           "span": {
-            "s": 5473,
-            "e": 5509
+            "s": 5528,
+            "e": 5564
           }
         },
         {
           "msg": "\"p_typecheck_uuid\"",
           "expr": "(=~ \"550e8400-e29b-41d4-a716-446655440000\" (dt UUID))",
           "expr_span": {
-            "s": 5532,
-            "e": 5578
+            "s": 5587,
+            "e": 5633
           },
           "span": {
-            "s": 5511,
-            "e": 5578
+            "s": 5566,
+            "e": 5633
           }
         },
         {
           "msg": "\"p_xor\"",
           "expr": "(^ true false)",
           "expr_span": {
-            "s": 5590,
-            "e": 5602
+            "s": 5645,
+            "e": 5657
           },
           "span": {
-            "s": 5580,
-            "e": 5602
+            "s": 5635,
+            "e": 5657
           }
         },
         {
           "msg": "\"p_xor_same_false\"",
           "expr": "(! (^ true true))",
           "expr_span": {
-            "s": 5625,
-            "e": 5639
+            "s": 5680,
+            "e": 5694
           },
           "span": {
-            "s": 5604,
-            "e": 5639
+            "s": 5659,
+            "e": 5694
           }
         },
         {
           "msg": "\"p_ternary_true\"",
           "expr": "(== (? true 1 2) 1)",
           "expr_span": {
-            "s": 5702,
-            "e": 5725
+            "s": 5757,
+            "e": 5780
           },
           "span": {
-            "s": 5683,
-            "e": 5725
+            "s": 5738,
+            "e": 5780
           }
         },
         {
           "msg": "\"p_ternary_false\"",
           "expr": "(== (? false 1 2) 2)",
           "expr_span": {
-            "s": 5747,
-            "e": 5771
+            "s": 5802,
+            "e": 5826
           },
           "span": {
-            "s": 5727,
-            "e": 5771
+            "s": 5782,
+            "e": 5826
           }
         },
         {
           "msg": "\"p_index\"",
           "expr": "(== (@ ([] 10 20 30) 1) 20)",
           "expr_span": {
-            "s": 5785,
-            "e": 5806
+            "s": 5840,
+            "e": 5861
           },
           "span": {
-            "s": 5773,
-            "e": 5806
+            "s": 5828,
+            "e": 5861
           }
         },
         {
           "msg": "\"p_index_string_rune\"",
           "expr": "(== (@ \"abé\" 2) \"é\")",
           "expr_span": {
-            "s": 5832,
-            "e": 5849
+            "s": 5887,
+            "e": 5904
           },
           "span": {
-            "s": 5808,
-            "e": 5849
+            "s": 5863,
+            "e": 5904
           }
         },
         {
           "msg": "\"d_index_oob_nil\"",
           "expr": "(== (@ ([] 10) 5) nil)",
           "expr_span": {
-            "s": 5871,
-            "e": 5887
+            "s": 5926,
+            "e": 5942
           },
           "span": {
-            "s": 5851,
-            "e": 5887
+            "s": 5906,
+            "e": 5942
           }
         },
         {
           "msg": "\"p_index_list_property\"",
           "expr": "(== (@ (p \"tags\") 0) \"alpha\")",
           "expr_span": {
-            "s": 5915,
-            "e": 5933
+            "s": 5970,
+            "e": 5988
           },
           "span": {
-            "s": 5889,
-            "e": 5933
+            "s": 5944,
+            "e": 5988
           }
         },
         {
           "msg": "\"p_index_list_property_last\"",
           "expr": "(== (@ (p \"tags\") 2) \"gamma\")",
           "expr_span": {
-            "s": 5966,
-            "e": 5984
+            "s": 6021,
+            "e": 6039
           },
           "span": {
-            "s": 5935,
-            "e": 5984
+            "s": 5990,
+            "e": 6039
           }
         },
         {
           "msg": "\"d_index_list_property_oob_nil\"",
           "expr": "(== (@ (p \"tags\") 9) nil)",
           "expr_span": {
-            "s": 6020,
-            "e": 6034
+            "s": 6075,
+            "e": 6089
           },
           "span": {
-            "s": 5986,
-            "e": 6034
+            "s": 6041,
+            "e": 6089
           }
         },
         {
           "msg": "\"d_index_list_property_negative_nil\"",
           "expr": "(== (@ (p \"tags\") (-x 1)) nil)",
           "expr_span": {
-            "s": 6075,
-            "e": 6090
+            "s": 6130,
+            "e": 6145
           },
           "span": {
-            "s": 6036,
-            "e": 6090
+            "s": 6091,
+            "e": 6145
           }
         },
         {
           "msg": "\"p_member_then_index\"",
           "expr": "(== (@ (. ($ \"self\") \"tags\") 0) \"alpha\")",
           "expr_span": {
-            "s": 6116,
-            "e": 6140
+            "s": 6171,
+            "e": 6195
           },
           "span": {
-            "s": 6092,
-            "e": 6140
+            "s": 6147,
+            "e": 6195
           }
         },
         {
           "msg": "\"p_member_then_pipeline\"",
           "expr": "(== (Len (. ($ \"self\") \"tags\") (args ) (params ) \u003cnil\u003e) 3)",
           "expr_span": {
-            "s": 6169,
-            "e": 6191
+            "s": 6224,
+            "e": 6246
           },
           "span": {
-            "s": 6142,
-            "e": 6191
+            "s": 6197,
+            "e": 6246
           }
         },
         {
           "msg": "\"p_postfix_chain_equals_grouped\"",
           "expr": "(== (@ (. ($ \"self\") \"tags\") 0) (@ (. ($ \"self\") \"tags\") 0))",
           "expr_span": {
-            "s": 6228,
-            "e": 6260
+            "s": 6283,
+            "e": 6315
           },
           "span": {
-            "s": 6193,
-            "e": 6260
+            "s": 6248,
+            "e": 6315
           }
         },
         {
           "msg": "\"d_self_is_map\"",
           "expr": "(== (TypeOf ($ \"self\") (args ) (params ) \u003cnil\u003e) \"map\")",
           "expr_span": {
-            "s": 6280,
-            "e": 6306
+            "s": 6335,
+            "e": 6361
           },
           "span": {
-            "s": 6262,
-            "e": 6306
+            "s": 6317,
+            "e": 6361
           }
         },
         {
           "msg": "\"d_self_len_counts_properties\"",
           "expr": "(\u003e (Len ($ \"self\") (args ) (params ) \u003cnil\u003e) 0)",
           "expr_span": {
-            "s": 6341,
-            "e": 6359
+            "s": 6396,
+            "e": 6414
           },
           "span": {
-            "s": 6308,
-            "e": 6359
+            "s": 6363,
+            "e": 6414
           }
         },
         {
           "msg": "\"d_numeric_var_unset_nil\"",
           "expr": "(== ($ \"0\") nil)",
           "expr_span": {
-            "s": 6389,
-            "e": 6398
+            "s": 6444,
+            "e": 6453
           },
           "span": {
-            "s": 6361,
-            "e": 6398
+            "s": 6416,
+            "e": 6453
           }
         }
       ],
       "span": {
         "s": 24,
-        "e": 6400
+        "e": 6455
       }
     }
   ]

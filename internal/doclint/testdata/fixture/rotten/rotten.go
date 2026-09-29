@@ -12,3 +12,7 @@ type Gadget struct{}
 // [json.Absent] reaches the fixture json package through the unique-name
 // fallback and is reported too.
 func Assemble() Gadget { return Gadget{} }
+
+// Relocate names [doclintfixture/moved] and [doclintfixture/moved.Gadget], a
+// package under the module's path that does not exist.
+func Relocate() {}

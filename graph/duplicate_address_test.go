@@ -70,7 +70,7 @@ func TestAdd_RootDuplicateRecordCarriesTheCanonicalAddress(t *testing.T) {
 	if len(dups) != 1 {
 		t.Fatalf("duplicates = %d, want 1", len(dups))
 	}
-	rejected := dups[0].Instance
+	rejected := dups[0].Instance()
 	if got, want := rejected.PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
 		t.Errorf("rejected duplicate key = %s, want the canonical %s", got, want)
 	}
@@ -154,7 +154,7 @@ func TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress(t *testing.T) {
 	if len(dups) != 1 {
 		t.Fatalf("duplicates = %d, want 1", len(dups))
 	}
-	rejected := dups[0].Instance
+	rejected := dups[0].Instance()
 	if got := rejected.PrimaryKey().String(); got != wantKey {
 		t.Errorf("rejected child key = %s, want the canonical %s", got, wantKey)
 	}
@@ -179,34 +179,30 @@ func TestRebuildSnapshot_DuplicateRecordResolvesFromEverySpelling(t *testing.T) 
 
 	snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{sensorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			sensorID: {{
-				TypeName: "Sensor", TypeID: sensorID,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{canonStamp}),
 				Properties: immutable.WrapProperties(map[string]any{"observed_at": canonStamp}),
 				Composed: map[string][]graph.InstanceParts{
 					"READINGS": {{
-						TypeName: "Reading", TypeID: readingID,
+						TypeID:     readingID,
 						PrimaryKey: immutable.WrapKey([]any{canonStamp}),
 						Properties: immutable.WrapProperties(map[string]any{"taken_at": canonStamp, "note": "first"}),
 					}},
 				},
-			}},
+			},
 		},
 		// Every address in the record is spelled RAW.
 		Duplicates: []graph.DuplicateParts{{
-			Type: readingID,
-			Key:  immutable.WrapKey([]any{rawStamp}),
 			Instance: graph.InstanceParts{
-				TypeName: "Reading", TypeID: readingID,
+				TypeID:     readingID,
 				PrimaryKey: immutable.WrapKey([]any{rawStamp}),
 				Properties: immutable.WrapProperties(map[string]any{"taken_at": rawStamp, "note": "second"}),
 			},
-			ConflictType: readingID,
-			ConflictKey:  immutable.WrapKey([]any{rawStamp}),
-			ParentType:   sensorID,
-			ParentKey:    immutable.WrapKey([]any{rawStamp}),
-			Relation:     "READINGS",
+			ParentType: sensorID,
+			ParentKey:  immutable.WrapKey([]any{rawStamp}),
+			Relation:   "READINGS",
 		}},
 	})
 	if res.HasErrors() {
@@ -218,17 +214,17 @@ func TestRebuildSnapshot_DuplicateRecordResolvesFromEverySpelling(t *testing.T) 
 		t.Fatalf("duplicates = %d, want 1", len(dups))
 	}
 	d := dups[0]
-	if d.Conflict == nil {
+	if d.Conflict() == nil {
 		t.Error("the conflict did not resolve from the raw spelling")
-	} else if got, want := d.Conflict.PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
+	} else if got, want := d.Conflict().PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
 		t.Errorf("conflict key = %s, want %s", got, want)
 	}
-	if d.Parent == nil {
+	if d.Parent() == nil {
 		t.Error("the parent did not resolve from the raw spelling")
-	} else if got, want := d.Parent.PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
+	} else if got, want := d.Parent().PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
 		t.Errorf("parent key = %s, want %s", got, want)
 	}
-	if got, want := d.Instance.PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
+	if got, want := d.Instance().PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
 		t.Errorf("rejected instance key = %s, want the canonical %s", got, want)
 	}
 }
@@ -246,26 +242,26 @@ func TestRebuildSnapshot_DuplicateRefusalNamesTheCanonicalAddress(t *testing.T) 
 	// renders dp.Key.
 	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{sensorID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			sensorID: {{
-				TypeName: "Sensor", TypeID: sensorID,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{canonStamp}),
 				Properties: immutable.WrapProperties(map[string]any{"observed_at": canonStamp}),
-			}},
+			},
 		},
 		Duplicates: []graph.DuplicateParts{{
-			Type: sensorID,
-			Key:  immutable.WrapKey([]any{rawStamp}),
 			Instance: graph.InstanceParts{
-				TypeName: "Sensor", TypeID: sensorID,
+				TypeID:     sensorID,
 				PrimaryKey: immutable.WrapKey([]any{rawStamp}),
 				Properties: immutable.WrapProperties(map[string]any{"observed_at": rawStamp}),
 				Composed: map[string][]graph.InstanceParts{
-					"READINGS": {{TypeName: "Reading", TypeID: readingID}},
+					"READINGS": {{
+						TypeID:     readingID,
+						PrimaryKey: immutable.WrapKey([]any{canonStamp}),
+						Properties: immutable.WrapProperties(map[string]any{"taken_at": canonStamp}),
+					}},
 				},
 			},
-			ConflictType: sensorID,
-			ConflictKey:  immutable.WrapKey([]any{canonStamp}),
 		}},
 	})
 	if !res.HasFatal() {
@@ -313,22 +309,22 @@ type Doc {
 
 	snap, rres := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{docID, noteID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			docID: {{
-				TypeName: "Doc", TypeID: docID,
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     docID,
 				PrimaryKey: immutable.WrapKey([]any{"d1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "d1"}),
-			}},
-			noteID: {{
-				TypeName: "Note", TypeID: noteID,
+			},
+			{
+				TypeID:     noteID,
 				PrimaryKey: immutable.WrapKey([]any{"n1"}),
 				Properties: immutable.WrapProperties(map[string]any{"id": "n1"}),
-			}},
+			},
 		},
 		Edges: []graph.EdgeParts{{
 			Relation:   "CITES",
 			SourceType: docID, SourceKey: immutable.WrapKey([]any{"d1"}),
-			TargetType: noteID, TargetKey: immutable.WrapKey([]any{"n1"}),
+			TargetKey:  immutable.WrapKey([]any{"n1"}),
 			Properties: immutable.WrapProperties(map[string]any{"seen_at": rawStamp}),
 		}},
 	})

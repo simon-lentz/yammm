@@ -4,9 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+	"github.com/yuin/goldmark"
 )
 
 // Option configures Marshal.
@@ -38,295 +43,556 @@ func WithClassMembers(include bool) Option {
 // per-type reference sections and data-type tables, with one section per
 // imported schema. Output is deterministic — byte-identical across runs
 // for the same schema — and structurally verified before return; an error
-// reports a generator bug or unusable input, never broken Markdown. The
-// schema does not need source backing: on a Builder-built schema,
-// invariant sections degrade to their message line.
+// reports a generator bug, never broken Markdown. The schema does not need
+// source backing: on a Builder-built schema, invariant sections degrade to
+// their message line.
 func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 	cfg := config{classDiagram: true, classMembers: true}
 	for _, o := range opts {
 		o(&cfg)
 	}
-	g, err := newGenerator(s)
+	g := newGenerator(s, cfg)
+	g.emitDocument()
+	moved, err := g.reanchor()
 	if err != nil {
 		return nil, err
 	}
-	g.classMembers = cfg.classMembers
-	g.emitDocument(cfg)
-	out := g.buf.Bytes()
-	if err := selfCheck(out, g.anchors); err != nil {
+	if moved {
+		g.reset()
+		g.emitDocument()
+	}
+	return g.finish()
+}
+
+// reanchor allocates every anchor over the headings the parser reads in the
+// emitted document, doc-comment headings included, as GitHub allocates them,
+// and reports whether an outline anchor moved. A heading in a doc comment is
+// invisible to the outline, so it can take an anchor the outline gave a later
+// heading; the links written to that heading are then wrong and the document
+// is emitted again. Heading text does not depend on anchors, so a second pass
+// allocates the same anchors.
+func (g *generator) reanchor() (bool, error) {
+	read := g.read()
+	parsed, err := g.headings.headings(read.root, read.src, g.inAuthorText)
+	if err != nil {
+		return false, fmt.Errorf("markdown: reading the emitted document: %w", err)
+	}
+	at := make(map[int]int, len(g.outline))
+	for i, h := range g.outline {
+		at[h.offset] = i
+	}
+	var alloc anchorAllocator
+	moved := false
+	for _, p := range parsed {
+		anchor := alloc.allocate(p.text)
+		if i, ok := at[p.offset]; ok && p.offset >= 0 && g.outline[i].anchor != anchor {
+			g.outline[i].anchor = anchor
+			moved = true
+		}
+	}
+	for _, h := range g.outline {
+		if h.kind == kindTypeSection {
+			g.types[h.typ.ID()].anchor = h.anchor
+		}
+	}
+	return moved, nil
+}
+
+// read returns the emitted document as the parser reads it, parsed once per
+// emission and shared by reanchor and the self-check.
+func (g *generator) read() probe {
+	if g.parsed == nil {
+		p := probeText(g.md, g.buf.Bytes())
+		g.parsed = &p
+	}
+	return *g.parsed
+}
+
+// reset discards the emitted document and the state emitting it recorded.
+func (g *generator) reset() {
+	g.parsed = nil
+	g.authored = nil
+	g.buf.Reset()
+	g.links = nil
+	g.tables = nil
+	g.labelled = false
+	g.diagramAt = -1
+}
+
+// finish runs the self-check over the emitted document and returns it. Marshal
+// returns only what finish returns, so the check cannot be bypassed without
+// losing the output.
+func (g *generator) finish() ([]byte, error) {
+	if err := g.selfCheck(); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return g.buf.Bytes(), nil
 }
 
-// emitDocument writes the full document skeleton: title, schema
+// outlineKind names what an outline entry's section holds.
+type outlineKind int
+
+const (
+	kindTitle outlineKind = iota
+	kindClassDiagram
+	kindTypes
+	kindTypeSection
+	kindDataTypes
+	kindImportedSchema
+)
+
+// outlineEntry is one heading of the document, in document order. The
+// outline is built once, allocates every anchor, and is what emitDocument
+// walks, so the headings written and the anchors linked to are one list.
+type outlineEntry struct {
+	kind   outlineKind
+	level  int
+	text   string         // the heading's text as rendered, which the anchor is derived from
+	md     string         // the heading's Markdown source, with inline syntax escaped
+	anchor string         // allocated by anchorAllocator in document order
+	offset int            // where emitDocument wrote the heading line, for the self-check
+	schema *schema.Schema // kindDataTypes, kindImportedSchema
+	typ    *schema.Type   // kindTypeSection
+}
+
+// emitDocument writes the document by walking the outline: title, schema
 // documentation, class diagram, the entry schema's type sections and
 // data-type table, then one section per imported schema in closure order.
-// Sections with nothing to say are omitted entirely.
-func (g *generator) emitDocument(cfg config) {
-	title := "Schema " + g.entry.Name()
-	g.anchors[slug(title)] = true
-	g.buf.WriteString("# " + title + "\n")
-
-	if doc := g.entry.Documentation(); doc != "" {
-		g.buf.WriteString("\n" + doc + "\n")
-	}
-	if cfg.classDiagram {
-		g.buf.WriteString("\n")
-		g.emitClassDiagram()
-	}
-	if types := g.entry.TypesSlice(); len(types) > 0 {
-		g.anchors["types"] = true
-		g.buf.WriteString("\n## Types\n")
-		for _, t := range types {
+func (g *generator) emitDocument() {
+	for i, h := range g.outline {
+		if i > 0 {
 			g.buf.WriteString("\n")
-			g.emitTypeSection(t)
 		}
-	}
-	if dts := g.entry.DataTypesSlice(); len(dts) > 0 {
-		g.anchors["data-types"] = true
-		g.buf.WriteString("\n## Data Types\n\n")
-		g.buf.WriteString(dataTypeTable(dts))
-	}
-
-	for _, sch := range g.closure[1:] {
-		heading := "Schema " + sch.Name()
-		if alias := g.entry.FindImportAlias(sch.SourceID()); alias != "" {
-			heading += " (imported as " + alias + ")"
-		}
-		g.anchors[slug(heading)] = true
-		g.buf.WriteString("\n## " + heading + "\n")
-		if doc := sch.Documentation(); doc != "" {
-			g.buf.WriteString("\n" + doc + "\n")
-		}
-		for _, t := range sch.TypesSlice() {
-			g.buf.WriteString("\n")
-			g.emitTypeSection(t)
-		}
-		if dts := sch.DataTypesSlice(); len(dts) > 0 {
-			g.anchors["data-types"] = true
-			g.buf.WriteString("\n### Data Types\n\n")
-			g.buf.WriteString(dataTypeTable(dts))
-		}
-	}
-}
-
-// dataTypeTable renders the Name | Definition | Description table over a
-// schema's named DataTypes.
-func dataTypeTable(dts []*schema.DataType) string {
-	var b bytes.Buffer
-	writeTableHeader(&b, "Name", "Definition", "Description")
-	for _, dt := range dts {
-		def := ""
-		if c := dt.Constraint(); c != nil {
-			def = c.String()
-		}
-		writeTableRow(&b, codeCell(dt.Name()), codeCell(def), escapeCell(dt.Documentation()))
-	}
-	return b.String()
-}
-
-// selfCheck structurally verifies emitted output before Marshal returns:
-// code fences balance and no heading opens inside one, every internal link
-// resolves to an emitted heading's anchor, and every table separator row
-// matches its header's column count. A failure is a generator bug
-// surfaced as an error, never emitted output.
-func selfCheck(out []byte, anchors map[string]bool) error {
-	if err := checkFences(out); err != nil {
-		return err
-	}
-	if err := checkLinks(out, anchors); err != nil {
-		return err
-	}
-	return checkTables(out)
-}
-
-// checkFences verifies that every opened code fence closes (a closing
-// fence needs at least the opening run's backtick count) and that no
-// column-zero heading line appears while a fence is open — the symptom of
-// a fence swallowing the rest of the document.
-func checkFences(out []byte) error {
-	inFence := false
-	openRun := 0
-	for line := range strings.SplitSeq(string(out), "\n") {
-		trimmed := strings.TrimLeft(line, " ")
-		run := 0
-		for run < len(trimmed) && trimmed[run] == '`' {
-			run++
-		}
-		if !inFence {
-			if run >= 3 {
-				inFence = true
-				openRun = run
+		g.outline[i].offset = g.buf.Len() // every case below writes its heading first
+		switch h.kind {
+		case kindTitle:
+			g.buf.WriteString("# " + h.md + "\n")
+			if doc := g.entry.Documentation(); doc != "" {
+				g.buf.WriteString("\n")
+				g.writeAuthorText(doc, false)
+				g.buf.WriteString("\n")
 			}
-			continue
-		}
-		if run >= openRun && strings.TrimRight(trimmed, "`") == "" {
-			inFence = false
-			continue
-		}
-		if strings.HasPrefix(line, "#") {
-			return fmt.Errorf("markdown: self-check: heading %q inside an open code fence", line)
+		case kindClassDiagram:
+			g.emitClassDiagram(h)
+		case kindTypes:
+			g.buf.WriteString("## " + h.md + "\n")
+		case kindTypeSection:
+			g.emitTypeSection(h.typ)
+		case kindDataTypes:
+			hashes := "##"
+			if h.level == 3 {
+				hashes = "###"
+			}
+			g.buf.WriteString(hashes + " " + h.md + "\n\n")
+			g.writeDataTypeTable(h.schema.DataTypesSlice())
+		case kindImportedSchema:
+			g.buf.WriteString("## " + h.md + "\n")
+			if doc := h.schema.Documentation(); doc != "" {
+				g.buf.WriteString("\n")
+				g.writeAuthorText(doc, false)
+				g.buf.WriteString("\n")
+			}
 		}
 	}
-	if inFence {
-		return errors.New("markdown: self-check: unclosed code fence at end of document")
+}
+
+// writeDataTypeTable writes the Name | Definition | Description table over a
+// schema's named DataTypes.
+func (g *generator) writeDataTypeTable(dts []*schema.DataType) {
+	tw := g.newTable(0, "Name", "Definition", "Description")
+	for _, dt := range dts {
+		tw.row(codeCellOf(dt.Name()), codeCellOf(dt.Constraint().String()), g.descriptionCellOf(dt.Documentation()))
+	}
+}
+
+// selfCheck reads the emitted document with a CommonMark parser and verifies
+// the structure the generator wrote. Nothing is left open at the end. Every
+// outline heading is a top-level heading of its level whose text is the text
+// the generator meant, holding the anchor GitHub allocates it. Outside doc
+// comments, the links read are the internal links the generator wrote, each
+// to an outline heading. Every table it wrote is read with its columns and
+// rows. The class diagram is read as a fenced code block whose every line is
+// a form the emitter writes. A failure is a generator bug.
+func (g *generator) selfCheck() error {
+	doc := g.read()
+	if _, open := doc.open(); open {
+		return errors.New("markdown: self-check: the document ends inside an open block")
+	}
+	root, out := doc.root, doc.src
+	type allocated struct {
+		heading parsedHeading
+		anchor  string
+	}
+	at := map[int]allocated{}
+	var alloc anchorAllocator
+	parsed, err := g.headings.headings(root, out, g.inAuthorText)
+	if err != nil {
+		return fmt.Errorf("markdown: self-check: %w", err)
+	}
+	for _, p := range parsed {
+		anchor := alloc.allocate(p.text)
+		if p.offset >= 0 {
+			at[p.offset] = allocated{p, anchor}
+		}
+	}
+	anchors := make(map[string]bool, len(g.outline))
+	for _, h := range g.outline {
+		got, ok := at[h.offset]
+		switch {
+		case !ok || !got.heading.topLevel:
+			return fmt.Errorf("markdown: self-check: heading %q is not read as a top-level heading", h.text)
+		case got.heading.level != h.level || got.heading.text != h.text:
+			return fmt.Errorf("markdown: self-check: heading %q is read as level %d %q", h.text, got.heading.level, got.heading.text)
+		case got.anchor != h.anchor:
+			return fmt.Errorf("markdown: self-check: heading %q takes anchor #%s where the generator gave it #%s", h.text, got.anchor, h.anchor)
+		}
+		anchors[h.anchor] = true
+	}
+	written := map[string]int{}
+	for _, a := range g.links {
+		written[a]++
+	}
+	read, err := linkTargets(root, out, g.inAuthorText)
+	if err != nil {
+		return fmt.Errorf("markdown: self-check: %w", err)
+	}
+	for _, a := range slices.Sorted(maps.Keys(read)) {
+		if written[a] == 0 {
+			return fmt.Errorf("markdown: self-check: internal link #%s is read %d times outside doc comments and written by no emitter", a, read[a])
+		}
+	}
+	for _, a := range slices.Sorted(maps.Keys(written)) {
+		n := written[a]
+		if !anchors[a] {
+			return fmt.Errorf("markdown: self-check: internal link #%s resolves to no emitted heading", a)
+		}
+		if read[a] != n {
+			return fmt.Errorf("markdown: self-check: internal link #%s is written %d times and read %d", a, n, read[a])
+		}
+	}
+	shapes, err := tables(root, out)
+	if err != nil {
+		return fmt.Errorf("markdown: self-check: %w", err)
+	}
+	for _, tw := range g.tables {
+		if tw.bad != "" {
+			return fmt.Errorf("markdown: self-check: %s", tw.bad)
+		}
+		got, ok := shapes[tw.offset]
+		if !ok {
+			return errors.New("markdown: self-check: a table the generator wrote is not read as a table")
+		}
+		if got.cols != tw.cols || got.rows != tw.rows {
+			return fmt.Errorf("markdown: self-check: a table written with %d columns and %d rows is read with %d and %d", tw.cols, tw.rows, got.cols, got.rows)
+		}
+	}
+	if g.diagramAt >= 0 {
+		body, ok := fencedCodeAt(root, out, g.diagramAt)
+		if !ok {
+			return errors.New("markdown: self-check: the class diagram is not read as a fenced code block")
+		}
+		if err := checkDiagram(body); err != nil {
+			return fmt.Errorf("markdown: self-check: %w", err)
+		}
 	}
 	return nil
 }
 
-// checkLinks verifies every emitted internal link targets an anchor
-// registered when its heading was written — the analog of jschema's $ref
-// audit, catching slug-rule drift between link and heading emission.
-func checkLinks(out []byte, anchors map[string]bool) error {
-	doc := string(out)
-	for i := 0; ; {
-		start := strings.Index(doc[i:], "](#")
-		if start < 0 {
-			return nil
-		}
-		start += i + len("](#")
-		end := strings.IndexByte(doc[start:], ')')
-		if end < 0 {
-			return fmt.Errorf("markdown: self-check: unterminated internal link at byte %d", start)
-		}
-		anchor := doc[start : start+end]
-		if !anchors[anchor] {
-			return fmt.Errorf("markdown: self-check: internal link #%s resolves to no emitted heading", anchor)
-		}
-		i = start + end
+// writeAuthorText writes a doc comment, indented under its bullet when
+// underBullet is set, with its line endings made LF and the Markdown block
+// and the HTML construct it leaves open closed.
+func (g *generator) writeAuthorText(doc string, underBullet bool) {
+	text := g.headings.closeAuthorHTML(g.md, closeAuthorText(g.md, lineEndings.Replace(doc)), "\n")
+	if underBullet {
+		text = indentUnderBullet(text)
 	}
+	start := g.buf.Len()
+	g.buf.WriteString(text)
+	g.authored = append(g.authored, span{start: start, end: g.buf.Len()})
 }
 
-// checkTables verifies each table separator row declares the same column
-// count as the header row above it.
-func checkTables(out []byte) error {
-	lines := strings.Split(string(out), "\n")
-	for i := 1; i < len(lines); i++ {
-		if !isSeparatorRow(lines[i]) {
-			continue
-		}
-		header := strings.TrimLeft(lines[i-1], " ")
-		if !strings.HasPrefix(header, "|") {
-			return fmt.Errorf("markdown: self-check: table separator %q has no header row", lines[i])
-		}
-		if h, s := countCells(header), countCells(strings.TrimLeft(lines[i], " ")); h != s {
-			return fmt.Errorf("markdown: self-check: table separator declares %d columns, header %q has %d", s, header, h)
+// span is a byte range of the emitted document.
+type span struct{ start, end int }
+
+// inAuthorText reports whether pos falls inside a doc comment the generator
+// wrote.
+func (g *generator) inAuthorText(pos int) bool {
+	for _, s := range g.authored {
+		if pos >= s.start && pos < s.end {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
-// isSeparatorRow reports whether the line is a table separator: pipes
-// delimiting cells that contain only hyphens.
-func isSeparatorRow(line string) bool {
-	trimmed := strings.TrimLeft(line, " ")
-	if !strings.HasPrefix(trimmed, "|") {
-		return false
-	}
-	cells := strings.SplitSeq(strings.Trim(trimmed, "|"), "|")
-	for cell := range cells {
-		c := strings.TrimSpace(cell)
-		if c == "" || strings.Trim(c, "-") != "" {
-			return false
-		}
-	}
-	return true
+// tableWriter writes one table into the document and records its shape: its
+// column and row counts, where its header line starts, and a row the
+// self-check reports because the parser cannot see it — a cell count other
+// than the header's, which GitHub's tables pad or trim, or a line break.
+type tableWriter struct {
+	g      *generator
+	indent string
+	cols   int
+	rows   int
+	offset int
+	bad    string
 }
 
-// countCells counts a table row's cells: unescaped pipe delimiters minus
-// the trailing edge.
-func countCells(row string) int {
-	pipes := 0
-	for i := range len(row) {
-		if row[i] == '|' && (i == 0 || row[i-1] != '\\') {
-			pipes++
-		}
+// tableCell is one cell's Markdown, and whether it holds a doc comment, which
+// the self-check leaves to its author.
+type tableCell struct {
+	md     string
+	author bool
+}
+
+func codeCellOf(s string) tableCell { return tableCell{md: codeCell(s)} }
+
+// descriptionCellOf writes a doc comment as a table cell, with the HTML
+// construct it leaves open closed on its line.
+func (g *generator) descriptionCellOf(doc string) tableCell {
+	return tableCell{md: g.headings.closeAuthorHTML(g.md, descriptionCell(g.md, doc), " "), author: true}
+}
+
+// newTable writes a table's header and separator rows, indented by indent,
+// and returns the writer for its body rows.
+func (g *generator) newTable(indent int, cols ...string) *tableWriter {
+	tw := &tableWriter{g: g, indent: strings.Repeat(" ", indent), cols: len(cols), offset: g.buf.Len()}
+	g.tables = append(g.tables, tw)
+	header := make([]tableCell, len(cols))
+	sep := make([]tableCell, len(cols))
+	for i, c := range cols {
+		header[i], sep[i] = tableCell{md: c}, tableCell{md: "---"}
 	}
-	return pipes - 1
+	tw.write(header)
+	tw.write(sep)
+	return tw
+}
+
+func (tw *tableWriter) row(cells ...tableCell) {
+	switch {
+	case tw.bad != "":
+	case len(cells) != tw.cols:
+		tw.bad = fmt.Sprintf("table row has %d cells, its header %d", len(cells), tw.cols)
+	case slices.ContainsFunc(cells, func(c tableCell) bool { return strings.ContainsAny(c.md, "\r\n") }):
+		tw.bad = "a table cell holds a line break"
+	}
+	tw.rows++
+	tw.write(cells)
+}
+
+// write writes one row of cells, which are Markdown already, and records each
+// doc comment's place in the document.
+func (tw *tableWriter) write(cells []tableCell) {
+	b := &tw.g.buf
+	b.WriteString(tw.indent + "|")
+	for _, c := range cells {
+		b.WriteByte(' ')
+		start := b.Len()
+		b.WriteString(c.md)
+		if c.author {
+			tw.g.authored = append(tw.g.authored, span{start: start, end: b.Len()})
+		}
+		b.WriteString(" |")
+	}
+	b.WriteByte('\n')
 }
 
 // typeEntry records how one type in the closure is addressed in the emitted
-// document: the display name used for its heading and in links to it (bare
-// for entry-schema types, schema-qualified for imported ones), and the
-// anchor that heading produces.
+// document: its display text, the anchor its heading takes, and its Mermaid
+// class id.
 type typeEntry struct {
-	typ     *schema.Type
-	display string
-	anchor  string
+	typ       *schema.Type
+	display   string // what a reader sees: see displayName
+	displayMD string // display with inline Markdown syntax escaped
+	anchor    string
+	mermaidID string
 }
 
 // generator accumulates the emitted document and the cross-referencing
-// state the emitters and the self-check share: the closure-wide type index,
-// the set of anchors emitted so far, and the source registry used to
-// extract invariant declaration text.
+// state the emitters and the self-check share.
 type generator struct {
-	buf     bytes.Buffer
-	entry   *schema.Schema
-	closure []*schema.Schema
-	types   map[schema.TypeID]*typeEntry
-	anchors map[string]bool
-	sources *schema.Sources
+	buf        bytes.Buffer
+	entry      *schema.Schema
+	closure    []*schema.Schema
+	declaredIn map[schema.TypeID]*schema.Schema // each type's declaring schema
+	types      map[schema.TypeID]*typeEntry
+	outline    []outlineEntry
+	sources    *schema.Sources
+	contents   map[location.SourceID][]byte // each source's content, read once
+	cfg        config
 
-	// classMembers selects whether writeClass lists a type's properties.
-	classMembers bool
+	md       goldmark.Markdown // the parser the self-check and the closing of doc comments read with
+	headings headingReader     // reads the heading elements of what md parses
+	parsed   *probe            // the emitted document as md reads it; nil until read
+	links    []string          // the anchor of every internal link emitted
+	authored []span            // every doc comment written, in document order
+	tables   []*tableWriter    // every table emitted
 
 	// labelled records that writeClass emitted a labelled class, which is
 	// what the floor sentence is about.
 	labelled bool
+	// diagramAt is where the class diagram's fence starts, or -1 when the
+	// document has none.
+	diagramAt int
 }
 
-// newGenerator builds the generator for a schema and its import closure.
-// Entry-schema types display under their bare name; every imported type
-// displays schema-qualified. Display names are unique across the closure, but
-// slug normalization strips the dots that qualify a name, so two distinct
-// displays can still collapse to one heading anchor. Every internal link
-// targets a type anchor, so such a collision would silently resolve a link to
-// the wrong type's section; it is rejected here instead, mirroring
-// adapter/jschema's $defs key-collision guard. (Section anchors like the
-// duplicated per-schema "data-types" are intentionally excluded — nothing
-// links to them.)
-func newGenerator(s *schema.Schema) (*generator, error) {
+// newGenerator builds the generator for a schema and its import closure: each
+// type's display name and Mermaid id, and the outline with every heading's
+// anchor. An anchor is allocated as GitHub allocates it — the heading's slug,
+// suffixed -1, -2, … when an earlier heading took it — so two headings that
+// slug alike each keep a working link and no schema is refused for its names.
+func newGenerator(s *schema.Schema, cfg config) *generator {
 	g := &generator{
-		entry:        s,
-		closure:      s.Closure(),
-		types:        make(map[schema.TypeID]*typeEntry),
-		anchors:      make(map[string]bool),
-		sources:      s.Sources(),
-		classMembers: true,
+		entry:      s,
+		closure:    s.Closure(),
+		declaredIn: map[schema.TypeID]*schema.Schema{},
+		types:      make(map[schema.TypeID]*typeEntry),
+		sources:    s.Sources(),
+		contents:   map[location.SourceID][]byte{},
+		cfg:        cfg,
+		md:         newParser(),
+		headings:   newHeadingReader(),
+		diagramAt:  -1,
 	}
-	anchorOwner := make(map[string]string) // anchor -> first claiming display name
-	for i, sch := range g.closure {
+	mermaidIDs := map[string]bool{}
+	for _, sch := range g.closure {
 		for _, t := range sch.TypesSlice() {
-			display := t.Name()
-			if i > 0 {
-				display = sch.Name() + "." + t.Name()
+			g.declaredIn[t.ID()] = sch
+			display, displayMD := g.displayName(sch, t)
+			g.types[t.ID()] = &typeEntry{
+				typ:       t,
+				display:   display,
+				displayMD: displayMD,
+				mermaidID: uniqueMermaidID(mermaidID(display), mermaidIDs),
 			}
-			anchor := slug(display)
-			if first, taken := anchorOwner[anchor]; taken {
-				return nil, fmt.Errorf(
-					"markdown: type headings %q and %q both anchor to #%s; rename one type",
-					first, display, anchor,
-				)
-			}
-			anchorOwner[anchor] = display
-			g.types[t.ID()] = &typeEntry{typ: t, display: display, anchor: anchor}
 		}
 	}
-	return g, nil
+	g.buildOutline()
+	return g
+}
+
+// displayName returns how the document names t, as text and as Markdown: the
+// bare name for a type the entry schema declares, the entry's own tag
+// ("alias.Name") for one it imports directly — the name a data file uses —
+// and "Name (schema)" for one it reaches only through another import, which
+// has no name a data file can use and so is never written as a tag.
+func (g *generator) displayName(sch *schema.Schema, t *schema.Type) (string, string) {
+	if tag, ok := schema.AddressableTag(g.entry, t.ID()); ok {
+		return tag, escapeInline(tag)
+	}
+	name := printableName(sch.Name())
+	return t.Name() + " (" + name + ")", t.Name() + " (" + escapeInline(name) + ")"
+}
+
+// buildOutline lists the document's headings in the order emitDocument writes
+// them and allocates each anchor. A section with nothing to say has no entry.
+func (g *generator) buildOutline() {
+	var alloc anchorAllocator
+	add := func(e outlineEntry) {
+		e.md = keepTrailingSpaces(e.md)
+		e.anchor = alloc.allocate(e.text)
+		g.outline = append(g.outline, e)
+	}
+	entryName := printableName(g.entry.Name())
+	add(outlineEntry{kind: kindTitle, level: 1, text: "Schema " + entryName, md: "Schema " + escapeInline(entryName)})
+	if g.cfg.classDiagram {
+		add(outlineEntry{kind: kindClassDiagram, level: 2, text: "Class Diagram", md: "Class Diagram"})
+	}
+	g.addSchemaTypes(add, g.entry, true)
+	for _, sch := range g.closure[1:] {
+		name := printableName(sch.Name())
+		text, md := "Schema "+name, "Schema "+escapeInline(name)
+		if alias := g.entry.FindImportAlias(sch.SourceID()); alias != "" {
+			text += " (imported as " + alias + ")"
+			md += " (imported as " + alias + ")"
+		}
+		add(outlineEntry{kind: kindImportedSchema, level: 2, text: text, md: md, schema: sch})
+		g.addSchemaTypes(add, sch, false)
+	}
+	for i, h := range g.outline {
+		if h.kind == kindTypeSection {
+			g.types[h.typ.ID()].anchor = g.outline[i].anchor
+		}
+	}
+}
+
+// addSchemaTypes adds one schema's type sections and its data-type table. The
+// entry schema's types sit under a "## Types" heading and its table under
+// "## Data Types"; an imported schema's sit directly under its own heading.
+func (g *generator) addSchemaTypes(add func(outlineEntry), sch *schema.Schema, entry bool) {
+	types := sch.TypesSlice()
+	if entry && len(types) > 0 {
+		add(outlineEntry{kind: kindTypes, level: 2, text: "Types", md: "Types"})
+	}
+	for _, t := range types {
+		e := g.types[t.ID()]
+		add(outlineEntry{kind: kindTypeSection, level: 3, text: e.display, md: e.displayMD, typ: t})
+	}
+	if len(sch.DataTypesSlice()) > 0 {
+		level := 3
+		if entry {
+			level = 2
+		}
+		add(outlineEntry{kind: kindDataTypes, level: level, text: "Data Types", md: "Data Types", schema: sch})
+	}
+}
+
+// anchorAllocator hands out heading anchors the way GitHub does: the slug of
+// the heading text, and on a repeat the slug suffixed -1, -2, … — skipping any
+// suffixed form an earlier heading already holds.
+type anchorAllocator struct {
+	occurrences map[string]int
+}
+
+func (a *anchorAllocator) allocate(text string) string {
+	if a.occurrences == nil {
+		a.occurrences = map[string]int{}
+	}
+	base := slug(text)
+	result := base
+	for {
+		if _, taken := a.occurrences[result]; !taken {
+			break
+		}
+		a.occurrences[base]++
+		result = base + "-" + strconv.Itoa(a.occurrences[base])
+	}
+	a.occurrences[result] = 0
+	return result
+}
+
+// uniqueMermaidID returns base, or base suffixed _2, _3, … when an earlier
+// class took it, and records the result. Class ids are internal to the
+// diagram, so two types whose display names sanitize alike stay two classes.
+func uniqueMermaidID(base string, taken map[string]bool) string {
+	id := base
+	for i := 2; taken[id]; i++ {
+		id = base + "_" + strconv.Itoa(i)
+	}
+	taken[id] = true
+	return id
+}
+
+// link renders a link to e's section and records its anchor for the
+// self-check.
+func (g *generator) link(e *typeEntry) string {
+	g.links = append(g.links, e.anchor)
+	return "[" + e.displayMD + "](#" + e.anchor + ")"
 }
 
 // resolveSuper finds the closure entry for a declared extends reference by
-// matching it against the type's resolved supertype linearization. Returns
-// false when the reference names no type in this document's type map.
+// resolving it in the schema that declares t, which is the scope the
+// reference was written in. Returns false when the reference names no type
+// in this document's type map.
 func (g *generator) resolveSuper(t *schema.Type, ref schema.TypeRef) (*typeEntry, bool) {
-	for _, super := range t.SuperTypesSlice() {
-		if super.Ref().String() != ref.String() {
-			continue
-		}
-		if e, ok := g.types[super.ID()]; ok {
-			return e, true
-		}
+	sch, ok := g.declaredIn[t.ID()]
+	if !ok {
+		return nil, false
 	}
-	return nil, false
+	super, ok := sch.ResolveType(ref)
+	if !ok {
+		return nil, false
+	}
+	e, ok := g.types[super.ID()]
+	return e, ok
 }

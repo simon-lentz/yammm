@@ -33,7 +33,7 @@ part type Wheel {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	want := "## Class Diagram\n" +
 		"\n" +
 		"```mermaid\n" +
@@ -54,7 +54,7 @@ part type Wheel {
 		"        position Enum\n" +
 		"    }\n" +
 		"    Car --> Person : OWNER (one)\n" +
-		"    Car *-- Wheel : WHEELS (one:many)\n" +
+		"    Car *-- Wheel : WHEELS (one#58;many)\n" +
 		"```\n"
 	if got := g.buf.String(); got != want {
 		t.Errorf("diagram = %q, want %q", got, want)
@@ -83,8 +83,8 @@ type Truck extends Vehicle {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.classMembers = false
-	g.emitClassDiagram()
+	g.cfg.classMembers = false
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	want := "## Class Diagram\n" +
 		"\n" +
 		"```mermaid\n" +
@@ -121,7 +121,7 @@ type Truck extends Vehicle {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	want := "## Class Diagram\n" +
 		"\n" +
 		"```mermaid\n" +
@@ -169,7 +169,7 @@ abstract type Located {
 `),
 	})
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	want := "## Class Diagram\n" +
 		"\n" +
 		mermaidFloorSentence + "\n" +
@@ -209,7 +209,7 @@ type Car {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
 	if got := g.buf.String(); strings.Contains(got, "Mermaid 10.1.0") {
 		t.Errorf("an import-free diagram carries the floor sentence:\n%s", got)
 	}
@@ -228,9 +228,9 @@ type Person {
 }
 `)
 	g := newTestGenerator(t, s)
-	g.emitClassDiagram()
-	if !g.anchors["class-diagram"] {
-		t.Errorf("anchors = %v, want %q registered", g.anchors, "class-diagram")
+	g.emitClassDiagram(outlineEntry{md: "Class Diagram"})
+	if h := g.outline[1]; h.kind != kindClassDiagram || h.anchor != "class-diagram" {
+		t.Errorf("outline[1] = %+v, want the class diagram at #class-diagram", h)
 	}
 	got := g.buf.String()
 	if n := strings.Count(got, "```"); n != 2 {
@@ -238,5 +238,99 @@ type Person {
 	}
 	if !strings.HasSuffix(got, "```\n") {
 		t.Errorf("diagram does not end with closing fence: %q", got)
+	}
+}
+
+// TestCheckDiagram pins the diagram lines the self-check accepts: the forms the
+// emitter writes, with entity codes read as Mermaid reads them, and nothing a
+// Mermaid lexer reads another way.
+func TestCheckDiagram(t *testing.T) {
+	t.Parallel()
+
+	const head = "classDiagram\n    direction TB\n"
+	for _, tt := range []struct {
+		name, body, want string
+	}{
+		{"emitted forms", head +
+			"    class Car {\n        <<Abstract>>\n        vin String\n        tags List\n    }\n" +
+			"    class Wheel\n" +
+			"    class a_B[\"a#quot;b (x#58;y direction#32;LR)\"]\n" +
+			"    Car <|-- Wheel\n" +
+			"    Car *-- Wheel : WHEELS (one#58;many)\n" +
+			"    Car --> a_B : TO (_)\n", ""},
+		{"no header", "    class Car\n", "header lines"},
+		{"another diagram type", "flowchart TD\n    direction TB\n    class Car\n", "header lines"},
+		{"no direction line", "classDiagram\n    class Car\n    class Wheel\n", "header lines"},
+		{"colon in an edge label", head + "    Car *-- Wheel : WHEELS (one:many)\n", "WHEELS (one:many)"},
+		{"semicolon in an edge label", head + "    Car --> Wheel : A;B\n", "A;B"},
+		{"quote in a class label", head + "    class a_B[\"a\"b\"]\n", `a\"b`},
+		{"non-ASCII class id", head + "    class Foo__\u00e9_\n", "Foo__"},
+		{"brace in a member line", head + "    class Car {\n        id{x}\n    }\n", "id{x}"},
+		{"comment line", head + "    %% note\n", "%% note"},
+		{"direction in a class label", head + "    class P_x_[\"P (x direction LR)\"]\n", "direction LR"},
+		{"a member named direction", head + "    class P {\n        direction LR\n        direction String\n    }\n", ""},
+		{"direction and no keyword in a class label", head + "    class P_x_[\"P (direction String, direction lr)\"]\n", ""},
+		{"direction in an edge label", head + "    Car --> Wheel : x direction TB\n", "direction TB"},
+		{"direction before a no-break space", head + "    class P_x_[\"P (direction\u00a0LR)\"]\n", "direction"},
+		{"directive in a label", head + "    class a_B[\"%%{init: {}}%%\"]\n", "%%{init"},
+		{"open class body", head + "    class Car {\n        vin String\n", "body open"},
+		{"unknown arrow", head + "    Car ..> Wheel\n", "..>"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := checkDiagram(tt.body)
+			switch {
+			case tt.want == "" && err != nil:
+				t.Errorf("checkDiagram = %v, want nil", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
+				t.Errorf("checkDiagram = %v, want an error naming %q", err, tt.want)
+			}
+		})
+	}
+}
+
+// TestMarshal_PropertyNamedDirectionIsAMember pins that a property named
+// direction renders as a class member, whatever its type is named. Mermaid
+// reads "direction" and a direction keyword as a statement only outside a
+// class body, so a member line needs no escape for it.
+func TestMarshal_PropertyNamedDirectionIsAMember(t *testing.T) {
+	t.Parallel()
+
+	out, err := Marshal(loadSchema(t, `schema "s"
+
+type LR = String[1, 2]
+
+type Arrow {
+	id String primary
+	direction String
+	heading LR
+	wind_direction Integer
+	--> POINTS (one) Winddirection
+}
+
+type Winddirection {
+	id String primary
+}
+
+type Sign {
+	id String primary
+	direction LR
+}
+`))
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	doc := string(out)
+	for _, want := range []string{
+		"        direction String\n",
+		"        direction LR\n",
+		"        heading LR\n",
+		"        wind_direction Integer\n",
+		"    class Winddirec_tion[\"Winddirection\"] {\n",
+		"    Arrow --> Winddirec_tion : POINTS (one)\n",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("document has no member line %q:\n%s", want, doc)
+		}
 	}
 }

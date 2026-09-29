@@ -42,7 +42,9 @@ var ErrAbsolutePathSourceID = errors.New("location: synthetic source ID looks li
 // Must forms).
 var ErrEmptyPath = errors.New("location: path is empty")
 
-// ErrInvalidUTF8Path is returned for a path that is not valid UTF-8.
+// ErrInvalidUTF8Path is returned for a path that is not valid UTF-8, or that
+// resolves to one through the working directory, a name on disk or a dangling
+// link's target.
 //
 // An identity is text that reaches two JSON wires — a diagnostic under
 // --format json, and the .ys header's schema_source — and encoding/json writes
@@ -51,9 +53,10 @@ var ErrEmptyPath = errors.New("location: path is empty")
 //
 // Returned by: ResolveHostPath, every file-backed constructor (NewCanonicalPath,
 // SourceIDFromPath, ResolveSourcePath, CanonicalizePathForSourceID and
-// CanonicalPath.Join), and ValidateSyntheticSourceID (and transitively by their
-// Must forms). A schema load reports it as a Fatal diagnostic, whose message
-// carries the error's text, so errors.Is cannot match it there.
+// CanonicalPath.Join), ValidateSyntheticSourceID and NormalizeSyntheticKey (and
+// transitively by their Must forms). A schema load reports it as a Fatal
+// diagnostic for the entry path and an E_IMPORT_RESOLVE error for an import,
+// each carrying the error's text, so errors.Is cannot match it there.
 var ErrInvalidUTF8Path = errors.New("location: path is not valid UTF-8")
 
 // ErrAbsoluteJoinElement is returned when CanonicalPath.Join receives an

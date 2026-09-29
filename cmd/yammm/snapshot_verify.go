@@ -1,9 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
-
 	"github.com/spf13/cobra"
 
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
@@ -43,9 +40,12 @@ func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSi
 	schemaPath := args[0]
 	snapshotPath := args[1]
 
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
+	}
+	if err := cli.CheckOperand("snapshot file", snapshotPath); err != nil {
+		return err
 	}
 
 	// Load schema.
@@ -59,7 +59,7 @@ func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSi
 	}
 
 	// Read snapshot file.
-	data, err := os.ReadFile(snapshotPath)
+	data, err := cli.ReadFile(snapshotPath)
 	if err != nil {
 		return cli.Runtimef("read snapshot file: %v", err)
 	}

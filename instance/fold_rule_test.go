@@ -135,6 +135,28 @@ type T {
 	}
 }
 
+// FoldKey is the exported rule: ASCII upper case, and only it, lowers; a key
+// holding a non-ASCII byte folds to nothing. '@' and '[' sit either side of
+// 'A' to 'Z'.
+func TestFoldKey(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		key, want string
+		ok        bool
+	}{
+		{"works_AT_Z", "works_at_z", true},
+		{"@[", "@[", true},
+		{"", "", true},
+		{"\u212Aey", "", false},
+		{"Café", "", false},
+	} {
+		got, ok := instance.FoldKey(c.key)
+		if got != c.want || ok != c.ok {
+			t.Errorf("FoldKey(%q) = %q, %v; want %q, %v", c.key, got, ok, c.want, c.ok)
+		}
+	}
+}
+
 // A collision between two edge-property keys is anchored on the edge object
 // they both belong to, not on whichever key iteration reached second.
 func TestEdgePropertyCollision_PathIsTheTargetObject(t *testing.T) {

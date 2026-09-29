@@ -1,9 +1,86 @@
 // Package csv provides a CSV adapter for parsing delimited data into
 // [instance.RawInstance] values and serializing validated instances to CSV.
 //
+// # Delimiter and Header
+//
+// Fields split on ',' unless [WithDelimiter] names another delimiter; a TSV
+// file takes '\t'. The parse side and the write side read one delimiter, so an
+// adapter reads back the file it writes. [encoding/csv]'s quoting holds under
+// every delimiter: a cell that starts with '"' is a quoted field, and the writer
+// quotes a cell holding the delimiter, a quote or a line break, or starting
+// with white space. A TSV file is
+// therefore CSV with tabs, not the quote-free IANA text/tab-separated-values
+// format. The first row is always the header,
+// because its column names are what map a cell to a property: the package has
+// no headerless mode.
+//
+// # Diagnostic Codes
+//
+// Four codes divide the faults this package's own checks find, by what the
+// caller must do about it, and two more, which the JSON adapter reports as
+// well, close the paragraph. A cell whose text does not coerce to the type its member
+// declares draws [E_CSV_COERCE]: the data needs cleaning, the cell keeps its
+// text and the row is still produced. A setting the adapter cannot use draws
+// [E_CSV_CONFIG] — a list separator the parser could not find again, a
+// delimiter [encoding/csv] refuses, [Adapter.ParseWithTypeColumn] with no
+// [WithTypeColumn] or with a name holding a CR LF, which no header can hold —
+// before the parse reads a byte, and carries no span, since
+// it names the configuration and not the input. Input that is not well formed
+// draws [diag.E_ADAPTER_PARSE], the code the JSON adapter reports a malformed
+// document under, so one code answers that question for both data parsers. An
+// [io.Reader] that fails draws [diag.E_ADAPTER_IO] at Fatal, the adapter
+// category's I/O code, which the CLI exits 3 on as it does for any I/O
+// failure. A type-column value that is not a type name draws
+// E_INVALID_TYPE_TAG and a cancelled parse E_CONTEXT_CANCELLED, as they do
+// there.
+//
+// The line falls on what the caller must change, not on who is at fault. A
+// type column the header does not name is [diag.E_ADAPTER_PARSE] and not
+// [E_CSV_CONFIG], although a caller chose the name: the file can be given the
+// column, so the input is what does not match. [E_CSV_CONFIG] is for a setting
+// no file could satisfy.
+//
+// # Header and Records
+//
+// The header must name every column, and name each one once: a header with an
+// unnamed column or a name that repeats is refused at the header's line, with
+// one diagnostic for each unnamed column and each repeated name, and no record
+// is read. A name is never trimmed; which member it names is decided under
+// Column Mapping.
+//
+// A record the reader refuses — one whose field count differs from the
+// header's, a bare quote in an unquoted field, a character after a quoted
+// field's closing quote — is reported as an Error at the line the fault is on,
+// and the parse goes on with the next record. A quoted field that is never
+// closed runs to the end of the input, so its record is the last one
+// reported. [encoding/csv]'s LazyQuotes is off, so a malformed quoted field is
+// a diagnostic, never a value the file did not state.
+//
+// Any other error the reader returns is the [io.Reader] failing, an error that
+// only wraps [io.EOF] included. It stops the parse with a Fatal
+// [diag.E_ADAPTER_IO], as the diag package documents for an I/O failure, and
+// the records read before it are kept. A header the reader cannot read is an
+// Error for a fault in the input and that same Fatal for the reader failing.
+// No failure is lost: the parser returns the reader's first error from every
+// later read, so a failure met while the byte order mark is looked for, or one
+// [encoding/csv] reads past behind a record it refuses, still stops the parse.
+//
+// # Cancellation
+//
+// Every entry point observes its context at each unit of work it has. Both parse
+// methods check before each record is read and stop with a Fatal
+// E_CONTEXT_CANCELLED carrying the span of the last record the reader returned
+// without an error, or none before the first, keeping the records read before
+// it; a record the reader refuses leaves the span where it was. Fatal because
+// [diag.Result.HasFatal] is documented to mean the run did not finish. Both
+// writers check once per type
+// and again once per instance and return an error wrapping the context's:
+// [Adapter.MarshalSnapshot] returns no output, and [Adapter.WriteSnapshot]
+// flushes what it wrote first, so a destination still parses as far as it goes.
+//
 // # Column Mapping
 //
-// Column names map 1:1 to property names. A CSV header row
+// A column maps to the property whose name it spells. A CSV header row
 //
 //	id,name,age,created_at
 //
@@ -16,19 +93,79 @@
 // so the grammar is unambiguous; with [WithTypeColumn], the type column is
 // extracted before dotted classification.
 //
+// The parser owns the CSV — its quoting, its records, its header and the
+// coercion of each cell — and the validator owns every name, as it does for
+// the JSON adapter. So a row parses as the JSON object that holds the same keys
+// and values does, and the validator answers the two alike.
+//
+// A row's object holds one key per name its cells write: a filled plain
+// column, a dotted field whose group holds a filled cell and was not dropped
+// for a count clash (under Foreign Keys), and an empty plain column that holds
+// its property's empty value (under Empty Cells). Which
+// member each key claims is decided by [instance.ClaimKeys], the validator's
+// own decision over every key the object holds, plain and dotted alike, and
+// each target of an edge group is its own object, decided by
+// [instance.ClaimEdgeKeys]. A key that claims a member takes that member's
+// coercion and empty value, and every key keeps the header's spelling.
+//
+// A dotted field's group is split into targets only where its key claims an
+// association. Any other group — one whose field names a composition, a
+// property or nothing, or whose key is shadowed or collides — is carried as
+// one object of its filled cells' text under the field's spelling, for the
+// validator to judge as it judges that JSON object.
+//
+// [WithStrictPropertyNames] matches names exactly instead, as
+// [instance.WithStrictPropertyNames] makes the validator match them. Give the
+// parser the validator's setting: [instance.RecommendedOptions] sets it. A
+// parser that folds for a strict validator writes a mis-cased column's empty
+// value under the header's spelling, so the row draws the validator's unknown
+// field where the file means no value.
+//
+// A key that claims no member is carried as its text, as a JSON key is, for
+// the validator to report as unknown, shadowed or colliding, or to ignore under
+// [instance.WithAllowUnknownFields]; its empty cell is skipped. That holds at
+// every position: a column naming no property, a suffix naming neither a key
+// component nor an edge property, and a key component the target does not
+// declare.
+//
+// Two values for one key are refused, as a JSON object that repeats a member
+// is: where a plain column and the dotted columns of the same field both hold
+// a value in one row, the row draws [diag.E_ADAPTER_PARSE] naming both — the
+// code that adapter reports its repeated member under — unless a count clash
+// dropped the group first, which leaves the plain value its one writer. The
+// group is kept where
+// the key claims an association, whose only valid form it is, and the plain
+// value everywhere else. An empty plain cell beside a filled group holds no
+// value, so the group alone writes the key.
+//
+// Each row type of a [WithTypeColumn] file reads the header against its own
+// members, once per type. A type-column value must be a type name by the
+// grammar's rule, which the JSON adapter applies to a document's top-level
+// keys; one that is not, the empty one included, draws E_INVALID_TYPE_TAG, and
+// its record is skipped.
+//
 // # Type Coercion
 //
 // CSV values are strings. The adapter uses [*schema.Type] constraint metadata
 // to coerce string values to typed Go values during parsing:
 //
-//   - Integer properties: [strconv.ParseInt]
-//   - Float properties: [strconv.ParseFloat]
+//   - Integer properties: a JSON integer literal, read exactly and refused
+//     outside int64. A float literal ("1.0", "1e2") is never an Integer,
+//     whole or not, as the validator reads the JSON document holding it
+//   - Float properties: any JSON number literal, read to its nearest float64
+//     with the sign of a zero kept, and refused where none is finite
+//   - A spelling JSON has no number literal for ("+5", "007", "1_000",
+//     "0x1p4", "Inf") draws [E_CSV_COERCE] at either kind, and at a List's or
+//     a Vector's element
 //   - Boolean properties: [strconv.ParseBool], every spelling it accepts
 //   - Date properties: validated as "2006-01-02" format, kept as string
 //   - Timestamp properties: validated against the declared layout — the
 //     validator's own rule — or RFC 3339 for the default layout; kept as
 //     string
-//   - List properties: split by the list separator, elements coerced
+//   - List properties: split by the list separator, each element coerced
+//     by the element constraint, a nested list by this same rule
+//   - Vector properties: split by the list separator, each element read as a
+//     Float
 //
 // Date and Timestamp values remain as strings in [instance.RawInstance],
 // matching the JSON adapter's behavior. Temporal coercion to driver types
@@ -37,46 +174,168 @@
 // The write side renders Timestamp, Date and UUID through their constraint, so
 // a cell carries the text the validator stores — including foreign-key columns,
 // whose components render through the TARGET type's primary-key constraints,
-// and list elements, which render through the element constraint. A value the
+// and list elements, which render through the element constraint. A scalar the
 // constraint cannot render is written as it arrived: an export returns an error
-// rather than a diag.Result, so one malformed cell must not fail the file.
+// rather than a diag.Result, so one malformed cell must not fail the file. A
+// composite value has no spelling in a cell and is refused (under Empty Cells).
 //
 // # List Properties
 //
 // List values use the list separator — "|" by default, configurable with
-// [WithListSeparator]. Both sides escape through one shared helper pair
-// (the backslash escapes itself and the separator), so an element
-// containing the separator survives the round trip.
+// [WithListSeparator]. Both sides escape through one shared helper pair: the
+// backslash escapes itself and every occurrence of the separator's first
+// byte, so the separator is found only between elements, and an element
+// holding any part of it splits back unchanged. A separator the parser
+// cannot find again is refused: one that begins with the backslash, and one
+// holding a CR LF, which [encoding/csv]'s reader turns into LF. A parse reports
+// it as [E_CSV_CONFIG] and a write returns it marked [ErrConfig], because the
+// separator is the adapter's own setting and no snapshot can satisfy it.
 //
-// # Null Handling
+// A nested collection — a List of Lists, a List of Vectors — renders by the
+// same rule at every depth: an inner list renders as a list cell does, and the
+// outer list escapes that text as one element, so its escapes are escaped
+// again. The parser splits and unescapes one depth at a time, so it reads every
+// depth back.
 //
-// An empty cell in a property column is treated as nil. An edge column is
-// different: an all-empty group means the edge is absent, and an empty
-// segment means the optional edge property is absent on that target —
-// never null, which the validator rejects for edges.
+// Every scalar renders one way wherever it sits — a cell, a list element, a
+// Vector element or an edge segment — so a Float is written in positional
+// notation ([strconv.FormatFloat] with 'f' and the shortest precision, with
+// ".0" after a whole value) everywhere, never with an exponent. A Vector's elements render as Floats, as
+// the validator coerces them, so a float32, which only an instance nothing
+// validated can hold, is widened to float64 in a Float, a List<Float> and a
+// Vector alike.
+//
+// # Empty Cells
+//
+// The schema, not the wire, decides what an empty cell holds. [encoding/csv]
+// writes the empty string and a missing value as the same empty field, and
+// reads a quoted empty field as a bare one, so no spelling of a cell can say
+// which one it carries.
+//
+// For a property the row's type declares, an empty cell is nil where the
+// property is optional. Where it is required it is the empty value of the
+// property's kind — "" for a String, a UUID, an enum or a pattern, an empty
+// list for a List or a Vector — which the validator then checks like any other
+// value, as it checks the JSON adapter's "" and []: an empty required UUID
+// draws E_CONSTRAINT_FAIL, and a pattern that admits "" accepts it. Where the
+// kind has no empty value (an Integer, a Float, a Boolean, a Date, a
+// Timestamp) the cell is nil, and the validator reports the property missing.
+//
+// An empty cell in a column the row's type does not declare is skipped, so a
+// header that unions several types' columns — the only shape a file read with
+// [WithTypeColumn] can take — parses every row. A value in such a column is
+// still reported, by the validator, for a plain column and a dotted one alike.
+//
+// An edge group is absent only when every cell in it is empty. Inside a present
+// group an empty cell stands for an empty segment on every target. An empty
+// foreign-key segment is the key's empty value where [WithSchema] supplies the
+// target's keys and the key's kind has one (a String or a UUID); otherwise it
+// is absent, and the validator reports the missing component. An empty
+// edge-property segment follows the property rule above, except that an edge
+// property is never null, so an optional one, or a required one whose kind has
+// no empty value, is absent on that target.
+//
+// These values cannot be written so that they read back unchanged. The writer
+// refuses the ones that would lose data, with an error marked
+// [ErrUnrepresentable] so a caller separates a refusal of the data from an I/O
+// failure and from [ErrConfig] without matching the message text; it writes the
+// documented limitations, which are not losses the writer can prevent, and
+// writes one shape specially so that it reads back:
+//
+//   - An optional property holding "" or an empty list writes the cell null
+//     writes, so it reads back as null, and an optional edge property holding
+//     "" writes an empty segment, so it reads back as absent on that target.
+//     This is a documented limitation: a null-sentinel option would exist
+//     only to express a case the specification calls a value, and the schema
+//     decides every other case.
+//   - A list holding one empty element writes the cell an empty list writes,
+//     and an inner list holding one empty element writes the text an empty
+//     inner list writes.
+//     A lone association target whose key components are all "" and whose
+//     edge properties are all absent or "" writes the cell an absent edge
+//     writes. The writer refuses both with an error naming the instance,
+//     rather than let an element or an association vanish on the way back.
+//   - A null list element, and a composite value its constraint cannot
+//     render: a map, an array, a pointer or a struct, or a time.Time outside a
+//     Timestamp or a Date. The list grammar has no spelling for either: a null
+//     element would be written as an empty one, and a composite as Go's
+//     rendering of it, which reads back as a string. A validated graph holds
+//     neither. The writer refuses both with an error naming the property or
+//     edge property, or the association and the target key component.
+//   - A cell whose text holds a CR LF: [encoding/csv]'s reader turns every CR
+//     LF into LF, inside a quoted field too. The writer refuses it with an
+//     error naming the column and the instance. A lone CR is written. A file
+//     another program wrote with a CR LF inside a quoted field reads as LF,
+//     since the parser never sees the CR.
+//   - A row whose only field is empty — a single-column type whose key is "" —
+//     is written as a quoted empty field, because [encoding/csv.Writer] would
+//     write a blank line, which [encoding/csv.Reader] skips.
 //
 // # Foreign Keys
 //
 // The writer emits each association as its dotted column group, and the
 // parser assembles the group back into the _target_-keyed objects the
-// instance validator accepts — identical to the JSON adapter path. Segment
-// counts across a group must agree, or the row draws E_CSV_COERCE naming
-// the relation.
+// instance validator accepts — identical to the JSON adapter path. The target
+// count is decided by the columns that can claim a member: the exact spelling
+// of a key component or an edge property, or its one folded spelling where
+// none is exact. Where two of them disagree the group writes nothing and claims
+// nothing, and the row draws [diag.E_ADAPTER_PARSE] naming the relation. Any
+// other column — one naming no member, or a shadowed or colliding spelling —
+// is zipped where its count agrees, taken whole as written where there is one
+// target, and otherwise left out with its own [diag.E_ADAPTER_PARSE]. Without
+// [WithSchema] no key spelling is known, so every key column decides.
 //
-// FK components coerce against the target type's primary-key constraints
-// when the adapter is constructed with [WithSchema]; without it they stay
-// strings, which string-keyed targets accept and the validator reports for
-// the rest.
+// [WithSchema] gives the parser each association's target type. A non-empty
+// key component keeps its text either way: every kind a primary key may take
+// (String, UUID, Date, Timestamp) reads as the text it was written as. A Date
+// or Timestamp component that does not parse draws E_CSV_COERCE with the
+// option and the validator's error without it. What the option decides is an
+// EMPTY segment, under Empty Cells above.
 //
 // During snapshot serialization ([Adapter.MarshalSnapshot], [Adapter.WriteSnapshot]),
 // edge columns are populated from the snapshot's edge index via [graph.Snapshot]
 // edge lookup. An association whose target type does not resolve is refused:
 // the writer will not emit columns its own parser cannot name.
 //
+// Every constructor of a snapshot holds its associations to what
+// [graph.Graph.Add] builds: each edge is under an association its type
+// declares, at the declared target, and a (one) association holds one. So every
+// edge has its column group, and its key reads back as the declared target's.
+//
 // # Compositions
 //
-// CSV is a flat format. Compositions are not supported in parsing and are
-// silently omitted during serialization.
+// CSV is a flat format, so a row has no column for a composed child. The parser
+// assembles no composition: a group whose field names one is carried as one
+// object of text, for the validator to judge as it judges that JSON object.
+// Both writers refuse a snapshot in which any instance
+// holds a composed child with an [ErrUnrepresentable] error naming the type,
+// the instance and the composition, before they produce any output. A
+// composition with no children loses nothing and is written. The JSON adapter
+// carries compositions.
+//
+// # Provenance
+//
+// Every instance carries a [location.Provenance]: the source the caller named,
+// the instance's path under its own type ($.Entity[0]), and a point span at the
+// start of its record. Every row diagnostic carries that span.
+//
+// The path indexes the instances of that type the parser PRODUCED, not the
+// records it read. CSV has no path language and no stable record address — the
+// ordinal this package no longer reports is not one — and under
+// [Adapter.ParseWithTypeColumn] no other index is well defined: a record the
+// reader refuses carries no type, so it can consume no type's index.
+//
+// No diagnostic names a record ordinal. A record's line comes from the reader,
+// so a quoted newline moves it as the file reads, which an ordinal cannot see.
+// A record the reader refuses is located from the parse error instead, at the
+// start of the line the fault is on; a reader error that is not a parse error
+// carries no position, unless the header could not be read at all, which is
+// reported at line 1. A header refusal and a missing type column carry the
+// header's own line: blank lines before the header are skipped.
+//
+// A span's column is always 1. [encoding/csv] counts columns in BYTES and
+// [location.Position] counts them in runes, and this package parses an
+// [io.Reader], so it never holds the line it would need to convert one.
 //
 // # BOM Handling
 //
@@ -89,5 +348,7 @@
 //
 // # Dependencies
 //
-//	adapter/csv  ──imports──▶  instance, diag, location, graph, immutable, schema
+//	adapter/csv  ──imports──▶  instance, diag, location, location/path, graph,
+//	                           immutable, schema, adapter/internal/constraintof,
+//	                           adapter/internal/refusal, adapter/internal/typetag
 package csv

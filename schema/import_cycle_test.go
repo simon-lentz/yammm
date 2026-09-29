@@ -137,3 +137,110 @@ func TestImportCycle_ReportedOnTheClosingImport(t *testing.T) {
 		})
 	}
 }
+
+// TestBuilder_RefusesAnImportThatClosesACycle pins that a built schema whose
+// import resolves to its own source ID, or to a registered schema whose
+// closure holds that ID, is refused with one E_IMPORT_CYCLE on that import, as
+// a load refuses a cycle; an import of another source builds.
+func TestBuilder_RefusesAnImportThatClosesACycle(t *testing.T) {
+	t.Parallel()
+
+	x, res := schema.LoadSourcesWithEntry(t.Context(), sourcesOf(map[string]string{"x.yammm": xSrc, "geo_a.yammm": geoA}), "x.yammm", ".", schema.WithSourcesOnly(true))
+	if res.HasErrors() {
+		t.Fatalf("load x: %v", res.Err())
+	}
+	geo, res := schema.LoadString(t.Context(), geoB, "geo_b.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load geo: %v", res.Err())
+	}
+	reg := schema.NewRegistry()
+	for _, s := range []*schema.Schema{x, geo} {
+		if err := reg.Register(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var geoAID location.SourceID
+	for _, member := range x.Closure() {
+		if member.Name() == "geo" {
+			geoAID = member.SourceID()
+		}
+	}
+	if geoAID.IsZero() {
+		t.Fatal("x's closure holds no geo")
+	}
+	build := func(id location.SourceID, imp string) (*schema.Schema, diag.Result) {
+		b := schema.NewBuilder().WithName("main").WithSourceID(id).WithRegistry(reg).AddImport(imp, "i")
+		b.AddType("Local").WithPrimaryKey("id", schema.NewStringConstraint())
+		return b.Build()
+	}
+
+	for label, tc := range map[string]struct {
+		id  location.SourceID
+		imp string
+	}{
+		"an import of the built schema's own source": {geo.SourceID(), "geo"},
+		"an import whose closure holds that source":  {geoAID, "x"},
+	} {
+		t.Run(label, func(t *testing.T) {
+			t.Parallel()
+			s, res := build(tc.id, tc.imp)
+			if s != nil {
+				t.Fatal("an import that closes a cycle built")
+			}
+			issues := slices.Collect(res.Issues())
+			if len(issues) != 1 || issues[0].Code() != diag.E_IMPORT_CYCLE || issues[0].Severity() != diag.Error {
+				t.Fatalf("result = %v, want one Error E_IMPORT_CYCLE", res.Err())
+			}
+			for _, want := range []diag.Detail{
+				{Key: diag.DetailKeyImportPath, Value: tc.imp},
+				{Key: diag.DetailKeyModuleRootOrigin, Value: diag.ModuleRootNone},
+			} {
+				if !slices.Contains(issues[0].Details(), want) {
+					t.Errorf("details = %v, want %v", issues[0].Details(), want)
+				}
+			}
+		})
+	}
+
+	t.Run("an import declared twice", func(t *testing.T) {
+		t.Parallel()
+		b := schema.NewBuilder().WithName("main").WithSourceID(geo.SourceID()).WithRegistry(reg).AddImport("geo", "i0").AddImport("geo", "i1")
+		b.AddType("Local").WithPrimaryKey("id", schema.NewStringConstraint())
+		_, res := b.Build()
+		var codes []string
+		for issue := range res.Issues() {
+			codes = append(codes, issue.Code().String())
+		}
+		slices.Sort(codes)
+		if want := []string{diag.E_DUPLICATE_IMPORT.String(), diag.E_IMPORT_CYCLE.String()}; !slices.Equal(codes, want) {
+			t.Errorf("codes = %v, want %v, as a load reports a cyclic import declared twice", codes, want)
+		}
+	})
+
+	t.Run("an import whose closure holds that source two imports deep", func(t *testing.T) {
+		t.Parallel()
+		y, res := schema.LoadSourcesWithEntry(t.Context(), sourcesOf(map[string]string{
+			"y.yammm":     "schema \"y\"\n\nimport \"./x.yammm\" as x\n\ntype Yt {\n\ty_id String primary\n\t--> TO (one) x.Xt\n}\n",
+			"x.yammm":     xSrc,
+			"geo_a.yammm": geoA,
+		}), "y.yammm", ".", schema.WithSourcesOnly(true))
+		if res.HasErrors() {
+			t.Fatalf("load y: %v", res.Err())
+		}
+		deep := schema.NewRegistry()
+		if err := deep.Register(y); err != nil {
+			t.Fatal(err)
+		}
+		b := schema.NewBuilder().WithName("main").WithSourceID(geoAID).WithRegistry(deep).AddImport("y", "i")
+		b.AddType("Local").WithPrimaryKey("id", schema.NewStringConstraint())
+		if s, res := b.Build(); s != nil || !res.HasErrors() {
+			t.Fatalf("an import whose closure holds the built source two imports deep built: %v", res.Err())
+		} else if issue := slices.Collect(res.Issues()); len(issue) != 1 || issue[0].Code() != diag.E_IMPORT_CYCLE {
+			t.Errorf("result = %v, want one E_IMPORT_CYCLE", res.Err())
+		}
+	})
+
+	if s, res := build(location.MustNewSourceID("test://built.yammm"), "x"); s == nil || res.HasErrors() {
+		t.Errorf("an import of another source is refused: %v", res.Err())
+	}
+}

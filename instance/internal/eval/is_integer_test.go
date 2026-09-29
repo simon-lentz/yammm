@@ -1,22 +1,28 @@
 package eval_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 )
 
-// The Integer type checker accepts a whole float only when it fits int64.
-func TestIsInteger_WholeFloatMustFitInt64(t *testing.T) {
+// The Integer type checker accepts an integer and refuses every float, whole or
+// not: `5.0 =~ Integer` is false. The Float checker widens an integer.
+func TestIsInteger_RefusesEveryFloat(t *testing.T) {
 	t.Parallel()
-	check := eval.IsInteger()
-	if ok, _ := check(3.0); !ok {
-		t.Error("3.0 is an integer")
+	isInteger, isFloat := eval.IsInteger(), eval.IsFloat()
+	for _, v := range []any{int64(3), 3, uint8(3), json.Number("3")} {
+		if ok, msg := isInteger(v); !ok {
+			t.Errorf("IsInteger(%T %v) = false (%s), want true", v, v, msg)
+		}
+		if ok, msg := isFloat(v); !ok {
+			t.Errorf("IsFloat(%T %v) = false (%s), want true: an integer widens", v, v, msg)
+		}
 	}
-	if ok, _ := check(1e19); ok {
-		t.Error("1e19 is whole but does not fit int64")
-	}
-	if ok, _ := check(3.5); ok {
-		t.Error("3.5 has a fractional part")
+	for _, v := range []any{3.0, float32(3), 1e19, 3.5, json.Number("3.0"), json.Number("3e0")} {
+		if ok, _ := isInteger(v); ok {
+			t.Errorf("IsInteger(%T %v) = true, want false: a float is never an Integer", v, v)
+		}
 	}
 }

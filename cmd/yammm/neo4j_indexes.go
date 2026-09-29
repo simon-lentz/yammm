@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -37,9 +36,9 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	}
 
 	schemaPath := args[0]
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
 	}
 
 	// Load schema
@@ -58,7 +57,7 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	sink.Add(indexResult)
 	sink.Flush()
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
 	}
 
 	// Print each statement

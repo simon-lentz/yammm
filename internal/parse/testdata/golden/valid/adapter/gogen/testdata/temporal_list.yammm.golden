@@ -1,0 +1,218 @@
+{
+  "name": "\"temporallist\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "datatypes": [
+    {
+      "name": "Day",
+      "constraint": {
+        "kind": "Date",
+        "span": {
+          "s": 36,
+          "e": 40
+        }
+      },
+      "span": {
+        "s": 23,
+        "e": 40
+      }
+    },
+    {
+      "name": "Wall",
+      "constraint": {
+        "kind": "Timestamp",
+        "args": [
+          "\"2006-01-02 15:04:05\""
+        ],
+        "span": {
+          "s": 54,
+          "e": 86
+        }
+      },
+      "span": {
+        "s": 41,
+        "e": 86
+      }
+    },
+    {
+      "name": "Days",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "Date",
+          "span": {
+            "s": 105,
+            "e": 109
+          }
+        },
+        "span": {
+          "s": 100,
+          "e": 110
+        }
+      },
+      "span": {
+        "s": 87,
+        "e": 110
+      }
+    },
+    {
+      "name": "Dates",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "Alias",
+          "args": [
+            "Day"
+          ],
+          "span": {
+            "s": 129,
+            "e": 132
+          }
+        },
+        "span": {
+          "s": 124,
+          "e": 133
+        }
+      },
+      "span": {
+        "s": 111,
+        "e": 133
+      }
+    },
+    {
+      "name": "Walls",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "Alias",
+          "args": [
+            "Wall"
+          ],
+          "span": {
+            "s": 152,
+            "e": 156
+          }
+        },
+        "span": {
+          "s": 147,
+          "e": 157
+        }
+      },
+      "span": {
+        "s": 134,
+        "e": 157
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Calendar",
+      "name_span": {
+        "s": 164,
+        "e": 172
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 183,
+              "e": 189
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 176,
+            "e": 197
+          }
+        },
+        {
+          "name": "days",
+          "constraint": {
+            "kind": "Alias",
+            "args": [
+              "Days"
+            ],
+            "span": {
+              "s": 206,
+              "e": 210
+            }
+          },
+          "span": {
+            "s": 199,
+            "e": 210
+          }
+        },
+        {
+          "name": "grid",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Alias",
+                "args": [
+                  "Day"
+                ],
+                "span": {
+                  "s": 229,
+                  "e": 232
+                }
+              },
+              "span": {
+                "s": 224,
+                "e": 233
+              }
+            },
+            "span": {
+              "s": 219,
+              "e": 234
+            }
+          },
+          "span": {
+            "s": 212,
+            "e": 234
+          }
+        },
+        {
+          "name": "shifts",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Alias",
+                "args": [
+                  "Wall"
+                ],
+                "span": {
+                  "s": 253,
+                  "e": 257
+                }
+              },
+              "span": {
+                "s": 248,
+                "e": 258
+              }
+            },
+            "span": {
+              "s": 243,
+              "e": 259
+            }
+          },
+          "span": {
+            "s": 236,
+            "e": 259
+          }
+        }
+      ],
+      "span": {
+        "s": 159,
+        "e": 261
+      }
+    }
+  ]
+}

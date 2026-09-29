@@ -5,6 +5,7 @@ import (
 	"maps"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/alecthomas/participle/v2/lexer"
 
@@ -253,7 +254,7 @@ func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 		if err != nil {
 			// This site supplies its own context, so it reports the cause
 			// alone rather than double-prefixing a text consumers match.
-			p.diagf(start, end, "invalid string literal: %s", unquoteSyntaxCause)
+			p.diagf(start, end, "invalid string literal: %s", strings.TrimPrefix(err.Error(), unquotePrefix))
 			return expr.NewLiteral(nil)
 		}
 		return expr.NewLiteral(s)
@@ -273,6 +274,11 @@ func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 		return expr.NewLiteral(f)
 	default: // REGEXP
 		re, err := regexp.Compile(t.Value[1 : len(t.Value)-1])
+		if _, refused := nextTextFault(t.Value, 0); refused {
+			// The source rules already report the literal's bytes; one
+			// diagnostic is enough, as for a string literal.
+			return expr.NewLiteral(nil)
+		}
 		if err != nil {
 			p.diagf(start, end, "invalid regexp literal: %v", err)
 			return expr.NewLiteral(nil)
@@ -463,6 +469,18 @@ var reservedLC = map[string]bool{
 var propertyNameExclusions = map[string]bool{
 	"as": true, "part": true, "in": true,
 	"nil": true, "true": true, "false": true,
+}
+
+// IsDatatypeKeyword reports whether name is one of the eleven built-in type
+// names, which no type, datatype or relation name may spell.
+func IsDatatypeKeyword(name string) bool {
+	return datatypeKeywords[name]
+}
+
+// IsExcludedPropertyName reports whether name is one of the six spellings no
+// property or annotation name may spell.
+func IsExcludedPropertyName(name string) bool {
+	return propertyNameExclusions[name]
 }
 
 // ReservedKeywords returns every spelling the language refuses in a position

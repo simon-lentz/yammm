@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -497,6 +499,61 @@ func TestCoerceSlice_ListValueUnderScalarConstraintErrors(t *testing.T) {
 	}
 }
 
+func TestCoerceSlice_AliasedElementCoercesAsItsResolvedKind(t *testing.T) {
+	t.Parallel()
+	// coerceSlice resolves the element's DataType reference before it picks a
+	// slice type. Read unresolved, the element's kind is Alias, whose arm passes
+	// the []any through, and the dates would reach the driver as strings under a
+	// DATE property.
+	s := loadInline(t, `schema "aliased_element"
+
+type Day = Date
+
+type Calendar {
+	id String primary
+	holidays List<Day> required
+}
+`)
+	st, ok := s.Type("Calendar")
+	if !ok {
+		t.Fatal("Calendar not found")
+	}
+	prop, ok := st.Property("holidays")
+	if !ok {
+		t.Fatal("holidays property not found")
+	}
+	got, err := coerceSlice([]any{"2026-01-01", "2026-12-25"}, prop.Constraint())
+	if err != nil {
+		t.Fatalf("coerceSlice: %v", err)
+	}
+	dates, ok := got.([]dbtype.Date)
+	if !ok {
+		t.Fatalf("got %T, want []dbtype.Date", got)
+	}
+	if len(dates) != 2 {
+		t.Errorf("got %d dates, want 2", len(dates))
+	}
+}
+
+func TestCoerceParams_RefusesAListWithoutAnElementConstraint(t *testing.T) {
+	t.Parallel()
+	// [schema.NewListConstraint] accepts a nil element, and CoerceParams judges
+	// the caller's constraints before any value, as the Builder does.
+	_, err := CoerceParams(
+		map[string]any{"tags": []any{"a"}},
+		ParamTypes{"tags": schema.NewListConstraint(nil)},
+	)
+	if err == nil {
+		t.Fatal("expected an error for a List constraint holding no element constraint, got nil")
+	}
+	if !strings.Contains(err.Error(), `param type "tags"`) || !strings.Contains(err.Error(), "no element constraint") {
+		t.Errorf("error %q does not name the key and the missing element constraint", err)
+	}
+	if strings.Contains(err.Error(), "scalar") {
+		t.Errorf("error %q calls a List constraint scalar", err)
+	}
+}
+
 func TestPropsToParamMap_DeterministicError(t *testing.T) {
 	t.Parallel()
 	// When multiple node properties fail coercion — reachable when a .ys snapshot
@@ -624,6 +681,43 @@ func TestBatchNodeQueries_MissingShape(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no shape for type") {
 		t.Errorf("unexpected error message: %v", err)
+	}
+}
+
+// TestBatchNodeQueries_AShapeNamingAKeyTheInstanceLacks pins the route to the
+// missing and nil key refusals once every constructor of a snapshot holds a
+// key property present and non-null: a GraphShape entry whose key names were
+// changed after ShapeForSchema built it. The map is exported, so a caller can.
+func TestBatchNodeQueries_AShapeNamingAKeyTheInstanceLacks(t *testing.T) {
+	t.Parallel()
+	s, _ := loadSchemaAndValidator(t, "basic.yammm")
+	a := New()
+	entity, _ := s.Type("Entity")
+	// Built without validation, which never stores a null property value.
+	g := graph.New(s)
+	if r := g.Add(context.Background(), instance.NewValidInstance("Entity", entity.ID(), immutable.WrapKey([]any{"e1"}),
+		immutable.WrapProperties(map[string]any{"id": "e1", "score": nil}), nil, nil, nil)); r.HasErrors() {
+		t.Fatalf("add: %s", r)
+	}
+	graphResult := g.Snapshot()
+	for _, c := range []struct {
+		keys []string
+		want string
+	}{
+		{[]string{"id", "description"}, "missing required primary key(s): [description]"},
+		{[]string{"id", "score"}, "nil primary key(s): [score]"},
+	} {
+		shapes, res := a.ShapeForSchema(context.Background(), s)
+		if res.HasErrors() {
+			t.Fatalf("ShapeForSchema: %s", res)
+		}
+		sh := shapes.Types[entity.ID()]
+		sh.PrimaryKeys = c.keys
+		shapes.Types[entity.ID()] = sh
+		_, err := a.BatchNodeQueries(context.Background(), graphResult, shapes)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("keys %v: got %v, want %q", c.keys, err, c.want)
+		}
 	}
 }
 

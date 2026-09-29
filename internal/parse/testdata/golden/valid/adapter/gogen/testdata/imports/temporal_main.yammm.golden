@@ -1,0 +1,47 @@
+{
+  "name": "\"temporalmain\"",
+  "span": {
+    "s": 0,
+    "e": 21
+  },
+  "imports": [
+    {
+      "path": "\"temporal_dep.yammm\"",
+      "alias": "dep",
+      "span": {
+        "s": 23,
+        "e": 57
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Log",
+      "name_span": {
+        "s": 64,
+        "e": 67
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 74,
+              "e": 80
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 71,
+            "e": 88
+          }
+        }
+      ],
+      "span": {
+        "s": 59,
+        "e": 90
+      }
+    }
+  ]
+}

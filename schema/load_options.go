@@ -46,7 +46,8 @@ func defaultLoadConfig() *loadConfig {
 //     inside the import closure of a schema r holds, the existing *Schema
 //     pointer is reused and the import is NOT re-parsed, whatever order the
 //     load meets its imports in. A source two schemas in r compiled from
-//     different bytes is not reused; it is read like any other import.
+//     different bytes is not reused: an import of it fails with
+//     E_IMPORT_RESOLVE rather than reading it again.
 //     This is where cross-Load schema caching pays off.
 //   - Re-registering the same source — the same bytes for every source both
 //     carry, the same structural hash — is a no-op (see Registry.Register); a
@@ -94,7 +95,9 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 //
 // Under this option no marker is read at all — not even a malformed one, which
 // would otherwise fail the load. That is what "explicit wins" means: a caller
-// can always override a marker it did not put there.
+// can always override a marker it did not put there. [Load] refuses a root that
+// is not a directory it can open with a Fatal E_LOAD_IO_FAILURE, whether or not
+// the schema imports anything.
 //
 // The root is the import sandbox's boundary. A discovered root therefore
 // widens what a load may read: committing a marker at a repository root grants
@@ -135,13 +138,14 @@ func withSourceRegistry(reg *source.Registry) LoadOption {
 }
 
 // WithSourcesOnly selects whether import resolution is restricted to the
-// pre-registered in-memory sources. With true, an import that misses the
-// registered set fails with E_IMPORT_RESOLVE, the module-root sandbox is never
-// opened, and SourceIDs derive textually from the module root and key — the
-// hermetic load an embedded SerializedSources needs, and what [WithSyntheticRoot]
-// requires. With false — the default — a miss falls back to the module root on
-// disk. Meaningful for LoadSourcesWithEntry; a plain Load reads its entry from
-// disk by definition.
+// pre-registered in-memory sources: with true a miss fails with E_IMPORT_RESOLVE
+// and the module-root sandbox is never opened, the hermetic load
+// [WithSyntheticRoot] requires; with false, the default, a miss falls back to the
+// module root on disk. It decides where an import is read from, never a source's
+// identity: without a synthetic root a key is resolved on the host under the
+// module root, or the working directory when the root is empty, as [Load]
+// resolves a path, through symlinks and in the disk's spelling. Only [LoadSourcesWithEntry] takes it; [Load] and [LoadString] refuse
+// it with true.
 func WithSourcesOnly(only bool) LoadOption {
 	return func(c *loadConfig) {
 		c.sourcesOnly = only
@@ -154,24 +158,28 @@ func WithSourcesOnly(only bool) LoadOption {
 // working directory, the checkout, or the container mount point. It is the way
 // to load embedded sources whose identities are persisted — a snapshot records
 // them, and a filesystem-derived one re-keys every record when the process
-// moves. A scheme prefix is the recommended form; the value is validated once
-// with [github.com/simon-lentz/yammm/location.ValidateSyntheticSourceID], and a
-// trailing slash is trimmed, so two spellings of one root give one identity.
+// moves. The root has the form scheme://authority, optionally followed by a
+// path, such as "embedded://app". It is normalized once: the scheme in lower
+// case, the path cleaned as path.Clean cleans it, and the whole in NFC; the
+// authority keeps its case and is not cleaned. A path climbing above it, and a
+// backslash, are refused.
 //
 // The root also stands in for the module root, so module-style imports resolve
 // under it. The load is rejected outright, rather than silently degraded, in
-// four cases: an invalid root; a root without [WithSourcesOnly], where an import
-// miss would fall back to disk and mix a file-backed identity into the closure;
-// a root together with a non-empty moduleRoot argument, which names the same
-// concept twice; and the option passed to [Load] or [LoadString], where it can
-// only ever be a no-op.
+// four cases: a root not of that form, or one
+// [github.com/simon-lentz/yammm/location.ValidateSyntheticSourceID] refuses; a
+// root without [WithSourcesOnly], where an import miss would fall back to disk
+// and mix a file-backed identity into the closure; a root together with a
+// non-empty moduleRoot argument, which names the same concept twice; and the
+// option passed to [Load] or [LoadString], where it can only ever be a no-op.
 //
-// Keys must be relative and must not resolve to the root itself. A key that
-// escapes the root is permitted and yields a ".."-bearing identity, which stays
-// stable and distinct. Relative imports ("./x", "../x") are NOT supported under
-// a synthetic root: they resolve through the path the importing file was read
-// from, which a synthetic source does not have, so the load reports "relative
-// imports require a file-based source". [Schema.ModuleRoot] reports the
+// A key is read by [github.com/simon-lentz/yammm/location.NormalizeSyntheticKey]:
+// it holds no backslash, and once cleaned and in NFC it is relative and names a
+// file, not the root or a directory above it. A key that escapes the root is
+// permitted and yields a ".."-bearing identity, which stays stable and
+// distinct. A relative import ("./x", "../x") resolves
+// against the importing source's key, as text, and one climbing above the root
+// keeps its ".."; [SyntheticImportKey] states the rule. [Schema.ModuleRoot] reports the
 // synthetic root, because the root is the one this load resolved imports
 // against; a schema loaded this way is a supported input to
 // [github.com/simon-lentz/yammm/adapter/gogen.Marshal], whose embedded keys

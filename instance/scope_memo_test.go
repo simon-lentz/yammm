@@ -65,9 +65,9 @@ func TestScope_ParentHoldsTheChildsMemo(t *testing.T) {
 		t.Fatal("no NEXT composition on the root")
 	}
 	childMemo := v.scopeOf(child)
-	entry, ok := v.scopeOf(root).Get("next")
+	entry, ok := v.scopeOf(root).Get("NEXT")
 	if !ok {
-		t.Fatal("the root's scope has no entry under the composition's field name")
+		t.Fatal("the root's scope has no entry under the composition's name")
 	}
 	parentHeld := entry.Unwrap()
 	if entriesPointer(parentHeld) != entriesPointer(childMemo) {

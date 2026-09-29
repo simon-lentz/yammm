@@ -19,27 +19,26 @@ import (
 
 // Marshal serializes a Snapshot to the yammm snapshot persistence format
 // (.ys). Output is deterministic by default — created_at is omitted unless
-// [WithCreatedAt] opts in — so one snapshot and one option set always
-// produce identical bytes. Marshal checks ctx.Err() at the start and once
-// per type group during emission, returning Fatal E_CONTEXT_CANCELLED on
-// cancellation; a caller-assembled state the writer cannot serialize —
-// a type outside its table, an unresolved record with no source instance,
-// or a target key [graph.ParseKey] cannot read — returns nil bytes with
-// Fatal E_INTERNAL, and a snapshot built through [graph.Graph] or [Load]
-// never triggers that path. A snapshot nested deeper
-// than the reader accepts returns nil bytes with Error
-// E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises,
-// so the bound reads identically from both sides. Panics if snap is nil.
+// [WithCreatedAt] or [WithCreatedAtFrom] opts in — so one snapshot and one
+// option set always produce identical bytes. Marshal checks ctx.Err() at the
+// start and once per type group during emission, returning Fatal
+// E_CONTEXT_CANCELLED on cancellation.
 //
-// Two further refusals, both Error-severity [diag.E_SNAPSHOT_MALFORMED]: an
-// indent that is not whitespace, which would produce bytes that are not JSON;
-// and a type whose schema is outside the entry schema's import closure, which
-// the document has no portable name for.
+// A property value the wire cannot carry — a non-finite float, or a Go value
+// encoding/json refuses — returns nil bytes with Error E_SNAPSHOT_MALFORMED
+// naming the property and where it sits: the root or duplicate record by type
+// and key, and the composition path to a composed child. Only an instance no validator judged
+// holds one, reaching the snapshot through [graph.Graph.Add],
+// [graph.Graph.AddComposed] or [graph.RebuildSnapshot]. A snapshot nested
+// deeper than the reader accepts returns nil bytes with Error
+// E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises, so
+// the bound reads identically from both sides. Fatal E_INTERNAL marks only a
+// broken invariant of the snapshot itself. Panics if snap is nil.
 //
-// A SUCCESSFUL Marshal can return Warning-severity issues. They report values
-// the snapshot held that the wire cannot carry — an unresolved record's target
-// key or edge properties under a reason that admits neither. A caller checking
-// only [diag.Result.Err] sees none of them.
+// Two further refusals, both Error: an indent that is not whitespace, which
+// would produce bytes that are not JSON ([diag.E_SNAPSHOT_MALFORMED]); and a
+// denoted type whose schema is outside the entry schema's import closure, which
+// the document has no portable name for ([diag.E_SNAPSHOT_UNKNOWN_TYPE]).
 func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap == nil {
 		panic("snapshot.Marshal: nil Snapshot")
@@ -92,8 +91,7 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 		return nil, marshalFatalErr("instances", err)
 	}
 
-	writerWarnings := diag.NewCollector(0)
-	diagsWire, err := marshalDiagnostics(view, s, tt, writerWarnings)
+	diagsWire, err := marshalDiagnostics(view, s, tt)
 	if err != nil {
 		return nil, marshalFatalErr("diagnostics", err)
 	}
@@ -131,20 +129,12 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 		attWire = &attestationWire{Values: att.Values, Associations: att.Associations}
 	}
 
-	out, res := assembleDocument(
+	return assembleDocument(
 		schemaHash, s.Name(), schemaSource, createdAt, features, metadata,
 		attWire,
 		typesJSON, instancesJSON, diagJSON,
 		cfg.indent, currentVersion,
 	)
-	// The writer's own warnings travel with the bytes: a value it could not
-	// put on the wire is a fact about this document, and silence left the next
-	// reader to find an absence nothing explained.
-	if res.HasErrors() {
-		return out, res
-	}
-	writerWarnings.Merge(res)
-	return out, writerWarnings.Result()
 }
 
 // marshalSection serializes one body section, compact or indented.
@@ -286,9 +276,13 @@ func marshalInstance(
 	}
 	id := inst.TypeID()
 	t, _ := s.TypeByID(id)
+	props, bad := wireProps(inst.Properties(), t)
+	if bad != "" {
+		return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), property: bad}
+	}
 	w := instWire{
 		Key:        inst.PrimaryKey().Clone(),
-		Properties: wireProps(inst.Properties(), t),
+		Properties: props,
 	}
 
 	if carryType {
@@ -310,10 +304,14 @@ func marshalInstance(
 			if err != nil {
 				return instWire{}, err
 			}
+			eprops, bad := wireEdgeProps(e.Properties(), rel)
+			if bad != "" {
+				return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), relation: e.Relation(), property: bad}
+			}
 			ew := edgeWire{
 				TargetType: row,
 				TargetKey:  e.Target().PrimaryKey().Clone(),
-				Properties: wireEdgeProps(e.Properties(), rel),
+				Properties: eprops,
 			}
 			if ew.Properties == nil {
 				ew.Properties = map[string]any{}
@@ -329,8 +327,13 @@ func marshalInstance(
 		for _, relName := range compRels {
 			children := inst.Composed(relName)
 			childWires := make([]instWire, 0, len(children))
-			for _, child := range children {
+			for i, child := range children {
 				cw, err := marshalInstance(child, nil, s, tt, true, depth+1)
+				if ue, ok := errors.AsType[*unwritableValueError](err); ok {
+					// Readdressed at each level, so the refusal names the root.
+					ue.ref, ue.key = tt.ref(id), inst.PrimaryKey().String()
+					ue.path = append([]string{fmt.Sprintf("%s[%d]", relName, i)}, ue.path...)
+				}
 				if err != nil {
 					return instWire{}, err
 				}
@@ -348,105 +351,95 @@ func marshalInstance(
 // marshalDiagnostics builds the diagnostics section. Every duplicate record
 // states its conflict's address; the graph API guarantees the invariants
 // checked here, so a violation is a caller-assembled inconsistency.
-func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable, diags *diag.Collector) (diagWire, error) {
+func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diagWire, error) {
 	dupWires := make([]dupWire, 0, len(view.duplicates))
 	for _, d := range view.duplicates {
-		row, err := tt.rowRef(d.Instance.TypeID(), "duplicate type")
+		row, err := tt.rowRef(d.Instance().TypeID(), "duplicate type")
 		if err != nil {
 			return diagWire{}, err
 		}
-		inst, err := marshalInstance(d.Instance, nil, s, tt, false, 0)
+		inst, err := marshalInstance(d.Instance(), nil, s, tt, false, 0)
+		if ue, ok := errors.AsType[*unwritableValueError](err); ok {
+			ue.duplicate = true
+		}
 		if err != nil {
 			return diagWire{}, err
 		}
-		if d.Conflict == nil {
+		if d.Conflict() == nil {
 			return diagWire{}, fmt.Errorf("duplicate %s[%s] carries no conflict instance",
-				d.Instance.TypeID(), d.Instance.PrimaryKey())
+				d.Instance().TypeID(), d.Instance().PrimaryKey())
 		}
-		conflictRow, err := tt.rowRef(d.Conflict.TypeID(), "duplicate conflict type")
+		conflictRow, err := tt.rowRef(d.Conflict().TypeID(), "duplicate conflict type")
 		if err != nil {
 			return diagWire{}, err
 		}
 		conflict := &conflictWire{Type: conflictRow}
-		if key := d.Conflict.PrimaryKey(); key.Len() > 0 {
+		if key := d.Conflict().PrimaryKey(); key.Len() > 0 {
 			conflict.Key = key.Clone()
 		}
 		dw := dupWire{
 			Type:     row,
-			Key:      d.Instance.PrimaryKey().Clone(),
+			Key:      d.Instance().PrimaryKey().Clone(),
 			Instance: inst,
 			Conflict: conflict,
 		}
-		if d.Relation != "" {
-			if d.Parent == nil {
+		if d.Relation() != "" {
+			if d.Parent() == nil {
 				return diagWire{}, fmt.Errorf("duplicate %s[%s] carries relation %q with no parent",
-					d.Instance.TypeID(), d.Instance.PrimaryKey(), d.Relation)
+					d.Instance().TypeID(), d.Instance().PrimaryKey(), d.Relation())
 			}
-			parentRow, err := tt.rowRef(d.Parent.TypeID(), "duplicate parent type")
+			parentRow, err := tt.rowRef(d.Parent().TypeID(), "duplicate parent type")
 			if err != nil {
 				return diagWire{}, err
 			}
 			dw.ParentType = parentRow
-			dw.ParentKey = d.Parent.PrimaryKey().Clone()
-			dw.Relation = d.Relation
+			dw.ParentKey = d.Parent().PrimaryKey().Clone()
+			dw.Relation = d.Relation()
 		}
 		dupWires = append(dupWires, dw)
 	}
 
 	unresWires := make([]unresolvedWire, 0, len(view.unresolved))
 	for _, u := range view.unresolved {
-		if u.Source == nil {
-			return diagWire{}, fmt.Errorf("unresolved edge record for relation %q carries no source instance", u.Relation)
+		if u.Source() == nil {
+			return diagWire{}, fmt.Errorf("unresolved edge record for relation %q carries no source instance", u.Relation())
 		}
-		sourceID := u.Source.TypeID()
+		sourceID := u.Source().TypeID()
 		sourceRow, err := tt.rowRef(sourceID, "unresolved source type")
 		if err != nil {
 			return diagWire{}, err
 		}
-		targetRow, err := tt.rowRef(u.TargetType, "unresolved target type")
+		targetRow, err := tt.rowRef(u.TargetType(), "unresolved target type")
 		if err != nil {
 			return diagWire{}, err
 		}
 		uw := unresolvedWire{
 			SourceType: sourceRow,
-			SourceKey:  u.Source.PrimaryKey().Clone(),
-			Relation:   u.Relation,
+			SourceKey:  u.Source().PrimaryKey().Clone(),
+			Relation:   u.Relation(),
 			TargetType: targetRow,
-			Required:   u.Required,
-			Reason:     u.Reason,
+			Required:   u.Required(),
+			Reason:     u.Reason(),
 		}
-		switch u.Reason {
+		switch u.Reason() {
 		case "absent", "empty":
-			// The reader refuses a document carrying either under these
-			// reasons, so dropping them silently wrote a document that says
-			// less than the record did. Report what is discarded.
-			if u.TargetKey != "" && u.TargetKey != "[]" {
-				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
-					fmt.Sprintf("unresolved record %s[%s].%s states reason %q and carries target key %s, which the wire cannot hold under that reason",
-						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.Reason, u.TargetKey)).
-					WithDetail(diag.DetailKeyRelationName, u.Relation).
-					Build())
-			}
-			if u.Properties().Len() > 0 {
-				diags.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
-					fmt.Sprintf("unresolved record %s[%s].%s states reason %q and carries edge properties, which the wire cannot hold under that reason",
-						tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, u.Reason)).
-					WithDetail(diag.DetailKeyRelationName, u.Relation).
-					Build())
-			}
 			uw.TargetKey = nil
 		default:
-			key, err := parseTargetKey(u.TargetKey)
+			key, err := parseTargetKey(u.TargetKey())
 			if err != nil {
 				return diagWire{}, fmt.Errorf("unresolved record %s[%s].%s: %w",
-					tt.ref(sourceID), u.Source.PrimaryKey(), u.Relation, err)
+					tt.ref(sourceID), u.Source().PrimaryKey(), u.Relation(), err)
 			}
 			uw.TargetKey = key
 			var rel *schema.Relation
 			if srcType, ok := s.TypeByID(sourceID); ok {
-				rel, _ = srcType.Relation(u.Relation)
+				rel, _ = srcType.Relation(u.Relation())
 			}
-			uw.Properties = wireEdgeProps(u.Properties(), rel)
+			uprops, bad := wireEdgeProps(u.Properties(), rel)
+			if bad != "" {
+				return diagWire{}, &unwritableValueError{ref: tt.ref(sourceID), key: u.Source().PrimaryKey().String(), relation: u.Relation(), property: bad}
+			}
+			uw.Properties = uprops
 		}
 		unresWires = append(unresWires, uw)
 	}
@@ -608,9 +601,9 @@ func buildHeaderCompact(hdr marshalHeaderWire, version, hashAlgo int) []byte {
 		b.Write(metaJSON)
 	}
 
-	// attestation (omitempty on read; Marshal always sets it, and
-	// UpdateMetadata preserves an input's absence rather than inventing
-	// a claim)
+	// attestation (omitempty on read; Marshal writes it when the snapshot
+	// holds a claim, and UpdateMetadata preserves an input's absence rather
+	// than inventing a claim)
 	if hdr.Attestation != nil {
 		b.WriteString(`,"attestation":`)
 		attJSON, _ := json.Marshal(hdr.Attestation)
@@ -765,9 +758,24 @@ func writeJSONString(b *strings.Builder, s string) {
 	b.Write(encoded)
 }
 
-// marshalFatalErr creates a diag.Result with a Fatal E_INTERNAL for marshal failures.
+// marshalFatalErr reports a marshal failure: Error E_SNAPSHOT_MALFORMED for a
+// value the wire cannot carry, Error E_SNAPSHOT_DEPTH_EXCEEDED for a tree nested
+// past the reader's bound, Fatal E_INTERNAL for any other.
 func marshalFatalErr(section string, err error) diag.Result {
 	c := diag.NewCollector(0)
+	// A value the wire cannot carry is caller data held by an instance no
+	// validator judged, not a fault of the writer.
+	if ue, ok := errors.AsType[*unwritableValueError](err); ok {
+		b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+ue.Error()).
+			WithDetail(diag.DetailKeyTypeName, ue.ref).
+			WithDetail(diag.DetailKeyPrimaryKey, ue.key).
+			WithDetail(diag.DetailKeyPropertyName, ue.property)
+		if ue.relation != "" {
+			b = b.WithDetail(diag.DetailKeyRelationName, ue.relation)
+		}
+		c.Collect(b.Build())
+		return c.Result()
+	}
 	// The composed-nesting bound is a property of the snapshot, not of the
 	// writer, and the reader already names it. Reporting it as an internal
 	// failure would leave a caller unable to tell the two apart.

@@ -26,17 +26,17 @@ Person is a registered individual.
 
 **Invariants**
 
-- "adults only"
+-   "adults only"
 
-  ```yammm
-  ! "adults only" age >= 18
-  ```
+    ```yammm
+    ! "adults only" age >= 18
+    ```
 
-- "age within bounds"
+-   "age within bounds"
 
-  Snapshot bound, revisit at next census.
+    Snapshot bound, revisit at next census.
 
-  ```yammm
-  ! "age within bounds" age >= 0 &&
-  age <= 150
-  ```
+    ```yammm
+    ! "age within bounds" age >= 0 &&
+    	age <= 150
+    ```

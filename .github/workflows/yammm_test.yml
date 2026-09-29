@@ -17,22 +17,33 @@ jobs:
   # no asset until every job here has passed. Lint, vet and test each run after
   # an earlier step fails, and fail-fast is off, so one run reports every host's
   # every failure.
+  #
+  # Every job carries a timeout. A hung runner otherwise holds its job for
+  # GitHub's six-hour default, and one wedged Windows runner, cancelled by
+  # hand, uploaded no log at all. Each go test timeout inside a job sits below
+  # the job's by at least the time the job takes to start its last test binary,
+  # measured on CI, so a hung binary prints its own stack before the job is
+  # killed; jobMargins in internal/scripttest's wiring test holds the margins.
+  #
+  # Every job names its image's OS release, never a -latest label. GitHub moves
+  # those labels to a new release on its own schedule, which changes the gate's
+  # operating system under a commit that does not say so; floatingRunners in the
+  # same wiring test refuses one in any tracked workflow. A named release still
+  # takes GitHub's weekly image rebuilds.
   test:
     name: Test ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: Linux
-            os: ubuntu-latest
-            vet_args: ""
+            os: ubuntu-24.04
           - name: Windows
-            os: windows-latest
-            vet_args: --host
+            os: windows-2025
           - name: macOS
-            os: macos-latest
-            vet_args: --host
+            os: macos-26
     defaults:
       run:
         # bash on every host: pwsh reports only the last command's exit status.
@@ -85,12 +96,81 @@ jobs:
           args: --config=.golangci.yml
       - name: Vet
         if: ${{ !cancelled() }}
-        # The Linux job vets every target the module's build constraints select;
-        # the other hosts vet their own build.
-        run: scripts/vet.sh ${{ matrix.vet_args }}
+        # Each host vets its own build; the cross-vet job vets every other
+        # target the module's build constraints select.
+        run: scripts/vet.sh --host
+      # The durations file holds the seconds of each package and of each test
+      # that reported a result, so a package near its -timeout shows which
+      # tests spend it. It is kept when the tests fail, the run it matters
+      # most for.
       - name: Test
         if: ${{ !cancelled() }}
+        env:
+          TEST_DURATIONS: ${{ runner.temp }}/test-durations.tsv
         run: scripts/test.sh
+      - name: Keep the test durations
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-${{ matrix.name }}
+          path: ${{ runner.temp }}/test-durations.tsv
+          if-no-files-found: error
+          overwrite: true
+  # Every target the module's build constraints select, in a job of its own.
+  # scripts/vet.sh with no argument type-checks eleven targets where --host
+  # checks two: inside a host job that step ran 255 to 382 s against the other
+  # hosts' under 30 s, and made the Linux job the longest of the workflow in
+  # two of three measured runs. Beside the host jobs it costs the workflow its
+  # own runtime alone, and the release calls this workflow whole, so a tag
+  # still waits for it. The job runs no test: internal/scripttest's
+  # testlessJobs records that, and untimedJobs holds it to its timeout.
+  #
+  # 20 minutes is 2.9 times the slowest Vet step measured plus its setup.
+  cross-vet:
+    name: Vet every target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: scripts/vet.sh
+  # adapter/markdown's self-check reads its class diagram through a Go model of
+  # Mermaid's lexer, and that model was measured wrong twice. This job hands
+  # every golden's and every fixture's diagram to Mermaid itself, the 10.1.0
+  # floor the document states, the last 11.x and the current release, pinned
+  # by the lock file in adapter/markdown/testdata/mermaid, and requires each to
+  # read what the schema says the diagram holds.
+  #
+  # Behind the mermaid build tag, so scripts/test.sh needs no Node. Linux only:
+  # Mermaid runs under Node, and the emitted diagram does not depend on the host.
+  mermaid:
+    name: Mermaid reads the diagrams
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install Mermaid
+        working-directory: adapter/markdown/testdata/mermaid
+        run: npm ci --ignore-scripts
+      - name: Parse the diagrams
+        run: go test -count=1 -tags mermaid -timeout 5m -v ./adapter/markdown/
   # The adapter compares its own literals against strings a Neo4j server fills
   # in. Those strings change between server generations — the node uniqueness
   # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
@@ -106,7 +186,8 @@ jobs:
   # runs the same matrix on a developer's machine.
   integration:
     name: Neo4j ${{ matrix.label }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       # Every combination runs: knowing that a change breaks the OLD server but
       # not the new one is the whole point, and fail-fast would hide it.

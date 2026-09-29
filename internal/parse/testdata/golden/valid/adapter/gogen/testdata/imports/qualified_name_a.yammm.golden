@@ -1,0 +1,65 @@
+{
+  "name": "\"a\"",
+  "span": {
+    "s": 0,
+    "e": 10
+  },
+  "types": [
+    {
+      "name": "Foo",
+      "name_span": {
+        "s": 17,
+        "e": 20
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 27,
+              "e": 33
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 24,
+            "e": 41
+          }
+        }
+      ],
+      "span": {
+        "s": 12,
+        "e": 43
+      }
+    },
+    {
+      "name": "Bar",
+      "name_span": {
+        "s": 50,
+        "e": 53
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 60,
+              "e": 66
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 57,
+            "e": 74
+          }
+        }
+      ],
+      "span": {
+        "s": 45,
+        "e": 76
+      }
+    }
+  ]
+}

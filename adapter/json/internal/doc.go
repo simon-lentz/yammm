@@ -1,4 +1,9 @@
-// Package internal provides shared utilities for the JSON adapter.
+// Package internal holds no code and has no API. It is the home of the tests
+// that pin the behaviour of github.com/tidwall/jsonc the JSON adapter's parser
+// depends on, kept apart from the adapter's own suite because they test a
+// dependency.
 //
-// This is an internal package; its API may change without notice.
+// Run them before a release that upgrades the dependency:
+//
+//	go test ./adapter/json/internal/...
 package internal

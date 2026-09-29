@@ -1,13 +1,17 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -16,7 +20,8 @@ import (
 // the parser are two front doors to the same object model: a Builder-built
 // schema must remain expressible in the DSL, so declared names are held to
 // the same productions the parser enforces structurally. Schema names and
-// invariant names are quoted strings in the DSL and stay free-form.
+// invariant names are quoted strings in the DSL and stay free-form, but valid
+// UTF-8, as every string value is.
 var (
 	// builderTypeNameRE mirrors UC_WORD (type and datatype names).
 	builderTypeNameRE = regexp.MustCompile(`^[A-Z][A-Za-z0-9_]*$`)
@@ -57,6 +62,50 @@ func unsupportedLiteral(e expr.Expression) (any, bool) {
 	return nil, false
 }
 
+// invalidStringLiteral finds the first string literal in e, or string element
+// of a []string literal, that is not valid UTF-8: the DSL writes every string
+// literal as a STRING, whose value is valid UTF-8.
+func invalidStringLiteral(e expr.Expression) (string, bool) {
+	switch ex := e.(type) {
+	case *expr.Literal:
+		switch v := ex.Val.(type) {
+		case string:
+			return v, !utf8.ValidString(v)
+		case []string:
+			for _, s := range v {
+				if !utf8.ValidString(s) {
+					return s, true
+				}
+			}
+		case []expr.Expression:
+			for _, arg := range v {
+				if bad, found := invalidStringLiteral(arg); found {
+					return bad, true
+				}
+			}
+		}
+	case expr.SExpr:
+		for _, child := range ex.Children() {
+			if bad, found := invalidStringLiteral(child); found {
+				return bad, true
+			}
+		}
+	}
+	return "", false
+}
+
+// docFault describes why no doc comment can carry doc: a character the
+// source rules refuse, or "*/", which ends a doc comment.
+func docFault(doc string) (string, bool) {
+	if why, found := parse.SourceTextFault(doc); found {
+		return why, true
+	}
+	if strings.Contains(doc, "*/") {
+		return `"*/", which ends a doc comment`, true
+	}
+	return "", false
+}
+
 // ImportResolver resolves import paths to SourceIDs for synthetic sources.
 // This is required when the builder's SourceID is synthetic (not file-backed)
 // and imports use relative paths like "./common".
@@ -69,25 +118,41 @@ type ImportResolver func(path string) (location.SourceID, bool)
 //
 // # Validation Contract
 //
-// The Builder trusts that callers provide semantically valid constraints.
-// Unlike the parser which validates constraint parameters (e.g., enum has
-// >= 2 values, bounds are ordered correctly), the Builder accepts constraints
-// as-is. Callers are responsible for constructing valid constraints using
-// the schema.New*Constraint constructors.
-//
-// Declared names, however, are validated: Build rejects (E_INVALID_NAME)
-// type, datatype, property, and relation names that do not match the DSL's
-// own name productions, so every Builder-built schema remains expressible
-// in the DSL. Type and datatype names start with an uppercase letter;
-// property names start with a lowercase letter; relation names start with
-// a letter of either case; all continue with letters, digits, or
-// underscores. Schema names and invariant names are quoted strings in the
-// DSL and stay free-form. Import aliases are validated during completion.
+// Build refuses what the DSL refuses in a name, a string value, a
+// documentation string or a constraint, so a Builder-built schema remains
+// expressible in the DSL.
+// A declared name that the DSL's name productions
+// refuse is E_INVALID_NAME: type and datatype names are an uppercase letter
+// followed by letters, digits or underscores, and none is one of the eleven
+// built-in type names; property names start with a lowercase letter and are
+// none of as, part, in, nil, true and false; relation names are UPPER_SNAKE
+// and are not UUID. A constraint no .yammm source can state is
+// E_INVALID_CONSTRAINT: inverted bounds, a non-finite Float bound, a negative
+// length, an enum value empty or repeated or fewer than two values, a Pattern
+// with no pattern, more than two or one regexp.Compile refuses, a Vector
+// dimension outside 1 to 65536, a List with no element, and a Go type this
+// package does not construct. So is a datatype declared as a bare reference to
+// another datatype, a Pattern writing a surrogate code point, and an enum value
+// or Timestamp format that is not valid UTF-8. Schema names and invariant names
+// are quoted strings in the DSL and stay free-form, but a string value is valid
+// UTF-8 wherever the Builder takes one: E_INVALID_NAME for the schema name,
+// E_IMPORT_RESOLVE for an import path, E_INVALID_INVARIANT for an invariant's
+// message or string literal. A documentation string is stored as the text a
+// doc comment holding it carries, by the rule the Comments section of
+// docs/SPEC.md states. One no doc comment can hold — with "*/", a NUL, a byte order mark or
+// bytes that are not UTF-8 — is E_SYNTAX. Import aliases are validated during
+// completion.
 //
 // # Import Requirements
 //
-// AddImport() requires WithSourceID() to have been called first.
-// If AddImport is called without a source ID, Build will return E_MISSING_SOURCE_ID.
+// AddImport() requires a non-zero source ID, set with WithSourceID() before or
+// after it. Without one, Build returns E_MISSING_SOURCE_ID. An import closure
+// holds one schema per name, as a loaded one does, so a built schema whose
+// closure holds two schemas of one name is E_DUPLICATE_SCHEMA. An import that
+// resolves to the built schema's own source ID, or to a registered schema
+// whose closure holds that ID, is E_IMPORT_CYCLE, as a load refuses a cycle.
+// An import whose closure holds a source compiled from other bytes than an
+// earlier import's closure holds it is E_IMPORT_RESOLVE, as on a load.
 type Builder struct {
 	name           string
 	sourceID       location.SourceID
@@ -156,9 +221,10 @@ func (b *Builder) WithSourceID(id location.SourceID) *Builder {
 	return b
 }
 
-// WithDocumentation sets the schema-level documentation.
+// WithDocumentation sets the schema-level documentation, stored as the text a
+// doc comment holding doc carries.
 func (b *Builder) WithDocumentation(doc string) *Builder {
-	b.documentation = doc
+	b.documentation = parse.DocText(doc)
 	return b
 }
 
@@ -212,8 +278,8 @@ func (b *Builder) WithImportResolver(resolver ImportResolver) *Builder {
 
 // AddImport adds an import declaration.
 //
-// Requires WithSourceID() to have been called first.
-// If not, Build() will return an E_MISSING_SOURCE_ID error.
+// It requires a non-zero source ID, set with WithSourceID() before or after
+// it; without one, Build() returns E_MISSING_SOURCE_ID.
 func (b *Builder) AddImport(path, alias string) *Builder {
 	b.imports = append(b.imports, &importDecl{
 		Path:  path,
@@ -270,6 +336,12 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 			WithDetail(diag.DetailKeyContext, "Builder").Build())
 		return nil, collector.Result()
 	}
+	if !utf8.ValidString(b.name) {
+		collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+			fmt.Sprintf("schema name %q is not valid UTF-8; the DSL writes it as a string, whose value is", b.name)).
+			WithDetail(diag.DetailKeyContext, "Builder").Build())
+		return nil, collector.Result()
+	}
 
 	// Validate SourceID requirement for imports - must be set AND non-zero
 	if len(b.imports) > 0 && (!b.sourceIDSet || b.sourceID.IsZero()) {
@@ -305,8 +377,8 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 	m := &model{
 		Name:          b.name,
 		Imports:       b.imports,
-		Types:         b.convertTypes(),
-		DataTypes:     b.dataTypes,
+		Types:         unresolveTypes(b.convertTypes()),
+		DataTypes:     unresolveDataTypes(b.dataTypes),
 		Documentation: b.documentation,
 		Span:          location.Span{}, // Synthetic
 	}
@@ -339,6 +411,11 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 
 	// Wire import schema pointers and seal imports
 	b.wireImports(s)
+
+	if issue, clash := closureNameClash(s); clash {
+		collector.Collect(issue)
+		return nil, collector.Result()
+	}
 
 	// Seal the schema to prevent further mutation
 	s.seal()
@@ -404,20 +481,53 @@ func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
 }
 
 // validateInput performs shallow validation of builder input before completion:
-// nil-checks, and grammar-conformance of declared names against the DSL's
-// productions (type/datatype names UC_WORD, property names LC_WORD, relation
-// names UC_WORD|LC_WORD). Invariant names map to the DSL's quoted failure
-// message, so only emptiness is checked.
+// nil-checks; grammar-conformance of declared names against the DSL's
+// productions (type/datatype names UC_WORD less the datatype keywords, property
+// names LC_WORD less the six excluded spellings, relation names UPPER_SNAKE less
+// UUID); every constraint argument [constraintFault] refuses, and a datatype
+// declared as another datatype alone; the Go type of every literal an invariant
+// holds, and that every string it reads (an import path, an invariant's message
+// and string literals, an enum value, a Timestamp format) is valid UTF-8, where
+// Build has checked the schema name before it; that every documentation
+// string is one a doc comment can carry; and the property each
+// WithPropertyAnnotation names. An invariant's message and expression are
+// otherwise completion's to check.
 // Returns true if validation passes, false otherwise (with diagnostics collected).
 //
 // Uses semantic diagnostic codes per:
 //   - E_INVALID_NAME for empty/invalid identifiers
-//   - E_INVALID_CONSTRAINT for nil constraints
+//   - E_INVALID_CONSTRAINT for nil constraints, for any argument no .yammm
+//     source can state (see [constraintFault]), and for a datatype declared as
+//     another datatype alone
 //   - E_INVALID_INVARIANT for invalid invariant declarations
+//   - E_IMPORT_RESOLVE for an import path that is not valid UTF-8
+//   - E_SYNTAX for a documentation string no doc comment can hold
+//   - E_UNKNOWN_ANNOTATION_TARGET for a property annotation naming no property
 func (b *Builder) validateInput(collector *diag.Collector) bool {
 	hasErrors := false
 
+	for _, imp := range b.imports {
+		if !utf8.ValidString(imp.Path) {
+			collector.Collect(importResolveIssue("", diag.ModuleRootNone,
+				fmt.Sprintf("import path %q is not valid UTF-8, so it names no schema", imp.Path), imp))
+			hasErrors = true
+		}
+	}
+	if why, found := docFault(b.documentation); found {
+		collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
+			"schema documentation cannot be written as a doc comment: "+why).
+			WithDetail(diag.DetailKeyContext, "Builder").Build())
+		hasErrors = true
+	}
+
 	for _, t := range b.types {
+		if why, found := docFault(t.documentation); found {
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
+				fmt.Sprintf("documentation of type %q cannot be written as a doc comment: %s", t.name, why)).
+				WithDetail(diag.DetailKeyTypeName, t.name).
+				WithDetail(diag.DetailKeyContext, "Builder").Build())
+			hasErrors = true
+		}
 		switch {
 		case t.name == "":
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
@@ -428,6 +538,12 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 		case !builderTypeNameRE.MatchString(t.name):
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
 				fmt.Sprintf("type name %q is not a valid DSL type name: type names start with an uppercase letter, followed by letters, digits, or underscores", t.name)).
+				WithDetail(diag.DetailKeyName, t.name).
+				WithDetail(diag.DetailKeyContext, "Builder").Build())
+			hasErrors = true
+		case parse.IsDatatypeKeyword(t.name):
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+				fmt.Sprintf("type name %q is a built-in type name, which the DSL refuses as a declared name", t.name)).
 				WithDetail(diag.DetailKeyName, t.name).
 				WithDetail(diag.DetailKeyContext, "Builder").Build())
 			hasErrors = true
@@ -447,10 +563,22 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 					WithDetail(diag.DetailKeyName, p.Name).
 					WithDetail(diag.DetailKeyTypeName, t.name).Build())
 				hasErrors = true
+			case parse.IsExcludedPropertyName(p.Name):
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+					fmt.Sprintf("property name %q in type %q is a keyword or literal, which the DSL refuses as a property name", p.Name, t.name)).
+					WithDetail(diag.DetailKeyName, p.Name).
+					WithDetail(diag.DetailKeyTypeName, t.name).Build())
+				hasErrors = true
 			}
 			if p.Constraint == nil {
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
 					fmt.Sprintf("property %q in type %q has nil constraint", p.Name, t.name)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyPropertyName, p.Name).Build())
+				hasErrors = true
+			} else if fault, found := constraintFault(p.Constraint); found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+					fmt.Sprintf("property %q in type %q: %s", p.Name, t.name, fault)).
 					WithDetail(diag.DetailKeyTypeName, t.name).
 					WithDetail(diag.DetailKeyPropertyName, p.Name).Build())
 				hasErrors = true
@@ -471,17 +599,44 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 					WithDetail(diag.DetailKeyName, r.Name).
 					WithDetail(diag.DetailKeyTypeName, t.name).Build())
 				hasErrors = true
+			case parse.IsDatatypeKeyword(r.Name):
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+					fmt.Sprintf("relation name %q in type %q is a built-in type name, which the DSL refuses as a relation name", r.Name, t.name)).
+					WithDetail(diag.DetailKeyName, r.Name).
+					WithDetail(diag.DetailKeyTypeName, t.name).Build())
+				hasErrors = true
 			}
 		}
 
 		// An empty message and an absent expression are the completer's to
 		// refuse, by the one rule the parse front door shares.
 		for _, inv := range t.invariants {
+			if !utf8.ValidString(inv.Name) {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
+					fmt.Sprintf("invariant message %q in type %q is not valid UTF-8; the DSL writes it as a string, whose value is", inv.Name, t.name)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyName, inv.Name).Build())
+				hasErrors = true
+			}
 			if bad, found := unsupportedLiteral(inv.Expr); found {
 				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
 					fmt.Sprintf("invariant %q in type %q holds a literal of Go type %T; an expression literal is nil, string, int64, float64, bool or *regexp.Regexp", inv.Name, t.name, bad)).
 					WithDetail(diag.DetailKeyTypeName, t.name).
 					WithDetail(diag.DetailKeyName, inv.Name).Build())
+				hasErrors = true
+			} else if bad, found := invalidStringLiteral(inv.Expr); found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_INVARIANT,
+					fmt.Sprintf("invariant %q in type %q holds the string literal %q, which is not valid UTF-8", inv.Name, t.name, bad)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyName, inv.Name).Build())
+				hasErrors = true
+			}
+			if why, found := docFault(inv.Documentation); found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_SYNTAX,
+					fmt.Sprintf("documentation of invariant %q in type %q cannot be written as a doc comment: %s", inv.Name, t.name, why)).
+					WithDetail(diag.DetailKeyTypeName, t.name).
+					WithDetail(diag.DetailKeyName, inv.Name).
+					WithDetail(diag.DetailKeyContext, "Builder").Build())
 				hasErrors = true
 			}
 		}
@@ -521,16 +676,163 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 				WithDetail(diag.DetailKeyName, dt.Name).
 				WithDetail(diag.DetailKeyContext, "Builder").Build())
 			hasErrors = true
+		case parse.IsDatatypeKeyword(dt.Name):
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
+				fmt.Sprintf("datatype name %q is a built-in type name, which the DSL refuses as a declared name", dt.Name)).
+				WithDetail(diag.DetailKeyName, dt.Name).
+				WithDetail(diag.DetailKeyContext, "Builder").Build())
+			hasErrors = true
 		}
-		if dt.Constraint == nil {
+		// The DSL's datatype declaration names a built-in type or a List after
+		// its "=", never another datatype alone.
+		bare, isBare := dt.Constraint.(AliasConstraint)
+		switch {
+		case dt.Constraint == nil:
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
 				fmt.Sprintf("datatype %q has nil constraint", dt.Name)).
 				WithDetail(diag.DetailKeyName, dt.Name).Build())
 			hasErrors = true
+		case isBare:
+			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+				fmt.Sprintf("datatype %q is declared as datatype %q alone; a datatype declares a built-in type or a List", dt.Name, bare.DataTypeName())).
+				WithDetail(diag.DetailKeyName, dt.Name).Build())
+			hasErrors = true
+		default:
+			if fault, found := constraintFault(dt.Constraint); found {
+				collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_CONSTRAINT,
+					fmt.Sprintf("datatype %q: %s", dt.Name, fault)).
+					WithDetail(diag.DetailKeyName, dt.Name).Build())
+				hasErrors = true
+			}
 		}
 	}
 
 	return !hasErrors
+}
+
+// CheckConstraint returns why c cannot judge a value, or nil when it can. It
+// refuses what [Builder.Build] refuses in a constraint: a nil constraint, an
+// argument no .yammm source can state, a List with no element, more than two
+// patterns or one regexp.Compile refuses, and a constraint of a Go type this
+// package does not construct, such as a pointer to one. A raw constraint meets
+// no completion, so it also refuses a DataType reference that resolves to no
+// constraint, at any List depth. The Neo4j adapter's Coerce and CoerceParams
+// call it before they coerce a value.
+func CheckConstraint(c Constraint) error {
+	if c == nil {
+		return errors.New("schema: no constraint")
+	}
+	if fault, found := constraintFault(c); found {
+		return fmt.Errorf("schema: %s", fault)
+	}
+	switch c := c.(type) {
+	case ListConstraint:
+		return CheckConstraint(c.Element())
+	case AliasConstraint:
+		terminal := ResolveAlias(c)
+		if open, isOpen := terminal.(AliasConstraint); isOpen {
+			return fmt.Errorf("schema: datatype %q resolves to no constraint", open.DataTypeName())
+		}
+		return CheckConstraint(terminal)
+	}
+	return nil
+}
+
+// constraintFault describes the first fault of c, or of a List element at any
+// depth, that no .yammm source can state: an argument the DSL refuses, as
+// E_INVALID_CONSTRAINT or E_SYNTAX, or a Go type this package does not construct.
+// The Builder refuses it too, so a built schema stays expressible in the DSL. A
+// DataType reference is judged by its name, which completion resolves.
+func constraintFault(c Constraint) (string, bool) {
+	switch c := c.(type) {
+	case BooleanConstraint, DateConstraint, UUIDConstraint, AliasConstraint:
+		// Nothing to judge: the DSL states every Boolean, Date and UUID, and a
+		// reference is judged by the name completion resolves.
+	case TimestampConstraint:
+		if !utf8.ValidString(c.Format()) {
+			return fmt.Sprintf("timestamp format %q is not valid UTF-8", c.Format()), true
+		}
+	case IntegerConstraint:
+		lo, hasLo := c.Min()
+		hi, hasHi := c.Max()
+		if hasLo && hasHi && lo > hi {
+			return fmt.Sprintf("integer bounds inverted: min %d > max %d", lo, hi), true
+		}
+	case FloatConstraint:
+		lo, hasLo := c.Min()
+		hi, hasHi := c.Max()
+		for _, b := range [...]struct {
+			v   float64
+			has bool
+		}{{lo, hasLo}, {hi, hasHi}} {
+			if b.has && (math.IsInf(b.v, 0) || math.IsNaN(b.v)) {
+				return fmt.Sprintf("non-finite float bound %v; a Float bound is a finite number", b.v), true
+			}
+		}
+		if hasLo && hasHi && lo > hi {
+			return fmt.Sprintf("float bounds inverted: min %v > max %v", lo, hi), true
+		}
+	case StringConstraint:
+		return lengthFault("string", c.MinLen, c.MaxLen)
+	case ListConstraint:
+		if fault, found := lengthFault("list", c.MinLen, c.MaxLen); found {
+			return fault, true
+		}
+		if c.Element() == nil {
+			return "list has no element constraint", true
+		}
+		return constraintFault(c.Element())
+	case EnumConstraint:
+		values := c.Values()
+		seen := make(map[string]bool, len(values))
+		for _, v := range values {
+			switch {
+			case v == "":
+				return "enum value cannot be empty", true
+			case !utf8.ValidString(v):
+				return fmt.Sprintf("enum value %q is not valid UTF-8", v), true
+			case seen[v]:
+				return fmt.Sprintf("duplicate enum value %q", v), true
+			}
+			seen[v] = true
+		}
+		if len(values) < 2 {
+			return fmt.Sprintf("enum must have at least two values (got %d)", len(values)), true
+		}
+	case PatternConstraint:
+		switch n := c.PatternCount(); {
+		case n == 0:
+			return "pattern constraint needs at least one pattern", true
+		case n > parse.MaxPatterns:
+			return fmt.Sprintf("pattern constraint exceeds maximum of %d patterns (got %d)", parse.MaxPatterns, n), true
+		case c.invalid != "":
+			return c.invalid, true
+		}
+	case VectorConstraint:
+		if d := c.Dimension(); d < parse.MinVectorDimensions || d > parse.MaxVectorDimensions {
+			return fmt.Sprintf("vector dimensions must be between %d and %d (got %d)",
+				parse.MinVectorDimensions, parse.MaxVectorDimensions, d), true
+		}
+	default:
+		return fmt.Sprintf("a constraint of Go type %T is none this package constructs", c), true
+	}
+	return "", false
+}
+
+// lengthFault reports a negative or inverted length pair; kind names the
+// constraint as the DSL's diagnostics do.
+func lengthFault(kind string, minLen, maxLen func() (int64, bool)) (string, bool) {
+	lo, hasLo := minLen()
+	hi, hasHi := maxLen()
+	switch {
+	case hasLo && lo < 0:
+		return fmt.Sprintf("%s minimum length cannot be negative: %d", kind, lo), true
+	case hasHi && hi < 0:
+		return fmt.Sprintf("%s maximum length cannot be negative: %d", kind, hi), true
+	case hasLo && hasHi && lo > hi:
+		return fmt.Sprintf("%s length bounds inverted: min %d > max %d", kind, lo, hi), true
+	}
+	return "", false
 }
 
 // resolveImportPath resolves an import path to a SourceID.
@@ -638,6 +940,7 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 	resolved := make(resolvedImportMap, len(b.imports))
 	// Track seen SourceIDs for duplicate detection
 	seenSourceIDs := make(map[location.SourceID]*importDecl)
+	compiles := make(map[location.SourceID]*Schema)
 	hasErrors := false
 	for _, imp := range b.imports {
 		// Keep-first: once an alias has resolved, a later declaration of the
@@ -686,7 +989,20 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 			hasErrors = true
 			continue
 		}
+		// A refused import is recorded too, so a second declaration of it draws
+		// E_DUPLICATE_IMPORT, as on a load, rather than a second refusal.
 		seenSourceIDs[resolvedID] = imp
+		if b.importClosesCycle(resolvedID) {
+			collector.Collect(importCycleIssue("", diag.ModuleRootNone, imp))
+			hasErrors = true
+			continue
+		}
+		if member, split := b.splitCompile(compiles, resolvedID); split {
+			collector.Collect(importResolveIssue("", diag.ModuleRootNone,
+				fmt.Sprintf("import %q holds %s in its closure compiled from different bytes than an earlier import's closure holds", imp.Path, member), imp))
+			hasErrors = true
+			continue
+		}
 		resolved[imp.Alias] = importResolution{sourceID: resolvedID}
 	}
 
@@ -694,6 +1010,50 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 		return nil
 	}
 	return resolved
+}
+
+// importClosesCycle reports whether the schema registered as id is the one
+// being built or holds its SourceID in its import closure, which the loader
+// refuses as a cycle.
+func (b *Builder) importClosesCycle(id location.SourceID) bool {
+	if id == b.sourceID {
+		return true
+	}
+	dep, ok := b.registry.LookupBySourceID(id)
+	return ok && slices.ContainsFunc(dep.Closure(), func(member *Schema) bool {
+		return member.SourceID() == b.sourceID
+	})
+}
+
+// splitCompile walks the closure of the schema registered as id by schema,
+// not by SourceID as [Schema.Closure] does, recording each member in compiles.
+// It reports a member whose SourceID compiles already holds as a schema
+// compiled from other bytes: the built closure would keep one and resolve the
+// other's references into it, which a load refuses.
+func (b *Builder) splitCompile(compiles map[location.SourceID]*Schema, id location.SourceID) (location.SourceID, bool) {
+	dep, ok := b.registry.LookupBySourceID(id)
+	if !ok {
+		return location.SourceID{}, false
+	}
+	visited := map[*Schema]bool{}
+	for queue := []*Schema{dep}; len(queue) > 0; queue = queue[1:] {
+		cur := queue[0]
+		if cur == nil || visited[cur] {
+			continue
+		}
+		visited[cur] = true
+		if prior, held := compiles[cur.SourceID()]; held {
+			if prior != cur && !sameSourceBytes(prior, cur) {
+				return cur.SourceID(), true
+			}
+		} else {
+			compiles[cur.SourceID()] = cur
+		}
+		for _, imp := range cur.imports {
+			queue = append(queue, imp.Schema())
+		}
+	}
+	return location.SourceID{}, false
 }
 
 // wireImports wires schema pointers and seals imports after completion.
@@ -712,6 +1072,26 @@ func (b *Builder) wireImports(s *Schema) {
 		}
 		imp.seal()
 	}
+}
+
+// closureNameClash reports two members of s's import closure that declare one
+// schema name, at s's declaration. The loader and the Builder each check the
+// closure they complete: an import can bring members no registry holds.
+func closureNameClash(s *Schema) (diag.Issue, bool) {
+	first := map[string]*Schema{}
+	for _, member := range s.Closure() {
+		prior, taken := first[member.Name()]
+		if !taken {
+			first[member.Name()] = member
+			continue
+		}
+		return diag.NewIssue(diag.Error, diag.E_DUPLICATE_SCHEMA,
+			fmt.Sprintf("schema name %q is declared by %s and by %s in one import closure; a closure holds one schema per name",
+				member.Name(), prior.SourceID(), member.SourceID())).
+			WithSpan(s.Span()).
+			WithDetail(diag.DetailKeySchemaName, member.Name()).Build(), true
+	}
+	return diag.Issue{}, false
 }
 
 // TypeBuilder provides a fluent API for building a type definition.
@@ -812,9 +1192,10 @@ func (t *TypeBuilder) AsAbstract() *TypeBuilder {
 	return t
 }
 
-// WithTypeDocumentation sets documentation for this type.
+// WithTypeDocumentation sets documentation for this type, stored as the text a
+// doc comment holding doc carries.
 func (t *TypeBuilder) WithTypeDocumentation(doc string) *TypeBuilder {
-	t.state.documentation = doc
+	t.state.documentation = parse.DocText(doc)
 	return t
 }
 
@@ -822,7 +1203,8 @@ func (t *TypeBuilder) WithTypeDocumentation(doc string) *TypeBuilder {
 //
 // The name parameter is the user-facing message displayed when the invariant
 // fails validation. The e parameter is the compiled expression to evaluate.
-// The doc parameter is optional documentation for the invariant.
+// The doc parameter is optional documentation for the invariant, stored as the
+// text a doc comment holding it carries.
 //
 // Expressions are constructed with the expr package. Compiling one from source
 // text is internal to schema loading and is not reachable from here:
@@ -832,7 +1214,7 @@ func (t *TypeBuilder) WithInvariant(name string, e expr.Expression, doc string) 
 	t.state.invariants = append(t.state.invariants, &invariantDecl{
 		Name:          name,
 		Expr:          e,
-		Documentation: doc,
+		Documentation: parse.DocText(doc),
 		Span:          location.Span{}, // Synthetic - no source location
 	})
 	return t
@@ -879,4 +1261,56 @@ func builderAnnotationDecl(name string, args []string) *annotationDecl {
 // Done completes the type definition and returns to the parent Builder.
 func (t *TypeBuilder) Done() *Builder {
 	return t.parent
+}
+
+// unresolve drops a caller-supplied alias resolution, at any List depth, so
+// completion resolves every alias by its name as it does for a loaded schema.
+func unresolve(c Constraint) Constraint {
+	switch c := c.(type) {
+	case AliasConstraint:
+		return NewAliasConstraint(c.DataTypeName(), nil)
+	case ListConstraint:
+		elem := unresolve(c.Element())
+		lo, hasLo := c.MinLen()
+		hi, hasHi := c.MaxLen()
+		switch {
+		case hasLo && hasHi:
+			return ListLenBetween(elem, lo, hi)
+		case hasLo:
+			return ListMinLen(elem, lo)
+		case hasHi:
+			return ListMaxLen(elem, hi)
+		}
+		return NewListConstraint(elem)
+	}
+	return c
+}
+
+func unresolveProps(ps []*propertyDecl) []*propertyDecl {
+	out := make([]*propertyDecl, len(ps))
+	for i, p := range ps {
+		cp := *p
+		cp.Constraint = unresolve(p.Constraint)
+		out[i] = &cp
+	}
+	return out
+}
+
+// unresolveTypes covers the properties alone: the Builder gives a relation no
+// properties, so a relationDecl it converts holds none to unresolve.
+func unresolveTypes(ts []*typeDecl) []*typeDecl {
+	for _, t := range ts {
+		t.Properties = unresolveProps(t.Properties)
+	}
+	return ts
+}
+
+func unresolveDataTypes(ds []*dataTypeDecl) []*dataTypeDecl {
+	out := make([]*dataTypeDecl, len(ds))
+	for i, d := range ds {
+		cd := *d
+		cd.Constraint = unresolve(d.Constraint)
+		out[i] = &cd
+	}
+	return out
 }

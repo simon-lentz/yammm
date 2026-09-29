@@ -15,10 +15,21 @@ import (
 // The identity-keyed snapshot.
 //
 // A tag form is a rendering of an identity: bare for a local type,
-// alias-qualified for a directly imported one. It cannot name a transitively
-// imported type and cannot tell two same-named types apart, so every position
-// that must denote a type exactly is keyed by [schema.TypeID]. These tests
-// drive the positions where a name key merged or dropped instances.
+// alias-qualified for a directly imported one. A BARE name cannot tell two
+// same-named types apart, so every position that must denote a type exactly is
+// keyed by [schema.TypeID]. These tests drive the positions where a name key
+// merged or dropped instances.
+
+// mustImport imports snap into a new graph bound to s and fails the test when
+// the import is refused.
+func mustImport(tb testing.TB, s *schema.Schema, snap *graph.Snapshot) *graph.Graph {
+	tb.Helper()
+	g, res := graph.NewFromSnapshot(s, snap)
+	if res.HasErrors() {
+		tb.Fatalf("NewFromSnapshot: %s", res)
+	}
+	return g
+}
 
 // hasCode reports whether the result carries an issue with the given code.
 func hasCode(result diag.Result, code diag.Code) bool {
@@ -30,122 +41,160 @@ func hasCode(result diag.Result, code diag.Code) bool {
 	return false
 }
 
-// TestImportSnapshot_KeepsTransitivelyImportedInstances drives the graph-side
-// import of a tag the entry schema cannot name. A transitively imported type
-// has no alias to qualify with, so its tag is a bare name that resolved
-// against nothing and dropped every instance of the type.
-func TestImportSnapshot_KeepsTransitivelyImportedInstances(t *testing.T) {
+// TestImportSnapshot_KeepsATransitivelyImportedComposedChild drives the
+// graph-side import of a child whose type the entry schema cannot name. Such a
+// type has no alias to qualify with, so a name-resolved import dropped it; a
+// composed child is addressed through its parent and must survive.
+//
+// It is a COMPOSED child and not a root because the entry schema cannot name
+// the type, and every root is keyed by name.
+func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
-	probeID := mustTransitiveTypeID(t, s, "base", "deep", "Probe")
-	tag := tagForm(s, probeID)
+	siteID := mustTypeIDIn(t, s, "", "Site")
+	deepPart := mustTransitiveTypeID(t, s, "base", "deep", "Part")
+	if _, addressable := schema.AddressableTag(s, deepPart); addressable {
+		t.Fatal("fixture is vacuous: the entry schema can name deep.Part")
+	}
+
+	basePart := mustTypeIDIn(t, s, "base", "Part")
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{probeID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			probeID: {{
-				TypeName:   tag,
-				TypeID:     probeID,
-				PrimaryKey: immutable.WrapKey([]any{"pr1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "pr1", "reading": float64(2)}),
-			}},
+		Types: []schema.TypeID{siteID},
+		Instances: []graph.InstanceParts{
+			{
+				TypeID:     siteID,
+				PrimaryKey: immutable.WrapKey([]any{"site1"}),
+				Properties: immutable.WrapProperties(map[string]any{"id": "site1"}),
+				Composed: map[string][]graph.InstanceParts{
+					"IMPORTED": {{
+						TypeID:     basePart,
+						PrimaryKey: immutable.WrapKey([]any{"bp1"}),
+						Properties: immutable.WrapProperties(map[string]any{"name": "bp1", "mass": float64(1)}),
+						Composed: map[string][]graph.InstanceParts{
+							"DEEP": {{
+								TypeID:     deepPart,
+								PrimaryKey: immutable.WrapKey([]any{"dp1"}),
+								Properties: immutable.WrapProperties(map[string]any{"name": "dp1", "density": float64(2)}),
+							}},
+						},
+					}},
+				},
+			},
 		},
 	})
 	if result.HasErrors() {
 		t.Fatalf("assembling: %s", result)
 	}
 
-	g := graph.NewFromSnapshot(s, built)
-	var count int
-	for range g.Snapshot().AllInstances() {
-		count++
+	after := mustImport(t, s, built).Snapshot()
+	roots := after.InstancesOf(siteID)
+	if len(roots) != 1 {
+		t.Fatalf("importing dropped the root: want 1, got %d", len(roots))
 	}
-	if count != 1 {
-		t.Errorf("importing a transitively imported type dropped its instances: want 1, got %d", count)
+	parents := roots[0].Composed("IMPORTED")
+	if len(parents) != 1 {
+		t.Fatalf("importing dropped the base.Part child: want 1, got %d", len(parents))
+	}
+	children := parents[0].Composed("DEEP")
+	if len(children) != 1 {
+		t.Fatalf("importing a transitively imported child dropped it: want 1, got %d", len(children))
+	}
+	if got := children[0].TypeID(); got != deepPart {
+		t.Errorf("the child carries type %s, want %s", got, deepPart)
 	}
 }
 
-// The tag collision, one layer above the wire.
+// Identity keying over one name two schemas declare.
 //
-// A local type and a transitively imported one render the same tag. Keying a
-// snapshot by that tag merges them: the second group overwrites the first
-// before anything is marshalled. Graph.Add refuses a transitively imported
-// type outright, so the collision is reachable only through the
-// deserialization path — which is exactly the path a persisted document takes.
+// A local type and a DIRECTLY imported one of the same name render different
+// tags and share one bare name. Every position that must denote a type exactly
+// is keyed by [schema.TypeID], and one keyed by the bare name merges the pair.
+// A type the entry schema cannot name is not part of this: it cannot hold a
+// root at all, so no position keyed by name ever has to separate one.
 
-// collidingBeacons builds a snapshot holding both Beacons, whose tags collide.
-func collidingBeacons(t *testing.T, s *schema.Schema) (*graph.Snapshot, schema.TypeID, schema.TypeID) {
+// sameNameBeacons builds a snapshot holding the entry schema's Beacon beside
+// the one it imports as base. Both are addressable, their tags differ, and
+// their bare names do not.
+func sameNameBeacons(t *testing.T, s *schema.Schema) (*graph.Snapshot, schema.TypeID, schema.TypeID) {
 	t.Helper()
 	localBeacon := mustTypeIDIn(t, s, "", "Beacon")
-	deepBeacon := mustTransitiveTypeID(t, s, "base", "deep", "Beacon")
-	if tagForm(s, localBeacon) != tagForm(s, deepBeacon) {
-		t.Fatalf("fixture is vacuous: the two Beacons render different tags (%q, %q)",
-			tagForm(s, localBeacon), tagForm(s, deepBeacon))
+	importedBeacon := mustTypeIDIn(t, s, "base", "Beacon")
+	if localBeacon.Name() != importedBeacon.Name() {
+		t.Fatalf("fixture is vacuous: the two Beacons have different names (%q, %q)",
+			localBeacon.Name(), importedBeacon.Name())
+	}
+	if tagForm(s, localBeacon) == tagForm(s, importedBeacon) {
+		t.Fatalf("fixture is vacuous: two addressable types render one tag (%q)", tagForm(s, localBeacon))
+	}
+	for _, id := range []schema.TypeID{localBeacon, importedBeacon} {
+		if _, addressable := schema.AddressableTag(s, id); !addressable {
+			t.Fatalf("fixture is vacuous: %s is not addressable, so it cannot hold a root", id)
+		}
 	}
 	beacon := func(id schema.TypeID, key string) graph.InstanceParts {
 		return graph.InstanceParts{
-			TypeName:   tagForm(s, id),
 			TypeID:     id,
 			PrimaryKey: immutable.WrapKey([]any{key}),
 			Properties: immutable.WrapProperties(map[string]any{"id": key, "power": float64(1)}),
 		}
 	}
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{localBeacon, deepBeacon},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			localBeacon: {beacon(localBeacon, "local1")},
-			deepBeacon:  {beacon(deepBeacon, "deep1")},
+		Types: []schema.TypeID{localBeacon, importedBeacon},
+		Instances: []graph.InstanceParts{
+			beacon(localBeacon, "local1"),
+			beacon(importedBeacon, "imported1"),
 		},
 	})
 	if result.HasErrors() {
 		t.Fatalf("assembling: %s", result)
 	}
-	return built, localBeacon, deepBeacon
+	return built, localBeacon, importedBeacon
 }
 
-// TestRebuildSnapshot_KeepsBothSidesOfATagCollision pins the assembly path. A
-// name-keyed Instances map cannot even express this input; an identity-keyed
+// TestRebuildSnapshot_SeparatesOneNameTwoSchemasDeclare pins the assembly path.
+// A name-keyed Instances map cannot even express this input; an identity-keyed
 // one must carry both groups through.
-func TestRebuildSnapshot_KeepsBothSidesOfATagCollision(t *testing.T) {
+func TestRebuildSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
-	built, localBeacon, deepBeacon := collidingBeacons(t, s)
+	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
 	if got := len(built.InstancesOf(localBeacon)); got != 1 {
 		t.Errorf("the local Beacon was merged away: want 1 instance, got %d", got)
 	}
-	if got := len(built.InstancesOf(deepBeacon)); got != 1 {
-		t.Errorf("the transitively imported Beacon was merged away: want 1 instance, got %d", got)
+	if got := len(built.InstancesOf(importedBeacon)); got != 1 {
+		t.Errorf("the imported Beacon was merged away: want 1 instance, got %d", got)
 	}
 }
 
-// TestGraphSnapshot_KeepsBothSidesOfATagCollision drives Graph.Snapshot itself,
-// reached through the import path because Add refuses the transitive type.
-func TestGraphSnapshot_KeepsBothSidesOfATagCollision(t *testing.T) {
+// TestGraphSnapshot_SeparatesOneNameTwoSchemasDeclare drives Graph.Snapshot
+// itself, reached through the import path so both groups arrive together.
+func TestGraphSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	t.Parallel()
 	s := loadIdentitySchema(t)
 
-	built, _, _ := collidingBeacons(t, s)
-	after := graph.NewFromSnapshot(s, built).Snapshot()
+	built, _, _ := sameNameBeacons(t, s)
+	after := mustImport(t, s, built).Snapshot()
 
 	var count int
 	for range after.AllInstances() {
 		count++
 	}
 	if count != 2 {
-		t.Errorf("Graph.Snapshot merged two types rendering one tag: want 2 instances, got %d", count)
+		t.Errorf("Graph.Snapshot merged two types sharing one name: want 2 instances, got %d", count)
 	}
 }
 
-// TestRoundTrip_KeepsBothSidesOfATagCollision is the end-to-end bar: both
+// TestRoundTrip_SeparatesOneNameTwoSchemasDeclare is the end-to-end bar: both
 // groups survive Marshal and Load, each denoted by its own types-table row
-// rather than by a tag the two share.
-func TestRoundTrip_KeepsBothSidesOfATagCollision(t *testing.T) {
+// rather than by the bare name the two share.
+func TestRoundTrip_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
 
-	built, localBeacon, deepBeacon := collidingBeacons(t, s)
+	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
 	data, result := snapshot.Marshal(ctx, built)
 	if err := result.Err(); err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -157,8 +206,8 @@ func TestRoundTrip_KeepsBothSidesOfATagCollision(t *testing.T) {
 	if got := len(loaded.InstancesOf(localBeacon)); got != 1 {
 		t.Errorf("the local Beacon did not survive the round trip: got %d\n%s", got, data)
 	}
-	if got := len(loaded.InstancesOf(deepBeacon)); got != 1 {
-		t.Errorf("the transitively imported Beacon did not survive the round trip: got %d\n%s", got, data)
+	if got := len(loaded.InstancesOf(importedBeacon)); got != 1 {
+		t.Errorf("the imported Beacon did not survive the round trip: got %d\n%s", got, data)
 	}
 }
 
@@ -169,27 +218,29 @@ func TestRoundTrip_KeepsBothSidesOfATagCollision(t *testing.T) {
 func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	s := loadIdentitySchema(t)
+	s, lres := schema.LoadSourcesWithEntry(ctx, map[string][]byte{
+		"entry.yammm": []byte("schema \"entry\"\n\nimport \"base.yammm\" as base\n\ntype Anchor {\n\tid String primary\n}\n"),
+		"base.yammm":  []byte("schema \"base\"\n\ntype Basin {\n\tid String primary\n\t--> NEAR (one:one) Basin\n}\n"),
+	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
+	if lres.HasErrors() {
+		t.Fatalf("load: %s", lres)
+	}
 
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
-	tag := tagForm(s, basinID)
 	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{basinID},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			basinID: {{
-				TypeName:   tag,
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     basinID,
 				PrimaryKey: immutable.WrapKey([]any{"b1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "b1", "area": float64(7)}),
-			}},
+				Properties: immutable.WrapProperties(map[string]any{"id": "b1"}),
+			},
 		},
 		Unresolved: []graph.UnresolvedParts{{
 			SourceType: basinID,
 			SourceKey:  immutable.WrapKey([]any{"b1"}),
 			Relation:   "NEAR",
-			TargetType: basinID,
 			TargetKey:  immutable.WrapKey([]any{"gone"}),
-			Required:   true,
 			Reason:     "target_missing",
 		}},
 	})
@@ -197,7 +248,7 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 		t.Fatalf("assembling: %s", result)
 	}
 
-	checked := graph.NewFromSnapshot(s, built).Check(ctx)
+	checked := mustImport(t, s, built).Check(ctx)
 
 	var seen, populated bool
 	for issue := range checked.Issues() {
@@ -221,13 +272,13 @@ func TestImportSnapshot_ResolvesJSONFieldForImportedSource(t *testing.T) {
 }
 
 // TestInfo_InstanceCountsKeyedByIdentity pins the schema-less Info surface
-// over a tag collision: two same-named types count under two distinct
-// TypeRef keys, and the per-type counts sum to the total.
+// over two same-named types, the entry schema's Beacon and base's: each counts
+// under its own TypeRef key, and the per-type counts sum to the total.
 func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
-	built, localBeacon, deepBeacon := collidingBeacons(t, s)
+	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
 
 	data, res := snapshot.Marshal(ctx, built)
 	if res.HasErrors() {
@@ -239,15 +290,15 @@ func TestInfo_InstanceCountsKeyedByIdentity(t *testing.T) {
 	}
 
 	localRef := snapshot.TypeRef{Schema: schemaNameOf(t, s, localBeacon), Name: localBeacon.Name()}
-	deepRef := snapshot.TypeRef{Schema: schemaNameOf(t, s, deepBeacon), Name: deepBeacon.Name()}
-	if localRef == deepRef {
+	baseRef := snapshot.TypeRef{Schema: schemaNameOf(t, s, importedBeacon), Name: importedBeacon.Name()}
+	if localRef == baseRef {
 		t.Fatal("fixture is vacuous: the two Beacons share one TypeRef")
 	}
 	if got := info.InstanceCounts[localRef]; got != 1 {
 		t.Errorf("InstanceCounts[%s] = %d, want 1", localRef, got)
 	}
-	if got := info.InstanceCounts[deepRef]; got != 1 {
-		t.Errorf("InstanceCounts[%s] = %d, want 1", deepRef, got)
+	if got := info.InstanceCounts[baseRef]; got != 1 {
+		t.Errorf("InstanceCounts[%s] = %d, want 1", baseRef, got)
 	}
 	if info.TotalInstances != 2 {
 		t.Errorf("TotalInstances = %d, want 2", info.TotalInstances)

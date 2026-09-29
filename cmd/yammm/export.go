@@ -2,9 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	"io"
-	"path/filepath"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -35,7 +36,7 @@ $props, $rows) and is not directly executable in Neo4j Browser or cypher-shell.`
 	cmd.Flags().String("from", "", "input format override: json or csv")
 	cmd.Flags().String("type", "", "type name for CSV data (required for single-type CSV)")
 	cmd.Flags().String("type-column", "", "column name containing type names (for multi-type CSV)")
-	cmd.Flags().String("output", "", "output file path (default: stdout)")
+	cmd.Flags().String("output", "", "output file path (default: stdout); with --to csv, a .tsv name writes tab-delimited fields")
 	cmd.Flags().String("output-dir", "", "output directory for CSV multi-type export (one file per type)")
 	registerLabelFlags(cmd)
 
@@ -47,9 +48,6 @@ $props, $rows) and is not directly executable in Neo4j Browser or cypher-shell.`
 
 func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	toFormat, _ := cmd.Flags().GetString("to")
-	fromFormat, _ := cmd.Flags().GetString("from")
-	typeName, _ := cmd.Flags().GetString("type")
-	typeColumn, _ := cmd.Flags().GetString("type-column")
 	outputPath, _ := cmd.Flags().GetString("output")
 	outputDir, _ := cmd.Flags().GetString("output-dir")
 
@@ -60,9 +58,12 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 
 	schemaPath := args[0]
 	dataPath := args[1]
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	absSchemaPath, err := schemaOperand(schemaPath)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
+	}
+	if err := cli.CheckOperand("data file", dataPath); err != nil {
+		return err
 	}
 
 	// Load schema
@@ -85,16 +86,20 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 		return exportFromSnapshot(cmd, sink, s, dataPath, target, outputPath, outputDir)
 	}
 
-	// Parse, validate, and build graph
-	graphResult, g, err := loadGraph(cmd, sink, s, dataPath, fromFormat, typeName, typeColumn)
+	in, err := dataInputOf(cmd, dataPath)
+	if err != nil {
+		return err
+	}
+	g, err := loadGraph(cmd, sink, s, in)
 	if err != nil {
 		return err
 	}
 
-	sink.Add(graphResult)
 	sink.Flush()
+	// The data file's own read failure rides this result for a streamed format,
+	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
 	}
 
 	return writeExport(cmd, sink, g.Snapshot(), s, target, outputPath, outputDir)
@@ -150,7 +155,7 @@ func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap *graph.Snaps
 func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string) error {
 	data, err := adapterjson.New().MarshalObject(cmd.Context(), snapshot, adapterjson.WithIndent("\t"))
 	if err != nil {
-		return cli.Runtimef("marshal json: %v", err)
+		return writerFailure("marshal json", err)
 	}
 	data = append(data, '\n')
 
@@ -161,13 +166,15 @@ func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string)
 }
 
 func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Snapshot, _ *schema.Schema, outputPath, outputDir string) error {
-	adapter := csv.New()
+	// --output names the one file's delimiter by its extension; --output-dir
+	// writes <type>.csv files, and stdout has no name, so both take ','.
+	adapter := csv.New(csv.WithDelimiter(cli.CSVDelimiter(outputPath)))
 
 	types := snapshot.Types()
 
 	// If --output-dir specified, always use directory output
 	if outputDir != "" {
-		return exportCSVToDir(cmd, sink, adapter, snapshot, types, outputDir)
+		return exportCSVToDir(cmd, sink, adapter, snapshot, outputDir)
 	}
 
 	// One destination holds one type. --output does not change that: the
@@ -180,7 +187,7 @@ func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Sna
 
 	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
 	if err != nil {
-		return cli.Runtimef("marshal csv: %v", err)
+		return writerFailure("marshal csv", err)
 	}
 
 	var out []byte
@@ -193,26 +200,33 @@ func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Sna
 	return nil
 }
 
-func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.Adapter, snapshot *graph.Snapshot, types []schema.TypeID, outputDir string) error {
-	staged, err := cli.NewStagedFiles(outputDir)
+func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.Adapter, snapshot *graph.Snapshot, outputDir string) error {
+	// Every file is rendered before the disk is touched, so a snapshot the
+	// writer refuses creates no directory and no file.
+	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
 	if err != nil {
-		return cli.Runtimef("%v", err)
+		return writerFailure("marshal csv", err)
 	}
-	defer staged.Rollback()
-
-	writerFor := func(typeName string) (io.Writer, error) {
-		return staged.Create(typeName + ".csv")
+	files := make([]cli.NamedFile, 0, len(data))
+	for _, typeName := range slices.Sorted(maps.Keys(data)) {
+		files = append(files, cli.NamedFile{Name: typeName + ".csv", Data: data[typeName]})
 	}
-
-	if err := adapter.WriteSnapshot(cmd.Context(), writerFor, snapshot); err != nil {
-		return cli.Runtimef("write csv snapshot: %v", err)
-	}
-	if err := staged.Commit(); err != nil {
+	if err := cli.WriteFileSet(outputDir, files); err != nil {
 		return cli.Runtimef("write csv snapshot: %v", err)
 	}
 
-	sink.Statusf("wrote %d CSV files to %s\n", len(types), outputDir)
+	sink.Statusf("wrote %d CSV files to %s\n", len(files), outputDir)
 	return nil
+}
+
+// writerFailure reports a writer's error as the exit it earns: a refusal of
+// the data, a value the format cannot represent, exits 1 as any other refusal
+// of the input does, and anything else is a failure outside the input, 3.
+func writerFailure(what string, err error) error {
+	if errors.Is(err, adapterjson.ErrUnrepresentable) || errors.Is(err, csv.ErrUnrepresentable) {
+		return cli.Validationf("%s: %v", what, err)
+	}
+	return cli.Runtimef("%s: %v", what, err)
 }
 
 // exportCypher writes parameterized Cypher statements to the output.
@@ -234,7 +248,7 @@ func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.
 	shapes, result := adapter.ShapeForSchema(cmd.Context(), s)
 	sink.Add(result)
 	if result.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(result)}
 	}
 	sink.Flush()
 
@@ -292,7 +306,7 @@ func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.
 	sink.Add(snapResult)
 	sink.Flush()
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
 	}
 
 	return writeExport(cmd, sink, snap, s, target, outputPath, outputDir)

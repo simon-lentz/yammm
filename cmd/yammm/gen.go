@@ -1,7 +1,6 @@
 package main
 
 import (
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -28,11 +27,14 @@ Targets:
                    upper-case extra acronyms (e.g. GUID,JWT) in generated
                    identifiers; they merge with the default golint acronym set.
 
-  --to jsonschema  A JSON Schema draft 2020-12 document describing the
-                   instance-data JSON accepted by 'yammm check': one key per
-                   concrete type, each an array of instances. Wire it into an
-                   editor (e.g. a yaml-language-server or JSON $schema header)
-                   for completion and validation while authoring data files.
+  --to jsonschema  A JSON Schema draft 2020-12 document describing the JSON
+                   object form 'yammm check' reads: one key per type a data
+                   file can hold at its top level, each an array of
+                   instances. It does not reproduce yammm's validation;
+                   'yammm check' gives the verdict. Wire it into an editor
+                   through a json.schemas mapping in VS Code settings for
+                   completion and validation while authoring data files; a
+                   JSON data file cannot carry a "$schema" member.
                    Use --schema-id to set the document's "$id" (omitted when
                    unset).
 
@@ -97,10 +99,17 @@ func runGen(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	if err := rejectInapplicableFlags(cmd, target); err != nil {
 		return err
 	}
+	// A flag refused before any lookup is a usage error whatever the schema
+	// holds, so --package is judged before the load, and when given empty too.
+	if pkgName, _ := cmd.Flags().GetString("package"); cmd.Flags().Changed("package") {
+		if err := gogen.CheckPackageName(pkgName); err != nil {
+			return cli.Usagef("invalid --package %q: a Go package name is an identifier that is not a keyword and not \"_\"", pkgName)
+		}
+	}
 
-	absSchemaPath, err := filepath.Abs(args[0])
+	absSchemaPath, err := schemaOperand(args[0])
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", args[0], err)
+		return err
 	}
 
 	moduleRootAbs, loadOpts, err := moduleRootOptions(cmd, sink)

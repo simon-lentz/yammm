@@ -51,13 +51,14 @@ func FormatKey(values ...any) string {
 // Components come back as the types a snapshot round trip produces: string,
 // int64, float64, bool, and nil. Numbers are classified by lexical form, the
 // same rule the .ys reader applies — a literal carrying '.', 'e', or 'E' is
-// float64, an int-shaped literal is int64. Two consequences follow, and neither
-// is reachable from FormatKey output:
+// float64, an int-shaped literal is int64. Two consequences follow:
 //
 //   - An int-shaped literal beyond the int64 range comes back as float64, with
-//     the precision loss that implies.
+//     the precision loss that implies. FormatKey writes one for a whole float64
+//     of magnitude 2^63 to below 1e21, on either sign, and for a uint64 above
+//     math.MaxInt64.
 //   - A literal that is valid JSON but has no finite Go value, such as 1e999,
-//     is an error naming the component's index.
+//     is an error naming the component's index. FormatKey never writes one.
 //
 // The round-trip law holds over normalized components — string, int64, bool,
 // nil, and non-whole float64: ParseKey(FormatKey(vs...)) returns vs, and
@@ -135,4 +136,26 @@ func decodeKeyArray(s string) ([]any, error) {
 		return nil, fmt.Errorf("graph: parsing key %q: trailing content after the array", s)
 	}
 	return out, nil
+}
+
+// unreadableComponent returns the index of the first component of k that
+// [ParseKey] cannot read back — one rendering as a JSON array or object, or as
+// a number no finite float64 holds — or -1. A string, a bool, an int64 and a
+// finite float64 settle without rendering.
+func unreadableComponent(k immutable.Key) int {
+	for i := range k.Len() {
+		v := k.Get(i)
+		switch v.Unwrap().(type) {
+		case string, bool, int64, float64, nil:
+			continue
+		}
+		b, err := json.Marshal(v.Clone())
+		if err != nil {
+			return i
+		}
+		if _, err := ParseKey("[" + string(b) + "]"); err != nil {
+			return i
+		}
+	}
+	return -1
 }

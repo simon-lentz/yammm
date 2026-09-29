@@ -59,6 +59,39 @@ func assertProvenance(t *testing.T, issue diag.Issue, details map[string]string,
 	}
 }
 
+// assertResolutionShape checks that every issue of the import-resolution
+// family in res carries the module root and its origin as details, and names
+// the root in its message (or says none is in play), whichever site raised it.
+func assertResolutionShape(t *testing.T, res diag.Result) {
+	t.Helper()
+	seen := 0
+	for issue := range res.Issues() {
+		if !diag.IsImportResolutionCode(issue.Code().String()) {
+			continue
+		}
+		seen++
+		details := map[string]string{}
+		for _, d := range issue.Details() {
+			details[d.Key] = d.Value
+		}
+		root, hasRoot := details[diag.DetailKeyModuleRoot]
+		origin, hasOrigin := details[diag.DetailKeyModuleRootOrigin]
+		if !hasRoot || !hasOrigin || origin == "" {
+			t.Errorf("%s %q carries module root %v and origin %q; the family carries both", issue.Code(), issue.Message(), hasRoot, origin)
+		}
+		words := root
+		if origin == diag.ModuleRootNone {
+			words = "no module root in play"
+		}
+		if !strings.Contains(issue.Message(), words) {
+			t.Errorf("%s %q does not state its root, %q", issue.Code(), issue.Message(), words)
+		}
+	}
+	if seen == 0 {
+		t.Errorf("no import-resolution issue in %v", res.Err())
+	}
+}
+
 // writeBrokenImportTree builds a tree whose entry imports a module-style path
 // that does not exist, so every root arrangement reaches the same failure.
 func writeBrokenImportTree(t *testing.T) (root, entry string) {

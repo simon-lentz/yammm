@@ -28,9 +28,9 @@ func parseOne(t *testing.T, a *Adapter, source location.SourceID, data []byte) (
 }
 
 // newAdapter constructs an adapter for a test.
-func newAdapter(t *testing.T, opts ...Option) *Adapter {
+func newAdapter(t *testing.T) *Adapter {
 	t.Helper()
-	return New(opts...)
+	return New()
 }
 
 func TestParseObject(t *testing.T) {
@@ -109,7 +109,6 @@ func TestParseObject_Errors(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		opts      []Option
 		data      string
 		wantTypes map[string]int // nil = no parsed-content requirement
 	}{
@@ -128,7 +127,7 @@ func TestParseObject_Errors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			adapter := newAdapter(t, tt.opts...)
+			adapter := newAdapter(t)
 			result, diags := adapter.ParseObject(context.Background(), source, []byte(tt.data))
 			require.False(t, diags.OK(), "expected parse errors")
 			for typeName, count := range tt.wantTypes {

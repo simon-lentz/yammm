@@ -1,9 +1,11 @@
 // Package snapshot provides serialization and deserialization of [graph.Snapshot]
 // values to and from the yammm snapshot persistence format (.ys).
 //
-// The .ys format is a JSON-based persistence format that preserves full structural
+// The .ys format is a JSON-based persistence format that preserves structural
 // fidelity: instances with properties, primary keys, edges, compositions, provenance,
 // duplicates, and unresolved edge records all survive a Marshal/Load round-trip.
+// Provenance survives as source name and path, with a zero span, and a
+// duplicate's Diagnostic is not persisted.
 //
 // The format includes a schema structural hash for compatibility verification, an
 // integrity hash for corruption detection, and a features array for forward
@@ -18,28 +20,31 @@
 //
 // The .ys header carries the writing library's attestation: whether every
 // root and composed child was validator-built, and whether every Required
-// association resolved. The integrity hash protects that claim against
-// tampering — and against nothing else. [graph.RebuildSnapshot] is exported,
+// association resolved. The integrity hash is an unkeyed SHA-256 of the
+// document: it detects corruption and an edit nobody rehashed, and anyone can
+// recompute it, so it stops no deliberate one. [graph.RebuildSnapshot] is exported,
 // so any process can assemble and sign a document whose header claims what
 // its instances never earned; the unforgeable point is the instance layer,
 // and the attestation is the writer's word, not a proof.
 //
-// [Load] returns what was written, with two exceptions it refuses outright.
-// A .ys can hold a graph that fails the graph layer's Add-time relation
-// guards, values outside their constraints, and invariant violations;
-// [WithRevalidation] is the option that reports all of it — the real
-// validator, run per root at load time.
+// [Load] refuses a document whose structure no caller of [graph.Graph.Add]
+// could have built: one that breaks a fact of the graph package doc's
+// "Structural facts" — type identity, root and denoted types, composition
+// slots, keys and their key properties, declared names, association shapes,
+// the unresolved records graph.Graph.Add derives, and each duplicate's derived
+// conflict — or holds two roots at one address ([diag.E_DUPLICATE_PK]). No option
+// excuses them, and [Verify] and [Info] run the same checks; a schema-less
+// read judges none that needs a schema.
 //
-// The exceptions are structural rather than a matter of validity, so no option
-// excuses them: an instances group keyed by a type that cannot hold a root
-// instance — abstract, part, or declaring no primary key — draws
-// [diag.E_SNAPSHOT_INVALID_ROOT], and two roots at one address draw
-// [diag.E_DUPLICATE_PK]. Neither describes a graph any caller could have
-// built, and the wire has a diagnostics section for a rejected duplicate.
-// [WithValueConformance] is the narrower canonical-form check. Duplicates
-// and unresolved records ride the document as data
+// What a .ys can still hold is data a validated graph would not: values
+// outside their constraints and invariant violations. [WithRevalidation] is
+// the option that reports them — the real validator, run per root at load
+// time — and [WithValueConformance] the narrower canonical-form check.
+// Duplicates and unresolved records ride the document as data
 // ([graph.Snapshot.Duplicates], [graph.Snapshot.Unresolved]); a rejected
-// duplicate's payload is outside the attestation.
+// duplicate's payload is outside the attestation, and whether an unresolved
+// record's association is required is read from the schema, never from the
+// document.
 //
 // [schema.StructuralHash] is the schema identity the header pins: an
 // identity over the rules that decide what instance data is valid.
@@ -87,7 +92,8 @@
 // # Functions
 //
 // [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
-// by default (no timestamp unless [WithCreatedAt] is used).
+// by default (no timestamp unless [WithCreatedAt] or [WithCreatedAtFrom] is
+// used).
 //
 // [Load] deserializes .ys bytes back to a *graph.Snapshot, verifying structural
 // integrity and schema compatibility.
@@ -102,8 +108,9 @@
 //
 // [HeaderOnly] reads header metadata from a .ys file without decoding the
 // instance body or verifying the integrity hash. Returns a [HeaderInfo] with
-// the header fields plus the types array. Cost is proportional to the header
-// size, not the total file size — the right choice for dispatch-style
+// the header fields plus the types array. It decodes the header alone, and
+// still scans the whole document once to check its top-level shape;
+// [HeaderOnlyRead] reads the header alone. Either suits dispatch-style
 // workloads that scan many .ys files to classify state or compare schema
 // hashes. When counts, diagnostics, or verified integrity are required, use
 // [Info] instead.
@@ -123,11 +130,23 @@
 // matching schema version.
 //
 // [WriteFile] writes bytes to a path atomically. It stages the bytes in a
-// file of its own beside the path, fsyncs and closes it, then renames it into
-// place. Concurrent writers of one path never share a staging file, so each
+// file of its own beside the file it replaces, fsyncs and closes it, then
+// renames it into place. Concurrent writers of one path never share a staging file, so each
 // rename commits one writer's bytes whole, and the last rename wins. The
-// staging name is the path's stem, a random token, the path's extension and
-// [TmpSuffix], as snap.12345.ys.tmp for snap.ys.
+// staging name is the replaced file's stem, a random token, its extension and
+// [TmpSuffix], as snap.12345.ys.tmp for snap.ys; through a symbolic link the
+// replaced file is the one the link names.
+//
+// WriteFile evaluates a ".." in the path on its text first, as the schema
+// loader evaluates it: the path is cleaned, so a ".." cancels the element before
+// it rather than following a symbolic link, and a relative path that climbs out
+// of the working directory is made absolute from it as [filepath.Abs] spells
+// it. A symbolic link at the path is then followed, as a chain, and the link
+// survives: the file it names is written, and a dangling link creates that
+// file. A link's target is read as the kernel reads it: on Unix a ".." in the
+// target takes the parent of the directory reached on disk, and on Windows it
+// is evaluated on the text. The staging file is made in the directory of the
+// file the rename replaces.
 //
 // On an error during the write, WriteFile removes its own staging file and
 // returns the error wrapped with the failing step. It never removes a staging
@@ -148,7 +167,9 @@
 // cancellation); per-file failures (corrupt header, per-file I/O)
 // surface on [ScanEntry.Result] and iteration continues. Files whose
 // basename ends with [TmpSuffix] are skipped so crash-residual
-// staging files are not confused for complete snapshots.
+// staging files are not confused for complete snapshots. The directory is
+// cleaned before it is read, so each [ScanEntry.Path] names an entry of the
+// directory the scan listed.
 // [ScanDirSlice] is the materializing convenience wrapper.
 // [ScanDirWith] and [ScanDirSliceWith] are the same two under [ScanOption]
 // values, where [WithScanFilter] rejects a file before it is opened.
@@ -164,8 +185,8 @@
 //
 // [UpdateMetadataOrReMarshal] is the default consumer entry point:
 // it runs [UpdateMetadata] on the happy path and transparently falls
-// back to [Load] + [Marshal] on recoverable Fatals (body-offset
-// failure, malformed header, or any non-cancellation Fatal), surfacing
+// back to [Load] + [Marshal] on any Error or Fatal but a cancellation
+// (a body-offset failure or a malformed header among them), surfacing
 // a Warning-severity [diag.W_UPDATE_METADATA_FALLBACK] on the returned
 // [diag.Result] so operators can observe fallback frequency.
 //
@@ -179,6 +200,7 @@
 //
 //   - [WithIndent]: pretty-print JSON output with the given indent string
 //   - [WithCreatedAt]: embed a creation timestamp in the snapshot
+//   - [WithCreatedAtFrom]: embed the creation timestamp another header states
 //   - [WithMetadata]: embed arbitrary key-value metadata
 //
 // # Update Options
@@ -205,10 +227,16 @@
 //
 // # Error Handling
 //
-// All functions return [diag.Result]:
+// The read, write and update functions return [diag.Result]; [WriteFile]
+// returns an error, and [ScanDir] and [ScanDirWith] yield a [diag.Result] per
+// entry, in [ScanEntry.Result]:
 //
-//   - Fatal: I/O failure or context cancellation
-//   - Error: schema hash mismatch, integrity check failure, structural corruption
+//   - Fatal: I/O failure, context cancellation, a body the metadata update
+//     cannot locate, or a broken invariant (E_INTERNAL)
+//   - Error: schema hash mismatch, integrity check failure, structural
+//     corruption; and at [Marshal], a value the wire cannot carry, a tree
+//     nested past the reader's bound, an indent that is not whitespace, or a
+//     type whose schema is outside the entry schema's import closure
 //   - OK: success (may include warnings)
 //
 // # File Extension
@@ -254,8 +282,9 @@
 //
 // # Dependencies
 //
-//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value
+//	snapshot  ──imports──▶  graph, instance, schema, diag, location, location/path, immutable, internal/value, internal/hostpath
 //
-// The instance edge exists for [WithRevalidation]: re-validation runs the
-// real validator, so the option's fidelity is the validator's own.
+// The instance edge exists for [WithRevalidation], whose re-validation runs
+// the real validator, so the option's fidelity is the validator's own, and for
+// [instance.MaxComposedDepth], the depth bound the reader shares with it.
 package snapshot

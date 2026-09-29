@@ -29,7 +29,10 @@
 //
 // # Entry Point Pattern
 //
-// All YAMMM diagnostic-producing operations return (T, [Result]):
+// A YAMMM operation that produces a value and diagnostics returns (T, [Result]),
+// and one that produces diagnostics alone returns a [Result]; graph.BatchAssembler,
+// whose methods return an error, carries its diagnostics in a [*ContextualError].
+// A Result reads:
 //
 //   - [Result.HasFatal]: an unrecoverable condition — an I/O failure, a
 //     cancellation, an internal fault, or input a reader cannot go past, such
@@ -157,6 +160,7 @@
 //	--------------------------------  --------  -----------------------------------------------------
 //	E_SNAPSHOT_IO                     Fatal     snapshot.ScanDir (a file that fails to open, on ScanEntry.Result)
 //	                                            snapshot.ScanDirSlice (a directory that fails to read)
+//	                                            snapshot.HeaderOnlyRead (a reader that fails, not a truncation)
 //	E_UPDATE_METADATA_BODY_OFFSET     Fatal     snapshot.UpdateMetadata (body-offset tracker cannot resolve)
 //	W_UPDATE_METADATA_FALLBACK        Warning   snapshot.UpdateMetadataOrReMarshal (fallback to Load+Marshal)
 //

@@ -1,0 +1,91 @@
+{
+  "name": "\"temporaldep\"",
+  "span": {
+    "s": 0,
+    "e": 20
+  },
+  "datatypes": [
+    {
+      "name": "Days",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "Date",
+          "span": {
+            "s": 39,
+            "e": 43
+          }
+        },
+        "span": {
+          "s": 34,
+          "e": 44
+        }
+      },
+      "span": {
+        "s": 22,
+        "e": 44
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Event",
+      "name_span": {
+        "s": 51,
+        "e": 56
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 63,
+              "e": 69
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 60,
+            "e": 77
+          }
+        },
+        {
+          "name": "on",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Timestamp",
+                "args": [
+                  "\"15:04 MST\""
+                ],
+                "span": {
+                  "s": 92,
+                  "e": 114
+                }
+              },
+              "span": {
+                "s": 87,
+                "e": 115
+              }
+            },
+            "span": {
+              "s": 82,
+              "e": 116
+            }
+          },
+          "span": {
+            "s": 79,
+            "e": 116
+          }
+        }
+      ],
+      "span": {
+        "s": 46,
+        "e": 118
+      }
+    }
+  ]
+}

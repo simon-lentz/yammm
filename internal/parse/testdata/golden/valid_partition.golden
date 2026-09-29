@@ -3,6 +3,7 @@
 
 ## clean (projection frozen under golden/valid/)
 adapter/csv/testdata/basic.yammm
+adapter/csv/testdata/edge_properties.yammm
 adapter/csv/testdata/inherited_relations.yammm
 adapter/csv/testdata/with_relations.yammm
 adapter/gogen/testdata/composite_pk.yammm
@@ -18,9 +19,15 @@ adapter/gogen/testdata/imports/diamond_base.yammm
 adapter/gogen/testdata/imports/diamond_left.yammm
 adapter/gogen/testdata/imports/diamond_main.yammm
 adapter/gogen/testdata/imports/diamond_right.yammm
+adapter/gogen/testdata/imports/entry_shadow_leaf.yammm
+adapter/gogen/testdata/imports/entry_shadow_main.yammm
+adapter/gogen/testdata/imports/entry_shadow_mid.yammm
 adapter/gogen/testdata/imports/inherit_common.yammm
 adapter/gogen/testdata/imports/inherit_main.yammm
 adapter/gogen/testdata/imports/main.yammm
+adapter/gogen/testdata/imports/qualified_name_a.yammm
+adapter/gogen/testdata/imports/qualified_name_b.yammm
+adapter/gogen/testdata/imports/qualified_name_main.yammm
 adapter/gogen/testdata/imports/rel_dep.yammm
 adapter/gogen/testdata/imports/rel_main.yammm
 adapter/gogen/testdata/imports/tagform_collision_main.yammm
@@ -28,9 +35,12 @@ adapter/gogen/testdata/imports/tc_left.yammm
 adapter/gogen/testdata/imports/tc_leftbase.yammm
 adapter/gogen/testdata/imports/tc_right.yammm
 adapter/gogen/testdata/imports/tc_rightbase.yammm
+adapter/gogen/testdata/imports/temporal_dep.yammm
+adapter/gogen/testdata/imports/temporal_main.yammm
 adapter/gogen/testdata/inheritance.yammm
 adapter/gogen/testdata/inherited_edge.yammm
 adapter/gogen/testdata/initialisms.yammm
+adapter/gogen/testdata/inline_enum_list.yammm
 adapter/gogen/testdata/marker.yammm
 adapter/gogen/testdata/modroot/a/b/entry.yammm
 adapter/gogen/testdata/modroot/lib/dep.yammm
@@ -41,6 +51,7 @@ adapter/gogen/testdata/scalars.yammm
 adapter/gogen/testdata/shared_edge.yammm
 adapter/gogen/testdata/temporal.yammm
 adapter/gogen/testdata/temporal_edge.yammm
+adapter/gogen/testdata/temporal_list.yammm
 adapter/jschema/testdata/composite_pk.yammm
 adapter/jschema/testdata/docs.yammm
 adapter/jschema/testdata/documented_layouts.yammm
@@ -66,6 +77,13 @@ adapter/markdown/testdata/imports/common.yammm
 adapter/markdown/testdata/imports/main.yammm
 adapter/markdown/testdata/inheritance.yammm
 adapter/markdown/testdata/invariants.yammm
+adapter/markdown/testdata/mermaid/fixtures/direction_label/lib/far.yammm
+adapter/markdown/testdata/mermaid/fixtures/direction_label/lib/mid.yammm
+adapter/markdown/testdata/mermaid/fixtures/direction_label/main.yammm
+adapter/markdown/testdata/mermaid/fixtures/label_text/lib/far.yammm
+adapter/markdown/testdata/mermaid/fixtures/label_text/lib/mid.yammm
+adapter/markdown/testdata/mermaid/fixtures/label_text/main.yammm
+adapter/markdown/testdata/mermaid/fixtures/redirection.yammm
 adapter/markdown/testdata/named.yammm
 adapter/markdown/testdata/no_diagram.yammm
 adapter/markdown/testdata/no_members.yammm

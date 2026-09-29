@@ -59,19 +59,19 @@ classDiagram
 
 **Associations**
 
-- `--> IN_REGION (one)` [Region](#region)
+-   `--> IN_REGION (one)` [Region](#region)
 
 **Compositions**
 
-- `*-> LANDMARKS (many)` [Landmark](#landmark)
+-   `*-> LANDMARKS (many)` [Landmark](#landmark)
 
 **Invariants**
 
-- "ranked"
+-   "ranked"
 
-  ```yammm
-  ! "ranked" rank >= 0
-  ```
+    ```yammm
+    ! "ranked" rank >= 0
+    ```
 
 ### County
 
@@ -86,21 +86,21 @@ Extends: [GeoEntity](#geoentity).
 
 **Associations**
 
-- `--> SEAT (one)` [City](#city)
+-   `--> SEAT (one)` [City](#city)
 
-- `--> IN_REGION (one)` [Region](#region) — from GeoEntity
+-   `--> IN_REGION (one)` [Region](#region) — from GeoEntity
 
 **Compositions**
 
-- `*-> LANDMARKS (many)` [Landmark](#landmark) — from GeoEntity
+-   `*-> LANDMARKS (many)` [Landmark](#landmark) — from GeoEntity
 
 **Invariants**
 
-- "ranked" — from GeoEntity
+-   "ranked" — from GeoEntity
 
-  ```yammm
-  ! "ranked" rank >= 0
-  ```
+    ```yammm
+    ! "ranked" rank >= 0
+    ```
 
 ### City
 
@@ -115,16 +115,16 @@ Extends: [GeoEntity](#geoentity).
 
 **Associations**
 
-- `--> IN_REGION (one)` [Region](#region) — from GeoEntity
+-   `--> IN_REGION (one)` [Region](#region) — from GeoEntity
 
 **Compositions**
 
-- `*-> LANDMARKS (many)` [Landmark](#landmark) — from GeoEntity
+-   `*-> LANDMARKS (many)` [Landmark](#landmark) — from GeoEntity
 
 **Invariants**
 
-- "ranked" — from GeoEntity
+-   "ranked" — from GeoEntity
 
-  ```yammm
-  ! "ranked" rank >= 0
-  ```
+    ```yammm
+    ! "ranked" rank >= 0
+    ```

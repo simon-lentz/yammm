@@ -91,7 +91,8 @@ func (s *DiagnosticSink) Flush() {
 // Close writes everything not yet written and returns the error the process
 // reports. The RunE wrapper calls it once, last.
 //
-// Under [FormatJSON] a failure that carries a message joins the document as
+// Under [FormatJSON] Close writes the command's one document, a clean run
+// included. A failure that carries a message joins it as
 // [diag.E_COMMAND_FAILED], and Close returns that failure's bare exit signal,
 // so nothing is printed beside the document. A second call writes nothing and
 // returns err unchanged.
@@ -104,6 +105,13 @@ func (s *DiagnosticSink) Close(err error) error {
 			s.results = append(s.results, failure)
 			err = &ExitError{Code: ExitForError(err)}
 		}
+		// Under FormatJSON nothing is flushed before Close, and the one
+		// document is written even when no result was added.
+		renderer := NewRenderer(s.format, s.isTTY, s.noColor, s.provider, s.root)
+		_ = RenderResult(s.w, renderer, s.format, MergeResults(s.results...))
+		s.flushed = len(s.results)
+		s.closed = true
+		return err
 	}
 	s.renderFrom(s.flushed)
 	s.closed = true

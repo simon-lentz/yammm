@@ -62,9 +62,10 @@ var (
 	// ErrEvalError indicates an error during expression evaluation.
 	ErrEvalError = diag.E_EVAL_ERROR
 
-	// ErrCaseFoldCollision indicates multiple input fields fold to the same schema property.
-	// This occurs when non-strict mode is enabled and the input contains multiple
-	// field names that differ only in case (e.g., "Name" and "name").
+	// ErrCaseFoldCollision indicates two or more input keys fold onto one member
+	// no key names exactly: a property, a relation's field, an edge property or a
+	// foreign-key field. It occurs only without strict property names, for keys
+	// that differ only in case (e.g., "Name" and "NAME").
 	ErrCaseFoldCollision = diag.E_CASE_FOLD_COLLISION
 )
 

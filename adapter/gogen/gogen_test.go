@@ -3,13 +3,16 @@ package gogen_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
+	"maps"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -29,8 +32,8 @@ func checkGolden(t *testing.T, name string, got []byte) {
 
 func TestMarshal_EmbedsTheSourceStore(t *testing.T) {
 	s := loadSchema(t, "scalars")
-	// Marshal succeeding already proves the round-trip self-check passed
-	// (verifyRoundTrip runs inside Marshal); these assertions pin the shape.
+	// Marshal returns only what finish returns, and finish re-loads the store
+	// (TestFinish_RefusesAnEmbeddedStoreThatDoesNotReload); these pin the shape.
 	got, err := gogen.Marshal(s)
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +63,29 @@ func TestMarshal_NotSourceBacked(t *testing.T) {
 		t.Fatal("expected an error for a non-source-backed (Builder) schema")
 	} else if !strings.Contains(err.Error(), "not source-backed") {
 		t.Errorf("expected a 'not source-backed' error, got: %v", err)
+	}
+}
+
+// A Builder-built schema whose properties name a DataType, directly and as a
+// List element, draws the same documented refusal: the DataType field resolves
+// from the property's constraint, which a built schema holds as a loaded one
+// does, so no step before the source check fails first.
+func TestMarshal_NotSourceBackedWithDataTypeProperties(t *testing.T) {
+	s, res := schema.NewBuilder().
+		WithName("geo").
+		AddDataType("Code", schema.NewStringConstraint()).
+		AddType("County").
+		WithPrimaryKey("id", schema.NewStringConstraint()).
+		WithProperty("code", schema.NewAliasConstraint("Code", nil)).
+		WithProperty("codes", schema.NewListConstraint(schema.NewAliasConstraint("Code", nil))).
+		Done().
+		Build()
+	if res.HasErrors() {
+		t.Fatalf("build: %v", res.Err())
+	}
+	_, err := gogen.Marshal(s)
+	if err == nil || !strings.Contains(err.Error(), "not source-backed") {
+		t.Errorf("Marshal error = %v; want the not source-backed refusal", err)
 	}
 }
 
@@ -157,11 +183,11 @@ func TestMarshal_CrossSchemaInheritance(t *testing.T) {
 	}
 }
 
-// TestMarshal_CrossSchemaCollision pins the cross-schema name-collision QUALIFICATION
-// SUCCESS path (the complement of the hard-error path in names_test.go): two schemas in
+// TestMarshal_CrossSchemaCollision pins a cross-schema name collision: two schemas in
 // the closure both declare a type Region, so neither can take the bare Go name "Region"
-// — the name table schema-qualifies them (GeoRegion / CommonRegion), and the qualified
-// name flows through to the EDGE_ target and the Graph aggregate.
+// and each takes its exact spelling (Type_geo__Region / Type_common__Region), which the
+// Graph aggregate names. The EDGE_ struct's bare spelling is built from the target's
+// name, and nothing else claims it.
 func TestMarshal_CrossSchemaCollision(t *testing.T) {
 	s := loadSchema(t, "imports/collision_main")
 	got, err := gogen.Marshal(s)
@@ -169,9 +195,10 @@ func TestMarshal_CrossSchemaCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"type GeoRegion struct",                          // entry-schema Region, qualified
-		"type CommonRegion struct",                       // imported Region, qualified
-		"type EDGE_County_in_region_CommonRegion struct", // edge target uses the qualified name
+		"type Type_geo__Region struct",
+		"type Type_common__Region struct",
+		"type EDGE_County_in_region_Region struct",
+		"InRegion *EDGE_County_in_region_Region ",
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q", want)
@@ -179,7 +206,7 @@ func TestMarshal_CrossSchemaCollision(t *testing.T) {
 	}
 	// Neither Region may keep the bare, ambiguous Go name.
 	if bytes.Contains(got, []byte("type Region struct")) {
-		t.Error("a colliding Region kept the bare Go name; expected schema-qualification")
+		t.Error("a colliding Region kept the bare Go name; expected its exact spelling")
 	}
 }
 
@@ -208,17 +235,11 @@ func TestMarshal_DiamondImport(t *testing.T) {
 	}
 }
 
-// TestMarshal_EdgeWhereKeyCollision pins the fix for an edge property named "where"
-// colliding with the synthesized Where block's JSON key. Two struct fields sharing a
-// JSON key make encoding/json drop BOTH at marshal time, and go/types does not catch
-// duplicate struct tags — so the block's wire key must fall back to its unique Go field
-// name (the lossy-collision strategy emitGraph uses), while the edge property's own
-// "where" key stays canonical.
+// TestMarshal_EdgeWhereKeyCollision pins that an edge property named "where" keeps
+// its wire key. Two struct fields sharing a JSON key make encoding/json drop both,
+// and go/types does not catch duplicate struct tags. The _target_ fields flatten
+// beside the properties, and the underscore rule keeps the namespaces apart.
 func TestMarshal_EdgeWhereKeyCollision(t *testing.T) {
-	// The nested Where block and its clash fallback are gone: _target_
-	// fields flatten beside the properties, and the underscore rule keeps
-	// the namespaces apart, so a property named "where" keeps its wire key
-	// with no collision handling at all.
 	s := loadSchema(t, "edge_where_collision")
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -267,7 +288,7 @@ func TestMarshal_Initialisms(t *testing.T) {
 // Marshal's hermetic timeImporter stub by confirming the output type-checks against the
 // actual time, not only the stub's opaque Time.
 func TestMarshal_TypeChecks(t *testing.T) {
-	for _, name := range []string{"full", "temporal", "temporal_edge"} {
+	for _, name := range []string{"full", "temporal", "temporal_edge", "temporal_list"} {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)
 			got, err := gogen.Marshal(s)
@@ -350,38 +371,327 @@ func TestMarshal_TemporalEdge(t *testing.T) {
 	}
 }
 
-// TestMarshal_GraphKeysAreTagForm pins the Graph aggregate's json keys as the
-// names adapter/json writes: bare for the entry schema's types, alias-qualified
-// for a direct import, and the unique Go name where two transitive imports
-// would otherwise render one bare name.
-func TestMarshal_GraphKeysAreTagForm(t *testing.T) {
-	cases := map[string][]string{
-		"imports/main":                   {"`json:\"County,omitempty\"`", "`json:\"common.Region,omitempty\"`"},
-		"imports/tagform_collision_main": {"`json:\"LeftbaseNode,omitempty\"`", "`json:\"RightbaseNode,omitempty\"`", "`json:\"Main,omitempty\"`"},
-		"graph_collision":                {"`json:\"ABCDef,omitempty\"`", "`json:\"AbcDef,omitempty\"`"},
-	}
-	for name, wants := range cases {
+// TestMarshal_TemporalInsideList pins that a temporal position reached only
+// inside a List generates what it names — the Date or layout type, or the time
+// import — under a List DataType and a nested List property, and that a List
+// of a temporal DataType names that DataType at every depth, so no Date or
+// layout type is generated for it.
+func TestMarshal_TemporalInsideList(t *testing.T) {
+	t.Parallel()
+
+	const wall = `type Wall = Timestamp["2006-01-02 15:04:05"]` + "\n"
+	for name, tc := range map[string]struct {
+		body         string
+		want, absent []string
+	}{
+		"list datatype over date": {
+			body: "type Days = List<Date>\ntype Doc {\n\tid String primary\n\td Days\n}\n",
+			want: []string{"type Days []Date", "type Date struct{ time.Time }"},
+		},
+		"list datatype over a date datatype": {
+			body:   "type Day = Date\ntype Dates = List<Day>\ntype Doc {\n\tid String primary\n}\n",
+			want:   []string{"type Dates []Day", "type Day struct{ time.Time }"},
+			absent: []string{"type Date struct"},
+		},
+		"list datatype over a layout datatype": {
+			body:   wall + "type Walls = List<Wall>\ntype Doc {\n\tid String primary\n}\n",
+			want:   []string{"type Walls []Wall", "type Wall struct{ time.Time }"},
+			absent: []string{"type Timestamp20060102150405 struct"},
+		},
+		"nested list property over date": {
+			body: "type Doc {\n\tid String primary\n\tgrid List<List<Date>>\n}\n",
+			want: []string{"Grid [][]Date ", "type Date struct{ time.Time }"},
+		},
+		"nested list property over a date datatype": {
+			body:   "type Day = Date\ntype Doc {\n\tid String primary\n\tgrid List<List<Day>>\n}\n",
+			want:   []string{"Grid [][]Day ", "type Day struct{ time.Time }"},
+			absent: []string{"type Date struct"},
+		},
+		"nested list property over a layout datatype": {
+			body:   wall + "type Doc {\n\tid String primary\n\tshifts List<List<Wall>>\n}\n",
+			want:   []string{"Shifts [][]Wall ", "type Wall struct{ time.Time }"},
+			absent: []string{"type Timestamp20060102150405 struct"},
+		},
+		"list datatype over timestamp": {
+			body: "type Stamps = List<Timestamp>\ntype Doc {\n\tid String primary\n}\n",
+			want: []string{"type Stamps []time.Time", "import \"time\""},
+		},
+		"list datatype over a timestamp datatype": {
+			body: "type At = Timestamp\ntype Ats = List<At>\ntype Doc {\n\tid String primary\n}\n",
+			want: []string{"type Ats []At", "type At struct{ time.Time }"},
+		},
+		"layout datatype property": {
+			body:   "type Clock = Timestamp[\"15:04\"]\ntype Doc {\n\tid String primary\n\tc Clock\n}\n",
+			want:   []string{"C  *Clock ", "type Clock struct{ time.Time }"},
+			absent: []string{"type Timestamp1504 struct"},
+		},
+		"list property over a date datatype": {
+			body:   "type Day = Date\ntype Doc {\n\tid String primary\n\tdays List<Day>\n}\n",
+			want:   []string{"Days []Day ", "type Day struct{ time.Time }"},
+			absent: []string{"type Date struct"},
+		},
+		"date datatype property": {
+			body:   "type Day = Date\ntype Doc {\n\tid String primary\n\td Day\n}\n",
+			want:   []string{"D  *Day ", "type Day struct{ time.Time }"},
+			absent: []string{"type Date struct"},
+		},
+	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := gogen.Marshal(loadSchema(t, name))
-			if err != nil {
-				t.Fatal(err)
+			t.Parallel()
+			s, res := schema.LoadString(context.Background(), "schema \"cal\"\n\n"+tc.body, "cal.yammm")
+			if res.HasErrors() {
+				t.Fatalf("load: %v", res.Err())
 			}
-			for _, want := range wants {
+			got, err := gogen.Marshal(s)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			for _, want := range tc.want {
 				if !bytes.Contains(got, []byte(want)) {
-					t.Errorf("output missing %s:\n%s", want, got)
+					t.Errorf("output missing %q:\n%s", want, got)
 				}
 			}
-			if bytes.Contains(got, []byte("`json:\"county,omitempty\"`")) {
-				t.Error("Graph still keyed by the lower_snake Go name")
+			for _, absent := range tc.absent {
+				if bytes.Contains(got, []byte(absent)) {
+					t.Errorf("output holds %q:\n%s", absent, got)
+				}
 			}
 		})
 	}
 }
 
-// TestMarshal_PerLayoutNameYieldsToSchemaType pins the precedence between a
-// schema-declared name and a synthesized per-layout name: the schema keeps
-// the bare identifier and the synthesized type takes the numbered one.
-func TestMarshal_PerLayoutNameYieldsToSchemaType(t *testing.T) {
+// TestMarshal_ALayoutAndAnInlineEnumSharingABareSpellingBothTakeExact pins that
+// neither family comes first: a per-layout type and an inline enum deriving one
+// name both take their exact spellings.
+func TestMarshal_ALayoutAndAnInlineEnumSharingABareSpellingBothTakeExact(t *testing.T) {
+	t.Parallel()
+
+	s, res := schema.LoadString(context.Background(), `schema "order"
+
+type TimestampMon {
+	id  String primary
+	jan Enum["a", "b"]
+	at  Timestamp["Mon Jan"]
+}
+`, "order.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, want := range []string{
+		"type Timestamp_Mon_20_Jan struct{ time.Time }",
+		"type Enum_order__TimestampMon__jan string",
+		"*Enum_order__TimestampMon__jan `json:\"jan,omitempty\"`",
+		"*Timestamp_Mon_20_Jan          `json:\"at,omitempty\"`",
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestMarshal_TemporalOnlyInAnImport pins that registration walks the whole
+// closure: the entry declares no temporal position, and the one import declares
+// a List DataType over Date and a nested List property over a layout, so each
+// is the only position that registers its type.
+func TestMarshal_TemporalOnlyInAnImport(t *testing.T) {
+	t.Parallel()
+
+	got, err := gogen.Marshal(loadSchema(t, "imports/temporal_main"))
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, want := range []string{
+		"type Date struct{ time.Time }",
+		"type Days []Date",
+		"type Timestamp1504MST struct{ time.Time }",
+		"On [][]Timestamp1504MST ",
+	} {
+		if !bytes.Contains(got, []byte(want)) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestMarshal_CollidingLayoutsAreNamedByTheirLayoutAlone pins the names of
+// layouts that share a letters-and-digits base: each takes its layout-exact
+// name, the same for any declaration order, and the bare base is emitted for
+// neither. A layout alone takes the bare base, and no name one run gives a
+// layout is given to a different layout by the other runs.
+func TestMarshal_CollidingLayoutsAreNamedByTheirLayoutAlone(t *testing.T) {
+	t.Parallel()
+
+	gen := func(t *testing.T, layouts ...string) map[string]string {
+		t.Helper()
+		return layoutNames(t, "", layouts...)
+	}
+
+	const dashed, bare, underscored = "2006-01-02", "20060102", "2006_01_02"
+	all := gen(t, dashed, bare, underscored)
+	for name, want := range map[string]string{
+		"Timestamp_2006_2D_01_2D_02": dashed,
+		"Timestamp_20060102":         bare,
+		"Timestamp_2006_5F_01_5F_02": underscored,
+	} {
+		if all[name] != want {
+			t.Errorf("%s names layout %q, want %q (all: %v)", name, all[name], want, all)
+		}
+	}
+	for _, alone := range []string{dashed, bare, underscored} {
+		one := gen(t, alone)
+		if one["Timestamp20060102"] != alone {
+			t.Errorf("a lone %q is named %v, want Timestamp20060102", alone, one)
+		}
+		for name, layout := range all {
+			if other, ok := one[name]; ok && other != layout {
+				t.Errorf("%s names %q beside the other layouts and %q alone", name, layout, other)
+			}
+		}
+	}
+	for range 16 {
+		if again := gen(t, underscored, dashed, bare); !maps.Equal(again, all) {
+			t.Fatalf("names depend on declaration order: %v, then %v", all, again)
+		}
+	}
+}
+
+// TestMarshal_LayoutNameNeverPassesToAnotherLayout pins that a layout whose
+// bare base anything else claims — another layout emission names, or a
+// declared type — takes its layout-exact name, so declaring or adding
+// something never hands a generated name from one layout to another. The
+// exact name tells an invalid UTF-8 byte from U+FFFD. A
+// temporal DataType is its own carrier and names no layout type, so its layout
+// claims nothing.
+func TestMarshal_LayoutNameNeverPassesToAnotherLayout(t *testing.T) {
+	t.Parallel()
+
+	const declared = "type Timestamp20060102 {\n\tid String primary\n}\n"
+	before := layoutNames(t, declared, "2006-01-022")
+	after := layoutNames(t, declared, "2006-01-022", "2006-01-02")
+	for name, layout := range before {
+		if other, ok := after[name]; ok && other != layout {
+			t.Errorf("%s names %q, and %q once another layout is added", name, layout, other)
+		}
+	}
+	if before["Timestamp200601022"] != "2006-01-022" || after["Timestamp200601022"] != "2006-01-022" {
+		t.Errorf("a layout whose base nothing else claims is named %v, then %v; want Timestamp200601022 both times", before, after)
+	}
+	if got := after["Timestamp_2006_2D_01_2D_02"]; got != "2006-01-02" {
+		t.Errorf("a layout whose base a declared type holds is named %v, want its exact name", after)
+	}
+
+	// A layout holding an invalid byte would name as U+FFFD does; the DSL
+	// refuses it, so the two never meet.
+	if _, res := schema.LoadString(context.Background(),
+		"schema \"bases\"\n\ntype Doc {\n\tid String primary\n\tp Timestamp[\"a\\xffb\"]\n}\n", "bases.yammm"); !res.HasErrors() {
+		t.Error(`Timestamp["a\xffb"] loads; a layout holding an invalid byte would name as U+FFFD does`)
+	}
+	if shared := layoutNames(t, "", "ab", "a\uFFFDb"); shared["Timestamp_a_FFFD_b"] != "a\uFFFDb" {
+		t.Errorf("U+FFFD's layout, sharing its base with ab, is named %v, want Timestamp_a_FFFD_b", shared)
+	}
+
+	carrier := layoutNames(t, "type Wall = Timestamp[\"2006-01-02\"]\n", "20060102")
+	if got := carrier["Timestamp20060102"]; got != "20060102" {
+		t.Errorf("a DataType's layout claimed the bare base: %v", carrier)
+	}
+}
+
+// layoutNames generates a schema holding decls and one Doc property per
+// layout, and returns each generated layout type's name mapped to its layout.
+func layoutNames(t *testing.T, decls string, layouts ...string) map[string]string {
+	t.Helper()
+	var b strings.Builder
+	b.WriteString("schema \"bases\"\n\n" + decls + "\ntype Doc {\n\tid String primary\n")
+	for i, l := range layouts {
+		fmt.Fprintf(&b, "\tp%d Timestamp[%s]\n", i, strconv.Quote(l))
+	}
+	b.WriteString("}\n")
+	s, res := schema.LoadString(context.Background(), b.String(), "bases.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load: %v", res.Err())
+	}
+	got, err := gogen.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	byName := map[string]string{}
+	for _, m := range layoutDecl.FindAllStringSubmatch(string(got), -1) {
+		layout, err := strconv.Unquote(m[2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		byName[m[1]] = layout
+	}
+	return byName
+}
+
+// layoutDecl matches a generated layout type's doc comment and declaration.
+var layoutDecl = regexp.MustCompile(`// (\w+) is exchanged as a JSON string in the layout ("[^"]*")\.\ntype \w+ struct\{ time\.Time \}`)
+
+// TestMarshal_GraphKeysAreAddressableTags pins the Graph aggregate's json keys
+// as the names adapter/json writes: bare for the entry schema's types and
+// alias-qualified for a direct import. A type the entry schema reaches only
+// through another import has no such name and no Graph field, though its
+// struct is still emitted; and an entry type that shares its name with one
+// keeps its bare key rather than its exact Go spelling.
+func TestMarshal_GraphKeysAreAddressableTags(t *testing.T) {
+	cases := map[string]struct{ keys, absent, structs []string }{
+		"imports/main": {
+			keys:   []string{"County", "common.Region"},
+			absent: []string{"county"},
+		},
+		"graph_collision": {
+			keys: []string{"ABCDef", "AbcDef"},
+		},
+		"imports/tagform_collision_main": {
+			keys:    []string{"Main", "left.Left", "right.Right"},
+			absent:  []string{"Type_leftbase__Node", "Type_rightbase__Node"},
+			structs: []string{"Type_leftbase__Node", "Type_rightbase__Node"},
+		},
+		"imports/entry_shadow_main": {
+			keys:    []string{"Node", "mid.Mid"},
+			absent:  []string{"Type_emain__Node", "Type_eleaf__Node"},
+			structs: []string{"Type_emain__Node", "Type_eleaf__Node"},
+		},
+		"imports/diamond_main": {
+			keys:    []string{"Top", "left.Left", "right.Right"},
+			absent:  []string{"Shared"},
+			structs: []string{"Shared"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := gogen.Marshal(loadSchema(t, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			keys := graphKeys(t, got)
+			for _, want := range tc.keys {
+				if !slices.Contains(keys, want) {
+					t.Errorf("Graph keys %q lack %q", keys, want)
+				}
+			}
+			for _, bad := range tc.absent {
+				if slices.Contains(keys, bad) {
+					t.Errorf("Graph keys %q hold %q", keys, bad)
+				}
+			}
+			for _, name := range tc.structs {
+				if !bytes.Contains(got, []byte("type "+name+" struct {")) {
+					t.Errorf("output lacks the struct %s:\n%s", name, got)
+				}
+			}
+		})
+	}
+}
+
+// TestMarshal_ALayoutAndATypeSharingABareSpellingBothTakeExact pins that a
+// schema-declared type has no precedence over a per-layout type: both take
+// their exact spellings.
+func TestMarshal_ALayoutAndATypeSharingABareSpellingBothTakeExact(t *testing.T) {
 	s, res := schema.LoadString(context.Background(),
 		"schema \"clash\"\n\ntype Timestamp20060102150405 {\n\tid String primary\n\tat Timestamp[\"2006-01-02 15:04:05\"]\n}", "clash.yammm")
 	if res.HasErrors() {
@@ -392,9 +702,9 @@ func TestMarshal_PerLayoutNameYieldsToSchemaType(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"type Timestamp20060102150405 struct {\n",
-		"type Timestamp200601021504052 struct{ time.Time }",
-		"At *Timestamp200601021504052 ",
+		"type Type_clash__Timestamp20060102150405 struct {\n",
+		"type Timestamp_2006_2D_01_2D_02_20_15_3A_04_3A_05 struct{ time.Time }",
+		"At *Timestamp_2006_2D_01_2D_02_20_15_3A_04_3A_05 ",
 	} {
 		if !bytes.Contains(got, []byte(want)) {
 			t.Errorf("output missing %q:\n%s", want, got)
@@ -445,11 +755,9 @@ func TestMarshal_UniformSerializedSources(t *testing.T) {
 	}
 }
 
-// TestMarshal_RelativeImport is the regression anchor for the round-trip
-// self-check's uniform arm. Every other fixture in this corpus imports
-// module-style, so a self-check that could not serve a relative import would
-// leave the whole corpus green and break generation for a shape the DSL
-// supports. A successful Marshal is the proof: both round-trip arms run inside it.
+// TestMarshal_RelativeImport pins that a relative import generates, keyed
+// beside its entry. Where a key follows the import text rather than the file's
+// identity is pinned by TestMarshal_SymlinkedImportDirKeysByImportText.
 func TestMarshal_RelativeImport(t *testing.T) {
 	t.Parallel()
 
@@ -474,8 +782,8 @@ func TestMarshal_RelativeImport(t *testing.T) {
 }
 
 // TestMarshal_SerializedEntryReserved pins the reservedNames addition: a schema
-// entity named SerializedEntry must be schema-qualified rather than taking the
-// emitted const's Go name, which would type-check-fail the whole file.
+// entity named SerializedEntry takes its exact spelling rather than the emitted
+// const's Go name, which would type-check-fail the whole file.
 func TestMarshal_SerializedEntryReserved(t *testing.T) {
 	t.Parallel()
 
@@ -483,8 +791,8 @@ func TestMarshal_SerializedEntryReserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	if !bytes.Contains(got, []byte("type GeoSerializedEntry struct")) {
-		t.Errorf("expected the schema type to be qualified away from the reserved name:\n%s", got)
+	if !bytes.Contains(got, []byte("type Type_geo__SerializedEntry struct")) {
+		t.Errorf("expected the schema type to take its exact spelling:\n%s", got)
 	}
 	if bytes.Contains(got, []byte("type SerializedEntry struct")) {
 		t.Error("the schema type took the reserved SerializedEntry name")
@@ -492,7 +800,7 @@ func TestMarshal_SerializedEntryReserved(t *testing.T) {
 }
 
 func TestMarshal_Golden(t *testing.T) {
-	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "imports/rel_main", "imports/tagform_collision_main", "reserved_name", "full", "temporal", "temporal_edge"}
+	cases := []string{"scalars", "named", "inheritance", "relations", "shared_edge", "edge_datatype", "inherited_edge", "edge_where_collision", "composite_pk", "graph", "graph_collision", "imports/main", "imports/inherit_main", "imports/collision_main", "imports/diamond_main", "imports/rel_main", "imports/tagform_collision_main", "imports/qualified_name_main", "imports/temporal_main", "reserved_name", "full", "temporal", "temporal_edge", "temporal_list", "inline_enum_list"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			s := loadSchema(t, name)
@@ -556,76 +864,6 @@ func TestMarshal_ModuleRoot_CwdIndependent(t *testing.T) {
 	}
 	if !bytes.Equal(want, got) {
 		t.Error("Marshal output differs across working directories")
-	}
-}
-
-// TestMarshal_ModuleRoot_HermeticReload pins the documented consumer recipe
-// for the embedded model: LoadSourcesWithEntry over the root-relative keys
-// with module root "." and WithSourcesOnly re-loads the schema from a
-// directory containing no .yammm files at all — the embedded map is
-// self-contained and the filesystem never participates.
-func TestMarshal_ModuleRoot_HermeticReload(t *testing.T) {
-	s := loadModrootSchema(t)
-	want := schema.StructuralHash(s)
-
-	entrySrc, err := os.ReadFile(filepath.Join("testdata", "modroot", "a", "b", "entry.yammm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	depSrc, err := os.ReadFile(filepath.Join("testdata", "modroot", "lib", "dep.yammm"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Chdir(t.TempDir())
-	got, res := schema.LoadSourcesWithEntry(context.Background(), map[string][]byte{
-		"a/b/entry.yammm": entrySrc,
-		"lib/dep.yammm":   depSrc,
-	}, "a/b/entry.yammm", ".", schema.WithSourcesOnly(true))
-	if res.HasErrors() {
-		t.Fatalf("hermetic re-load: %v", res.Err())
-	}
-	if h := schema.StructuralHash(got); h != want {
-		t.Errorf("hermetic re-load hash mismatch: got %s, want %s", h, want)
-	}
-}
-
-// TestMarshal_SymlinkedImportDir pins that the embedded-model round-trip
-// check is independent of working-directory contents: a schema whose import
-// path traverses a symlinked directory (lib -> real) marshals successfully
-// even when the cwd is the module root itself, where every embedded key
-// resolves to an existing file through the symlink. The re-load must match
-// pre-registered keys textually rather than resolving them against disk.
-func TestMarshal_SymlinkedImportDir(t *testing.T) {
-	root := t.TempDir()
-	for _, dir := range []string{
-		filepath.Join(root, "a", "b"),
-		filepath.Join(root, "real"),
-	} {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.Symlink("real", filepath.Join(root, "lib")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
-	}
-	entry := filepath.Join(root, "a", "b", "entry.yammm")
-	entrySrc := []byte("schema \"registry\"\n\nimport \"lib/dep\" as dep\n\ntype Contract {\n\tcontract_id String primary\n\t--> SUPPLIED_BY (one) dep.Vendor\n}\n")
-	depSrc := []byte("schema \"deplib\"\n\ntype Vendor {\n\tvendor_id String primary\n}\n")
-	if err := os.WriteFile(entry, entrySrc, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "real", "dep.yammm"), depSrc, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	s, res := schema.Load(context.Background(), entry, schema.WithModuleRoot(root))
-	if res.HasErrors() {
-		t.Fatalf("load: %v", res.Err())
-	}
-	t.Chdir(root) // embedded keys now join the cwd to paths that exist through the symlink
-	if _, err := gogen.Marshal(s); err != nil {
-		t.Fatalf("Marshal with the module root as cwd: %v", err)
 	}
 }
 

@@ -9,10 +9,13 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: read
+# Every job carries a timeout, so a hung runner costs minutes rather than
+# GitHub's six-hour default. 15 minutes is five times the slowest job measured.
 jobs:
   pre-commit:
     name: Pre-commit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -32,7 +35,8 @@ jobs:
   # binary cross-compiles from this host with CGO_ENABLED=0.
   extension-checks:
     name: Extension Checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -64,14 +68,15 @@ jobs:
       - name: Cache VS Code test install
         uses: actions/cache@v6
         with:
-          path: lsp/editors/vscode/.vscode-test
+          path: ~/.cache/yammm-vscode-test
           key: vscode-test-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}
       - name: Integration tests
         working-directory: lsp/editors/vscode
         run: xvfb-run -a npm run test:integration
   build-extension:
     name: Build Extension ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       matrix:
         include:

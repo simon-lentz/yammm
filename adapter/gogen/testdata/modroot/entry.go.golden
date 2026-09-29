@@ -3,7 +3,7 @@ package registry
 
 type Contract struct {
 	ContractID string                            `json:"contract_id"`
-	SuppliedBy *EDGE_Contract_supplied_by_Vendor `json:"supplied_by"`
+	SuppliedBy *EDGE_Contract_supplied_by_Vendor `json:"supplied_by,omitempty"`
 }
 
 type Vendor struct {
@@ -20,9 +20,9 @@ type Graph struct {
 	Vendor   []*Vendor   `json:"dep.Vendor,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// module-root-relative path, as verbatim .yammm text. Read it through
-// SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"a/b/entry.yammm": "schema \"registry\"\n\nimport \"lib/dep\" as dep\n\ntype Contract {\n\tcontract_id String primary\n\t--> SUPPLIED_BY (one) dep.Vendor\n}\n",
 	"lib/dep.yammm":   "schema \"deplib\"\n\ntype Vendor {\n\tvendor_id String primary\n\tname String required\n}\n",
@@ -31,15 +31,15 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "a/b/entry.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// module-root-relative path. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
 //
-// The synthetic root is what keeps the loaded type identities stable. Passing
-// module root "." instead also re-loads, but "." canonicalizes against the
-// process working directory, which then lands inside every TypeID.
+// The synthetic root keeps the loaded type identities stable: no working
+// directory, checkout or mount point enters them. Any root of that form
+// serves; generation verified this one.
 func SerializedSources() map[string][]byte {
 	m := make(map[string][]byte, len(serializedSources))
 	for k, v := range serializedSources {

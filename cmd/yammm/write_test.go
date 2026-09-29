@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 )
 
 // Every way the CLI writes a file the operator named.
@@ -357,9 +360,9 @@ func TestWrite_PartialDirectoryExportLeavesTheDirectoryAsItWas(t *testing.T) {
 
 	schemaPath, dataPath := multiTypeFixture(t)
 
-	code, _, _ := runCLI(t, "export", "--to", "csv", "--output-dir", outDir, schemaPath, dataPath)
-	if code == 0 {
-		t.Fatal("a blocked write reported success")
+	code, _, errOut := runCLI(t, "export", "--to", "csv", "--output-dir", outDir, schemaPath, dataPath)
+	if code != cli.ExitRuntime {
+		t.Fatalf("a blocked write: exit %d, want %d: %s", code, cli.ExitRuntime, errOut)
 	}
 
 	entries, err := os.ReadDir(outDir)
@@ -383,9 +386,12 @@ func TestWrite_DirectoryExportFilesAreOwnerOnly(t *testing.T) {
 	outDir := filepath.Join(dir, "csvs")
 	schemaPath, dataPath := multiTypeFixture(t)
 
-	if code, _, errOut := runCLI(t, "export", "--to", "csv", "--output-dir", outDir,
-		schemaPath, dataPath); code != 0 {
+	code, _, errOut := runCLI(t, "export", "--to", "csv", "--output-dir", outDir, schemaPath, dataPath)
+	if code != 0 {
 		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	if want := "wrote 3 CSV files to " + outDir; !strings.Contains(errOut, want) {
+		t.Errorf("stderr %q does not report %q", errOut, want)
 	}
 
 	entries, err := os.ReadDir(outDir)

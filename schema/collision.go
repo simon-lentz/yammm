@@ -340,11 +340,9 @@ func (c *completer) resolveRelationTarget(r *Relation, kind string) {
 }
 
 // validateCompositionTarget checks that a composition target is a concrete part type.
-// NOTE: when the target is a cross-schema ref and registry is nil (the registry-less
-// Builder path), the IsPart and IsAbstract checks are skipped — the registry-backed
-// Load path runs them instead, since it always supplies a registry. There is no API to
-// validate an already-built schema after the fact, so a registry-less Builder schema
-// with an unresolved cross-schema target never receives these checks.
+// A registry-less completion resolves no cross-schema target, and no such schema
+// builds: the Builder refuses imports without a registry, and a qualifier naming
+// no import draws E_UNKNOWN_TYPE.
 func (c *completer) validateCompositionTarget(t *Type, r *Relation) {
 	// An unresolved target was reported or deferred when targets resolved.
 	target := c.resolveTypeID(r.TargetID())

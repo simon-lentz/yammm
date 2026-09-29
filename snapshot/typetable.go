@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -38,6 +39,31 @@ func (e *depthExceededError) Error() string {
 		e.depth, maxComposedDepth, e.ref, e.key)
 }
 
+// unwritableValueError names a property whose value the wire cannot carry: an
+// instance's, or, where relation is set, an edge property of one of its
+// association records. ref and key address a root, or a duplicate record's
+// instance where duplicate is set; path names the composition hops below it.
+type unwritableValueError struct {
+	ref, key, relation, property string
+	path                         []string
+	duplicate                    bool
+}
+
+func (e *unwritableValueError) Error() string {
+	where := fmt.Sprintf("%s[%s]", e.ref, e.key)
+	if e.duplicate {
+		where = "duplicate record " + where
+	}
+	if len(e.path) > 0 {
+		where += "." + strings.Join(e.path, ".")
+	}
+	if e.relation != "" {
+		where += fmt.Sprintf(" under %q", e.relation)
+	}
+	return fmt.Sprintf("%s: property %q holds a value the wire cannot carry: a non-finite float, or a Go value encoding/json refuses",
+		where, e.property)
+}
+
 // schemaNames maps each import-closure member's source identity to its
 // declared name — the form the .ys wire states a type in. It is built once
 // per Marshal because a closure walk per type identity would repeat the same
@@ -58,24 +84,25 @@ func newSchemaNames(s *schema.Schema) schemaNames {
 	return names
 }
 
-// entry renders one type identity as the document states it, and reports
-// whether the closure could name it.
+// entry renders one type identity as the document states it: its schema's
+// name in the closure, and its type name.
 //
 // A miss is NOT rendered as a source path. The whole point of keying by name is
 // that a path does not travel, so falling back to one would put a
 // machine-local path into the field that exists to keep it out — and the
 // document would look well-formed.
 //
-// PRECONDITION: requireDenotable has passed. [Marshal] runs it before a byte
-// is written, so every identity reaching here is one the closure names.
+// PRECONDITION: the closure names id. Every constructor of a snapshot refuses
+// an identity the closure does not hold, so every identity a snapshot carries
+// meets it.
 func (n schemaNames) entry(id schema.TypeID) typeTableEntry {
 	return typeTableEntry{Schema: n[id.SchemaPath()], Name: id.Name()}
 }
 
 // requireDenotable reports the first type identity the closure cannot name.
-// An identity outside the closure reaches a snapshot only through
-// caller-assembled parts — [graph.Graph.Add] refuses one — and a document
-// that cannot state its own types is one no reader can bind.
+// Every constructor of a snapshot refuses such an identity, so this guards
+// that invariant: a document that cannot state its own types is one no reader
+// can bind.
 func (n schemaNames) requireDenotable(ids []schema.TypeID) (schema.TypeID, bool) {
 	for _, id := range ids {
 		if _, ok := n[id.SchemaPath()]; !ok {
@@ -148,20 +175,20 @@ func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 	}
 
 	for _, d := range view.duplicates {
-		collectInstance(d.Instance)
-		if d.Conflict != nil {
-			seen[d.Conflict.TypeID()] = struct{}{}
+		collectInstance(d.Instance())
+		if d.Conflict() != nil {
+			seen[d.Conflict().TypeID()] = struct{}{}
 		}
-		if d.Parent != nil {
-			seen[d.Parent.TypeID()] = struct{}{}
+		if d.Parent() != nil {
+			seen[d.Parent().TypeID()] = struct{}{}
 		}
 	}
 
 	for _, u := range view.unresolved {
-		if u.Source != nil {
-			seen[u.Source.TypeID()] = struct{}{}
+		if u.Source() != nil {
+			seen[u.Source().TypeID()] = struct{}{}
 		}
-		seen[u.TargetType] = struct{}{}
+		seen[u.TargetType()] = struct{}{}
 	}
 
 	// Ordered by the rendered row, not by TypeID: the sort key must be what

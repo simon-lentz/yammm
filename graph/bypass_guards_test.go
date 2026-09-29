@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -211,22 +212,42 @@ func TestAdd_BypassGuard_KeyPropertyMismatch(t *testing.T) {
 	assertHasCode(t, result, diag.E_GRAPH_INVALID_PK)
 }
 
-// TestAdd_BypassGuard_AbsentKeyPropertyTolerated pins the deliberate
-// tolerance: the in-repo fixture corpus carries keys without materializing
-// the property map, and that stays legal.
-func TestAdd_BypassGuard_AbsentKeyPropertyTolerated(t *testing.T) {
+// TestAdd_BypassGuard_AbsentKeyPropertyRefused pins that a key states what the
+// instance's own key properties hold: a key whose property is absent, or null,
+// is refused, since nothing in the instance states it.
+func TestAdd_BypassGuard_AbsentKeyPropertyRefused(t *testing.T) {
 	t.Parallel()
 	s := loadGuardSchema(t)
-	g := graph.New(s)
+	for _, props := range []map[string]any{{}, {"vin": nil}} {
+		vi := instancetest.VI(
+			"Car",
+			instancetest.TypeID(mustTypeID(t, s, "Car")),
+			instancetest.PK("v1"),
+			instancetest.Props(props),
+		)
+		result := graph.New(s).Add(t.Context(), vi)
+		if result.OK() {
+			t.Fatalf("a key whose property is %v passed Add", props)
+		}
+		assertHasCode(t, result, diag.E_GRAPH_INVALID_PK)
+	}
+	nullKey := instancetest.VI("Car", instancetest.TypeID(mustTypeID(t, s, "Car")), instancetest.PK(nil), instancetest.Props(map[string]any{"vin": nil}))
+	if result := graph.New(s).Add(t.Context(), nullKey); !result.HasCode(diag.E_GRAPH_INVALID_PK) {
+		t.Errorf("a null key over a null key property: Add = %s, want E_GRAPH_INVALID_PK", result)
+	}
+}
 
-	vi := instancetest.VI(
-		"Car",
-		instancetest.TypeID(mustTypeID(t, s, "Car")),
-		instancetest.PK("v1"),
-		instancetest.Props(map[string]any{}),
-	)
-	if result := g.Add(t.Context(), vi); !result.OK() {
-		t.Fatalf("a key without its property map was rejected: %s", result.String())
+// TestAdd_BypassGuard_KeyComponentOfEveryScalarKind pins that a key component
+// disagreeing with its key property is refused whatever Go type both hold.
+// Only a bypass-built instance holds an int64 or bool key.
+func TestAdd_BypassGuard_KeyComponentOfEveryScalarKind(t *testing.T) {
+	t.Parallel()
+	s := loadGuardSchema(t)
+	for _, c := range []struct{ key, prop any }{{int64(1), int64(2)}, {false, true}, {true, false}} {
+		vi := instancetest.VI("Car", instancetest.TypeID(mustTypeID(t, s, "Car")), instancetest.PK(c.key), instancetest.Props(map[string]any{"vin": c.prop}))
+		if result := graph.New(s).Add(t.Context(), vi); !result.HasCode(diag.E_GRAPH_INVALID_PK) {
+			t.Errorf("key %v over property %v: Add = %s, want E_GRAPH_INVALID_PK", c.key, c.prop, result)
+		}
 	}
 }
 
@@ -708,5 +729,27 @@ part type Wheel {
 	car := g.Snapshot().InstancesOf(mustTypeID(t, sm, "Car"))[0]
 	if n := car.ComposedCount("WHEELS"); n != 2 {
 		t.Errorf("keyless siblings attached = %d, want 2", n)
+	}
+}
+
+// TestAdd_BypassGuard_KeyComponentParseKeyCannotRead pins that a stored key
+// is one graph.ParseKey reads back: a list, a map and a number no float64
+// holds are refused even when the key property holds the same value, at
+// Graph.Add and at RebuildSnapshot.
+func TestAdd_BypassGuard_KeyComponentParseKeyCannotRead(t *testing.T) {
+	t.Parallel()
+	s := loadGuardSchema(t)
+	car := mustTypeID(t, s, "Car")
+	for _, v := range []any{[]any{"v1"}, map[string]any{"v": "1"}, json.Number("1e400")} {
+		vi := instancetest.VI("Car", instancetest.TypeID(car), instancetest.PK(v), instancetest.Props(map[string]any{"vin": v}))
+		if res := graph.New(s).Add(t.Context(), vi); !res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(res.String(), "not a scalar") {
+			t.Errorf("key [%v]: Add = %s, want E_GRAPH_INVALID_PK naming the component", v, res)
+		}
+		_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Instances: []graph.InstanceParts{{
+			TypeID: car, PrimaryKey: immutable.WrapKey([]any{v}), Properties: immutable.WrapProperties(map[string]any{"vin": v}),
+		}}})
+		if !res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(res.String(), "not a scalar") {
+			t.Errorf("key [%v]: RebuildSnapshot = %s, want E_GRAPH_INVALID_PK naming the component", v, res)
+		}
 	}
 }

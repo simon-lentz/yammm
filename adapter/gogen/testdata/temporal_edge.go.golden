@@ -57,7 +57,7 @@ type Day struct {
 
 type Log struct {
 	ID string           `json:"id"`
-	On *EDGE_Log_on_Day `json:"on"`
+	On *EDGE_Log_on_Day `json:"on,omitempty"`
 }
 
 type EDGE_Log_on_Day struct {
@@ -70,9 +70,9 @@ type Graph struct {
 	Log []*Log `json:"Log,omitempty"`
 }
 
-// serializedSources holds every source in the import closure, keyed by
-// module-root-relative path, as verbatim .yammm text. Read it through
-// SerializedSources below.
+// serializedSources holds every source the schema's load held, keyed by
+// the name the re-load registers it under, as verbatim .yammm text. Read
+// it through SerializedSources below.
 var serializedSources = map[string]string{
 	"temporal_edge.yammm": "schema \"temporaledge\"\n\ntype Day {\n\ton Date primary\n}\n\ntype Log {\n\tid String primary\n\t--> ON (one) Day {\n\t\tat Timestamp[\"2006-01-02 15:04:05\"] required\n\t}\n}\n",
 }
@@ -80,15 +80,15 @@ var serializedSources = map[string]string{
 // SerializedEntry is the entry-point key into SerializedSources.
 const SerializedEntry = "temporal_edge.yammm"
 
-// SerializedSources returns every source in the import closure, keyed by
-// module-root-relative path. Re-load with:
+// SerializedSources returns every source the schema's load held, keyed by
+// the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
 //
-// The synthetic root is what keeps the loaded type identities stable. Passing
-// module root "." instead also re-loads, but "." canonicalizes against the
-// process working directory, which then lands inside every TypeID.
+// The synthetic root keeps the loaded type identities stable: no working
+// directory, checkout or mount point enters them. Any root of that form
+// serves; generation verified this one.
 func SerializedSources() map[string][]byte {
 	m := make(map[string][]byte, len(serializedSources))
 	for k, v := range serializedSources {

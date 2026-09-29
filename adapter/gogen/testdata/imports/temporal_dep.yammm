@@ -1,0 +1,8 @@
+schema "temporaldep"
+
+type Days = List<Date>
+
+type Event {
+	id String primary
+	on List<List<Timestamp["15:04 MST"]>>
+}

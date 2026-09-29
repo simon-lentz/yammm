@@ -3,10 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"maps"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,7 +13,6 @@ import (
 	"github.com/simon-lentz/yammm/cmd/yammm/internal/cli"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
-	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -49,9 +46,6 @@ merged file's own created_at forward.`,
 
 func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error {
 	outputPath, _ := cmd.Flags().GetString("output")
-	fromFormat, _ := cmd.Flags().GetString("from")
-	typeName, _ := cmd.Flags().GetString("type")
-	typeColumn, _ := cmd.Flags().GetString("type-column")
 	metadataRaw, _ := cmd.Flags().GetStringArray("metadata")
 	timestamp, _ := cmd.Flags().GetBool("timestamp")
 	indent, _ := cmd.Flags().GetBool("indent")
@@ -68,15 +62,24 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// Parse metadata key=value pairs.
 	metadata, err := parseMetadata(metadataRaw)
 	if err != nil {
-		return cli.Usagef("%v", err)
+		return err
 	}
 
 	schemaPath := args[0]
-	dataPaths := args[1:]
-
-	absSchemaPath, err := filepath.Abs(schemaPath)
+	in, err := dataInputOf(cmd, args[1:]...)
 	if err != nil {
-		return cli.Usagef("resolve path %q: %v", schemaPath, err)
+		return err
+	}
+
+	absSchemaPath, err := schemaOperand(schemaPath)
+	if err != nil {
+		return err
+	}
+	// Judged when given, as an empty value is: it names no file either.
+	if cmd.Flags().Changed("into") {
+		if err := cli.CheckOperand("snapshot file", intoPath); err != nil {
+			return err
+		}
 	}
 
 	// Load schema.
@@ -89,10 +92,9 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		return err
 	}
 
-	// Load existing snapshot if --into is set. A warning here (an unsupported
-	// hash algorithm, say) means the imported snapshot's integrity was not fully
-	// verified, and it reaches the operator whether or not this command gets as
-	// far as writing anything.
+	// Load existing snapshot if --into is set. A warning the load raises (a
+	// provenance path that falls back, say) reaches the operator whether or not
+	// this command gets as far as writing anything.
 	var g *graph.Graph
 	var imported *snapshot.HeaderInfo
 	if intoPath != "" {
@@ -102,32 +104,26 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		}
 		sink.Add(loadResult)
 		if loadResult.HasErrors() {
-			return &cli.ExitError{Code: cli.ExitValidation}
+			return &cli.ExitError{Code: cli.ExitForResult(loadResult)}
 		}
-		g = graph.NewFromSnapshot(s, snap)
+		var importResult diag.Result
+		g, importResult = graph.NewFromSnapshot(s, snap)
+		sink.Add(importResult)
+		if importResult.HasErrors() {
+			return &cli.ExitError{Code: cli.ExitForResult(importResult)}
+		}
 		imported = header
 	}
 
-	// Parse all data files.
-	allParsed, parseResult, err := parseDataFiles(cmd, s, dataPaths, fromFormat, typeName, typeColumn)
+	a, err := assembleGraph(cmd, sink, s, in, g)
 	if err != nil {
 		return err
 	}
-
-	// Validate instances.
-	valids, validateResult := cli.ValidateInstances(cmd.Context(), s, allParsed)
-
-	// Build graph: fresh build or add to imported graph.
-	var graphResult diag.Result
-	if g != nil {
-		graphResult = addInstancesToGraph(cmd.Context(), g, valids)
-	} else {
-		g, graphResult = cli.BuildGraph(cmd.Context(), s, valids)
-	}
-
-	sink.Add(parseResult, validateResult, graphResult)
+	g = a.graph
+	// The data file's own read failure rides this result for a streamed format,
+	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
 	}
 
 	// Create snapshot and marshal.
@@ -149,12 +145,12 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		opts = append(opts, snapshot.WithMetadata(merged))
 	}
 
-	// Marshal reports a failure as an Error and a value it could not put on the
-	// wire as a Warning; both are diagnostics, so both reach the sink.
+	// Marshal reports a failure, a value it could not put on the wire included,
+	// as a diagnostic, so it reaches the sink and the exit rule decides.
 	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
 	sink.Add(marshalResult)
 	if marshalResult.Err() != nil {
-		return &cli.ExitError{Code: cli.ExitRuntime}
+		return &cli.ExitError{Code: cli.ExitForResult(marshalResult)}
 	}
 
 	// One primitive whether or not --into names the same file, so the write is
@@ -207,68 +203,6 @@ func mergeMetadata(imported *snapshot.HeaderInfo, flags map[string]string) map[s
 	return merged
 }
 
-// addInstancesToGraph adds validated instances to an existing graph and runs
-// graph-level checks. Used for the --into workflow.
-func addInstancesToGraph(ctx context.Context, g *graph.Graph, valids []*instance.ValidInstance) diag.Result {
-	collector := diag.NewCollectorUnlimited()
-	for _, valid := range valids {
-		result := g.Add(ctx, valid)
-		collector.Merge(result)
-	}
-	checkResult := g.Check(ctx)
-	collector.Merge(checkResult)
-	return collector.Result()
-}
-
-// parseDataFiles parses multiple data files into a merged instance map.
-func parseDataFiles(cmd *cobra.Command, s *schema.Schema, dataPaths []string, fromFormat, typeName, typeColumn string) (map[string][]instance.RawInstance, diag.Result, error) {
-	allParsed := make(map[string][]instance.RawInstance)
-	collector := diag.NewCollectorUnlimited()
-
-	for _, dataPath := range dataPaths {
-		absDataPath, err := filepath.Abs(dataPath)
-		if err != nil {
-			return nil, diag.Result{}, fmt.Errorf("resolve path %q: %w", dataPath, err)
-		}
-
-		// Detect format per file if not overridden.
-		format := fromFormat
-		if format == "" {
-			format, err = cli.DetectFormat(absDataPath)
-			if err != nil {
-				return nil, diag.Result{}, err
-			}
-		}
-
-		var parsed map[string][]instance.RawInstance
-		var parseResult diag.Result
-
-		switch format {
-		case "json":
-			parsed, parseResult, err = cli.LoadAndParseJSON(cmd.Context(), absDataPath)
-		case "csv":
-			if typeName == "" && typeColumn == "" {
-				return nil, diag.Result{}, errors.New("CSV data requires --type or --type-column flag")
-			}
-			parsed, parseResult, err = cli.LoadAndParseCSV(cmd.Context(), absDataPath, typeName, typeColumn, s)
-		default:
-			return nil, diag.Result{}, fmt.Errorf("unsupported format %q for %s", format, dataPath)
-		}
-		if err != nil {
-			return nil, diag.Result{}, err
-		}
-
-		collector.Merge(parseResult)
-
-		// Merge parsed instances.
-		for typeName, instances := range parsed {
-			allParsed[typeName] = append(allParsed[typeName], instances...)
-		}
-	}
-
-	return allParsed, collector.Result(), nil
-}
-
 // parseMetadata parses key=value metadata pairs from --metadata flag values.
 // Returns an empty (non-nil) map when raw is empty.
 func parseMetadata(raw []string) (map[string]string, error) {
@@ -279,10 +213,10 @@ func parseMetadata(raw []string) (map[string]string, error) {
 	for _, kv := range raw {
 		k, v, ok := strings.Cut(kv, "=")
 		if !ok {
-			return nil, fmt.Errorf("invalid metadata %q: expected key=value format", kv)
+			return nil, cli.Usagef("invalid metadata %q: expected key=value format", kv)
 		}
 		if k == "" {
-			return nil, fmt.Errorf("invalid metadata %q: key must not be empty", kv)
+			return nil, cli.Usagef("invalid metadata %q: key must not be empty", kv)
 		}
 		m[k] = v
 	}

@@ -3,9 +3,8 @@ package gogen
 import (
 	"fmt"
 	"go/token"
-	"maps"
+	"go/types"
 	"slices"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -13,17 +12,10 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// goExportedIdent converts a yammm identifier to an exported Go identifier via
-// ident.ToUpperCamelInitialisms with the effective initialism set (golint-idiomatic
-// id->ID, url->URL, json->JSON, plus any injected through WithInitialisms). It
-// GUARANTEES an exported result. The transform upper-cases the first letter segment,
-// so a letter-leading name is exported and never a keyword (every Go keyword is
-// lower-case). But an all-separator input yields "" and a digit-leading input yields
-// a "_"-prefixed (unexported) string — reachable for an arbitrary schema name (e.g.
-// "2020census") used as a collision qualifier, since schema names are unconstrained
-// STRING literals (type/datatype/property/relation names are UC_WORD/LC_WORD and
-// cannot start with a digit). Prefix "X" in those cases so the result always begins
-// with an upper-/title-case letter.
+// goExportedIdent converts a yammm name to an exported Go identifier through
+// ident.ToUpperCamelInitialisms. An all-separator name yields "" and a
+// digit-leading one (a schema name such as "2020census") an unexported
+// "_"-prefixed string, so both take an "X" prefix.
 func goExportedIdent(name string, inits map[string]bool) string {
 	out := ident.ToUpperCamelInitialisms(name, inits)
 	if out == "" {
@@ -35,32 +27,9 @@ func goExportedIdent(name string, inits map[string]bool) string {
 	return out
 }
 
-// goField returns a struct-field Go name, disambiguated within a single struct's
-// field namespace. The loader already rejects case-insensitive field collisions
-// (checkPropertyCaseCollisions / checkPropertyRelationCollisions /
-// checkRelationCollisions in schema/collision.go), so the residuals are names that
-// ident merges to one identifier despite differing in the source — separators
-// ("foo_bar" and "foo__bar" both -> "FooBar") or letter/digit boundaries ("foo_1"
-// and "foo1" both -> "Foo1"). goField returns the first free "<base>", "<base>2",
-// … and REGISTERS the chosen name in used, so a later natural "<base>2" cannot
-// silently re-collide with an earlier disambiguated one (a bug the naive
-// increment-only form has). used is a per-struct set (value > 0 means taken);
-// caller passes one used map per struct (a struct's properties and relations share
-// one field namespace).
-func goField(name string, used map[string]int, inits map[string]bool) string {
-	base := goExportedIdent(name, inits)
-	cand := base
-	for i := 2; used[cand] > 0; i++ {
-		cand = base + strconv.Itoa(i)
-	}
-	used[cand]++ // register the chosen name (base or disambiguated)
-	return cand
-}
-
-// goPackageName sanitizes a schema name into a valid lowercase package identifier,
-// falling back to "schema" when the input yields nothing usable. Unlike exported
-// identifiers, a lower-case package name CAN collide with a Go keyword (e.g. a
-// schema named "type"), so guard with go/token.
+// goPackageName sanitizes a schema name into a lowercase package identifier,
+// or "schema" when nothing usable remains. A keyword, "main", "init" and a
+// predeclared identifier, which an importing file would lose, take "_".
 func goPackageName(name string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(name) {
@@ -72,54 +41,60 @@ func goPackageName(name string) string {
 	if out == "" || unicode.IsDigit([]rune(out)[0]) {
 		return "schema"
 	}
-	if token.IsKeyword(out) {
+	if token.IsKeyword(out) || types.Universe.Lookup(out) != nil || out == "main" || out == "init" {
 		return out + "_"
 	}
 	return out
 }
 
-// nameTable holds the resolved, collision-free Go names for every entity that
-// becomes a top-level declaration: types, datatypes, and inline enums. They share
-// ONE Go package-block namespace (with the Graph aggregate and the
-// SerializedSources/SerializedEntry/SchemaHash declarations), so the table tracks a
-// single `taken` set seeded with those reserved names. Types are keyed by their
-// stable TypeID; datatypes by pointer (DataType has no exported identity, and the
-// same *schema.DataType the closure walk sees is exactly what ResolveDataType
-// returns from the loaded graph — verified: DataTypesSlice clones the same pointers
-// DataType()/ResolveDataType() return). Inline-enum names are resolved on demand and
-// memoized in inlineEnum.
-//
-// EDGE_ names are deliberately NOT in this set: they always contain underscores,
-// while goExportedIdent only ever emits underscore-free CamelCase, so an EDGE_ name
-// can never collide with a type/datatype/enum name. Each EDGE_ name is owner-qualified
-// (EDGE_<OwnerGoName>_<edge>_<TargetGoName>, built from the table's collision-resolved
-// Go names), so EDGE_ names are unique by construction — no emitter dedup is needed.
-type nameTable struct {
-	taken      map[string]bool             // every assigned top-level Go identifier
-	types      map[schema.TypeID]string    // resolved type -> Go type name
-	dataTypes  map[*schema.DataType]string // resolved datatype -> Go type name (pointer-keyed)
-	inlineEnum map[string]string           // "<typeID>\x00<rawField>" -> Go enum-type name
+// The words that open each family's exact spelling. None ends in "X" and none
+// is "EDGE", which keeps every exact spelling off every bare one.
+const (
+	wordType            = "Type"
+	wordDataType        = "DataType"
+	wordLayout          = "Timestamp"
+	wordAssociation     = "Association"
+	wordEnum            = "Enum"
+	wordAssociationEnum = "AssociationEnum"
+	wordElement         = "Element"
+	wordConst           = "Const"
+	wordField           = "Field"
+)
+
+// exactSpelling is word, "_", and each identity part written by [exactPart],
+// joined by "__"; the package doc's Names section states why no bare spelling
+// and no other identity can hold it.
+func exactSpelling(word string, parts ...string) string {
+	written := make([]string, len(parts))
+	for i, p := range parts {
+		written[i] = exactPart(p)
+	}
+	return word + "_" + strings.Join(written, "__")
 }
 
-// reservedNames are the package-level identifiers gogen always emits; no schema
-// entity may take them (Go has one package block namespace shared by types, consts,
-// and vars). Without the reservation a schema type of the same name takes the Go
-// name, format.Source succeeds, and the collision surfaces as a type-check failure.
-//
-// SerializedModel and SerializedModelEntry stay reserved although nothing emits
-// them any more. Freeing a name is not a no-op: a schema declaring a type of
-// that name derives a schema-qualified Go name today and would derive the bare
-// one after, which moves an emitted identifier — the one thing the
-// generated-output contract's Breaking tier names. Keeping them costs nothing;
-// a schema type called "SerializedModelEntry" is absurd either way.
-//
-// Date is a DSL keyword no schema entity can claim; reserving it keeps that
-// true by construction. Per-layout Timestamp names are reserved later by
-// registerTemporalTypes, after the schema's own names, so a schema type
-// keeps the bare identifier and the synthesized one takes the suffix.
-//
-// The unexported store the accessor reads is not listed: name derivation only
-// ever emits exported CamelCase, so a lowercase identifier cannot be taken.
+// exactPart writes s with every letter and digit kept and every other rune as
+// "_<hex>_", its code point in upper-case hexadecimal.
+func exactPart(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			continue
+		}
+		fmt.Fprintf(&b, "_%X_", r)
+	}
+	return b.String()
+}
+
+// constExact is a value constant's exact spelling: its enum's exact spelling,
+// whose word fixes how many parts follow, and the value as one more part.
+func constExact(enumExact, value string) string {
+	return wordConst + "_" + enumExact + "__" + exactPart(value)
+}
+
+// reservedNames are the identifiers gogen emits or once emitted, each a
+// permanent claimant of its spelling; freeing one would move the emitted name
+// of an entity that claims it.
 //
 //nolint:gochecknoglobals // Intentional: static reserved-name list.
 var reservedNames = []string{
@@ -132,81 +107,186 @@ var reservedNames = []string{
 	dateGoName,
 }
 
-// buildNameTable walks the closure (entry + transitively imported schemas) and
-// assigns each type and datatype a collision-free exported Go name in ONE shared
-// namespace (seeded with the reserved structural names). Types and datatypes are
-// assigned together because yammm permits a type and a datatype to share a name
-// (separate loader indices — indexTypes/indexDataTypes in schema/complete.go), and
-// both become top-level Go declarations. Unqualified where unique; schema-qualified
-// on collision (or when the bare name is reserved). A clash that survives
-// qualification is a hard error (mirrors DetectLabelCollisions in
-// adapter/neo4j/labels.go).
-func buildNameTable(s *schema.Schema, inits map[string]bool) (*nameTable, error) {
-	schemas := s.Closure()
+// enumKey names an inline enum by its owner's exact spelling and its
+// property's name.
+type enumKey struct {
+	owner, property string
+}
 
+// constKey names an enum value constant by its enum's exact spelling and the
+// value.
+type constKey struct {
+	enum, value string
+}
+
+// nameTable holds the Go name of every top-level declaration a schema entity
+// gives, and the initialism set every name is derived with.
+type nameTable struct {
+	inits       map[string]bool
+	types       map[schema.TypeID]string
+	dataTypes   map[*schema.DataType]string
+	dtKeys      map[*schema.DataType]string // each data type's exact spelling
+	layouts     map[string]string
+	edges       map[*schema.Relation]string
+	inlineEnum  map[enumKey]string
+	enumKeys    map[enumKey]string // each inline enum's exact spelling
+	elements    map[*schema.DataType]string
+	elementKeys map[*schema.DataType]string // each element enum's exact spelling
+	consts      map[constKey]string
+}
+
+// claim is one entity's two spellings and where its assigned name is kept.
+type claim struct {
+	bare, exact string
+	assign      func(name string)
+}
+
+// buildNameTable names every schema entity's declaration by the package doc's
+// Names rule. Every bare spelling is counted before any name is assigned, so a name
+// depends on the set of claims and never on their order.
+func buildNameTable(s *schema.Schema, inits map[string]bool, edges []edgeRec, layouts []string) *nameTable {
 	nt := &nameTable{
-		taken:      map[string]bool{},
-		types:      map[schema.TypeID]string{},
-		dataTypes:  map[*schema.DataType]string{},
-		inlineEnum: map[string]string{},
+		inits:       inits,
+		types:       map[schema.TypeID]string{},
+		dataTypes:   map[*schema.DataType]string{},
+		dtKeys:      map[*schema.DataType]string{},
+		layouts:     map[string]string{},
+		edges:       map[*schema.Relation]string{},
+		inlineEnum:  map[enumKey]string{},
+		enumKeys:    map[enumKey]string{},
+		elements:    map[*schema.DataType]string{},
+		elementKeys: map[*schema.DataType]string{},
+		consts:      map[constKey]string{},
 	}
-	for _, r := range reservedNames {
-		nt.taken[r] = true
+	var claims []claim
+	enumValues := func(bare, exact string, values []string) {
+		for _, v := range values {
+			key := constKey{enum: exact, value: v}
+			claims = append(claims, claim{
+				bare:   bare + nt.ident(v),
+				exact:  constExact(exact, v),
+				assign: func(name string) { nt.consts[key] = name },
+			})
+		}
+	}
+	inlineEnums := func(ownerBare, ownerWord string, ownerParts []string, props []*schema.Property) {
+		ownerKey := exactSpelling(ownerWord, ownerParts...)
+		enumWord := wordEnum
+		if ownerWord == wordAssociation {
+			enumWord = wordAssociationEnum
+		}
+		for _, p := range props {
+			ec, ok := inlineEnum(p.Constraint())
+			if !ok {
+				continue
+			}
+			key := enumKey{owner: ownerKey, property: p.Name()}
+			bare := ownerBare + nt.ident(p.Name())
+			exact := exactSpelling(enumWord, append(slices.Clone(ownerParts), p.Name())...)
+			nt.enumKeys[key] = exact
+			claims = append(claims, claim{bare: bare, exact: exact, assign: func(name string) { nt.inlineEnum[key] = name }})
+			enumValues(bare, exact, ec.Values())
+		}
 	}
 
-	// Pass 1: candidate (unqualified) names for every declared entity — types AND
-	// datatypes — grouped so cross-kind collisions are detected, not just same-kind.
-	type origin struct {
-		kind       string // "type" | "datatype"
-		schemaName string
-		id         schema.TypeID    // kind == "type"
-		dt         *schema.DataType // kind == "datatype"
-	}
-	byCandidate := map[string][]origin{}
-	for _, sc := range schemas {
+	for _, sc := range s.Closure() {
 		for _, t := range sc.TypesSlice() {
-			cand := goExportedIdent(t.Name(), inits)
-			byCandidate[cand] = append(byCandidate[cand], origin{kind: "type", schemaName: sc.Name(), id: t.ID()})
+			id := t.ID()
+			claims = append(claims, claim{bare: nt.ident(t.Name()), exact: typeKey(t), assign: func(name string) { nt.types[id] = name }})
 		}
 		for _, dt := range sc.DataTypesSlice() {
-			cand := goExportedIdent(dt.Name(), inits)
-			byCandidate[cand] = append(byCandidate[cand], origin{kind: "datatype", schemaName: sc.Name(), dt: dt})
-		}
-	}
-
-	assign := func(o origin, name string) {
-		nt.taken[name] = true
-		if o.kind == "type" {
-			nt.types[o.id] = name
-		} else {
-			nt.dataTypes[o.dt] = name
-		}
-	}
-
-	// Pass 2: assign in deterministic (sorted-candidate) order. Use the bare
-	// candidate only when it is the sole claimant AND not reserved/taken; otherwise
-	// schema-qualify every claimant. A qualified name that is STILL taken (two
-	// entities in the same schema mapping to one Go name — e.g. a type and a
-	// datatype both named Region) cannot be separated by qualification: hard error.
-	for _, cand := range slices.Sorted(maps.Keys(byCandidate)) {
-		origins := byCandidate[cand]
-		if len(origins) == 1 && !nt.taken[cand] {
-			assign(origins[0], cand)
-			continue
-		}
-		for _, o := range origins {
-			qualified := goExportedIdent(o.schemaName, inits) + cand
-			if nt.taken[qualified] {
-				return nil, fmt.Errorf(
-					"gogen: Go name collision that schema-qualification cannot resolve: %q (%s %q in schema %q); rename one entity",
-					qualified, o.kind, cand, o.schemaName,
-				)
+			bare := nt.ident(dt.Name())
+			exact := exactSpelling(wordDataType, sc.Name(), dt.Name())
+			nt.dtKeys[dt] = exact
+			claims = append(claims, claim{bare: bare, exact: exact, assign: func(name string) { nt.dataTypes[dt] = name }})
+			if lc, isList := dt.Constraint().(schema.ListConstraint); isList {
+				if ec, ok := inlineEnum(lc); ok {
+					elemBare := bare + "Element"
+					elemExact := exactSpelling(wordElement, sc.Name(), dt.Name())
+					nt.elementKeys[dt] = elemExact
+					claims = append(claims, claim{bare: elemBare, exact: elemExact, assign: func(name string) { nt.elements[dt] = name }})
+					enumValues(elemBare, elemExact, ec.Values())
+				}
 			}
-			assign(o, qualified)
+			if temporalLayout(dt.Constraint()) != "" {
+				continue
+			}
+			if ec, ok := schema.ResolveAlias(dt.Constraint()).(schema.EnumConstraint); ok {
+				enumValues(bare, exact, ec.Values())
+			}
 		}
 	}
+	for _, sc := range s.Closure() {
+		for _, t := range sc.TypesSlice() {
+			inlineEnums(nt.ident(t.Name()), wordType, []string{t.SchemaName(), t.Name()}, t.AllPropertiesSlice())
+		}
+	}
+	for _, e := range edges {
+		rel := e.rel
+		bare := "EDGE_" + nt.ident(e.owner.Name()) + "_" + rel.FieldName() + "_" + nt.ident(e.target.Name())
+		parts := []string{e.owner.SchemaName(), e.owner.Name(), rel.Name()}
+		claims = append(claims, claim{bare: bare, exact: edgeKey(e), assign: func(name string) { nt.edges[rel] = name }})
+		inlineEnums(bare, wordAssociation, parts, rel.PropertiesSlice())
+	}
+	for _, layout := range layouts {
+		claims = append(claims, claim{bare: layoutTypeBase(layout), exact: layoutTypeExact(layout), assign: func(name string) { nt.layouts[layout] = name }})
+	}
 
-	return nt, nil
+	claimants := map[string]int{}
+	for _, r := range reservedNames {
+		claimants[r]++
+	}
+	for _, c := range claims {
+		claimants[c.bare]++
+	}
+	for _, c := range claims {
+		if claimants[c.bare] == 1 {
+			c.assign(c.bare)
+		} else {
+			c.assign(c.exact)
+		}
+	}
+	return nt
+}
+
+// typeKey is t's exact spelling, which also keys its struct as an enum owner.
+func typeKey(t *schema.Type) string {
+	return exactSpelling(wordType, t.SchemaName(), t.Name())
+}
+
+// edgeKey is an association's exact spelling, which also keys its EDGE_ struct
+// as an enum owner.
+func edgeKey(e edgeRec) string {
+	return exactSpelling(wordAssociation, e.owner.SchemaName(), e.owner.Name(), e.rel.Name())
+}
+
+// ident is goExportedIdent under the table's initialism set.
+func (nt *nameTable) ident(name string) string {
+	return goExportedIdent(name, nt.inits)
+}
+
+// fieldWire is one struct field before it is named: its wire key, which is
+// unique in its struct, and its bare Go spelling.
+type fieldWire struct {
+	wire, bare string
+}
+
+// fieldNames names every field of one struct, keyed by wire key: the bare
+// spelling when no other field claims it, and otherwise "Field_" and the key.
+func fieldNames(fields []fieldWire) map[string]string {
+	claimants := map[string]int{}
+	for _, f := range fields {
+		claimants[f.bare]++
+	}
+	names := make(map[string]string, len(fields))
+	for _, f := range fields {
+		if claimants[f.bare] == 1 {
+			names[f.wire] = f.bare
+		} else {
+			names[f.wire] = wordField + "_" + f.wire
+		}
+	}
+	return names
 }
 
 // goType returns the resolved Go type name for a type identity.
@@ -221,28 +301,21 @@ func (nt *nameTable) goDataType(dt *schema.DataType) (string, bool) {
 	return n, ok
 }
 
-// reserve returns the first free name in "<base>", "<base>2", … and records it in
-// the shared namespace. Used for synthesized names (inline enums, enum value
-// consts) that must not collide with an already-assigned type / datatype / enum /
-// reserved name.
-func (nt *nameTable) reserve(base string) string {
-	cand := base
-	for i := 2; nt.taken[cand]; i++ {
-		cand = base + strconv.Itoa(i)
-	}
-	nt.taken[cand] = true
-	return cand
+// goInlineEnum returns the Go type name of the inline enum property p declares
+// in owner's struct.
+func (nt *nameTable) goInlineEnum(owner enumOwner, p *schema.Property) string {
+	return nt.inlineEnum[enumKey{owner: owner.key, property: p.Name()}]
 }
 
-// goInlineEnum returns the memoized Go type name for an inline-enum property —
-// "<OwnerGoType><FieldGoName>", reserved in the shared namespace. The owner type is
-// already named (types/datatypes are assigned before any emission).
-func (nt *nameTable) goInlineEnum(owner *schema.Type, p *schema.Property, inits map[string]bool) string {
-	key := owner.ID().String() + "\x00" + p.Name()
-	if n, ok := nt.inlineEnum[key]; ok {
-		return n
-	}
-	name := nt.reserve(nt.types[owner.ID()] + goExportedIdent(p.Name(), inits))
-	nt.inlineEnum[key] = name
-	return name
+// goDataTypeElement returns the Go type name of the inline enum a List
+// DataType holds as its innermost element. It is false for any other DataType.
+func (nt *nameTable) goDataTypeElement(dt *schema.DataType) (string, bool) {
+	n, ok := nt.elements[dt]
+	return n, ok
+}
+
+// enumOwner names the struct an inline-enum field belongs to by its exact
+// spelling, which no other struct shares.
+type enumOwner struct {
+	key string
 }

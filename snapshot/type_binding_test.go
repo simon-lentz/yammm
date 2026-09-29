@@ -54,13 +54,12 @@ func marshalCounty(t *testing.T, s *schema.Schema) []byte {
 	id := county.ID()
 	built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{id},
-		Instances: map[schema.TypeID][]graph.InstanceParts{
-			id: {{
-				TypeName:   "County",
+		Instances: []graph.InstanceParts{
+			{
 				TypeID:     id,
 				PrimaryKey: immutable.WrapKey([]any{"01001"}),
 				Properties: immutable.WrapProperties(map[string]any{"fips": "01001", "name": "Autauga"}),
-			}},
+			},
 		},
 	})
 	if res.HasErrors() {

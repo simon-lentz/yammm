@@ -1,0 +1,69 @@
+{
+  "name": "\"emid\"",
+  "span": {
+    "s": 0,
+    "e": 13
+  },
+  "imports": [
+    {
+      "path": "\"entry_shadow_leaf.yammm\"",
+      "alias": "leaf",
+      "span": {
+        "s": 15,
+        "e": 55
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Mid",
+      "name_span": {
+        "s": 62,
+        "e": 65
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 72,
+              "e": 78
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 69,
+            "e": 86
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "assoc",
+          "name": "TO_NODE",
+          "name_span": {
+            "s": 92,
+            "e": 99
+          },
+          "target": {
+            "qualifier": "leaf",
+            "name": "Node",
+            "span": {
+              "s": 106,
+              "e": 115
+            }
+          },
+          "span": {
+            "s": 88,
+            "e": 115
+          }
+        }
+      ],
+      "span": {
+        "s": 57,
+        "e": 117
+      }
+    }
+  ]
+}

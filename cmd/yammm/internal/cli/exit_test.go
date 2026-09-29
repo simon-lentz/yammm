@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 )
 
 func TestExitError_MessageWithoutAWrappedError(t *testing.T) {
@@ -93,15 +95,14 @@ func TestExitForError(t *testing.T) {
 			&ExitError{Code: ExitUsage, Err: statErr}, ExitUsage,
 		},
 		{"a real path error is a runtime failure", statErr, ExitRuntime},
-		// The classification is by identity, not by wording: an error whose
-		// text happens to read like a missing file is not one.
-		{
-			"a message that merely reads like not-exist is not an I/O failure",
-			errors.New("x: " + fs.ErrNotExist.Error()), ExitUsage,
-		},
 		{"the not-exist sentinel is a runtime failure", fs.ErrNotExist, ExitRuntime},
 		{"the permission sentinel is a runtime failure", fs.ErrPermission, ExitRuntime},
-		{"anything else falls back to usage", errors.New("invalid output format"), ExitUsage},
+		{"an operand CheckOperand refuses is a usage failure", CheckOperand("data file", ""), ExitUsage},
+		{"a non-UTF-8 source CheckSourceOperand refuses is a usage failure", CheckSourceOperand("data file", "x\xff"), ExitUsage},
+		// A location sentinel that no CheckOperand marked came from a
+		// resolution the filesystem answered.
+		{"a resolution into bytes that are not UTF-8 is a runtime failure", fmt.Errorf("resolve: %w", location.ErrInvalidUTF8Path), ExitRuntime},
+		{"a failure the command did not classify is a runtime failure", errors.New("invalid output format"), ExitRuntime},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,9 +114,28 @@ func TestExitForError(t *testing.T) {
 	}
 }
 
+// TestCheckOperand_CarriesLocationsSentinel pins that each refusal wraps the
+// location sentinel it names, so a caller matches it by errors.Is, and that a
+// path which only names a file to read may be any bytes.
+func TestCheckOperand_CarriesLocationsSentinel(t *testing.T) {
+	t.Parallel()
+	if err := CheckOperand("snapshot file", ""); !errors.Is(err, location.ErrEmptyPath) {
+		t.Errorf("CheckOperand(\"\") = %v, want ErrEmptyPath", err)
+	}
+	if err := CheckOperand("snapshot file", "x\xff.ys"); err != nil {
+		t.Errorf("CheckOperand refused a name that is not UTF-8: %v", err)
+	}
+	if err := CheckSourceOperand("data file", ""); !errors.Is(err, location.ErrEmptyPath) {
+		t.Errorf("CheckSourceOperand(\"\") = %v, want ErrEmptyPath", err)
+	}
+	if err := CheckSourceOperand("data file", "x\xff.json"); !errors.Is(err, location.ErrInvalidUTF8Path) {
+		t.Errorf("CheckSourceOperand of a name that is not UTF-8 = %v, want ErrInvalidUTF8Path", err)
+	}
+}
+
 // An unreadable file reaches some commands as a diagnostic rather than an error
 // return, so the two rules have to agree or one missing path draws two codes.
-func TestExitForResult_IOCodeOutranksValidation(t *testing.T) {
+func TestExitForResult_RuntimeCodeOutranksValidation(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -125,6 +145,9 @@ func TestExitForResult_IOCodeOutranksValidation(t *testing.T) {
 	}{
 		{"a schema load I/O failure", diag.E_LOAD_IO_FAILURE, ExitRuntime},
 		{"a snapshot I/O failure", diag.E_SNAPSHOT_IO, ExitRuntime},
+		{"an adapter I/O failure", diag.E_ADAPTER_IO, ExitRuntime},
+		{"an internal fault", diag.E_INTERNAL, ExitRuntime},
+		{"a cancelled context", diag.E_CONTEXT_CANCELLED, ExitRuntime},
 		{"an ordinary error", diag.E_MISSING_REQUIRED, ExitValidation},
 	}
 	for _, tt := range tests {
@@ -145,7 +168,22 @@ func TestExitForResult_IOCodeOutranksValidation(t *testing.T) {
 		}
 	})
 
-	t.Run("a warning is not a failure", func(t *testing.T) {
+	// A full collector drops later issues, and a runtime code it dropped still
+	// decides: the process failed outside its input whatever the collector kept.
+	t.Run("a runtime code the collector dropped still decides", func(t *testing.T) {
+		t.Parallel()
+		c := diag.NewCollector(1)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_TYPE_MISMATCH, "kept").Build())
+		c.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "dropped").Build())
+		if c.Result().HasCode(diag.E_INTERNAL) {
+			t.Fatal("precondition: the collector kept the second issue")
+		}
+		if got := ExitForResult(c.Result()); got != ExitRuntime {
+			t.Errorf("ExitForResult = %d, want %d", got, ExitRuntime)
+		}
+	})
+
+	t.Run("an I/O code at Warning severity is still a runtime failure", func(t *testing.T) {
 		t.Parallel()
 		c := diag.NewCollectorUnlimited()
 		c.Collect(diag.NewIssue(diag.Warning, diag.E_LOAD_IO_FAILURE, "boom").Build())

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"strconv"
 	"strings"
 
@@ -19,23 +18,35 @@ const (
 	ExitRuntime    = 3 // Runtime error (connection failure, I/O error)
 )
 
-// ioCodes are the diagnostic codes that report a filesystem failure.
+// runtimeCodes are the diagnostic codes that report a failure outside the
+// input: an I/O failure (a filesystem failure, or the reader a streamed parse
+// reads from failing), an internal fault, or a cancelled context.
 //
-// diag/code.go introduces one per category by a stated convention rather than a
-// CategoryIO constant, so membership is this list and not a category test. A new
-// per-category I/O code belongs here.
-var ioCodes = [...]diag.Code{diag.E_LOAD_IO_FAILURE, diag.E_SNAPSHOT_IO}
+// diag/code.go introduces one I/O code per category by a stated convention
+// rather than a CategoryIO constant, so membership is this list and not a
+// category test. A new per-category I/O code belongs here.
+var runtimeCodes = [...]diag.Code{
+	diag.E_LOAD_IO_FAILURE, diag.E_SNAPSHOT_IO, diag.E_ADAPTER_IO,
+	diag.E_INTERNAL, diag.E_CONTEXT_CANCELLED,
+}
 
-// ExitForResult returns the exit code a diagnostic result earns.
+// ExitForResult returns the exit code a diagnostic result earns, and is the
+// one place a result becomes an exit code.
 //
-// An I/O failure outranks a validation failure. schema.Load reports an
-// unreadable file as a diagnostic rather than an error return, so without this
-// rule one missing path exits 1 through a command that loads a schema and 3
-// through one that opens the file itself.
+// A failure outside the input outranks a refusal of it: 3 over 1. schema.Load
+// reports an unreadable file as a diagnostic rather than an error return, so
+// without this rule one missing path exits 1 through a command that loads a
+// schema and 3 through one that opens the file itself.
+//
+// It reads [diag.Result.CodeCounts], which counts issues a full collector
+// dropped, where [diag.Result.HasCode] sees only the ones it kept.
 func ExitForResult(result diag.Result) int {
-	for _, code := range ioCodes {
-		if result.HasCode(code) {
-			return ExitRuntime
+	for sev := diag.Fatal; sev <= diag.Hint; sev++ {
+		counts := result.CodeCounts(sev)
+		for _, code := range runtimeCodes {
+			if counts[code] > 0 {
+				return ExitRuntime
+			}
 		}
 	}
 	if result.HasErrors() {
@@ -47,9 +58,12 @@ func ExitForResult(result diag.Result) int {
 // ExitForError returns the exit code an error earns — the error-side twin of
 // [ExitForResult].
 //
-// A filesystem failure is ExitRuntime, which is both what the exit table's own
-// wording says and what the commands that open a file themselves already
-// answer. Anything unclassified stays ExitUsage.
+// An [ExitError] keeps its code, and anything else is ExitRuntime: a path the
+// filesystem answers, or a failure the command did not classify. A usage
+// refusal is an [ExitError] from [Usagef], so a path refused before any lookup
+// reaches here as one ([CheckOperand], [CheckSourceOperand]); a location
+// sentinel reaching here unmarked came from a resolution the filesystem
+// answered.
 func ExitForError(err error) int {
 	if err == nil {
 		return ExitOK
@@ -57,13 +71,7 @@ func ExitForError(err error) int {
 	if exitErr, ok := errors.AsType[*ExitError](err); ok {
 		return exitErr.Code
 	}
-	if _, ok := errors.AsType[*fs.PathError](err); ok {
-		return ExitRuntime
-	}
-	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
-		return ExitRuntime
-	}
-	return ExitUsage
+	return ExitRuntime
 }
 
 // ExitError carries a process exit code and, where the failure has a message of

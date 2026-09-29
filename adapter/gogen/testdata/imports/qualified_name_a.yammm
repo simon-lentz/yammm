@@ -1,0 +1,9 @@
+schema "a"
+
+type Foo {
+	id String primary
+}
+
+type Bar {
+	id String primary
+}
