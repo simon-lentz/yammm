@@ -877,13 +877,13 @@ Minor tier: one breaking Go-API change and one behaviour tightening under the pr
 ## Unreleased — merged to `main`
 
 Condition-1 **unit 6** (the CLI and the formatter), closed by decision (A-461)
-and merged to `main` as `fb57e99` (PR #107), and condition-1 **unit 7** (the
+and merged to `main` as `fb57e99` (PR #107), condition-1 **unit 7** (the
 foundation layer), closed by decision (A-513) and merged to `main` as `19d67fa`
-(PR #108), are both on `main`, followed by the byte-order-mark repair (A-514,
-`6796714`, PR #109); nothing below is released. Condition-1 **unit 8** (the
-generator and writer adapters) is open, and its blocks below are on the `review`
-branch rather than on `main`. Each block was written by the pass or group that
-landed its behaviour, not at the tag (A-227, A-346).
+(PR #108), the byte-order-mark repair (A-514, `6796714`, PR #109), and
+condition-1 **unit 8** (the generator and writer adapters), closed by decision
+(A-551) and merged to `main` as `73c637b` (PR #110), are all on `main`; nothing
+below is released. Each block was written by the pass or group that landed its
+behaviour, not at the tag (A-227, A-346).
 **Unit 6 adds six exported declarations and removes or changes none:**
 `gorelease -base=v0.21.0` on its candidate reports `diag.E_COMMAND_FAILED`,
 `diag.W_SNAPSHOT_PATH_EXTENSION`, `neo4j.W_NEO4J_INDEXES_UNREADABLE`,
