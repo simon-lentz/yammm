@@ -6,7 +6,7 @@
 //
 // The neo4j adapter lives alongside [github.com/simon-lentz/yammm/adapter/json]
 // in the adapter layer. It depends on library packages (schema, graph,
-// immutable, diag); library packages never depend on adapters.
+// immutable, diag, location); library packages never depend on adapters.
 //
 // # Neo4j Driver Dependency (Type-Only)
 //
@@ -43,8 +43,10 @@
 // The one shape a valid schema can hit here is a list whose ELEMENT is itself a
 // collection: List<List<T>>, List<Vector[N]>, or a list of a list-typed alias.
 // Those are legal yammm and validate normally, but Neo4j has no nested
-// collection property type, so [ErrUnsupportedListElem] surfaces as
-// [E_NEO4J_UNSUPPORTED_TYPE]. A model that must export to Neo4j represents the
+// collection property type, so under the default configuration
+// [ErrUnsupportedListElem] surfaces as [E_NEO4J_UNSUPPORTED_TYPE]. The
+// type-constraint pass is what judges a list's element, so under
+// [WithScalarTypeConstraints](false) no pass reports it. A model that must export to Neo4j represents the
 // inner collection as a part type reached by a composition instead. (A bare
 // Vector is fine — it maps to LIST<FLOAT NOT NULL>; it is only a Vector nested
 // INSIDE a list that has no expression.)
@@ -105,8 +107,11 @@
 // index generation and rejected with [ErrReservedKeyword]
 // (the check is case-insensitive). Namespaced labels usually absorb
 // reserved type names — the label "app__MATCH" is not a keyword — but a
-// reserved property name always fails, and a reserved type name fails in
-// unscoped (empty schema name) label mode. For export-compatibility
+// reserved property name fails wherever a generated constraint or index
+// statement names it, and a reserved type name fails in unscoped (empty schema
+// name) label mode. No generated DDL names an edge property, so no pass checks
+// an edge property's name, and the write queries check no name but the
+// relationship type's. For export-compatibility
 // feedback before write time, run [Adapter.ConstraintsForSchema] AND
 // [Adapter.IndexesForSchema], or call [ValidateIdentifier] on names directly.
 // The DROP builders take the opposite path, because they take a name the
@@ -114,10 +119,10 @@
 // fails validation, reserved word included, is backtick-quoted rather than
 // rejected — see [DropConstraintStatement].
 // Under the default configuration the constraint pass already checks every
-// property it emits a constraint for, which is all of them; under
+// node property it emits a constraint for, which is all of them; under
 // [WithScalarTypeConstraints](false) or [WithRequiredOnlyTypeConstraints](true)
 // it checks fewer, and the index pass then covers properties named only by an
-// @index / @@index / @vector annotation. Note that [Adapter.ShapeForSchema]
+// @index / @@index / @vector / @fulltext / @@fulltext annotation. Note that [Adapter.ShapeForSchema]
 // validates the label only — it is not a property-name gate.
 //
 // # Graph Shape
@@ -130,8 +135,7 @@
 //
 // [Adapter.BatchNodeQueries] and [Adapter.BatchEdgeQueries] operate on a
 // complete [graph.Snapshot] for high-throughput batch writes. They are the
-// write surface; the single-item entry points were removed and this section
-// described two modes long after only one remained.
+// write surface, and the package has no single-item write.
 //
 // Both require a [GraphShape] that [Adapter.ShapeForSchema] built from the
 // snapshot's own schema, and refuse one built by hand or from another schema:
@@ -217,9 +221,10 @@
 // silent-failure detection has a stable column to sum; aggregation across
 // chunks is the consumer's.
 //
-// The node-merge and single-relationship templates are internal. Node
-// templates stay RETURN-free — a constraint violation on a node surfaces as a
-// driver error, not a silent zero-match.
+// The node-merge and composition templates are internal. A node merge ends
+// with no RETURN clause: a MERGE creates the node it does not find, so it has
+// no missed match to count. The composition templates are MATCH-anchored, so
+// each ends with the same `RETURN count(*) AS matched_rows`.
 //
 // # Introspection
 //
@@ -306,16 +311,22 @@
 // Drift has four producers, so [IndexDrift.Actual] is not always an index kind
 // the schema could declare: a vector index whose dimension or similarity
 // differs; a definition change under a name the database already holds; an index
-// in a state that serves no queries; and a desired index the server would refuse
-// to create, because its name or its whole definition is already taken — there
-// the Actual is the blocker, which may be a TEXT, POINT, or multi-label
-// FULLTEXT index, an
-// index on a label this schema does not own, or a constraint's backing index. Composite property order is
+// in a state that serves no queries and will not recover on its own (FAILED; a
+// POPULATING index is unverified); and a desired index the server would refuse
+// to create, because its name or its whole definition is already taken. There
+// the Actual is the blocker: an index of any kind or on any label, a
+// constraint's backing index, an index that realises another declaration of
+// this schema, or, when the caller passes constraints as alsoBlocking, a
+// constraint with no backing index, whose Actual carries its name, labels and
+// properties and no index type. Composite property order is
 // significant, a deliberate divergence from [Adapter.DiffConstraints]: a
 // same-set/different-order remote index is a distinct index — create + drop when
 // its name differs too, and drift when it holds the desired index's name. A
-// schema-owned remote index with no declaration is reported as a drop — the
-// drift the index feature exists to surface. Drops are reported, never applied.
+// schema-owned remote index that [RemoteIndex.Declarable] accepts and no
+// declaration matches is reported as a drop — the drift the index feature
+// exists to surface. An owned index it refuses is never a drop: it is counted in [IndexDiffResult.Excluded], a
+// blocker included, unless it is a constraint's backing index that serves a
+// declaration and serves queries ([RemoteIndex.IsOnline]), which is a match. Drops are reported, never applied.
 //
 // # Configuration
 //
@@ -323,11 +334,12 @@
 //
 //   - [WithEdition]: target Neo4j edition ([Enterprise] or [Community])
 //   - [WithNodeKeyConstraints]: use NODE KEY instead of separate UNIQUE + NOT NULL
-//   - [WithScalarTypeConstraints]: emit PROPERTY_TYPE constraints for scalar properties
+//   - [WithScalarTypeConstraints]: emit PROPERTY_TYPE constraints for scalar,
+//     List and Vector properties
 //   - [WithRequiredOnlyTypeConstraints]: restrict type constraints to required properties
 //   - [WithNamedConstraints]: include explicit constraint names
 //   - [WithLabelSeparator]: separator between schema and type in labels (default "__")
-//   - [WithLabelPrefix]: global prefix for all labels
+//   - [WithLabelPrefix]: prefix for every label rendered with a schema name
 //
 // Write options control query generation:
 //
@@ -354,8 +366,11 @@
 //
 // # Neo4j Version
 //
-// The default configuration targets Neo4j 5.0+ Enterprise.
-// [WithNodeKeyConstraints](true) requires Neo4j 5.7+.
+// The default configuration targets Neo4j 5.9+ Enterprise, and 5.10+ for a
+// schema with a List or Vector property: it emits PROPERTY_TYPE constraints,
+// which Neo4j 5.9 added for scalar types and 5.10 for LIST types. With
+// [WithScalarTypeConstraints](false) it targets Neo4j 5.0+.
+// [WithNodeKeyConstraints](true) needs no newer release than the default.
 // Minimum recommended version: Neo4j 5.13+ (fixes the orphaned index
 // bug where interrupted constraint creation leaves an orphaned backing
 // index that blocks subsequent IF NOT EXISTS retries).

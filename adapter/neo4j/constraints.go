@@ -164,9 +164,10 @@ func (a *Adapter) constraintsForType(ctx context.Context, t *schema.Type, label 
 	// One gate because they are one kind of statement. A `Vector[4]` and a
 	// `List<Float>` emit the SAME expression, `IS :: LIST<FLOAT NOT NULL>`, and
 	// gating them differently meant an option suppressed the constraint for one
-	// declaration and not for the other. It is also the switch an operator on a
-	// server older than Neo4j 5.9 needs: property-type constraints do not exist
-	// there, and nothing else in this package turns them all off.
+	// declaration and not for the other. It is also the switch an operator on an
+	// Enterprise server older than Neo4j 5.9 needs, where property-type
+	// constraints do not exist, or older than 5.10, where a LIST type does not;
+	// only the Community edition's gating also drops them all.
 	if a.config.scalarTypeConstraints {
 		constraints = append(constraints, a.listTypeConstraints(t, label, collector)...)
 		constraints = append(constraints, a.scalarTypeConstraints(t, label, collector)...)

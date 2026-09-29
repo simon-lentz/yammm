@@ -33,7 +33,7 @@ stdout '"lib/dep.yammm":'
 stderr 'lib/dep'
 
 # gen --to jsonschema: a JSON Schema draft 2020-12 document describing the
-# instance-data JSON accepted by `yammm check`; "$id" omitted by default.
+# instance-data JSON `yammm check` reads; "$id" omitted by default.
 exec yammm gen --to jsonschema county.yammm
 stdout '"\$schema": "https://json-schema\.org/draft/2020-12/schema"'
 stdout '"County": \{ "type": "array", "items": \{ "\$ref": "#/\$defs/County" \} \}'

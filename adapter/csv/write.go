@@ -70,7 +70,11 @@ func (a *Adapter) MarshalSnapshot(
 //
 // Returns [ErrNilSnapshot] if result is nil, and refuses a setting the adapter
 // cannot use, with [ErrConfig], and a snapshot holding a composed child before
-// it requests any writer: see [refuseComposedChildren].
+// it requests any writer: see [refuseComposedChildren]. Every other refusal
+// under the package doc's Empty Cells is found at its instance, after that
+// type's writer was requested: the rows before it are flushed, so that
+// destination parses as far as it goes, and no later type's writer is
+// requested.
 func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),

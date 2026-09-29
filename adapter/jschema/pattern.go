@@ -20,8 +20,8 @@ import (
 // The rewrite parses the pattern as regexp.Compile does and renders the tree:
 // case folding becomes explicit classes, every class becomes explicit ranges
 // (\d and \w too, which some validators read as Unicode classes), "." becomes
-// "[^\n]", and flags vanish. A string of code points matches the result
-// exactly when it matches the source; a JSON string holding a lone surrogate
+// "[^\n]", or "[\s\S]" under the "s" flag, and flags vanish. A string of Unicode
+// scalar values matches the result exactly when it matches the source; a JSON string holding a lone surrogate
 // is not one (see the Fidelity Caveats). It reports false for a pattern holding a line
 // anchor — "^" or "$" under the "m" flag — which neither dialect can state
 // without the flag or a lookaround the other lacks.

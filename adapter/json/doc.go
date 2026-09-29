@@ -18,9 +18,17 @@
 //     properties — the same shape [Adapter.ParseObject] accepts
 //   - Composed children as arrays, (one) compositions included
 //
-// The output of a fully resolved snapshot round-trips: ParseObject plus the
-// validator accept every shape this writer emits. Unresolved edges are not
-// written; persist them in the .ys format when they must survive.
+// The output round-trips when the snapshot's [graph.Snapshot.Attestation]
+// reports Values — every instance entered through the validator — and it holds
+// no unresolved edge ([graph.Snapshot.Unresolved] is empty): ParseObject plus
+// the validator accept every shape this writer emits. A loaded snapshot carries
+// its header's claim, and [graph.Attestation] states what that claim proves. An
+// unresolved edge is not written, so an invariant that reads its relation, even
+// an optional one, can fail on the way back; persist such a snapshot in the .ys
+// format when its edges must survive. Any other snapshot is written as held —
+// each value in the form its constraint stores where the constraint renders it,
+// a nil value as null at a property or inside a list — and the validator judges
+// the result.
 //
 // Every constructor of a snapshot holds its structure to what [graph.Graph.Add]
 // builds, so every relation this writer meets renders in a shape its own

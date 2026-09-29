@@ -1,9 +1,10 @@
 // Package jschema generates a JSON Schema (draft 2020-12) document from a
-// yammm schema, for editor-assisted authoring of the instance-data JSON that
-// `yammm check` accepts. Call [Marshal] with a loaded, resolved schema; it
-// returns a deterministic, self-contained document that editors (VS Code's
-// JSON/YAML language servers, IntelliJ, Helix) can use for completion,
-// hover documentation, and validation while data files are being written.
+// yammm schema, for editor-assisted authoring of instance-data JSON files,
+// which `yammm check` then judges. Call [Marshal] with a loaded, resolved
+// schema; it returns a deterministic, self-contained document that editors
+// (VS Code's JSON/YAML language servers, IntelliJ, Helix) can use for
+// completion, hover documentation, and validation while data files are being
+// written.
 //
 // # Schema-In, Bytes-Out
 //
@@ -13,14 +14,17 @@
 // instance nor graph. It maps a completed schema to one JSON document,
 // nothing more, and returns a plain error rather than the
 // [github.com/simon-lentz/yammm/diag.Result] the rest of the library threads
-// through, because its only failures are generator-internal (see Error
-// Conditions), not data diagnostics with source locations.
+// through, because its failures are a schema that breaks its preconditions or
+// a generator bug (see Error Conditions), not data diagnostics with source
+// locations.
 //
 // # The Target Contract
 //
-// The emitted document describes exactly the JSON object form the yammm
-// instance layer accepts — the shape parsed by adapter/json's ParseObject
-// and validated by [github.com/simon-lentz/yammm/instance.Validator]:
+// The emitted document describes the JSON object form the yammm instance
+// layer reads — the shape parsed by adapter/json's ParseObject and validated by
+// [github.com/simon-lentz/yammm/instance.Validator]. It does not reproduce
+// that validation: Fidelity Caveats names each class of file the two judge
+// differently. Its terms:
 //
 //   - The envelope is a single JSON object keyed by type name, each key
 //     holding an array of instance objects. Entry-schema types are keyed by
@@ -86,10 +90,11 @@
 // pattern as ECMA-262, and a validator built on Go's regexp reads it as RE2,
 // so each pattern is rewritten into syntax both read the same way, with the
 // "u" flag ECMA-262 validators such as ajv apply: case folding becomes
-// explicit classes, "." becomes [^\n], \s becomes its five ASCII characters,
+// explicit classes, "." becomes [^\n] (or [\s\S] under the "s" flag), \s
+// becomes its five ASCII characters,
 // POSIX and Unicode classes become ranges, and \d and \w become their ASCII
-// ranges. A string of code points matches the rewrite exactly when it matches
-// the source. A line anchor under the "m" flag has
+// ranges. A string of Unicode scalar values matches the rewrite exactly when it
+// matches the source. A line anchor under the "m" flag has
 // no such form: that pattern is not asserted, and the fragment's description
 // carries it in source form.
 //
@@ -129,9 +134,12 @@
 //
 // The emitted schema does not reproduce yammm's validation; it diverges in
 // the classes below, and each divergence changes only what the editor flags.
-// Every yammm data command — `yammm check`, `load`, `export` and
-// `snapshot save` — runs all three stages the cases below name: the parse,
-// instance validation and graph assembly.
+// Every yammm data command — `yammm check`, `load`, `export` and `snapshot
+// save` — runs all three stages the cases below name on a data file it reads:
+// the parse, instance validation and graph assembly. `export` given a snapshot
+// document instead, one whose first member is "yammm_snapshot" whatever the
+// file is named, reads it through the snapshot loader and runs neither of the
+// last two.
 //
 // The emitted schema judges each value by its own shape, so no check that
 // compares instances, counts depth or evaluates an expression reaches it. In
@@ -282,7 +290,8 @@
 // jschema imports only public yammm packages and the standard library —
 // no internal/* (the adapter-layer carve-out documented in adapter/doc.go
 // stays gogen-only), no instance/graph, no diag, and no third-party
-// modules. The contract-alignment test suite carries the package's one
+// modules. The contract-alignment test suite also imports the yammm packages
+// that read instance data, and carries the package's one third-party
 // test-only dependency, a JSON Schema validator used to prove yammm and the
 // emitted schema agree.
 package jschema

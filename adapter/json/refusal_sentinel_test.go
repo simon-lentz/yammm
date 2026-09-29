@@ -62,9 +62,8 @@ func nonFiniteSnapshot(t *testing.T, props map[string]any, weight any) *graph.Sn
 
 var nonFinite = math.Inf(1)
 
-// JSON has no number for NaN or an infinity, and every constructor of a
-// snapshot holds its structure to what the writer renders, so a non-finite
-// float is the one shape of the data the writer refuses. It is refused as the
+// JSON has no number for NaN or an infinity, and a validated Float is never
+// non-finite, so only a bypass-built snapshot holds one. It is refused as the
 // class wherever a value stands, naming the site.
 func TestWriters_ANonFiniteFloatIsRefusedAsTheClass(t *testing.T) {
 	t.Parallel()
@@ -97,6 +96,62 @@ func TestWriters_ANonFiniteFloatIsRefusedAsTheClass(t *testing.T) {
 				t.Errorf("WriteObject: %v does not match ErrUnrepresentable", werr)
 			}
 		})
+	}
+}
+
+// refusingJSON and refusingText spell themselves for encoding/json and refuse,
+// as a caller's own type can; spelled spells itself and succeeds. Each is a
+// string, which a Float constraint cannot render, so it reaches the writer as
+// held and encoding/json only through its method.
+type (
+	refusingJSON string
+	refusingText string
+	spelled      string
+)
+
+func (refusingJSON) MarshalJSON() ([]byte, error) { return nil, errors.New("no spelling") }
+func (refusingText) MarshalText() ([]byte, error) { return nil, errors.New("no spelling") }
+func (s spelled) MarshalJSON() ([]byte, error)    { return []byte(`{"spelled":"` + string(s) + `"}`), nil }
+
+// A value encoding/json refuses is refused as the class wherever it stands,
+// naming the site, whatever its kind: a string's own method can refuse as a
+// container's contents can. Before the writer asked encoding/json
+// about a scalar, such a value failed the whole document outside the class.
+func TestWriters_AValueEncodingJSONRefusesIsRefusedAsTheClass(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, mentions string
+		props          map[string]any
+		weight         any
+	}{
+		{"a MarshalJSON refusal at a property", `property "ratio"`, map[string]any{"ratio": refusingJSON("x")}, 1.5},
+		{"a MarshalText refusal at a property", `property "ratio"`, map[string]any{"ratio": refusingText("x")}, 1.5},
+		{"a refusal inside a list", `property "series"`, map[string]any{"series": []any{1.5, refusingJSON("x")}}, 1.5},
+		{"a refusal at an edge property", `edge property "weight"`, nil, refusingText("w")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			snap := nonFiniteSnapshot(t, c.props, c.weight)
+			a := New()
+			_, err := a.MarshalObject(context.Background(), snap)
+			if !errors.Is(err, ErrUnrepresentable) {
+				t.Errorf("MarshalObject: %v does not match ErrUnrepresentable", err)
+			}
+			if err != nil && !strings.Contains(err.Error(), c.mentions) {
+				t.Errorf("the refusal does not name %s: %v", c.mentions, err)
+			}
+			if _, werr := a.WriteObject(context.Background(), io.Discard, snap); !errors.Is(werr, ErrUnrepresentable) {
+				t.Errorf("WriteObject: %v does not match ErrUnrepresentable", werr)
+			}
+		})
+	}
+
+	data, err := New().MarshalObject(context.Background(), nonFiniteSnapshot(t, map[string]any{"ratio": spelled("x")}, 1.5))
+	if err != nil {
+		t.Fatalf("a value that spells itself was refused: %v", err)
+	}
+	if !strings.Contains(string(data), `"ratio":{"spelled":"x"}`) {
+		t.Errorf("got %s, want the value written as it spells itself", data)
 	}
 }
 

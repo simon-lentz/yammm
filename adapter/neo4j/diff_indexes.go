@@ -77,8 +77,9 @@ type IndexDrift struct {
 // DiffIndexes performs a semantic diff between desired schema indexes and
 // actual database indexes, classifying each into one of five categories.
 //
-// Only indexes on labels the schema owns are considered — see
-// [Adapter.OwnedLabels], which the caller builds once and passes in. Desired
+// Only indexes on labels the schema owns are matched, created or dropped — see
+// [Adapter.OwnedLabels], which the caller builds once and passes in — and any
+// remote index can block a desired one's creation. Desired
 // indexes are matched to remote ones in three phases: name and identity
 // together, then identity alone, then name alone; see [pairObjects] for why that
 // order matters.
@@ -90,8 +91,11 @@ type IndexDrift struct {
 // Create + Drop when its name differs too, and Drift when it holds the desired
 // index's name.
 //
-// A schema-owned remote index with no declaration is reported as a Drop — the
-// drift the index feature exists to surface. Drops are reported, never applied.
+// A schema-owned remote index that [RemoteIndex.Declarable] accepts and no
+// declaration matches is reported as a Drop — the drift the index feature
+// exists to surface; an owned index it refuses is counted in Excluded instead,
+// unless it is a constraint's backing index that serves a declaration and
+// serves queries, which is a match. Drops are reported, never applied.
 //
 // Index and constraint names share ONE namespace. A constraint backed by an
 // index appears in SHOW INDEXES under the constraint's name and is seen here

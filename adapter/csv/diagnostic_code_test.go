@@ -11,11 +11,14 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Every fault this package reports carries one of four codes, and which one
-// says what the caller must do about it: fix the data, fix the file, fix the
-// call, or fix the device. The table drives every emission site, and the
-// header's own read twice, since it chooses between two codes at run time — so
-// a site that moves between classes fails here.
+// Every fault this package's own checks find carries one of four codes, and
+// which one says what the caller must do about it: fix the data, fix the file,
+// fix the call, or fix the device. A type-column value that is not a type name
+// and a cancelled parse take the codes the JSON adapter reports them under,
+// E_INVALID_TYPE_TAG and E_CONTEXT_CANCELLED, and are not in this table. The
+// table drives every site that emits one of the four, and the header's own read
+// twice, since it chooses between two codes at run time — so a site that moves
+// between classes fails here.
 func TestParse_CodeSaysWhichFaultItIs(t *testing.T) {
 	t.Parallel()
 
@@ -64,6 +67,13 @@ func TestParse_CodeSaysWhichFaultItIs(t *testing.T) {
 			typeColumn: true,
 			wantCode:   E_CSV_CONFIG, wantSev: diag.Error, mentions: "requires WithTypeColumn",
 		},
+		{
+			name: "ParseWithTypeColumn with a type column holding a CR LF", schemaFile: "basic.yammm", typeName: "Entity",
+			opts:       []Option{WithTypeColumn("ki\r\nnd")},
+			input:      "kind,id,name\nEntity,e1,Ann\n",
+			typeColumn: true,
+			wantCode:   E_CSV_CONFIG, wantSev: diag.Error, mentions: "holds a CR LF",
+		},
 
 		// The file is not well formed for this configuration. The same code the
 		// JSON adapter reports a malformed document under.
@@ -98,6 +108,11 @@ func TestParse_CodeSaysWhichFaultItIs(t *testing.T) {
 			name: "an edge group whose columns disagree on target count", schemaFile: "edge_properties.yammm", typeName: "Order",
 			input:    "order_id,carries._target_item_id,carries.quantity\no1,i1|i2,5\n",
 			wantCode: diag.E_ADAPTER_PARSE, wantSev: diag.Error, mentions: "disagree on target count",
+		},
+		{
+			name: "an edge group column naming no member whose count disagrees", schemaFile: "edge_properties.yammm", typeName: "Order",
+			input:    "order_id,carries._target_item_id,carries.quantity,carries.extra\no1,i1|i2,5|6,a|b|c\n",
+			wantCode: diag.E_ADAPTER_PARSE, wantSev: diag.Error, mentions: "holds 3 segments for 2 targets",
 		},
 		{
 			name: "a plain column and its dotted group both writing one key", schemaFile: "with_relations.yammm", typeName: "Employee",

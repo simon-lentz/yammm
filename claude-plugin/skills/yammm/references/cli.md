@@ -252,7 +252,7 @@ yammm gen --to md --no-class-diagram --output SCHEMA.md schema.yammm
 
 `--to go` generates Go source via the `adapter/gogen` adapter: one struct per type, named Enum/DataType types, generated `Date` and per-layout `Timestamp` types, `EDGE_` association structs, a Graph aggregate, and the embedded schema source reachable through `SerializedSources()` / `SerializedEntry`. Output is stdlib-only (imports at most `time` and `encoding/json`), formatted and type-checked before being written; schemas with imports are flattened into one self-contained package.
 
-`--to jsonschema` generates a JSON Schema draft 2020-12 document via the `adapter/jschema` adapter, describing the instance-data JSON object form `yammm check` accepts — wire it into an editor through a VS Code `json.schemas` mapping for completion, hover documentation, and validation while authoring JSON data files. A JSON data file cannot carry a `"$schema"` member, because `adapter/json` reads every top-level key as a type name. A `# yaml-language-server: $schema=…` header wires a YAML file, but yammm reads no YAML data file, so that file gets the editor's checks alone. Same closure flattening; output is deterministic and self-checked before being written.
+`--to jsonschema` generates a JSON Schema draft 2020-12 document via the `adapter/jschema` adapter, describing the instance-data JSON object form `yammm check` reads, without reproducing yammm's validation — wire it into an editor through a VS Code `json.schemas` mapping for completion, hover documentation, and validation while authoring JSON data files. A JSON data file cannot carry a `"$schema"` member, because `adapter/json` reads every top-level key as a type name. A `# yaml-language-server: $schema=…` header wires a YAML file, but yammm reads no YAML data file, so that file gets the editor's checks alone. Same closure flattening; output is deterministic and self-checked before being written.
 
 `--to md` (alias `markdown`) generates a Markdown reference document via the `adapter/markdown` adapter: a Mermaid class diagram of the whole import closure plus per-type sections (flattened property tables with `from <Owner>` inherited-row markers, relation bullets with edge-property sub-tables, invariant source fences) and data-type tables. Same closure flattening; output is deterministic and structurally self-checked before being written.
 
@@ -296,8 +296,8 @@ Generates `CREATE CONSTRAINT IF NOT EXISTS` Cypher statements from a schema.
 | ---- | ------- | ----------- |
 | `--edition` | `enterprise` | `enterprise` or `community` |
 | `--named` | `true` | Generate named constraints |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
-| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar properties |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
+| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |
@@ -331,8 +331,8 @@ Compares desired schema constraints **and indexes** against the live database (i
 | `--indexes` | `true` | Include index drift in the diff and the exit code; `--indexes=false` is constraints-only |
 | `--edition` | `enterprise` | `enterprise` or `community` (governs which constraints are diffed, on **both** sides) |
 | `--named` | `true` | Named constraints; with `false` every pairing falls through to semantic identity |
-| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Neo4j 5.7+, Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
-| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar properties |
+| `--node-keys` | `false` | Emit NODE KEY instead of separate UNIQUE + NOT NULL for primary keys (Enterprise; degrades to UNIQUE with `W_NEO4J_NODE_KEY_UNSUPPORTED` under `--edition community`) |
+| `--scalar-types` | `true` | Emit `IS :: <TYPE>` constraints for scalar, List and Vector properties |
 | `--required-only-types` | `false` | Restrict type constraints to required properties |
 | `--separator` | `__` | Label separator (schema__Type) |
 | `--prefix` | *(none)* | Global label prefix, if the target graph was generated with one |

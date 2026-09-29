@@ -45,7 +45,8 @@
 // The header must name every column, and name each one once: a header with an
 // unnamed column or a name that repeats is refused at the header's line, with
 // one diagnostic for each unnamed column and each repeated name, and no record
-// is read. A name is matched as written; it is never trimmed.
+// is read. A name is never trimmed; which member it names is decided under
+// Column Mapping.
 //
 // A record the reader refuses — one whose field count differs from the
 // header's, a bare quote in an unquoted field, a character after a quoted
@@ -68,9 +69,11 @@
 //
 // Every entry point observes its context at each unit of work it has. Both parse
 // methods check before each record is read and stop with a Fatal
-// E_CONTEXT_CANCELLED carrying the span of the last record the reader returned,
-// or none before the first, keeping the records read before it; Fatal because [diag.Result.HasFatal] is
-// documented to mean the run did not finish. Both writers check once per type
+// E_CONTEXT_CANCELLED carrying the span of the last record the reader returned
+// without an error, or none before the first, keeping the records read before
+// it; a record the reader refuses leaves the span where it was. Fatal because
+// [diag.Result.HasFatal] is documented to mean the run did not finish. Both
+// writers check once per type
 // and again once per instance and return an error wrapping the context's:
 // [Adapter.MarshalSnapshot] returns no output, and [Adapter.WriteSnapshot]
 // flushes what it wrote first, so a destination still parses as far as it goes.
@@ -171,9 +174,10 @@
 // The write side renders Timestamp, Date and UUID through their constraint, so
 // a cell carries the text the validator stores — including foreign-key columns,
 // whose components render through the TARGET type's primary-key constraints,
-// and list elements, which render through the element constraint. A value the
+// and list elements, which render through the element constraint. A scalar the
 // constraint cannot render is written as it arrived: an export returns an error
-// rather than a diag.Result, so one malformed cell must not fail the file.
+// rather than a diag.Result, so one malformed cell must not fail the file. A
+// composite value has no spelling in a cell and is refused (under Empty Cells).
 //
 // # List Properties
 //
@@ -239,9 +243,11 @@
 // writes one shape specially so that it reads back:
 //
 //   - An optional property holding "" or an empty list writes the cell null
-//     writes, so it reads back as null. This is a documented limitation: a
-//     null-sentinel option would exist only to express a case the
-//     specification calls a value, and the schema decides every other case.
+//     writes, so it reads back as null, and an optional edge property holding
+//     "" writes an empty segment, so it reads back as absent on that target.
+//     This is a documented limitation: a null-sentinel option would exist
+//     only to express a case the specification calls a value, and the schema
+//     decides every other case.
 //   - A list holding one empty element writes the cell an empty list writes,
 //     and an inner list holding one empty element writes the text an empty
 //     inner list writes.

@@ -35,13 +35,15 @@ var (
 	// the parse side: the adapter holds a setting it cannot use — a list
 	// separator the parser could not find again, or a delimiter [encoding/csv]
 	// refuses. It is the class, matched with errors.Is; the message names the
-	// setting, and for a delimiter it is [encoding/csv]'s own.
+	// setting, and for a delimiter it quotes [encoding/csv]'s refusal text.
 	ErrConfig = errors.New("csv adapter: the adapter holds a setting it cannot use")
 
-	// ErrUnrepresentable marks a write refused because the snapshot holds a
-	// value CSV cannot write so that this adapter's own parser reads it back
-	// unchanged. It is the class, matched with errors.Is; the message names the
-	// instance, the column or the association. It separates a refusal of the
-	// data from an I/O failure and from [ErrConfig], which no message text can.
+	// ErrUnrepresentable marks a write refused because the snapshot holds what
+	// CSV cannot write so that this adapter's own parser reads it back
+	// unchanged: a value, an association whose columns would all be empty, or a
+	// composed child. It is the class, matched with errors.Is; the message names
+	// the instance and the property, the column, the association or the
+	// composition. It separates a refusal of the data from an I/O failure and
+	// from [ErrConfig], which no message text can.
 	ErrUnrepresentable = errors.New("csv adapter: the snapshot holds a value CSV cannot represent")
 )

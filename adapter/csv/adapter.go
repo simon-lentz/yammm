@@ -3,8 +3,11 @@ package csv
 import (
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/schema"
@@ -48,8 +51,8 @@ func New(opts ...Option) *Adapter {
 // quoting. A delimiter [encoding/csv] refuses — 0, '"', '\r', '\n',
 // U+FFFD or an invalid rune — is refused before a parse reads or a write
 // requests a writer, as a refused list separator is: as an Error
-// [E_CSV_CONFIG] diagnostic, or as an error marked [ErrConfig], each carrying
-// [encoding/csv]'s own refusal.
+// [E_CSV_CONFIG] diagnostic, or as an error marked [ErrConfig], each naming the
+// delimiter and quoting [encoding/csv]'s refusal text.
 func WithDelimiter(r rune) Option {
 	return func(c *adapterConfig) {
 		c.delimiter = r
@@ -122,12 +125,26 @@ func (a *Adapter) configError() error {
 }
 
 // delimiterError refuses a delimiter [encoding/csv] refuses, asked of the
-// package itself so this adapter never restates its rule, and carrying its text.
+// package itself so this adapter never restates its rule, and quoting its text.
+// The text is all a caller can have: encoding/csv does not export that error.
 func delimiterError(delim rune) error {
 	probe := csv.NewReader(strings.NewReader(""))
 	probe.Comma = delim
 	if _, err := probe.Read(); !errors.Is(err, io.EOF) {
-		return refusal.New(ErrConfig, "csv adapter: delimiter %q: %s", delim, err)
+		return refusal.New(ErrConfig, "csv adapter: delimiter %s: %s", runeText(delim), err)
 	}
 	return nil
+}
+
+// runeText names r in a message. %q writes U+FFFD for every value that is not
+// a Unicode scalar value, so such a value is written by its number instead.
+func runeText(r rune) string {
+	switch {
+	case utf8.ValidRune(r):
+		return strconv.QuoteRune(r)
+	case r < 0:
+		return fmt.Sprintf("%d (not a Unicode scalar value)", r)
+	default:
+		return fmt.Sprintf("%U (not a Unicode scalar value)", r)
+	}
 }

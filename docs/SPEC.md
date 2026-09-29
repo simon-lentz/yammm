@@ -388,7 +388,7 @@ The nearest marker wins, so a nested marker deliberately narrows a sub-module's 
 
 **Size:** A schema source — the entry file or an import — is read up to 16 MiB; a larger file is refused before it is parsed.
 
-**Security:** Import paths are sandboxed using `os.Root` to prevent path traversal attacks. Paths that attempt to escape the module root are rejected at the kernel level. The module root is that sandbox's boundary, so committing a `yammm.mod` grants the loader read access to that directory's whole subtree for imports — which is what makes a repository-relative import resolve.
+**Security:** A load that reads imports from disk sandboxes their paths using `os.Root` to prevent path traversal attacks: `os.Root` resolves every component, a symlink's target included, against an open handle on the module root and rejects a path that would leave it. The module root is that sandbox's boundary, so committing a `yammm.mod` grants the loader read access to that directory's whole subtree for imports — which is what makes a repository-relative import resolve. A load under `schema.WithSyntheticRoot` reads no disk: it requires `WithSourcesOnly`, so every import is looked up among the sources the caller passed, and a relative import resolves against the importing source's key as text, so one that climbs above the root keeps its `..` rather than being rejected (`schema.SyntheticImportKey` states the rule).
 
 **Default alias derivation:** When no explicit `as` clause is provided, the alias is derived from the last path segment:
 
@@ -1839,7 +1839,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
-**Adapter** — format-specific errors. These are registered by the adapter packages, so they appear in `diag.AllCodes()` only once the package is linked:
+**Adapter** — format-specific errors. `E_ADAPTER_PARSE` and `E_ADAPTER_IO` are declared in `diag`, so they are always in `diag.AllCodes()`; every other code below is registered by its adapter package, so it appears there only once that package is linked:
 
 - `E_ADAPTER_PARSE` — parsing error in adapter input
 - `E_ADAPTER_IO` (Fatal) — an adapter's input failed to arrive: the reader a parse reads from returned an error that is neither the input's end nor a fault in its content. What was read before the failure is kept

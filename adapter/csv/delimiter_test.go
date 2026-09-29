@@ -194,3 +194,59 @@ func TestWithDelimiter_RefusedDelimiterIsReportedAtUse(t *testing.T) {
 		})
 	}
 }
+
+// The refusal names the delimiter it refuses. %q writes U+FFFD for a value that
+// is not a Unicode scalar value, so a surrogate half, a value past U+10FFFF and
+// a negative value each read as the replacement character unless the message
+// writes the number.
+func TestWithDelimiter_RefusalNamesTheDelimiter(t *testing.T) {
+	t.Parallel()
+	s := loadTestSchema(t, "basic.yammm")
+	st, _ := s.Type("Entity")
+	snap := buildSnapshot(t, s, map[string][]map[string]any{"Entity": {{"id": "e1", "name": "Ann"}}})
+	id := location.MustNewSourceID("test://data.csv")
+
+	for _, c := range []struct {
+		delim rune
+		name  string
+	}{
+		{0, `'\x00'`},
+		{'"', `'"'`},
+		{'\r', `'\r'`},
+		{'\n', `'\n'`},
+		{utf8.RuneError, `'�'`},
+		{0xD800, `U+D800 (not a Unicode scalar value)`},
+		{utf8.MaxRune + 1, `U+110000 (not a Unicode scalar value)`},
+		{-1, `-1 (not a Unicode scalar value)`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			want := "csv adapter: delimiter " + c.name + ": csv: invalid field or comment delimiter"
+			a := New(WithDelimiter(c.delim), WithTypeColumn("kind"))
+
+			_, typed := a.ParseTyped(context.Background(), id, "Entity", strings.NewReader("id\ne1\n"), st)
+			_, byColumn := a.ParseWithTypeColumn(context.Background(), id, strings.NewReader("kind\nEntity\n"),
+				func(string) *schema.Type { return st })
+			for side, result := range map[string]diag.Result{"ParseTyped": typed, "ParseWithTypeColumn": byColumn} {
+				var messages []string
+				for issue := range result.Issues() {
+					messages = append(messages, issue.Message())
+				}
+				if len(messages) != 1 || messages[0] != want {
+					t.Errorf("%s messages = %q, want [%q]", side, messages, want)
+				}
+			}
+
+			_, err := a.MarshalSnapshot(context.Background(), snap)
+			if err == nil || err.Error() != want {
+				t.Errorf("MarshalSnapshot error = %v, want %q", err, want)
+			}
+			err = a.WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
+				return io.Discard, nil
+			}, snap)
+			if err == nil || err.Error() != want {
+				t.Errorf("WriteSnapshot error = %v, want %q", err, want)
+			}
+		})
+	}
+}

@@ -57,7 +57,7 @@ adapter := csvAdapter.New(
 )
 ```
 
-The delimiter is `,` unless `csvAdapter.WithDelimiter` sets another (`'\t'` for TSV), the first row is always the header, and list values join on `|`.
+The delimiter is `,` unless `csvAdapter.WithDelimiter` sets another (`'\t'` for TSV), the first row is always the header, and list elements, vector elements and edge-column segments join on `|` unless `csvAdapter.WithListSeparator` sets another separator, which the parse side splits on too.
 
 ### Parsing
 
@@ -267,7 +267,7 @@ Full API semantics: the gogen section of `docs/API.md`. CLI form: `yammm gen --t
 import "github.com/simon-lentz/yammm/adapter/jschema"
 ```
 
-Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` accepts — one top-level key per type a data file can hold (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
+Schema-in, bytes-out: `jschema.Marshal` maps a loaded, resolved schema to a JSON Schema **draft 2020-12** document describing the instance-data JSON object form `yammm check` reads (it does not reproduce yammm's validation; `adapter/jschema`'s Fidelity Caveats list where the two differ) — one top-level key per type a data file can hold (entry types bare, directly imported types alias-qualified as `common.Region`), each an array of instances; `EDGE_` defs carrying required `_target_<pk>` foreign-key fields; compositions always arrays (`minItems: 1` when required, `maxItems: 1` for to-one); named DataTypes as `$ref`ed `$defs` entries; schema doc-comments flowing through as `description` for editor hover. Association presence is deliberately NOT `required` per-file (yammm defers it to graph assembly). Output is deterministic and self-checked (valid JSON, every `$ref` resolves) before return. Options: `WithSchemaID` (the `"$id"`, omitted when unset). Plain `error`, no instance-data path, no source-backing requirement.
 
 Wire the generated document into an editor for completion and validation while authoring data files. For a JSON data file, use a `json.schemas` mapping in the editor's settings. A JSON data file cannot carry a `"$schema"` member: the envelope admits no member but a type name, and `adapter/json` refuses the key as a type tag (`E_INVALID_TYPE_TAG`). A `# yaml-language-server: $schema=./fleet.schema.json` comment wires a YAML file, but yammm reads no YAML data file — its data commands read JSON, JSONC and CSV — so that file gets the editor's checks alone.
 

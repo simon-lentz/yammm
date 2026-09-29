@@ -3,6 +3,7 @@ package json
 import (
 	"bytes"
 	"context"
+	"encoding"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -341,13 +342,24 @@ func canonicalOrRaw(raw any, c schema.Constraint) (any, bool) {
 //
 // The digits come from encoding/json itself, so this cannot drift from the
 // encoder that writes every other number in the document. A float32, and a
-// named type over one, keeps its 32-bit shortest form. Every other value
-// passes through. A non-finite float reports false, JSON having no number for
-// it, and so does a Go value encoding/json refuses.
+// named type over one, keeps its 32-bit shortest form. A value whose type
+// spells itself for encoding/json, as a [json.Marshaler] or an
+// [encoding.TextMarshaler], is written as it spells itself, whatever its kind.
+// Every other value passes through. A non-finite float reports false, JSON
+// having no number for it, and so does a Go value encoding/json refuses.
 func withFloatIndicator(v any) (any, bool) {
+	rv := reflect.ValueOf(v)
+	if rv.IsValid() && (rv.Type().Implements(jsonMarshalerType) || rv.Type().Implements(textMarshalerType)) {
+		// Its method can refuse at any kind, a string's included, so
+		// encoding/json judges it here, where the refusal can name its site.
+		if _, err := json.Marshal(v); err != nil {
+			return nil, false
+		}
+		return v, true
+	}
 	var b []byte
 	var err error
-	switch rv := reflect.ValueOf(v); rv.Kind() {
+	switch rv.Kind() {
 	case reflect.Float32:
 		b, err = json.Marshal(float32(rv.Float()))
 	case reflect.Float64:
@@ -372,3 +384,8 @@ func withFloatIndicator(v any) (any, bool) {
 	}
 	return json.RawMessage(b), true
 }
+
+var (
+	jsonMarshalerType = reflect.TypeFor[json.Marshaler]()
+	textMarshalerType = reflect.TypeFor[encoding.TextMarshaler]()
+)
