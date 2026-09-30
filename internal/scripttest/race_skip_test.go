@@ -8,7 +8,6 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,18 +26,13 @@ const ratioFloorTest = "TestUpdateMetadataRatioFloor"
 // skipped it, so a skip built another way never runs at all.
 func TestRaceSkips_GoThroughRaceskip(t *testing.T) {
 	t.Parallel()
-	cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z", "--", "*.go")
-	cmd.Dir = repoRoot
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git ls-files: %v", err)
-	}
+	goFiles := trackedFiles(t, repoRoot, func(rel string) bool { return strings.HasSuffix(rel, ".go") })
 
 	fset := token.NewFileSet()
 	scanned := 0
 	ratioFloorFound := false
-	for rel := range strings.SplitSeq(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		if rel == "" || strings.HasPrefix(rel, "internal/raceskip/") || slices.Contains(strings.Split(rel, "/"), "testdata") {
+	for _, rel := range goFiles {
+		if strings.HasPrefix(rel, "internal/raceskip/") || slices.Contains(strings.Split(rel, "/"), "testdata") {
 			continue
 		}
 		src, err := os.ReadFile(fromRoot(rel))

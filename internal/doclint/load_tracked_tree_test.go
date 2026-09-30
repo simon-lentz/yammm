@@ -1,7 +1,6 @@
 package doclint
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -37,28 +36,6 @@ func TestLoad_ReadsATaggedTestFile(t *testing.T) {
 	integration := packageAt(t, m, "adapter/neo4j/integration")
 	if _, ok := integration.names["TestMain"]; !ok {
 		t.Error("TestMain is not in the loaded name set: a tagged test file was excluded")
-	}
-}
-
-// TestLoad_ReadsTheTrackedTreeOnly pins that an untracked file contributes
-// nothing. Reading one gave a local run a verdict CI could not reproduce — the
-// same divergence class the tidy gate closed — because the file exists on one
-// machine and in no checkout. Dropping the tracked filter turns this red.
-func TestLoad_ReadsTheTrackedTreeOnly(t *testing.T) {
-	// Not parallel: it writes a file into the module and removes it.
-	const probe = "untracked_probe.go"
-	const src = "package doclint\n\n// UntrackedProbe is declared by a file no checkout holds.\nfunc UntrackedProbe() {}\n"
-	if err := os.WriteFile(probe, []byte(src), 0o600); err != nil {
-		t.Fatalf("writing the probe: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Remove(probe) })
-
-	m, err := Load("../..")
-	if err != nil {
-		t.Fatalf("loading the module: %v", err)
-	}
-	if _, ok := packageAt(t, m, "internal/doclint").names["UntrackedProbe"]; ok {
-		t.Error("an untracked file contributed a name; the gate reads the filesystem, not the tracked tree")
 	}
 }
 

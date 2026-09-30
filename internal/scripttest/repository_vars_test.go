@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -53,6 +54,12 @@ func ignoresTheEnclosingRepository(t *testing.T, name string) {
 
 	r.wantCode(t, 0)
 	r.wantStdout(t, fixtureModule+"/ok\n")
+	listed := &fixture{t: t, dir: t.TempDir()}
+	listed.write("held.txt", "held\n")
+	listed.index()
+	if got := trackedFiles(t, listed.dir, func(string) bool { return true }); !slices.Equal(got, []string{"held.txt"}) {
+		t.Errorf("trackedFiles read %q under %s, want the fixture's own [held.txt]", got, name)
+	}
 	after, err := os.ReadFile(index)
 	if err != nil {
 		t.Fatal(err)

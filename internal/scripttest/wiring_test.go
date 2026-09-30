@@ -2193,22 +2193,15 @@ func untimedJobs(workflows map[string]workflow) []string {
 
 // trackedWorkflows decodes, keyed by file name, every workflow GitHub reads
 // from root's tracked tree: the .yml and .yaml files directly under
-// .github/workflows. The pathspecs take glob magic because a plain * also
-// matches a slash, and GitHub runs no file in a subdirectory.
+// .github/workflows. GitHub runs no file in a subdirectory.
 func trackedWorkflows(t *testing.T, root string) map[string]workflow {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z", "--",
-		":(glob).github/workflows/*.yml", ":(glob).github/workflows/*.yaml")
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git ls-files: %v", err)
+	isWorkflow := func(rel string) bool {
+		ext := path.Ext(rel)
+		return path.Dir(rel) == ".github/workflows" && (ext == ".yml" || ext == ".yaml")
 	}
 	workflows := map[string]workflow{}
-	for rel := range strings.SplitSeq(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		if rel == "" {
-			continue
-		}
+	for _, rel := range trackedFiles(t, root, isWorkflow) {
 		file := filepath.Join(root, filepath.FromSlash(rel))
 		if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
 			// The index still lists a file the working tree has deleted.
@@ -2231,16 +2224,67 @@ func TestTrackedWorkflows_ReadsWhatGitHubRuns(t *testing.T) {
 	f.write(".github/workflows/b.yaml", jobNamed("b"))
 	f.write(".github/workflows/sub/a.yml", jobNamed("nested"))
 	f.write(".github/workflows/sub/c.yaml", jobNamed("nested"))
+	f.write("nested/.github/workflows/d.yml", jobNamed("nested"))
 	f.write(".github/workflows/gone.yml", jobNamed("gone"))
 	f.write(".github/workflows/notes.txt", "not a workflow\n")
 	f.index()
 	if err := os.Remove(filepath.Join(f.dir, ".github", "workflows", "gone.yml")); err != nil {
 		t.Fatal(err)
 	}
+	f.write(".github/workflows/untracked.yml", jobNamed("untracked"))
 
 	got := trackedWorkflows(t, f.dir)
 	if names := slices.Sorted(maps.Keys(got)); !slices.Equal(names, []string{"a.yml", "b.yaml"}) {
-		t.Errorf("read %q, want [a.yml b.yaml]: a subdirectory, a deleted file and a non-workflow are not run", names)
+		t.Errorf("read %q, want [a.yml b.yaml]: a subdirectory, another tree's .github, a deleted file, an untracked file and a non-workflow are not run", names)
+	}
+	if _, ok := got["a.yml"].Jobs["top"]; !ok {
+		t.Errorf("a.yml decoded as jobs %q, want the top-level file's job top", slices.Sorted(maps.Keys(got["a.yml"].Jobs)))
+	}
+}
+
+// insideWorkTree asks about the root it is given, and a .git directory is no
+// work tree.
+func TestInsideWorkTree_AsksAboutItsRoot(t *testing.T) {
+	t.Parallel()
+	f := &fixture{t: t, dir: t.TempDir()}
+	f.write("held.txt", "held\n")
+	f.index()
+	plain := t.TempDir()
+	for dir, want := range map[string]bool{
+		f.dir:                        true,
+		filepath.Join(f.dir, ".git"): false,
+		plain:                        false,
+	} {
+		if got := insideWorkTree(t, dir); got != want {
+			t.Errorf("insideWorkTree(%s) = %v, want %v", dir, got, want)
+		}
+	}
+}
+
+// Outside a git work tree, as in the module cache's copy of a release, the
+// files on disk are the tracked tree, and the same workflows are read.
+func TestTrackedWorkflows_ReadsTheFilesOutsideAWorkTree(t *testing.T) {
+	t.Parallel()
+	f := &fixture{t: t, dir: t.TempDir()}
+	probe := exec.CommandContext(t.Context(), "git", "rev-parse", "--is-inside-work-tree")
+	probe.Dir = f.dir
+	probe.Env = withoutRepositoryVars(t, os.Environ())
+	if probe.Run() == nil {
+		t.Fatalf("the temporary directory %s lies inside a git work tree; set TMPDIR outside one", f.dir)
+	}
+	jobNamed := func(name string) string {
+		return "jobs:\n  " + name + ":\n    runs-on: ubuntu-24.04\n    steps:\n      - run: make\n"
+	}
+	f.write(".github/workflows/a.yml", jobNamed("top"))
+	f.write(".github/workflows/b.yaml", jobNamed("b"))
+	f.write(".github/workflows/sub/a.yml", jobNamed("nested"))
+	f.write(".github/workflows/dir.yml/notes.txt", "a directory named as a workflow\n")
+	f.write("nested/.github/workflows/c.yml", jobNamed("nested"))
+	f.write(".github/workflows/notes.txt", "not a workflow\n")
+
+	got := trackedWorkflows(t, f.dir)
+	if names := slices.Sorted(maps.Keys(got)); !slices.Equal(names, []string{"a.yml", "b.yaml"}) {
+		t.Errorf("read %q, want [a.yml b.yaml]: a subdirectory, a directory, another tree's .github and a non-workflow are not run", names)
 	}
 	if _, ok := got["a.yml"].Jobs["top"]; !ok {
 		t.Errorf("a.yml decoded as jobs %q, want the top-level file's job top", slices.Sorted(maps.Keys(got["a.yml"].Jobs)))

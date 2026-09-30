@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,6 +59,63 @@ func directiveOf(version string) string {
 		v = v[:i]
 	}
 	return v
+}
+
+// trackedFiles returns the files git tracks under root that keep accepts,
+// slash-separated, relative to root and sorted. When root lies in no work tree
+// git can read, as in the module cache's copy of a release, it walks root
+// instead: that copy holds the tracked tree and nothing else, and has no index.
+func trackedFiles(t *testing.T, root string, keep func(rel string) bool) []string {
+	t.Helper()
+	var all []string
+	if insideWorkTree(t, root) {
+		cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z")
+		cmd.Dir = root
+		cmd.Env = gitEnv(t, root)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git ls-files: %v", err)
+		}
+		all = strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	} else {
+		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return err
+			}
+			rel, err := filepath.Rel(root, p)
+			all = append(all, filepath.ToSlash(rel))
+			return err
+		})
+		if err != nil {
+			t.Fatalf("walking %s: %v", root, err)
+		}
+	}
+	return slices.Sorted(slices.Values(slices.DeleteFunc(all, func(rel string) bool { return rel == "" || !keep(rel) })))
+}
+
+// insideWorkTree reports whether root lies in a git work tree git can read.
+func insideWorkTree(t *testing.T, root string) bool {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		return false
+	}
+	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--is-inside-work-tree")
+	cmd.Dir = root
+	cmd.Env = gitEnv(t, root)
+	out, err := cmd.Output()
+	return err == nil && strings.TrimSpace(string(out)) == "true"
+}
+
+// gitEnv is the environment git runs in when it reads root. The repository
+// root keeps the repository variables, since under a hook they name the tree
+// being committed; any other root is a fixture, with a repository of its own or
+// none, and those variables would point it at the enclosing repository.
+func gitEnv(t *testing.T, root string) []string {
+	t.Helper()
+	if root == repoRoot {
+		return os.Environ()
+	}
+	return withoutRepositoryVars(t, os.Environ())
 }
 
 // fromRoot returns a slash-separated repository path relative to this package.

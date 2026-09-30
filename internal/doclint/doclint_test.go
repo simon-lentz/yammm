@@ -2,6 +2,8 @@ package doclint_test
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -27,14 +29,18 @@ func (r *recorder) reports(substr string) bool {
 	})
 }
 
-// fixture is a module of its own so the gate runs its real entry point, go.mod
-// read included, rather than a path that only tests exercise.
-const fixture = "testdata/fixture"
-
+// runGate runs the gate over a copy of testdata/fixture restored as a module of
+// its own, so the gate runs its real entry point, go.mod read included, rather
+// than a path that only tests exercise. A run that resolved no link fails, so a
+// test asserting that a report is absent cannot pass with nothing read.
 func runGate(t *testing.T) (*recorder, int) {
 	t.Helper()
 	r := &recorder{}
-	return r, doclint.AssertNoDanglingLinks(r, fixture)
+	checked := doclint.AssertNoDanglingLinks(r, materialize(t, "fixture"))
+	if checked == 0 {
+		t.Fatalf("the gate resolved no link in the fixture: %v", r.msgs)
+	}
+	return r, checked
 }
 
 func TestAssertNoDanglingLinks_CleanPackageIsSilent(t *testing.T) {
@@ -131,6 +137,45 @@ func TestAssertNoDanglingLinks_AcceptsWholePackageLinks(t *testing.T) {
 	}
 }
 
+// The gate reads the tracked tree: a name only an untracked file declares
+// resolves nothing. Reading the filesystem gave a local run a verdict CI could
+// not reproduce, because the file exists on one machine and in no checkout. The
+// module sits below the repository's top, so the gate must name the tracked
+// paths from its root, as git lists them there, never from the top.
+//
+// Not parallel: it builds its own repository (isolateFromEnclosingRepository).
+func TestAssertNoDanglingLinks_ReadsTheTrackedTreeOnly(t *testing.T) {
+	isolateFromEnclosingRepository(t)
+	dir := t.TempDir()
+	root := filepath.Join(dir, "mod")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"go.mod":       "module example.com/tracked\n\ngo 1.26\n",
+		"held.go":      "package tracked\n\n// Held links [Untracked].\nfunc Held() {}\n",
+		"untracked.go": "package tracked\n\n// Untracked is declared by a file no checkout holds.\nfunc Untracked() {}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "mod/go.mod", "mod/held.go"}} {
+		cmd := exec.CommandContext(t.Context(), "git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	r := &recorder{}
+	if checked := doclint.AssertNoDanglingLinks(r, root); checked == 0 {
+		t.Error("the gate resolved no links, so it asserts nothing")
+	}
+	if !r.reports("[Untracked]") {
+		t.Errorf("a link to a name only an untracked file declares was not reported; got %v", r.msgs)
+	}
+}
+
 func TestAssertNoDanglingLinks_MissingRootIsReported(t *testing.T) {
 	t.Parallel()
 	r := &recorder{}
@@ -162,7 +207,7 @@ func TestAssertNoDanglingLinks_HonoursBuildConstraints(t *testing.T) {
 func TestAssertNoDanglingLinks_ReadsTheModuleLayout(t *testing.T) {
 	t.Parallel()
 	r := &recorder{}
-	doclint.AssertNoDanglingLinks(r, "testdata/layoutfixture")
+	doclint.AssertNoDanglingLinks(r, materialize(t, "layoutfixture"))
 	for _, want := range []string{
 		"[example.com/lp] resolves to nothing (the module has no package example.com/lp)",
 		"[example.com/lp/gone] resolves to nothing (the module has no package example.com/lp/gone)",
