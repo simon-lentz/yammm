@@ -8,15 +8,17 @@ import (
 
 // Duplicate records a duplicate primary key detected during graph construction.
 //
-// When an instance is added with a primary key that already exists for the same
-// type, a Duplicate is created to track both the new instance (which is rejected)
-// and the existing instance (which remains in the graph).
+// When [Graph.Add] meets a primary key that already exists for the same type, a
+// Duplicate is created to track both the new instance (which is rejected) and
+// the existing instance (which remains in the graph). [Graph.AddOrMerge]
+// creates one only for an incoming instance carrying composed children; a merge
+// creates none.
 //
 // # Composed Children Not Included
 //
-// The Instance field contains the rejected instance without its composed children.
-// This is because duplicate detection occurs before composition extraction, so
-// composed children from the rejected instance are never processed. If you need
+// [Duplicate.Instance] is the rejected instance without its composed children.
+// [Graph.Add] builds the whole tree before it meets the duplicate, and records
+// a childless copy of the rejected root: a duplicate installs nothing. If you need
 // to inspect composed children from duplicate data, access them from the original
 // [instance.ValidInstance] passed to [Graph.Add].
 //

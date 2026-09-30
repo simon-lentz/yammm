@@ -12,7 +12,7 @@ permissions:
 jobs:
   pre-commit:
     name: Pre-commit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -25,7 +25,7 @@ jobs:
         run: pre-commit run --all-files
   extension-checks:
     name: Extension Checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -64,7 +64,7 @@ jobs:
         run: xvfb-run -a npm run test:integration
   build-extension:
     name: Build Extension ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         include:

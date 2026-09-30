@@ -265,11 +265,10 @@ func UpdateMetadata(
 	return out, sd.collector.Result()
 }
 
-// UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; on any failure
-// that indicates the input is not Marshal-shaped
-// (E_UPDATE_METADATA_BODY_OFFSET, E_SNAPSHOT_MALFORMED, or any other
-// Fatal-severity issue that is NOT E_CONTEXT_CANCELLED), transparently
-// falls back to [Load] + [Marshal] using s for the Load. The fallback
+// UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; on any Error or
+// Fatal issue other than E_CONTEXT_CANCELLED (E_SNAPSHOT_MALFORMED at Error,
+// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another), transparently falls
+// back to [Load] + [Marshal] using s for the Load. The fallback
 // carries the input's indentation and its created_at across — the created_at
 // byte-for-byte, as the fast path keeps it — so the result differs from a
 // direct Marshal only where the input document did.
@@ -283,8 +282,8 @@ func UpdateMetadata(
 // Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], every warning the Load
 // and Marshal legs produced, and one further Warning if the input stated a
 // created_at this path could not parse.
-// Its details include the original triggering Fatal code(s) via a
-// comma-joined "triggering_codes" entry so consumers can log or surface
+// Its details include the distinct Error and Fatal codes that triggered it via
+// a comma-joined "triggering_codes" entry so consumers can log or surface
 // the transition without inspecting the error chain. Callers who want
 // to treat the warning as an error check HasWarnings() or iterate
 // BySeverity(Warning); callers who just want the output bytes use the
@@ -296,10 +295,11 @@ func UpdateMetadata(
 // where any Load + Marshal round-trip is operationally unacceptable and
 // the caller would rather surface the failure than silently recover.
 //
-// Cost on the happy path matches [UpdateMetadata] (~20-40 ms on a
-// 20 MB .ys). On the fallback path, cost matches Load + Marshal
-// (~1 s on the same file); the W_UPDATE_METADATA_FALLBACK warning makes
-// the transition visible in consumer logs and dashboards.
+// Cost on the happy path matches [UpdateMetadata]. On the fallback path it
+// matches Load + Marshal, at least three times slower, the floor the
+// package's ratio test asserts; the
+// W_UPDATE_METADATA_FALLBACK warning makes the transition visible in consumer
+// logs and dashboards.
 //
 // E_CONTEXT_CANCELLED is not a fallback trigger — it propagates as
 // cancellation without re-attempting via the slow path.

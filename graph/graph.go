@@ -21,11 +21,13 @@ import (
 // Graph builds an in-memory data structure from validated instances.
 //
 // Graph is safe for concurrent use from multiple goroutines. Multiple
-// callers may invoke [Graph.Add] and [Graph.AddComposed] concurrently;
-// the graph handles forward references and duplicate detection atomically.
+// callers may invoke [Graph.Add], [Graph.AddOrMerge] and [Graph.AddComposed]
+// concurrently; the graph handles forward references, duplicate detection and
+// merges atomically.
 //
-// All operations accept a [context.Context] for cancellation. Cancellation
-// does not corrupt internal state; partial results may be inspected.
+// Add, AddOrMerge, AddComposed and Check accept a [context.Context] for
+// cancellation. Cancellation does not corrupt internal state; partial results
+// may be inspected.
 type Graph struct {
 	schema *schema.Schema
 	config graphConfig
@@ -57,11 +59,17 @@ type Graph struct {
 	// duplicates holds duplicate PK records.
 	duplicates []*Duplicate
 
+	// bySource indexes edges and pending records by source and association,
+	// for [Graph.AddOrMerge]. It is nil until the first AddOrMerge to reach the
+	// merge rules, at a held key with no composed children, builds it.
+	bySource map[recordSlot]*heldRecords
+
 	// collector accumulates diagnostics.
 	collector *diag.Collector
 
 	// attestValues accumulates the Values attestation: it stays true only
-	// while every installed root and composed child arrived validated.
+	// while every installed root, composed child and merged record arrived
+	// validated.
 	// A seeded graph starts from the loaded header's claim. Guarded by mu.
 	attestValues bool
 }
@@ -135,39 +143,46 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 //
 // Panics if g is nil, inst is nil, or inst's schema does not match the graph's schema.
 func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Result {
+	_, res := g.add(ctx, inst, "graph.Add", "yammm.graph.add", false)
+	return res
+}
+
+// add is [Graph.Add], and with merge set [Graph.AddOrMerge]. name prefixes a
+// panic and the cancellation message; traceName names the traced operation.
+func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, traceName string, merge bool) (merged bool, res diag.Result) {
 	// Programmer errors: a caller cannot recover from any of these.
 	if g == nil {
-		panic("graph.Add: nil *Graph receiver")
+		panic(name + ": nil *Graph receiver")
 	}
 
 	if inst == nil {
-		panic("graph.Add: nil ValidInstance")
+		panic(name + ": nil ValidInstance")
 	}
 
 	if ctx == nil {
-		panic("graph.Add: nil context")
+		panic(name + ": nil context")
 	}
 
 	opCollector := diag.NewCollector(0)
 
 	// Opened before the context check so a cancelled Add is still traced.
 	op := trace.Begin(
-		ctx, g.config.logger, "yammm.graph.add",
+		ctx, g.config.logger, traceName,
 		slog.String("type", inst.TypeName()),
 		slog.String("pk", inst.PrimaryKey().String()),
 	)
 	defer func() { op.End(opCollector.Result().Err()) }()
 
 	if err := ctx.Err(); err != nil {
-		return g.reject(opCollector, diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
-			"graph.Add cancelled: "+err.Error()).Build())
+		return false, g.reject(opCollector, diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
+			name+" cancelled: "+err.Error()).Build())
 	}
 
 	typeID := inst.TypeID()
 
 	// Schema mismatch check — programmer error
 	if !g.isKnownSchema(typeID.SchemaPath()) {
-		panic("graph.Add: instance schema does not match graph schema")
+		panic(name + ": instance schema does not match graph schema")
 	}
 
 	typ, ok := g.schema.TypeByID(typeID)
@@ -182,23 +197,23 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 			builder = builder.WithHint("if this type is from a transitively imported schema, add a direct import to access it")
 			builder = builder.WithDetail(diag.DetailKeyTypeSchema, typeID.SchemaPath().String())
 		}
-		return g.reject(opCollector, builder.Build())
+		return false, g.reject(opCollector, builder.Build())
 	}
 
 	if !typ.HasPrimaryKey() {
-		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
+		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
 			fmt.Sprintf("type %q has no primary key; cannot add to graph", inst.TypeName())).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
 
 	if typ.IsPart() {
-		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
+		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
 			fmt.Sprintf("part type %q cannot be added directly; use AddComposed", inst.TypeName())).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
 
 	if typ.IsAbstract() {
-		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_ABSTRACT_TYPE,
+		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_ABSTRACT_TYPE,
 			fmt.Sprintf("abstract type %q cannot be instantiated in the graph", inst.TypeName())).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
@@ -206,7 +221,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	// An empty key installs under the literal "[]", and a key disagreeing with
 	// a present key property is a forged address.
 	if err := checkInstanceKey(typ, inst, g.canon); err != nil {
-		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
+		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
 			fmt.Sprintf("instance of type %q: %s", inst.TypeName(), err)).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).
 			WithDetail(diag.DetailKeyPrimaryKey, inst.PrimaryKey().String()).Build())
@@ -223,7 +238,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	// first sub-Error issue the check ever produces from Snapshot.Diagnostics().
 	g.collector.Merge(opCollector.Result())
 	if opCollector.HasErrors() {
-		return opCollector.Result()
+		return false, opCollector.Result()
 	}
 
 	typeName := graphInst.TypeName()
@@ -237,6 +252,22 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	typeInstances := g.instances[typeID]
 	if typeInstances != nil {
 		if existing, found := typeInstances[pkString]; found {
+			if merge && len(graphInst.composed) == 0 {
+				plan, refused := g.planMerge(typ, existing, staged)
+				if len(refused) > 0 {
+					for _, issue := range refused {
+						res = g.reject(opCollector, issue)
+					}
+					return false, res
+				}
+				// A merge that installs a record brings the payload's target
+				// keys and edge properties in, so its validation joins Values.
+				if len(plan) > 0 {
+					g.attestValues = g.attestValues && b.attested
+				}
+				g.commitMerge(ctx, existing, plan)
+				return true, opCollector.Result()
+			}
 			// Duplicate.Instance is documented as carrying no composed
 			// children, so the record gets its own childless instance, with
 			// the key and properties the graph would have stored.
@@ -255,7 +286,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 				slog.String("type", typeName),
 				slog.String("pk", pkString),
 			)
-			return g.reject(opCollector, dup.Diagnostic)
+			return false, g.reject(opCollector, dup.Diagnostic)
 		}
 	} else {
 		g.instances[typeID] = make(map[string]*Instance)
@@ -269,7 +300,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	for _, se := range staged {
 		if se.reason == "" {
 			if targetInst := g.findInstance(se.targetType, se.targetKey); targetInst != nil {
-				g.edges = append(g.edges, newEdge(se.relation, graphInst, targetInst, se.properties))
+				g.installEdge(newEdge(se.relation, graphInst, targetInst, se.properties))
 				trace.Debug(
 					ctx, g.config.logger, "edge resolved",
 					slog.String("relation", se.relation),
@@ -289,8 +320,7 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 				slog.String("target_pk", se.targetKey),
 			)
 		}
-		pk := pendingKey{targetTypeID: se.targetType, targetKey: se.targetKey}
-		g.pending[pk] = append(g.pending[pk], &pendingEdge{
+		g.installPendingEdge(&pendingEdge{
 			source:       graphInst,
 			relation:     se.relation,
 			jsonField:    se.jsonField,
@@ -303,23 +333,16 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 	}
 
 	// Resolve every pending edge that targets this instance.
-	pk := pendingKey{targetTypeID: typeID, targetKey: pkString}
-	if pendingList, ok := g.pending[pk]; ok {
-		for _, pend := range pendingList {
-			g.edges = append(g.edges, newEdge(pend.relation, pend.source, graphInst, pend.properties))
-		}
-		if len(pendingList) > 0 {
-			trace.Debug(
-				ctx, g.config.logger, "pending edges resolved",
-				slog.String("target_type", typeName),
-				slog.String("target_pk", pkString),
-				slog.Int("count", len(pendingList)),
-			)
-		}
-		delete(g.pending, pk)
+	if n := g.resolvePending(typeID, pkString, graphInst); n > 0 {
+		trace.Debug(
+			ctx, g.config.logger, "pending edges resolved",
+			slog.String("target_type", typeName),
+			slog.String("target_pk", pkString),
+			slog.Int("count", n),
+		)
 	}
 
-	return opCollector.Result()
+	return false, opCollector.Result()
 }
 
 // AddComposed adds a composed child to an existing parent in the graph.
@@ -334,8 +357,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 //     [Instance.TypeID] carry it. A rendered name cannot denote a type exactly
 //     — see the package doc's Type Identity and Type Names section.
 //   - parentKey: the parent's primary key in [FormatKey]'s form — for example
-//     `["alice"]`, which [FormatKey]("alice") renders, or the String of the
-//     [instance.ValidInstance] handed to [Graph.Add]. A Timestamp, Date or UUID
+//     `["alice"]`, which [FormatKey]("alice") renders, or the PrimaryKey().String()
+//     of the [instance.ValidInstance] handed to [Graph.Add]. A Timestamp, Date or UUID
 //     component is canonicalized here as [Graph.Add] canonicalized it, so any
 //     spelling of the instant addresses the parent; a refusal names the
 //     spelling the caller wrote.
@@ -345,7 +368,8 @@ func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Resu
 // # Limitation: Top-Level Parents Only
 //
 // AddComposed can only attach children to parents that exist in the top-level
-// instances map (those added via [Graph.Add]). It cannot attach grandchildren
+// instances map (those added via [Graph.Add] or [Graph.AddOrMerge], or imported
+// by [NewFromSnapshot]). It cannot attach grandchildren
 // to a composed child. To build nested compositions, either:
 //   - Include nested children inline in the parent's [instance.ValidInstance], or
 //   - Stream children only to top-level parents
@@ -664,8 +688,8 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 // The returned [Snapshot] is immutable and independent of subsequent
 // graph modifications. All slice accessors on Snapshot return sorted data.
 //
-// Snapshot acquires a read lock; concurrent Add/AddComposed calls will
-// block until Snapshot completes.
+// Snapshot acquires a read lock; concurrent Add, AddOrMerge and AddComposed
+// calls block until Snapshot completes.
 func (g *Graph) Snapshot() *Snapshot {
 	if g == nil {
 		return nil

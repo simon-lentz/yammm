@@ -1789,7 +1789,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — primary key missing in graph operations
-- `E_GRAPH_INVALID_PK` — primary key empty, or disagreeing with the instance's own key properties
+- `E_GRAPH_INVALID_PK` — primary key empty, of the wrong arity, or disagreeing with the instance's own key properties
 - `E_GRAPH_CARDINALITY` — an association carries more targets than its multiplicity allows
 - `E_GRAPH_UNKNOWN_RELATION` — instance data under a relation name the type does not declare
 - `E_GRAPH_ABSTRACT_TYPE` — an instance of an abstract type reached the graph

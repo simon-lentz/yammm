@@ -8,7 +8,7 @@ on:
 jobs:
   test:
     name: Test Linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -75,7 +75,7 @@ jobs:
   # Docker-free.
   integration:
     name: Neo4j ${{ matrix.label }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       # Every combination runs: knowing that a change breaks the OLD server but
       # not the new one is the whole point, and fail-fast would hide it.

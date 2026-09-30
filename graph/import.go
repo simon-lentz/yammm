@@ -79,7 +79,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	for _, edge := range snap.Edges() {
 		srcClone := cloneMap[edge.Source()]
 		tgtClone := cloneMap[edge.Target()]
-		g.edges = append(g.edges, newEdge(edge.Relation(), srcClone, tgtClone,
+		g.installEdge(newEdge(edge.Relation(), srcClone, tgtClone,
 			g.canon.edgeProperties(edge.Source().TypeID(), edge.Relation(), edge.Properties())))
 	}
 
@@ -108,8 +108,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 		// The pending index is read by the address Add installs, so the target
 		// key moves with the instances this same pass re-keyed.
 		targetKey := g.canon.address(unres.TargetType, unres.TargetKey)
-		pk := pendingKey{targetTypeID: unres.TargetType, targetKey: targetKey}
-		g.pending[pk] = append(g.pending[pk], &pendingEdge{
+		g.installPendingEdge(&pendingEdge{
 			source:       srcClone,
 			relation:     unres.Relation,
 			jsonField:    jsonField,

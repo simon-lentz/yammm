@@ -124,7 +124,10 @@ var (
 	E_INTERNAL = NewCode("E_INTERNAL", CategorySentinel)
 
 	// E_CONTEXT_CANCELLED indicates the operation was cancelled via context.
-	// Used across all packages when ctx.Err() returns a non-nil error.
+	// An operation that checks its context and reports through a [Result], or
+	// through a [ContextualError] that holds one, raises it when ctx.Err()
+	// returns a non-nil error; one that returns another Go error returns
+	// ctx.Err() or wraps it instead.
 	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED", CategorySentinel)
 )
 
@@ -409,8 +412,8 @@ var (
 	// constructor can produce one.
 	E_GRAPH_ABSTRACT_TYPE = NewCode("E_GRAPH_ABSTRACT_TYPE", CategoryGraph)
 
-	// E_GRAPH_INVALID_PK indicates an instance primary key that is empty
-	// or disagrees with the instance's own key properties.
+	// E_GRAPH_INVALID_PK indicates an instance primary key that is empty, has
+	// the wrong arity, or disagrees with the instance's own key properties.
 	E_GRAPH_INVALID_PK = NewCode("E_GRAPH_INVALID_PK", CategoryGraph)
 )
 
