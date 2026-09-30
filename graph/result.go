@@ -14,7 +14,9 @@ import (
 // Values reports that the snapshot holds at least one instance and that
 // every root and composed child entered through the validator — an empty
 // snapshot attests false, so a vacuous truth cannot be re-marshalled as
-// an attestation. Rejected duplicates' payloads are outside the claim.
+// an attestation. Rejected duplicates' payloads are outside the claim; a
+// payload [Graph.AddOrMerge] merged is inside it when the merge installs a
+// record, and outside it when the merge installs nothing.
 // Associations reports that no unresolved record is Required.
 //
 // On a built snapshot both dimensions are computed. On a loaded snapshot

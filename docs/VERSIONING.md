@@ -2614,6 +2614,43 @@ the repair unit 7's fix-diff round routed to `../plans/backlog.md` §3 (U7-91).
   carry no mark, and its suite against this tree differs from its run against
   `v0.21.0` by nothing.
 
+### After unit 8 — a duplicate key can merge its association records
+
+**Two exported declarations are added, and none is removed or changed:**
+`graph.Graph.AddOrMerge` and `graph.BatchAssembler.AddValidOrMerge`. Landed on
+`review` after unit 8's merge, for a consumer that lists one record under
+several parents.
+
+- **`Graph.AddOrMerge(ctx, inst)` adds `inst` as `Add` does, or merges it**
+  when the graph already holds a root of its type at its primary key, and
+  returns `(merged bool, diag.Result)`. A merge installs `inst`'s association
+  records on the held root and drops `inst`'s properties and provenance, so
+  the held root's stand. It records no `Duplicate` and raises no error. A
+  target the held root already names adds nothing; a merge that would give a
+  `(one)` association a second target is refused whole with
+  `E_GRAPH_CARDINALITY`; an `inst` carrying composed children is refused as a
+  duplicate, `E_DUPLICATE_PK`, as `Add` refuses it. A record the merge installs
+  under a required association retires the held root's `absent` or `empty`
+  record there. The graph package doc's "Merge on a Duplicate Key" section
+  states every rule.
+- **`BatchAssembler.AddValidOrMerge(valid)` is `AddValid` with that merge**,
+  under the same locks, so concurrent workers adding listings of one key keep
+  every listing's edges. It returns `(merged bool, err error)`, so a caller
+  counts its merges without racing other workers. A merge adds no instance, so
+  `Count()` does not count it.
+- **`Add` and `AddValid` do not change.** A duplicate key they meet is still
+  `E_DUPLICATE_PK` with a `Duplicate` record.
+
+### After unit 8 — a `BatchAssembler.Add` validation failure reaches the snapshot
+
+- **`BatchAssembler.Add` records its validator's diagnostics in the graph**, so
+  `Finalize`'s `Snapshot.Diagnostics()` carries a record that failed
+  validation, as it already carried a record `Graph.Add` refused and a nil
+  instance `AddValid` refused. Before, the failure reached only `Add`'s
+  returned error, so a caller that discarded per-record errors, the pattern
+  `docs/API.md` describes, had no record of it. `Finalize`'s error does not
+  change: it reports `Graph.Check` alone.
+
 ## v0.21.0 under this policy
 
 Minor tier: breaking DSL, Go-API, structural-hash and load-time changes under the pre-1.0 subtractive rules, plus a large additive catalogue in `schema/expr`. It is the release the condition-1 **tier-1 round** produced, and it carries four streams. Each was written into this section by the fix pass that landed it, not at the tag (A-227, A-346), and each is kept below in that shape, in this order:

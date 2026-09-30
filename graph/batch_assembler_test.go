@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"testing"
 	"time"
@@ -216,6 +217,27 @@ func TestBatchAssembler_AddError_WrapsAsContextualError(t *testing.T) {
 	// successes counter must NOT increment on failed Add.
 	if got := ba.Count(); got != 0 {
 		t.Errorf("Count() after failed Add: got %d, want 0", got)
+	}
+}
+
+func TestBatchAssembler_AddValidationFailure_ReachesSnapshotDiagnostics(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ba := graph.NewBatchAssembler(t.Context(), s)
+
+	err := ba.Add("Person", instance.RawInstance{Properties: map[string]any{"name": "no-id"}})
+	ce, ok := errors.AsType[*diag.ContextualError](err)
+	if !ok {
+		t.Fatalf("Add error is not *diag.ContextualError: %T (%v)", err, err)
+	}
+
+	res, err := ba.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("Finalize over an empty graph: %v", err)
+	}
+	got := res.Snapshot.Diagnostics().CodeCounts(diag.Error)
+	want := ce.Result.CodeCounts(diag.Error)
+	if len(want) == 0 || !maps.Equal(got, want) {
+		t.Errorf("Snapshot.Diagnostics() error codes = %v, want the Add error's %v", got, want)
 	}
 }
 
