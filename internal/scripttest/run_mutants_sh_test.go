@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -305,6 +306,151 @@ func TestRunMutantsScript_ReadsTestOutputThatIsNotUTF8(t *testing.T) {
 		if !bytes.Contains(log, []byte(line)) {
 			t.Errorf("%s's log drops the line its test printed, %q:\n%q", id, line, log)
 		}
+	}
+}
+
+// A mutant that hangs reads TIMEOUT and names the test that was running, beside
+// a kill in the same run. MUTATE_TIMEOUT sets the verdict run's limit, so such a
+// mutant can run again, alone, with a longer one.
+func TestRunMutantsScript_RecordsATimeoutAsItsOwnVerdict(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	f := runMutantsFixture(t)
+	f.writeMutantSearching("hangs", "{ return a + b }", "{ for {} }")
+	f.writeMutant("killed", "a - b")
+	f.env = append(f.env, "MUTATE_TIMEOUT=5s")
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	if r.code != 0 {
+		t.Fatalf("exit code %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
+	}
+	out := filepath.Join(f.dir, "out")
+	rows := resultRows(t, out)
+	for id, want := range map[string]struct{ verdict, fails string }{
+		"hangs":  {"TIMEOUT", "TestAdd "},
+		"killed": {"KILLED", "TestAdd "},
+	} {
+		if row := rows[id]; len(row) < 6 || row[2] != want.verdict || row[5] != want.fails {
+			t.Errorf("mutant %q's row is %q, want verdict %q and failing tests %q", id, row, want.verdict, want.fails)
+		}
+	}
+	log, err := os.ReadFile(filepath.Join(out, "logs", "hangs.asis.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "panic: test timed out after 5s") {
+		t.Errorf("the hanging mutant's log does not show the 5s limit MUTATE_TIMEOUT set:\n%s", log)
+	}
+}
+
+// MUTATE_TIMEOUT sets the -timeout of every go test run a mutant makes, 300s
+// when it is unset, and 24 hours is the longest it takes.
+func TestRunMutantsScript_SetsTheTimeoutOfEveryGoTestRun(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	for _, c := range []struct{ env, want string }{
+		{"", "-timeout=300s"},
+		{"MUTATE_TIMEOUT=24h", "-timeout=24h"},
+	} {
+		t.Run(c.want, func(t *testing.T) {
+			t.Parallel()
+			f := runMutantsFixture(t)
+			f.writeMutant("killed", "a - b")
+			f.shimVerdictRun("--- FAIL: TestAdd (0.00s)\nFAIL\nFAIL\t" + fixtureModule + "/m\t0.31s\nFAIL\n")
+			if c.env != "" {
+				f.env = append(f.env, c.env)
+			}
+
+			r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+			if r.code != 0 {
+				t.Fatalf("exit code %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
+			}
+			flags := f.shimFlags()
+			if len(flags) != 2 {
+				t.Fatalf("the shim counted %d go test runs, want the baseline and the verdict: %q", len(flags), flags)
+			}
+			for i, g := range flags {
+				if !slices.Contains(strings.Fields(g), c.want) {
+					t.Errorf("go test run %d had GOFLAGS %q, want %s", i+1, g, c.want)
+				}
+			}
+		})
+	}
+}
+
+// A TIMEOUT row names each running test once, sorted, across the packages
+// that timed out, and a timeout that quotes a kill's words reads TIMEOUT.
+func TestRunMutantsScript_NamesEachRunningTestOnce(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	f := runMutantsFixture(t)
+	f.writeMutant("timed", "a - b")
+	f.shimVerdictRun("mutate: MUTANT KILLED\n" + timeoutOutput(fixtureModule+"/q", "TestB") +
+		timeoutOutput(fixtureModule+"/p", "TestA") + timeoutOutput(fixtureModule+"/m", "TestA") + "FAIL\n")
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	if r.code != 0 {
+		t.Fatalf("exit code %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
+	}
+	if row := resultRows(t, filepath.Join(f.dir, "out"))["timed"]; len(row) < 6 || row[2] != "TIMEOUT" || row[5] != "TestA TestB " {
+		t.Errorf("mutant %q's row is %q, want verdict TIMEOUT and running tests %q", "timed", row, "TestA TestB ")
+	}
+}
+
+// The verdict is mutate.sh's own line, which comes before any test output: a
+// kill whose failing test prints another verdict's words still reads KILLED.
+func TestRunMutantsScript_ReadsTheVerdictFromMutateShsOwnLine(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skip("needs rsync, which run_mutants.sh uses to give each worker its own copy")
+	}
+	f := runMutantsFixture(t)
+	dir := f.writeMutantSearching("echoes",
+		"if Add(1, 2) != 3 {",
+		"println(\"mutate: MUTANT TIMED OUT\")\n\tprintln(\"mutate: MUTANT SURVIVED\")\n\tif Add(1, 2) == 3 {")
+	if err := os.WriteFile(filepath.Join(dir, "file"), []byte("m/m_test.go"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+	if r.code != 0 {
+		t.Fatalf("exit code %d, want 0\nstdout:\n%s\nstderr:\n%s", r.code, r.stdout, r.stderr)
+	}
+	if row := resultRows(t, filepath.Join(f.dir, "out"))["echoes"]; len(row) < 6 || row[2] != "KILLED" || row[5] != "TestAdd " {
+		t.Errorf("mutant %q's row is %q, want verdict KILLED and failing tests %q", "echoes", row, "TestAdd ")
+	}
+}
+
+// A MUTATE_TIMEOUT that is not a whole number of seconds, minutes or hours from 1
+// up to 24 hours, written with no leading zero, is refused before any copy is
+// made; 1.5m and 05s among them, though go test reads both.
+func TestRunMutantsScript_RefusesAMalformedTimeout(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"5", "5x", "0s", "-1s", "1.5m", "5ms", "1xs", "05s", "86401s", "1441m", "25h", "9999999999s", "99999999999999999999s"} {
+		t.Run(v, func(t *testing.T) {
+			t.Parallel()
+			f := runMutantsFixture(t)
+			f.writeMutant("killed", "a - b")
+			f.env = append(f.env, "MUTATE_TIMEOUT="+v)
+
+			r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+
+			r.wantCode(t, 2)
+			r.wantStderr(t, "MUTATE_TIMEOUT")
+			if _, err := os.Stat(filepath.Join(f.dir, "out", "work", "w1")); err == nil {
+				t.Errorf("a worker copy exists after the refusal")
+			}
+		})
 	}
 }
 

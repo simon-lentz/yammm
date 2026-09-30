@@ -19,8 +19,9 @@
 #
 # The named packages must pass before the mutation. When MUTATE_BASELINE_CACHE
 # names a directory, a passing baseline is recorded there under a key over the
-# packages, TMPDIR, YAMMM_* variables, the Go environment and the tree's content,
-# and a later run with the same key skips the baseline. The harness restores
+# packages, TMPDIR, PATH, YAMMM_* variables, GOOS, GOARCH, CGO_ENABLED, GOFLAGS,
+# GOEXPERIMENT, the go version and the tree's content, and a later run with the
+# same key skips the baseline. The harness restores
 # each mutated file byte for byte, so the key still matches after a mutant, and
 # any edit to the tree changes it.
 #
@@ -28,6 +29,23 @@
 # runs. A package that shells out to this script would otherwise inherit the
 # cache directory and take the recorded-baseline path, which is how a run over
 # internal/scripttest read its own unmutated tree as red.
+#
+# A package whose test binary ran out of time is no kill, though go test gives
+# it a duration as it does a failing test: a mutant that makes the code hang
+# ends so, and so does a run that load only slowed. Its output holds the testing
+# package's "panic: test timed out after", or, for a hang outside the tests (in
+# init, or in TestMain around m.Run), cmd/go's "*** Test killed ...: ran too
+# long", each read anywhere on a line, since a test's output may leave a line
+# open. A run in which every package that failed ran out of time with no
+# "--- FAIL:" line of its own reads TIMEOUT; running the mutant alone with a
+# longer -timeout settles it. A test that failed and then hung, and a subtest
+# that failed while its parent still ran, print no such line, so such a run
+# reads TIMEOUT rather than KILLED.
+#
+# Exit status: 0 killed; 1 survived, not built, no test ran, an already red
+# tree, or no mutation applied; 2 a usage error, a missing file, or a go.mod or
+# Go version scripts/toolchain.sh refuses; 3 timed out. Any other failed command
+# exits with its own status.
 #
 # Usage:
 #   scripts/mutate.sh <file> <search> <replace> <pkg> [pkg...]
@@ -203,6 +221,25 @@ if [ "${ran}" -eq 0 ]; then
 	printf 'mutate: NO TEST RAN — the verdict run named no package that ran, so this is not a kill\n' >&2
 	printf '%s\n' "${test_out}" >&2
 	exit 1
+fi
+
+# go test prints each package's output as one block ending in its line; a block
+# with the timeout panic and no failing test of its own is a timeout, not a kill.
+read -r kills timeouts < <(printf '%s\n' "${test_out}" | LC_ALL=C awk '
+	/panic: test timed out after |\*\*\* Test killed( with [^:]+)?: ran too long/ { tout = 1 }
+	/^[ \t]*--- FAIL: / { failed = 1 }
+	/^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9]+[.][0-9]+s$/ {
+		if (tout && !failed) timeouts++; else kills++
+		tout = 0; failed = 0; next
+	}
+	/^(ok|\?)[ \t]/ { tout = 0; failed = 0 }
+	END { print kills + 0, timeouts + 0 }
+')
+if [ "${kills}" -eq 0 ] && [ "${timeouts}" -gt 0 ]; then
+	printf 'mutate: MUTANT TIMED OUT — every package that failed ran out of time, so this is no verdict\n' >&2
+	printf '  a mutant that makes the code hang ends so, and so does a run that load only slowed: run it alone with a longer -timeout\n' >&2
+	printf '%s\n' "${test_out}" | LC_ALL=C grep -v -e $'^ok  \t' -e $'^?   \t' >&2 || true
+	exit 3
 fi
 
 printf 'mutate: MUTANT KILLED (exit %d)\n' "${rc}"
