@@ -159,9 +159,9 @@ func skipDir(name string) bool {
 	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
 }
 
-// modulePath reads the module path from root's go.mod. It is read textually
-// rather than through golang.org/x/mod so this package stays standard-library
-// only, matching every other gate in the repo.
+// modulePath reads the module path from root's go.mod. It reads the one
+// directive textually rather than taking golang.org/x/mod as a dependency for
+// it.
 func modulePath(root string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {

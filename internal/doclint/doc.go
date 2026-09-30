@@ -1,6 +1,6 @@
 // Package doclint holds the module's documentation gates: doc links that name
 // nothing, doc comments go doc renders wrongly, dependency lines, cited
-// diagnostic codes, and process references in names.
+// diagnostic codes, command invocations, and process references in names.
 //
 // # Why
 //
@@ -8,9 +8,7 @@
 // complain: godoc renders a link to a symbol that no longer exists either as a
 // link to nothing or, in the symbol's own package, as plain brackets, and
 // golangci-lint's documentation linters check style, not reference resolution. Two releases in a row shipped documentation advertising
-// API that had been cut, and neither was found by a gate — the first by a
-// cleanup pass that happened to open the file, the second by a consumer trying
-// to upgrade.
+// API that had been cut, and no gate caught either.
 //
 // # What a link is
 //
@@ -58,11 +56,66 @@
 //
 // # Code names
 //
-// [AssertCitedCodesExist] reads every diagnostic code name written in a Go
-// comment, a Markdown file or a shell script's comment against the registry the
-// caller passes. A renamed or removed code leaves its name in prose exactly as a
+// [AssertCitedCodesExist] reads the diagnostic code names written in tracked Go
+// comments, Markdown files and shell scripts' comments, outside testdata and
+// the caller's exclusions, against the registry the caller passes. A renamed or removed code leaves its name in prose exactly as a
 // removed symbol leaves its links, and a code name is not a doc link, so the
 // resolver cannot see it.
+//
+// # Invocations
+//
+// [AssertInvocationsExist] reads every invocation of a command-line program
+// written in a tracked Markdown file, testdata included, against the program's
+// commands and flags, which the caller passes as data. A file matching one of
+// the caller's exclusions is not read. Outside a git work tree the gate walks
+// the filesystem instead, skipping node_modules and dot-directories, and reads
+// every Markdown file it reaches that no exclusion matches. A table entry the
+// gate could never read back from an invocation, such as a flag name holding
+// "=" or a space, is refused before any file is read. A renamed flag or
+// command leaves its old spelling in every example that uses it, and a flag
+// copied from a neighbouring command reads as plausible to every reviewer.
+//
+// The Markdown is read as GitHub reads it, CRLF and a lone CR as line endings:
+// CommonMark with GitHub's extensions, parsed by goldmark, the reader
+// adapter/markdown puts its structural questions to. An invocation is a line of
+// a fenced code block that, less its indentation, is the program's name alone
+// or the name followed by white space, or a code span that starts with the name
+// and white space; a span may cross the lines of its paragraph, and each line
+// ending in it reads as a space. A fenced command's first line may open with a
+// "$" prompt. A line that ends in a backslash continues onto the next, and one
+// that ends the block is read without it. An indented code block, an HTML block
+// and a fence's info string hold no invocation.
+//
+// The invocation ends at shell text: a word that opens a comment ("#"), a pipe,
+// "&&", "||", "&", or a redirection (">", "2>", "&>", or "<" alone). It also
+// ends after a word that ends in ";". The words after the program name the
+// command, looked up as cobra's Find looks one up: a level at a time, and at
+// each level every word left is read with that level's flags by the rule of
+// cobra's stripFlags. There a flag written without "=" takes the next word as
+// its value, unless the command at that level defines it as taking no value; a
+// flag the lookup does not know takes one, and so does a flag the program
+// defines only after the lookup (Flag.AfterLookup), as cobra does its help and
+// version flags. For a single dash, only a word of two bytes such as -o takes
+// one, and a synopsis word with alternatives, such as [-w|--check], takes
+// none. A synopsis word is read as the flag it names, where cobra would read
+// "[--output" as a word. A lone "-" is not part of the lookup. The first
+// other word that names no subcommand ends the lookup. When the command reached has subcommands,
+// that word is reported unless it is a placeholder or a path: a word holding
+// "<" or "[", or "." or "/". After "--" no word is read.
+//
+// Every flag is judged against the command the lookup reached, its own flags
+// and the ones it inherits, read in order as pflag parses them: a flag that
+// takes a value, written with no "=" and no value attached, takes the next
+// word, dash and all. A synopsis's brackets and alternatives are read, so [--output
+// <path>] names --output and [-w|--check] names both flags. A single-dash word
+// is read as pflag reads one: its first character is a shorthand, "="
+// included. The rest is that shorthand's value when it is "=" and at least one
+// character more, or when the shorthand takes a value; otherwise the next
+// character is another shorthand, as in -wv, so -w= names the shorthand "=".
+// An unknown shorthand ends the word, as pflag stops there.
+//
+// The gate sees that a name exists. It cannot see a false claim about what a
+// command does, such as a fallback the command never calls.
 //
 // # Names
 //
