@@ -7,11 +7,19 @@ lint:
 lint-fix:
 	scripts/lint.sh --fix
 
-# The one test definition the pre-commit hook, every CI host and the release
-# workflow share.
+# The test definition the full gate, every CI host and the release workflow
+# share.
 .PHONY: test
 test:
 	scripts/test.sh
+
+# The full gate: every pre-commit hook that names no stage, then the linter for
+# this host and Windows, vet for every target and scripts/test.sh. A commit runs
+# the commit gate instead: the same hooks with the linter and vet for this host
+# alone and scripts/committest.sh.
+.PHONY: gate
+gate:
+	pre-commit run --all-files --hook-stage manual
 
 # Round-trips the neo4j adapter against a real server in Docker: the emitted DDL
 # is executed, the introspection queries are run for real, and what comes back is

@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // Package is one directory's Go files and every name they declare.
@@ -211,6 +213,7 @@ func trackedGoFiles(ctx context.Context, root string) (tracked map[string]bool, 
 	if !gitTracks(ctx, root) {
 		return nil, false, nil
 	}
+	gittree.MarkTrackedFiles()
 	out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--", "*.go").Output()
 	if err != nil {
 		return nil, false, fmt.Errorf("listing the tracked files of %s: %w", root, err)

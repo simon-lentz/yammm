@@ -1,4 +1,4 @@
-package scripttest
+package wiringtest
 
 import (
 	"cmp"
@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -28,6 +29,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 const testWorkflow = "./.github/workflows/yammm_test.yml"
@@ -2216,7 +2219,7 @@ func trackedWorkflows(t *testing.T, root string) map[string]workflow {
 
 func TestTrackedWorkflows_ReadsWhatGitHubRuns(t *testing.T) {
 	t.Parallel()
-	f := &fixture{t: t, dir: t.TempDir()}
+	f := newTree(t)
 	jobNamed := func(name string) string {
 		return "jobs:\n  " + name + ":\n    runs-on: ubuntu-24.04\n    steps:\n      - run: make\n"
 	}
@@ -2246,7 +2249,7 @@ func TestTrackedWorkflows_ReadsWhatGitHubRuns(t *testing.T) {
 // work tree.
 func TestInsideWorkTree_AsksAboutItsRoot(t *testing.T) {
 	t.Parallel()
-	f := &fixture{t: t, dir: t.TempDir()}
+	f := newTree(t)
 	f.write("held.txt", "held\n")
 	f.index()
 	plain := t.TempDir()
@@ -2265,10 +2268,10 @@ func TestInsideWorkTree_AsksAboutItsRoot(t *testing.T) {
 // files on disk are the tracked tree, and the same workflows are read.
 func TestTrackedWorkflows_ReadsTheFilesOutsideAWorkTree(t *testing.T) {
 	t.Parallel()
-	f := &fixture{t: t, dir: t.TempDir()}
+	f := newTree(t)
 	probe := exec.CommandContext(t.Context(), "git", "rev-parse", "--is-inside-work-tree")
 	probe.Dir = f.dir
-	probe.Env = withoutRepositoryVars(t, os.Environ())
+	probe.Env = gittree.WithoutRepositoryVars(t, os.Environ())
 	if probe.Run() == nil {
 		t.Fatalf("the temporary directory %s lies inside a git work tree; set TMPDIR outside one", f.dir)
 	}
@@ -2597,88 +2600,370 @@ func TestReleaseWorkflow_BuildsOnlyAfterTheTestWorkflow(t *testing.T) {
 	}
 }
 
-func TestPreCommitHooks_RunTheGateScripts(t *testing.T) {
-	t.Parallel()
-	var config struct {
-		DefaultStages []string `yaml:"default_stages"`
-		Repos         []struct {
-			Hooks []struct {
-				ID        string   `yaml:"id"`
-				Entry     string   `yaml:"entry"`
-				Files     string   `yaml:"files"`
-				Exclude   string   `yaml:"exclude"`
-				Stages    []string `yaml:"stages"`
-				AlwaysRun bool     `yaml:"always_run"`
-			} `yaml:"hooks"`
-		} `yaml:"repos"`
+// preCommitConfig is .pre-commit-config.yaml as the hook check reads it: every
+// top-level key, and each hook's whole mapping.
+type preCommitConfig struct {
+	keys  []string
+	Repos []struct {
+		Repo  string           `yaml:"repo"`
+		Hooks []map[string]any `yaml:"hooks"`
+	} `yaml:"repos"`
+}
+
+func (c *preCommitConfig) UnmarshalYAML(n *yaml.Node) error {
+	type plain preCommitConfig
+	if err := n.Decode((*plain)(c)); err != nil {
+		return err
 	}
-	decodeYAML(t, fromRoot(".pre-commit-config.yaml"), &config)
-	atCommit := func(stages []string) bool {
-		return len(stages) == 0 || slices.Contains(stages, "pre-commit") || slices.Contains(stages, "commit")
+	c.keys = mappingKeys(n)
+	return nil
+}
+
+// The files patterns of the gate hooks: pre-commit searches each staged path
+// with a hook's pattern, and runs the hook when one matches.
+const (
+	lintConfigFiles = `(^\.golangci\.yml$)|(^go\.(mod|sum)$)`
+	goFiles         = `\.go$`
+	goBuildFiles    = `(\.go$)|(\bgo\.mod$)|(\bgo\.sum$)`
+)
+
+// gateHooks holds each lint, vet and test hook to one form: every key its
+// mapping sets beside id and name, with its value. Any other key is a finding,
+// since args, types and exclude each change what a hook runs or when it runs.
+var gateHooks = map[string]map[string]any{
+	"golangci-lint-config": {"language": "system", "pass_filenames": false, "files": lintConfigFiles, "entry": "scripts/lintconfig.sh"},
+	"golangci-lint":        {"language": "system", "stages": []any{"pre-commit"}, "pass_filenames": false, "files": goFiles, "entry": "scripts/lint.sh --host"},
+	"go-vet":               {"language": "system", "stages": []any{"pre-commit"}, "pass_filenames": false, "files": goBuildFiles, "entry": "scripts/vet.sh --host"},
+	"go-test":              {"language": "system", "stages": []any{"pre-commit"}, "pass_filenames": false, "always_run": true, "entry": "scripts/committest.sh"},
+	"golangci-lint-full":   {"language": "system", "stages": []any{"manual"}, "pass_filenames": false, "files": goFiles, "entry": "scripts/lint.sh"},
+	"go-vet-full":          {"language": "system", "stages": []any{"manual"}, "pass_filenames": false, "files": goBuildFiles, "entry": "scripts/vet.sh"},
+	"go-test-full":         {"language": "system", "stages": []any{"manual"}, "pass_filenames": false, "always_run": true, "entry": "scripts/test.sh"},
+}
+
+// hookFindings reports each way config departs from the two gates: a top-level
+// key beside repos, two hooks of one id, a gate hook that is missing, not local
+// or outside its one form, and any other hook that names stages. A hook that
+// names none runs at the stages its own manifest gives it.
+func hookFindings(config preCommitConfig) []string {
+	var findings []string
+	for _, k := range config.keys {
+		if k != "repos" {
+			findings = append(findings, fmt.Sprintf("the configuration sets %s, which the check does not know leaves every hook as written", k))
+		}
 	}
-	if !atCommit(config.DefaultStages) {
-		t.Errorf("default_stages %q leaves out the commit stage", config.DefaultStages)
-	}
-	type hook = struct {
-		entry     string
-		files     string
-		exclude   string
-		stages    []string
-		alwaysRun bool
-	}
-	hooks := map[string]hook{}
+	seen := map[string]bool{}
 	for _, repo := range config.Repos {
 		for _, h := range repo.Hooks {
-			hooks[h.ID] = hook{h.Entry, h.Files, h.Exclude, h.Stages, h.AlwaysRun}
+			id := fmt.Sprint(h["id"])
+			if seen[id] {
+				findings = append(findings, "two hooks are named "+id)
+				continue
+			}
+			seen[id] = true
+			want, gate := gateHooks[id]
+			if !gate {
+				if stages, ok := h["stages"]; ok {
+					findings = append(findings, fmt.Sprintf("hook %s names stages %v, so a gate may leave it out", id, stages))
+				}
+				continue
+			}
+			if repo.Repo != "local" {
+				findings = append(findings, fmt.Sprintf("hook %s comes from %s, want a local hook", id, repo.Repo))
+			}
+			keys := maps.Clone(h)
+			maps.Copy(keys, want)
+			for _, k := range slices.Sorted(maps.Keys(keys)) {
+				got, set := h[k]
+				w, wanted := want[k]
+				switch {
+				case k == "id" || k == "name":
+				case !wanted:
+					findings = append(findings, fmt.Sprintf("hook %s sets %s: %v, which is outside its one form", id, k, got))
+				case !set:
+					findings = append(findings, fmt.Sprintf("hook %s sets no %s, want %v", id, k, w))
+				case !reflect.DeepEqual(got, w):
+					findings = append(findings, fmt.Sprintf("hook %s sets %s: %v, want %v", id, k, got, w))
+				}
+			}
 		}
 	}
+	for _, id := range slices.Sorted(maps.Keys(gateHooks)) {
+		if !seen[id] {
+			findings = append(findings, "no hook "+id)
+		}
+	}
+	return findings
+}
 
-	rows := []struct {
-		id        string
-		entry     string
-		fires     []string
-		alwaysRun bool
-	}{
-		{id: "golangci-lint-config", entry: "scripts/lintconfig.sh", fires: []string{".golangci.yml", "go.mod", "go.sum"}},
-		{id: "golangci-lint", entry: "scripts/lint.sh", fires: []string{"schema/load.go", "location/host_path_windows.go"}},
-		{id: "go-vet", entry: "scripts/vet.sh", fires: []string{"schema/load.go", "go.mod", "go.sum"}},
-		{id: "go-test", entry: "scripts/test.sh", alwaysRun: true},
+// A commit runs the commit gate: the linter config check, the linter and vet for
+// this host's build, and scripts/committest.sh. The full gate's three hooks run
+// at the manual stage alone, which `make gate` names, and no other hook names a
+// stage.
+func TestPreCommitHooks_RunTheGateScripts(t *testing.T) {
+	t.Parallel()
+	var config preCommitConfig
+	decodeYAML(t, fromRoot(".pre-commit-config.yaml"), &config)
+	for _, f := range hookFindings(config) {
+		t.Error(f)
 	}
-	for _, row := range rows {
-		h, ok := hooks[row.id]
-		if !ok {
-			t.Errorf("no hook %s", row.id)
-			continue
-		}
-		if h.entry != row.entry {
-			t.Errorf("hook %s runs %q, want %q", row.id, h.entry, row.entry)
-		}
-		if row.alwaysRun && !h.alwaysRun {
-			t.Errorf("hook %s does not always run", row.id)
-		}
-		if !atCommit(h.stages) {
-			t.Errorf("hook %s runs only at stages %q, not at commit", row.id, h.stages)
-		}
-		if h.exclude != "" {
-			t.Errorf("hook %s excludes %q, so a change it matches does not run it", row.id, h.exclude)
-		}
-		// pre-commit searches each staged path with the files pattern.
-		files, err := regexp.Compile(h.files)
-		if err != nil {
-			t.Errorf("hook %s files pattern %q: %v", row.id, h.files, err)
-			continue
-		}
-		for _, path := range row.fires {
+	for pattern, fires := range map[string][]string{
+		lintConfigFiles: {".golangci.yml", "go.mod", "go.sum"},
+		goFiles:         {"schema/load.go", "location/host_path_windows.go"},
+		goBuildFiles:    {"schema/load.go", "go.mod", "go.sum"},
+	} {
+		files := regexp.MustCompile(pattern)
+		for _, path := range fires {
 			if !files.MatchString(path) {
-				t.Errorf("hook %s does not fire when %s changes (files %q)", row.id, path, h.files)
+				t.Errorf("a hook with the files pattern %q does not fire when %s changes", pattern, path)
 			}
 		}
 	}
 }
 
+// The check itself: the repository's configuration draws no finding, and each
+// departure from the two gates draws the findings that name it.
+func TestHookFindings_RefusesEachDepartureFromTheTwoGates(t *testing.T) {
+	t.Parallel()
+	// Each row edits its own decoding of the repository's configuration.
+	hook := func(t *testing.T, c *preCommitConfig, id string) map[string]any {
+		t.Helper()
+		for _, repo := range c.Repos {
+			for _, h := range repo.Hooks {
+				if h["id"] == id {
+					return h
+				}
+			}
+		}
+		t.Fatalf("the configuration holds no hook %s", id)
+		return nil
+	}
+	set := func(id, key string, value any) func(*testing.T, *preCommitConfig) {
+		return func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			hook(t, c, id)[key] = value
+		}
+	}
+	drop := func(id, key string) func(*testing.T, *preCommitConfig) {
+		return func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			delete(hook(t, c, id), key)
+		}
+	}
+	local := func(t *testing.T, c *preCommitConfig, id string) (repo, at int) {
+		t.Helper()
+		for r, rp := range c.Repos {
+			for i, h := range rp.Hooks {
+				if h["id"] == id {
+					return r, i
+				}
+			}
+		}
+		t.Fatalf("the configuration holds no hook %s", id)
+		return 0, 0
+	}
+	for _, tt := range []struct {
+		name string
+		edit func(*testing.T, *preCommitConfig)
+		want []string // a substring of each finding expected, in order
+	}{
+		{"the repository's configuration", func(*testing.T, *preCommitConfig) {}, nil},
+		{"default_stages", func(_ *testing.T, c *preCommitConfig) { c.keys = append(c.keys, "default_stages") }, []string{"the configuration sets default_stages"}},
+		{"a top-level exclude", func(_ *testing.T, c *preCommitConfig) { c.keys = append(c.keys, "exclude") }, []string{"the configuration sets exclude"}},
+		{"args on a full hook", set("golangci-lint-full", "args", []any{"--host"}), []string{"hook golangci-lint-full sets args: [--host], which is outside its one form"}},
+		{"types on a commit hook", set("golangci-lint", "types", []any{"python"}), []string{"hook golangci-lint sets types"}},
+		{"an exclude on a gate hook", set("go-vet-full", "exclude", "^schema/"), []string{"hook go-vet-full sets exclude"}},
+		{"pass_filenames dropped", drop("go-test-full", "pass_filenames"), []string{"hook go-test-full sets no pass_filenames"}},
+		{"pass_filenames on", set("golangci-lint", "pass_filenames", true), []string{"hook golangci-lint sets pass_filenames: true, want false"}},
+		{"always_run dropped", drop("go-test", "always_run"), []string{"hook go-test sets no always_run"}},
+		{"the full test at a commit", set("go-test", "entry", "scripts/test.sh"), []string{"hook go-test sets entry: scripts/test.sh, want scripts/committest.sh"}},
+		{"the commit test by hand", set("go-test-full", "entry", "scripts/committest.sh"), []string{"hook go-test-full sets entry"}},
+		{"every target vetted at a commit", set("go-vet", "entry", "scripts/vet.sh"), []string{"hook go-vet sets entry"}},
+		{"a narrower files pattern", set("golangci-lint-full", "files", `^schema/.*\.go$`), []string{"hook golangci-lint-full sets files"}},
+		{"another language", set("go-vet", "language", "golang"), []string{"hook go-vet sets language"}},
+		{"a full hook at a commit too", set("go-test-full", "stages", []any{"manual", "pre-commit"}), []string{"hook go-test-full sets stages"}},
+		{"a full hook at a merge commit too", set("go-test-full", "stages", []any{"manual", "pre-merge-commit"}), []string{"hook go-test-full sets stages"}},
+		{"a full hook at every stage", drop("go-vet-full", "stages"), []string{"hook go-vet-full sets no stages"}},
+		{"a commit hook by hand too", set("go-test", "stages", []any{"pre-commit", "manual"}), []string{"hook go-test sets stages"}},
+		{"the legacy stage name", set("go-vet", "stages", []any{"commit"}), []string{"hook go-vet sets stages: [commit], want [pre-commit]"}},
+		{"a stage on the config hook", set("golangci-lint-config", "stages", []any{"pre-commit"}), []string{"hook golangci-lint-config sets stages"}},
+		{"a stage on another local hook", set("gofumpt", "stages", []any{"pre-commit"}), []string{"hook gofumpt names stages"}},
+		{"a stage on a third-party hook", set("actionlint", "stages", []any{"pre-commit"}), []string{"hook actionlint names stages"}},
+		{"a gate hook renamed", set("go-vet", "id", "vet"), []string{"hook vet names stages", "no hook go-vet"}},
+		{"a gate hook removed", func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			r, i := local(t, c, "go-test-full")
+			c.Repos[r].Hooks = slices.Delete(c.Repos[r].Hooks, i, i+1)
+		}, []string{"no hook go-test-full"}},
+		{"two hooks of one id", func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			r, i := local(t, c, "go-test")
+			c.Repos[r].Hooks = append(c.Repos[r].Hooks, maps.Clone(c.Repos[r].Hooks[i]))
+		}, []string{"two hooks are named go-test"}},
+		{"a gate hook from another repository", func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			r, _ := local(t, c, "go-test-full")
+			c.Repos[r].Repo = "https://example.com/hooks"
+		}, []string{"hook golangci-lint-full comes from", "hook go-vet-full comes from", "hook go-test-full comes from"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var config preCommitConfig
+			decodeYAML(t, fromRoot(".pre-commit-config.yaml"), &config)
+			tt.edit(t, &config)
+			got := hookFindings(config)
+			if len(got) != len(tt.want) {
+				t.Fatalf("findings %q, want %d naming %q", got, len(tt.want), tt.want)
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(got[i], want) {
+					t.Errorf("finding %q, want one naming %q", got[i], want)
+				}
+			}
+		})
+	}
+}
+
+// gateCommand is the one command that runs the full gate. --hook-stage manual
+// selects the three hooks no commit runs, beside every hook that names no stage.
+const gateCommand = "pre-commit run --all-files --hook-stage manual"
+
+// ruleFindings holds target's rule in the makefile text to one form: a .PHONY
+// line naming it alone, the line "target:", one recipe line holding command,
+// and no other line that names the target before a colon. It does not read a
+// conditional, an included file, a target named through a variable, or an
+// assignment to SHELL or .RECIPEPREFIX.
+func ruleFindings(makefile, target, command string) []string {
+	lines := strings.Split(makefile, "\n")
+	var rules []int
+	for i, l := range lines {
+		if strings.HasPrefix(l, "\t") || strings.HasPrefix(l, "#") {
+			continue
+		}
+		if before, _, ok := strings.Cut(l, ":"); ok && slices.Contains(strings.Fields(before), target) {
+			rules = append(rules, i)
+		}
+	}
+	if len(rules) != 1 {
+		return []string{fmt.Sprintf("the Makefile names %s before a colon on %d lines, want one rule", target, len(rules))}
+	}
+	at := rules[0]
+	line := func(i int) string {
+		if i < 0 || i >= len(lines) {
+			return ""
+		}
+		return lines[i]
+	}
+	var findings []string
+	if lines[at] != target+":" {
+		findings = append(findings, fmt.Sprintf("the rule line is %q, want %q", lines[at], target+":"))
+	}
+	if line(at-1) != ".PHONY: "+target {
+		findings = append(findings, fmt.Sprintf("the line before the rule is %q, want %q", line(at-1), ".PHONY: "+target))
+	}
+	if line(at+1) != "\t"+command {
+		findings = append(findings, fmt.Sprintf("make %s runs %q, want %q", target, strings.TrimPrefix(line(at+1), "\t"), command))
+	}
+	// make reads a tab line after a blank line or a comment as one more command.
+	for _, l := range lines[min(at+2, len(lines)):] {
+		if second, ok := strings.CutPrefix(l, "\t"); ok {
+			findings = append(findings, fmt.Sprintf("make %s runs a second command, %q", target, second))
+		}
+		if l != "" && !strings.HasPrefix(l, "#") {
+			break
+		}
+	}
+	return findings
+}
+
+// `make gate` is the full gate's command, and `make test` its test definition.
+func TestMakefile_GateRunsTheFullGate(t *testing.T) {
+	t.Parallel()
+	b, err := os.ReadFile(fromRoot("Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for target, command := range map[string]string{"gate": gateCommand, "test": "scripts/test.sh"} {
+		for _, f := range ruleFindings(string(b), target, command) {
+			t.Error(f)
+		}
+	}
+}
+
+// The check itself: the one form draws no finding, and each other form in the
+// table draws one.
+func TestRuleFindings_RefusesEachOtherForm(t *testing.T) {
+	t.Parallel()
+	const rule = ".PHONY: gate\ngate:\n\tgo\n"
+	for _, tt := range []struct {
+		name, makefile, want string // want is a substring of the one finding expected; "" expects none
+	}{
+		{"the one form", "x := 1\n\n" + rule + "\nnext:\n\tother\n", ""},
+		{"the one form at the end of the file", rule, ""},
+		{"a comment after the recipe", rule + "# done\nnext:\n", ""},
+		{"no rule", "gateway:\n\tgo\n", "on 0 lines"},
+		{"a rule in a comment alone", "# gate:\n#\tgo\n", "on 0 lines"},
+		{"a second rule", rule + "\ngate:\n\tother\n", "on 2 lines"},
+		{"a target-specific variable", rule + "\ngate: export SKIP := x\n", "on 2 lines"},
+		{"a double-colon pair", ".PHONY: gate\ngate::\n\tgo\ngate::\n\tother\n", "on 2 lines"},
+		{"a second target on the rule line", ".PHONY: gate\ngate full:\n\tgo\n", `the rule line is "gate full:"`},
+		{"a prerequisite", ".PHONY: gate\ngate: lint\n\tgo\n", `the rule line is "gate: lint"`},
+		{"a space before the colon", ".PHONY: gate\ngate :\n\tgo\n", `the rule line is "gate :"`},
+		{"not phony", "\ngate:\n\tgo\n", "the line before the rule"},
+		{"phony beside another target", ".PHONY: gate lint\ngate:\n\tgo\n", "the line before the rule"},
+		{"another command", ".PHONY: gate\ngate:\n\tother\n", `runs "other", want "go"`},
+		{"no command", ".PHONY: gate\ngate:\n\nnext:\n", `runs "", want "go"`},
+		{"a second command", rule + "\tother\n", `a second command, "other"`},
+		{"a second command after a comment", rule + "# and\n\tother\n", `a second command, "other"`},
+		{"a second command after a blank line", rule + "\n\tother\n", `a second command, "other"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ruleFindings(tt.makefile, "gate", "go")
+			if tt.want == "" {
+				if len(got) != 0 {
+					t.Errorf("findings %q, want none", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0], tt.want) {
+				t.Errorf("findings %q, want one naming %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// CI's pre-commit job runs the commit stage and skips the commit gate's four
+// lint, vet and test hooks, whose checks the test workflow's jobs run.
+func TestCIWorkflow_PreCommitJobSkipsTheGateHooks(t *testing.T) {
+	t.Parallel()
+	var ci workflow
+	decodeYAML(t, fromRoot(".github/workflows/ci.yaml"), &ci)
+	var runs []step
+	for _, s := range ci.Jobs["pre-commit"].Steps {
+		if strings.Contains(s.Run, "pre-commit run") {
+			runs = append(runs, s)
+		}
+	}
+	if len(runs) != 1 {
+		t.Fatalf("CI's pre-commit job runs pre-commit in %d steps, want one", len(runs))
+	}
+	if got := strings.TrimSpace(runs[0].Run); got != "pre-commit run --all-files" {
+		t.Errorf("CI's pre-commit job runs %q, want pre-commit run --all-files, the commit stage", got)
+	}
+	var commit []string
+	for id, h := range gateHooks {
+		if !reflect.DeepEqual(h["stages"], []any{"manual"}) {
+			commit = append(commit, id)
+		}
+	}
+	if got := slices.Sorted(slices.Values(skippedHooks(runs[0].Env["SKIP"]))); !slices.Equal(got, slices.Sorted(slices.Values(commit))) {
+		t.Errorf("CI's pre-commit job skips %q, want the hooks that run at a commit, %q", got, slices.Sorted(slices.Values(commit)))
+	}
+}
+
 // shellcheck reads every file under scripts/ and every shell script of the
 // Claude plugin's hooks, at commit and in CI's pre-commit job, which skips only
-// the hooks the host jobs run.
+// the hooks whose checks the host jobs run.
 func TestPreCommitHooks_ShellcheckReadsEveryScript(t *testing.T) {
 	t.Parallel()
 	var config struct {

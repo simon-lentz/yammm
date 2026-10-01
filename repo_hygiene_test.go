@@ -12,7 +12,21 @@ import (
 	"testing"
 
 	"golang.org/x/mod/zip"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
+
+// trackedTree returns git ls-files -z's output for the repository, or skips the
+// test where git cannot list it.
+func trackedTree(t *testing.T) []byte {
+	t.Helper()
+	gittree.MarkTrackedFiles()
+	out, err := exec.CommandContext(t.Context(), "git", "ls-files", "-z").Output()
+	if err != nil {
+		t.Skipf("git ls-files unavailable: %v", err)
+	}
+	return out
+}
 
 // TestRepository_TracksNoModuleRootMarker keeps this repository free of a
 // committed module-root marker outside a fixture directory.
@@ -28,10 +42,7 @@ import (
 func TestRepository_TracksNoModuleRootMarker(t *testing.T) {
 	t.Parallel()
 
-	out, err := exec.CommandContext(t.Context(), "git", "ls-files", "-z").Output()
-	if err != nil {
-		t.Skipf("git ls-files unavailable: %v", err)
-	}
+	out := trackedTree(t)
 
 	for path := range strings.SplitSeq(string(out), "\x00") {
 		if path == "" || filepath.Base(path) != "yammm.mod" {
@@ -52,10 +63,7 @@ func TestRepository_TracksNoModuleRootMarker(t *testing.T) {
 func TestRepository_ModuleZipHoldsEveryTrackedFile(t *testing.T) {
 	t.Parallel()
 
-	out, err := exec.CommandContext(t.Context(), "git", "ls-files", "-z").Output()
-	if err != nil {
-		t.Skipf("git ls-files unavailable: %v", err)
-	}
+	out := trackedTree(t)
 
 	var files []zip.File
 	for path := range strings.SplitSeq(string(out), "\x00") {

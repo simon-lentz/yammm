@@ -12,8 +12,8 @@ jobs:
   # One job definition on every host the module supports. Windows and macOS each
   # carry path rules Linux lacks — a backslash separator and UNC volumes, a
   # case-insensitive volume spelled through fcntl(F_GETPATH) — so each host
-  # lints, vets and runs the whole suite through scripts/test.sh, the pre-commit
-  # hook's test definition. The release workflow calls this workflow and builds
+  # lints, vets and runs the whole suite through scripts/test.sh, the full
+  # gate's test definition. The release workflow calls this workflow and builds
   # no asset until every job here has passed. Lint, vet and test each run after
   # an earlier step fails, and fail-fast is off, so one run reports every host's
   # every failure.
@@ -23,7 +23,7 @@ jobs:
   # hand, uploaded no log at all. Each go test timeout inside a job sits below
   # the job's by at least the time the job takes to start its last test binary,
   # measured on CI, so a hung binary prints its own stack before the job is
-  # killed; jobMargins in internal/scripttest's wiring test holds the margins.
+  # killed; jobMargins in internal/wiringtest's wiring test holds the margins.
   #
   # Every job names its image's OS release, never a -latest label. GitHub moves
   # those labels to a new release on its own schedule, which changes the gate's
@@ -122,7 +122,7 @@ jobs:
   # hosts' under 30 s, and made the Linux job the longest of the workflow in
   # two of three measured runs. Beside the host jobs it costs the workflow its
   # own runtime alone, and the release calls this workflow whole, so a tag
-  # still waits for it. The job runs no test: internal/scripttest's
+  # still waits for it. The job runs no test: internal/wiringtest's
   # testlessJobs records that, and untimedJobs holds it to its timeout.
   #
   # 20 minutes is 2.9 times the slowest Vet step measured plus its setup.

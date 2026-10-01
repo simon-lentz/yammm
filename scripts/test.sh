@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# test.sh — run the module's test suite: the one test definition every gate uses.
+# test.sh — run the module's test suite: the full gate's test definition.
 #
-# The pre-commit hook, each CI host's job and `make test` call this script, and
-# the release workflow runs those host jobs before it builds anything, so a suite
-# that passes locally ran under the flags CI runs it with. CGO_ENABLED is set
-# rather than inherited, so every host tests the build with cgo on: with cgo off
-# the go command refuses -race on Linux and Windows, and on macOS, where the
-# detector needs no cgo, it would test the build with cgo off. -shuffle=on
-# surfaces order coupling between tests, and -count=1 runs every test rather
-# than replaying a cached pass.
+# The full gate (`make gate`), each CI host's job and `make test` run this
+# script, and the release workflow runs those host jobs before it builds
+# anything, so a suite that passes the full gate locally ran under the flags CI
+# runs it with. The commit gate's hook runs scripts/committest.sh instead.
+# CGO_ENABLED is set rather than inherited, so every host tests the build with
+# cgo on: with cgo off the go command refuses -race on Linux and Windows, and on
+# macOS, where the detector needs no cgo, it would test the build with cgo off.
+# -shuffle=on surfaces order coupling between tests, and -count=1 runs every
+# test rather than replaying a cached pass.
 # -timeout states Go's own default of ten minutes per test binary, so the CI
 # job's timeout can be held above it: a hung binary then prints its stack before
 # the job is killed, and the summary prints that stack.

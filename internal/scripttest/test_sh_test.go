@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // ratioTests returns a test file for package ratio that imports raceskip.
@@ -225,7 +227,7 @@ func TestTestScript_WritesNoDurationsUnlessNamed(t *testing.T) {
 	for _, args := range [][]string{{"ls-files", "--others"}, {"diff", "--name-only"}} {
 		cmd := exec.CommandContext(t.Context(), "git", args...)
 		cmd.Dir = f.dir
-		cmd.Env = withoutRepositoryVars(t, os.Environ())
+		cmd.Env = gittree.WithoutRepositoryVars(t, os.Environ())
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("git %v: %v", args, err)
@@ -236,12 +238,18 @@ func TestTestScript_WritesNoDurationsUnlessNamed(t *testing.T) {
 	}
 }
 
-// Not parallel: it sets TEST_DURATIONS for the whole process, as CI's test
-// step does for internal/scripttest's own run.
-func TestFixtureEnv_DropsTheEnclosingRunsDurationsFile(t *testing.T) {
-	t.Setenv("TEST_DURATIONS", filepath.Join(t.TempDir(), "enclosing.tsv"))
+// Not parallel: it sets each variable for the whole process.
+func TestFixtureEnv_DropsWhatTheEnclosingRunSetsForItself(t *testing.T) {
+	enclosing := map[string]string{
+		"TEST_DURATIONS":        filepath.Join(t.TempDir(), "enclosing.tsv"),
+		"MUTATE_TIMEOUT":        "900s",
+		"MUTATE_BASELINE_CACHE": t.TempDir(),
+	}
+	for name, value := range enclosing {
+		t.Setenv(name, value)
+	}
 	for _, kv := range fixtureEnv() {
-		if strings.HasPrefix(kv, "TEST_DURATIONS=") {
+		if name, _, _ := strings.Cut(kv, "="); enclosing[name] != "" {
 			t.Errorf("a fixture inherits %s", kv)
 		}
 	}

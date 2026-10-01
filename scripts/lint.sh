@@ -9,7 +9,11 @@
 # cannot execute it. Every target runs even after an earlier one fails, and the
 # summary names each failure. Arguments pass to every `golangci-lint run`.
 #
-# Usage: scripts/lint.sh [run arguments...]
+# With --host as the first argument, only this host's build is linted. The
+# commit gate's hook passes it; the full gate's hook and CI's Windows job read
+# the Windows build.
+#
+# Usage: scripts/lint.sh [--host] [run arguments...]
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -20,7 +24,11 @@ cd "$(git rev-parse --show-toplevel)"
 
 host=$(go env GOOS | tr -d '\r')
 targets=("${host}")
-[ "${host}" = windows ] || targets+=(windows)
+if [ "${1:-}" = "--host" ]; then
+	shift
+elif [ "${host}" != windows ]; then
+	targets+=(windows)
+fi
 
 bin=$(mktemp -d)
 trap 'rm -rf "${bin}"' EXIT

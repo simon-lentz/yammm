@@ -35,7 +35,8 @@ func newLintFixture(t *testing.T) *fixture {
 
 // TestLintScript_LintsThisHostAndWindows holds the script to reading the
 // Windows build: a file only Windows compiles, whose one call drops an error,
-// fails the Windows target and no other.
+// fails the Windows target and no other. With --host the script reads this
+// host's build alone, so off Windows that file fails nothing.
 func TestLintScript_LintsThisHostAndWindows(t *testing.T) {
 	t.Parallel()
 	rows := []struct {
@@ -72,6 +73,22 @@ func TestLintScript_LintsThisHostAndWindows(t *testing.T) {
 			if row.stderr != "" {
 				r.wantStderr(t, row.stderr)
 			}
+
+			// A Windows host's own build is the Windows build, so --host
+			// changes nothing there.
+			code, stdout, stderr := row.wantCode, row.stdout, row.stderr
+			if runtime.GOOS != "windows" {
+				code, stdout, stderr = 0, "lint: clean for "+runtime.GOOS+"\n", ""
+			}
+			host := f.run("lint.sh", "--host")
+			host.wantCode(t, code)
+			host.wantStdout(t, stdout)
+			if stderr != "" {
+				host.wantStderr(t, stderr)
+			}
+			// The arguments after --host still reach the linter, which prints
+			// its usage and lints nothing.
+			f.run("lint.sh", "--host", "--help").wantStdout(t, "golangci-lint run [flags]")
 		})
 	}
 }

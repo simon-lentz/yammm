@@ -2,17 +2,18 @@ package scripttest
 
 import (
 	"bytes"
-	"context"
 	"errors"
-	"io/fs"
+	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // fixtureModule is the module path each fixture declares, so the copies of
@@ -61,65 +62,34 @@ func directiveOf(version string) string {
 	return v
 }
 
-// trackedFiles returns the files git tracks under root that keep accepts,
-// slash-separated, relative to root and sorted. When root lies in no work tree
-// git can read, as in the module cache's copy of a release, it walks root
-// instead: that copy holds the tracked tree and nothing else, and has no index.
-func trackedFiles(t *testing.T, root string, keep func(rel string) bool) []string {
-	t.Helper()
-	var all []string
-	if insideWorkTree(t, root) {
-		cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z")
-		cmd.Dir = root
-		cmd.Env = gitEnv(t, root)
-		out, err := cmd.Output()
-		if err != nil {
-			t.Fatalf("git ls-files: %v", err)
-		}
-		all = strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
-	} else {
-		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			rel, err := filepath.Rel(root, p)
-			all = append(all, filepath.ToSlash(rel))
-			return err
-		})
-		if err != nil {
-			t.Fatalf("walking %s: %v", root, err)
-		}
-	}
-	return slices.Sorted(slices.Values(slices.DeleteFunc(all, func(rel string) bool { return rel == "" || !keep(rel) })))
+// inputs are the tracked files this package's tests read: a file by its path
+// from the repository root, a directory's files by that path and a slash. go
+// test's result cache replays a pass of the package after a change to any other
+// tracked file outside the package, which keeps these slow tests out of a commit.
+var inputs = []string{".golangci.yml", "go.mod", "go.sum", "internal/gittree/", "internal/raceskip/", "internal/testsummary/", "scripts/"}
+
+// isInput reports whether rel, a slash-separated repository path in its
+// cleaned form, is a listed file, a listed directory, or a file under one.
+func isInput(rel string) bool {
+	return path.Clean(rel) == rel && slices.ContainsFunc(inputs, func(in string) bool {
+		return rel == in || rel+"/" == in || strings.HasSuffix(in, "/") && strings.HasPrefix(rel, in)
+	})
 }
 
-// insideWorkTree reports whether root lies in a git work tree git can read.
-func insideWorkTree(t *testing.T, root string) bool {
-	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		return false
-	}
-	cmd := exec.CommandContext(t.Context(), "git", "rev-parse", "--is-inside-work-tree")
-	cmd.Dir = root
-	cmd.Env = gitEnv(t, root)
-	out, err := cmd.Output()
-	return err == nil && strings.TrimSpace(string(out)) == "true"
+// failer is the slice of testing.T that fromRoot uses, which lets a test see
+// it refuse a path.
+type failer interface {
+	Helper()
+	Fatalf(format string, args ...any)
 }
 
-// gitEnv is the environment git runs in when it reads root. The repository
-// root keeps the repository variables, since under a hook they name the tree
-// being committed; any other root is a fixture, with a repository of its own or
-// none, and those variables would point it at the enclosing repository.
-func gitEnv(t *testing.T, root string) []string {
+// fromRoot returns the path of the input rel relative to this package, and
+// fails the test when rel is outside inputs.
+func fromRoot(t failer, rel string) string {
 	t.Helper()
-	if root == repoRoot {
-		return os.Environ()
+	if !isInput(rel) {
+		t.Fatalf("%s is not one of this package's inputs %q: a test that reads another tracked file belongs in internal/wiringtest", rel, inputs)
 	}
-	return withoutRepositoryVars(t, os.Environ())
-}
-
-// fromRoot returns a slash-separated repository path relative to this package.
-func fromRoot(rel string) string {
 	return filepath.Join(repoRoot, filepath.FromSlash(rel))
 }
 
@@ -146,7 +116,7 @@ func newFixture(t *testing.T) *fixture {
 	// scripts hold a run to go.mod's toolchain and refuse a mismatch, and a
 	// fixture pinned to one release would refuse every run under another.
 	f.write("go.mod", "module "+fixtureModule+"\n\ngo "+goDirective()+"\n")
-	for _, name := range []string{"test.sh", "vet.sh", "packages.sh", "lintconfig.sh", "toolchain.sh"} {
+	for _, name := range []string{"test.sh", "committest.sh", "vet.sh", "packages.sh", "lintconfig.sh", "toolchain.sh"} {
 		f.copyScript(name)
 	}
 	for _, dir := range []string{"internal/testsummary", "internal/raceskip"} {
@@ -164,20 +134,14 @@ func (f *fixture) write(rel, content string) {
 
 func (f *fixture) writeMode(rel string, content []byte, mode os.FileMode) {
 	f.t.Helper()
-	path := filepath.Join(f.dir, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		f.t.Fatal(err)
-	}
-	if err := os.WriteFile(path, content, mode); err != nil {
-		f.t.Fatal(err)
-	}
+	gittree.WriteFile(f.t, f.dir, rel, content, mode)
 }
 
 // copyScript copies a script from scripts/, executable, because the scripts
 // call each other by path.
 func (f *fixture) copyScript(name string) {
 	f.t.Helper()
-	b, err := os.ReadFile(fromRoot("scripts/" + name))
+	b, err := os.ReadFile(fromRoot(f.t, "scripts/"+name))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -187,7 +151,7 @@ func (f *fixture) copyScript(name string) {
 // copyFile copies a file from the repository root to the same path in the fixture.
 func (f *fixture) copyFile(rel string) {
 	f.t.Helper()
-	b, err := os.ReadFile(fromRoot(rel))
+	b, err := os.ReadFile(fromRoot(f.t, rel))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -197,7 +161,7 @@ func (f *fixture) copyFile(rel string) {
 // copyPackage copies a repository package's non-test Go files.
 func (f *fixture) copyPackage(dir string) {
 	f.t.Helper()
-	entries, err := os.ReadDir(fromRoot(dir))
+	entries, err := os.ReadDir(fromRoot(f.t, dir))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -215,21 +179,7 @@ func (f *fixture) copyPackage(dir string) {
 // the index, so nothing is committed.
 func (f *fixture) index(paths ...string) {
 	f.t.Helper()
-	f.git("init", "-q")
-	if len(paths) == 0 {
-		paths = []string{"-A"}
-	}
-	f.git(append([]string{"add"}, paths...)...)
-}
-
-func (f *fixture) git(args ...string) {
-	f.t.Helper()
-	cmd := exec.CommandContext(f.t.Context(), "git", args...)
-	cmd.Dir = f.dir
-	cmd.Env = withoutRepositoryVars(f.t, os.Environ())
-	if out, err := cmd.CombinedOutput(); err != nil {
-		f.t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-	}
+	gittree.Index(f.t, f.dir, paths...)
 }
 
 func (f *fixture) run(script string, args ...string) result {
@@ -243,7 +193,7 @@ func (f *fixture) runFrom(dir, script string, args ...string) result {
 	//nolint:gosec // runs one of the repository's scripts, copied into the fixture's own module
 	cmd := exec.CommandContext(f.t.Context(), "bash", append([]string{filepath.Join(f.dir, "scripts", script)}, args...)...)
 	cmd.Dir = dir
-	cmd.Env = append(withoutRepositoryVars(f.t, fixtureEnv()), f.env...)
+	cmd.Env = append(gittree.WithoutRepositoryVars(f.t, fixtureEnv()), f.env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	var r result
@@ -259,40 +209,12 @@ func (f *fixture) runFrom(dir, script string, args ...string) result {
 	return r
 }
 
-// repositoryVars returns the variables `git rev-parse --local-env-vars` names:
-// each sets the repository, index or configuration git uses, whatever the
-// working directory. A commit
-// with -a runs the pre-commit hook with GIT_INDEX_FILE naming the commit's
-// temporary index, and a fixture's git inheriting it locks, and can write, the
-// real repository's index.
-var repositoryVars = sync.OnceValues(func() ([]string, error) {
-	out, err := exec.CommandContext(context.Background(), "git", "rev-parse", "--local-env-vars").Output()
-	if err != nil {
-		return nil, err
-	}
-	return strings.Fields(string(out)), nil
-})
-
-// withoutRepositoryVars returns env without the variables repositoryVars names.
-func withoutRepositoryVars(t *testing.T, env []string) []string {
-	t.Helper()
-	vars, err := repositoryVars()
-	if err != nil {
-		t.Fatalf("git rev-parse --local-env-vars: %v", err)
-	}
-	return slices.DeleteFunc(env, func(kv string) bool {
-		name, _, _ := strings.Cut(kv, "=")
-		return slices.Contains(vars, name)
-	})
-}
-
 // fixtureEnv keeps a fixture's go commands inside the fixture module and off
-// the network, whatever the enclosing run sets. MUTATE_BASELINE_CACHE is
-// dropped because a fixture runs mutate.sh, which would otherwise read an
-// enclosing mutation run's recorded baseline, and TEST_DURATIONS because every
-// fixture's test.sh would otherwise write the enclosing run's durations file.
+// the network, whatever the enclosing run sets. It drops what an enclosing
+// mutation or gate run sets for itself: a recorded baseline, a go test timeout,
+// and a durations file that every fixture's test.sh would write.
 func fixtureEnv() []string {
-	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "MUTATE_BASELINE_CACHE", "TEST_DURATIONS"}
+	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "MUTATE_BASELINE_CACHE", "MUTATE_TIMEOUT", "TEST_DURATIONS"}
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
 		return slices.ContainsFunc(dropped, func(p string) bool { return strings.EqualFold(p, name) })
@@ -318,5 +240,50 @@ func (r result) wantStderr(t *testing.T, want string) {
 	t.Helper()
 	if !strings.Contains(r.stderr, want) {
 		t.Errorf("stderr does not hold %q\nstdout:\n%s\nstderr:\n%s", want, r.stdout, r.stderr)
+	}
+}
+
+// refusal records a Fatalf call in place of a test.
+type refusal struct{ message string }
+
+func (r *refusal) Helper() {}
+
+func (r *refusal) Fatalf(format string, args ...any) { r.message = fmt.Sprintf(format, args...) }
+
+func TestFromRoot_FailsATestThatReadsOutsideTheInputs(t *testing.T) {
+	t.Parallel()
+	var r refusal
+	if fromRoot(&r, "scripts/test.sh"); r.message != "" {
+		t.Errorf("fromRoot refuses an input: %s", r.message)
+	}
+	if fromRoot(&r, "graph/doc.go"); !strings.Contains(r.message, "graph/doc.go is not one of this package's inputs") {
+		t.Errorf("fromRoot's refusal of graph/doc.go is %q", r.message)
+	}
+}
+
+func TestIsInput_AdmitsTheListedFilesAndDirectoriesAlone(t *testing.T) {
+	t.Parallel()
+	for rel, want := range map[string]bool{
+		"go.mod":                         true,
+		".golangci.yml":                  true,
+		"scripts":                        true,
+		"scripts/test.sh":                true,
+		"internal/testsummary":           true,
+		"internal/testsummary/main.go":   true,
+		"":                               false,
+		"./go.mod":                       false,
+		"scripts/":                       false,
+		"scripts/../graph/doc.go":        false,
+		"internal/raceskip/../../go.mod": false,
+		"go.model":                       false,
+		"scripts2/test.sh":               false,
+		"internal/testsummaries/a.go":    false,
+		"internal/scripttest/tree.go":    false,
+		"graph/doc.go":                   false,
+		".github/workflows/ci.yaml":      false,
+	} {
+		if got := isInput(rel); got != want {
+			t.Errorf("isInput(%q) = %v, want %v", rel, got, want)
+		}
 	}
 }

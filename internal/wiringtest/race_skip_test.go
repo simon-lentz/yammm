@@ -1,4 +1,4 @@
-package scripttest
+package wiringtest
 
 import (
 	"errors"
@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-const raceskipPath = fixtureModule + "/internal/raceskip"
+const raceskipPath = modulePath + "/internal/raceskip"
 
 // ratioFloorTest measures a ratio the race detector distorts, so its plain run
 // through raceskip.Skip is the only run that gates it.

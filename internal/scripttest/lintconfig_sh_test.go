@@ -8,7 +8,7 @@ import (
 
 func TestLintConfigScript_RefusesAKeyTheSchemaRefuses(t *testing.T) {
 	t.Parallel()
-	own, err := os.ReadFile(fromRoot(".golangci.yml"))
+	own, err := os.ReadFile(fromRoot(t, ".golangci.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
