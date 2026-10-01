@@ -135,7 +135,10 @@ var (
 	E_COMMAND_FAILED = NewCode("E_COMMAND_FAILED", CategorySentinel)
 
 	// E_CONTEXT_CANCELLED indicates the operation was cancelled via context.
-	// Used across all packages when ctx.Err() returns a non-nil error.
+	// An operation that checks its context and reports through a [Result], or
+	// through a [ContextualError] that holds one, raises it when ctx.Err()
+	// returns a non-nil error; one that returns another Go error returns
+	// ctx.Err() or wraps it instead.
 	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED", CategorySentinel)
 )
 

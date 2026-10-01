@@ -1,9 +1,11 @@
 package graph
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -17,7 +19,8 @@ import (
 // children, installs inst's association records on the held instance and keeps
 // nothing else of inst. It reports whether it merged; a merge records no
 // [Duplicate] and raises no error, and one that would give a (one) association
-// a second target is refused with E_GRAPH_CARDINALITY. The package doc's Merge
+// a second target is refused with an E_GRAPH_CARDINALITY for each such
+// association. The package doc's Merge
 // on a Duplicate Key section states the rules. Panics as [Graph.Add] does.
 func (g *Graph) AddOrMerge(ctx context.Context, inst *instance.ValidInstance) (merged bool, res diag.Result) {
 	return g.add(ctx, inst, "graph.AddOrMerge", "yammm.graph.add_or_merge", true)
@@ -153,16 +156,16 @@ func (h *heldRecords) targets() int {
 }
 
 // planMerge returns the incoming records a merge into held installs: each one
-// that names a target held does not already hold, once. It refuses a (one)
-// association the merge would give a second target. Called under g.mu.
-func (g *Graph) planMerge(typ *schema.Type, held *Instance, staged []stagedEdge) ([]stagedEdge, *diag.Issue) {
+// that names a target held does not already hold, once. It refuses with one
+// issue for each (one) association the merge would give a second target, in
+// relation-name order. Called under g.mu.
+func (g *Graph) planMerge(typ *schema.Type, held *Instance, staged []stagedEdge) ([]stagedEdge, []diag.Issue) {
 	g.sourceIndex()
 	var plan []stagedEdge
 	added := make(map[recordSlot]int)
 	seen := make(map[recordSlot]map[string]bool)
 	for _, se := range staged {
-		// A required association's "absent" or "empty" record adds nothing:
-		// held already holds an edge or a record under it.
+		// An "absent" or "empty" record names no target, so it adds nothing.
 		if se.reason != "" {
 			continue
 		}
@@ -180,20 +183,28 @@ func (g *Graph) planMerge(typ *schema.Type, held *Instance, staged []stagedEdge)
 		added[slot]++
 		plan = append(plan, se)
 	}
-	for slot, n := range added {
+	var refused []diag.Issue
+	// A collector with an issue limit keeps the equally severe issues that
+	// arrive first, so the refusals arrive in one order on every run.
+	for _, slot := range slices.SortedFunc(maps.Keys(added), func(a, b recordSlot) int {
+		return cmp.Compare(a.relation, b.relation)
+	}) {
+		n := added[slot]
 		rel, _ := typ.Relation(slot.relation)
 		if rel.IsMany() {
 			continue
 		}
 		if h := g.bySource[slot]; n+h.targets() > 1 {
-			issue := diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
+			refused = append(refused, diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("association %q on type %q is (one), and %s[%s] already holds a target the duplicate does not name",
 					slot.relation, held.TypeName(), held.TypeName(), held.PrimaryKey().String())).
 				WithDetail(diag.DetailKeyTypeName, held.TypeName()).
 				WithDetail(diag.DetailKeyPrimaryKey, held.PrimaryKey().String()).
-				WithDetail(diag.DetailKeyRelationName, slot.relation).Build()
-			return nil, &issue
+				WithDetail(diag.DetailKeyRelationName, slot.relation).Build())
 		}
+	}
+	if len(refused) > 0 {
+		return nil, refused
 	}
 	return plan, nil
 }

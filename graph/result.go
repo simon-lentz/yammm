@@ -47,17 +47,20 @@ type Attestation struct {
 // All slice-returning methods produce deterministically sorted output,
 // independent of Add() call order or concurrency, and every ordering below
 // compares types by TypeID so two types rendering one name still sort apart:
-//   - [Snapshot.Types]: lexicographic by TypeID (schema path, then name)
+//   - [Snapshot.Types]: lexicographic by the TypeID's String (the schema
+//     path, ":", then the name)
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
 //   - [Snapshot.Duplicates]: (type, primaryKey, relation, conflictType,
-//     conflictKey, parent slot, instance properties)
+//     conflictKey, parent slot, instance properties, instance provenance)
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //
-// Each tuple is total: every arm is compared, so two records that differ at
-// all sort apart and none inherits map-iteration order.
+// Every arm of each tuple is compared, so records that differ in an arm sort
+// apart. The provenance arm compares a source name and a span start, and a
+// loaded provenance carries no span, so two loaded duplicates that differ only
+// in their provenance's path tie.
 //
 // No instance map is exposed, so there is no iteration order to be surprised
 // by: [Snapshot.AllInstances] yields every root instance in the order above,
@@ -240,7 +243,9 @@ func (r *Snapshot) EdgesFrom(inst *Instance) []*Edge {
 
 // Diagnostics returns validation issues from graph construction.
 //
-// This includes errors and warnings from [Graph.Add] and [Graph.AddComposed] calls.
+// This includes errors and warnings from [Graph.Add], [Graph.AddOrMerge] and
+// [Graph.AddComposed] calls, and a [BatchAssembler]'s validator results, its
+// validation failures among them, and nil-instance refusals.
 // [Graph.Check] results are returned separately per-call and are not accumulated
 // here, making Check idempotent: multiple calls have no effect on snapshot diagnostics.
 //

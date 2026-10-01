@@ -220,6 +220,24 @@ func TestBatchAssembler_AddError_WrapsAsContextualError(t *testing.T) {
 	}
 }
 
+func TestBatchAssembler_CancelledAdd_ReachesSnapshotDiagnostics(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	ba := graph.NewBatchAssembler(ctx, s)
+
+	err := ba.Add("Person", instance.RawInstance{Properties: map[string]any{"id": "p1", "name": "A"}})
+	ce, ok := errors.AsType[*diag.ContextualError](err)
+	if !ok || !ce.Result.HasCode(diag.E_CONTEXT_CANCELLED) {
+		t.Fatalf("Add with a cancelled assembler context: %v; want E_CONTEXT_CANCELLED", err)
+	}
+
+	res, _ := ba.Finalize(t.Context())
+	if !res.Snapshot.Diagnostics().HasCode(diag.E_CONTEXT_CANCELLED) {
+		t.Errorf("Snapshot.Diagnostics() = %s; want the cancellation Add returned", res.Snapshot.Diagnostics())
+	}
+}
+
 func TestBatchAssembler_AddValidationFailure_ReachesSnapshotDiagnostics(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	ba := graph.NewBatchAssembler(t.Context(), s)

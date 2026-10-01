@@ -81,9 +81,9 @@ type BatchAssembler struct {
 	// lifecycleMu coordinates Add lifecycle against Finalize.
 	//
 	//   - Add / AddValid / AddValidOrMerge hold RLock for the whole call.
-	//     Many calls hold it at once, but each one's validation and graph
-	//     work runs under addMu, one call at a time; the RLock is the
-	//     barrier Finalize waits on.
+	//     Many calls hold it at once, but each call that reaches the graph
+	//     runs its graph add, and Add its validation, under addMu, one call
+	//     at a time; the RLock is the barrier Finalize waits on.
 	//   - Finalize sets the finalized flag, then acquires the write
 	//     lock — which by Go's RWMutex semantics waits for every
 	//     outstanding RLock to release before granting. After the write
@@ -194,7 +194,9 @@ func NewBatchAssembler(ctx context.Context, s *schema.Schema) *BatchAssembler {
 //   - A new instance may resolve an unresolved edge imported from snap,
 //     and new forward references resolve against seeded instances.
 //   - A new instance whose (type, primary key) collides with a seeded
-//     instance is rejected as a duplicate (E_DUPLICATE_PK).
+//     instance is rejected as a duplicate (E_DUPLICATE_PK) by Add and
+//     AddValid; AddValidOrMerge merges it into the seeded instance, or
+//     refuses it, by [Graph.AddOrMerge]'s rules.
 //   - Finalize's Check covers seeded and new state alike: a required
 //     association imported from snap and still unresolved at Finalize
 //     fails the batch with E_UNRESOLVED_REQUIRED.
@@ -364,8 +366,12 @@ func (ba *BatchAssembler) addValid(valid *instance.ValidInstance, merge bool) (b
 		// E_INTERNAL, not E_GRAPH_INVALID_PK: the record is absent, not
 		// mis-keyed, and a consumer routing remediation off the code would be
 		// sent to inspect a primary key that does not exist.
+		method := "AddValid"
+		if merge {
+			method = "AddValidOrMerge"
+		}
 		issue := diag.NewIssue(diag.Error, diag.E_INTERNAL,
-			"AddValid received a nil instance; ValidateForComposition returns nil for a child that failed validation").Build()
+			method+" received a nil instance; ValidateForComposition returns nil for a child that failed validation").Build()
 		collector := diag.NewCollector(0)
 		collector.Collect(issue)
 		// Every other Add rejection reaches Snapshot.Diagnostics(); this one

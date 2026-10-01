@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -784,5 +785,139 @@ func TestAddValidOrMerge_EveryAcceptedCallIsInTheSnapshot(t *testing.T) {
 	defer mu.Unlock()
 	if !maps.Equal(held, accepted) {
 		t.Errorf("snapshot holds %d issuers, %d calls were accepted: every accepted call, and no other, must be in it", len(held), len(accepted))
+	}
+}
+
+// AddValid and AddValidOrMerge run under the assembler's own context: once it
+// is cancelled, both refuse, tagged, and add nothing.
+func TestAddValidOrMerge_ACancelledAssemblerRefuses(t *testing.T) {
+	t.Parallel()
+	s := mergeSchema(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	ba := graph.NewBatchAssembler(ctx, s)
+	for name, call := range map[string]func(*instance.ValidInstance) (bool, error){
+		"graph.Add":        func(v *instance.ValidInstance) (bool, error) { return false, ba.AddValid(v) },
+		"graph.AddOrMerge": ba.AddValidOrMerge,
+	} {
+		merged, err := call(roots(t, s)[0])
+		ce, ok := errors.AsType[*diag.ContextualError](err)
+		if merged || !ok || !ce.Result.HasCode(diag.E_CONTEXT_CANCELLED) || !strings.Contains(ce.Result.String(), name+" cancelled") {
+			t.Errorf("%s: merged %v, %v; want a tagged %s cancellation", name, merged, err, name)
+		}
+	}
+	if n := ba.Count(); n != 0 {
+		t.Errorf("Count %d, want 0", n)
+	}
+}
+
+// A nil instance through AddValidOrMerge is named by that method.
+func TestAddValidOrMerge_NilInstanceNamesTheMethod(t *testing.T) {
+	t.Parallel()
+	s := mergeSchema(t)
+	ba := graph.NewBatchAssembler(t.Context(), s)
+	for method, call := range map[string]func() error{
+		"AddValid":        func() error { return ba.AddValid(nil) },
+		"AddValidOrMerge": func() error { _, err := ba.AddValidOrMerge(nil); return err },
+	} {
+		ce, ok := errors.AsType[*diag.ContextualError](call())
+		if !ok || !strings.Contains(ce.Result.String(), method+" received a nil instance") {
+			t.Errorf("%s(nil): %v; want the message to name %s", method, ce, method)
+		}
+	}
+}
+
+// Add and AddOrMerge name themselves in the panics a caller cannot recover
+// from.
+func TestAddOrMerge_PanicsNameTheMethod(t *testing.T) {
+	t.Parallel()
+	s := mergeSchema(t)
+	inst := roots(t, s)[0]
+	var none *graph.Graph
+	var noCtx context.Context
+	g := graph.New(s)
+	for want, call := range map[string]func(){
+		"graph.Add: nil *Graph receiver":        func() { none.Add(t.Context(), inst) },
+		"graph.AddOrMerge: nil *Graph receiver": func() { none.AddOrMerge(t.Context(), inst) },
+		"graph.AddOrMerge: nil context":         func() { g.AddOrMerge(noCtx, inst) },
+	} {
+		t.Run(want, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				if msg, _ := recover().(string); msg != want {
+					t.Errorf("panic %q, want %q", msg, want)
+				}
+			}()
+			call()
+		})
+	}
+}
+
+// A merge that would give several (one) associations a second target is
+// refused with one E_GRAPH_CARDINALITY for each, and each names the held root
+// and its association.
+func TestAddOrMerge_RefusesEveryOneAssociationItWouldOverfill(t *testing.T) {
+	t.Parallel()
+	s := mergeSchema(t)
+	for run := range 50 {
+		g := graph.New(s)
+		mustAdd(t, g, roots(t, s)...)
+		mustAdd(t, g, issue(t, s, "i1", "t", with(required(), "LEAD", target{"a", nil})))
+		merged, res := g.AddOrMerge(t.Context(), issue(t, s, "i1", "t", with(with(required(), "HOME", target{"p2", nil}), "LEAD", target{"b", nil})))
+		if merged {
+			t.Fatalf("run %d: merged; want a refusal", run)
+		}
+		var relations []string
+		for iss := range res.Issues() {
+			if iss.Code() != diag.E_GRAPH_CARDINALITY {
+				t.Fatalf("run %d: %s; want E_GRAPH_CARDINALITY alone", run, res)
+			}
+			details := make(map[string]string)
+			for _, d := range iss.Details() {
+				details[d.Key] = d.Value
+			}
+			if details[diag.DetailKeyTypeName] != "Issue" || details[diag.DetailKeyPrimaryKey] != `["i1"]` {
+				t.Errorf("run %d: details %v; want type_name Issue and primary_key [\"i1\"]", run, details)
+			}
+			relations = append(relations, details[diag.DetailKeyRelationName])
+			if !strings.Contains(iss.Message(), strconv.Quote(details[diag.DetailKeyRelationName])) {
+				t.Errorf("run %d: message %q does not name its association", run, iss.Message())
+			}
+		}
+		if slices.Sort(relations); !slices.Equal(relations, []string{"HOME", "LEAD"}) {
+			t.Fatalf("run %d: refused relations %q, want [HOME LEAD]", run, relations)
+		}
+		if n := g.Snapshot().Diagnostics().CodeCounts(diag.Error)[diag.E_GRAPH_CARDINALITY]; n != 2 {
+			t.Errorf("run %d: Snapshot.Diagnostics() holds %d E_GRAPH_CARDINALITY, want both refusals", run, n)
+		}
+		// A collector that keeps one issue keeps the refusal that arrives first.
+		capped := diag.NewCollector(1)
+		capped.Merge(res)
+		for iss := range capped.Result().Issues() {
+			for _, d := range iss.Details() {
+				if d.Key == diag.DetailKeyRelationName && d.Value != "HOME" {
+					t.Fatalf("run %d: a one-issue collector kept %s; the refusals arrive in relation-name order", run, d.Value)
+				}
+			}
+		}
+		want := []string{`HOME->["p1"]{}`, `LEAD->["a"]{}`, `LISTED_ON->["p1"]{}`}
+		if got := edgesOf(g.Snapshot()); !slices.Equal(got, want) {
+			t.Fatalf("run %d: edges %q, want %q: a refused merge installs nothing", run, got, want)
+		}
+	}
+}
+
+// A merge is traced with the number of records it installed.
+func TestAddOrMerge_TracesTheMerge(t *testing.T) {
+	t.Parallel()
+	s := mergeSchema(t)
+	var buf bytes.Buffer
+	g := graph.New(s, graph.WithLogger(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))))
+	mustAdd(t, g, roots(t, s)...)
+	mustAdd(t, g, issue(t, s, "i1", "t", required()))
+	buf.Reset()
+	mustMerge(t, g, issue(t, s, "i1", "t", with(required(), "ISSUED_BY", target{"a", nil}, target{"b", nil})))
+	if log := buf.String(); !strings.Contains(log, `msg="merged on duplicate primary key"`) || !strings.Contains(log, "records=2") {
+		t.Errorf("trace %q; want the merge and its two records", log)
 	}
 }

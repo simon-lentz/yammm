@@ -24,8 +24,9 @@ import (
 // concurrently; the graph handles forward references, duplicate detection and
 // merges atomically.
 //
-// All operations accept a [context.Context] for cancellation. Cancellation
-// does not corrupt internal state; partial results may be inspected.
+// Add, AddOrMerge, AddComposed and Check accept a [context.Context] for
+// cancellation. Cancellation does not corrupt internal state; partial results
+// may be inspected.
 type Graph struct {
 	schema *schema.Schema
 	config graphConfig
@@ -243,9 +244,12 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 	if typeInstances != nil {
 		if existing, found := typeInstances[pkString]; found {
 			if merge && len(graphInst.composed) == 0 {
-				plan, issue := g.planMerge(typ, existing, staged)
-				if issue != nil {
-					return false, g.reject(opCollector, *issue)
+				plan, refused := g.planMerge(typ, existing, staged)
+				if len(refused) > 0 {
+					for _, issue := range refused {
+						res = g.reject(opCollector, issue)
+					}
+					return false, res
 				}
 				// A merge that installs a record brings the payload's target
 				// keys and edge properties in, so its validation joins Values.
@@ -355,7 +359,8 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 // # Limitation: Top-Level Parents Only
 //
 // AddComposed can only attach children to parents that exist in the top-level
-// instances map (those added via [Graph.Add]). It cannot attach grandchildren
+// instances map (those added via [Graph.Add] or [Graph.AddOrMerge], or imported
+// by [NewFromSnapshot]). It cannot attach grandchildren
 // to a composed child. To build nested compositions, either:
 //   - Include nested children inline in the parent's [instance.ValidInstance], or
 //   - Stream children only to top-level parents
