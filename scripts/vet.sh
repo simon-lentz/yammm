@@ -15,7 +15,7 @@
 # even after an earlier one fails, and the summary names each failure.
 #
 # With --host, only this host's build is vetted, plain and under -race: each
-# host job of the test workflow vets its own build, and one job of that
+# host's check job of the test workflow vets its own build, and one job of that
 # workflow vets every target. The commit gate's hook passes --host too, and the
 # full gate's hook vets every target.
 #

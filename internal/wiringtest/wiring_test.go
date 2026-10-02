@@ -328,74 +328,536 @@ func TestTestWorkflow_RunsOnEveryBranchAndWhenCalled(t *testing.T) {
 	}
 }
 
-func TestTestWorkflow_EveryHostRunsEveryCheck(t *testing.T) {
+// workflowFormFile is the test workflow less its comments, the form the
+// workflow is held to.
+const workflowFormFile = "testdata/yammm_test.yaml"
+
+// parseOneDocument parses text as one YAML document and returns its root
+// value. yaml.Unmarshal reads the first of several documents and drops the
+// rest, where GitHub refuses the file.
+func parseOneDocument(text string) (*yaml.Node, error) {
+	dec := yaml.NewDecoder(strings.NewReader(text))
+	var doc, next yaml.Node
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+	if err := dec.Decode(&next); !errors.Is(err, io.EOF) {
+		return nil, errors.New("it holds more than one YAML document")
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 {
+		return nil, errors.New("it holds no single value")
+	}
+	return doc.Content[0], nil
+}
+
+// oneDocument returns the root value of the one YAML document the file at
+// path holds.
+func oneDocument(t *testing.T, path string) *yaml.Node {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := parseOneDocument(string(b))
+	if err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return doc
+}
+
+func TestParseOneDocument_RefusesAllButOneDocument(t *testing.T) {
+	t.Parallel()
+	if doc, err := parseOneDocument("on: push\n"); err != nil || doc.Kind != yaml.MappingNode {
+		t.Fatalf("one document decodes to %v, error %v", doc, err)
+	}
+	for _, tt := range []struct{ name, text, want string }{
+		{"a second document", "on: push\n---\njobs: {}\n", "more than one YAML document"},
+		{"a second document that is empty", "on: push\n---\n", "more than one YAML document"},
+		{"no document", "", "EOF"},
+		{"text that is no YAML", "on: [push\n", "yaml:"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if doc, err := parseOneDocument(tt.text); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("parseOneDocument = %v, error %v, want an error holding %q", doc, err, tt.want)
+			}
+		})
+	}
+}
+
+// describe spells a YAML node for a finding: a scalar by its tag and its text
+// (a plain scalar's spelling, a quoted or block scalar's content), a mapping, a
+// list or an alias by its kind, and any other node as no value.
+func describe(n *yaml.Node) string {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.ShortTag() + " " + strconv.Quote(n.Value)
+	case yaml.MappingNode:
+		return "a mapping"
+	case yaml.SequenceNode:
+		return "a list"
+	case yaml.AliasNode:
+		return "an alias"
+	}
+	return "no value"
+}
+
+// entry returns the value m holds under key, or nil when m is no mapping or
+// holds no such key.
+func entry(m *yaml.Node, key string) *yaml.Node {
+	if m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// nodeFindings reports each place where the YAML value got departs from want:
+// a value of another kind, a scalar of another tag or text, a key one side
+// lacks or got sets twice, a list of another length, and a value that is an
+// alias or carries an anchor or a written tag other than "!". A scalar is
+// compared by its tag and its text, not by the value it decodes to, so 024 is
+// not 20: GitHub reads some spellings as another value than this decoder does.
+// Key order, quoting, block style and a key's own anchor or tag are not
+// compared. path names the place, a list's item by its index and want's name.
+func nodeFindings(path string, got, want *yaml.Node) []string {
+	if got.Kind == yaml.AliasNode || got.Anchor != "" || got.Style&yaml.TaggedStyle != 0 {
+		return []string{path + " is an alias, or carries an anchor or a tag, which the form does not hold"}
+	}
+	if got.Kind != want.Kind {
+		return []string{fmt.Sprintf("%s is %s, want %s", path, describe(got), describe(want))}
+	}
+	var findings []string
+	switch want.Kind {
+	case yaml.ScalarNode:
+		if got.ShortTag() != want.ShortTag() || got.Value != want.Value {
+			findings = append(findings, fmt.Sprintf("%s is %s, want %s", path, describe(got), describe(want)))
+		}
+	case yaml.SequenceNode:
+		if len(got.Content) != len(want.Content) {
+			return []string{fmt.Sprintf("%s holds %d items, want %d", path, len(got.Content), len(want.Content))}
+		}
+		for i, w := range want.Content {
+			at := fmt.Sprintf("%s[%d]", path, i)
+			if name := entry(w, "name"); name != nil {
+				at += " (" + name.Value + ")"
+			}
+			findings = append(findings, nodeFindings(at, got.Content[i], w)...)
+		}
+	case yaml.MappingNode:
+		under := func(key string) string {
+			if path == "" {
+				return key
+			}
+			return path + "." + key
+		}
+		seen := map[string]bool{}
+		for i := 0; i+1 < len(got.Content); i += 2 {
+			key := got.Content[i].Value
+			if seen[key] {
+				findings = append(findings, under(key)+" is set twice")
+			}
+			seen[key] = true
+		}
+		for i := 0; i+1 < len(want.Content); i += 2 {
+			key := want.Content[i].Value
+			if v := entry(got, key); v != nil {
+				findings = append(findings, nodeFindings(under(key), v, want.Content[i+1])...)
+			} else {
+				findings = append(findings, fmt.Sprintf("%s is not set, want %s", under(key), describe(want.Content[i+1])))
+			}
+		}
+		for i := 0; i+1 < len(got.Content); i += 2 {
+			if key := got.Content[i].Value; entry(want, key) == nil {
+				findings = append(findings, fmt.Sprintf("%s is set to %s, which the form does not hold", under(key), describe(got.Content[i+1])))
+			}
+		}
+	}
+	return findings
+}
+
+// The test workflow holds its form: the keys, values, tags and scalar text of
+// testdata/yammm_test.yaml, with key order, quoting, layout and comments aside.
+// So a change to what the workflow holds is a change to that file too.
+func TestTestWorkflow_IsItsKnownForm(t *testing.T) {
+	t.Parallel()
+	got := oneDocument(t, fromRoot(".github/workflows/yammm_test.yml"))
+	for _, f := range nodeFindings("", got, oneDocument(t, workflowFormFile)) {
+		t.Error(f)
+	}
+}
+
+// The comparison itself, against each kind of edit to the form.
+func TestNodeFindings_RefusesEachDeparture(t *testing.T) {
+	t.Parallel()
+	scalar := func(tag, value string) *yaml.Node {
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value}
+	}
+	// in follows keys from doc: a mapping's key, a list item's name, or its index.
+	in := func(doc *yaml.Node, keys ...string) *yaml.Node {
+		t.Helper()
+		n := doc
+		for _, key := range keys {
+			var next *yaml.Node
+			if n.Kind == yaml.SequenceNode {
+				if i, err := strconv.Atoi(key); err == nil && i < len(n.Content) {
+					next = n.Content[i]
+				}
+				for _, item := range n.Content {
+					if name := entry(item, "name"); name != nil && name.Value == key {
+						next = item
+					}
+				}
+			} else {
+				next = entry(n, key)
+			}
+			if next == nil {
+				t.Fatalf("the form holds nothing at %q", keys)
+			}
+			n = next
+		}
+		return n
+	}
+	put := func(m *yaml.Node, key string, v *yaml.Node) {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == key {
+				m.Content[i+1] = v
+				return
+			}
+		}
+		m.Content = append(m.Content, scalar("!!str", key), v)
+	}
+	drop := func(m *yaml.Node, key string) {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == key {
+				m.Content = slices.Delete(m.Content, i, i+2)
+				return
+			}
+		}
+		t.Fatalf("the form holds no key %s to drop", key)
+	}
+	form := func() *yaml.Node { return oneDocument(t, workflowFormFile) }
+	if f := nodeFindings("", form(), form()); len(f) != 0 {
+		t.Fatalf("the form against itself reports %q", f)
+	}
+	for _, tt := range []struct {
+		name   string
+		want   []string // the findings, in order
+		change func(doc *yaml.Node)
+	}{
+		{"every host on one image", []string{`jobs.check.runs-on is !!str "ubuntu-24.04", want !!str "${{ matrix.os }}"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check"), "runs-on", scalar("!!str", "ubuntu-24.04"))
+		}},
+		{"a host gone from the matrix", []string{"jobs.test.strategy.matrix.include holds 2 items, want 3"}, func(doc *yaml.Node) {
+			include := in(doc, "jobs", "test", "strategy", "matrix", "include")
+			include.Content = include.Content[:2]
+		}},
+		{"a key in a matrix entry", []string{`jobs.test.strategy.matrix.include[0] (Linux).experimental is set to !!bool "true", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "strategy", "matrix", "include", "Linux"), "experimental", scalar("!!bool", "true"))
+		}},
+		{"a matrix GitHub fills at run time", []string{`jobs.test.strategy.matrix.include is !!str "${{ fromJSON(needs.x.outputs.hosts) }}", want a list`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "strategy", "matrix"), "include", scalar("!!str", "${{ fromJSON(needs.x.outputs.hosts) }}"))
+		}},
+		{"a strategy that is no mapping", []string{`jobs.test.strategy is !!str "none", want a mapping`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test"), "strategy", scalar("!!str", "none"))
+		}},
+		{"a run that is a list", []string{`jobs.check.steps[9] (Vet).run is a list, want !!str "scripts/vet.sh --host"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check", "steps", "Vet"), "run", &yaml.Node{Kind: yaml.SequenceNode})
+		}},
+		{"a timeout GitHub reads as 24", []string{`jobs.check.timeout-minutes is !!int "024", want !!int "20"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check"), "timeout-minutes", scalar("!!int", "024"))
+		}},
+		{"a string where the form holds false", []string{`(Set up Go).with.cache is !!str "false", want !!bool "false"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "steps", "Set up Go", "with"), "cache", scalar("!!str", "false"))
+		}},
+		{"nothing where the form holds false", []string{`(Set up Go).with.cache is !!null "", want !!bool "false"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check", "steps", "Set up Go", "with"), "cache", scalar("!!null", ""))
+		}},
+		{"a key that holds nothing", []string{`(Vet).continue-on-error is set to !!null "", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check", "steps", "Vet"), "continue-on-error", scalar("!!null", ""))
+		}},
+		{"a key the form holds, gone", []string{`(golangci-lint).with.skip-cache is not set, want !!bool "true"`}, func(doc *yaml.Node) {
+			drop(in(doc, "jobs", "check", "steps", "golangci-lint", "with"), "skip-cache")
+		}},
+		{"a mapping the form holds, gone", []string{"jobs.check.defaults is not set, want a mapping"}, func(doc *yaml.Node) {
+			drop(in(doc, "jobs", "check"), "defaults")
+		}},
+		{"a key set twice", []string{"jobs.test.timeout-minutes is set twice"}, func(doc *yaml.Node) {
+			job := in(doc, "jobs", "test")
+			job.Content = append(job.Content, scalar("!!str", "timeout-minutes"), scalar("!!int", "30"))
+		}},
+		{"a job that waits for another", []string{`jobs.test.needs is set to !!str "check", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test"), "needs", scalar("!!str", "check"))
+		}},
+		{"a step added", []string{"jobs.check.steps holds 12 items, want 11"}, func(doc *yaml.Node) {
+			steps := in(doc, "jobs", "check", "steps")
+			steps.Content = append(steps.Content, &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"two steps in the other order", []string{
+			`(Test).name is !!str "Keep the test durations", want !!str "Test"`, "(Test).env is not set, want a mapping", `(Test).run is not set, want !!str "scripts/test.sh"`,
+			`(Test).uses is set to !!str "actions/upload-artifact@v7"`, "(Test).with is set to a mapping",
+			`(Keep the test durations).name is !!str "Test"`, "(Keep the test durations).uses is not set", "(Keep the test durations).with is not set",
+			"(Keep the test durations).env is set to a mapping", `(Keep the test durations).run is set to !!str "scripts/test.sh"`,
+		}, func(doc *yaml.Node) {
+			steps := in(doc, "jobs", "test", "steps").Content
+			i := slices.Index(steps, in(doc, "jobs", "test", "steps", "Test"))
+			steps[i], steps[i+1] = steps[i+1], steps[i]
+		}},
+		{"a suite that runs no test", []string{`(Test).env.GOFLAGS is set to !!str "-run=^$", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "steps", "Test", "env"), "GOFLAGS", scalar("!!str", "-run=^$"))
+		}},
+		{"an entry of another key restored", []string{`(Restore this job's Go caches).with.restore-keys is set to !!str "go-", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "cross-vet", "steps", "Restore this job's Go caches", "with"), "restore-keys", scalar("!!str", "go-"))
+		}},
+		{"a save on every ref", []string{`(Save this job's Go caches).if is !!str "${{ steps.go-restore.outputs.cache-hit != 'true' }}", want !!str`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "steps", "Save this job's Go caches"), "if", scalar("!!str", "${{ steps.go-restore.outputs.cache-hit != 'true' }}"))
+		}},
+		{"an alias", []string{"jobs.test.defaults is an alias, or carries an anchor or a tag, which the form does not hold"}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test"), "defaults", &yaml.Node{Kind: yaml.AliasNode, Value: "shell", Alias: in(doc, "jobs", "check", "defaults")})
+		}},
+		{"an anchor", []string{"jobs.check.defaults is an alias, or carries an anchor or a tag, which the form does not hold"}, func(doc *yaml.Node) {
+			in(doc, "jobs", "check", "defaults").Anchor = "shell"
+		}},
+		{"a tag on a quoted scalar", []string{"(Set up Go).with.cache is an alias, or carries an anchor or a tag"}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check", "steps", "Set up Go", "with"), "cache", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.TaggedStyle | yaml.DoubleQuotedStyle, Tag: "!!bool", Value: "false"})
+		}},
+		{"a merge key", []string{"jobs.integration.strategy.matrix.include[0].<< is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "integration", "strategy", "matrix", "include", "0"), "<<", &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"a branch whose push runs no suite", []string{"on.push.branches holds 2 items, want 1"}, func(doc *yaml.Node) {
+			branches := in(doc, "on", "push", "branches")
+			branches.Content = append(branches.Content, scalar("!!str", "!main"))
+		}},
+		{"a dispatch that takes an input", []string{"on.workflow_dispatch.inputs is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			put(in(doc, "on", "workflow_dispatch"), "inputs", &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"a run cancelled by the next push", []string{"concurrency is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			put(doc, "concurrency", &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"a longer timeout for the mermaid job", []string{`jobs.mermaid.timeout-minutes is !!int "360", want !!int "15"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "mermaid"), "timeout-minutes", scalar("!!int", "360"))
+		}},
+		{"a job gone and a job added", []string{"jobs.cross-vet is not set, want a mapping", "jobs.extra is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			drop(in(doc, "jobs"), "cross-vet")
+			put(in(doc, "jobs"), "extra", &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"a key in another case", []string{"jobs is not set, want a mapping", "Jobs is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			jobs := in(doc, "jobs")
+			drop(doc, "jobs")
+			put(doc, "Jobs", jobs)
+		}},
+		{"an edit to each of two jobs", []string{`jobs.check.timeout-minutes is !!int "21", want !!int "20"`, `jobs.integration.timeout-minutes is !!int "31", want !!int "30"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "integration"), "timeout-minutes", scalar("!!int", "31"))
+			put(in(doc, "jobs", "check"), "timeout-minutes", scalar("!!int", "21"))
+		}},
+		{"a workflow that is a list", []string{"a workflow is a list, want a mapping"}, func(doc *yaml.Node) {
+			*doc = yaml.Node{Kind: yaml.SequenceNode}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			doc := form()
+			tt.change(doc)
+			path := ""
+			if doc.Kind != yaml.MappingNode {
+				path = "a workflow"
+			}
+			f := nodeFindings(path, doc, form())
+			if len(f) != len(tt.want) {
+				t.Fatalf("findings = %q, want %d", f, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(f[i], want) {
+					t.Errorf("finding %d = %q, want it to hold %q", i, f[i], want)
+				}
+			}
+		})
+	}
+}
+
+// testHosts are the images the check job and the test job each run on.
+var testHosts = []string{"macos-26", "ubuntu-24.04", "windows-2025"}
+
+// isCacheSave reports whether s does nothing but save a cache entry.
+func isCacheSave(s step) bool {
+	return strings.HasPrefix(s.Uses, "actions/cache/save@")
+}
+
+// gateFindings reports each way wf lets a failure pass or leaves a host
+// unchecked: a job that is conditional, waits for another or may fail; a step
+// that may fail or carries a condition other than the one that runs it after
+// an earlier failure (a cache save may carry any); and a check job or a test
+// job that does not run on each of testHosts, its config check with no
+// condition and its lint, vet or suite after an earlier step fails. The form holds these today, and this check holds them against a
+// change made to the workflow and the form together.
+func gateFindings(wf workflow) []string {
+	var findings []string
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		j := wf.Jobs[name]
+		if j.If != "" {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs only if %q", name, j.If))
+		}
+		if j.ContinueOnError != nil {
+			findings = append(findings, fmt.Sprintf("jobs.%s sets continue-on-error %v, so its failure passes the run", name, j.ContinueOnError))
+		}
+		if len(j.Needs) > 0 {
+			findings = append(findings, fmt.Sprintf("jobs.%s needs %q, so it is skipped when one of them fails", name, []string(j.Needs)))
+		}
+		for i, s := range j.Steps {
+			if s.If != "" && s.If != "${{ !cancelled() }}" && !isCacheSave(s) {
+				findings = append(findings, fmt.Sprintf("jobs.%s step %d (%s) runs only if %q", name, i+1, s.Name, s.If))
+			}
+			if s.ContinueOnError != nil {
+				findings = append(findings, fmt.Sprintf("jobs.%s step %d (%s) sets continue-on-error %v, so its failure passes the job", name, i+1, s.Name, s.ContinueOnError))
+			}
+		}
+	}
+	// checks are the steps a host job must run, each with the condition it runs on.
+	type check struct {
+		what, wantIf string
+		is           func(step) bool
+	}
+	ran := func(cmd string) func(step) bool {
+		return func(s step) bool { return strings.TrimSpace(s.Run) == cmd }
+	}
+	hostJobs := map[string][]check{
+		"check": {
+			{"scripts/lintconfig.sh", "", ran("scripts/lintconfig.sh")},
+			{"the linter", "${{ !cancelled() }}", func(s step) bool { return strings.HasPrefix(s.Uses, "golangci/golangci-lint-action@") }},
+			{"scripts/vet.sh --host", "${{ !cancelled() }}", ran("scripts/vet.sh --host")},
+		},
+		"test": {{"scripts/test.sh", "${{ !cancelled() }}", ran("scripts/test.sh")}},
+	}
+	for _, name := range slices.Sorted(maps.Keys(hostJobs)) {
+		j, ok := wf.Jobs[name]
+		if !ok {
+			findings = append(findings, fmt.Sprintf("jobs.%s is not set", name))
+			continue
+		}
+		if ff := j.Strategy.FailFast; ff == nil || *ff {
+			findings = append(findings, fmt.Sprintf("jobs.%s does not set fail-fast: false, so one host's failure cancels the other hosts' reports", name))
+		}
+		if !slices.Equal(j.RunsOn, []string{"${{ matrix.os }}"}) {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs on %q, want the matrix's os", name, []string(j.RunsOn)))
+		}
+		var hosts []string
+		for _, c := range j.Strategy.Matrix.combinations() {
+			hosts = append(hosts, c["os"])
+		}
+		slices.Sort(hosts)
+		if !slices.Equal(hosts, testHosts) {
+			findings = append(findings, fmt.Sprintf("jobs.%s's matrix holds the hosts %q, want %q", name, hosts, testHosts))
+		}
+		for _, c := range hostJobs[name] {
+			i := slices.IndexFunc(j.Steps, c.is)
+			if i < 0 {
+				findings = append(findings, fmt.Sprintf("jobs.%s has no step that runs %s", name, c.what))
+			} else if got := j.Steps[i].If; got != c.wantIf {
+				findings = append(findings, fmt.Sprintf("jobs.%s runs %s if %q, want %q", name, c.what, got, c.wantIf))
+			}
+		}
+	}
+	return findings
+}
+
+// No job or step of the test workflow lets a failure pass, and each host runs
+// every check: the release builds once this workflow has passed.
+func TestTestWorkflow_HoldsTheGate(t *testing.T) {
 	t.Parallel()
 	var wf workflow
 	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
-	test, ok := wf.Jobs["test"]
-	if !ok {
-		t.Fatal("jobs.test is not set")
+	for _, f := range gateFindings(wf) {
+		t.Error(f)
 	}
-	if test.If != "" {
-		t.Errorf("jobs.test runs only if %q", test.If)
-	}
-	if test.ContinueOnError != nil {
-		t.Errorf("jobs.test sets continue-on-error %v, so a failure passes the job", test.ContinueOnError)
-	}
-	if ff := test.Strategy.FailFast; ff == nil || *ff {
-		t.Error("jobs.test does not set fail-fast: false, so one host's failure cancels the other hosts' reports")
-	}
+}
 
-	find := func(match func(step) bool) (step, bool) {
-		i := slices.IndexFunc(test.Steps, match)
-		if i < 0 {
-			return step{}, false
-		}
-		return test.Steps[i], true
+// The check itself, against each weakening of the form's jobs.
+func TestGateFindings_RefusesEachWeakening(t *testing.T) {
+	t.Parallel()
+	form := func() workflow {
+		var wf workflow
+		decodeYAML(t, workflowFormFile, &wf)
+		return wf
 	}
-	if verify, ok := find(func(s step) bool { return s.Run == "scripts/lintconfig.sh" }); !ok {
-		t.Error("no step runs scripts/lintconfig.sh")
-	} else if verify.If != "" || verify.ContinueOnError != nil {
-		t.Errorf("the verify step runs if %q with continue-on-error %v; it must run on every event and fail the job", verify.If, verify.ContinueOnError)
-	}
-	checks := map[string]func(step) bool{
-		"lint": func(s step) bool { return strings.HasPrefix(s.Uses, "golangci/golangci-lint-action@") },
-		"vet":  func(s step) bool { return strings.HasPrefix(s.Run, "scripts/vet.sh") },
-		"test": func(s step) bool { return s.Run == "scripts/test.sh" },
-	}
-	for name, match := range checks {
-		s, ok := find(match)
-		if !ok {
-			t.Errorf("no %s step", name)
-			continue
-		}
-		if s.If != "${{ !cancelled() }}" {
-			t.Errorf("the %s step runs if %q; it must run after an earlier step fails", name, s.If)
-		}
-		if s.ContinueOnError != nil {
-			t.Errorf("the %s step sets continue-on-error %v, so its failure passes the job", name, s.ContinueOnError)
+	// edit applies change to the named job of the form and to its step that is.
+	edit := func(name string, is func(step) bool, change func(j *job, i int)) func(wf workflow) {
+		return func(wf workflow) {
+			j := wf.Jobs[name]
+			i := 0
+			if is != nil {
+				if i = slices.IndexFunc(j.Steps, is); i < 0 {
+					t.Fatalf("jobs.%s of the form has no such step", name)
+				}
+			}
+			change(&j, i)
+			wf.Jobs[name] = j
 		}
 	}
-
-	vet, ok := find(checks["vet"])
-	if !ok {
-		return
+	lint := func(s step) bool { return strings.HasPrefix(s.Uses, "golangci/golangci-lint-action@") }
+	runs := func(cmd string) func(step) bool { return func(s step) bool { return s.Run == cmd } }
+	on := true
+	if f := gateFindings(form()); len(f) != 0 {
+		t.Fatalf("the form reports %q", f)
 	}
-	hosts := map[string]string{}
-	for _, c := range test.Strategy.Matrix.combinations() {
-		hosts[c["os"]] = strings.TrimSpace(vet.Run)
-	}
-	want := map[string]string{
-		"ubuntu-24.04": "scripts/vet.sh --host",
-		"windows-2025": "scripts/vet.sh --host",
-		"macos-26":     "scripts/vet.sh --host",
-	}
-	for host, cmd := range want {
-		if got, ok := hosts[host]; !ok {
-			t.Errorf("the matrix holds no %s host", host)
-		} else if got != cmd {
-			t.Errorf("the %s host vets with %q, want %q", host, got, cmd)
-		}
+	for _, tt := range []struct {
+		name   string
+		want   []string // the findings, in order
+		change func(wf workflow)
+	}{
+		{"a job switched off", []string{`jobs.check runs only if "false"`}, edit("check", nil, func(j *job, _ int) { j.If = "false" })},
+		{"a job on one event", []string{`jobs.integration runs only if "github.event_name == 'push'"`}, edit("integration", nil, func(j *job, _ int) { j.If = "github.event_name == 'push'" })},
+		{"a job whose failure passes", []string{"jobs.test sets continue-on-error true"}, edit("test", nil, func(j *job, _ int) { j.ContinueOnError = true })},
+		{"a job that names the default", []string{"jobs.mermaid sets continue-on-error false"}, edit("mermaid", nil, func(j *job, _ int) { j.ContinueOnError = false })},
+		{"a job that waits for another", []string{`jobs.test needs ["check"]`}, edit("test", nil, func(j *job, _ int) { j.Needs = stringList{"check"} })},
+		{"a step switched off", []string{`jobs.cross-vet step 6 (Vet) runs only if "false"`}, edit("cross-vet", runs("scripts/vet.sh"), func(j *job, i int) { j.Steps[i].If = "false" })},
+		{"a step only after success", []string{`jobs.integration step 1 (Checkout) runs only if "${{ success() }}"`}, edit("integration", nil, func(j *job, i int) { j.Steps[i].If = "${{ success() }}" })},
+		{"a step whose failure passes", []string{"jobs.integration step 3 (Integration tests) sets continue-on-error true"}, edit("integration", nil, func(j *job, _ int) { j.Steps[2].ContinueOnError = true })},
+		{"a condition on an action that only names a cache save", []string{`jobs.check step 11 (Save this job's Go caches) runs only if`}, edit("check", isCacheSave, func(j *job, i int) { j.Steps[i].Uses = "docker://example/actions/cache/save@v6" })},
+		{"a step that names the default", []string{"jobs.check step 1 (Keep committed line endings) sets continue-on-error false"}, edit("check", nil, func(j *job, i int) { j.Steps[i].ContinueOnError = false })},
+		{"fail-fast on", []string{"jobs.check does not set fail-fast: false"}, edit("check", nil, func(j *job, _ int) { j.Strategy.FailFast = &on })},
+		{"fail-fast at its default", []string{"jobs.test does not set fail-fast: false"}, edit("test", nil, func(j *job, _ int) { j.Strategy.FailFast = nil })},
+		{"every host on one image", []string{`jobs.check runs on ["ubuntu-24.04"], want the matrix's os`}, edit("check", nil, func(j *job, _ int) { j.RunsOn = runnerLabels{"ubuntu-24.04"} })},
+		{"a host gone from the matrix", []string{`jobs.test's matrix holds the hosts ["ubuntu-24.04" "windows-2025"]`}, edit("test", nil, func(j *job, _ int) {
+			j.Strategy.Matrix.Include = slices.DeleteFunc(j.Strategy.Matrix.Include, func(c map[string]string) bool { return c["os"] == "macos-26" })
+		})},
+		{"a host on another image", []string{`jobs.check's matrix holds the hosts ["macos-15" "ubuntu-24.04" "windows-2025"]`}, edit("check", nil, func(j *job, _ int) {
+			for _, c := range j.Strategy.Matrix.Include {
+				if c["os"] == "macos-26" {
+					c["os"] = "macos-15"
+				}
+			}
+		})},
+		{"no config check", []string{"jobs.check has no step that runs scripts/lintconfig.sh"}, edit("check", runs("scripts/lintconfig.sh"), func(j *job, i int) { j.Steps[i].Run = "true" })},
+		{"a config check on one event", []string{`jobs.check step 8 (Verify the linter config) runs only if "github.event_name == 'push'"`, `jobs.check runs scripts/lintconfig.sh if "github.event_name == 'push'", want ""`}, edit("check", runs("scripts/lintconfig.sh"), func(j *job, i int) { j.Steps[i].If = "github.event_name == 'push'" })},
+		{"no lint", []string{"jobs.check has no step that runs the linter"}, edit("check", lint, func(j *job, i int) { j.Steps[i].Uses = "actions/checkout@v7" })},
+		{"a lint that stops at an earlier failure", []string{`jobs.check runs the linter if "", want "${{ !cancelled() }}"`}, edit("check", lint, func(j *job, i int) { j.Steps[i].If = "" })},
+		{"a vet whose failure passes", []string{"jobs.check has no step that runs scripts/vet.sh --host"}, edit("check", runs("scripts/vet.sh --host"), func(j *job, i int) { j.Steps[i].Run = "scripts/vet.sh --host || true" })},
+		{"a vet that stops at an earlier failure", []string{`jobs.check runs scripts/vet.sh --host if "", want "${{ !cancelled() }}"`}, edit("check", runs("scripts/vet.sh --host"), func(j *job, i int) { j.Steps[i].If = "" })},
+		{"no suite", []string{"jobs.test has no step that runs scripts/test.sh"}, edit("test", runs("scripts/test.sh"), func(j *job, i int) { j.Steps[i].Run = "scripts/test.sh || true" })},
+		{"a suite that stops at an earlier failure", []string{`jobs.test runs scripts/test.sh if "", want "${{ !cancelled() }}"`}, edit("test", runs("scripts/test.sh"), func(j *job, i int) { j.Steps[i].If = "" })},
+		{"no check job and no test job", []string{"jobs.check is not set", "jobs.test is not set"}, func(wf workflow) {
+			delete(wf.Jobs, "check")
+			delete(wf.Jobs, "test")
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wf := form()
+			tt.change(wf)
+			f := gateFindings(wf)
+			if len(f) != len(tt.want) {
+				t.Fatalf("findings = %q, want %d", f, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(f[i], want) {
+					t.Errorf("finding %d = %q, want it to hold %q", i, f[i], want)
+				}
+			}
+		})
 	}
 }
 
@@ -435,12 +897,13 @@ func TestVetCommands_OnePerConfiguration(t *testing.T) {
 	}
 }
 
-// Every target the module's build constraints select is vetted, in a job of
-// its own. On a Linux host scripts/vet.sh type-checks eleven targets where
-// --host checks two, which took the Vet step of a host job 255 to 382 s
-// against the other hosts' under 30 s and made that job the longest of the
-// workflow. One job runs it, because a second would pay the cost twice, and
-// the release calls this workflow whole, so a tag still waits for it.
+// Every target scripts/vet.sh lists is vetted, in a job of its own. On a
+// Linux host scripts/vet.sh makes twelve vet runs over eleven targets where
+// --host makes two over one, which took the Vet step of a host job 255 to
+// 382 s against the other hosts' under 30 s and made that job the longest of
+// the workflow in two of three measured runs. One job runs it, because a
+// second would pay the cost twice, and the release calls this workflow whole,
+// so a tag still waits for it.
 func TestTestWorkflow_VetsEveryTargetInAJobOfItsOwn(t *testing.T) {
 	t.Parallel()
 	var wf workflow
@@ -463,8 +926,8 @@ func TestTestWorkflow_VetsEveryTargetInAJobOfItsOwn(t *testing.T) {
 // jobMargins holds, per job of the test workflow, how far every go test
 // timeout the job runs must stay below the job's own timeout: at least as long
 // as the job takes to start its last test binary, so a hung binary prints its
-// stack before the job is killed. Measured over 25 CI runs, the test jobs'
-// Test step ended at most 688 s into the job and the integration job's test
+// stack before the job is killed. Measured on CI, a test job ended at most
+// 795 s in, with no cache entry to restore, and the integration job's test
 // step started at most 23 s in. The mermaid job's test binary starts after npm
 // ci, which took 37 s from an empty npm cache, and a build, which took under
 // 6 s with a cold build cache. Each margin adds headroom to its measurement.
@@ -480,7 +943,8 @@ var jobMargins = map[string]time.Duration{
 // test command it failed to read, so the distinction is stated rather than
 // inferred.
 var testlessJobs = map[string]string{
-	"cross-vet": "it vets every target the module's build constraints select",
+	"check":     "it lints and vets one host's build",
+	"cross-vet": "it vets every target scripts/vet.sh lists",
 }
 
 // goTestCall matches go test written in text: the mermaid check classifies a

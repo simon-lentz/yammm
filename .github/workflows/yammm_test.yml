@@ -9,14 +9,17 @@ on:
   workflow_dispatch: {}
   workflow_call: {}
 jobs:
-  # One job definition on every host the module supports. Windows and macOS each
-  # carry path rules Linux lacks — a backslash separator and UNC volumes, a
-  # case-insensitive volume spelled through fcntl(F_GETPATH) — so each host
-  # lints, vets and runs the whole suite through scripts/test.sh, the full
-  # gate's test definition. The release workflow calls this workflow and builds
-  # no asset until every job here has passed. Lint, vet and test each run after
-  # an earlier step fails, and fail-fast is off, so one run reports every host's
-  # every failure.
+  # Two job definitions on every host the module supports. Windows and macOS
+  # each carry path rules Linux lacks — a backslash separator and UNC volumes, a
+  # case-insensitive volume spelled through realpath(3) — so each host lints and
+  # vets its own build in the check job and runs the whole suite through
+  # scripts/test.sh, the full gate's test definition, in the test job. The two
+  # run side by side, since neither reads what the other builds: in one job the
+  # linter's build, its config check, lint and vet held a host's tests back by
+  # 88 to 163 s, the three hosts' medians over twenty runs. The release workflow
+  # calls this workflow and builds no asset until every job here has passed.
+  # Lint and vet each run after an earlier step fails, and fail-fast is off, so
+  # one run reports every host's every failure.
   #
   # Every job carries a timeout. A hung runner otherwise holds its job for
   # GitHub's six-hour default, and one wedged Windows runner, cancelled by
@@ -30,10 +33,10 @@ jobs:
   # operating system under a commit that does not say so; floatingRunners in the
   # same wiring test refuses one in any tracked workflow. A named release still
   # takes GitHub's weekly image rebuilds.
-  test:
-    name: Test ${{ matrix.name }}
+  check:
+    name: Lint and vet ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -56,10 +59,43 @@ jobs:
         run: git config --global core.autocrlf false
       - name: Checkout
         uses: actions/checkout@v7
+      # setup-go keys its cache entry by the runner's platform, the Go version
+      # and go.mod, and by no job, so two jobs on one host would share one entry,
+      # holding what the first of them to save had built. The check, test and
+      # cross-vet jobs each take an entry of their own: setup-go's cache is off,
+      # and the key of the restore step names the job. Over three runs of one
+      # tree with the entries and three without, each of those seven jobs ran
+      # faster with its own, and the workflow took 426 s at the median against
+      # 786 s.
       - name: Set up Go
+        id: go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Find the Go caches
+        id: go-caches
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - name: Restore this job's Go caches
+        id: go-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      # A build trims the build cache as it ends, once a day by the time in
+      # trim.txt, and deletes each file no build used for five days. A restored
+      # entry keeps the times of the run that saved it, and no run saves it again
+      # under the same key, so from its sixth day the first build of a job would
+      # delete all of the build cache it did not itself read. This run's time in
+      # trim.txt holds the trim off for the job.
+      - name: Keep the restored build cache
+        run: |
+          mkdir -p "${{ steps.go-caches.outputs.build }}"
+          date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
       # The linter is built from this module's tool dependency, not downloaded.
       # A release binary and a `go build` of the same golangci-lint version are
       # not the same linter: the release embeds whichever golang.org/x/tools its
@@ -96,9 +132,67 @@ jobs:
           args: --config=.golangci.yml
       - name: Vet
         if: ${{ !cancelled() }}
-        # Each host vets its own build; the cross-vet job vets every other
-        # target the module's build constraints select.
+        # Each host vets its own build; the cross-vet job vets every target
+        # scripts/vet.sh lists.
         run: scripts/vet.sh --host
+      # Only main and review save an entry, and only after a run that found
+      # none: the seven entries of one ref hold 3.66 GB of the repository's
+      # 10 GB. A run on another ref restores what GitHub lets it read, the
+      # default branch's entries and, for a pull request, its base branch's.
+      - name: Save this job's Go caches
+        if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: ${{ steps.go-restore.outputs.cache-primary-key }}
+  test:
+    name: Test ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+          - name: Windows
+            os: windows-2025
+          - name: macOS
+            os: macos-26
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - name: Checkout
+        uses: actions/checkout@v7
+      # This job's own Go cache entry, as in the check job.
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Find the Go caches
+        id: go-caches
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - name: Restore this job's Go caches
+        id: go-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Keep the restored build cache
+        run: |
+          mkdir -p "${{ steps.go-caches.outputs.build }}"
+          date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
       # The durations file holds the seconds of each package and of each test
       # that reported a result, so a package near its -timeout shows which
       # tests spend it. It is kept when the tests fail, the run it matters
@@ -116,16 +210,26 @@ jobs:
           path: ${{ runner.temp }}/test-durations.tsv
           if-no-files-found: error
           overwrite: true
-  # Every target the module's build constraints select, in a job of its own.
-  # scripts/vet.sh with no argument type-checks eleven targets where --host
-  # checks two: inside a host job that step ran 255 to 382 s against the other
-  # hosts' under 30 s, and made the Linux job the longest of the workflow in
-  # two of three measured runs. Beside the host jobs it costs the workflow its
-  # own runtime alone, and the release calls this workflow whole, so a tag
-  # still waits for it. The job runs no test: internal/wiringtest's
-  # testlessJobs records that, and untimedJobs holds it to its timeout.
+      - name: Save this job's Go caches
+        if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: ${{ steps.go-restore.outputs.cache-primary-key }}
+  # Every target scripts/vet.sh lists, in a job of its own.
+  # scripts/vet.sh with no argument makes twelve vet runs over eleven targets
+  # where --host makes two over one: inside a host job that step ran 255 to
+  # 382 s against the other hosts' under 30 s, and made the Linux job the
+  # longest of the workflow in two of three measured runs. Beside the host
+  # jobs it costs the workflow its own runtime alone, and the release calls
+  # this workflow whole, so a tag still waits for it. The job runs no test:
+  # internal/wiringtest's testlessJobs records that, and untimedJobs holds it
+  # to its timeout.
   #
-  # 20 minutes is 2.9 times the slowest Vet step measured plus its setup.
+  # With its entry the Vet step took 4 to 6 s; with none it took up to 451 s,
+  # and 20 minutes is 2.5 times that job's 476 s.
   cross-vet:
     name: Vet every target
     runs-on: ubuntu-24.04
@@ -136,12 +240,40 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+      # This job's own Go cache entry, as in the check job.
       - name: Set up Go
+        id: go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Find the Go caches
+        id: go-caches
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - name: Restore this job's Go caches
+        id: go-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Keep the restored build cache
+        run: |
+          mkdir -p "${{ steps.go-caches.outputs.build }}"
+          date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
       - name: Vet
         run: scripts/vet.sh
+      - name: Save this job's Go caches
+        if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: ${{ steps.go-restore.outputs.cache-primary-key }}
   # adapter/markdown's self-check reads its class diagram through a Go model of
   # Mermaid's lexer, and that model was measured wrong twice. This job hands
   # every golden's and every fixture's diagram to Mermaid itself, the 10.1.0

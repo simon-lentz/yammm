@@ -1,0 +1,233 @@
+name: YAMMM Test
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch: {}
+  workflow_call: {}
+jobs:
+  check:
+    name: Lint and vet ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+          - name: Windows
+            os: windows-2025
+          - name: macOS
+            os: macos-26
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Find the Go caches
+        id: go-caches
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - name: Restore this job's Go caches
+        id: go-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Keep the restored build cache
+        run: |
+          mkdir -p "${{ steps.go-caches.outputs.build }}"
+          date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
+      - name: Build the pinned linter
+        run: |
+          go build -o "${{ runner.temp }}/bin/" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+          echo "${{ runner.temp }}/bin" >> "$GITHUB_PATH"
+      - name: Verify the linter config
+        run: scripts/lintconfig.sh
+      - name: golangci-lint
+        if: ${{ !cancelled() }}
+        uses: golangci/golangci-lint-action@v9
+        with:
+          install-mode: none
+          verify: false
+          skip-cache: true
+          args: --config=.golangci.yml
+      - name: Vet
+        if: ${{ !cancelled() }}
+        run: scripts/vet.sh --host
+      - name: Save this job's Go caches
+        if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: ${{ steps.go-restore.outputs.cache-primary-key }}
+  test:
+    name: Test ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+          - name: Windows
+            os: windows-2025
+          - name: macOS
+            os: macos-26
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep committed line endings
+        run: git config --global core.autocrlf false
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Find the Go caches
+        id: go-caches
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - name: Restore this job's Go caches
+        id: go-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Keep the restored build cache
+        run: |
+          mkdir -p "${{ steps.go-caches.outputs.build }}"
+          date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
+      - name: Test
+        if: ${{ !cancelled() }}
+        env:
+          TEST_DURATIONS: ${{ runner.temp }}/test-durations.tsv
+        run: scripts/test.sh
+      - name: Keep the test durations
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-${{ matrix.name }}
+          path: ${{ runner.temp }}/test-durations.tsv
+          if-no-files-found: error
+          overwrite: true
+      - name: Save this job's Go caches
+        if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: ${{ steps.go-restore.outputs.cache-primary-key }}
+  cross-vet:
+    name: Vet every target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Find the Go caches
+        id: go-caches
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - name: Restore this job's Go caches
+        id: go-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Keep the restored build cache
+        run: |
+          mkdir -p "${{ steps.go-caches.outputs.build }}"
+          date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
+      - name: Vet
+        run: scripts/vet.sh
+      - name: Save this job's Go caches
+        if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: ${{ steps.go-restore.outputs.cache-primary-key }}
+  mermaid:
+    name: Mermaid reads the diagrams
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install Mermaid
+        working-directory: adapter/markdown/testdata/mermaid
+        run: npm ci --ignore-scripts
+      - name: Parse the diagrams
+        run: go test -count=1 -tags mermaid -timeout 5m -v ./adapter/markdown/
+  integration:
+    name: Neo4j ${{ matrix.label }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: neo4j:5.26-enterprise
+            label: 5.26 Enterprise
+          - image: neo4j:2026.05.0-enterprise
+            label: 2026.05 Enterprise
+          - image: neo4j:2026.05.0-community
+            label: 2026.05 Community
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Integration tests
+        env:
+          YAMMM_NEO4J_TEST_IMAGE: ${{ matrix.image }}
+        run: go test -count=1 -tags neo4j_integration -timeout 20m -v ./adapter/neo4j/integration/

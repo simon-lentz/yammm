@@ -1,11 +1,14 @@
 package scripttest
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/gittree"
@@ -20,6 +23,34 @@ func lintTargets() []string {
 	return []string{runtime.GOOS, "windows"}
 }
 
+// linterPackage is the pinned linter's command, which go.mod's tool directive names.
+const linterPackage = "github.com/golangci/golangci-lint/v2/cmd/golangci-lint"
+
+var (
+	linterModulesOnce sync.Once
+	errLinterModules  error
+)
+
+// needLinterModules puts every module a build of the pinned linter reads into
+// the module cache, once per test binary, from the repository's own module and
+// with the caller's network settings. A fixture's go commands run with
+// GOPROXY=off, so a fixture that builds the linter must find them there.
+func needLinterModules(t *testing.T) {
+	t.Helper()
+	linterModulesOnce.Do(func() {
+		cmd := exec.CommandContext(t.Context(), "go", "list", "-deps", linterPackage)
+		cmd.Dir = repoRoot
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			errLinterModules = fmt.Errorf("go list -deps %s in the repository's module: %w\n%s", linterPackage, err, stderr.String())
+		}
+	})
+	if errLinterModules != nil {
+		t.Fatal(errLinterModules)
+	}
+}
+
 // newLintFixture returns a module the pinned linter can be built in and run on:
 // the repository's module requirements and lint configuration, scripts/lint.sh
 // and the script it sources, and one package. A golangci-lint that fails every
@@ -27,6 +58,7 @@ func lintTargets() []string {
 // from the module, lints nothing.
 func newLintFixture(t *testing.T) *fixture {
 	t.Helper()
+	needLinterModules(t)
 	f := &fixture{t: t, dir: t.TempDir()}
 	f.copyFile("go.mod")
 	f.pinGoDirective()
@@ -38,8 +70,8 @@ func newLintFixture(t *testing.T) *fixture {
 	onPath := t.TempDir()
 	gittree.WriteFile(t, onPath, "golangci-lint", []byte("#!/usr/bin/env bash\necho 'the golangci-lint on PATH ran' >&2\nexit 1\n"), 0o700)
 	f.env = []string{
-		// No build of the linter needs the network: its source and its
-		// module's requirements are in the module cache.
+		// No build of the linter needs the network: needLinterModules put its
+		// source and its module's requirements in the module cache.
 		"HTTP_PROXY=http://127.0.0.1:9", "HTTPS_PROXY=http://127.0.0.1:9", "NO_PROXY=",
 		"PATH=" + onPath + string(os.PathListSeparator) + os.Getenv("PATH"),
 	}
