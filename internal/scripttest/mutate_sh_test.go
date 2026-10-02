@@ -5,9 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // countingTest appends a line to the file MUTATE_RUN_LOG names on every run, so
@@ -220,6 +223,86 @@ func TestMutateScript_KeepsWhatTheKillingTestReported(t *testing.T) {
 	f.wantRestored()
 }
 
+// A tree with a tracked file git cannot open has no key. The script stops with
+// git's status, where it once keyed the rest of the tree and reused a baseline
+// recorded before the edit. An unreadable file needs a host that enforces file
+// modes and a user they bind.
+func TestMutateScript_StopsWhenGitCannotHashTheTree(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a file its owner cannot read")
+	}
+	f, runLog := mutateFixture(t, "3")
+	f.env = append(f.env, "MUTATE_BASELINE_CACHE="+filepath.Join(t.TempDir(), "baselines"))
+	f.write("data.txt", "one\n")
+	f.index()
+	f.mutate().wantCode(t, 0)
+
+	f.write("data.txt", "two\n")
+	if err := os.Chmod(filepath.Join(f.dir, "data.txt"), 0); err != nil {
+		t.Fatal(err)
+	}
+	r := f.mutate()
+
+	r.wantCode(t, 128)
+	r.wantStderr(t, "data.txt")
+	if strings.Contains(r.stdout, "mutate: baseline green") {
+		t.Errorf("the run took a baseline for a tree it could not key:\n%s", r.stdout)
+	}
+	if got := testRuns(t, runLog); got != 2 {
+		t.Errorf("%d test runs in all, want the first call's two", got)
+	}
+	f.wantRestored()
+}
+
+// failingCommand is a go or a git that fails one command line with status 77
+// and leaves every other to the real program.
+const failingCommand = `#!/usr/bin/env bash
+if [ "$*" = "$SHIM_FAILS" ]; then exit 77; fi
+exec "$SHIM_REAL" "$@"
+`
+
+// The key is no key when a go or git command that feeds it fails: the script
+// stops with that command's status before any baseline, whichever of them it
+// is.
+func TestMutateScript_StopsWhenACommandOfTheKeyFails(t *testing.T) {
+	t.Parallel()
+	for _, row := range []struct{ program, fails string }{
+		{"go", "env GOOS GOARCH CGO_ENABLED GOFLAGS GOEXPERIMENT"},
+		{"go", "version"},
+		{"git", "ls-files --stage"},
+		{"git", "diff --binary"},
+		{"git", "ls-files --others --exclude-standard"},
+	} {
+		t.Run(row.program+" "+row.fails, func(t *testing.T) {
+			t.Parallel()
+			f, runLog := mutateFixture(t, "3")
+			real, err := exec.LookPath(row.program)
+			if err != nil {
+				t.Fatal(err)
+			}
+			shim := t.TempDir()
+			gittree.WriteFile(t, shim, row.program, []byte(failingCommand), 0o700)
+			f.env = append(f.env,
+				"MUTATE_BASELINE_CACHE="+filepath.Join(t.TempDir(), "baselines"),
+				"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"SHIM_REAL="+real,
+				"SHIM_FAILS="+row.fails,
+			)
+
+			r := f.mutate()
+
+			r.wantCode(t, 77)
+			if strings.Contains(r.stdout, "mutate: baseline green") {
+				t.Errorf("the run took a baseline for a tree it could not key:\n%s", r.stdout)
+			}
+			if got := testRuns(t, runLog); got != 0 {
+				t.Errorf("%d test runs, want none", got)
+			}
+		})
+	}
+}
+
 // extraSource and extraTest give package m a function only a test calls, a
 // format string vet reads and a package-level value built at init. Package q
 // is a second package whose test build a mutant can break alone.
@@ -340,6 +423,43 @@ func TestMutateScript_RecordsNoRedBaseline(t *testing.T) {
 		}
 		if got := stamps(t, cache); got != 0 {
 			t.Errorf("after call %d: %d recorded baselines, want none for a red tree", i, got)
+		}
+	}
+}
+
+// A red baseline prints, after its verdict line, what go test reported, less
+// its line for a package that passed and for one that has no test files. A
+// package whose test does not build is reported after that line too, with the
+// compiler's errors. A line a test prints is kept though it starts as a
+// passing package's line does, short of the tab, and holds a byte that is not
+// UTF-8, which GNU grep drops under a UTF-8 locale unless it reads byte-wise.
+func TestMutateScript_PrintsWhatARedBaselineReported(t *testing.T) {
+	t.Parallel()
+	f, _ := mutateFixture(t, "4")
+	f.write("nt/nt.go", "package nt\n")
+	f.write("nb/nb_test.go", "package nb\n\nimport \"testing\"\n\nfunc TestNB(t *testing.T) { missing() }\n")
+	f.write("said/said_test.go", "package said\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\n"+
+		"func TestSaid(t *testing.T) {\n\tfmt.Println(\"ok  said the test \\xff\")\n\tt.Fatal(\"and then it failed\")\n}\n")
+	f.index()
+	f.env = append(f.env, "LC_ALL=C.UTF-8")
+
+	r := f.run("mutate.sh", "m/m.go", "a + b", "a - b", "./m/", "./ok/", "./nt/", "./nb/", "./said/")
+
+	r.wantCode(t, 1)
+	verdict := "mutate: the UNMUTATED tree is already red in ./m/ ./ok/ ./nt/ ./nb/ ./said/, so no verdict is possible\n"
+	if !strings.HasPrefix(r.stderr, verdict) {
+		t.Errorf("stderr does not open with the verdict line:\n%s", r.stderr)
+	}
+	for _, want := range []string{
+		"--- FAIL: TestAdd", "Add(1, 2) is wrong", "FAIL\t" + fixtureModule + "/m\t",
+		"undefined: missing", "FAIL\t" + fixtureModule + "/nb [build failed]\n",
+		"\nok  said the test \xff\n",
+	} {
+		r.wantStderr(t, want)
+	}
+	for _, dropped := range []string{"/ok", "/nt"} {
+		if strings.Contains(r.stderr, fixtureModule+dropped) {
+			t.Errorf("stderr names %s, which did not fail:\n%s", fixtureModule+dropped, r.stderr)
 		}
 	}
 }

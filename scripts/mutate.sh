@@ -5,25 +5,27 @@
 # test packages expecting them to FAIL. A mutation the suite does not notice is
 # a surviving mutant: nothing asserts the behaviour it changed.
 #
-# Two things are asserted before any verdict, because each fails silently.
-# The search string MUST match: a
-# pattern matching nothing rewrites nothing, and "nothing red" then reads as
-# "mutant killed" when no mutant existed. The build MUST succeed: a mutation
-# that does not compile makes go test exit non-zero for an unrelated reason,
-# and that also reads as "killed". The build includes the named packages' test
-# binaries and the vet checks go test runs, which `go build` does not reach: a
-# mutant that breaks only a test build, or fails that vet, fails go test before
-# any of the package's code runs. The check executes none of the binaries it
-# builds: a mutant that panics in init or fails in a TestMain is a kill for the
-# verdict run to report, and a TestMain that writes files runs only there.
+# Before any verdict the script asserts what would otherwise fail silently.
+# The search string MUST match: a pattern matching nothing rewrites nothing,
+# and the green suite then reads as a mutant that survived when no mutant
+# existed. The build MUST succeed: no test judges a mutant that does not
+# compile, so no result of the suite is its verdict. The build includes the
+# named packages' test binaries and the vet checks go test runs, which
+# `go build` does not reach: a package whose test build a mutant breaks, or
+# whose vet it fails, fails go test before its tests run. The check executes
+# none of the binaries it builds: a mutant that panics in init or fails in a
+# TestMain is a kill for the verdict run to report, and the check runs no
+# TestMain that writes files.
 #
-# The named packages must pass before the mutation. When MUTATE_BASELINE_CACHE
-# names a directory, a passing baseline is recorded there under a key over the
-# packages, TMPDIR, PATH, YAMMM_* variables, GOOS, GOARCH, CGO_ENABLED, GOFLAGS,
-# GOEXPERIMENT, the go version and the tree's content, and a later run with the
-# same key skips the baseline. The harness restores
-# each mutated file byte for byte, so the key still matches after a mutant, and
-# any edit to the tree changes it.
+# The named packages must pass before the mutation; when one does not, the run
+# prints what go test reported, less its line for each package that passed or
+# has no test files. When MUTATE_BASELINE_CACHE names a directory, a passing
+# baseline is recorded there under a key over the packages, TMPDIR, PATH,
+# YAMMM_* variables, GOOS, GOARCH, CGO_ENABLED, GOFLAGS, GOEXPERIMENT, the go
+# version and the tree's content, and a later run with the same key skips the
+# baseline. The harness restores each mutated file byte for byte, so the key
+# still matches after a mutant, and an edit git reports, to a tracked file or
+# to an untracked file it does not ignore, changes it.
 #
 # MUTATE_BASELINE_CACHE is dropped from the environment of the suite this script
 # runs. A package that shells out to this script would otherwise inherit the
@@ -44,8 +46,9 @@
 #
 # Exit status: 0 killed; 1 survived, not built, no test ran, an already red
 # tree, or no mutation applied; 2 a usage error, a missing file, or a go.mod or
-# Go version scripts/toolchain.sh refuses; 3 timed out. Any other failed command
-# exits with its own status.
+# Go version scripts/toolchain.sh refuses; 3 timed out. A command that fails
+# anywhere else stops the script with that command's status, which may be 1 or
+# 2 as well.
 #
 # Usage:
 #   scripts/mutate.sh <file> <search> <replace> <pkg> [pkg...]
@@ -94,20 +97,27 @@ if [ "${hits}" -eq 0 ]; then
 	exit 1
 fi
 
-# baseline_key hashes the packages, the environment the tests read, and the
-# content of every tracked, staged, unstaged and untracked file.
+# baseline_key hashes the packages, the header's variables and go settings as
+# env and go env print them, and the tree as git reports it: the index, the
+# worktree's difference from the index, and every untracked file git does not
+# ignore. It fails, and the script stops, when a go or git command in it fails,
+# as git diff does on a tracked file it cannot open: a key over the rest would
+# name a tree the baseline never ran on. The commands are chained because a
+# command substitution does not stop at a failed command. A change git does
+# not report changes no key: one under a directory git cannot search, or to
+# an entry marked skip-worktree.
 baseline_key() {
 	{
-		printf '%s\n' "${pkgs[@]}"
-		printf 'TMPDIR=%s\n' "${TMPDIR:-}"
-		printf 'PATH=%s\n' "${PATH:-}"
-		env | grep '^YAMMM_' | LC_ALL=C sort || true
-		go env GOOS GOARCH CGO_ENABLED GOFLAGS GOEXPERIMENT
-		go version
-		git ls-files --stage
-		git diff --binary
-		git ls-files --others --exclude-standard
-		git ls-files --others --exclude-standard | git hash-object --stdin-paths
+		printf '%s\n' "${pkgs[@]}" &&
+			printf 'TMPDIR=%s\n' "${TMPDIR:-}" &&
+			printf 'PATH=%s\n' "${PATH:-}" &&
+			{ env | grep '^YAMMM_' | LC_ALL=C sort || true; } &&
+			go env GOOS GOARCH CGO_ENABLED GOFLAGS GOEXPERIMENT &&
+			go version &&
+			git ls-files --stage &&
+			git diff --binary &&
+			git ls-files --others --exclude-standard &&
+			git ls-files --others --exclude-standard | git hash-object --stdin-paths
 	} | git hash-object --stdin
 }
 
@@ -121,8 +131,10 @@ fi
 if [ -n "${stamp}" ] && [ -f "${stamp}" ]; then
 	printf 'mutate: baseline green (recorded for this tree in %s)\n' "${MUTATE_BASELINE_CACHE}"
 else
-	if ! env -u MUTATE_BASELINE_CACHE go test "${pkgs[@]}" >/dev/null 2>&1; then
+	if ! baseline_out=$(env -u MUTATE_BASELINE_CACHE go test "${pkgs[@]}" 2>&1); then
 		printf 'mutate: the UNMUTATED tree is already red in %s, so no verdict is possible\n' "${pkgs[*]}" >&2
+		# What failed, as a kill prints it: without it a red baseline names no test.
+		printf '%s\n' "${baseline_out}" | LC_ALL=C grep -v -e $'^ok  \t' -e $'^?   \t' >&2 || true
 		exit 1
 	fi
 	if [ -n "${stamp}" ]; then

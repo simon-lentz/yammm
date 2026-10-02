@@ -8,8 +8,8 @@
 # of seconds, minutes or hours, from 1 up to 24 hours, with no leading zero, such
 # as 900s or 15m. A baseline the limit cuts short reads RED.
 #
-# Each <mutants dir>/<id>/ holds file, search and replace, mutate.sh's three
-# arguments, each used byte for byte; spell, the TMPDIR spellings to run under
+# Each <mutants dir>/<id>/ holds file, search and replace, mutate.sh's first
+# three arguments, each used byte for byte; spell, the TMPDIR spellings to run under
 # ("asis", "folded" or both); and optionally pkgs, a package list that replaces
 # the computed one. Without pkgs, a mutant runs over the mutated file's package,
 # every tracked package whose code or tests import it directly, and ./docs.
@@ -19,7 +19,7 @@
 # claims about packages it does not import, so an import-graph set alone lets a
 # mutation that breaks a documented claim read as survived. Every run sets
 # -failfast, -p=2, the -timeout above and MUTATE_BASELINE_CACHE, so a copy runs a
-# baseline once per package set, spelling and tree. "folded" is TMPDIR's last component "T" spelled "t", which
+# passing baseline once per package set, spelling and tree. "folded" is TMPDIR's last component "T" spelled "t", which
 # names the same directory only on a case-insensitive volume.
 #
 # Each worker owns one copy (rsync of the checkout without .claude,
@@ -31,13 +31,17 @@
 # stamps and the queues at exit, leaving results.tsv, logs/, pkgsets/,
 # work/worker.N.out and work/results.wN.tsv. An interrupted run writes no
 # results.tsv, so the files it keeps are its record. Every entry a worker's
-# build writes for the checkout's own packages is keyed by the copy's path, so
-# a run that kept them would leave a cache nothing reads again: the shared
+# build writes for the checkout's own packages is keyed by the copy's path, and
+# the run removes the copies: kept in a shared cache, such an entry is one no
+# build reads again unless a later run uses the same out directory. The shared
 # cache reached 163 GB in four days of mutant runs and filled the disk.
 #
 # A mutant that does not build, and a verdict run in which any named package
 # did not run, read NOBUILD: the verdict cannot rest on that run. A search that
-# matches nothing reads NOMATCH, and a red baseline reads RED. A verdict run in
+# matches nothing reads NOMATCH. A red baseline reads RED: its log holds go
+# test's report of each package that failed there, and its failing-test column
+# names each test go test reported as failed, which is none for a baseline the
+# limit cut short. A verdict run in
 # which every package that failed ran out of time with no "--- FAIL:" line of its
 # own reads TIMEOUT (mutate.sh's exit 3, whose header states that rule), its
 # failing-test column naming the tests that were running: run that mutant again,

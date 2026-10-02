@@ -451,7 +451,7 @@ func TestRunMutantsScript_KeepsJobControlToTheWorkerLaunch(t *testing.T) {
 		"AWK_SHIM_LOG="+log,
 	)
 
-	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+	r := f.runMutants("out", "1")
 
 	r.wantCode(t, 0)
 	b, err := os.ReadFile(log)

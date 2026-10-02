@@ -1,9 +1,14 @@
 package scripttest
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // lintTargets is the order scripts/lint.sh lints in: this host, then Windows
@@ -16,8 +21,10 @@ func lintTargets() []string {
 }
 
 // newLintFixture returns a module the pinned linter can be built in and run on:
-// the repository's module requirements and lint configuration, the script, and
-// one package.
+// the repository's module requirements and lint configuration, scripts/lint.sh
+// and the script it sources, and one package. A golangci-lint that fails every
+// run is first on its PATH, so a script that takes the linter from there, not
+// from the module, lints nothing.
 func newLintFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{t: t, dir: t.TempDir()}
@@ -28,9 +35,81 @@ func newLintFixture(t *testing.T) *fixture {
 	f.copyScript("lint.sh")
 	f.copyScript("toolchain.sh")
 	f.write("ok/ok.go", "package ok\n")
-	// The linter and its module come from the module cache.
-	f.env = []string{"HTTP_PROXY=http://127.0.0.1:9", "HTTPS_PROXY=http://127.0.0.1:9", "NO_PROXY="}
+	onPath := t.TempDir()
+	gittree.WriteFile(t, onPath, "golangci-lint", []byte("#!/usr/bin/env bash\necho 'the golangci-lint on PATH ran' >&2\nexit 1\n"), 0o700)
+	f.env = []string{
+		// No build of the linter needs the network: its source and its
+		// module's requirements are in the module cache.
+		"HTTP_PROXY=http://127.0.0.1:9", "HTTPS_PROXY=http://127.0.0.1:9", "NO_PROXY=",
+		"PATH=" + onPath + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}
 	return f
+}
+
+// toolPathGo is a go that answers `go tool -n golangci-lint` with the path
+// GO_SHIM_LINTER holds and leaves every other command to the real toolchain.
+const toolPathGo = `#!/usr/bin/env bash
+if [ "$*" = "tool -n golangci-lint" ]; then
+	printf '%s\n' "$GO_SHIM_LINTER"
+	exit 0
+fi
+exec "$GO_SHIM_REAL" "$@"
+`
+
+// The script lints only with a linter go built for it. With none, it stops
+// before any target and prints no summary, which would report a lint that did
+// not run.
+func TestLintScript_StopsWithoutALinterToRun(t *testing.T) {
+	t.Parallel()
+	newBareFixture := func(t *testing.T) *fixture {
+		t.Helper()
+		f := &fixture{t: t, dir: t.TempDir()}
+		f.write("go.mod", "module "+fixtureModule+"\n\ngo "+goDirective()+"\n")
+		f.copyScript("lint.sh")
+		f.copyScript("toolchain.sh")
+		f.write("ok/ok.go", "package ok\n")
+		f.index()
+		return f
+	}
+	wantNoSummary := func(t *testing.T, r result) {
+		t.Helper()
+		for _, summary := range []string{"lint: clean", "lint: FAILED"} {
+			if strings.Contains(r.stdout+r.stderr, summary) {
+				t.Errorf("the run printed a summary, %q, and linted nothing\nstdout:\n%s\nstderr:\n%s", summary, r.stdout, r.stderr)
+			}
+		}
+	}
+
+	t.Run("the module names no such tool", func(t *testing.T) {
+		t.Parallel()
+		r := newBareFixture(t).run("lint.sh")
+		if r.code == 0 {
+			t.Errorf("exit 0 with no linter\nstdout:\n%s\nstderr:\n%s", r.stdout, r.stderr)
+		}
+		wantNoSummary(t, r)
+	})
+
+	t.Run("go names a path that holds no file", func(t *testing.T) {
+		t.Parallel()
+		f := newBareFixture(t)
+		real, err := exec.LookPath("go")
+		if err != nil {
+			t.Fatal(err)
+		}
+		shim := t.TempDir()
+		gittree.WriteFile(t, shim, "go", []byte(toolPathGo), 0o700)
+		gone := filepath.Join(shim, "removed", "golangci-lint")
+		f.env = []string{
+			"PATH=" + shim + string(os.PathListSeparator) + os.Getenv("PATH"),
+			"GO_SHIM_REAL=" + real,
+			"GO_SHIM_LINTER=" + gone,
+		}
+
+		r := f.run("lint.sh")
+		r.wantCode(t, 2)
+		r.wantStderr(t, "lint: go tool -n names no linter this run can execute: "+gone+"\n")
+		wantNoSummary(t, r)
+	})
 }
 
 // TestLintScript_LintsThisHostAndWindows holds the script to reading the
