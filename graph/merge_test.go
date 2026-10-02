@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -785,6 +786,175 @@ func TestAddValidOrMerge_EveryAcceptedCallIsInTheSnapshot(t *testing.T) {
 	defer mu.Unlock()
 	if !maps.Equal(held, accepted) {
 		t.Errorf("snapshot holds %d issuers, %d calls were accepted: every accepted call, and no other, must be in it", len(held), len(accepted))
+	}
+}
+
+// A snapshot taken while another goroutine sends listings of one key through
+// AddValidOrMerge holds the first listings whole, every one that returned
+// before it was asked for among them. Written to the wire and loaded, a mid-run
+// snapshot seeds an assembler that holds the snapshot's edges, takes every
+// listing again and ends with each edge once.
+func TestAddValidOrMerge_AMidRunSnapshotSeedsAResume(t *testing.T) {
+	t.Parallel()
+	s := mergeSchema(t)
+	ctx := t.Context()
+	ba := graph.NewBatchAssembler(ctx, s)
+	const listings, every = 40, 10
+	for _, r := range roots(t, s) {
+		if err := ba.AddValid(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A listing names two issuers, so a merge that is not atomic can show half
+	// of one.
+	sides := []string{"a", "b"}
+	batch := make([]*instance.ValidInstance, listings)
+	for i := range listings {
+		var targets []target
+		for _, side := range sides {
+			id := fmt.Sprint(side, i)
+			if err := ba.AddValid(mustValidInstance(t, s, "Issuer", []any{id}, map[string]any{"name": "X"})); err != nil {
+				t.Fatal(err)
+			}
+			targets = append(targets, target{id, map[string]any{"role": fmt.Sprint("r", i)}})
+		}
+		batch[i] = issue(t, s, "shared", "t", with(required(), "ISSUED_BY", targets...))
+	}
+	// edgesAt renders the shared issue's edges once it holds the first k
+	// listings, as edgesOf renders them: none before the first listing.
+	edgesAt := func(k int) []string {
+		if k == 0 {
+			return nil
+		}
+		out := []string{`HOME->["p1"]{}`, `LISTED_ON->["p1"]{}`}
+		for i := range k {
+			for _, side := range sides {
+				out = append(out, fmt.Sprintf("ISSUED_BY->[%q]{role: %q}", fmt.Sprint(side, i), fmt.Sprint("r", i)))
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+
+	// check holds one snapshot to the rule, where at least lo listings had
+	// returned before it was asked for. midRun keeps the first snapshot seen at
+	// each count of listings between none and all.
+	midRun := make(map[int]*graph.Snapshot)
+	var fault string
+	var taken, checked int
+	check := func(snap *graph.Snapshot, lo int) {
+		checked++
+		// The first listing brings HOME and LISTED_ON beside its two issuers.
+		got := edgesOf(snap)
+		k := max(0, (len(got)-2)/2)
+		switch {
+		case fault != "":
+		case !slices.Equal(got, edgesAt(k)):
+			fault = fmt.Sprintf("a snapshot holds edges %q: not the first listings, each whole", got)
+		case k < lo:
+			fault = fmt.Sprintf("a snapshot holds %d listings, and %d had returned before it was asked for", k, lo)
+		case k > 0 && k < listings && midRun[k] == nil:
+			midRun[k] = snap
+		}
+	}
+
+	var returned atomic.Int64
+	tick, done := make(chan struct{}), make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		defer close(done)
+		for i, listing := range batch {
+			if _, err := ba.AddValidOrMerge(listing); err != nil {
+				t.Error(err)
+				return
+			}
+			returned.Add(1)
+			// Each tick follows one snapshot. The snapshot before the second
+			// tick ran whole during this wait, so it holds exactly n listings.
+			if n := i + 1; n%every == 0 && n < listings {
+				<-tick
+				<-tick
+			}
+		}
+	})
+	wg.Go(func() {
+		// Snapshots are checked in batches: no check runs between the snapshots
+		// of one batch, and at most one batch waits unchecked.
+		type sample struct {
+			snap *graph.Snapshot
+			lo   int
+		}
+		samples := make([]sample, 0, 64)
+		flush := func() {
+			for _, sm := range samples {
+				check(sm.snap, sm.lo)
+			}
+			samples = samples[:0]
+		}
+		defer flush()
+		for {
+			if len(samples) == cap(samples) {
+				flush()
+			}
+			lo := int(returned.Load())
+			samples = append(samples, sample{ba.Graph().Snapshot(), lo})
+			taken++
+			select {
+			case <-done:
+				return
+			case tick <- struct{}{}:
+			default:
+			}
+		}
+	})
+	wg.Wait()
+	if fault != "" {
+		t.Fatal(fault)
+	}
+	if checked != taken {
+		t.Fatalf("%d of %d snapshots were checked", checked, taken)
+	}
+	if floor := listings/every - 1; len(midRun) < floor {
+		t.Fatalf("%d snapshots fell mid-run, want at least %d", len(midRun), floor)
+	}
+
+	want := edgesAt(listings)
+	fin, err := ba.Finalize(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := edgesOf(fin.Snapshot); !slices.Equal(got, want) {
+		t.Fatalf("the run ended with edges %q, want %q", got, want)
+	}
+
+	for k, snap := range midRun {
+		data, res := snapshot.Marshal(ctx, snap)
+		if res.HasErrors() {
+			t.Fatalf("the snapshot of %d listings: Marshal: %s", k, res)
+		}
+		loaded, res := snapshot.Load(ctx, data, s)
+		if res.HasErrors() {
+			t.Fatalf("the snapshot of %d listings: Load: %s", k, res)
+		}
+		resumed := mustSeed(t, ctx, s, loaded)
+		if got := edgesOf(resumed.Graph().Snapshot()); !slices.Equal(got, edgesAt(k)) {
+			t.Fatalf("the seed from %d listings holds edges %q, want %q", k, got, edgesAt(k))
+		}
+		for i, listing := range batch {
+			if merged, err := resumed.AddValidOrMerge(listing); err != nil || !merged {
+				t.Fatalf("resumed from %d listings, listing %d: merged %v, %v", k, i, merged, err)
+			}
+		}
+		fin, err := resumed.Finalize(ctx)
+		if err != nil {
+			t.Fatalf("resumed from %d listings: Finalize: %v", k, err)
+		}
+		if got := edgesOf(fin.Snapshot); !slices.Equal(got, want) {
+			t.Fatalf("resumed from %d listings: edges %q, want %q", k, got, want)
+		}
+		if n := len(fin.Snapshot.Duplicates()); n != 0 || !fin.Snapshot.Diagnostics().OK() {
+			t.Fatalf("resumed from %d listings: %d duplicates, diagnostics %s; a resume records neither", k, n, fin.Snapshot.Diagnostics())
+		}
 	}
 }
 
