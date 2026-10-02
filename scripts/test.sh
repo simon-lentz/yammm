@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # test.sh — run the module's test suite: the full gate's test definition.
 #
-# The full gate (`make gate`), each CI host's test job and `make test` run this
-# script, and the release workflow runs those jobs before it builds
-# anything, so a suite that passes the full gate locally ran under the flags CI
-# runs it with. The commit gate's hook runs scripts/committest.sh instead.
+# The full gate (`make gate`), each CI host's test job, the test workflow's
+# jsonv2 job and `make test` run this script, and the release workflow runs
+# those jobs before it builds anything, so a suite that passes the full gate
+# locally ran under the flags CI runs it with. The commit gate's hook runs scripts/committest.sh instead.
 # CGO_ENABLED is set rather than inherited, so every host tests the build with
 # cgo on: with cgo off the go command refuses -race on Linux and Windows, and on
 # macOS, where the detector needs no cgo, it would test the build with cgo off.

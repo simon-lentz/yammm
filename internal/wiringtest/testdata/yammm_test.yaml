@@ -186,6 +186,58 @@ jobs:
             ${{ steps.go-caches.outputs.build }}
             ${{ steps.go-caches.outputs.mod }}
           key: ${{ steps.go-restore.outputs.cache-primary-key }}
+  jsonv2:
+    name: Lint, vet and test under jsonv2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GOEXPERIMENT: jsonv2
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Find the Go caches
+        id: go-caches
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - name: Restore this job's Go caches
+        id: go-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Keep the restored build cache
+        run: |
+          mkdir -p "${{ steps.go-caches.outputs.build }}"
+          date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: scripts/lint.sh --host
+      - name: Vet
+        if: ${{ !cancelled() }}
+        run: scripts/vet.sh --host
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: scripts/test.sh
+      - name: Save this job's Go caches
+        if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: ${{ steps.go-restore.outputs.cache-primary-key }}
   mermaid:
     name: Mermaid reads the diagrams
     runs-on: ubuntu-24.04

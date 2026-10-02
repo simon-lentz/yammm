@@ -373,6 +373,7 @@ func TestParseOneDocument_RefusesAllButOneDocument(t *testing.T) {
 	for _, tt := range []struct{ name, text, want string }{
 		{"a second document", "on: push\n---\njobs: {}\n", "more than one YAML document"},
 		{"a second document that is empty", "on: push\n---\n", "more than one YAML document"},
+		{"a second document that does not parse", "on: push\n---\n[\n", "more than one YAML document"},
 		{"no document", "", "EOF"},
 		{"text that is no YAML", "on: [push\n", "yaml:"},
 	} {
@@ -546,7 +547,7 @@ func TestNodeFindings_RefusesEachDeparture(t *testing.T) {
 	}
 	for _, tt := range []struct {
 		name   string
-		want   []string // the findings, in order
+		want   []string // a part of each finding, in order
 		change func(doc *yaml.Node)
 	}{
 		{"every host on one image", []string{`jobs.check.runs-on is !!str "ubuntu-24.04", want !!str "${{ matrix.os }}"`}, func(doc *yaml.Node) {
@@ -567,6 +568,9 @@ func TestNodeFindings_RefusesEachDeparture(t *testing.T) {
 		}},
 		{"a run that is a list", []string{`jobs.check.steps[9] (Vet).run is a list, want !!str "scripts/vet.sh --host"`}, func(doc *yaml.Node) {
 			put(in(doc, "jobs", "check", "steps", "Vet"), "run", &yaml.Node{Kind: yaml.SequenceNode})
+		}},
+		{"a scalar with a space after it", []string{`include[0].image is !!str "neo4j:5.26-enterprise ", want !!str "neo4j:5.26-enterprise"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "integration", "strategy", "matrix", "include", "0"), "image", scalar("!!str", "neo4j:5.26-enterprise "))
 		}},
 		{"a timeout GitHub reads as 24", []string{`jobs.check.timeout-minutes is !!int "024", want !!int "20"`}, func(doc *yaml.Node) {
 			put(in(doc, "jobs", "check"), "timeout-minutes", scalar("!!int", "024"))
@@ -805,7 +809,7 @@ func TestGateFindings_RefusesEachWeakening(t *testing.T) {
 	}
 	for _, tt := range []struct {
 		name   string
-		want   []string // the findings, in order
+		want   []string // a part of each finding, in order
 		change func(wf workflow)
 	}{
 		{"a job switched off", []string{`jobs.check runs only if "false"`}, edit("check", nil, func(j *job, _ int) { j.If = "false" })},
@@ -815,12 +819,14 @@ func TestGateFindings_RefusesEachWeakening(t *testing.T) {
 		{"a job that waits for another", []string{`jobs.test needs ["check"]`}, edit("test", nil, func(j *job, _ int) { j.Needs = stringList{"check"} })},
 		{"a step switched off", []string{`jobs.cross-vet step 6 (Vet) runs only if "false"`}, edit("cross-vet", runs("scripts/vet.sh"), func(j *job, i int) { j.Steps[i].If = "false" })},
 		{"a step only after success", []string{`jobs.integration step 1 (Checkout) runs only if "${{ success() }}"`}, edit("integration", nil, func(j *job, i int) { j.Steps[i].If = "${{ success() }}" })},
+		{"a step that runs after a failure on one event", []string{`jobs.integration step 3 (Integration tests) runs only if "${{ !cancelled() && github.event_name == 'push' }}"`}, edit("integration", nil, func(j *job, _ int) { j.Steps[2].If = "${{ !cancelled() && github.event_name == 'push' }}" })},
 		{"a step whose failure passes", []string{"jobs.integration step 3 (Integration tests) sets continue-on-error true"}, edit("integration", nil, func(j *job, _ int) { j.Steps[2].ContinueOnError = true })},
 		{"a condition on an action that only names a cache save", []string{`jobs.check step 11 (Save this job's Go caches) runs only if`}, edit("check", isCacheSave, func(j *job, i int) { j.Steps[i].Uses = "docker://example/actions/cache/save@v6" })},
 		{"a step that names the default", []string{"jobs.check step 1 (Keep committed line endings) sets continue-on-error false"}, edit("check", nil, func(j *job, i int) { j.Steps[i].ContinueOnError = false })},
 		{"fail-fast on", []string{"jobs.check does not set fail-fast: false"}, edit("check", nil, func(j *job, _ int) { j.Strategy.FailFast = &on })},
 		{"fail-fast at its default", []string{"jobs.test does not set fail-fast: false"}, edit("test", nil, func(j *job, _ int) { j.Strategy.FailFast = nil })},
 		{"every host on one image", []string{`jobs.check runs on ["ubuntu-24.04"], want the matrix's os`}, edit("check", nil, func(j *job, _ int) { j.RunsOn = runnerLabels{"ubuntu-24.04"} })},
+		{"each host's runner with a second label", []string{`jobs.test runs on ["${{ matrix.os }}" "self-hosted"], want the matrix's os`}, edit("test", nil, func(j *job, _ int) { j.RunsOn = runnerLabels{"${{ matrix.os }}", "self-hosted"} })},
 		{"a host gone from the matrix", []string{`jobs.test's matrix holds the hosts ["ubuntu-24.04" "windows-2025"]`}, edit("test", nil, func(j *job, _ int) {
 			j.Strategy.Matrix.Include = slices.DeleteFunc(j.Strategy.Matrix.Include, func(c map[string]string) bool { return c["os"] == "macos-26" })
 		})},
@@ -849,6 +855,407 @@ func TestGateFindings_RefusesEachWeakening(t *testing.T) {
 			wf := form()
 			tt.change(wf)
 			f := gateFindings(wf)
+			if len(f) != len(tt.want) {
+				t.Fatalf("findings = %q, want %d", f, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(f[i], want) {
+					t.Errorf("finding %d = %q, want it to hold %q", i, f[i], want)
+				}
+			}
+		})
+	}
+}
+
+// knownEnv names the environment variables the test workflow may set at each
+// level. Any other could change what a step runs, as GOFLAGS or BASH_ENV can.
+var knownEnv = map[string][]string{
+	"workflow": nil,
+	"job":      {"GOEXPERIMENT"},
+	"step":     {"TEST_DURATIONS", "YAMMM_NEO4J_TEST_IMAGE"},
+}
+
+// runFindings reports what can run a step's script other than as written: a
+// default shell other than bash, or none on a Windows image, any step shell,
+// an env variable knownEnv does not name, a job in a container, and run text
+// naming GITHUB_ENV. A working directory and a GITHUB_PATH write are not read.
+func runFindings(wf workflow) []string {
+	var findings []string
+	unknown := func(env map[string]string, level string) []string {
+		return slices.DeleteFunc(slices.Sorted(maps.Keys(env)), func(k string) bool { return slices.Contains(knownEnv[level], k) })
+	}
+	if s := wf.Defaults.Run.Shell; s != "" && s != "bash" {
+		findings = append(findings, fmt.Sprintf("the workflow runs its steps under shell %q, want bash", s))
+	}
+	for _, k := range unknown(wf.Env, "workflow") {
+		findings = append(findings, fmt.Sprintf("the workflow's env sets %s, which knownEnv does not name", k))
+	}
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		j := wf.Jobs[name]
+		if s := j.Defaults.Run.Shell; s != "" && s != "bash" {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs its steps under shell %q, want bash", name, s))
+		}
+		if j.Defaults.Run.Shell == "" && wf.Defaults.Run.Shell == "" {
+			var labels []string
+			for _, l := range j.RunsOn {
+				labels = append(labels, perCombination(l, j.Strategy.Matrix.combinations())...)
+			}
+			if i := slices.IndexFunc(labels, func(l string) bool { return strings.HasPrefix(l, "windows") }); i >= 0 {
+				findings = append(findings, fmt.Sprintf("jobs.%s can run on %s with no bash default, so its steps run under pwsh", name, labels[i]))
+			}
+		}
+		for _, k := range unknown(j.Env, "job") {
+			findings = append(findings, fmt.Sprintf("jobs.%s's env sets %s, which knownEnv does not name", name, k))
+		}
+		if slices.Contains(j.keys, "container") {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs in a container", name))
+		}
+		for i, s := range j.Steps {
+			at := fmt.Sprintf("jobs.%s step %d (%s)", name, i+1, s.Name)
+			if s.Shell != "" {
+				findings = append(findings, fmt.Sprintf("%s sets shell %q", at, s.Shell))
+			}
+			for _, k := range unknown(s.Env, "step") {
+				findings = append(findings, fmt.Sprintf("%s's env sets %s, which knownEnv does not name", at, k))
+			}
+			if strings.Contains(s.Run, "GITHUB_ENV") {
+				findings = append(findings, at+" writes GITHUB_ENV, which sets the environment of the steps after it")
+			}
+		}
+	}
+	return findings
+}
+
+// The test workflow draws no finding from runFindings.
+func TestTestWorkflow_SetsNothingRunFindingsRefuses(t *testing.T) {
+	t.Parallel()
+	var wf workflow
+	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
+	for _, f := range runFindings(wf) {
+		t.Error(f)
+	}
+}
+
+// The check itself, against each finding it can make.
+func TestRunFindings_RefusesEachChange(t *testing.T) {
+	t.Parallel()
+	form := func() workflow {
+		var wf workflow
+		decodeYAML(t, workflowFormFile, &wf)
+		return wf
+	}
+	// edit applies change to the named job of the form, to its step i.
+	edit := func(name string, i int, change func(j *job, s *step)) func(wf *workflow) {
+		return func(wf *workflow) {
+			j := wf.Jobs[name]
+			change(&j, &j.Steps[i])
+			wf.Jobs[name] = j
+		}
+	}
+	if f := runFindings(form()); len(f) != 0 {
+		t.Fatalf("the form reports %q", f)
+	}
+	for _, tt := range []struct {
+		name   string
+		want   []string // a part of each finding, in order
+		change func(wf *workflow)
+	}{
+		{"a step shell that runs nothing", []string{`jobs.jsonv2 step 8 (Test) sets shell "true {0}"`}, edit("jsonv2", 7, func(_ *job, s *step) { s.Shell = "true {0}" })},
+		{"a host step under a named bash", []string{`jobs.check step 10 (Vet) sets shell "bash"`}, edit("check", 9, func(_ *job, s *step) { s.Shell = "bash" })},
+		{"a job shell that clears the experiment", []string{`jobs.jsonv2 runs its steps under shell "env -u GOEXPERIMENT bash {0}", want bash`}, edit("jsonv2", 0, func(j *job, _ *step) { j.Defaults.Run.Shell = "env -u GOEXPERIMENT bash {0}" })},
+		{"a workflow shell", []string{`the workflow runs its steps under shell "sh", want bash`}, func(wf *workflow) { wf.Defaults.Run.Shell = "sh" }},
+		{"a Windows host job with no bash default", []string{"jobs.test can run on windows-2025 with no bash default, so its steps run under pwsh"}, edit("test", 0, func(j *job, _ *step) { j.Defaults = runDefaults{} })},
+		{"a job env that runs no test", []string{"jobs.jsonv2's env sets GOFLAGS, which knownEnv does not name"}, edit("jsonv2", 0, func(j *job, _ *step) { j.Env["GOFLAGS"] = "-run=^$" })},
+		{"a job env that sources a file", []string{"jobs.test's env sets BASH_ENV"}, edit("test", 0, func(j *job, _ *step) { j.Env = map[string]string{"BASH_ENV": "scripts/clear.sh"} })},
+		{"a step env that runs no test", []string{"jobs.test step 7 (Test)'s env sets GOFLAGS"}, edit("test", 6, func(_ *job, s *step) { s.Env["GOFLAGS"] = "-run=^$" })},
+		{"a workflow env", []string{"the workflow's env sets GOTOOLCHAIN"}, func(wf *workflow) { wf.Env = map[string]string{"GOTOOLCHAIN": "go1.27.1"} }},
+		{"a write to GITHUB_ENV", []string{"jobs.jsonv2 step 1 (Checkout) writes GITHUB_ENV"}, edit("jsonv2", 0, func(_ *job, s *step) { s.Run = `echo "GOEXPERI""MENT=" >> "$GITHUB_ENV"` })},
+		{"a job in a container", []string{"jobs.jsonv2 runs in a container"}, edit("jsonv2", 0, func(j *job, _ *step) { j.keys = append(j.keys, "container") })},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wf := form()
+			tt.change(&wf)
+			f := runFindings(wf)
+			if len(f) != len(tt.want) {
+				t.Fatalf("findings = %q, want %d", f, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(f[i], want) {
+					t.Errorf("finding %d = %q, want it to hold %q", i, f[i], want)
+				}
+			}
+		})
+	}
+}
+
+// experimentTagPrefix starts the build tag go sets for each experiment a build
+// runs under.
+const experimentTagPrefix = "goexperiment."
+
+// experimentSettings maps each GOEXPERIMENT value that reverses one experiment
+// a file of srcs names, and under which runner (a build that sets none) builds
+// that file where it did not, to those files. A file go/build reads that names
+// an experiment and that neither runner nor any such value builds is an error.
+func experimentSettings(runner build.Context, srcs map[string]string) (map[string][]string, error) {
+	ctx := runner
+	ctx.OpenFile = func(p string) (io.ReadCloser, error) {
+		src, ok := srcs[filepath.ToSlash(p)]
+		if !ok {
+			return nil, fs.ErrNotExist
+		}
+		return io.NopCloser(strings.NewReader(src)), nil
+	}
+	settings := map[string][]string{}
+	for _, name := range slices.Sorted(maps.Keys(srcs)) {
+		dir, base := path.Split(name)
+		// go/build ignores these names on every platform.
+		if strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), name, srcs[name], parser.ParseComments|parser.PackageClauseOnly)
+		if err != nil {
+			return nil, fmt.Errorf("%s does not parse: %w", name, err)
+		}
+		expr := buildConstraint(file)
+		if expr == nil {
+			continue
+		}
+		var experiments []string
+		// Eval asks about every tag of the expression, whatever the answers.
+		expr.Eval(func(tag string) bool {
+			if e, ok := strings.CutPrefix(tag, experimentTagPrefix); ok && !slices.Contains(experiments, e) {
+				experiments = append(experiments, e)
+			}
+			return false
+		})
+		if len(experiments) == 0 {
+			continue
+		}
+		if built, err := ctx.MatchFile(dir, base); err != nil || built {
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			continue
+		}
+		found := false
+		for _, e := range experiments {
+			tag, setting, reversed := experimentTagPrefix+e, e, ctx
+			if slices.Contains(ctx.ToolTags, tag) {
+				setting = "no" + e
+				reversed.ToolTags = slices.DeleteFunc(slices.Clone(ctx.ToolTags), func(t string) bool { return t == tag })
+			} else {
+				reversed.ToolTags = append(slices.Clone(ctx.ToolTags), tag)
+			}
+			built, err := reversed.MatchFile(dir, base)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			if built {
+				settings[setting] = append(settings[setting], name)
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("%s names the experiments %q, and the runner builds it with no one of them reversed", name, experiments)
+		}
+	}
+	return settings, nil
+}
+
+// experimentChecks are the commands a job runs under an experiment: lint and
+// vet of the host's build, and the suite. For each, some step's run text,
+// trimmed, is the command, and the first such step's if is
+// `${{ !cancelled() }}`.
+var experimentChecks = []string{"scripts/lint.sh --host", "scripts/vet.sh --host", "scripts/test.sh"}
+
+// experimentFindings reports each setting of want no job's env sets, each job
+// that sets one on labels other than mermaidRunner alone or that breaks the
+// rule experimentChecks states, and GOEXPERIMENT in the workflow's env, a
+// job's env with another value, or a step's env or run text.
+func experimentFindings(wf workflow, want map[string][]string) []string {
+	var findings []string
+	if _, sets := wf.Env["GOEXPERIMENT"]; sets {
+		findings = append(findings, "the workflow's env names GOEXPERIMENT, which the check reads from a job's env alone")
+	}
+	ran := map[string]bool{}
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		j := wf.Jobs[name]
+		// Only env and run are read: a shell, an action's inputs, a container's
+		// env and what a script or an action sets are outside the check.
+		for i, s := range j.Steps {
+			if _, sets := s.Env["GOEXPERIMENT"]; sets || strings.Contains(s.Run, "GOEXPERIMENT") {
+				findings = append(findings, fmt.Sprintf("jobs.%s step %d (%s) names GOEXPERIMENT, which the check reads from a job's env alone", name, i+1, s.Name))
+			}
+		}
+		setting, sets := j.Env["GOEXPERIMENT"]
+		if !sets {
+			continue
+		}
+		if _, needed := want[setting]; !needed {
+			findings = append(findings, fmt.Sprintf("jobs.%s sets GOEXPERIMENT=%s, which no tracked Go file's build constraint needs", name, setting))
+			continue
+		}
+		ran[setting] = true
+		// want holds the settings of runnerBuild's target, which is this runner's.
+		if !slices.Equal(j.RunsOn, []string{mermaidRunner}) || j.runnerGroup != "" {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs on %q in group %q, want %s alone, the runner the settings are read for", name, []string(j.RunsOn), j.runnerGroup, mermaidRunner))
+		}
+		for _, cmd := range experimentChecks {
+			i := slices.IndexFunc(j.Steps, func(s step) bool { return strings.TrimSpace(s.Run) == cmd })
+			if i < 0 {
+				findings = append(findings, fmt.Sprintf("jobs.%s has no step that runs %s", name, cmd))
+			} else if got := j.Steps[i].If; got != "${{ !cancelled() }}" {
+				findings = append(findings, fmt.Sprintf("jobs.%s runs %s if %q, want %q", name, cmd, got, "${{ !cancelled() }}"))
+			}
+		}
+	}
+	for _, setting := range slices.Sorted(maps.Keys(want)) {
+		if !ran[setting] {
+			findings = append(findings, fmt.Sprintf("no job sets GOEXPERIMENT=%s, so no job builds what %s select under it", setting, strings.Join(want[setting], ", ")))
+		}
+	}
+	return findings
+}
+
+// Each GOEXPERIMENT value that reverses one experiment and makes the Linux
+// runner build a tracked Go file outside testdata it leaves out has a job that
+// lints, vets and tests the module under it, as experimentFindings holds.
+func TestTestWorkflow_RunsTheGateUnderEachExperiment(t *testing.T) {
+	t.Parallel()
+	var wf workflow
+	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
+	srcs := map[string]string{}
+	for _, rel := range trackedFiles(t, repoRoot, func(rel string) bool { return strings.HasSuffix(rel, ".go") }) {
+		if slices.Contains(strings.Split(rel, "/"), "testdata") {
+			continue
+		}
+		src, err := os.ReadFile(fromRoot(rel))
+		if errors.Is(err, fs.ErrNotExist) {
+			// The index still lists a file the working tree has deleted.
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		srcs[rel] = string(src)
+	}
+	if len(srcs) == 0 {
+		t.Fatal("no tracked Go file was read")
+	}
+	want, err := experimentSettings(runnerBuild(t), srcs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range experimentFindings(wf, want) {
+		t.Error(f)
+	}
+}
+
+func TestExperimentSettings_ReadEachConstraint(t *testing.T) {
+	t.Parallel()
+	runner := build.Default
+	runner.GOOS, runner.GOARCH, runner.CgoEnabled, runner.BuildTags = "linux", "amd64", true, nil
+	runner.ToolTags = []string{"goexperiment.regabiargs", "amd64.v1"}
+	got, err := experimentSettings(runner, map[string]string{
+		"a/on.go":     "//go:build goexperiment.jsonv2\n\npackage a\n",
+		"a/off.go":    "// Package a.\n\n//go:build !goexperiment.jsonv2\n\npackage a\n",
+		"a/host.go":   "//go:build linux && goexperiment.jsonv2\n\npackage a\n",
+		"a/either.go": "//go:build goexperiment.jsonv2 || !goexperiment.jsonv2\n\npackage a\n",
+		"b/plus.go":   "// +build goexperiment.simd\n\npackage b\n",
+		"b/off.go":    "//go:build !goexperiment.regabiargs\n\npackage b\n",
+		"c/host.go":   "//go:build linux\n\npackage c\n",
+		"c/plain.go":  "package c\n",
+		"c/text.go":   "package c\n\n//go:build goexperiment.arenas\n\nconst tag = \"goexperiment.arenas\"\n",
+		"c/_skip.go":  "//go:build goexperiment.arenas\n\npackage c\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		"jsonv2":       {"a/host.go", "a/on.go"},
+		"simd":         {"b/plus.go"},
+		"noregabiargs": {"b/off.go"},
+	}
+	if !maps.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("settings = %q, want %q", got, want)
+	}
+	for name, tt := range map[string]struct{ src, want string }{
+		"d/broken.go":    {"//go:build goexperiment.jsonv2\n\nfunc\n", "d/broken.go does not parse"},
+		"e/x_windows.go": {"//go:build goexperiment.jsonv2\n\npackage e\n", `e/x_windows.go names the experiments ["jsonv2"], and the runner builds it with no one of them reversed`},
+		"e/two.go":       {"//go:build goexperiment.jsonv2 && goexperiment.arenas\n\npackage e\n", `e/two.go names the experiments ["jsonv2" "arenas"]`},
+	} {
+		if got, err := experimentSettings(runner, map[string]string{name: tt.src}); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s reads as %q, error %v, want an error holding %q", name, got, err, tt.want)
+		}
+	}
+}
+
+// The check itself, against each finding it can make.
+func TestExperimentFindings_RefusesEachBrokenLink(t *testing.T) {
+	t.Parallel()
+	const after = "${{ !cancelled() }}"
+	files := []string{"adapter/json/nesting_jsonv2.go"}
+	needs := map[string][]string{"jsonv2": files}
+	// with returns a workflow of a host's test job and a jsonv2 job, edited.
+	with := func(edit func(j, test *job)) workflow {
+		j := job{
+			RunsOn: runnerLabels{mermaidRunner},
+			Env:    map[string]string{"GOEXPERIMENT": "jsonv2"},
+			Steps: []step{
+				{Name: "Checkout", Uses: "actions/checkout@v7"},
+				{Name: "Lint", If: after, Run: "scripts/lint.sh --host"},
+				{Name: "Vet", If: after, Run: "scripts/vet.sh --host"},
+				{Name: "Test", If: after, Run: "scripts/test.sh\n"},
+			},
+		}
+		test := job{RunsOn: runnerLabels{"${{ matrix.os }}"}, Steps: []step{{Name: "Test", If: after, Run: "scripts/test.sh"}}}
+		if edit != nil {
+			edit(&j, &test)
+		}
+		return workflow{Jobs: map[string]job{"jsonv2": j, "test": test}}
+	}
+	if f := experimentFindings(with(nil), needs); len(f) != 0 {
+		t.Fatalf("a whole job reports %q", f)
+	}
+	unbuilt := "no job sets GOEXPERIMENT=jsonv2, so no job builds what adapter/json/nesting_jsonv2.go select under it"
+	for _, tt := range []struct {
+		name  string
+		want  []string // a part of each finding, in order
+		needs map[string][]string
+		wf    workflow
+	}{
+		{"no experiment and no job for one", nil, nil, with(func(j, _ *job) { j.Env = nil })},
+		{"no job under the experiment", []string{unbuilt}, needs, with(func(j, _ *job) { j.Env = nil })},
+		{"the variable under another name", []string{unbuilt}, needs, with(func(j, _ *job) { j.Env = map[string]string{"GOEXPERIMENTS": "jsonv2"} })},
+		{"the experiment switched off", []string{"jobs.jsonv2 sets GOEXPERIMENT=nojsonv2, which no tracked Go file's build constraint needs", unbuilt}, needs, with(func(j, _ *job) { j.Env["GOEXPERIMENT"] = "nojsonv2" })},
+		{"a second experiment beside it", []string{"jobs.jsonv2 sets GOEXPERIMENT=jsonv2,arenas, which no tracked Go file's", unbuilt}, needs, with(func(j, _ *job) { j.Env["GOEXPERIMENT"] = "jsonv2,arenas" })},
+		{"a setting that holds nothing", []string{"jobs.jsonv2 sets GOEXPERIMENT=, which no tracked Go file's", unbuilt}, needs, with(func(j, _ *job) { j.Env["GOEXPERIMENT"] = "" })},
+		{"an experiment no file names", []string{"jobs.jsonv2 sets GOEXPERIMENT=jsonv2, which no tracked Go file's build constraint needs"}, nil, with(nil)},
+		{"a second experiment with no job", []string{"no job sets GOEXPERIMENT=nosimd, so no job builds what b/simd.go select under it"}, map[string][]string{"jsonv2": files, "nosimd": {"b/simd.go"}}, with(nil)},
+		{"the workflow sets it for every job", []string{"the workflow's env names GOEXPERIMENT, which the check reads from a job's env alone"}, needs, func() workflow {
+			wf := with(nil)
+			wf.Env = map[string]string{"GOEXPERIMENT": "jsonv2"}
+			return wf
+		}()},
+		{"a step that clears the experiment", []string{"jobs.jsonv2 step 4 (Test) names GOEXPERIMENT, which the check reads from a job's env alone"}, needs, with(func(j, _ *job) { j.Steps[3].Env = map[string]string{"GOEXPERIMENT": ""} })},
+		{"a step of another job that sets it", []string{"jobs.test step 1 (Test) names GOEXPERIMENT"}, needs, with(func(_, test *job) { test.Steps[0].Env = map[string]string{"GOEXPERIMENT": "jsonv2"} })},
+		{"a step of another job that sets it in its command", []string{"jobs.test step 1 (Test) names GOEXPERIMENT"}, needs, with(func(_, test *job) { test.Steps[0].Run = "GOEXPERIMENT=jsonv2 scripts/test.sh" })},
+		{"a step that clears it for the later steps", []string{"jobs.jsonv2 step 1 (Checkout) names GOEXPERIMENT"}, needs, with(func(j, _ *job) { j.Steps[0].Run = `echo "GOEXPERIMENT=" >> "$GITHUB_ENV"` })},
+		{"another runner", []string{`jobs.jsonv2 runs on ["macos-26"] in group "", want ubuntu-24.04 alone`}, needs, with(func(j, _ *job) { j.RunsOn = runnerLabels{"macos-26"} })},
+		{"a second runner label", []string{`jobs.jsonv2 runs on ["ubuntu-24.04" "self-hosted"] in group "", want ubuntu-24.04 alone`}, needs, with(func(j, _ *job) { j.RunsOn = append(j.RunsOn, "self-hosted") })},
+		{"a runner group", []string{`jobs.jsonv2 runs on ["ubuntu-24.04"] in group "larger", want ubuntu-24.04 alone`}, needs, with(func(j, _ *job) { j.runnerGroup = "larger" })},
+		{"a lint that reads Windows too", []string{"jobs.jsonv2 has no step that runs scripts/lint.sh --host"}, needs, with(func(j, _ *job) { j.Steps[1].Run = "scripts/lint.sh" })},
+		{"no vet", []string{"jobs.jsonv2 has no step that runs scripts/vet.sh --host"}, needs, with(func(j, _ *job) { j.Steps = slices.Delete(j.Steps, 2, 3) })},
+		{"a suite whose failure passes", []string{"jobs.jsonv2 has no step that runs scripts/test.sh"}, needs, with(func(j, _ *job) { j.Steps[3].Run = "scripts/test.sh || true" })},
+		{"a suite run with the experiment cleared", []string{"jobs.jsonv2 step 4 (Test) names GOEXPERIMENT", "jobs.jsonv2 has no step that runs scripts/test.sh"}, needs, with(func(j, _ *job) { j.Steps[3].Run = "GOEXPERIMENT= scripts/test.sh" })},
+		{"a lint that stops at an earlier failure", []string{`jobs.jsonv2 runs scripts/lint.sh --host if "", want "${{ !cancelled() }}"`}, needs, with(func(j, _ *job) { j.Steps[1].If = "" })},
+		{"a vet only after success", []string{`jobs.jsonv2 runs scripts/vet.sh --host if "${{ success() }}"`}, needs, with(func(j, _ *job) { j.Steps[2].If = "${{ success() }}" })},
+		{"a suite switched off", []string{`jobs.jsonv2 runs scripts/test.sh if "false"`}, needs, with(func(j, _ *job) { j.Steps[3].If = "false" })},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := experimentFindings(tt.wf, tt.needs)
 			if len(f) != len(tt.want) {
 				t.Fatalf("findings = %q, want %d", f, len(tt.want))
 			}
@@ -935,6 +1342,9 @@ var jobMargins = map[string]time.Duration{
 	"test":        15 * time.Minute,
 	"integration": 5 * time.Minute,
 	"mermaid":     5 * time.Minute,
+	// It lints and vets before its suite: with no cache entry a Linux check
+	// job has taken 202 s and a Linux test job 517 s, 719 s together.
+	"jsonv2": 15 * time.Minute,
 }
 
 // testlessJobs names, per job of the test workflow that runs no go test, what

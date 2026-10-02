@@ -15,9 +15,10 @@
 # even after an earlier one fails, and the summary names each failure.
 #
 # With --host, only this host's build is vetted, plain and under -race: each
-# host's check job of the test workflow vets its own build, and one job of that
-# workflow vets every target. The commit gate's hook passes --host too, and the
-# full gate's hook vets every target.
+# host's check job of the test workflow vets its own build, its jsonv2 job vets
+# the Linux build under GOEXPERIMENT=jsonv2, and one job of that workflow vets
+# every target. The commit gate's hook passes --host too, and the full gate's
+# hook vets every target.
 #
 # Usage: scripts/vet.sh [--host]
 set -euo pipefail

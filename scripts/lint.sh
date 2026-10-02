@@ -14,8 +14,8 @@
 # Arguments pass to every `golangci-lint run`.
 #
 # With --host as the first argument, only this host's build is linted. The
-# commit gate's hook passes it; the full gate's hook and CI's Windows job read
-# the Windows build.
+# commit gate's hook and the test workflow's jsonv2 job pass it; the full
+# gate's hook and CI's Windows job read the Windows build.
 #
 # Usage: scripts/lint.sh [--host] [run arguments...]
 set -euo pipefail

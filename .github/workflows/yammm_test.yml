@@ -136,9 +136,10 @@ jobs:
         # scripts/vet.sh lists.
         run: scripts/vet.sh --host
       # Only main and review save an entry, and only after a run that found
-      # none: the seven entries of one ref hold 3.66 GB of the repository's
-      # 10 GB. A run on another ref restores what GitHub lets it read, the
-      # default branch's entries and, for a pull request, its base branch's.
+      # none: the seven entries of one ref's check, test and cross-vet jobs
+      # hold 3.66 GB of the repository's 10 GB. A run on another ref restores
+      # what GitHub lets it read, the default branch's entries and, for a pull
+      # request, its base branch's.
       - name: Save this job's Go caches
         if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
         uses: actions/cache/save@v6
@@ -266,6 +267,73 @@ jobs:
           date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
       - name: Vet
         run: scripts/vet.sh
+      - name: Save this job's Go caches
+        if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: ${{ steps.go-restore.outputs.cache-primary-key }}
+  # adapter/json holds a file behind the goexperiment.jsonv2 build tag. Go
+  # builds it where encoding/json runs on its v2 implementation: with the
+  # module's toolchain only under GOEXPERIMENT=jsonv2, and from Go 1.27 with no
+  # setting. No other job sets the experiment, so this job lints, vets and
+  # tests the module under it with the gate's scripts, and each of the three
+  # runs after an earlier step fails. It runs the module's toolchain, so it
+  # reads none of the Go 1.27 standard library.
+  #
+  # The experiment is the job's own env, so it reaches every step.
+  # TestTestWorkflow_RunsTheGateUnderEachExperiment in internal/wiringtest
+  # wants such a job for each GOEXPERIMENT value that reverses one experiment
+  # and makes the Linux runner build a tracked Go file outside testdata that
+  # it leaves out. Linux only: that toolchain's encoding/json holds no file
+  # built for one host alone.
+  jsonv2:
+    name: Lint, vet and test under jsonv2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GOEXPERIMENT: jsonv2
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      # This job's own Go cache entry, as in the check job.
+      - name: Set up Go
+        id: go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Find the Go caches
+        id: go-caches
+        run: |
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+      - name: Restore this job's Go caches
+        id: go-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ steps.go-caches.outputs.build }}
+            ${{ steps.go-caches.outputs.mod }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Keep the restored build cache
+        run: |
+          mkdir -p "${{ steps.go-caches.outputs.build }}"
+          date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
+      - name: Lint
+        if: ${{ !cancelled() }}
+        run: scripts/lint.sh --host
+      - name: Vet
+        if: ${{ !cancelled() }}
+        run: scripts/vet.sh --host
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: scripts/test.sh
       - name: Save this job's Go caches
         if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
         uses: actions/cache/save@v6
