@@ -8,9 +8,11 @@ import (
 
 // Duplicate records a duplicate primary key detected during graph construction.
 //
-// When an instance is added with a primary key that already exists for the same
-// type, a Duplicate is created to track both the new instance (which is rejected)
-// and the existing instance (which remains in the graph). Its fields are read
+// When [Graph.Add] meets a primary key that already exists for the same type, a
+// Duplicate is created to track both the new instance (which is rejected) and
+// the existing instance (which remains in the graph). [Graph.AddOrMerge]
+// creates one only for an incoming instance carrying composed children; a merge
+// creates none. Its fields are read
 // through methods, so no caller can write through a snapshot.
 //
 // # Composed Children Not Included

@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# vet.sh — vet the module's packages for this host, for Windows and for every
-# member of the unix family, and this host's build once more under -race.
+# vet.sh — vet the module's packages for this host, for Windows and for the
+# members of the unix family in its cross list, and this host's build once more
+# under -race.
 #
 # A developer's machine executes one host's build; CI executes three. Vet
 # type-checks each target's GOOS-gated files and tests, so a call a target lacks
 # fails here before a push. A file behind the unix constraint builds for every
 # member of the family, and the members differ in the syscalls they declare
 # (solaris and aix have no syscall.Mkfifo), so each member is vetted. ios is
-# left out: its build links through cgo. scripts/test.sh
+# left out, since its build links through cgo, and hurd, which this toolchain
+# does not build. scripts/test.sh
 # always runs with -race, which sets the race build tag, so the files behind that
 # tag are vetted too. The package set is scripts/packages.sh's. Every target runs
 # even after an earlier one fails, and the summary names each failure.
 #
 # With --host, only this host's build is vetted, plain and under -race: each
-# host job of the test workflow vets its own build, and one job of that
-# workflow vets every target.
+# host's check job of the test workflow vets its own build, its jsonv2 job vets
+# the Linux build under GOEXPERIMENT=jsonv2, and one job of that workflow vets
+# every target. The commit gate's hook passes --host too, and the full gate's
+# hook vets every target.
 #
 # Usage: scripts/vet.sh [--host]
 set -euo pipefail

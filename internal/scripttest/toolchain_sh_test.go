@@ -127,7 +127,7 @@ func TestToolchainScript_ReadsAModuleFileWithCRLFLineEndings(t *testing.T) {
 // standard library CI does not run.
 func TestGateScripts_RefuseAToolchainThatIsNotTheModulesOwn(t *testing.T) {
 	t.Parallel()
-	for _, script := range []string{"test.sh", "vet.sh", "lint.sh", "lintconfig.sh", "gomodtidy.sh"} {
+	for _, script := range []string{"test.sh", "committest.sh", "vet.sh", "lint.sh", "lintconfig.sh", "gomodtidy.sh"} {
 		t.Run(script, func(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)

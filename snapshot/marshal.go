@@ -27,9 +27,12 @@ import (
 // A property value the wire cannot carry — a non-finite float, or a Go value
 // encoding/json refuses — returns nil bytes with Error E_SNAPSHOT_MALFORMED
 // naming the property and where it sits: the root or duplicate record by type
-// and key, and the composition path to a composed child. Only an instance no validator judged
-// holds one, reaching the snapshot through [graph.Graph.Add],
-// [graph.Graph.AddComposed] or [graph.RebuildSnapshot]. A snapshot nested
+// and key, the composition path to a composed child, and for an edge property
+// the relation. Only a value no validator judged is one. It reaches the
+// snapshot on an unjudged instance through [graph.Graph.Add],
+// [graph.Graph.AddComposed] or [graph.RebuildSnapshot], or through
+// [graph.Graph.AddOrMerge], which installs an unjudged instance's edge
+// properties on the instance the graph holds. A snapshot nested
 // deeper than the reader accepts returns nil bytes with Error
 // E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises, so
 // the bound reads identically from both sides. Fatal E_INTERNAL marks only a

@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // sleepingGo is a go whose every go test run that is not a pre-build records
@@ -118,7 +120,7 @@ func signalRun(t *testing.T, c signalCase) signalledRun {
 	//nolint:gosec // runs the repository's script, copied into the fixture's own module
 	cmd := exec.CommandContext(t.Context(), "bash", filepath.Join(f.dir, "scripts", "run_mutants.sh"), ".", "mutants", out, "2")
 	cmd.Dir = f.dir
-	cmd.Env = append(withoutRepositoryVars(t, fixtureEnv()), f.env...)
+	cmd.Env = append(gittree.WithoutRepositoryVars(t, fixtureEnv()), f.env...)
 	var output bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Start(); err != nil {
@@ -449,7 +451,7 @@ func TestRunMutantsScript_KeepsJobControlToTheWorkerLaunch(t *testing.T) {
 		"AWK_SHIM_LOG="+log,
 	)
 
-	r := f.run("run_mutants.sh", ".", "mutants", "out", "1")
+	r := f.runMutants("out", "1")
 
 	r.wantCode(t, 0)
 	b, err := os.ReadFile(log)

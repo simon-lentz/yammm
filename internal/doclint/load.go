@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // Package is one directory's Go files and every name they declare.
@@ -159,9 +161,9 @@ func skipDir(name string) bool {
 	return strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
 }
 
-// modulePath reads the module path from root's go.mod. It is read textually
-// rather than through golang.org/x/mod so this package stays standard-library
-// only, matching every other gate in the repo.
+// modulePath reads the module path from root's go.mod. It reads the one
+// directive textually rather than taking golang.org/x/mod as a dependency for
+// it.
 func modulePath(root string) (string, error) {
 	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
@@ -211,6 +213,7 @@ func trackedGoFiles(ctx context.Context, root string) (tracked map[string]bool, 
 	if !gitTracks(ctx, root) {
 		return nil, false, nil
 	}
+	gittree.MarkTrackedFiles()
 	out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z", "--", "*.go").Output()
 	if err != nil {
 		return nil, false, fmt.Errorf("listing the tracked files of %s: %w", root, err)

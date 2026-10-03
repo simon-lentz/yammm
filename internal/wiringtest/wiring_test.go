@@ -1,4 +1,4 @@
-package scripttest
+package wiringtest
 
 import (
 	"cmp"
@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -28,6 +29,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"mvdan.cc/sh/v3/expand"
 	"mvdan.cc/sh/v3/syntax"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 const testWorkflow = "./.github/workflows/yammm_test.yml"
@@ -325,74 +328,943 @@ func TestTestWorkflow_RunsOnEveryBranchAndWhenCalled(t *testing.T) {
 	}
 }
 
-func TestTestWorkflow_EveryHostRunsEveryCheck(t *testing.T) {
+// workflowFormFile is the test workflow less its comments, the form the
+// workflow is held to.
+const workflowFormFile = "testdata/yammm_test.yaml"
+
+// parseOneDocument parses text as one YAML document and returns its root
+// value. yaml.Unmarshal reads the first of several documents and drops the
+// rest, where GitHub refuses the file.
+func parseOneDocument(text string) (*yaml.Node, error) {
+	dec := yaml.NewDecoder(strings.NewReader(text))
+	var doc, next yaml.Node
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+	if err := dec.Decode(&next); !errors.Is(err, io.EOF) {
+		return nil, errors.New("it holds more than one YAML document")
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 {
+		return nil, errors.New("it holds no single value")
+	}
+	return doc.Content[0], nil
+}
+
+// oneDocument returns the root value of the one YAML document the file at
+// path holds.
+func oneDocument(t *testing.T, path string) *yaml.Node {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := parseOneDocument(string(b))
+	if err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return doc
+}
+
+func TestParseOneDocument_RefusesAllButOneDocument(t *testing.T) {
+	t.Parallel()
+	if doc, err := parseOneDocument("on: push\n"); err != nil || doc.Kind != yaml.MappingNode {
+		t.Fatalf("one document decodes to %v, error %v", doc, err)
+	}
+	for _, tt := range []struct{ name, text, want string }{
+		{"a second document", "on: push\n---\njobs: {}\n", "more than one YAML document"},
+		{"a second document that is empty", "on: push\n---\n", "more than one YAML document"},
+		{"a second document that does not parse", "on: push\n---\n[\n", "more than one YAML document"},
+		{"no document", "", "EOF"},
+		{"text that is no YAML", "on: [push\n", "yaml:"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if doc, err := parseOneDocument(tt.text); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("parseOneDocument = %v, error %v, want an error holding %q", doc, err, tt.want)
+			}
+		})
+	}
+}
+
+// describe spells a YAML node for a finding: a scalar by its tag and its text
+// (a plain scalar's spelling, a quoted or block scalar's content), a mapping, a
+// list or an alias by its kind, and any other node as no value.
+func describe(n *yaml.Node) string {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.ShortTag() + " " + strconv.Quote(n.Value)
+	case yaml.MappingNode:
+		return "a mapping"
+	case yaml.SequenceNode:
+		return "a list"
+	case yaml.AliasNode:
+		return "an alias"
+	}
+	return "no value"
+}
+
+// entry returns the value m holds under key, or nil when m is no mapping or
+// holds no such key.
+func entry(m *yaml.Node, key string) *yaml.Node {
+	if m.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			return m.Content[i+1]
+		}
+	}
+	return nil
+}
+
+// nodeFindings reports each place where the YAML value got departs from want:
+// a value of another kind, a scalar of another tag or text, a key one side
+// lacks or got sets twice, a list of another length, and a value that is an
+// alias or carries an anchor or a written tag other than "!". A scalar is
+// compared by its tag and its text, not by the value it decodes to, so 024 is
+// not 20: GitHub reads some spellings as another value than this decoder does.
+// Key order, quoting, block style and a key's own anchor or tag are not
+// compared. path names the place, a list's item by its index and want's name.
+func nodeFindings(path string, got, want *yaml.Node) []string {
+	if got.Kind == yaml.AliasNode || got.Anchor != "" || got.Style&yaml.TaggedStyle != 0 {
+		return []string{path + " is an alias, or carries an anchor or a tag, which the form does not hold"}
+	}
+	if got.Kind != want.Kind {
+		return []string{fmt.Sprintf("%s is %s, want %s", path, describe(got), describe(want))}
+	}
+	var findings []string
+	switch want.Kind {
+	case yaml.ScalarNode:
+		if got.ShortTag() != want.ShortTag() || got.Value != want.Value {
+			findings = append(findings, fmt.Sprintf("%s is %s, want %s", path, describe(got), describe(want)))
+		}
+	case yaml.SequenceNode:
+		if len(got.Content) != len(want.Content) {
+			return []string{fmt.Sprintf("%s holds %d items, want %d", path, len(got.Content), len(want.Content))}
+		}
+		for i, w := range want.Content {
+			at := fmt.Sprintf("%s[%d]", path, i)
+			if name := entry(w, "name"); name != nil {
+				at += " (" + name.Value + ")"
+			}
+			findings = append(findings, nodeFindings(at, got.Content[i], w)...)
+		}
+	case yaml.MappingNode:
+		under := func(key string) string {
+			if path == "" {
+				return key
+			}
+			return path + "." + key
+		}
+		seen := map[string]bool{}
+		for i := 0; i+1 < len(got.Content); i += 2 {
+			key := got.Content[i].Value
+			if seen[key] {
+				findings = append(findings, under(key)+" is set twice")
+			}
+			seen[key] = true
+		}
+		for i := 0; i+1 < len(want.Content); i += 2 {
+			key := want.Content[i].Value
+			if v := entry(got, key); v != nil {
+				findings = append(findings, nodeFindings(under(key), v, want.Content[i+1])...)
+			} else {
+				findings = append(findings, fmt.Sprintf("%s is not set, want %s", under(key), describe(want.Content[i+1])))
+			}
+		}
+		for i := 0; i+1 < len(got.Content); i += 2 {
+			if key := got.Content[i].Value; entry(want, key) == nil {
+				findings = append(findings, fmt.Sprintf("%s is set to %s, which the form does not hold", under(key), describe(got.Content[i+1])))
+			}
+		}
+	}
+	return findings
+}
+
+// The test workflow holds its form: the keys, values, tags and scalar text of
+// testdata/yammm_test.yaml, with key order, quoting, layout and comments aside.
+// So a change to what the workflow holds is a change to that file too.
+func TestTestWorkflow_IsItsKnownForm(t *testing.T) {
+	t.Parallel()
+	got := oneDocument(t, fromRoot(".github/workflows/yammm_test.yml"))
+	for _, f := range nodeFindings("", got, oneDocument(t, workflowFormFile)) {
+		t.Error(f)
+	}
+}
+
+// The comparison itself, against each kind of edit to the form.
+func TestNodeFindings_RefusesEachDeparture(t *testing.T) {
+	t.Parallel()
+	scalar := func(tag, value string) *yaml.Node {
+		return &yaml.Node{Kind: yaml.ScalarNode, Tag: tag, Value: value}
+	}
+	// in follows keys from doc: a mapping's key, a list item's name, or its index.
+	in := func(doc *yaml.Node, keys ...string) *yaml.Node {
+		t.Helper()
+		n := doc
+		for _, key := range keys {
+			var next *yaml.Node
+			if n.Kind == yaml.SequenceNode {
+				if i, err := strconv.Atoi(key); err == nil && i < len(n.Content) {
+					next = n.Content[i]
+				}
+				for _, item := range n.Content {
+					if name := entry(item, "name"); name != nil && name.Value == key {
+						next = item
+					}
+				}
+			} else {
+				next = entry(n, key)
+			}
+			if next == nil {
+				t.Fatalf("the form holds nothing at %q", keys)
+			}
+			n = next
+		}
+		return n
+	}
+	put := func(m *yaml.Node, key string, v *yaml.Node) {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == key {
+				m.Content[i+1] = v
+				return
+			}
+		}
+		m.Content = append(m.Content, scalar("!!str", key), v)
+	}
+	drop := func(m *yaml.Node, key string) {
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			if m.Content[i].Value == key {
+				m.Content = slices.Delete(m.Content, i, i+2)
+				return
+			}
+		}
+		t.Fatalf("the form holds no key %s to drop", key)
+	}
+	form := func() *yaml.Node { return oneDocument(t, workflowFormFile) }
+	if f := nodeFindings("", form(), form()); len(f) != 0 {
+		t.Fatalf("the form against itself reports %q", f)
+	}
+	for _, tt := range []struct {
+		name   string
+		want   []string // a part of each finding, in order
+		change func(doc *yaml.Node)
+	}{
+		{"every host on one image", []string{`jobs.check.runs-on is !!str "ubuntu-24.04", want !!str "${{ matrix.os }}"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check"), "runs-on", scalar("!!str", "ubuntu-24.04"))
+		}},
+		{"a host gone from the matrix", []string{"jobs.test.strategy.matrix.include holds 2 items, want 3"}, func(doc *yaml.Node) {
+			include := in(doc, "jobs", "test", "strategy", "matrix", "include")
+			include.Content = include.Content[:2]
+		}},
+		{"a key in a matrix entry", []string{`jobs.test.strategy.matrix.include[0] (Linux).experimental is set to !!bool "true", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "strategy", "matrix", "include", "Linux"), "experimental", scalar("!!bool", "true"))
+		}},
+		{"a matrix GitHub fills at run time", []string{`jobs.test.strategy.matrix.include is !!str "${{ fromJSON(needs.x.outputs.hosts) }}", want a list`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "strategy", "matrix"), "include", scalar("!!str", "${{ fromJSON(needs.x.outputs.hosts) }}"))
+		}},
+		{"a strategy that is no mapping", []string{`jobs.test.strategy is !!str "none", want a mapping`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test"), "strategy", scalar("!!str", "none"))
+		}},
+		{"a run that is a list", []string{`jobs.check.steps[9] (Vet).run is a list, want !!str "scripts/vet.sh --host"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check", "steps", "Vet"), "run", &yaml.Node{Kind: yaml.SequenceNode})
+		}},
+		{"a scalar with a space after it", []string{`include[0].image is !!str "neo4j:5.26-enterprise ", want !!str "neo4j:5.26-enterprise"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "integration", "strategy", "matrix", "include", "0"), "image", scalar("!!str", "neo4j:5.26-enterprise "))
+		}},
+		{"a timeout GitHub reads as 24", []string{`jobs.check.timeout-minutes is !!int "024", want !!int "20"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check"), "timeout-minutes", scalar("!!int", "024"))
+		}},
+		{"a string where the form holds false", []string{`(Set up Go).with.cache is !!str "false", want !!bool "false"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "steps", "Set up Go", "with"), "cache", scalar("!!str", "false"))
+		}},
+		{"nothing where the form holds false", []string{`(Set up Go).with.cache is !!null "", want !!bool "false"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check", "steps", "Set up Go", "with"), "cache", scalar("!!null", ""))
+		}},
+		{"a key that holds nothing", []string{`(Vet).continue-on-error is set to !!null "", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check", "steps", "Vet"), "continue-on-error", scalar("!!null", ""))
+		}},
+		{"a key the form holds, gone", []string{`(golangci-lint).with.skip-cache is not set, want !!bool "true"`}, func(doc *yaml.Node) {
+			drop(in(doc, "jobs", "check", "steps", "golangci-lint", "with"), "skip-cache")
+		}},
+		{"a mapping the form holds, gone", []string{"jobs.check.defaults is not set, want a mapping"}, func(doc *yaml.Node) {
+			drop(in(doc, "jobs", "check"), "defaults")
+		}},
+		{"a key set twice", []string{"jobs.test.timeout-minutes is set twice"}, func(doc *yaml.Node) {
+			job := in(doc, "jobs", "test")
+			job.Content = append(job.Content, scalar("!!str", "timeout-minutes"), scalar("!!int", "30"))
+		}},
+		{"a job that waits for another", []string{`jobs.test.needs is set to !!str "check", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test"), "needs", scalar("!!str", "check"))
+		}},
+		{"a step added", []string{"jobs.check.steps holds 12 items, want 11"}, func(doc *yaml.Node) {
+			steps := in(doc, "jobs", "check", "steps")
+			steps.Content = append(steps.Content, &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"two steps in the other order", []string{
+			`(Test).name is !!str "Keep the test durations", want !!str "Test"`, "(Test).env is not set, want a mapping", `(Test).run is not set, want !!str "scripts/test.sh"`,
+			`(Test).uses is set to !!str "actions/upload-artifact@v7"`, "(Test).with is set to a mapping",
+			`(Keep the test durations).name is !!str "Test"`, "(Keep the test durations).uses is not set", "(Keep the test durations).with is not set",
+			"(Keep the test durations).env is set to a mapping", `(Keep the test durations).run is set to !!str "scripts/test.sh"`,
+		}, func(doc *yaml.Node) {
+			steps := in(doc, "jobs", "test", "steps").Content
+			i := slices.Index(steps, in(doc, "jobs", "test", "steps", "Test"))
+			steps[i], steps[i+1] = steps[i+1], steps[i]
+		}},
+		{"a suite that runs no test", []string{`(Test).env.GOFLAGS is set to !!str "-run=^$", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "steps", "Test", "env"), "GOFLAGS", scalar("!!str", "-run=^$"))
+		}},
+		{"an entry of another key restored", []string{`(Restore this job's Go caches).with.restore-keys is set to !!str "go-", which the form does not hold`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "cross-vet", "steps", "Restore this job's Go caches", "with"), "restore-keys", scalar("!!str", "go-"))
+		}},
+		{"a save on every ref", []string{`(Save this job's Go caches).if is !!str "${{ steps.go-restore.outputs.cache-hit != 'true' }}", want !!str`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test", "steps", "Save this job's Go caches"), "if", scalar("!!str", "${{ steps.go-restore.outputs.cache-hit != 'true' }}"))
+		}},
+		{"an alias", []string{"jobs.test.defaults is an alias, or carries an anchor or a tag, which the form does not hold"}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "test"), "defaults", &yaml.Node{Kind: yaml.AliasNode, Value: "shell", Alias: in(doc, "jobs", "check", "defaults")})
+		}},
+		{"an anchor", []string{"jobs.check.defaults is an alias, or carries an anchor or a tag, which the form does not hold"}, func(doc *yaml.Node) {
+			in(doc, "jobs", "check", "defaults").Anchor = "shell"
+		}},
+		{"a tag on a quoted scalar", []string{"(Set up Go).with.cache is an alias, or carries an anchor or a tag"}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "check", "steps", "Set up Go", "with"), "cache", &yaml.Node{Kind: yaml.ScalarNode, Style: yaml.TaggedStyle | yaml.DoubleQuotedStyle, Tag: "!!bool", Value: "false"})
+		}},
+		{"a merge key", []string{"jobs.integration.strategy.matrix.include[0].<< is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "integration", "strategy", "matrix", "include", "0"), "<<", &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"a branch whose push runs no suite", []string{"on.push.branches holds 2 items, want 1"}, func(doc *yaml.Node) {
+			branches := in(doc, "on", "push", "branches")
+			branches.Content = append(branches.Content, scalar("!!str", "!main"))
+		}},
+		{"a dispatch that takes an input", []string{"on.workflow_dispatch.inputs is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			put(in(doc, "on", "workflow_dispatch"), "inputs", &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"a run cancelled by the next push", []string{"concurrency is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			put(doc, "concurrency", &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"a longer timeout for the mermaid job", []string{`jobs.mermaid.timeout-minutes is !!int "360", want !!int "15"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "mermaid"), "timeout-minutes", scalar("!!int", "360"))
+		}},
+		{"a job gone and a job added", []string{"jobs.cross-vet is not set, want a mapping", "jobs.extra is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			drop(in(doc, "jobs"), "cross-vet")
+			put(in(doc, "jobs"), "extra", &yaml.Node{Kind: yaml.MappingNode})
+		}},
+		{"a key in another case", []string{"jobs is not set, want a mapping", "Jobs is set to a mapping, which the form does not hold"}, func(doc *yaml.Node) {
+			jobs := in(doc, "jobs")
+			drop(doc, "jobs")
+			put(doc, "Jobs", jobs)
+		}},
+		{"an edit to each of two jobs", []string{`jobs.check.timeout-minutes is !!int "21", want !!int "20"`, `jobs.integration.timeout-minutes is !!int "31", want !!int "30"`}, func(doc *yaml.Node) {
+			put(in(doc, "jobs", "integration"), "timeout-minutes", scalar("!!int", "31"))
+			put(in(doc, "jobs", "check"), "timeout-minutes", scalar("!!int", "21"))
+		}},
+		{"a workflow that is a list", []string{"a workflow is a list, want a mapping"}, func(doc *yaml.Node) {
+			*doc = yaml.Node{Kind: yaml.SequenceNode}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			doc := form()
+			tt.change(doc)
+			path := ""
+			if doc.Kind != yaml.MappingNode {
+				path = "a workflow"
+			}
+			f := nodeFindings(path, doc, form())
+			if len(f) != len(tt.want) {
+				t.Fatalf("findings = %q, want %d", f, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(f[i], want) {
+					t.Errorf("finding %d = %q, want it to hold %q", i, f[i], want)
+				}
+			}
+		})
+	}
+}
+
+// testHosts are the images the check job and the test job each run on.
+var testHosts = []string{"macos-26", "ubuntu-24.04", "windows-2025"}
+
+// isCacheSave reports whether s does nothing but save a cache entry.
+func isCacheSave(s step) bool {
+	return strings.HasPrefix(s.Uses, "actions/cache/save@")
+}
+
+// gateFindings reports each way wf lets a failure pass or leaves a host
+// unchecked: a job that is conditional, waits for another or may fail; a step
+// that may fail or carries a condition other than the one that runs it after
+// an earlier failure (a cache save may carry any); and a check job or a test
+// job that does not run on each of testHosts, its config check with no
+// condition and its lint, vet or suite after an earlier step fails. The form holds these today, and this check holds them against a
+// change made to the workflow and the form together.
+func gateFindings(wf workflow) []string {
+	var findings []string
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		j := wf.Jobs[name]
+		if j.If != "" {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs only if %q", name, j.If))
+		}
+		if j.ContinueOnError != nil {
+			findings = append(findings, fmt.Sprintf("jobs.%s sets continue-on-error %v, so its failure passes the run", name, j.ContinueOnError))
+		}
+		if len(j.Needs) > 0 {
+			findings = append(findings, fmt.Sprintf("jobs.%s needs %q, so it is skipped when one of them fails", name, []string(j.Needs)))
+		}
+		for i, s := range j.Steps {
+			if s.If != "" && s.If != "${{ !cancelled() }}" && !isCacheSave(s) {
+				findings = append(findings, fmt.Sprintf("jobs.%s step %d (%s) runs only if %q", name, i+1, s.Name, s.If))
+			}
+			if s.ContinueOnError != nil {
+				findings = append(findings, fmt.Sprintf("jobs.%s step %d (%s) sets continue-on-error %v, so its failure passes the job", name, i+1, s.Name, s.ContinueOnError))
+			}
+		}
+	}
+	// checks are the steps a host job must run, each with the condition it runs on.
+	type check struct {
+		what, wantIf string
+		is           func(step) bool
+	}
+	ran := func(cmd string) func(step) bool {
+		return func(s step) bool { return strings.TrimSpace(s.Run) == cmd }
+	}
+	hostJobs := map[string][]check{
+		"check": {
+			{"scripts/lintconfig.sh", "", ran("scripts/lintconfig.sh")},
+			{"the linter", "${{ !cancelled() }}", func(s step) bool { return strings.HasPrefix(s.Uses, "golangci/golangci-lint-action@") }},
+			{"scripts/vet.sh --host", "${{ !cancelled() }}", ran("scripts/vet.sh --host")},
+		},
+		"test": {{"scripts/test.sh", "${{ !cancelled() }}", ran("scripts/test.sh")}},
+	}
+	for _, name := range slices.Sorted(maps.Keys(hostJobs)) {
+		j, ok := wf.Jobs[name]
+		if !ok {
+			findings = append(findings, fmt.Sprintf("jobs.%s is not set", name))
+			continue
+		}
+		if ff := j.Strategy.FailFast; ff == nil || *ff {
+			findings = append(findings, fmt.Sprintf("jobs.%s does not set fail-fast: false, so one host's failure cancels the other hosts' reports", name))
+		}
+		if !slices.Equal(j.RunsOn, []string{"${{ matrix.os }}"}) {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs on %q, want the matrix's os", name, []string(j.RunsOn)))
+		}
+		var hosts []string
+		for _, c := range j.Strategy.Matrix.combinations() {
+			hosts = append(hosts, c["os"])
+		}
+		slices.Sort(hosts)
+		if !slices.Equal(hosts, testHosts) {
+			findings = append(findings, fmt.Sprintf("jobs.%s's matrix holds the hosts %q, want %q", name, hosts, testHosts))
+		}
+		for _, c := range hostJobs[name] {
+			i := slices.IndexFunc(j.Steps, c.is)
+			if i < 0 {
+				findings = append(findings, fmt.Sprintf("jobs.%s has no step that runs %s", name, c.what))
+			} else if got := j.Steps[i].If; got != c.wantIf {
+				findings = append(findings, fmt.Sprintf("jobs.%s runs %s if %q, want %q", name, c.what, got, c.wantIf))
+			}
+		}
+	}
+	return findings
+}
+
+// No job or step of the test workflow lets a failure pass, and each host runs
+// every check: the release builds once this workflow has passed.
+func TestTestWorkflow_HoldsTheGate(t *testing.T) {
 	t.Parallel()
 	var wf workflow
 	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
-	test, ok := wf.Jobs["test"]
-	if !ok {
-		t.Fatal("jobs.test is not set")
+	for _, f := range gateFindings(wf) {
+		t.Error(f)
 	}
-	if test.If != "" {
-		t.Errorf("jobs.test runs only if %q", test.If)
-	}
-	if test.ContinueOnError != nil {
-		t.Errorf("jobs.test sets continue-on-error %v, so a failure passes the job", test.ContinueOnError)
-	}
-	if ff := test.Strategy.FailFast; ff == nil || *ff {
-		t.Error("jobs.test does not set fail-fast: false, so one host's failure cancels the other hosts' reports")
-	}
+}
 
-	find := func(match func(step) bool) (step, bool) {
-		i := slices.IndexFunc(test.Steps, match)
-		if i < 0 {
-			return step{}, false
+// The check itself, against each weakening of the form's jobs.
+func TestGateFindings_RefusesEachWeakening(t *testing.T) {
+	t.Parallel()
+	form := func() workflow {
+		var wf workflow
+		decodeYAML(t, workflowFormFile, &wf)
+		return wf
+	}
+	// edit applies change to the named job of the form and to its step that is.
+	edit := func(name string, is func(step) bool, change func(j *job, i int)) func(wf workflow) {
+		return func(wf workflow) {
+			j := wf.Jobs[name]
+			i := 0
+			if is != nil {
+				if i = slices.IndexFunc(j.Steps, is); i < 0 {
+					t.Fatalf("jobs.%s of the form has no such step", name)
+				}
+			}
+			change(&j, i)
+			wf.Jobs[name] = j
 		}
-		return test.Steps[i], true
 	}
-	if verify, ok := find(func(s step) bool { return s.Run == "scripts/lintconfig.sh" }); !ok {
-		t.Error("no step runs scripts/lintconfig.sh")
-	} else if verify.If != "" || verify.ContinueOnError != nil {
-		t.Errorf("the verify step runs if %q with continue-on-error %v; it must run on every event and fail the job", verify.If, verify.ContinueOnError)
+	lint := func(s step) bool { return strings.HasPrefix(s.Uses, "golangci/golangci-lint-action@") }
+	runs := func(cmd string) func(step) bool { return func(s step) bool { return s.Run == cmd } }
+	on := true
+	if f := gateFindings(form()); len(f) != 0 {
+		t.Fatalf("the form reports %q", f)
 	}
-	checks := map[string]func(step) bool{
-		"lint": func(s step) bool { return strings.HasPrefix(s.Uses, "golangci/golangci-lint-action@") },
-		"vet":  func(s step) bool { return strings.HasPrefix(s.Run, "scripts/vet.sh") },
-		"test": func(s step) bool { return s.Run == "scripts/test.sh" },
+	for _, tt := range []struct {
+		name   string
+		want   []string // a part of each finding, in order
+		change func(wf workflow)
+	}{
+		{"a job switched off", []string{`jobs.check runs only if "false"`}, edit("check", nil, func(j *job, _ int) { j.If = "false" })},
+		{"a job on one event", []string{`jobs.integration runs only if "github.event_name == 'push'"`}, edit("integration", nil, func(j *job, _ int) { j.If = "github.event_name == 'push'" })},
+		{"a job whose failure passes", []string{"jobs.test sets continue-on-error true"}, edit("test", nil, func(j *job, _ int) { j.ContinueOnError = true })},
+		{"a job that names the default", []string{"jobs.mermaid sets continue-on-error false"}, edit("mermaid", nil, func(j *job, _ int) { j.ContinueOnError = false })},
+		{"a job that waits for another", []string{`jobs.test needs ["check"]`}, edit("test", nil, func(j *job, _ int) { j.Needs = stringList{"check"} })},
+		{"a step switched off", []string{`jobs.cross-vet step 6 (Vet) runs only if "false"`}, edit("cross-vet", runs("scripts/vet.sh"), func(j *job, i int) { j.Steps[i].If = "false" })},
+		{"a step only after success", []string{`jobs.integration step 1 (Checkout) runs only if "${{ success() }}"`}, edit("integration", nil, func(j *job, i int) { j.Steps[i].If = "${{ success() }}" })},
+		{"a step that runs after a failure on one event", []string{`jobs.integration step 3 (Integration tests) runs only if "${{ !cancelled() && github.event_name == 'push' }}"`}, edit("integration", nil, func(j *job, _ int) { j.Steps[2].If = "${{ !cancelled() && github.event_name == 'push' }}" })},
+		{"a step whose failure passes", []string{"jobs.integration step 3 (Integration tests) sets continue-on-error true"}, edit("integration", nil, func(j *job, _ int) { j.Steps[2].ContinueOnError = true })},
+		{"a condition on an action that only names a cache save", []string{`jobs.check step 11 (Save this job's Go caches) runs only if`}, edit("check", isCacheSave, func(j *job, i int) { j.Steps[i].Uses = "docker://example/actions/cache/save@v6" })},
+		{"a step that names the default", []string{"jobs.check step 1 (Keep committed line endings) sets continue-on-error false"}, edit("check", nil, func(j *job, i int) { j.Steps[i].ContinueOnError = false })},
+		{"fail-fast on", []string{"jobs.check does not set fail-fast: false"}, edit("check", nil, func(j *job, _ int) { j.Strategy.FailFast = &on })},
+		{"fail-fast at its default", []string{"jobs.test does not set fail-fast: false"}, edit("test", nil, func(j *job, _ int) { j.Strategy.FailFast = nil })},
+		{"every host on one image", []string{`jobs.check runs on ["ubuntu-24.04"], want the matrix's os`}, edit("check", nil, func(j *job, _ int) { j.RunsOn = runnerLabels{"ubuntu-24.04"} })},
+		{"each host's runner with a second label", []string{`jobs.test runs on ["${{ matrix.os }}" "self-hosted"], want the matrix's os`}, edit("test", nil, func(j *job, _ int) { j.RunsOn = runnerLabels{"${{ matrix.os }}", "self-hosted"} })},
+		{"a host gone from the matrix", []string{`jobs.test's matrix holds the hosts ["ubuntu-24.04" "windows-2025"]`}, edit("test", nil, func(j *job, _ int) {
+			j.Strategy.Matrix.Include = slices.DeleteFunc(j.Strategy.Matrix.Include, func(c map[string]string) bool { return c["os"] == "macos-26" })
+		})},
+		{"a host on another image", []string{`jobs.check's matrix holds the hosts ["macos-15" "ubuntu-24.04" "windows-2025"]`}, edit("check", nil, func(j *job, _ int) {
+			for _, c := range j.Strategy.Matrix.Include {
+				if c["os"] == "macos-26" {
+					c["os"] = "macos-15"
+				}
+			}
+		})},
+		{"no config check", []string{"jobs.check has no step that runs scripts/lintconfig.sh"}, edit("check", runs("scripts/lintconfig.sh"), func(j *job, i int) { j.Steps[i].Run = "true" })},
+		{"a config check on one event", []string{`jobs.check step 8 (Verify the linter config) runs only if "github.event_name == 'push'"`, `jobs.check runs scripts/lintconfig.sh if "github.event_name == 'push'", want ""`}, edit("check", runs("scripts/lintconfig.sh"), func(j *job, i int) { j.Steps[i].If = "github.event_name == 'push'" })},
+		{"no lint", []string{"jobs.check has no step that runs the linter"}, edit("check", lint, func(j *job, i int) { j.Steps[i].Uses = "actions/checkout@v7" })},
+		{"a lint that stops at an earlier failure", []string{`jobs.check runs the linter if "", want "${{ !cancelled() }}"`}, edit("check", lint, func(j *job, i int) { j.Steps[i].If = "" })},
+		{"a vet whose failure passes", []string{"jobs.check has no step that runs scripts/vet.sh --host"}, edit("check", runs("scripts/vet.sh --host"), func(j *job, i int) { j.Steps[i].Run = "scripts/vet.sh --host || true" })},
+		{"a vet that stops at an earlier failure", []string{`jobs.check runs scripts/vet.sh --host if "", want "${{ !cancelled() }}"`}, edit("check", runs("scripts/vet.sh --host"), func(j *job, i int) { j.Steps[i].If = "" })},
+		{"no suite", []string{"jobs.test has no step that runs scripts/test.sh"}, edit("test", runs("scripts/test.sh"), func(j *job, i int) { j.Steps[i].Run = "scripts/test.sh || true" })},
+		{"a suite that stops at an earlier failure", []string{`jobs.test runs scripts/test.sh if "", want "${{ !cancelled() }}"`}, edit("test", runs("scripts/test.sh"), func(j *job, i int) { j.Steps[i].If = "" })},
+		{"no check job and no test job", []string{"jobs.check is not set", "jobs.test is not set"}, func(wf workflow) {
+			delete(wf.Jobs, "check")
+			delete(wf.Jobs, "test")
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wf := form()
+			tt.change(wf)
+			f := gateFindings(wf)
+			if len(f) != len(tt.want) {
+				t.Fatalf("findings = %q, want %d", f, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(f[i], want) {
+					t.Errorf("finding %d = %q, want it to hold %q", i, f[i], want)
+				}
+			}
+		})
 	}
-	for name, match := range checks {
-		s, ok := find(match)
+}
+
+// knownEnv names the environment variables the test workflow may set at each
+// level. Any other could change what a step runs, as GOFLAGS or BASH_ENV can.
+var knownEnv = map[string][]string{
+	"workflow": nil,
+	"job":      {"GOEXPERIMENT"},
+	"step":     {"TEST_DURATIONS", "YAMMM_NEO4J_TEST_IMAGE"},
+}
+
+// runFindings reports what can run a step's script other than as written: a
+// default shell other than bash, or none on a Windows image, any step shell,
+// an env variable knownEnv does not name, a job in a container, and run text
+// naming GITHUB_ENV. A working directory and a GITHUB_PATH write are not read.
+func runFindings(wf workflow) []string {
+	var findings []string
+	unknown := func(env map[string]string, level string) []string {
+		return slices.DeleteFunc(slices.Sorted(maps.Keys(env)), func(k string) bool { return slices.Contains(knownEnv[level], k) })
+	}
+	if s := wf.Defaults.Run.Shell; s != "" && s != "bash" {
+		findings = append(findings, fmt.Sprintf("the workflow runs its steps under shell %q, want bash", s))
+	}
+	for _, k := range unknown(wf.Env, "workflow") {
+		findings = append(findings, fmt.Sprintf("the workflow's env sets %s, which knownEnv does not name", k))
+	}
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		j := wf.Jobs[name]
+		if s := j.Defaults.Run.Shell; s != "" && s != "bash" {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs its steps under shell %q, want bash", name, s))
+		}
+		if j.Defaults.Run.Shell == "" && wf.Defaults.Run.Shell == "" {
+			var labels []string
+			for _, l := range j.RunsOn {
+				labels = append(labels, perCombination(l, j.Strategy.Matrix.combinations())...)
+			}
+			if i := slices.IndexFunc(labels, func(l string) bool { return strings.HasPrefix(l, "windows") }); i >= 0 {
+				findings = append(findings, fmt.Sprintf("jobs.%s can run on %s with no bash default, so its steps run under pwsh", name, labels[i]))
+			}
+		}
+		for _, k := range unknown(j.Env, "job") {
+			findings = append(findings, fmt.Sprintf("jobs.%s's env sets %s, which knownEnv does not name", name, k))
+		}
+		if slices.Contains(j.keys, "container") {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs in a container", name))
+		}
+		for i, s := range j.Steps {
+			at := fmt.Sprintf("jobs.%s step %d (%s)", name, i+1, s.Name)
+			if s.Shell != "" {
+				findings = append(findings, fmt.Sprintf("%s sets shell %q", at, s.Shell))
+			}
+			for _, k := range unknown(s.Env, "step") {
+				findings = append(findings, fmt.Sprintf("%s's env sets %s, which knownEnv does not name", at, k))
+			}
+			if strings.Contains(s.Run, "GITHUB_ENV") {
+				findings = append(findings, at+" writes GITHUB_ENV, which sets the environment of the steps after it")
+			}
+		}
+	}
+	return findings
+}
+
+// The test workflow draws no finding from runFindings.
+func TestTestWorkflow_SetsNothingRunFindingsRefuses(t *testing.T) {
+	t.Parallel()
+	var wf workflow
+	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
+	for _, f := range runFindings(wf) {
+		t.Error(f)
+	}
+}
+
+// The check itself, against each finding it can make.
+func TestRunFindings_RefusesEachChange(t *testing.T) {
+	t.Parallel()
+	form := func() workflow {
+		var wf workflow
+		decodeYAML(t, workflowFormFile, &wf)
+		return wf
+	}
+	// edit applies change to the named job of the form, to its step i.
+	edit := func(name string, i int, change func(j *job, s *step)) func(wf *workflow) {
+		return func(wf *workflow) {
+			j := wf.Jobs[name]
+			change(&j, &j.Steps[i])
+			wf.Jobs[name] = j
+		}
+	}
+	if f := runFindings(form()); len(f) != 0 {
+		t.Fatalf("the form reports %q", f)
+	}
+	for _, tt := range []struct {
+		name   string
+		want   []string // a part of each finding, in order
+		change func(wf *workflow)
+	}{
+		{"a step shell that runs nothing", []string{`jobs.jsonv2 step 8 (Test) sets shell "true {0}"`}, edit("jsonv2", 7, func(_ *job, s *step) { s.Shell = "true {0}" })},
+		{"a host step under a named bash", []string{`jobs.check step 10 (Vet) sets shell "bash"`}, edit("check", 9, func(_ *job, s *step) { s.Shell = "bash" })},
+		{"a job shell that clears the experiment", []string{`jobs.jsonv2 runs its steps under shell "env -u GOEXPERIMENT bash {0}", want bash`}, edit("jsonv2", 0, func(j *job, _ *step) { j.Defaults.Run.Shell = "env -u GOEXPERIMENT bash {0}" })},
+		{"a workflow shell", []string{`the workflow runs its steps under shell "sh", want bash`}, func(wf *workflow) { wf.Defaults.Run.Shell = "sh" }},
+		{"a Windows host job with no bash default", []string{"jobs.test can run on windows-2025 with no bash default, so its steps run under pwsh"}, edit("test", 0, func(j *job, _ *step) { j.Defaults = runDefaults{} })},
+		{"a job env that runs no test", []string{"jobs.jsonv2's env sets GOFLAGS, which knownEnv does not name"}, edit("jsonv2", 0, func(j *job, _ *step) { j.Env["GOFLAGS"] = "-run=^$" })},
+		{"a job env that sources a file", []string{"jobs.test's env sets BASH_ENV"}, edit("test", 0, func(j *job, _ *step) { j.Env = map[string]string{"BASH_ENV": "scripts/clear.sh"} })},
+		{"a step env that runs no test", []string{"jobs.test step 7 (Test)'s env sets GOFLAGS"}, edit("test", 6, func(_ *job, s *step) { s.Env["GOFLAGS"] = "-run=^$" })},
+		{"a workflow env", []string{"the workflow's env sets GOTOOLCHAIN"}, func(wf *workflow) { wf.Env = map[string]string{"GOTOOLCHAIN": "go1.27.1"} }},
+		{"a write to GITHUB_ENV", []string{"jobs.jsonv2 step 1 (Checkout) writes GITHUB_ENV"}, edit("jsonv2", 0, func(_ *job, s *step) { s.Run = `echo "GOEXPERI""MENT=" >> "$GITHUB_ENV"` })},
+		{"a job in a container", []string{"jobs.jsonv2 runs in a container"}, edit("jsonv2", 0, func(j *job, _ *step) { j.keys = append(j.keys, "container") })},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			wf := form()
+			tt.change(&wf)
+			f := runFindings(wf)
+			if len(f) != len(tt.want) {
+				t.Fatalf("findings = %q, want %d", f, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(f[i], want) {
+					t.Errorf("finding %d = %q, want it to hold %q", i, f[i], want)
+				}
+			}
+		})
+	}
+}
+
+// experimentTagPrefix starts the build tag go sets for each experiment a build
+// runs under.
+const experimentTagPrefix = "goexperiment."
+
+// experimentSettings maps each GOEXPERIMENT value that reverses one experiment
+// a file of srcs names, and under which runner (a build that sets none) builds
+// that file where it did not, to those files. A file go/build reads that names
+// an experiment and that neither runner nor any such value builds is an error.
+func experimentSettings(runner build.Context, srcs map[string]string) (map[string][]string, error) {
+	ctx := runner
+	ctx.OpenFile = func(p string) (io.ReadCloser, error) {
+		src, ok := srcs[filepath.ToSlash(p)]
 		if !ok {
-			t.Errorf("no %s step", name)
+			return nil, fs.ErrNotExist
+		}
+		return io.NopCloser(strings.NewReader(src)), nil
+	}
+	settings := map[string][]string{}
+	for _, name := range slices.Sorted(maps.Keys(srcs)) {
+		dir, base := path.Split(name)
+		// go/build ignores these names on every platform.
+		if strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") {
 			continue
 		}
-		if s.If != "${{ !cancelled() }}" {
-			t.Errorf("the %s step runs if %q; it must run after an earlier step fails", name, s.If)
+		file, err := parser.ParseFile(token.NewFileSet(), name, srcs[name], parser.ParseComments|parser.PackageClauseOnly)
+		if err != nil {
+			return nil, fmt.Errorf("%s does not parse: %w", name, err)
 		}
-		if s.ContinueOnError != nil {
-			t.Errorf("the %s step sets continue-on-error %v, so its failure passes the job", name, s.ContinueOnError)
+		expr := buildConstraint(file)
+		if expr == nil {
+			continue
+		}
+		var experiments []string
+		// Eval asks about every tag of the expression, whatever the answers.
+		expr.Eval(func(tag string) bool {
+			if e, ok := strings.CutPrefix(tag, experimentTagPrefix); ok && !slices.Contains(experiments, e) {
+				experiments = append(experiments, e)
+			}
+			return false
+		})
+		if len(experiments) == 0 {
+			continue
+		}
+		if built, err := ctx.MatchFile(dir, base); err != nil || built {
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			continue
+		}
+		found := false
+		for _, e := range experiments {
+			tag, setting, reversed := experimentTagPrefix+e, e, ctx
+			if slices.Contains(ctx.ToolTags, tag) {
+				setting = "no" + e
+				reversed.ToolTags = slices.DeleteFunc(slices.Clone(ctx.ToolTags), func(t string) bool { return t == tag })
+			} else {
+				reversed.ToolTags = append(slices.Clone(ctx.ToolTags), tag)
+			}
+			built, err := reversed.MatchFile(dir, base)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", name, err)
+			}
+			if built {
+				settings[setting] = append(settings[setting], name)
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("%s names the experiments %q, and the runner builds it with no one of them reversed", name, experiments)
 		}
 	}
+	return settings, nil
+}
 
-	vet, ok := find(checks["vet"])
-	if !ok {
-		return
+// experimentChecks are the commands a job runs under an experiment: lint and
+// vet of the host's build, and the suite. For each, some step's run text,
+// trimmed, is the command, and the first such step's if is
+// `${{ !cancelled() }}`.
+var experimentChecks = []string{"scripts/lint.sh --host", "scripts/vet.sh --host", "scripts/test.sh"}
+
+// experimentFindings reports each setting of want no job's env sets, each job
+// that sets one on labels other than mermaidRunner alone or that breaks the
+// rule experimentChecks states, and GOEXPERIMENT in the workflow's env, a
+// job's env with another value, or a step's env or run text.
+func experimentFindings(wf workflow, want map[string][]string) []string {
+	var findings []string
+	if _, sets := wf.Env["GOEXPERIMENT"]; sets {
+		findings = append(findings, "the workflow's env names GOEXPERIMENT, which the check reads from a job's env alone")
 	}
-	hosts := map[string]string{}
-	for _, c := range test.Strategy.Matrix.combinations() {
-		hosts[c["os"]] = strings.TrimSpace(vet.Run)
-	}
-	want := map[string]string{
-		"ubuntu-24.04": "scripts/vet.sh --host",
-		"windows-2025": "scripts/vet.sh --host",
-		"macos-26":     "scripts/vet.sh --host",
-	}
-	for host, cmd := range want {
-		if got, ok := hosts[host]; !ok {
-			t.Errorf("the matrix holds no %s host", host)
-		} else if got != cmd {
-			t.Errorf("the %s host vets with %q, want %q", host, got, cmd)
+	ran := map[string]bool{}
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		j := wf.Jobs[name]
+		// Only env and run are read: a shell, an action's inputs, a container's
+		// env and what a script or an action sets are outside the check.
+		for i, s := range j.Steps {
+			if _, sets := s.Env["GOEXPERIMENT"]; sets || strings.Contains(s.Run, "GOEXPERIMENT") {
+				findings = append(findings, fmt.Sprintf("jobs.%s step %d (%s) names GOEXPERIMENT, which the check reads from a job's env alone", name, i+1, s.Name))
+			}
 		}
+		setting, sets := j.Env["GOEXPERIMENT"]
+		if !sets {
+			continue
+		}
+		if _, needed := want[setting]; !needed {
+			findings = append(findings, fmt.Sprintf("jobs.%s sets GOEXPERIMENT=%s, which no tracked Go file's build constraint needs", name, setting))
+			continue
+		}
+		ran[setting] = true
+		// want holds the settings of runnerBuild's target, which is this runner's.
+		if !slices.Equal(j.RunsOn, []string{mermaidRunner}) || j.runnerGroup != "" {
+			findings = append(findings, fmt.Sprintf("jobs.%s runs on %q in group %q, want %s alone, the runner the settings are read for", name, []string(j.RunsOn), j.runnerGroup, mermaidRunner))
+		}
+		for _, cmd := range experimentChecks {
+			i := slices.IndexFunc(j.Steps, func(s step) bool { return strings.TrimSpace(s.Run) == cmd })
+			if i < 0 {
+				findings = append(findings, fmt.Sprintf("jobs.%s has no step that runs %s", name, cmd))
+			} else if got := j.Steps[i].If; got != "${{ !cancelled() }}" {
+				findings = append(findings, fmt.Sprintf("jobs.%s runs %s if %q, want %q", name, cmd, got, "${{ !cancelled() }}"))
+			}
+		}
+	}
+	for _, setting := range slices.Sorted(maps.Keys(want)) {
+		if !ran[setting] {
+			findings = append(findings, fmt.Sprintf("no job sets GOEXPERIMENT=%s, so no job builds what %s select under it", setting, strings.Join(want[setting], ", ")))
+		}
+	}
+	return findings
+}
+
+// Each GOEXPERIMENT value that reverses one experiment and makes the Linux
+// runner build a tracked Go file outside testdata it leaves out has a job that
+// lints, vets and tests the module under it, as experimentFindings holds.
+func TestTestWorkflow_RunsTheGateUnderEachExperiment(t *testing.T) {
+	t.Parallel()
+	var wf workflow
+	decodeYAML(t, fromRoot(".github/workflows/yammm_test.yml"), &wf)
+	srcs := map[string]string{}
+	for _, rel := range trackedFiles(t, repoRoot, func(rel string) bool { return strings.HasSuffix(rel, ".go") }) {
+		if slices.Contains(strings.Split(rel, "/"), "testdata") {
+			continue
+		}
+		src, err := os.ReadFile(fromRoot(rel))
+		if errors.Is(err, fs.ErrNotExist) {
+			// The index still lists a file the working tree has deleted.
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		srcs[rel] = string(src)
+	}
+	if len(srcs) == 0 {
+		t.Fatal("no tracked Go file was read")
+	}
+	want, err := experimentSettings(runnerBuild(t), srcs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range experimentFindings(wf, want) {
+		t.Error(f)
+	}
+}
+
+func TestExperimentSettings_ReadEachConstraint(t *testing.T) {
+	t.Parallel()
+	runner := build.Default
+	runner.GOOS, runner.GOARCH, runner.CgoEnabled, runner.BuildTags = "linux", "amd64", true, nil
+	runner.ToolTags = []string{"goexperiment.regabiargs", "amd64.v1"}
+	got, err := experimentSettings(runner, map[string]string{
+		"a/on.go":     "//go:build goexperiment.jsonv2\n\npackage a\n",
+		"a/off.go":    "// Package a.\n\n//go:build !goexperiment.jsonv2\n\npackage a\n",
+		"a/host.go":   "//go:build linux && goexperiment.jsonv2\n\npackage a\n",
+		"a/either.go": "//go:build goexperiment.jsonv2 || !goexperiment.jsonv2\n\npackage a\n",
+		"b/plus.go":   "// +build goexperiment.simd\n\npackage b\n",
+		"b/off.go":    "//go:build !goexperiment.regabiargs\n\npackage b\n",
+		"c/host.go":   "//go:build linux\n\npackage c\n",
+		"c/plain.go":  "package c\n",
+		"c/text.go":   "package c\n\n//go:build goexperiment.arenas\n\nconst tag = \"goexperiment.arenas\"\n",
+		"c/_skip.go":  "//go:build goexperiment.arenas\n\npackage c\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		"jsonv2":       {"a/host.go", "a/on.go"},
+		"simd":         {"b/plus.go"},
+		"noregabiargs": {"b/off.go"},
+	}
+	if !maps.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("settings = %q, want %q", got, want)
+	}
+	for name, tt := range map[string]struct{ src, want string }{
+		"d/broken.go":    {"//go:build goexperiment.jsonv2\n\nfunc\n", "d/broken.go does not parse"},
+		"e/x_windows.go": {"//go:build goexperiment.jsonv2\n\npackage e\n", `e/x_windows.go names the experiments ["jsonv2"], and the runner builds it with no one of them reversed`},
+		"e/two.go":       {"//go:build goexperiment.jsonv2 && goexperiment.arenas\n\npackage e\n", `e/two.go names the experiments ["jsonv2" "arenas"]`},
+	} {
+		if got, err := experimentSettings(runner, map[string]string{name: tt.src}); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s reads as %q, error %v, want an error holding %q", name, got, err, tt.want)
+		}
+	}
+}
+
+// The check itself, against each finding it can make.
+func TestExperimentFindings_RefusesEachBrokenLink(t *testing.T) {
+	t.Parallel()
+	const after = "${{ !cancelled() }}"
+	files := []string{"adapter/json/nesting_jsonv2.go"}
+	needs := map[string][]string{"jsonv2": files}
+	// with returns a workflow of a host's test job and a jsonv2 job, edited.
+	with := func(edit func(j, test *job)) workflow {
+		j := job{
+			RunsOn: runnerLabels{mermaidRunner},
+			Env:    map[string]string{"GOEXPERIMENT": "jsonv2"},
+			Steps: []step{
+				{Name: "Checkout", Uses: "actions/checkout@v7"},
+				{Name: "Lint", If: after, Run: "scripts/lint.sh --host"},
+				{Name: "Vet", If: after, Run: "scripts/vet.sh --host"},
+				{Name: "Test", If: after, Run: "scripts/test.sh\n"},
+			},
+		}
+		test := job{RunsOn: runnerLabels{"${{ matrix.os }}"}, Steps: []step{{Name: "Test", If: after, Run: "scripts/test.sh"}}}
+		if edit != nil {
+			edit(&j, &test)
+		}
+		return workflow{Jobs: map[string]job{"jsonv2": j, "test": test}}
+	}
+	if f := experimentFindings(with(nil), needs); len(f) != 0 {
+		t.Fatalf("a whole job reports %q", f)
+	}
+	unbuilt := "no job sets GOEXPERIMENT=jsonv2, so no job builds what adapter/json/nesting_jsonv2.go select under it"
+	for _, tt := range []struct {
+		name  string
+		want  []string // a part of each finding, in order
+		needs map[string][]string
+		wf    workflow
+	}{
+		{"no experiment and no job for one", nil, nil, with(func(j, _ *job) { j.Env = nil })},
+		{"no job under the experiment", []string{unbuilt}, needs, with(func(j, _ *job) { j.Env = nil })},
+		{"the variable under another name", []string{unbuilt}, needs, with(func(j, _ *job) { j.Env = map[string]string{"GOEXPERIMENTS": "jsonv2"} })},
+		{"the experiment switched off", []string{"jobs.jsonv2 sets GOEXPERIMENT=nojsonv2, which no tracked Go file's build constraint needs", unbuilt}, needs, with(func(j, _ *job) { j.Env["GOEXPERIMENT"] = "nojsonv2" })},
+		{"a second experiment beside it", []string{"jobs.jsonv2 sets GOEXPERIMENT=jsonv2,arenas, which no tracked Go file's", unbuilt}, needs, with(func(j, _ *job) { j.Env["GOEXPERIMENT"] = "jsonv2,arenas" })},
+		{"a setting that holds nothing", []string{"jobs.jsonv2 sets GOEXPERIMENT=, which no tracked Go file's", unbuilt}, needs, with(func(j, _ *job) { j.Env["GOEXPERIMENT"] = "" })},
+		{"an experiment no file names", []string{"jobs.jsonv2 sets GOEXPERIMENT=jsonv2, which no tracked Go file's build constraint needs"}, nil, with(nil)},
+		{"a second experiment with no job", []string{"no job sets GOEXPERIMENT=nosimd, so no job builds what b/simd.go select under it"}, map[string][]string{"jsonv2": files, "nosimd": {"b/simd.go"}}, with(nil)},
+		{"the workflow sets it for every job", []string{"the workflow's env names GOEXPERIMENT, which the check reads from a job's env alone"}, needs, func() workflow {
+			wf := with(nil)
+			wf.Env = map[string]string{"GOEXPERIMENT": "jsonv2"}
+			return wf
+		}()},
+		{"a step that clears the experiment", []string{"jobs.jsonv2 step 4 (Test) names GOEXPERIMENT, which the check reads from a job's env alone"}, needs, with(func(j, _ *job) { j.Steps[3].Env = map[string]string{"GOEXPERIMENT": ""} })},
+		{"a step of another job that sets it", []string{"jobs.test step 1 (Test) names GOEXPERIMENT"}, needs, with(func(_, test *job) { test.Steps[0].Env = map[string]string{"GOEXPERIMENT": "jsonv2"} })},
+		{"a step of another job that sets it in its command", []string{"jobs.test step 1 (Test) names GOEXPERIMENT"}, needs, with(func(_, test *job) { test.Steps[0].Run = "GOEXPERIMENT=jsonv2 scripts/test.sh" })},
+		{"a step that clears it for the later steps", []string{"jobs.jsonv2 step 1 (Checkout) names GOEXPERIMENT"}, needs, with(func(j, _ *job) { j.Steps[0].Run = `echo "GOEXPERIMENT=" >> "$GITHUB_ENV"` })},
+		{"another runner", []string{`jobs.jsonv2 runs on ["macos-26"] in group "", want ubuntu-24.04 alone`}, needs, with(func(j, _ *job) { j.RunsOn = runnerLabels{"macos-26"} })},
+		{"a second runner label", []string{`jobs.jsonv2 runs on ["ubuntu-24.04" "self-hosted"] in group "", want ubuntu-24.04 alone`}, needs, with(func(j, _ *job) { j.RunsOn = append(j.RunsOn, "self-hosted") })},
+		{"a runner group", []string{`jobs.jsonv2 runs on ["ubuntu-24.04"] in group "larger", want ubuntu-24.04 alone`}, needs, with(func(j, _ *job) { j.runnerGroup = "larger" })},
+		{"a lint that reads Windows too", []string{"jobs.jsonv2 has no step that runs scripts/lint.sh --host"}, needs, with(func(j, _ *job) { j.Steps[1].Run = "scripts/lint.sh" })},
+		{"no vet", []string{"jobs.jsonv2 has no step that runs scripts/vet.sh --host"}, needs, with(func(j, _ *job) { j.Steps = slices.Delete(j.Steps, 2, 3) })},
+		{"a suite whose failure passes", []string{"jobs.jsonv2 has no step that runs scripts/test.sh"}, needs, with(func(j, _ *job) { j.Steps[3].Run = "scripts/test.sh || true" })},
+		{"a suite run with the experiment cleared", []string{"jobs.jsonv2 step 4 (Test) names GOEXPERIMENT", "jobs.jsonv2 has no step that runs scripts/test.sh"}, needs, with(func(j, _ *job) { j.Steps[3].Run = "GOEXPERIMENT= scripts/test.sh" })},
+		{"a lint that stops at an earlier failure", []string{`jobs.jsonv2 runs scripts/lint.sh --host if "", want "${{ !cancelled() }}"`}, needs, with(func(j, _ *job) { j.Steps[1].If = "" })},
+		{"a vet only after success", []string{`jobs.jsonv2 runs scripts/vet.sh --host if "${{ success() }}"`}, needs, with(func(j, _ *job) { j.Steps[2].If = "${{ success() }}" })},
+		{"a suite switched off", []string{`jobs.jsonv2 runs scripts/test.sh if "false"`}, needs, with(func(j, _ *job) { j.Steps[3].If = "false" })},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := experimentFindings(tt.wf, tt.needs)
+			if len(f) != len(tt.want) {
+				t.Fatalf("findings = %q, want %d", f, len(tt.want))
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(f[i], want) {
+					t.Errorf("finding %d = %q, want it to hold %q", i, f[i], want)
+				}
+			}
+		})
 	}
 }
 
@@ -432,12 +1304,13 @@ func TestVetCommands_OnePerConfiguration(t *testing.T) {
 	}
 }
 
-// Every target the module's build constraints select is vetted, in a job of
-// its own. On a Linux host scripts/vet.sh type-checks eleven targets where
-// --host checks two, which took the Vet step of a host job 255 to 382 s
-// against the other hosts' under 30 s and made that job the longest of the
-// workflow. One job runs it, because a second would pay the cost twice, and
-// the release calls this workflow whole, so a tag still waits for it.
+// Every target scripts/vet.sh lists is vetted, in a job of its own. On a
+// Linux host scripts/vet.sh makes twelve vet runs over eleven targets where
+// --host makes two over one, which took the Vet step of a host job 255 to
+// 382 s against the other hosts' under 30 s and made that job the longest of
+// the workflow in two of three measured runs. One job runs it, because a
+// second would pay the cost twice, and the release calls this workflow whole,
+// so a tag still waits for it.
 func TestTestWorkflow_VetsEveryTargetInAJobOfItsOwn(t *testing.T) {
 	t.Parallel()
 	var wf workflow
@@ -460,8 +1333,8 @@ func TestTestWorkflow_VetsEveryTargetInAJobOfItsOwn(t *testing.T) {
 // jobMargins holds, per job of the test workflow, how far every go test
 // timeout the job runs must stay below the job's own timeout: at least as long
 // as the job takes to start its last test binary, so a hung binary prints its
-// stack before the job is killed. Measured over 25 CI runs, the test jobs'
-// Test step ended at most 688 s into the job and the integration job's test
+// stack before the job is killed. Measured on CI, a test job ended at most
+// 795 s in, with no cache entry to restore, and the integration job's test
 // step started at most 23 s in. The mermaid job's test binary starts after npm
 // ci, which took 37 s from an empty npm cache, and a build, which took under
 // 6 s with a cold build cache. Each margin adds headroom to its measurement.
@@ -469,6 +1342,9 @@ var jobMargins = map[string]time.Duration{
 	"test":        15 * time.Minute,
 	"integration": 5 * time.Minute,
 	"mermaid":     5 * time.Minute,
+	// It lints and vets before its suite: with no cache entry a Linux check
+	// job has taken 202 s and a Linux test job 517 s, 719 s together.
+	"jsonv2": 15 * time.Minute,
 }
 
 // testlessJobs names, per job of the test workflow that runs no go test, what
@@ -477,7 +1353,8 @@ var jobMargins = map[string]time.Duration{
 // test command it failed to read, so the distinction is stated rather than
 // inferred.
 var testlessJobs = map[string]string{
-	"cross-vet": "it vets every target the module's build constraints select",
+	"check":     "it lints and vets one host's build",
+	"cross-vet": "it vets every target scripts/vet.sh lists",
 }
 
 // goTestCall matches go test written in text: the mermaid check classifies a
@@ -2193,22 +3070,15 @@ func untimedJobs(workflows map[string]workflow) []string {
 
 // trackedWorkflows decodes, keyed by file name, every workflow GitHub reads
 // from root's tracked tree: the .yml and .yaml files directly under
-// .github/workflows. The pathspecs take glob magic because a plain * also
-// matches a slash, and GitHub runs no file in a subdirectory.
+// .github/workflows. GitHub runs no file in a subdirectory.
 func trackedWorkflows(t *testing.T, root string) map[string]workflow {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), "git", "ls-files", "-z", "--",
-		":(glob).github/workflows/*.yml", ":(glob).github/workflows/*.yaml")
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("git ls-files: %v", err)
+	isWorkflow := func(rel string) bool {
+		ext := path.Ext(rel)
+		return path.Dir(rel) == ".github/workflows" && (ext == ".yml" || ext == ".yaml")
 	}
 	workflows := map[string]workflow{}
-	for rel := range strings.SplitSeq(strings.TrimSuffix(string(out), "\x00"), "\x00") {
-		if rel == "" {
-			continue
-		}
+	for _, rel := range trackedFiles(t, root, isWorkflow) {
 		file := filepath.Join(root, filepath.FromSlash(rel))
 		if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
 			// The index still lists a file the working tree has deleted.
@@ -2223,7 +3093,7 @@ func trackedWorkflows(t *testing.T, root string) map[string]workflow {
 
 func TestTrackedWorkflows_ReadsWhatGitHubRuns(t *testing.T) {
 	t.Parallel()
-	f := &fixture{t: t, dir: t.TempDir()}
+	f := newTree(t)
 	jobNamed := func(name string) string {
 		return "jobs:\n  " + name + ":\n    runs-on: ubuntu-24.04\n    steps:\n      - run: make\n"
 	}
@@ -2231,16 +3101,67 @@ func TestTrackedWorkflows_ReadsWhatGitHubRuns(t *testing.T) {
 	f.write(".github/workflows/b.yaml", jobNamed("b"))
 	f.write(".github/workflows/sub/a.yml", jobNamed("nested"))
 	f.write(".github/workflows/sub/c.yaml", jobNamed("nested"))
+	f.write("nested/.github/workflows/d.yml", jobNamed("nested"))
 	f.write(".github/workflows/gone.yml", jobNamed("gone"))
 	f.write(".github/workflows/notes.txt", "not a workflow\n")
 	f.index()
 	if err := os.Remove(filepath.Join(f.dir, ".github", "workflows", "gone.yml")); err != nil {
 		t.Fatal(err)
 	}
+	f.write(".github/workflows/untracked.yml", jobNamed("untracked"))
 
 	got := trackedWorkflows(t, f.dir)
 	if names := slices.Sorted(maps.Keys(got)); !slices.Equal(names, []string{"a.yml", "b.yaml"}) {
-		t.Errorf("read %q, want [a.yml b.yaml]: a subdirectory, a deleted file and a non-workflow are not run", names)
+		t.Errorf("read %q, want [a.yml b.yaml]: a subdirectory, another tree's .github, a deleted file, an untracked file and a non-workflow are not run", names)
+	}
+	if _, ok := got["a.yml"].Jobs["top"]; !ok {
+		t.Errorf("a.yml decoded as jobs %q, want the top-level file's job top", slices.Sorted(maps.Keys(got["a.yml"].Jobs)))
+	}
+}
+
+// insideWorkTree asks about the root it is given, and a .git directory is no
+// work tree.
+func TestInsideWorkTree_AsksAboutItsRoot(t *testing.T) {
+	t.Parallel()
+	f := newTree(t)
+	f.write("held.txt", "held\n")
+	f.index()
+	plain := t.TempDir()
+	for dir, want := range map[string]bool{
+		f.dir:                        true,
+		filepath.Join(f.dir, ".git"): false,
+		plain:                        false,
+	} {
+		if got := insideWorkTree(t, dir); got != want {
+			t.Errorf("insideWorkTree(%s) = %v, want %v", dir, got, want)
+		}
+	}
+}
+
+// Outside a git work tree, as in the module cache's copy of a release, the
+// files on disk are the tracked tree, and the same workflows are read.
+func TestTrackedWorkflows_ReadsTheFilesOutsideAWorkTree(t *testing.T) {
+	t.Parallel()
+	f := newTree(t)
+	probe := exec.CommandContext(t.Context(), "git", "rev-parse", "--is-inside-work-tree")
+	probe.Dir = f.dir
+	probe.Env = gittree.WithoutRepositoryVars(t, os.Environ())
+	if probe.Run() == nil {
+		t.Fatalf("the temporary directory %s lies inside a git work tree; set TMPDIR outside one", f.dir)
+	}
+	jobNamed := func(name string) string {
+		return "jobs:\n  " + name + ":\n    runs-on: ubuntu-24.04\n    steps:\n      - run: make\n"
+	}
+	f.write(".github/workflows/a.yml", jobNamed("top"))
+	f.write(".github/workflows/b.yaml", jobNamed("b"))
+	f.write(".github/workflows/sub/a.yml", jobNamed("nested"))
+	f.write(".github/workflows/dir.yml/notes.txt", "a directory named as a workflow\n")
+	f.write("nested/.github/workflows/c.yml", jobNamed("nested"))
+	f.write(".github/workflows/notes.txt", "not a workflow\n")
+
+	got := trackedWorkflows(t, f.dir)
+	if names := slices.Sorted(maps.Keys(got)); !slices.Equal(names, []string{"a.yml", "b.yaml"}) {
+		t.Errorf("read %q, want [a.yml b.yaml]: a subdirectory, a directory, another tree's .github and a non-workflow are not run", names)
 	}
 	if _, ok := got["a.yml"].Jobs["top"]; !ok {
 		t.Errorf("a.yml decoded as jobs %q, want the top-level file's job top", slices.Sorted(maps.Keys(got["a.yml"].Jobs)))
@@ -2553,88 +3474,370 @@ func TestReleaseWorkflow_BuildsOnlyAfterTheTestWorkflow(t *testing.T) {
 	}
 }
 
-func TestPreCommitHooks_RunTheGateScripts(t *testing.T) {
-	t.Parallel()
-	var config struct {
-		DefaultStages []string `yaml:"default_stages"`
-		Repos         []struct {
-			Hooks []struct {
-				ID        string   `yaml:"id"`
-				Entry     string   `yaml:"entry"`
-				Files     string   `yaml:"files"`
-				Exclude   string   `yaml:"exclude"`
-				Stages    []string `yaml:"stages"`
-				AlwaysRun bool     `yaml:"always_run"`
-			} `yaml:"hooks"`
-		} `yaml:"repos"`
+// preCommitConfig is .pre-commit-config.yaml as the hook check reads it: every
+// top-level key, and each hook's whole mapping.
+type preCommitConfig struct {
+	keys  []string
+	Repos []struct {
+		Repo  string           `yaml:"repo"`
+		Hooks []map[string]any `yaml:"hooks"`
+	} `yaml:"repos"`
+}
+
+func (c *preCommitConfig) UnmarshalYAML(n *yaml.Node) error {
+	type plain preCommitConfig
+	if err := n.Decode((*plain)(c)); err != nil {
+		return err
 	}
-	decodeYAML(t, fromRoot(".pre-commit-config.yaml"), &config)
-	atCommit := func(stages []string) bool {
-		return len(stages) == 0 || slices.Contains(stages, "pre-commit") || slices.Contains(stages, "commit")
+	c.keys = mappingKeys(n)
+	return nil
+}
+
+// The files patterns of the gate hooks: pre-commit searches each staged path
+// with a hook's pattern, and runs the hook when one matches.
+const (
+	lintConfigFiles = `(^\.golangci\.yml$)|(^go\.(mod|sum)$)`
+	goFiles         = `\.go$`
+	goBuildFiles    = `(\.go$)|(\bgo\.mod$)|(\bgo\.sum$)`
+)
+
+// gateHooks holds each lint, vet and test hook to one form: every key its
+// mapping sets beside id and name, with its value. Any other key is a finding,
+// since args, types and exclude each change what a hook runs or when it runs.
+var gateHooks = map[string]map[string]any{
+	"golangci-lint-config": {"language": "system", "pass_filenames": false, "files": lintConfigFiles, "entry": "scripts/lintconfig.sh"},
+	"golangci-lint":        {"language": "system", "stages": []any{"pre-commit"}, "pass_filenames": false, "files": goFiles, "entry": "scripts/lint.sh --host"},
+	"go-vet":               {"language": "system", "stages": []any{"pre-commit"}, "pass_filenames": false, "files": goBuildFiles, "entry": "scripts/vet.sh --host"},
+	"go-test":              {"language": "system", "stages": []any{"pre-commit"}, "pass_filenames": false, "always_run": true, "entry": "scripts/committest.sh"},
+	"golangci-lint-full":   {"language": "system", "stages": []any{"manual"}, "pass_filenames": false, "files": goFiles, "entry": "scripts/lint.sh"},
+	"go-vet-full":          {"language": "system", "stages": []any{"manual"}, "pass_filenames": false, "files": goBuildFiles, "entry": "scripts/vet.sh"},
+	"go-test-full":         {"language": "system", "stages": []any{"manual"}, "pass_filenames": false, "always_run": true, "entry": "scripts/test.sh"},
+}
+
+// hookFindings reports each way config departs from the two gates: a top-level
+// key beside repos, two hooks of one id, a gate hook that is missing, not local
+// or outside its one form, and any other hook that names stages. A hook that
+// names none runs at the stages its own manifest gives it.
+func hookFindings(config preCommitConfig) []string {
+	var findings []string
+	for _, k := range config.keys {
+		if k != "repos" {
+			findings = append(findings, fmt.Sprintf("the configuration sets %s, which the check does not know leaves every hook as written", k))
+		}
 	}
-	if !atCommit(config.DefaultStages) {
-		t.Errorf("default_stages %q leaves out the commit stage", config.DefaultStages)
-	}
-	type hook = struct {
-		entry     string
-		files     string
-		exclude   string
-		stages    []string
-		alwaysRun bool
-	}
-	hooks := map[string]hook{}
+	seen := map[string]bool{}
 	for _, repo := range config.Repos {
 		for _, h := range repo.Hooks {
-			hooks[h.ID] = hook{h.Entry, h.Files, h.Exclude, h.Stages, h.AlwaysRun}
+			id := fmt.Sprint(h["id"])
+			if seen[id] {
+				findings = append(findings, "two hooks are named "+id)
+				continue
+			}
+			seen[id] = true
+			want, gate := gateHooks[id]
+			if !gate {
+				if stages, ok := h["stages"]; ok {
+					findings = append(findings, fmt.Sprintf("hook %s names stages %v, so a gate may leave it out", id, stages))
+				}
+				continue
+			}
+			if repo.Repo != "local" {
+				findings = append(findings, fmt.Sprintf("hook %s comes from %s, want a local hook", id, repo.Repo))
+			}
+			keys := maps.Clone(h)
+			maps.Copy(keys, want)
+			for _, k := range slices.Sorted(maps.Keys(keys)) {
+				got, set := h[k]
+				w, wanted := want[k]
+				switch {
+				case k == "id" || k == "name":
+				case !wanted:
+					findings = append(findings, fmt.Sprintf("hook %s sets %s: %v, which is outside its one form", id, k, got))
+				case !set:
+					findings = append(findings, fmt.Sprintf("hook %s sets no %s, want %v", id, k, w))
+				case !reflect.DeepEqual(got, w):
+					findings = append(findings, fmt.Sprintf("hook %s sets %s: %v, want %v", id, k, got, w))
+				}
+			}
 		}
 	}
+	for _, id := range slices.Sorted(maps.Keys(gateHooks)) {
+		if !seen[id] {
+			findings = append(findings, "no hook "+id)
+		}
+	}
+	return findings
+}
 
-	rows := []struct {
-		id        string
-		entry     string
-		fires     []string
-		alwaysRun bool
-	}{
-		{id: "golangci-lint-config", entry: "scripts/lintconfig.sh", fires: []string{".golangci.yml", "go.mod", "go.sum"}},
-		{id: "golangci-lint", entry: "scripts/lint.sh", fires: []string{"schema/load.go", "location/host_path_windows.go"}},
-		{id: "go-vet", entry: "scripts/vet.sh", fires: []string{"schema/load.go", "go.mod", "go.sum"}},
-		{id: "go-test", entry: "scripts/test.sh", alwaysRun: true},
+// A commit runs the commit gate: the linter config check, the linter and vet for
+// this host's build, and scripts/committest.sh. The full gate's three hooks run
+// at the manual stage alone, which `make gate` names, and no other hook names a
+// stage.
+func TestPreCommitHooks_RunTheGateScripts(t *testing.T) {
+	t.Parallel()
+	var config preCommitConfig
+	decodeYAML(t, fromRoot(".pre-commit-config.yaml"), &config)
+	for _, f := range hookFindings(config) {
+		t.Error(f)
 	}
-	for _, row := range rows {
-		h, ok := hooks[row.id]
-		if !ok {
-			t.Errorf("no hook %s", row.id)
-			continue
-		}
-		if h.entry != row.entry {
-			t.Errorf("hook %s runs %q, want %q", row.id, h.entry, row.entry)
-		}
-		if row.alwaysRun && !h.alwaysRun {
-			t.Errorf("hook %s does not always run", row.id)
-		}
-		if !atCommit(h.stages) {
-			t.Errorf("hook %s runs only at stages %q, not at commit", row.id, h.stages)
-		}
-		if h.exclude != "" {
-			t.Errorf("hook %s excludes %q, so a change it matches does not run it", row.id, h.exclude)
-		}
-		// pre-commit searches each staged path with the files pattern.
-		files, err := regexp.Compile(h.files)
-		if err != nil {
-			t.Errorf("hook %s files pattern %q: %v", row.id, h.files, err)
-			continue
-		}
-		for _, path := range row.fires {
+	for pattern, fires := range map[string][]string{
+		lintConfigFiles: {".golangci.yml", "go.mod", "go.sum"},
+		goFiles:         {"schema/load.go", "location/host_path_windows.go"},
+		goBuildFiles:    {"schema/load.go", "go.mod", "go.sum"},
+	} {
+		files := regexp.MustCompile(pattern)
+		for _, path := range fires {
 			if !files.MatchString(path) {
-				t.Errorf("hook %s does not fire when %s changes (files %q)", row.id, path, h.files)
+				t.Errorf("a hook with the files pattern %q does not fire when %s changes", pattern, path)
 			}
 		}
 	}
 }
 
+// The check itself: the repository's configuration draws no finding, and each
+// departure from the two gates draws the findings that name it.
+func TestHookFindings_RefusesEachDepartureFromTheTwoGates(t *testing.T) {
+	t.Parallel()
+	// Each row edits its own decoding of the repository's configuration.
+	hook := func(t *testing.T, c *preCommitConfig, id string) map[string]any {
+		t.Helper()
+		for _, repo := range c.Repos {
+			for _, h := range repo.Hooks {
+				if h["id"] == id {
+					return h
+				}
+			}
+		}
+		t.Fatalf("the configuration holds no hook %s", id)
+		return nil
+	}
+	set := func(id, key string, value any) func(*testing.T, *preCommitConfig) {
+		return func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			hook(t, c, id)[key] = value
+		}
+	}
+	drop := func(id, key string) func(*testing.T, *preCommitConfig) {
+		return func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			delete(hook(t, c, id), key)
+		}
+	}
+	local := func(t *testing.T, c *preCommitConfig, id string) (repo, at int) {
+		t.Helper()
+		for r, rp := range c.Repos {
+			for i, h := range rp.Hooks {
+				if h["id"] == id {
+					return r, i
+				}
+			}
+		}
+		t.Fatalf("the configuration holds no hook %s", id)
+		return 0, 0
+	}
+	for _, tt := range []struct {
+		name string
+		edit func(*testing.T, *preCommitConfig)
+		want []string // a substring of each finding expected, in order
+	}{
+		{"the repository's configuration", func(*testing.T, *preCommitConfig) {}, nil},
+		{"default_stages", func(_ *testing.T, c *preCommitConfig) { c.keys = append(c.keys, "default_stages") }, []string{"the configuration sets default_stages"}},
+		{"a top-level exclude", func(_ *testing.T, c *preCommitConfig) { c.keys = append(c.keys, "exclude") }, []string{"the configuration sets exclude"}},
+		{"args on a full hook", set("golangci-lint-full", "args", []any{"--host"}), []string{"hook golangci-lint-full sets args: [--host], which is outside its one form"}},
+		{"types on a commit hook", set("golangci-lint", "types", []any{"python"}), []string{"hook golangci-lint sets types"}},
+		{"an exclude on a gate hook", set("go-vet-full", "exclude", "^schema/"), []string{"hook go-vet-full sets exclude"}},
+		{"pass_filenames dropped", drop("go-test-full", "pass_filenames"), []string{"hook go-test-full sets no pass_filenames"}},
+		{"pass_filenames on", set("golangci-lint", "pass_filenames", true), []string{"hook golangci-lint sets pass_filenames: true, want false"}},
+		{"always_run dropped", drop("go-test", "always_run"), []string{"hook go-test sets no always_run"}},
+		{"the full test at a commit", set("go-test", "entry", "scripts/test.sh"), []string{"hook go-test sets entry: scripts/test.sh, want scripts/committest.sh"}},
+		{"the commit test by hand", set("go-test-full", "entry", "scripts/committest.sh"), []string{"hook go-test-full sets entry"}},
+		{"every target vetted at a commit", set("go-vet", "entry", "scripts/vet.sh"), []string{"hook go-vet sets entry"}},
+		{"a narrower files pattern", set("golangci-lint-full", "files", `^schema/.*\.go$`), []string{"hook golangci-lint-full sets files"}},
+		{"another language", set("go-vet", "language", "golang"), []string{"hook go-vet sets language"}},
+		{"a full hook at a commit too", set("go-test-full", "stages", []any{"manual", "pre-commit"}), []string{"hook go-test-full sets stages"}},
+		{"a full hook at a merge commit too", set("go-test-full", "stages", []any{"manual", "pre-merge-commit"}), []string{"hook go-test-full sets stages"}},
+		{"a full hook at every stage", drop("go-vet-full", "stages"), []string{"hook go-vet-full sets no stages"}},
+		{"a commit hook by hand too", set("go-test", "stages", []any{"pre-commit", "manual"}), []string{"hook go-test sets stages"}},
+		{"the legacy stage name", set("go-vet", "stages", []any{"commit"}), []string{"hook go-vet sets stages: [commit], want [pre-commit]"}},
+		{"a stage on the config hook", set("golangci-lint-config", "stages", []any{"pre-commit"}), []string{"hook golangci-lint-config sets stages"}},
+		{"a stage on another local hook", set("gofumpt", "stages", []any{"pre-commit"}), []string{"hook gofumpt names stages"}},
+		{"a stage on a third-party hook", set("actionlint", "stages", []any{"pre-commit"}), []string{"hook actionlint names stages"}},
+		{"a gate hook renamed", set("go-vet", "id", "vet"), []string{"hook vet names stages", "no hook go-vet"}},
+		{"a gate hook removed", func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			r, i := local(t, c, "go-test-full")
+			c.Repos[r].Hooks = slices.Delete(c.Repos[r].Hooks, i, i+1)
+		}, []string{"no hook go-test-full"}},
+		{"two hooks of one id", func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			r, i := local(t, c, "go-test")
+			c.Repos[r].Hooks = append(c.Repos[r].Hooks, maps.Clone(c.Repos[r].Hooks[i]))
+		}, []string{"two hooks are named go-test"}},
+		{"a gate hook from another repository", func(t *testing.T, c *preCommitConfig) {
+			t.Helper()
+			r, _ := local(t, c, "go-test-full")
+			c.Repos[r].Repo = "https://example.com/hooks"
+		}, []string{"hook golangci-lint-full comes from", "hook go-vet-full comes from", "hook go-test-full comes from"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var config preCommitConfig
+			decodeYAML(t, fromRoot(".pre-commit-config.yaml"), &config)
+			tt.edit(t, &config)
+			got := hookFindings(config)
+			if len(got) != len(tt.want) {
+				t.Fatalf("findings %q, want %d naming %q", got, len(tt.want), tt.want)
+			}
+			for i, want := range tt.want {
+				if !strings.Contains(got[i], want) {
+					t.Errorf("finding %q, want one naming %q", got[i], want)
+				}
+			}
+		})
+	}
+}
+
+// gateCommand is the one command that runs the full gate. --hook-stage manual
+// selects the three hooks no commit runs, beside every hook that names no stage.
+const gateCommand = "pre-commit run --all-files --hook-stage manual"
+
+// ruleFindings holds target's rule in the makefile text to one form: a .PHONY
+// line naming it alone, the line "target:", one recipe line holding command,
+// and no other line that names the target before a colon. It does not read a
+// conditional, an included file, a target named through a variable, or an
+// assignment to SHELL or .RECIPEPREFIX.
+func ruleFindings(makefile, target, command string) []string {
+	lines := strings.Split(makefile, "\n")
+	var rules []int
+	for i, l := range lines {
+		if strings.HasPrefix(l, "\t") || strings.HasPrefix(l, "#") {
+			continue
+		}
+		if before, _, ok := strings.Cut(l, ":"); ok && slices.Contains(strings.Fields(before), target) {
+			rules = append(rules, i)
+		}
+	}
+	if len(rules) != 1 {
+		return []string{fmt.Sprintf("the Makefile names %s before a colon on %d lines, want one rule", target, len(rules))}
+	}
+	at := rules[0]
+	line := func(i int) string {
+		if i < 0 || i >= len(lines) {
+			return ""
+		}
+		return lines[i]
+	}
+	var findings []string
+	if lines[at] != target+":" {
+		findings = append(findings, fmt.Sprintf("the rule line is %q, want %q", lines[at], target+":"))
+	}
+	if line(at-1) != ".PHONY: "+target {
+		findings = append(findings, fmt.Sprintf("the line before the rule is %q, want %q", line(at-1), ".PHONY: "+target))
+	}
+	if line(at+1) != "\t"+command {
+		findings = append(findings, fmt.Sprintf("make %s runs %q, want %q", target, strings.TrimPrefix(line(at+1), "\t"), command))
+	}
+	// make reads a tab line after a blank line or a comment as one more command.
+	for _, l := range lines[min(at+2, len(lines)):] {
+		if second, ok := strings.CutPrefix(l, "\t"); ok {
+			findings = append(findings, fmt.Sprintf("make %s runs a second command, %q", target, second))
+		}
+		if l != "" && !strings.HasPrefix(l, "#") {
+			break
+		}
+	}
+	return findings
+}
+
+// `make gate` is the full gate's command, and `make test` its test definition.
+func TestMakefile_GateRunsTheFullGate(t *testing.T) {
+	t.Parallel()
+	b, err := os.ReadFile(fromRoot("Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for target, command := range map[string]string{"gate": gateCommand, "test": "scripts/test.sh"} {
+		for _, f := range ruleFindings(string(b), target, command) {
+			t.Error(f)
+		}
+	}
+}
+
+// The check itself: the one form draws no finding, and each other form in the
+// table draws one.
+func TestRuleFindings_RefusesEachOtherForm(t *testing.T) {
+	t.Parallel()
+	const rule = ".PHONY: gate\ngate:\n\tgo\n"
+	for _, tt := range []struct {
+		name, makefile, want string // want is a substring of the one finding expected; "" expects none
+	}{
+		{"the one form", "x := 1\n\n" + rule + "\nnext:\n\tother\n", ""},
+		{"the one form at the end of the file", rule, ""},
+		{"a comment after the recipe", rule + "# done\nnext:\n", ""},
+		{"no rule", "gateway:\n\tgo\n", "on 0 lines"},
+		{"a rule in a comment alone", "# gate:\n#\tgo\n", "on 0 lines"},
+		{"a second rule", rule + "\ngate:\n\tother\n", "on 2 lines"},
+		{"a target-specific variable", rule + "\ngate: export SKIP := x\n", "on 2 lines"},
+		{"a double-colon pair", ".PHONY: gate\ngate::\n\tgo\ngate::\n\tother\n", "on 2 lines"},
+		{"a second target on the rule line", ".PHONY: gate\ngate full:\n\tgo\n", `the rule line is "gate full:"`},
+		{"a prerequisite", ".PHONY: gate\ngate: lint\n\tgo\n", `the rule line is "gate: lint"`},
+		{"a space before the colon", ".PHONY: gate\ngate :\n\tgo\n", `the rule line is "gate :"`},
+		{"not phony", "\ngate:\n\tgo\n", "the line before the rule"},
+		{"phony beside another target", ".PHONY: gate lint\ngate:\n\tgo\n", "the line before the rule"},
+		{"another command", ".PHONY: gate\ngate:\n\tother\n", `runs "other", want "go"`},
+		{"no command", ".PHONY: gate\ngate:\n\nnext:\n", `runs "", want "go"`},
+		{"a second command", rule + "\tother\n", `a second command, "other"`},
+		{"a second command after a comment", rule + "# and\n\tother\n", `a second command, "other"`},
+		{"a second command after a blank line", rule + "\n\tother\n", `a second command, "other"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := ruleFindings(tt.makefile, "gate", "go")
+			if tt.want == "" {
+				if len(got) != 0 {
+					t.Errorf("findings %q, want none", got)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0], tt.want) {
+				t.Errorf("findings %q, want one naming %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// CI's pre-commit job runs the commit stage and skips the commit gate's four
+// lint, vet and test hooks, whose checks the test workflow's jobs run.
+func TestCIWorkflow_PreCommitJobSkipsTheGateHooks(t *testing.T) {
+	t.Parallel()
+	var ci workflow
+	decodeYAML(t, fromRoot(".github/workflows/ci.yaml"), &ci)
+	var runs []step
+	for _, s := range ci.Jobs["pre-commit"].Steps {
+		if strings.Contains(s.Run, "pre-commit run") {
+			runs = append(runs, s)
+		}
+	}
+	if len(runs) != 1 {
+		t.Fatalf("CI's pre-commit job runs pre-commit in %d steps, want one", len(runs))
+	}
+	if got := strings.TrimSpace(runs[0].Run); got != "pre-commit run --all-files" {
+		t.Errorf("CI's pre-commit job runs %q, want pre-commit run --all-files, the commit stage", got)
+	}
+	var commit []string
+	for id, h := range gateHooks {
+		if !reflect.DeepEqual(h["stages"], []any{"manual"}) {
+			commit = append(commit, id)
+		}
+	}
+	if got := slices.Sorted(slices.Values(skippedHooks(runs[0].Env["SKIP"]))); !slices.Equal(got, slices.Sorted(slices.Values(commit))) {
+		t.Errorf("CI's pre-commit job skips %q, want the hooks that run at a commit, %q", got, slices.Sorted(slices.Values(commit)))
+	}
+}
+
 // shellcheck reads every file under scripts/ and every shell script of the
 // Claude plugin's hooks, at commit and in CI's pre-commit job, which skips only
-// the hooks the host jobs run.
+// the hooks whose checks the host jobs run.
 func TestPreCommitHooks_ShellcheckReadsEveryScript(t *testing.T) {
 	t.Parallel()
 	var config struct {

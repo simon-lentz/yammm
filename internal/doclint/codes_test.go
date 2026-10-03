@@ -9,8 +9,6 @@ import (
 	"github.com/simon-lentz/yammm/internal/doclint"
 )
 
-const codeFixture = "testdata/codefixture"
-
 func codeRules() doclint.CodeRules {
 	return doclint.CodeRules{
 		Codes:        []string{"E_KNOWN", "E_KNOWN_ONE", "W_KNOWN_WARNING"},
@@ -19,10 +17,17 @@ func codeRules() doclint.CodeRules {
 	}
 }
 
+// runCodeGate runs the gate over a copy of testdata/codefixture. A run that
+// read no name fails, so a test asserting that a report is absent cannot pass
+// with nothing read.
 func runCodeGate(t *testing.T, rules doclint.CodeRules) (*recorder, doclint.CodeCitations) {
 	t.Helper()
 	r := &recorder{}
-	return r, doclint.AssertCitedCodesExist(r, codeFixture, rules)
+	n := doclint.AssertCitedCodesExist(r, materialize(t, "codefixture"), rules)
+	if n.Comments+n.Markdown+n.Shell == 0 {
+		t.Fatalf("the gate read no name in the fixture: %v", r.msgs)
+	}
+	return r, n
 }
 
 func TestAssertCitedCodesExist_ReportsEveryUnregisteredName(t *testing.T) {
@@ -199,12 +204,57 @@ func TestAssertCitedCodesExist_RefusesAMalformedExclusion(t *testing.T) {
 	t.Parallel()
 	rules := codeRules()
 	rules.Exclude = append(rules.Exclude, "notes/[")
-	r, n := runCodeGate(t, rules)
+	r := &recorder{}
+	n := doclint.AssertCitedCodesExist(r, materialize(t, "codefixture"), rules)
 	if !r.reports(`exclusion "notes/[" is not a valid pattern`) {
 		t.Errorf("a malformed exclusion was not reported: %v", r.msgs)
 	}
 	if n != (doclint.CodeCitations{}) {
 		t.Errorf("counted %+v under a malformed exclusion; want nothing read", n)
+	}
+}
+
+// Rooted below the repository's top, the gate reads the tracked files under its
+// root, named from that root, and no untracked one.
+//
+// Not parallel: it builds its own repository (isolateFromEnclosingRepository).
+func TestAssertCitedCodesExist_ReadsATrackedTreeBelowTheRepositoryTop(t *testing.T) {
+	isolateFromEnclosingRepository(t)
+	dir := t.TempDir()
+	root := filepath.Join(dir, "sub")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"tracked.md":   "E_TRACKED_GONE\n",
+		"untracked.md": "E_UNTRACKED_GONE\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "top.md"), []byte("E_TOP_GONE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "top.md", "sub/tracked.md"}} {
+		cmd := exec.CommandContext(t.Context(), "git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	r := &recorder{}
+	n := doclint.AssertCitedCodesExist(r, root, doclint.CodeRules{Codes: []string{"E_KNOWN"}})
+	if !r.reports("tracked.md:1: cites the diagnostic code E_TRACKED_GONE") {
+		t.Errorf("the tracked file under the root was not read; got %v", r.msgs)
+	}
+	for _, unread := range []string{"E_UNTRACKED_GONE", "E_TOP_GONE"} {
+		if r.reports(unread) {
+			t.Errorf("read %s, from a file untracked or outside the root: %v", unread, r.msgs)
+		}
+	}
+	if n.Markdown != 1 {
+		t.Errorf("read %d names in Markdown, want 1", n.Markdown)
 	}
 }
 

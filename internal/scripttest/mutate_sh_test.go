@@ -5,9 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // countingTest appends a line to the file MUTATE_RUN_LOG names on every run, so
@@ -220,6 +223,86 @@ func TestMutateScript_KeepsWhatTheKillingTestReported(t *testing.T) {
 	f.wantRestored()
 }
 
+// A tree with a tracked file git cannot open has no key. The script stops with
+// git's status, where it once keyed the rest of the tree and reused a baseline
+// recorded before the edit. An unreadable file needs a host that enforces file
+// modes and a user they bind.
+func TestMutateScript_StopsWhenGitCannotHashTheTree(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a file its owner cannot read")
+	}
+	f, runLog := mutateFixture(t, "3")
+	f.env = append(f.env, "MUTATE_BASELINE_CACHE="+filepath.Join(t.TempDir(), "baselines"))
+	f.write("data.txt", "one\n")
+	f.index()
+	f.mutate().wantCode(t, 0)
+
+	f.write("data.txt", "two\n")
+	if err := os.Chmod(filepath.Join(f.dir, "data.txt"), 0); err != nil {
+		t.Fatal(err)
+	}
+	r := f.mutate()
+
+	r.wantCode(t, 128)
+	r.wantStderr(t, "data.txt")
+	if strings.Contains(r.stdout, "mutate: baseline green") {
+		t.Errorf("the run took a baseline for a tree it could not key:\n%s", r.stdout)
+	}
+	if got := testRuns(t, runLog); got != 2 {
+		t.Errorf("%d test runs in all, want the first call's two", got)
+	}
+	f.wantRestored()
+}
+
+// failingCommand is a go or a git that fails one command line with status 77
+// and leaves every other to the real program.
+const failingCommand = `#!/usr/bin/env bash
+if [ "$*" = "$SHIM_FAILS" ]; then exit 77; fi
+exec "$SHIM_REAL" "$@"
+`
+
+// The key is no key when a go or git command that feeds it fails: the script
+// stops with that command's status before any baseline, whichever of them it
+// is.
+func TestMutateScript_StopsWhenACommandOfTheKeyFails(t *testing.T) {
+	t.Parallel()
+	for _, row := range []struct{ program, fails string }{
+		{"go", "env GOOS GOARCH CGO_ENABLED GOFLAGS GOEXPERIMENT"},
+		{"go", "version"},
+		{"git", "ls-files --stage"},
+		{"git", "diff --binary"},
+		{"git", "ls-files --others --exclude-standard"},
+	} {
+		t.Run(row.program+" "+row.fails, func(t *testing.T) {
+			t.Parallel()
+			f, runLog := mutateFixture(t, "3")
+			real, err := exec.LookPath(row.program)
+			if err != nil {
+				t.Fatal(err)
+			}
+			shim := t.TempDir()
+			gittree.WriteFile(t, shim, row.program, []byte(failingCommand), 0o700)
+			f.env = append(f.env,
+				"MUTATE_BASELINE_CACHE="+filepath.Join(t.TempDir(), "baselines"),
+				"PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"),
+				"SHIM_REAL="+real,
+				"SHIM_FAILS="+row.fails,
+			)
+
+			r := f.mutate()
+
+			r.wantCode(t, 77)
+			if strings.Contains(r.stdout, "mutate: baseline green") {
+				t.Errorf("the run took a baseline for a tree it could not key:\n%s", r.stdout)
+			}
+			if got := testRuns(t, runLog); got != 0 {
+				t.Errorf("%d test runs, want none", got)
+			}
+		})
+	}
+}
+
 // extraSource and extraTest give package m a function only a test calls, a
 // format string vet reads and a package-level value built at init. Package q
 // is a second package whose test build a mutant can break alone.
@@ -344,10 +427,47 @@ func TestMutateScript_RecordsNoRedBaseline(t *testing.T) {
 	}
 }
 
+// A red baseline prints, after its verdict line, what go test reported, less
+// its line for a package that passed and for one that has no test files. A
+// package whose test does not build is reported after that line too, with the
+// compiler's errors. A line a test prints is kept though it starts as a
+// passing package's line does, short of the tab, and holds a byte that is not
+// UTF-8, which GNU grep drops under a UTF-8 locale unless it reads byte-wise.
+func TestMutateScript_PrintsWhatARedBaselineReported(t *testing.T) {
+	t.Parallel()
+	f, _ := mutateFixture(t, "4")
+	f.write("nt/nt.go", "package nt\n")
+	f.write("nb/nb_test.go", "package nb\n\nimport \"testing\"\n\nfunc TestNB(t *testing.T) { missing() }\n")
+	f.write("said/said_test.go", "package said\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\n"+
+		"func TestSaid(t *testing.T) {\n\tfmt.Println(\"ok  said the test \\xff\")\n\tt.Fatal(\"and then it failed\")\n}\n")
+	f.index()
+	f.env = append(f.env, "LC_ALL=C.UTF-8")
+
+	r := f.run("mutate.sh", "m/m.go", "a + b", "a - b", "./m/", "./ok/", "./nt/", "./nb/", "./said/")
+
+	r.wantCode(t, 1)
+	verdict := "mutate: the UNMUTATED tree is already red in ./m/ ./ok/ ./nt/ ./nb/ ./said/, so no verdict is possible\n"
+	if !strings.HasPrefix(r.stderr, verdict) {
+		t.Errorf("stderr does not open with the verdict line:\n%s", r.stderr)
+	}
+	for _, want := range []string{
+		"--- FAIL: TestAdd", "Add(1, 2) is wrong", "FAIL\t" + fixtureModule + "/m\t",
+		"undefined: missing", "FAIL\t" + fixtureModule + "/nb [build failed]\n",
+		"\nok  said the test \xff\n",
+	} {
+		r.wantStderr(t, want)
+	}
+	for _, dropped := range []string{"/ok", "/nt"} {
+		if strings.Contains(r.stderr, fixtureModule+dropped) {
+			t.Errorf("stderr names %s, which did not fail:\n%s", fixtureModule+dropped, r.stderr)
+		}
+	}
+}
+
 // goShim is a go that replaces one `go test` run's output and leaves every
 // other run to the real toolchain. It counts the runs that are not the
 // pre-build, so GO_SHIM_FAIL_ON=2 names the verdict run, and appends each
-// counted run's arguments to GO_SHIM_ARGS, one line per run.
+// counted run's arguments to GO_SHIM_ARGS and its GOFLAGS to GO_SHIM_FLAGS.
 const goShim = `#!/usr/bin/env bash
 for a in "$@"; do
 	if [ "$a" = "-exec=true" ]; then exec "$GO_SHIM_REAL" "$@"; fi
@@ -358,6 +478,7 @@ if [ "${1:-}" = "test" ]; then
 	n=$((n + 1))
 	printf '%s\n' "$n" >"$GO_SHIM_COUNT"
 	printf '%s\n' "$*" >>"$GO_SHIM_ARGS"
+	printf '%s\n' "${GOFLAGS:-}" >>"$GO_SHIM_FLAGS"
 	if [ "$n" = "$GO_SHIM_FAIL_ON" ]; then
 		cat "$GO_SHIM_OUT"
 		exit 1
@@ -388,6 +509,7 @@ func (f *fixture) shimVerdictRun(out string) {
 		"GO_SHIM_COUNT="+filepath.Join(dir, "count"),
 		"GO_SHIM_OUT="+outFile,
 		"GO_SHIM_ARGS="+filepath.Join(dir, "args"),
+		"GO_SHIM_FLAGS="+filepath.Join(dir, "flags"),
 		"GO_SHIM_FAIL_ON=2",
 	)
 }
@@ -395,13 +517,27 @@ func (f *fixture) shimVerdictRun(out string) {
 // shimArgs returns the arguments of each go test run the shim counted.
 func (f *fixture) shimArgs() []string {
 	f.t.Helper()
+	return f.shimLines("GO_SHIM_ARGS=")
+}
+
+// shimFlags returns the GOFLAGS of each go test run the shim counted.
+func (f *fixture) shimFlags() []string {
+	f.t.Helper()
+	return f.shimLines("GO_SHIM_FLAGS=")
+}
+
+func (f *fixture) shimLines(key string) []string {
+	f.t.Helper()
 	for _, kv := range f.env {
-		if p, ok := strings.CutPrefix(kv, "GO_SHIM_ARGS="); ok {
+		if p, ok := strings.CutPrefix(kv, key); ok {
 			b, err := os.ReadFile(p)
 			if err != nil {
 				f.t.Fatal(err)
 			}
-			return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+			if len(b) == 0 {
+				return nil
+			}
+			return strings.Split(strings.TrimSuffix(string(b), "\n"), "\n")
 		}
 	}
 	f.t.Fatal("no go shim is installed")
@@ -487,6 +623,118 @@ func TestMutateScript_NeedsAPackageThatRanItsTests(t *testing.T) {
 			f.wantRestored()
 		})
 	}
+}
+
+// timeoutOutput is what go test prints for a package whose test binary ran out
+// of time: the panic with the test that was running, then the package's line
+// with a duration, as a kill's line has.
+func timeoutOutput(pkg, test string) string {
+	return "panic: test timed out after 5m0s\n\trunning tests:\n\t\t" + test + " (5m0s)\n\n" +
+		"goroutine 7 [running]:\ntesting.(*M).startAlarm.func1()\n\t/go/src/testing/testing.go:2802 +0x2c4\n" +
+		"FAIL\t" + pkg + "\t300.012s\n"
+}
+
+// A package that ran out of time is no kill: a mutant that makes the code hang
+// ends so, and so does a run that load only slowed. The run reads TIMEOUT only
+// when every package that ran and failed timed out with no "--- FAIL:" line of
+// its own; a package that did not run still makes it no verdict.
+func TestMutateScript_ReadsARunThatTimedOutAsATimeout(t *testing.T) {
+	t.Parallel()
+	const pkg = fixtureModule + "/m"
+	const other = fixtureModule + "/q"
+	for _, c := range []struct {
+		name, verdict string
+		code          int
+		want          []string
+		absent        []string
+	}{
+		{
+			name:    "a package that timed out is a timeout, naming the running test",
+			verdict: timeoutOutput(pkg, "TestAdd") + "FAIL\n",
+			code:    3, want: []string{"mutate: MUTANT TIMED OUT", "TestAdd (5m0s)"},
+		},
+		{
+			name:    "a timeout beside a package whose test failed is a kill",
+			verdict: timeoutOutput(other, "TestOne") + "--- FAIL: TestAdd (0.00s)\nFAIL\nFAIL\t" + pkg + "\t0.31s\nFAIL\n",
+			code:    0, want: []string{"mutate: MUTANT KILLED"},
+		},
+		{
+			name:    "a test that failed before its package timed out is a kill",
+			verdict: "--- FAIL: TestAdd (0.00s)\n" + timeoutOutput(pkg, "TestSlow") + "FAIL\n",
+			code:    0, want: []string{"mutate: MUTANT KILLED"},
+		},
+		{
+			name:    "a panic that is not a timeout is a kill",
+			verdict: "panic: runtime error: index out of range [3] with length 3\n\ngoroutine 7 [running]:\nFAIL\t" + pkg + "\t0.02s\nFAIL\n",
+			code:    0, want: []string{"mutate: MUTANT KILLED"},
+		},
+		{
+			name:    "cmd/go's kill of a binary that outlived its timeout is a timeout",
+			verdict: "*** Test killed with quit: ran too long (5m5s).\nFAIL\t" + pkg + "\t305.115s\nFAIL\n",
+			code:    3, want: []string{"mutate: MUTANT TIMED OUT"},
+		},
+		{
+			name:    "a timeout after output that left its line open is a timeout",
+			verdict: "progress:" + timeoutOutput(pkg, "TestAdd") + "FAIL\n",
+			code:    3, want: []string{"mutate: MUTANT TIMED OUT"},
+		},
+		{
+			name:    "a timeout, then a package that panicked with no failing test, is a kill",
+			verdict: timeoutOutput(other, "TestOne") + "panic: runtime error: index out of range [3] with length 3\n\ngoroutine 7 [running]:\nFAIL\t" + pkg + "\t0.02s\nFAIL\n",
+			code:    0, want: []string{"mutate: MUTANT KILLED"},
+		},
+		{
+			name:    "a timeout's report leaves out a package that passed",
+			verdict: "ok  \t" + other + "\t0.01s\n" + timeoutOutput(pkg, "TestAdd") + "FAIL\n",
+			code:    3, want: []string{"mutate: MUTANT TIMED OUT"}, absent: []string{"ok  \t"},
+		},
+		{
+			name:    "a timeout whose output holds a byte that is not UTF-8 is a timeout",
+			verdict: "early \xff\n" + timeoutOutput(pkg, "TestAdd") + "FAIL\n",
+			code:    3, want: []string{"mutate: MUTANT TIMED OUT", "early \xff"},
+		},
+		{
+			name:    "a timeout beside a package that did not run is not a verdict",
+			verdict: timeoutOutput(pkg, "TestAdd") + "FAIL\t" + other + " [build failed]\nFAIL\n",
+			code:    1, want: []string{"mutate: NO TEST RAN"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f, _ := mutateFixture(t, "3")
+			f.env = append(f.env, "LC_ALL=C.UTF-8")
+			f.shimVerdictRun(c.verdict)
+
+			r := f.mutate()
+			r.wantCode(t, c.code)
+			for _, w := range c.want {
+				if !strings.Contains(r.stdout+r.stderr, w) {
+					t.Errorf("output does not hold %q\nstdout:\n%s\nstderr:\n%s", w, r.stdout, r.stderr)
+				}
+			}
+			for _, a := range c.absent {
+				if strings.Contains(r.stdout+r.stderr, a) {
+					t.Errorf("output holds %q\nstdout:\n%s\nstderr:\n%s", a, r.stdout, r.stderr)
+				}
+			}
+			f.wantRestored()
+		})
+	}
+}
+
+// A mutant that makes the code hang runs until go test's timeout and reads
+// TIMEOUT, not KILLED.
+func TestMutateScript_ReadsAMutantThatHangsAsATimeout(t *testing.T) {
+	t.Parallel()
+	f, _ := mutateFixture(t, "3")
+	f.env[0] = "GOFLAGS=-mod=mod -count=1 -timeout=5s"
+
+	r := f.run("mutate.sh", "m/m.go", "{ return a + b }", "{ for {} }", "./m/")
+
+	r.wantCode(t, 3)
+	r.wantStderr(t, "mutate: MUTANT TIMED OUT")
+	r.wantStderr(t, "TestAdd")
+	f.wantRestored()
 }
 
 // Under -failfast, go test drops the line of every package that starts after

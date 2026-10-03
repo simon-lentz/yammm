@@ -8,14 +8,19 @@ import (
 	"github.com/simon-lentz/yammm/internal/doclint"
 )
 
-// commentFixture is a module of its own so the gate runs its real entry point,
-// go.mod read included, rather than a path that only tests exercise.
-const commentFixture = "testdata/commentfixture"
-
+// runCommentGate runs the gate over a copy of testdata/commentfixture restored
+// as a module of its own, so the gate runs its real entry point, go.mod read
+// included, rather than a path that only tests exercise. A run that checked no
+// comment fails, so a test asserting that a report is absent cannot pass with
+// nothing read.
 func runCommentGate(t *testing.T) (*recorder, int) {
 	t.Helper()
 	r := &recorder{}
-	return r, doclint.AssertDocCommentsRender(r, commentFixture)
+	checked := doclint.AssertDocCommentsRender(r, materialize(t, "commentfixture"))
+	if checked == 0 {
+		t.Fatalf("the gate checked no doc comment in the fixture: %v", r.msgs)
+	}
+	return r, checked
 }
 
 func TestAssertDocCommentsRender_WellFormedDocsAreSilent(t *testing.T) {

@@ -74,12 +74,13 @@ repos:
         pass_filenames: false
         files: '(\.go$)|(\bgo\.mod$)|(\bgo\.sum$)'
         entry: scripts/gomodtidy.sh
-  # --- lint, vet & test ---
+  # --- lint, vet & test: the commit gate ---
   #
-  # The same four checks each CI host's job runs: the linter config against its
-  # schema, the pinned linter, vet, and scripts/test.sh. vet.sh also vets the
-  # Windows build and every unix member's, which CI gives a job of its own. The
-  # CI pre-commit job skips these four hooks because the host jobs run them.
+  # At a commit: the linter config against its schema, the pinned linter and vet
+  # for this host's build, and scripts/committest.sh, which runs the suite with
+  # go test's result cache and without the race detector. The CI pre-commit job
+  # skips these four hooks because the test workflow's jobs run the full gate's
+  # checks.
   - repo: local
     hooks:
       - id: golangci-lint-config
@@ -89,20 +90,52 @@ repos:
         files: '(^\.golangci\.yml$)|(^go\.(mod|sum)$)'
         entry: scripts/lintconfig.sh
       - id: golangci-lint
-        name: golangci-lint
+        name: golangci-lint (host)
         language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        files: \.go$
+        entry: scripts/lint.sh --host
+      - id: go-vet
+        name: go vet (host)
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        files: '(\.go$)|(\bgo\.mod$)|(\bgo\.sum$)'
+        entry: scripts/vet.sh --host
+      - id: go-test
+        name: go test (cached, no race detector)
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        always_run: true
+        entry: scripts/committest.sh
+  # --- lint, vet & test: the full gate ---
+  #
+  # `make gate` runs every hook above that names no stage, then these three: the
+  # pinned linter for this host and Windows, vet for every target scripts/vet.sh
+  # names, which CI gives a job of its own, and scripts/test.sh. No commit runs
+  # them.
+  - repo: local
+    hooks:
+      - id: golangci-lint-full
+        name: golangci-lint (host, windows)
+        language: system
+        stages: [manual]
         pass_filenames: false
         files: \.go$
         entry: scripts/lint.sh
-      - id: go-vet
+      - id: go-vet-full
         name: go vet (host, windows, unix family)
         language: system
+        stages: [manual]
         pass_filenames: false
         files: '(\.go$)|(\bgo\.mod$)|(\bgo\.sum$)'
         entry: scripts/vet.sh
-      - id: go-test
-        name: go test
+      - id: go-test-full
+        name: go test (race detector, shuffled, uncached)
         language: system
+        stages: [manual]
         pass_filenames: false
         always_run: true
         entry: scripts/test.sh

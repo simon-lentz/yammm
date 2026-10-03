@@ -24,8 +24,8 @@ jobs:
           cache: true
       - name: Install pre-commit
         run: pip install pre-commit
-      # Each host's job in yammm_test.yml verifies the linter config, lints,
-      # vets and tests, so this job skips those hooks rather than running them a
+      # Each host's two jobs in yammm_test.yml verify the linter config, lint,
+      # vet and test, so this job skips those hooks rather than running them a
       # second time on Linux.
       - name: Run all checks
         env:
