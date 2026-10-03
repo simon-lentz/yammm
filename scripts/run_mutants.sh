@@ -3,8 +3,13 @@
 #
 # usage: run_mutants.sh <checkout> <mutants dir> <out dir> [workers, default 4]
 #
-# Each <mutants dir>/<id>/ holds file, search and replace, mutate.sh's three
-# arguments, each used byte for byte; spell, the TMPDIR spellings to run under
+# MUTATE_TIMEOUT sets the -timeout of every go test run a mutant's mutate.sh
+# makes, its baseline, pre-build and verdict run (default 300s): a whole number
+# of seconds, minutes or hours, from 1 up to 24 hours, with no leading zero, such
+# as 900s or 15m. A baseline the limit cuts short reads RED.
+#
+# Each <mutants dir>/<id>/ holds file, search and replace, mutate.sh's first
+# three arguments, each used byte for byte; spell, the TMPDIR spellings to run under
 # ("asis", "folded" or both); and optionally pkgs, a package list that replaces
 # the computed one. Without pkgs, a mutant runs over the mutated file's package,
 # every tracked package whose code or tests import it directly, and ./docs.
@@ -13,12 +18,12 @@
 # checkout has one. It holds the documentation-conformance gates, which judge
 # claims about packages it does not import, so an import-graph set alone lets a
 # mutation that breaks a documented claim read as survived. Every run sets
-# -failfast, -p=2 and MUTATE_BASELINE_CACHE, so a copy runs a baseline once per package set,
-# spelling and tree. "folded" is TMPDIR's last component "T" spelled "t", which
+# -failfast, -p=2, the -timeout above and MUTATE_BASELINE_CACHE, so a copy runs a
+# passing baseline once per package set, spelling and tree. "folded" is TMPDIR's last component "T" spelled "t", which
 # names the same directory only on a case-insensitive volume.
 #
 # Each worker owns one copy (rsync of the checkout without .claude,
-# node_modules and .vscode-test) and runs its mutants one at a time; its unstaged tree must be
+# node_modules, .vscode-test and an out directory inside the checkout) and runs its mutants one at a time; its unstaged tree must be
 # clean before and after every run. The checkout's unstaged tree must be clean.
 # Writes <out dir>/results.tsv and one log per run under <out dir>/logs.
 #
@@ -26,13 +31,21 @@
 # stamps and the queues at exit, leaving results.tsv, logs/, pkgsets/,
 # work/worker.N.out and work/results.wN.tsv. An interrupted run writes no
 # results.tsv, so the files it keeps are its record. Every entry a worker's
-# build writes for the checkout's own packages is keyed by the copy's path, so
-# a run that kept them would leave a cache nothing reads again: the shared
+# build writes for the checkout's own packages is keyed by the copy's path, and
+# the run removes the copies: kept in a shared cache, such an entry is one no
+# build reads again unless a later run uses the same out directory. The shared
 # cache reached 163 GB in four days of mutant runs and filled the disk.
 #
 # A mutant that does not build, and a verdict run in which any named package
 # did not run, read NOBUILD: the verdict cannot rest on that run. A search that
-# matches nothing reads NOMATCH, and a red baseline reads RED.
+# matches nothing reads NOMATCH. A red baseline reads RED: its log holds go
+# test's report of each package that failed there, and its failing-test column
+# names each test go test reported as failed, which is none for a baseline the
+# limit cut short. A verdict run in
+# which every package that failed ran out of time with no "--- FAIL:" line of its
+# own reads TIMEOUT (mutate.sh's exit 3, whose header states that rule), its
+# failing-test column naming the tests that were running: run that mutant again,
+# alone, with a longer MUTATE_TIMEOUT.
 set -euo pipefail
 # With CDPATH exported, a `cd` that finds a relative argument through it
 # prints the directory it chose, and $(cd "$1" && pwd -P) below would capture
@@ -54,6 +67,15 @@ case "$workers" in
 '' | *[!0-9]* | 0) echo "workers must be a positive integer, got '$workers'" >&2; exit 2 ;;
 esac
 [ "$out" != "$src" ] || { echo "the out directory $out is the checkout" >&2; exit 2; }
+timeout=${MUTATE_TIMEOUT:-300s}
+n=${timeout%[smh]}
+max=0
+case "${timeout#"$n"}" in s) max=86400 ;; m) max=1440 ;; h) max=24 ;; esac
+case "$n" in '' | 0* | *[!0-9]*) max=0 ;; esac
+if [ "$max" -eq 0 ] || [ "${#n}" -gt 5 ] || [ "$n" -gt "$max" ]; then
+	echo "MUTATE_TIMEOUT must be a whole number of seconds, minutes or hours from 1 up to 24 hours, with no leading zero, such as 900s or 15m, got '${MUTATE_TIMEOUT}'" >&2
+	exit 2
+fi
 
 # An out directory inside the checkout is left out of every worker's copy: a
 # later copy would otherwise hold an earlier worker's tree, whose .git a
@@ -233,7 +255,7 @@ for w in $(seq 1 "$workers"); do
 done
 
 worker() {
-	local w=$1 tree="$out/work/w$1" id d file search replace pkgs spell tdir log start rc secs verdict fails output
+	local w=$1 tree="$out/work/w$1" id d file search replace pkgs spell tdir log start rc secs verdict fails output line
 	while IFS= read -r id <&3; do
 		d="$mutants/$id"
 		readbytes file "$d/file"
@@ -259,7 +281,7 @@ worker() {
 			start=$(date +%s)
 			set +e
 			# shellcheck disable=SC2086 # pkgs is a word list
-			output=$(cd "$tree" && TMPDIR="$tdir" GOFLAGS="-failfast=true -timeout=300s -p=2" \
+			output=$(cd "$tree" && TMPDIR="$tdir" GOFLAGS="-failfast=true -timeout=$timeout -p=2" \
 				GOCACHE="$out/work/gocache" \
 				MUTATE_BASELINE_CACHE="$out/work/baselines.w$w" \
 				bash scripts/mutate.sh "$file" "$search" "$replace" $pkgs 2>&1 </dev/null)
@@ -271,18 +293,28 @@ worker() {
 				echo "pkgs=$(printf '%s' "$pkgs" | tr '\n' ' ')"
 				echo "$output"
 			} >"$log"
-			case "$output" in
-			*"MUTANT KILLED"*) verdict=KILLED ;;
-			*"MUTANT SURVIVED"*) verdict=SURVIVED ;;
-			*"DOES NOT BUILD"* | *"NO TEST RAN"*) verdict=NOBUILD ;;
-			*"already red"*) verdict=RED ;;
-			*"matched NOTHING"* | *"did not apply"*) verdict=NOMATCH ;;
+			# mutate.sh exits 0 on a kill and 3 on a timeout; the other verdicts share
+			# exit 1, and its own first verdict line, before any test output, splits them.
+			line=$(printf '%s\n' "$output" | LC_ALL=C grep -m 1 -E '^mutate: (MUTANT |NO TEST RAN|the mutated tree DOES NOT BUILD|the UNMUTATED tree|the search string matched NOTHING|the replacement left )' || true)
+			[ "$rc" -ne 0 ] || line="mutate: MUTANT KILLED"
+			[ "$rc" -ne 3 ] || line="mutate: MUTANT TIMED OUT"
+			case "$line" in
+			"mutate: MUTANT TIMED OUT"*) verdict=TIMEOUT ;;
+			"mutate: MUTANT KILLED"*) verdict=KILLED ;;
+			"mutate: MUTANT SURVIVED"*) verdict=SURVIVED ;;
+			"mutate: the mutated tree DOES NOT BUILD"* | "mutate: NO TEST RAN"*) verdict=NOBUILD ;;
+			"mutate: the UNMUTATED tree"*) verdict=RED ;;
+			"mutate: the search string matched NOTHING"* | "mutate: the replacement left "*) verdict=NOMATCH ;;
 			*) verdict="OTHER(rc=$rc)" ;;
 			esac
 			# Byte-wise: a test's output may hold bytes that are not UTF-8,
 			# which macOS sed and tr refuse under a UTF-8 locale, stopping the
 			# worker.
-			fails=$(printf '%s\n' "$output" | LC_ALL=C sed -nE 's/^ *--- FAIL: ([^ ]+).*/\1/p' | LC_ALL=C sort -u | LC_ALL=C tr '\n' ' ')
+			if [ "$verdict" = TIMEOUT ]; then
+				fails=$(printf '%s\n' "$output" | LC_ALL=C awk '/^\trunning tests:$/ { r = 1; next } r && /^\t\t[^ \t]+ \(/ { sub(/^\t\t/, ""); sub(/ \(.*/, ""); print; next } { r = 0 }' | LC_ALL=C sort -u | LC_ALL=C tr '\n' ' ')
+			else
+				fails=$(printf '%s\n' "$output" | LC_ALL=C sed -nE 's/^ *--- FAIL: ([^ ]+).*/\1/p' | LC_ALL=C sort -u | LC_ALL=C tr '\n' ' ')
+			fi
 			printf '%s\t%s\t%s\t%s\tw%s\t%s\t%s\n' "$id" "$spell" "$verdict" "$secs" "$w" "$fails" \
 				"$(printf '%s' "$pkgs" | tr '\n' ' ')" >>"$out/work/results.w$w.tsv"
 			echo "$id $spell $verdict ${secs}s"

@@ -4,8 +4,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // ratioTests returns a test file for package ratio that imports raceskip.
@@ -169,12 +172,14 @@ func TestTestScript_RunsEveryTestRatherThanReplayingACachedResult(t *testing.T) 
 	}
 }
 
-// The file holds the run under -race: a race-skipped test's plain rerun, which
-// runs one package, writes nothing over it.
-func TestTestScript_WritesTheDurationsTestDurationsNames(t *testing.T) {
+// The seconds are those of the run under -race: a race-skipped test's plain
+// rerun writes nothing over the file and prints no list of the slowest packages.
+func TestTestScript_ReportsTheSecondsOfTheRunUnderRace(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	f.write("ratio/r.go", "package ratio\n")
+	for _, name := range []string{"p1", "p2", "ratio"} {
+		f.write(name+"/p.go", "package "+name+"\n")
+	}
 	f.write("ratio/r_test.go", ratioTests("func TestFloor(t *testing.T) { raceskip.Skip(t) }\n"))
 	f.index()
 	file := filepath.Join(t.TempDir(), "durations.tsv")
@@ -183,20 +188,34 @@ func TestTestScript_WritesTheDurationsTestDurationsNames(t *testing.T) {
 	r := f.run("test.sh")
 	r.wantCode(t, 0)
 	r.wantStdout(t, "again without the race detector")
-	got, err := os.ReadFile(file)
-	if err != nil {
-		t.Fatalf("read durations: %v", err)
-	}
-	for _, want := range []string{
-		"package\ttest\tresult\tseconds\tscheduling\n",
-		fixtureModule + "/ok\tTestOK\tpass\t",
-		fixtureModule + "/ok\t\tpass\t",
-		fixtureModule + "/ratio\tTestFloor\tskip\t",
-	} {
-		if !strings.Contains(string(got), want) {
-			t.Errorf("durations do not hold %q:\n%s", want, got)
+
+	t.Run("the file TEST_DURATIONS names holds them", func(t *testing.T) {
+		t.Parallel()
+		got, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read durations: %v", err)
 		}
-	}
+		for _, want := range []string{
+			"package\ttest\tresult\tseconds\tscheduling\n",
+			fixtureModule + "/ok\tTestOK\tpass\t",
+			fixtureModule + "/ok\t\tpass\t",
+			fixtureModule + "/ratio\tTestFloor\tskip\t",
+		} {
+			if !strings.Contains(string(got), want) {
+				t.Errorf("durations do not hold %q:\n%s", want, got)
+			}
+		}
+	})
+	t.Run("the five slowest packages are listed once", func(t *testing.T) {
+		t.Parallel()
+		list := regexp.MustCompile(`(?m)^test: the 5 slowest of 6 packages:\n(?: +[0-9]+\.[0-9]s  ` + regexp.QuoteMeta(fixtureModule) + `[^\n]*\n){5}test: `)
+		if got := list.FindAllString(r.stdout, -1); len(got) != 1 {
+			t.Errorf("the run printed %d lists of its five slowest packages, want 1\nstdout:\n%s", len(got), r.stdout)
+		}
+		if n := strings.Count(r.stdout, "slowest of"); n != 1 {
+			t.Errorf("the run named its slowest packages %d times, want once\nstdout:\n%s", n, r.stdout)
+		}
+	})
 }
 
 func TestTestScript_WritesNoDurationsUnlessNamed(t *testing.T) {
@@ -208,7 +227,7 @@ func TestTestScript_WritesNoDurationsUnlessNamed(t *testing.T) {
 	for _, args := range [][]string{{"ls-files", "--others"}, {"diff", "--name-only"}} {
 		cmd := exec.CommandContext(t.Context(), "git", args...)
 		cmd.Dir = f.dir
-		cmd.Env = withoutRepositoryVars(t, os.Environ())
+		cmd.Env = gittree.WithoutRepositoryVars(t, os.Environ())
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("git %v: %v", args, err)
@@ -219,12 +238,18 @@ func TestTestScript_WritesNoDurationsUnlessNamed(t *testing.T) {
 	}
 }
 
-// Not parallel: it sets TEST_DURATIONS for the whole process, as CI's test
-// step does for internal/scripttest's own run.
-func TestFixtureEnv_DropsTheEnclosingRunsDurationsFile(t *testing.T) {
-	t.Setenv("TEST_DURATIONS", filepath.Join(t.TempDir(), "enclosing.tsv"))
+// Not parallel: it sets each variable for the whole process.
+func TestFixtureEnv_DropsWhatTheEnclosingRunSetsForItself(t *testing.T) {
+	enclosing := map[string]string{
+		"TEST_DURATIONS":        filepath.Join(t.TempDir(), "enclosing.tsv"),
+		"MUTATE_TIMEOUT":        "900s",
+		"MUTATE_BASELINE_CACHE": t.TempDir(),
+	}
+	for name, value := range enclosing {
+		t.Setenv(name, value)
+	}
 	for _, kv := range fixtureEnv() {
-		if strings.HasPrefix(kv, "TEST_DURATIONS=") {
+		if name, _, _ := strings.Cut(kv, "="); enclosing[name] != "" {
 			t.Errorf("a fixture inherits %s", kv)
 		}
 	}

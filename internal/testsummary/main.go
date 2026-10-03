@@ -30,9 +30,16 @@
 // parallel test's seconds leave out the time it waited paused. An empty FILE
 // writes nothing.
 //
+// With -slowest=N, the summary lists before its verdict the N packages whose
+// results go test timed longest, longest first, each with its seconds to a
+// tenth; packages timed alike are in import-path order. The seconds are a
+// package's test binary's, so they leave out its build, and packages run at
+// once, so they can sum to more than the run took. A run of fewer than N
+// packages lists them all.
+//
 // Usage:
 //
-//	go test -json ./... | testsummary [-race-skips=FILE] [-durations=FILE] [-require=A,B] pkg...
+//	go test -json ./... | testsummary [-race-skips=FILE] [-durations=FILE] [-slowest=N] [-require=A,B] pkg...
 package main
 
 import (
@@ -60,6 +67,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	raceSkipsFile := fs.String("race-skips", "", "write the tests raceskip.Skip skipped to this file")
 	durationsFile := fs.String("durations", "", "write every timed result to this file")
+	slowest := fs.Int("slowest", 0, "list this many of the packages go test timed longest")
 	require := fs.String("require", "", "comma-separated top-level tests that must run and pass")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -67,6 +75,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	want := fs.Args()
 	if len(want) == 0 {
 		fmt.Fprintln(stderr, "testsummary: name the packages the run was asked for")
+		return 2
+	}
+	if *slowest < 0 {
+		fmt.Fprintf(stderr, "testsummary: -slowest takes a count of zero or more, got %d\n", *slowest)
 		return 2
 	}
 
@@ -81,7 +93,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	// The report comes first, so a file that cannot be written does not hide
 	// the run's result.
-	status := s.report(want, required, stdout, stderr)
+	status := s.report(want, required, *slowest, stdout, stderr)
 	for _, out := range []struct {
 		file    string
 		content func() []byte
@@ -332,7 +344,26 @@ func (s *summary) durationLines() []byte {
 	return []byte(b.String())
 }
 
-func (s *summary) report(want, required []string, stdout, stderr io.Writer) int {
+// slowestPackages returns the n package results with the most seconds, most
+// first and ties by import path, each as its seconds and package, and a heading.
+func (s *summary) slowestPackages(n int) (heading string, items []string) {
+	var pkgs []timing
+	for _, r := range s.timed {
+		if r.test == "" {
+			pkgs = append(pkgs, r)
+		}
+	}
+	slices.SortFunc(pkgs, func(a, b timing) int {
+		return cmp.Or(cmp.Compare(b.seconds, a.seconds), strings.Compare(a.pkg, b.pkg))
+	})
+	n = min(n, len(pkgs))
+	for _, r := range pkgs[:n] {
+		items = append(items, fmt.Sprintf("%6.1fs  %s", r.seconds, r.pkg))
+	}
+	return fmt.Sprintf("the %d slowest of %d packages", n, len(pkgs)), items
+}
+
+func (s *summary) report(want, required []string, slowest int, stdout, stderr io.Writer) int {
 	var missing, failed, noTests []string
 	for _, pkg := range want {
 		switch s.result[pkg] {
@@ -349,6 +380,8 @@ func (s *summary) report(want, required []string, stdout, stderr io.Writer) int 
 	slices.Sort(s.skipped)
 	list(stdout, fmt.Sprintf("%d package(s) ran no test", len(noTests)), noTests)
 	list(stdout, fmt.Sprintf("%d test(s) skipped", len(s.skipped)), s.skipped)
+	heading, items := s.slowestPackages(slowest)
+	list(stdout, heading, items)
 
 	status := 0
 	if len(missing) > 0 {

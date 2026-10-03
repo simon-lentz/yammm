@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # lintconfig.sh — check .golangci.yml against the pinned linter's own schema.
 #
-# The pre-commit hook, every CI host's job and, through them, the release run
+# The pre-commit hook, every CI host's check job and, through them, the release run
 # this, so a config key the schema refuses fails locally as it fails in CI. The
 # schema comes from the module cache rather than golangci-lint.run: a fetch there
 # failed CI on transient network errors, and the module already holds the schema
-# its source builds against. `next` is the file a source build of the linter
-# asks for, and the newest versioned schema lags the module's own version.
+# its source builds against. `next` is the newest schema the module ships: its
+# versioned files stop a release short of the module's own version.
 #
 # Usage: scripts/lintconfig.sh
 set -euo pipefail

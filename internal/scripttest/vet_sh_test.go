@@ -22,6 +22,24 @@ func vetTargets() []string {
 	return targets
 }
 
+// newVetFixture returns a module holding the scripts scripts/vet.sh runs and
+// three packages that import nothing. Vet compiles the packages a target's
+// files import, so a row over every target builds no standard library unless
+// the file it adds imports one. Nothing is indexed until the caller calls
+// index.
+func newVetFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := &fixture{t: t, dir: t.TempDir()}
+	f.write("go.mod", "module "+fixtureModule+"\n\ngo "+goDirective()+"\n")
+	for _, name := range []string{"vet.sh", "packages.sh", "toolchain.sh"} {
+		f.copyScript(name)
+	}
+	for _, pkg := range []string{"a", "ok", "z"} {
+		f.write(pkg+"/"+pkg+".go", "package "+pkg+"\n")
+	}
+	return f
+}
+
 func TestVetScript_VetsEveryTargetAndTheRaceBuild(t *testing.T) {
 	t.Parallel()
 	host := runtime.GOOS
@@ -36,8 +54,11 @@ func TestVetScript_VetsEveryTargetAndTheRaceBuild(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			f := newFixture(t)
-			// Vet reads this file only for a solaris build with cgo enabled.
+			f := newVetFixture(t)
+			// Vet type-checks this file only for a solaris or illumos build
+			// with cgo enabled, which no cross target is, whatever the
+			// caller exports.
+			f.env = []string{"CGO_ENABLED=1"}
 			f.write("ok/cgo_solaris.go", "//go:build cgo && solaris\n\npackage ok\n\nimport \"fmt\"\n\nfunc C() { fmt.Printf(\"%d\\n\", \"x\") }\n")
 			f.index()
 
@@ -64,7 +85,7 @@ func TestVetScript_FailsATargetWhoseSyscallPackageLacksACall(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
-			f := newFixture(t)
+			f := newVetFixture(t)
 			f.write("ok/fifo.go", "//go:build unix\n\npackage ok\n\nimport \"syscall\"\n\nfunc F() error { return syscall.Mkfifo(\"p\", 0o600) }\n")
 			f.index()
 
@@ -78,7 +99,7 @@ func TestVetScript_FailsATargetWhoseSyscallPackageLacksACall(t *testing.T) {
 func TestVetScript_VetsTheRaceBuild(t *testing.T) {
 	t.Parallel()
 	host := runtime.GOOS
-	f := newFixture(t)
+	f := newVetFixture(t)
 	f.write("ok/race_test.go", "//go:build race\n\npackage ok\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\nfunc TestRaceOnly(t *testing.T) { fmt.Printf(\"%d\\n\", \"x\") }\n")
 	f.index()
 
@@ -87,22 +108,30 @@ func TestVetScript_VetsTheRaceBuild(t *testing.T) {
 	r.wantStderr(t, "vet: FAILED for "+host+" -race (of "+host+", and "+host+" -race)\n")
 }
 
+// A finding in any one package fails every target and the race build: the
+// script vets its whole package list in each pass, not one end of it.
 func TestVetScript_ReportsEveryFailingTarget(t *testing.T) {
 	t.Parallel()
 	host := runtime.GOOS
-	f := newFixture(t)
-	f.write("ok/bad.go", "package ok\n\nimport \"fmt\"\n\nfunc Bad() { fmt.Printf(\"%d\\n\", \"x\") }\n")
-	f.index()
-
-	r := f.run("vet.sh")
-	r.wantCode(t, 1)
 	targets := strings.Join(vetTargets(), " ")
-	r.wantStderr(t, "vet: FAILED for "+targets+" "+host+" -race (of "+targets+", and "+host+" -race)\n")
+	for _, pkg := range []string{"a", "ok", "z"} {
+		t.Run(pkg, func(t *testing.T) {
+			t.Parallel()
+			f := newVetFixture(t)
+			// A finding in a file that imports nothing, so no target compiles a package for it.
+			f.write(pkg+"/bad.go", "package "+pkg+"\n\nfunc Bad(x int) int {\n\tx = x\n\treturn x\n}\n")
+			f.index()
+
+			r := f.run("vet.sh")
+			r.wantCode(t, 1)
+			r.wantStderr(t, "vet: FAILED for "+targets+" "+host+" -race (of "+targets+", and "+host+" -race)\n")
+		})
+	}
 }
 
 func TestVetScript_LeavesOutAnUntrackedPackage(t *testing.T) {
 	t.Parallel()
-	f := newFixture(t)
+	f := newVetFixture(t)
 	f.index()
 	f.write("untracked/u.go", "package untracked\n\nimport \"fmt\"\n\nfunc F() { fmt.Printf(\"%d\\n\", \"x\") }\n")
 

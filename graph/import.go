@@ -160,7 +160,7 @@ func (g *Graph) importSnapshot(snap *Snapshot) {
 	for _, edge := range snap.Edges() {
 		srcClone := cloneMap[edge.Source()]
 		tgtClone := cloneMap[edge.Target()]
-		g.edges = append(g.edges, newEdge(edge.Relation(), srcClone, tgtClone,
+		g.installEdge(newEdge(edge.Relation(), srcClone, tgtClone,
 			g.canon.edgeProperties(edge.Source().TypeID(), edge.Relation(), edge.Properties())))
 	}
 
@@ -247,8 +247,7 @@ func (g *Graph) installPending(source *Instance, relation, targetKey, reason str
 		reason = ""
 		targetKey = g.canon.address(targetType, targetKey)
 	}
-	pk := pendingKey{targetTypeID: targetType, targetKey: targetKey}
-	g.pending[pk] = append(g.pending[pk], &pendingEdge{
+	g.installPendingEdge(&pendingEdge{
 		source:       source,
 		relation:     relation,
 		jsonField:    rel.FieldName(),
@@ -289,7 +288,7 @@ func (g *Graph) deriveRecords(snap *Snapshot, cloneMap map[*Instance]*Instance) 
 				continue
 			}
 		} else if target := g.findInstance(rel.TargetID(), g.canon.address(rel.TargetID(), unres.targetKey)); target != nil {
-			g.edges = append(g.edges, newEdge(unres.relation, source, target,
+			g.installEdge(newEdge(unres.relation, source, target,
 				g.canon.edgeProperties(source.typeID, unres.relation, unres.properties)))
 			held[slot{source, unres.relation}] = true
 			continue

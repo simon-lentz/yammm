@@ -12,9 +12,10 @@
 //
 // # Thread Safety
 //
-// [Graph] is safe for concurrent use. Multiple goroutines may call [Graph.Add]
-// and [Graph.AddComposed] concurrently. The graph handles forward references
-// and duplicate detection atomically using internal synchronization.
+// [Graph] is safe for concurrent use. Multiple goroutines may call [Graph.Add],
+// [Graph.AddOrMerge] and [Graph.AddComposed] concurrently. The graph handles
+// forward references, duplicate detection and merges atomically using internal
+// synchronization.
 //
 // [Snapshot] is an immutable snapshot; it is safe for concurrent read access
 // from multiple goroutines.
@@ -176,11 +177,12 @@
 //     "absent" or "empty" record carries no target key and no edge
 //     properties. A (one) association holds one record at most, edges and
 //     unresolved records together.
-//   - Records. The records are the ones [Graph.Add] derives from the data.
-//     Every root holds an edge or a record under each required association
-//     of its type. An "absent" or "empty" record stands alone, once, and only
-//     under a required association. A "target_missing" record names a target
-//     no root holds.
+//   - Records. The records are the ones [Graph.Add] derives from the data, and
+//     the ones [Graph.AddOrMerge] merges into a held root from a duplicate's
+//     data. Every root holds an edge or a record under each required
+//     association of its type. An "absent" or "empty" record stands alone,
+//     once, and only under a required association. A "target_missing" record
+//     names a target no root holds.
 //   - Duplicates. A duplicate's instance holds no composed children, and a
 //     root duplicate's type can hold a root. Its conflict is derived from its
 //     position, never taken from a constructor's input: for a root duplicate, the root at its own type and key; for a
@@ -210,18 +212,26 @@
 //
 // # Build Then Commit
 //
-// [Graph.Add] and [Graph.AddComposed] walk an instance ONCE. That walk both
-// checks the whole structure — edge names and multiplicities, and every slot
-// and child of the composition tree at any depth — and assembles the [Instance]
-// tree to install, touching no graph state. Only a walk that raised no error
-// reaches the commit phase, which installs the tree, the staged association
-// records and the attestation together under the graph's lock.
+// [Graph.Add], [Graph.AddOrMerge] and [Graph.AddComposed] walk an instance
+// ONCE. That walk both checks the whole structure — edge names and
+// multiplicities, and every slot and child of the composition tree at any depth
+// — and assembles the [Instance] tree to install, touching no graph state. Only
+// a walk that raised no error reaches the commit phase, which installs the
+// tree, the staged association records and the attestation together under the
+// graph's lock; [Graph.AddComposed] holds that lock across its walk too. A
+// merge's commit installs no tree: it installs the records the merge plans on
+// the held root, retires the held root's "absent" or "empty" records they
+// replace, and joins the attestation when it installs a record. The commit can
+// still refuse, before it installs anything of the record: a root at a key the
+// graph holds with E_DUPLICATE_PK, a child at an occupied slot with
+// E_DUPLICATE_COMPOSED_PK, and a merge with E_GRAPH_CARDINALITY.
 //
 // A non-OK result therefore installs nothing of the record — no instance, child
 // or edge — and does so structurally rather than by two functions agreeing. A
-// rejection is itself recorded: a root [Graph.Add] refuses at its key, or a
-// child [Graph.AddComposed] refuses at its slot, in [Snapshot.Duplicates], and
-// every refusal's issue in [Snapshot.Diagnostics]. The alternative,
+// rejection is itself recorded: a root [Graph.Add] refuses at its key, a root
+// [Graph.AddOrMerge] refuses at its key for its composed children, and a child
+// [Graph.AddComposed] refuses at its slot, in [Snapshot.Duplicates], and every
+// refusal's issue in [Snapshot.Diagnostics]. The alternative,
 // installing first and rejecting during the walk, left a record in the graph
 // that the caller had been told had failed: [BatchAssembler.Count]
 // under-reported against a snapshot that held the instance, and a retry of that
@@ -236,6 +246,41 @@
 // one of these very rules — a (one) composition accepted an array of any
 // length — which this guard was the only thing to catch. A trust boundary
 // that deletes the check which found the last defect is not a trust boundary.
+//
+// # Merge on a Duplicate Key
+//
+// [Graph.AddOrMerge], and [BatchAssembler.AddValidOrMerge] above it, add an
+// instance as [Graph.Add] does. When the graph already holds a root of the
+// instance's type at its primary key, they merge instead: the incoming
+// instance's association records go to the held root, and its properties and
+// provenance are dropped, so the held root's stand. A merge records no
+// [Duplicate] and raises no error. It is for a source that lists one record
+// under several parents, each listing naming its own association targets.
+//
+// The merge walks the incoming instance as [Graph.Add] does, and a record Add
+// would refuse is refused the same way. Then, under the graph's lock:
+//
+//   - A record naming a target the held root already names under that
+//     association, by an edge or an unresolved record, adds nothing, and
+//     neither does the second of two alike in the incoming data.
+//   - A record under a (one) association that would leave the held root two
+//     targets there refuses the whole merge, before anything installs, with an
+//     E_GRAPH_CARDINALITY for each such association.
+//   - Every other record naming a target installs on the held root: an edge
+//     when the target is held, carrying the incoming edge properties, and an
+//     unresolved record otherwise, which a later Add of the target resolves.
+//   - An "absent" or "empty" record of the incoming instance adds nothing: the
+//     held root already holds an edge or a record under every required
+//     association. A record the merge installs under a required association
+//     retires the held root's "absent" or "empty" record there.
+//
+// An incoming instance carrying composed children is not merged: it is refused
+// as [Graph.Add] refuses a duplicate, with a [Duplicate] and E_DUPLICATE_PK.
+// A merge that installs a record joins the payload's validation to
+// [Attestation]'s Values claim; one that installs nothing leaves the claim as
+// it stood. A merge finds the held root's records through an index by source,
+// built by the first AddOrMerge to reach these rules, whether it commits or is
+// refused, so a graph that never merges keeps none.
 //
 // # Composed Children
 //
@@ -256,8 +301,8 @@
 // [NewBatchAssembler] (or [NewBatchAssemblerFromSnapshot], seeding from
 // a prior snapshot) and finalized via [BatchAssembler.Finalize], which
 // returns a [FinalizeResult] whose Snapshot field is always non-nil.
-// [ErrAssemblerFinalized] is the sentinel returned from Add / AddValid
-// after Finalize.
+// [ErrAssemblerFinalized] is the sentinel returned from Add / AddValid /
+// AddValidOrMerge after Finalize.
 //
 // [Instance] provides immutable access to a graph node's data:
 // [Instance.TypeName], [Instance.PrimaryKey], [Instance.Properties],
@@ -271,18 +316,19 @@
 // properties declared on the forward reference survive Marshal/Load
 // symmetric with [Edge.Properties] and are accessed via
 // [UnresolvedEdge.Property] and [UnresolvedEdge.Properties]. The .ys
-// wire format carries these through the version-2 "properties" field
-// on unresolved-edge wire entries; see the snapshot package for
+// wire format carries these in the "properties" field of each
+// unresolved-edge wire entry; see the snapshot package for
 // format-version semantics.
 //
 // # Graph Options
 //
 // [New] and [NewFromSnapshot] accept [Option] values. [WithLogger] attaches a
-// structured logger to the graph's operation boundaries — Add, AddComposed and
-// Check each open and close a traced operation, and edge resolution, forward
-// references, duplicate primary keys and unresolved required associations are
-// logged as they occur. With no logger, every trace call returns immediately.
-// Symmetric with [github.com/simon-lentz/yammm/schema.WithLogger].
+// structured logger to the graph's operation boundaries — Add, AddOrMerge,
+// AddComposed and Check each open and close a traced operation, and edge
+// resolution, forward references, duplicate primary keys, merges and unresolved
+// required associations are logged as they occur. With no logger, every trace
+// call returns immediately. Symmetric with
+// [github.com/simon-lentz/yammm/schema.WithLogger].
 //
 // # Type Identity and Type Names
 //
@@ -295,8 +341,8 @@
 //
 // The rendering is lossy, and only ever suitable for display. A type reachable
 // only through an intermediate import has no alias to qualify with and renders
-// bare, so it can collide with a local type of the same name; two same-named
-// types in different schemas render identically. Keying anything by a rendering
+// bare, so it can collide with a local type of the same name, and two
+// same-named types in different schemas can render identically. Keying anything by a rendering
 // therefore merges types that are not the same type, silently and before any
 // diagnostic can see it.
 //
@@ -319,9 +365,9 @@
 // ([Instance.TypeID]). Every constructor renders it from the identity under the
 // bound schema with [github.com/simon-lentz/yammm/schema.TagForm], which is
 // lossy as above: a root's name names only its type, and a composed child's
-// may match another type's. Use
-// [github.com/simon-lentz/yammm/schema.TagForm] to render an identity where
-// output needs a name — Cypher labels, CSV filenames, JSON object keys.
+// may match another type's. Where output needs a name that denotes one type,
+// render the identity with [github.com/simon-lentz/yammm/schema.AddressableTag],
+// as the JSON writer's object keys and the CSV writer's file names do.
 //
 // # Key Formatting
 //
@@ -401,6 +447,11 @@
 // It does NOT emit E_GRAPH_MISSING_PK, E_GRAPH_ABSTRACT_TYPE or
 // E_DUPLICATE_PK; those three belong to a root.
 //
+// [Graph.AddOrMerge] emits what [Graph.Add] emits, with two differences at a
+// held key: E_DUPLICATE_PK only for an incoming instance carrying composed
+// children, and E_GRAPH_CARDINALITY for a merge that would give a (one)
+// association a second target.
+//
 // A composed child whose identity is not in the import closure is an
 // invariant guard on both paths, Fatal E_INTERNAL: the child must already
 // equal its relation's target, which the schema resolved at load, and a
@@ -419,9 +470,11 @@
 //
 // # Diagnostics Lifecycle
 //
-// [Snapshot.Diagnostics] returns the cumulative issues from [Graph.Add] and
-// [Graph.AddComposed] calls. These are construction-time diagnostics that
-// accumulate as instances are added to the graph.
+// [Snapshot.Diagnostics] returns the cumulative issues from [Graph.Add],
+// [Graph.AddOrMerge] and [Graph.AddComposed] calls, and a [BatchAssembler]'s
+// validator results, its validation failures among them, and nil-instance
+// refusals. These are construction-time
+// diagnostics that accumulate as instances are added to the graph.
 //
 // [Graph.Check] operates differently: it returns a fresh [diag.Result] per
 // call without affecting [Snapshot.Diagnostics]. This makes Check idempotent—
@@ -437,7 +490,8 @@
 // All slice-returning [Snapshot] methods produce deterministically sorted output,
 // independent of [Graph.Add] call order or concurrency:
 //
-//   - [Snapshot.Types]: lexicographic by TypeID (schema path, then name)
+//   - [Snapshot.Types]: lexicographic by the TypeID's String (the schema
+//     path, ":", then the name)
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
@@ -447,8 +501,10 @@
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //
-// Each tuple is total: every arm is compared, so no two distinct records tie
-// and inherit map-iteration order.
+// Every arm of each tuple is compared, so records that differ in an arm sort
+// apart. The provenance arm compares a source name and a span start, and a
+// loaded provenance carries no span, so two loaded duplicates that differ only
+// in their provenance's path tie.
 //
 // Sorting is established when the Snapshot is constructed — by [Graph.Snapshot]
 // and by [RebuildSnapshot] alike, which reach it through one place — and is
@@ -463,7 +519,8 @@
 //
 // Supported:
 //
-//   - Adding children to any top-level parent (added via [Graph.Add])
+//   - Adding children to any top-level parent (added via [Graph.Add] or
+//     [Graph.AddOrMerge], or imported by [NewFromSnapshot])
 //   - Mixed inline and streamed children (inline added first, streamed later)
 //   - Nested inline compositions (grandchildren included in streamed child)
 //

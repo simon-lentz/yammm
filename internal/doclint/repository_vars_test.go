@@ -28,8 +28,8 @@ func repositoryVars(t *testing.T) []string {
 // isolateFromEnclosingRepository unsets every repository variable for the rest
 // of the test and restores it at cleanup, so a test that builds its own
 // repository, and the gate it runs over that repository, read that repository
-// alone. A test that reads a fixture the enclosing repository tracks keeps the
-// variables: under a hook the index they name is the tree being committed.
+// alone. A test that reads the enclosing repository keeps the variables: under
+// a hook the index they name is the tree being committed.
 // t.Setenv refuses a parallel test, whose environment another test shares.
 func isolateFromEnclosingRepository(t *testing.T) {
 	t.Helper()
@@ -46,8 +46,8 @@ func isolateFromEnclosingRepository(t *testing.T) {
 	}
 }
 
-// TestFixtureRepositories_IgnoreTheEnclosingRepositorysIndex runs a test that
-// builds its own repository in a child of this test binary, with
+// TestFixtureRepositories_IgnoreTheEnclosingRepositorysIndex runs the tests
+// that build their own repository in a child of this test binary, with
 // GIT_INDEX_FILE naming another repository's index, as a hook would.
 func TestFixtureRepositories_IgnoreTheEnclosingRepositorysIndex(t *testing.T) {
 	t.Parallel()
@@ -74,17 +74,26 @@ func TestFixtureRepositories_IgnoreTheEnclosingRepositorysIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const target = "TestAssertCitedCodesExist_ReportsAFileItCannotRead"
+	targets := []string{
+		"TestAssertCitedCodesExist_ReadsShellComments",
+		"TestAssertInvocationsExist_ReadsTheTrackedMarkdown",
+		"TestAssertCitedCodesExist_ReportsAFileItCannotRead",
+		"TestAssertCitedCodesExist_ReadsATrackedTreeBelowTheRepositoryTop",
+		"TestAssertNoDanglingLinks_ReadsTheTrackedTreeOnly",
+	}
 	//nolint:gosec // runs this test binary again
-	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^"+target+"$", "-test.count=1", "-test.v")
+	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^("+strings.Join(targets, "|")+")$", "-test.count=1", "-test.v")
 	child.Env = slices.Concat(clean, []string{"GIT_INDEX_FILE=" + index})
 	out, err := child.CombinedOutput()
 	if err != nil {
 		t.Errorf("the child run failed: %v\n%s", err, out)
 	}
-	for _, want := range []string{"cleared GIT_INDEX_FILE", "--- PASS: " + target} {
-		if !bytes.Contains(out, []byte(want)) {
-			t.Errorf("the child run does not show %q\n%s", want, out)
+	if n := bytes.Count(out, []byte("cleared GIT_INDEX_FILE")); n != len(targets) {
+		t.Errorf("the child run cleared GIT_INDEX_FILE %d times, want once per test\n%s", n, out)
+	}
+	for _, target := range targets {
+		if !bytes.Contains(out, []byte("--- PASS: "+target)) {
+			t.Errorf("the child run does not pass %s\n%s", target, out)
 		}
 	}
 	after, err := os.ReadFile(index)

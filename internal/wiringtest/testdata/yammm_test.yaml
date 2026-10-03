@@ -1,7 +1,5 @@
 name: YAMMM Test
 on:
-  # `*` stops at a slash, so a branch named feature/x would run nothing; `**`
-  # matches every branch. A tag runs this workflow through release.yml.
   push:
     branches: ["**"]
   pull_request:
@@ -9,30 +7,6 @@ on:
   workflow_dispatch: {}
   workflow_call: {}
 jobs:
-  # Two job definitions on every host the module supports. Windows and macOS
-  # each carry path rules Linux lacks — a backslash separator and UNC volumes, a
-  # case-insensitive volume spelled through realpath(3) — so each host lints and
-  # vets its own build in the check job and runs the whole suite through
-  # scripts/test.sh, the full gate's test definition, in the test job. The two
-  # run side by side, since neither reads what the other builds: in one job the
-  # linter's build, its config check, lint and vet held a host's tests back by
-  # 88 to 163 s, the three hosts' medians over twenty runs. The release workflow
-  # calls this workflow and builds no asset until every job here has passed.
-  # Lint and vet each run after an earlier step fails, and fail-fast is off, so
-  # one run reports every host's every failure.
-  #
-  # Every job carries a timeout. A hung runner otherwise holds its job for
-  # GitHub's six-hour default, and one wedged Windows runner, cancelled by
-  # hand, uploaded no log at all. Each go test timeout inside a job sits below
-  # the job's by at least the time the job takes to start its last test binary,
-  # measured on CI, so a hung binary prints its own stack before the job is
-  # killed; jobMargins in internal/wiringtest's wiring test holds the margins.
-  #
-  # Every job names its image's OS release, never a -latest label. GitHub moves
-  # those labels to a new release on its own schedule, which changes the gate's
-  # operating system under a commit that does not say so; floatingRunners in the
-  # same wiring test refuses one in any tracked workflow. A named release still
-  # takes GitHub's weekly image rebuilds.
   check:
     name: Lint and vet ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -49,24 +23,12 @@ jobs:
             os: macos-26
     defaults:
       run:
-        # bash on every host: pwsh reports only the last command's exit status.
         shell: bash
     steps:
-      # Git for Windows checks out with core.autocrlf=true, which would give
-      # diag's goldens CRLF line endings its renderer never writes. Linux and
-      # macOS already default to false, so the step is the same on every host.
       - name: Keep committed line endings
         run: git config --global core.autocrlf false
       - name: Checkout
         uses: actions/checkout@v7
-      # setup-go keys its cache entry by the runner's platform, the Go version
-      # and go.mod, and by no job, so two jobs on one host would share one entry,
-      # holding what the first of them to save had built. The check, test and
-      # cross-vet jobs each take an entry of their own: setup-go's cache is off,
-      # and the key of the restore step names the job. Over three runs of one
-      # tree with the entries and three without, each of those seven jobs ran
-      # faster with its own, and the workflow took 426 s at the median against
-      # 786 s.
       - name: Set up Go
         id: go
         uses: actions/setup-go@v7
@@ -86,42 +48,16 @@ jobs:
             ${{ steps.go-caches.outputs.build }}
             ${{ steps.go-caches.outputs.mod }}
           key: go-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
-      # A build trims the build cache as it ends, once a day by the time in
-      # trim.txt, and deletes each file no build used for five days. A restored
-      # entry keeps the times of the run that saved it, and no run saves it again
-      # under the same key, so from its sixth day the first build of a job would
-      # delete all of the build cache it did not itself read. This run's time in
-      # trim.txt holds the trim off for the job.
       - name: Keep the restored build cache
         run: |
           mkdir -p "${{ steps.go-caches.outputs.build }}"
           date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
-      # The linter is built from this module's tool dependency, not downloaded.
-      # A release binary and a `go build` of the same golangci-lint version are
-      # not the same linter: the release embeds whichever golang.org/x/tools its
-      # own build resolved, while this one links the version go.mod pins, so the
-      # two disagree about which modernize analyzers exist. Downloading it makes
-      # the lint surface move with golangci-lint's release cadence and puts this
-      # step beyond the reach of any local check; building it makes go.mod the
-      # single source of truth, so the surface moves only on a deliberate
-      # x/tools bump and `go tool golangci-lint run` reproduces this step
-      # exactly. install-mode: none keeps the action's inline PR annotations
-      # while running the binary built here. An output path ending in a
-      # separator names a directory, so Windows gets golangci-lint.exe.
       - name: Build the pinned linter
         run: |
           go build -o "${{ runner.temp }}/bin/" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
           echo "${{ runner.temp }}/bin" >> "$GITHUB_PATH"
-      # The action's own `verify` fetches the schema over the network, which
-      # failed lint on transient fetch errors; the script reads the schema the
-      # pinned linter's module ships. The pre-commit hook runs the same script.
       - name: Verify the linter config
         run: scripts/lintconfig.sh
-      # The analysis cache is never carried between runs. The action restores a
-      # cache by key prefix when the exact key is absent, so a run inherits
-      # entries a different linter build wrote; one such cache reported 47
-      # staticcheck findings in files that every cache-free lint of the same
-      # tree passes. A cold lint costs under a minute more than a cached one.
       - name: golangci-lint
         if: ${{ !cancelled() }}
         uses: golangci/golangci-lint-action@v9
@@ -132,14 +68,7 @@ jobs:
           args: --config=.golangci.yml
       - name: Vet
         if: ${{ !cancelled() }}
-        # Each host vets its own build; the cross-vet job vets every target
-        # scripts/vet.sh lists.
         run: scripts/vet.sh --host
-      # Only main and review save an entry, and only after a run that found
-      # none: the seven entries of one ref's check, test and cross-vet jobs
-      # hold 3.66 GB of the repository's 10 GB. A run on another ref restores
-      # what GitHub lets it read, the default branch's entries and, for a pull
-      # request, its base branch's.
       - name: Save this job's Go caches
         if: ${{ steps.go-restore.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/review') }}
         uses: actions/cache/save@v6
@@ -170,7 +99,6 @@ jobs:
         run: git config --global core.autocrlf false
       - name: Checkout
         uses: actions/checkout@v7
-      # This job's own Go cache entry, as in the check job.
       - name: Set up Go
         id: go
         uses: actions/setup-go@v7
@@ -194,10 +122,6 @@ jobs:
         run: |
           mkdir -p "${{ steps.go-caches.outputs.build }}"
           date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
-      # The durations file holds the seconds of each package and of each test
-      # that reported a result, so a package near its -timeout shows which
-      # tests spend it. It is kept when the tests fail, the run it matters
-      # most for.
       - name: Test
         if: ${{ !cancelled() }}
         env:
@@ -219,18 +143,6 @@ jobs:
             ${{ steps.go-caches.outputs.build }}
             ${{ steps.go-caches.outputs.mod }}
           key: ${{ steps.go-restore.outputs.cache-primary-key }}
-  # Every target scripts/vet.sh lists, in a job of its own.
-  # scripts/vet.sh with no argument makes twelve vet runs over eleven targets
-  # where --host makes two over one: inside a host job that step ran 255 to
-  # 382 s against the other hosts' under 30 s, and made the Linux job the
-  # longest of the workflow in two of three measured runs. Beside the host
-  # jobs it costs the workflow its own runtime alone, and the release calls
-  # this workflow whole, so a tag still waits for it. The job runs no test:
-  # internal/wiringtest's testlessJobs records that, and untimedJobs holds it
-  # to its timeout.
-  #
-  # With its entry the Vet step took 4 to 6 s; with none it took up to 451 s,
-  # and 20 minutes is 2.5 times that job's 476 s.
   cross-vet:
     name: Vet every target
     runs-on: ubuntu-24.04
@@ -241,7 +153,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      # This job's own Go cache entry, as in the check job.
       - name: Set up Go
         id: go
         uses: actions/setup-go@v7
@@ -275,20 +186,6 @@ jobs:
             ${{ steps.go-caches.outputs.build }}
             ${{ steps.go-caches.outputs.mod }}
           key: ${{ steps.go-restore.outputs.cache-primary-key }}
-  # adapter/json holds a file behind the goexperiment.jsonv2 build tag. Go
-  # builds it where encoding/json runs on its v2 implementation: with the
-  # module's toolchain only under GOEXPERIMENT=jsonv2, and from Go 1.27 with no
-  # setting. No other job sets the experiment, so this job lints, vets and
-  # tests the module under it with the gate's scripts, and each of the three
-  # runs after an earlier step fails. It runs the module's toolchain, so it
-  # reads none of the Go 1.27 standard library.
-  #
-  # The experiment is the job's own env, so it reaches every step.
-  # TestTestWorkflow_RunsTheGateUnderEachExperiment in internal/wiringtest
-  # wants such a job for each GOEXPERIMENT value that reverses one experiment
-  # and makes the Linux runner build a tracked Go file outside testdata that
-  # it leaves out. Linux only: that toolchain's encoding/json holds no file
-  # built for one host alone.
   jsonv2:
     name: Lint, vet and test under jsonv2
     runs-on: ubuntu-24.04
@@ -301,7 +198,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-      # This job's own Go cache entry, as in the check job.
       - name: Set up Go
         id: go
         uses: actions/setup-go@v7
@@ -342,15 +238,6 @@ jobs:
             ${{ steps.go-caches.outputs.build }}
             ${{ steps.go-caches.outputs.mod }}
           key: ${{ steps.go-restore.outputs.cache-primary-key }}
-  # adapter/markdown's self-check reads its class diagram through a Go model of
-  # Mermaid's lexer, and that model was measured wrong twice. This job hands
-  # every golden's and every fixture's diagram to Mermaid itself, the 10.1.0
-  # floor the document states, the last 11.x and the current release, pinned
-  # by the lock file in adapter/markdown/testdata/mermaid, and requires each to
-  # read what the schema says the diagram holds.
-  #
-  # Behind the mermaid build tag, so scripts/test.sh needs no Node. Linux only:
-  # Mermaid runs under Node, and the emitted diagram does not depend on the host.
   mermaid:
     name: Mermaid reads the diagrams
     runs-on: ubuntu-24.04
@@ -371,39 +258,18 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Parse the diagrams
         run: go test -count=1 -tags mermaid -timeout 5m -v ./adapter/markdown/
-  # The adapter compares its own literals against strings a Neo4j server fills
-  # in. Those strings change between server generations — the node uniqueness
-  # constraint type is reported as UNIQUENESS by 5.x and NODE_PROPERTY_UNIQUENESS
-  # by 2026.x — and a stale comparison fails SILENTLY, reporting a correct
-  # database as drifted. Running one server per supported generation is what
-  # turns "supports Neo4j 5.0+" from a claim in the docs into a tested one, and
-  # it is why accepting both spellings is required rather than renaming to the
-  # newer one.
-  #
-  # Behind the neo4j_integration build tag, so scripts/test.sh stays Docker-free.
-  # Linux only: GitHub's Windows and macOS runners cannot run the Linux server
-  # image, and the adapter is platform-independent Go. `make test-integration`
-  # runs the same matrix on a developer's machine.
   integration:
     name: Neo4j ${{ matrix.label }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
-      # Every combination runs: knowing that a change breaks the OLD server but
-      # not the new one is the whole point, and fail-fast would hide it.
       fail-fast: false
       matrix:
         include:
-          # The oldest generation the adapter claims to support. Its constraint
-          # vocabulary differs from current, so this entry is the one that
-          # catches a fix applied only to the newer spelling.
           - image: neo4j:5.26-enterprise
             label: 5.26 Enterprise
-          # The pinned default, matching adapter/neo4j/integration's defaultImage.
           - image: neo4j:2026.05.0-enterprise
             label: 2026.05 Enterprise
-          # Community exercises the edition gating: the emitter drops to UNIQUE
-          # alone, and the Enterprise-only capability tests skip rather than fail.
           - image: neo4j:2026.05.0-community
             label: 2026.05 Community
     steps:
@@ -416,7 +282,4 @@ jobs:
       - name: Integration tests
         env:
           YAMMM_NEO4J_TEST_IMAGE: ${{ matrix.image }}
-        # -count=1 because the environment variable that selects the image is
-        # read at run time: a cached result from another matrix entry would be
-        # reported as this entry's pass.
         run: go test -count=1 -tags neo4j_integration -timeout 20m -v ./adapter/neo4j/integration/

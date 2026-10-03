@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/simon-lentz/yammm/internal/gittree"
 )
 
 // AssertProcessFreeNames reports every path under root, and every Test, Fuzz,
@@ -63,6 +65,7 @@ func AssertProcessFreeNames(t TB, root string) (paths, tests int) {
 // filesystem and skips node_modules and dot-directories.
 func trackedPaths(ctx context.Context, root string) ([]string, error) {
 	if gitTracks(ctx, root) {
+		gittree.MarkTrackedFiles()
 		out, err := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "-z").Output()
 		if err != nil {
 			return nil, fmt.Errorf("listing the tracked paths of %s: %w", root, err)

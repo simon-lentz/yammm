@@ -8,14 +8,18 @@ import (
 	"github.com/simon-lentz/yammm/internal/doclint"
 )
 
-// depFixture is a module of its own so the gate runs its real entry point,
-// go.mod read included, rather than a path that only tests exercise.
-const depFixture = "testdata/depfixture"
-
+// runDepGate runs the gate over a copy of testdata/depfixture restored as a
+// module of its own, so the gate runs its real entry point, go.mod read
+// included, rather than a path that only tests exercise. A run that checked no
+// line fails, so a test asserting that a report is absent cannot pass with
+// nothing read.
 func runDepGate(t *testing.T) (*recorder, int) {
 	t.Helper()
 	r := &recorder{}
-	checked, _ := doclint.AssertDependencyLines(r, depFixture)
+	checked, _ := doclint.AssertDependencyLines(r, materialize(t, "depfixture"))
+	if checked == 0 {
+		t.Fatalf("the gate checked no dependency line in the fixture: %v", r.msgs)
+	}
 	return r, checked
 }
 

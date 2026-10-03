@@ -135,7 +135,10 @@ var (
 	E_COMMAND_FAILED = NewCode("E_COMMAND_FAILED", CategorySentinel)
 
 	// E_CONTEXT_CANCELLED indicates the operation was cancelled via context.
-	// Used across all packages when ctx.Err() returns a non-nil error.
+	// An operation that checks its context and reports through a [Result], or
+	// through a [ContextualError] that holds one, raises it when ctx.Err()
+	// returns a non-nil error; one that returns another Go error returns
+	// ctx.Err() or wraps it instead.
 	E_CONTEXT_CANCELLED = NewCode("E_CONTEXT_CANCELLED", CategorySentinel)
 )
 
@@ -433,8 +436,9 @@ var (
 	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
 
 	// E_GRAPH_CARDINALITY indicates a (one) association holding more than one
-	// record: several targets at graph.Graph.Add, or several edges and
-	// unresolved records together in a snapshot or a .ys document.
+	// record: several targets at graph.Graph.Add, a merge at
+	// graph.Graph.AddOrMerge that would add a second target, or several edges
+	// and unresolved records together in a snapshot or a .ys document.
 	E_GRAPH_CARDINALITY = NewCode("E_GRAPH_CARDINALITY", CategoryGraph)
 
 	// E_GRAPH_UNKNOWN_RELATION indicates instance data or an association

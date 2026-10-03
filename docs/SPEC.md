@@ -1809,7 +1809,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — a root whose type declares no primary key
 - `E_GRAPH_INVALID_PK` — primary key empty, of the wrong arity, with a component `graph.ParseKey` cannot read back, with a key property absent or null, or disagreeing with the instance's own key properties; or an association target key of the wrong arity or with such a component
-- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add`, several edges and unresolved records in a snapshot or a `.ys` document
+- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or a `.ys` document
 - `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one
 - `E_GRAPH_ABSTRACT_TYPE` — an instance of an abstract type reached the graph
 
