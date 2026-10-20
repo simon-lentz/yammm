@@ -16,6 +16,7 @@ func TestPackagesScript_ListsThePackagesHoldingATrackedGoFile(t *testing.T) {
 	want := fixtureModule + "\n" +
 		fixtureModule + "/cafe\n" +
 		fixtureModule + "/internal/raceskip\n" +
+		fixtureModule + "/internal/testjson\n" +
 		fixtureModule + "/internal/testsummary\n" +
 		fixtureModule + "/ok\n"
 	if r.stdout != want {

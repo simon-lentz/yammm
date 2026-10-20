@@ -58,19 +58,42 @@ if [ "${codes[0]}" -ne 0 ] || [ "${codes[1]}" -ne 0 ]; then
 	status=1
 fi
 
-# Each line of race-skips is a package, a tab, and its test names joined by commas.
+# rerun <package> <test>... runs the package's named tests again without -race.
+# -run selects by top-level test, and the summary requires each named test.
+rerun() {
+	local pkg=$1 name tops="" shown="" codes
+	local required=()
+	shift
+	for name in "$@"; do
+		case "|${tops}|" in *"|${name%%/*}|"*) ;; *) tops="${tops:+${tops}|}${name%%/*}" ;; esac
+		shown="${shown:+${shown},}${name}"
+		required+=("-require=${name}")
+	done
+	printf 'test: %s in %s, again without the race detector\n' "${shown}" "${pkg}"
+	set +e
+	go test -json -shuffle=on -count=1 -timeout=10m -run "^(${tops})\$" "${pkg}" 2>&1 |
+		"${summary}" "${required[@]}" "${pkg}"
+	codes=("${PIPESTATUS[@]}")
+	set -e
+	if [ "${codes[0]}" -ne 0 ] || [ "${codes[1]}" -ne 0 ]; then
+		status=1
+	fi
+}
+
+# Each line of race-skips is a package, a tab and one test's name, and a
+# package's lines are together.
 if [ -s "${work}/race-skips" ]; then
-	while IFS=$'\t' read -r -u 3 pkg names; do
-		printf 'test: %s in %s, again without the race detector\n' "${names}" "${pkg}"
-		set +e
-		go test -json -shuffle=on -count=1 -timeout=10m -run "^(${names//,/|})\$" "${pkg}" 2>&1 |
-			"${summary}" -require="${names}" "${pkg}"
-		codes=("${PIPESTATUS[@]}")
-		set -e
-		if [ "${codes[0]}" -ne 0 ] || [ "${codes[1]}" -ne 0 ]; then
-			status=1
+	last=""
+	names=()
+	while IFS=$'\t' read -r -u 3 pkg name; do
+		if [ -n "${last}" ] && [ "${pkg}" != "${last}" ]; then
+			rerun "${last}" "${names[@]}"
+			names=()
 		fi
+		last="${pkg}"
+		names+=("${name}")
 	done 3<"${work}/race-skips"
+	rerun "${last}" "${names[@]}"
 fi
 
 if [ "${status}" -ne 0 ]; then

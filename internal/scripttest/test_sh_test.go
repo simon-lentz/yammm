@@ -27,12 +27,13 @@ func TestTestScript_NamesEveryPackageWithNoTestAndEverySkip(t *testing.T) {
 
 	r := f.run("test.sh")
 	r.wantCode(t, 0)
-	r.wantStdout(t, "test: 3 package(s) ran no test:\n"+
+	r.wantStdout(t, "test: 4 package(s) ran no test:\n"+
 		"  "+fixtureModule+"/internal/raceskip\n"+
+		"  "+fixtureModule+"/internal/testjson\n"+
 		"  "+fixtureModule+"/internal/testsummary\n"+
 		"  "+fixtureModule+"/notests\n")
 	r.wantStdout(t, "test: 1 test(s) skipped:\n  "+fixtureModule+"/skips TestNeedsSymlink: s_test.go:5: needs a symlink\n")
-	r.wantStdout(t, "test: 5 of 5 packages reported a result, and none failed\n")
+	r.wantStdout(t, "test: 6 of 6 packages reported a result, and none failed\n")
 }
 
 func TestTestScript_FailsWhenATestFails(t *testing.T) {
@@ -45,7 +46,7 @@ func TestTestScript_FailsWhenATestFails(t *testing.T) {
 	r.wantCode(t, 1)
 	r.wantStdout(t, "boom_test.go:5: boom")
 	r.wantStdout(t, "-test.shuffle ")
-	r.wantStderr(t, "test: 1 of 3 packages failed:\n  "+fixtureModule+"/ok\n")
+	r.wantStderr(t, "test: 1 of 4 packages failed:\n  "+fixtureModule+"/ok\n")
 	r.wantStderr(t, "test: FAILED\n")
 }
 
@@ -59,7 +60,7 @@ func TestTestScript_RunsUnderTheRaceDetector(t *testing.T) {
 	r := f.run("test.sh")
 	r.wantCode(t, 1)
 	r.wantStdout(t, "WARNING: DATA RACE")
-	r.wantStderr(t, "test: 1 of 3 packages failed:\n  "+fixtureModule+"/ok\n")
+	r.wantStderr(t, "test: 1 of 4 packages failed:\n  "+fixtureModule+"/ok\n")
 }
 
 func TestTestScript_RunsARaceSkippedTestAgainWithoutRace(t *testing.T) {
@@ -103,6 +104,47 @@ func TestTestScript_RunsARaceSkippedTestAgainWithoutRace(t *testing.T) {
 			stdout:   []string{"test: TestFloor in " + fixtureModule + "/ratio, again without the race detector\n"},
 			stderr:   []string{"test: TestFloor did not run and pass\n", "test: FAILED\n"},
 		},
+		{
+			// The subtest is required by its own name: its parent passes in both runs.
+			name: "a subtest's plain run skips",
+			tests: "func TestRatios(t *testing.T) {\n\tt.Run(\"floor\", func(t *testing.T) {\n\t\traceskip.Skip(t)\n\t\tt.Skip(\"no input on this host\")\n\t})\n" +
+				"\tt.Run(\"ceiling\", func(t *testing.T) { raceskip.Skip(t) })\n}\n",
+			wantCode: 1,
+			stdout:   []string{"test: TestRatios/ceiling,TestRatios/floor in " + fixtureModule + "/ratio, again without the race detector\n"},
+			stderr:   []string{"test: TestRatios/floor did not run and pass\n", "test: FAILED\n"},
+		},
+		{
+			// Each named test is required, the first as well as the last.
+			name: "the first subtest's plain run skips",
+			tests: "func TestRatios(t *testing.T) {\n\tt.Run(\"ceiling\", func(t *testing.T) {\n\t\traceskip.Skip(t)\n\t\tt.Skip(\"no input on this host\")\n\t})\n" +
+				"\tt.Run(\"floor\", func(t *testing.T) { raceskip.Skip(t) })\n}\n",
+			wantCode: 1,
+			stdout:   []string{"test: TestRatios/ceiling,TestRatios/floor in " + fixtureModule + "/ratio, again without the race detector\n"},
+			stderr:   []string{"test: TestRatios/ceiling did not run and pass\n", "test: FAILED\n"},
+		},
+		{
+			// Each package's tests run again in a run of that package alone.
+			name:  "tests skipped in two packages",
+			tests: "func TestFloor(t *testing.T) { raceskip.Skip(t) }\n",
+			files: map[string]string{
+				"other/o.go":      "package other\n",
+				"other/o_test.go": "package other\n\nimport (\n\t\"testing\"\n\n\t\"" + fixtureModule + "/internal/raceskip\"\n)\n\nfunc TestOther(t *testing.T) { raceskip.Skip(t) }\n",
+			},
+			wantCode: 0,
+			stdout: []string{
+				"test: TestOther in " + fixtureModule + "/other, again without the race detector\n",
+				"test: TestFloor in " + fixtureModule + "/ratio, again without the race detector\n",
+			},
+		},
+		{
+			name:     "a subtest's plain run passes",
+			tests:    "func TestRatios(t *testing.T) {\n\tt.Run(\"floor\", func(t *testing.T) { raceskip.Skip(t) })\n}\n\nfunc TestOther(t *testing.T) { raceskip.Skip(t) }\n",
+			wantCode: 0,
+			stdout: []string{
+				"test: TestOther,TestRatios/floor in " + fixtureModule + "/ratio, again without the race detector\n",
+				"test: 1 of 1 packages reported a result, and none failed\n",
+			},
+		},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
@@ -127,6 +169,63 @@ func TestTestScript_RunsARaceSkippedTestAgainWithoutRace(t *testing.T) {
 	}
 }
 
+// failingGoTest is a go that runs the real one and then exits 1 for a go test
+// whose arguments hold SHIM_FAILS, whatever the real run's status.
+const failingGoTest = `#!/usr/bin/env bash
+"$SHIM_REAL" "$@"
+rc=$?
+if [ "$1" = test ]; then
+	for a in "$@"; do
+		if [ "$a" = "$SHIM_FAILS" ]; then exit 1; fi
+	done
+fi
+exit "$rc"
+`
+
+// Each pipeline is go test and the summary, and the script fails when either
+// program of either pipeline fails. Each row fails one program alone in a
+// suite whose every test passes.
+func TestTestScript_FailsWhenOneProgramOfAPipelineFailsAlone(t *testing.T) {
+	t.Parallel()
+	for _, row := range []struct {
+		name      string
+		shimFails string // the go test argument whose run the shim fails
+		durations bool   // name a durations file the summary cannot write
+		stdout    string
+	}{
+		{name: "the summary of the run under -race", durations: true, stdout: "test: 5 of 5 packages reported a result, and none failed\n"},
+		{name: "go test under -race", shimFails: "-race", stdout: "test: 5 of 5 packages reported a result, and none failed\n"},
+		{name: "go test in the run without -race", shimFails: "-run", stdout: "test: 1 of 1 packages reported a result, and none failed\n"},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			f.write("ratio/r.go", "package ratio\n")
+			f.write("ratio/r_test.go", ratioTests("func TestFloor(t *testing.T) { raceskip.Skip(t) }\n"))
+			f.index()
+			if row.durations {
+				f.env = append(f.env, "TEST_DURATIONS="+filepath.Join(t.TempDir(), "missing", "durations.tsv"))
+			}
+			if row.shimFails != "" {
+				real, err := exec.LookPath("go")
+				if err != nil {
+					t.Fatal(err)
+				}
+				shim := t.TempDir()
+				gittree.WriteFile(t, shim, "go", []byte(failingGoTest), 0o700)
+				f.env = append(f.env, "PATH="+shim+string(os.PathListSeparator)+os.Getenv("PATH"), "SHIM_REAL="+real, "SHIM_FAILS="+row.shimFails)
+			}
+
+			r := f.run("test.sh")
+
+			r.wantCode(t, 1)
+			r.wantStdout(t, row.stdout)
+			r.wantStdout(t, "again without the race detector")
+			r.wantStderr(t, "test: FAILED\n")
+		})
+	}
+}
+
 func TestTestScript_RunsEveryPackageHoldingATrackedGoFile(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
@@ -141,7 +240,7 @@ func TestTestScript_RunsEveryPackageHoldingATrackedGoFile(t *testing.T) {
 	r := f.run("test.sh")
 	r.wantCode(t, 1)
 	r.wantStderr(t, "packages: leaving out 1 package(s) that hold no tracked Go file:\n  "+fixtureModule+"/untracked\n")
-	r.wantStderr(t, "test: 2 of 5 packages failed:\n  "+fixtureModule+"\n  "+fixtureModule+"/cafe\n")
+	r.wantStderr(t, "test: 2 of 6 packages failed:\n  "+fixtureModule+"\n  "+fixtureModule+"/cafe\n")
 }
 
 func TestTestScript_LeavesOutAnUntrackedPackage(t *testing.T) {
@@ -154,7 +253,7 @@ func TestTestScript_LeavesOutAnUntrackedPackage(t *testing.T) {
 	r := f.run("test.sh")
 	r.wantCode(t, 0)
 	r.wantStderr(t, "packages: leaving out 1 package(s) that hold no tracked Go file:\n  "+fixtureModule+"/untracked\n")
-	r.wantStdout(t, "test: 3 of 3 packages reported a result, and none failed\n")
+	r.wantStdout(t, "test: 4 of 4 packages reported a result, and none failed\n")
 }
 
 func TestTestScript_RunsEveryTestRatherThanReplayingACachedResult(t *testing.T) {
@@ -208,7 +307,7 @@ func TestTestScript_ReportsTheSecondsOfTheRunUnderRace(t *testing.T) {
 	})
 	t.Run("the five slowest packages are listed once", func(t *testing.T) {
 		t.Parallel()
-		list := regexp.MustCompile(`(?m)^test: the 5 slowest of 6 packages:\n(?: +[0-9]+\.[0-9]s  ` + regexp.QuoteMeta(fixtureModule) + `[^\n]*\n){5}test: `)
+		list := regexp.MustCompile(`(?m)^test: the 5 slowest of 7 packages:\n(?: +[0-9]+\.[0-9]s  ` + regexp.QuoteMeta(fixtureModule) + `[^\n]*\n){5}test: `)
 		if got := list.FindAllString(r.stdout, -1); len(got) != 1 {
 			t.Errorf("the run printed %d lists of its five slowest packages, want 1\nstdout:\n%s", len(got), r.stdout)
 		}
@@ -241,9 +340,7 @@ func TestTestScript_WritesNoDurationsUnlessNamed(t *testing.T) {
 // Not parallel: it sets each variable for the whole process.
 func TestFixtureEnv_DropsWhatTheEnclosingRunSetsForItself(t *testing.T) {
 	enclosing := map[string]string{
-		"TEST_DURATIONS":        filepath.Join(t.TempDir(), "enclosing.tsv"),
-		"MUTATE_TIMEOUT":        "900s",
-		"MUTATE_BASELINE_CACHE": t.TempDir(),
+		"TEST_DURATIONS": filepath.Join(t.TempDir(), "enclosing.tsv"),
 	}
 	for name, value := range enclosing {
 		t.Setenv(name, value)

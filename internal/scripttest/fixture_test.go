@@ -17,7 +17,7 @@ import (
 )
 
 // fixtureModule is the module path each fixture declares, so the copies of
-// internal/testsummary and internal/raceskip build unchanged.
+// internal/testsummary, internal/testjson and internal/raceskip build unchanged.
 const fixtureModule = "github.com/simon-lentz/yammm"
 
 // repoRoot is the repository root relative to this package's directory, where
@@ -66,7 +66,7 @@ func directiveOf(version string) string {
 // from the repository root, a directory's files by that path and a slash. go
 // test's result cache replays a pass of the package after a change to any other
 // tracked file outside the package, which keeps these slow tests out of a commit.
-var inputs = []string{".golangci.yml", "go.mod", "go.sum", "internal/gittree/", "internal/raceskip/", "internal/testsummary/", "scripts/"}
+var inputs = []string{".golangci.yml", "go.mod", "go.sum", "internal/gittree/", "internal/raceskip/", "internal/testjson/", "internal/testsummary/", "scripts/"}
 
 // isInput reports whether rel, a slash-separated repository path in its
 // cleaned form, is a listed file, a listed directory, or a file under one.
@@ -106,7 +106,7 @@ type result struct {
 	stderr string
 }
 
-// newFixture returns a module holding the scripts, the two packages
+// newFixture returns a module holding six of the scripts, the three packages
 // scripts/test.sh builds, and one package with a passing test. Nothing is
 // indexed until the caller calls index.
 func newFixture(t *testing.T) *fixture {
@@ -119,7 +119,7 @@ func newFixture(t *testing.T) *fixture {
 	for _, name := range []string{"test.sh", "committest.sh", "vet.sh", "packages.sh", "lintconfig.sh", "toolchain.sh"} {
 		f.copyScript(name)
 	}
-	for _, dir := range []string{"internal/testsummary", "internal/raceskip"} {
+	for _, dir := range []string{"internal/testsummary", "internal/testjson", "internal/raceskip"} {
 		f.copyPackage(dir)
 	}
 	f.write("ok/ok.go", "package ok\n")
@@ -210,11 +210,11 @@ func (f *fixture) runFrom(dir, script string, args ...string) result {
 }
 
 // fixtureEnv keeps a fixture's go commands inside the fixture module and off
-// the network, whatever the enclosing run sets. It drops what an enclosing
-// mutation or gate run sets for itself: a recorded baseline, a go test timeout,
-// and a durations file that every fixture's test.sh would write.
+// the network, whatever the enclosing run sets. It also drops TEST_DURATIONS,
+// which an enclosing gate run sets for itself and every fixture's test.sh would
+// write.
 func fixtureEnv() []string {
-	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "MUTATE_BASELINE_CACHE", "MUTATE_TIMEOUT", "TEST_DURATIONS"}
+	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "TEST_DURATIONS"}
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
 		return slices.ContainsFunc(dropped, func(p string) bool { return strings.EqualFold(p, name) })
