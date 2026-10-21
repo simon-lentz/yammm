@@ -11,11 +11,20 @@ jobs:
   # is built. A called workflow runs with this workflow's github context, so it
   # checks out the tag.
   #
-  # A job that calls a workflow cannot set timeout-minutes; each job of the
-  # called test workflow carries its own. The release job times out at 15
-  # minutes, about three times its slowest measured run.
+  # A job that calls a workflow cannot set timeout-minutes; each job of a
+  # called workflow carries its own. The release job times out at 15 minutes,
+  # about three times its slowest measured run.
   test:
     uses: ./.github/workflows/yammm_test.yml
+  # The VS Code extension bundles yammm-lsp, so it is published by this run,
+  # from the tag and after the same tests, beside the assets. A publish cut
+  # short is finished by re-running this run's failed jobs: the publish step
+  # skips each target already at the version.
+  publish:
+    needs: test
+    uses: ./.github/workflows/publish_vscode.yml
+    secrets:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
   release:
     needs: test
     runs-on: ubuntu-24.04

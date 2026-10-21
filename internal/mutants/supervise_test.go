@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -50,6 +52,8 @@ func TestSupervise_RecordsWhatTheBinaryDid(t *testing.T) {
 		{name: "an exit status", mode: "exit3", limit: "1m", code: 3, want: record{Exit: 3}, atMost: 30 * time.Second},
 		{name: "a binary at the limit", mode: "sleep", limit: "4s", code: 2, want: record{Exit: 2, TimedOut: true}, atLeast: 4 * time.Second, atMost: 7 * time.Second},
 		{name: "a binary that ignores the request for its stacks", mode: "deaf", limit: "1s", code: 1, want: record{Exit: 1, TimedOut: true}, atLeast: time.Second + stopGrace, atMost: 4*time.Second + stopGrace},
+		// A binary stopped at the limit fails though it exits 0.
+		{name: "a binary that exits 0 at the request for its stacks", mode: "exit0", limit: "2s", code: 1, want: record{Exit: 0, TimedOut: true}, atLeast: 2 * time.Second, atMost: 6 * time.Second},
 		{name: "a binary that cannot start", mode: "no such binary", limit: "1m", code: 1, atMost: 30 * time.Second},
 	} {
 		t.Run(row.name, func(t *testing.T) {
@@ -120,5 +124,30 @@ func TestReadRecords_RefusesTwoBinariesInOneDirectory(t *testing.T) {
 	}
 	if records, err := readRecords(dir); err != nil || len(records) != 1 {
 		t.Errorf("readRecords returned %v, %v; want the one finished record", records, err)
+	}
+}
+
+// A benchmark binary's stdout and stderr reach go test in the order it wrote
+// them, as they do without the runner: go test gives a binary one file or pipe
+// for both.
+func TestSupervise_KeepsTheOrderOfABenchmarkBinarysOutput(t *testing.T) {
+	t.Parallel()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), self, superviseFlag, self, "-test.bench=.")
+	cmd.Env = append(os.Environ(), recordVar+"="+t.TempDir(), superviseLimitVar+"=1m", childVar+"=interleave")
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("the runner: %v\n%s", err, out.String())
+	}
+	var want strings.Builder
+	for i := range 200 {
+		fmt.Fprintf(&want, "out %03d\nerr %03d\n", i, i)
+	}
+	if out.String() != want.String() {
+		t.Errorf("the binary's output reached go test out of order:\n%s", out.String())
 	}
 }

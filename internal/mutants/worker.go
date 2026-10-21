@@ -223,60 +223,118 @@ func (w *worker) judgeInto(ctx context.Context, j *judgement, m mutant, tmp stri
 		return err
 	}
 	j.config = config.name
-	if key := config.name + "\x00" + tmp + "\x00" + strings.Join(m.packages, " "); !w.baselines[key] {
-		base, err := w.test(ctx, config, tmp, m.packages)
+	for _, bench := range runs(config) {
+		// The benchmarks can only move a verdict the tests left open, so their
+		// run before the change is made only then.
+		if bench && j.verdict != verdictSurvived && j.verdict != verdictNoTest {
+			break
+		}
+		if key := config.name + "\x00" + tmp + "\x00" + strings.Join(m.packages, " ") + runName(bench); !w.baselines[key] {
+			base, err := w.test(ctx, config, tmp, m.packages, bench)
+			if err != nil {
+				return err
+			}
+			if base.fault != "" {
+				base.report(&j.log)
+				return errors.New("the run before the change cannot be read")
+			}
+			if !base.green() {
+				j.verdict = verdictRed
+				j.tests = base.failing()
+				fmt.Fprintf(&j.log, "the packages do not pass before the change, so no verdict is possible%s\n", runName(bench))
+				base.report(&j.log)
+				return w.restore(ctx, j, "after the run before the change")
+			}
+			if err := w.restore(ctx, j, "after the run before the change"); err != nil {
+				return err
+			}
+			w.baselines[key] = true
+		}
+		undo, matches, err := w.tree.mutate(m)
 		if err != nil {
 			return err
 		}
-		if base.fault != "" {
-			base.report(&j.log)
-			return errors.New("the run before the change cannot be read")
+		if !bench {
+			fmt.Fprintf(&j.log, "applied to %s (%d match(es))\n", m.file, matches)
 		}
-		if !base.green() {
-			j.verdict = verdictRed
-			j.tests = base.failing()
-			j.log.WriteString("the packages do not pass before the change, so no verdict is possible\n")
-			base.report(&j.log)
-			return w.restore(ctx, j, "after the run before the change")
+		err = w.judgeChanged(ctx, j, m, config, tmp, bench)
+		if undoErr := undo(); undoErr != nil {
+			return errors.Join(err, undoErr)
 		}
-		if err := w.restore(ctx, j, "after the run before the change"); err != nil {
+		if err != nil {
 			return err
 		}
-		w.baselines[key] = true
+		if err := w.restore(ctx, j, "after the mutant"+runName(bench)); err != nil {
+			return err
+		}
 	}
-	undo, matches, err = w.tree.mutate(m)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(&j.log, "applied to %s (%d match(es))\n", m.file, matches)
-	err = w.judgeChanged(ctx, j, m, config, tmp)
-	if undoErr := undo(); undoErr != nil {
-		return errors.Join(err, undoErr)
-	}
-	if err != nil {
-		return err
-	}
-	return w.restore(ctx, j, "after the mutant")
+	return nil
 }
 
-// judgeChanged builds and tests the tree that holds the mutant.
-func (w *worker) judgeChanged(ctx context.Context, j *judgement, m mutant, config configuration, tmp string) error {
-	var built bytes.Buffer
-	env := setEnv(config.environment(w.tree.run.env), "TMPDIR", tmp)
-	code, err := goCommand(ctx, w.tree.dir, env, &built, &built, slices.Concat([]string{"build"}, config.flags, []string{"./..."})...)
+// runs returns the test runs a configuration's gate makes: its tests, then,
+// where scripts/test.sh runs them, its benchmarks.
+func runs(config configuration) []bool {
+	if config.bench {
+		return []bool{false, true}
+	}
+	return []bool{false}
+}
+
+// runName names the benchmark run in a log line; the test run needs no name.
+func runName(bench bool) string {
+	if bench {
+		return " (the benchmark run)"
+	}
+	return ""
+}
+
+// judgeChanged builds and tests the tree that holds the mutant. The benchmark
+// run comes after a test run that left the verdict SURVIVED or NOTEST, and its
+// verdict replaces that one unless it is NOTEST, or SURVIVED where the tests
+// left SURVIVED.
+func (w *worker) judgeChanged(ctx context.Context, j *judgement, m mutant, config configuration, tmp string, bench bool) error {
+	if !bench {
+		var built bytes.Buffer
+		env := setEnv(config.environment(w.tree.run.env), "TMPDIR", tmp)
+		code, err := goCommand(ctx, w.tree.dir, env, &built, &built, slices.Concat([]string{"build"}, config.flags, []string{"./..."})...)
+		if err != nil {
+			return err
+		}
+		if code != 0 {
+			j.verdict = verdictNoBuild
+			fmt.Fprintf(&j.log, "the changed tree does not build, so no test judges it\n%s", built.String())
+			return nil
+		}
+	}
+	changed, err := w.test(ctx, config, tmp, m.packages, bench)
 	if err != nil {
 		return err
 	}
-	if code != 0 {
-		j.verdict = verdictNoBuild
-		fmt.Fprintf(&j.log, "the changed tree does not build, so no test judges it\n%s", built.String())
+	verdict := changed.verdict()
+	if bench {
+		fmt.Fprintf(&j.log, "each benchmark, once, as scripts/test.sh runs them:\n")
+		switch verdict {
+		case verdictSurvived, verdictNoTest:
+			fmt.Fprintf(&j.log, "every benchmark passed\n")
+			// A benchmark that ran judged the change, where no test did.
+			if verdict == verdictSurvived {
+				j.verdict = verdictSurvived
+			}
+			changed.report(&j.log)
+			return nil
+		case verdictTimeout:
+			// scripts/test.sh fails a benchmark binary stopped at its limit.
+			verdict = verdictKilled
+			j.tests = changed.unfinished(packageTimedOut)
+			fmt.Fprintf(&j.log, "a benchmark binary ran to the gate's limit of %v\n", w.tree.run.bench)
+		default:
+			j.tests = changed.failing()
+		}
+		j.verdict = verdict
+		changed.report(&j.log)
 		return nil
 	}
-	changed, err := w.test(ctx, config, tmp, m.packages)
-	if err != nil {
-		return err
-	}
-	j.verdict = changed.verdict()
+	j.verdict = verdict
 	switch j.verdict {
 	case verdictTimeout:
 		j.tests = changed.unfinished(packageTimedOut)

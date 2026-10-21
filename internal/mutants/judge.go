@@ -17,20 +17,28 @@ import (
 // command and variables of its environment.
 type configuration struct {
 	name    string
-	flags   []string
+	flags   []string      // build flags, for go list, go build and go test
 	env     []string      // name=value
-	timeout time.Duration // the -timeout the gate job that makes it gives go test
+	timeout time.Duration // the -timeout the gate job that makes it gives the go test that runs its tests
+	bench   bool          // the gate also runs each benchmark of this build once
 }
+
+// benchLimit is how long scripts/test.sh lets a benchmark binary run when
+// TEST_BENCH_LIMIT is unset, and the -timeout it gives that go test, which
+// bounds no benchmark.
+const benchLimit = 2 * time.Minute
 
 // configurations are the test builds a gate makes on one host, one for each
 // setting a gate job adds, in the order a file is tried under them: the plain
 // build, the full gate's, the jsonv2 job's, the mermaid job's and the
 // integration job's. None combines two, as the jsonv2 job's -race run does.
+// scripts/test.sh runs each benchmark once without the race detector, in the
+// full gate and in the jsonv2 job, so the plain and jsonv2 builds run them too.
 func configurations() []configuration {
 	return []configuration{
-		{name: "default", timeout: 10 * time.Minute},
+		{name: "default", timeout: 10 * time.Minute, bench: true},
 		{name: "race", flags: []string{"-race"}, env: []string{"CGO_ENABLED=1"}, timeout: 10 * time.Minute},
-		{name: "jsonv2", env: []string{"GOEXPERIMENT=jsonv2"}, timeout: 10 * time.Minute},
+		{name: "jsonv2", env: []string{"GOEXPERIMENT=jsonv2"}, timeout: 10 * time.Minute, bench: true},
 		{name: "mermaid", flags: []string{"-tags=mermaid"}, timeout: 5 * time.Minute},
 		{name: "neo4j_integration", flags: []string{"-tags=neo4j_integration"}, timeout: 20 * time.Minute},
 	}
@@ -66,6 +74,7 @@ const (
 	packageFailed     = "failed"
 	packageExited     = "failed though its binary exited 0"
 	packageTimedOut   = "was stopped at the limit"
+	packageOutputOpen = "left its output open after it exited"
 	packageNotBuilt   = "was not built"
 	packageNotStarted = "did not start"
 	packageNoResult   = "reported no result"
@@ -86,8 +95,9 @@ type testRun struct {
 type printed struct{ test, text string }
 
 // test runs go test over patterns in the tree under config, with tmp as
-// TMPDIR, and classifies every named package.
-func (w *worker) test(ctx context.Context, config configuration, tmp string, patterns []string) (*testRun, error) {
+// TMPDIR, and classifies every named package. With bench it runs no test and
+// each benchmark once, as scripts/test.sh does, under that script's limit.
+func (w *worker) test(ctx context.Context, config configuration, tmp string, patterns []string, bench bool) (*testRun, error) {
 	env := setEnv(config.environment(w.tree.run.env), "TMPDIR", tmp)
 	named, err := goList(ctx, w.tree.dir, env, slices.Concat(config.flags, []string{"--"}, patterns)...)
 	if err != nil {
@@ -102,15 +112,21 @@ func (w *worker) test(ctx context.Context, config configuration, tmp string, pat
 		return nil, fmt.Errorf("the runners' records: %w", err)
 	}
 	limit := w.tree.run.limit
-	args := slices.Concat([]string{
+	args := []string{
 		"test", "-json", "-count=1", "-failfast=false", "-p=2",
 		// The runner stops a binary at the limit, before this alarm of the
-		// binary's own. go test waits a tenth of it for a binary's output to
-		// close, and a test that asks for its deadline gets it, so it is the gate
-		// job's whenever the limit leaves room.
+		// binary's own. go test waits a tenth of this -timeout for a test
+		// binary's output to close, and a test that asks for its deadline gets
+		// it, so it is the gate job's whenever the limit leaves room.
 		"-timeout=" + max(config.timeout, limit+time.Minute).String(),
-		"-exec=" + w.tree.run.exec,
-	}, config.flags, patterns)
+	}
+	if bench {
+		// Under -bench go test bounds no binary and sets no bound on its wait
+		// for a binary's output: the runner sets both.
+		limit = w.tree.run.bench
+		args = []string{"test", "-json", "-count=1", "-p=2", "-run=^$", "-bench=.", "-benchtime=1x", "-timeout=" + benchLimit.String()}
+	}
+	args = slices.Concat(args, []string{"-exec=" + w.tree.run.exec}, config.flags, patterns)
 	env = setEnv(setEnv(env, recordVar, records), superviseLimitVar, limit.String())
 	var stdout, stderr bytes.Buffer
 	run := &testRun{packages: named, state: map[string]string{}, output: map[string][]printed{}}
@@ -154,6 +170,9 @@ func (t *testRun) classify(records map[string]record) {
 		// line or none.
 		case started && rec.TimedOut:
 			state = packageTimedOut
+		// Only a benchmark run's runner holds the output, and fails the binary.
+		case started && rec.OutputOpen:
+			state = packageOutputOpen
 		// A binary that exited 0 with a test open, inside it or after a framing
 		// line, gets no package result of the go command's, so whatever package
 		// event it printed last, or none, stands; one that left its output open
@@ -223,7 +242,7 @@ func (t *testRun) verdict() string {
 		return verdictError
 	case t.count(packageNotBuilt, packageNotStarted, packageNoResult) > 0:
 		return verdictNoBuild
-	case t.count(packageFailed, packageExited) > 0:
+	case t.count(packageFailed, packageExited, packageOutputOpen) > 0:
 		return verdictKilled
 	case t.count(packageTimedOut) > 0:
 		return verdictTimeout
@@ -252,7 +271,7 @@ func (t *testRun) tests(state, result string) []string {
 // failed and, of a package whose binary exited 0, those it reported failed and
 // those it exited inside.
 func (t *testRun) failing() []string {
-	names := slices.Concat(t.tests(packageFailed, "fail"), t.tests(packageExited, "fail"), t.unfinished(packageExited))
+	names := slices.Concat(t.tests(packageFailed, "fail"), t.tests(packageExited, "fail"), t.unfinished(packageExited), t.tests(packageOutputOpen, "fail"))
 	slices.Sort(names)
 	return slices.Compact(names)
 }

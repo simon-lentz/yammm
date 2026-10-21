@@ -353,16 +353,62 @@ func (t *tree) restore(ctx context.Context) (differed []string, err error) {
 	if index != t.index || len(now) != len(t.files) || !maps.Equal(nowDirs, t.dirs) {
 		return nil, fmt.Errorf("%s cannot be restored to what was copied (%s)", t.dir, strings.Join(differed, " "))
 	}
-	for name, want := range t.files {
-		switch got, ok := now[name]; {
-		case got == want:
-		case ok && got.mode.IsRegular() && got.sum == [sha256.Size]byte{}:
-			return nil, fmt.Errorf("%s cannot be restored: %s cannot be read", t.dir, name)
-		default:
-			return nil, fmt.Errorf("%s cannot be restored: %s is not what was copied, so the checkout changed during the run", t.dir, name)
-		}
+	if err := t.unlike(now); err != nil {
+		return nil, err
 	}
 	return differed, nil
+}
+
+// unlike names why now, the copy as restore last reads it with every path
+// counted, is not what was copied, by the first path in order, or returns nil.
+// A held file read with no sum cannot be read. Restore writes only the
+// checkout's bytes, so another held path absent or other while the checkout
+// still holds what was copied was changed by a process the run did not stop;
+// otherwise the checkout changed.
+func (t *tree) unlike(now map[string]entry) error {
+	for _, name := range slices.Sorted(maps.Keys(t.files)) {
+		want := t.files[name]
+		got, ok := now[name]
+		switch {
+		case ok && got == want:
+			continue
+		case ok && got.mode.IsRegular() && got.sum == [sha256.Size]byte{}:
+			return fmt.Errorf("%s cannot be restored: %s cannot be read", t.dir, name)
+		case !t.checkoutHolds(name, want):
+			return fmt.Errorf("%s cannot be restored: %s is not what was copied, so the checkout changed during the run", t.dir, name)
+		case !ok:
+			return fmt.Errorf("%s cannot be restored: %s is gone after it was copied back, so a process the run did not stop removes it", t.dir, name)
+		default:
+			return fmt.Errorf("%s cannot be restored: %s is not what was copied back from the checkout, so a process the run did not stop changes it", t.dir, name)
+		}
+	}
+	return nil
+}
+
+// checkoutHolds reports whether the checkout's name is still the kind of entry
+// want is, with want's bytes, or link target, as read reads them, and a file's
+// permission bits, which copyIn copies. A link's mode is not compared: it is
+// the umask's on darwin and the BSDs, and always 0777 on Linux.
+func (t *tree) checkoutHolds(name string, want entry) bool {
+	from := filepath.Join(t.run.checkout, filepath.FromSlash(name))
+	info, err := os.Lstat(from)
+	if err != nil || info.Mode().Type() != want.mode.Type() {
+		return false
+	}
+	if info.Mode().IsRegular() && info.Mode().Perm() != want.mode.Perm() {
+		return false
+	}
+	var content []byte
+	if info.Mode()&fs.ModeSymlink != 0 {
+		target, err := os.Readlink(from)
+		if err != nil {
+			return false
+		}
+		content = []byte(target)
+	} else if content, err = os.ReadFile(from); err != nil {
+		return false
+	}
+	return sha256.Sum256(content) == want.sum
 }
 
 // depth counts the directories above name, a path from a tree's root; the root

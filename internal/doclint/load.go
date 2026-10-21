@@ -54,6 +54,10 @@ type Module struct {
 	// nested holds the slash-separated directories under root that carry
 	// their own go.mod: each is another module, and none of it is loaded.
 	nested []string
+	// tracked holds every tracked .go file as trackedGoFiles keys it, or nil
+	// where git cannot list them (no git, or root outside a work tree) and the
+	// walk reads every file.
+	tracked map[string]bool
 }
 
 // Load parses the module's Go files under root, skipping directories that hold
@@ -92,6 +96,7 @@ func Load(root string) (*Module, error) {
 	if !hasTracked {
 		tracked = nil
 	}
+	m.tracked = tracked
 
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {

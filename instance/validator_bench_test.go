@@ -13,11 +13,14 @@ import (
 // collection — the last because a List property reaches the evaluator as an
 // immutable.Slice and every consumer decides for itself what to do with it.
 //
-// The three benchmarks below separate those parts so a regression names its
-// own cause. Without them a normalization change is argued rather than
-// measured: nothing else in this repository times validation.
+// The first three benchmarks below separate those parts so a regression names
+// its own cause; of the two after them, one times relation invariants and the
+// other is its control. Without them
+// a normalization change is argued rather than measured: no benchmark outside
+// this file times validation.
 //
-// Not a CI gate. Gate 7 proves each one still runs; the numbers are for
+// scripts/test.sh runs each one once, at every full gate and in CI, which
+// proves it still runs; no gate reads their numbers, which are for
 // cross-checking a profile.
 
 // benchValidatorSchema loads a one-type schema carrying decls and invs. It

@@ -14,12 +14,14 @@ test:
 	scripts/test.sh
 
 # The full gate: every pre-commit hook that names no stage, then the linter for
-# this host and Windows, vet for every target and scripts/test.sh. A commit runs
-# the commit gate instead: the same hooks with the linter and vet for this host
-# alone and scripts/committest.sh.
+# this host and windows/amd64, vet for every target and scripts/test.sh. A commit
+# runs the commit gate instead: the same hooks with the linter and vet for this
+# host alone and scripts/committest.sh. scripts/stagedtree.sh first refuses a
+# working tree that is not the index, since pre-commit reads the working tree's
+# bodies under --all-files.
 .PHONY: gate
 gate:
-	pre-commit run --all-files --hook-stage manual
+	scripts/stagedtree.sh && pre-commit run --all-files --hook-stage manual
 
 # Round-trips the neo4j adapter against a real server in Docker: the emitted DDL
 # is executed, the introspection queries are run for real, and what comes back is

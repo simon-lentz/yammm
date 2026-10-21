@@ -103,19 +103,26 @@ jobs:
       # two disagree about which modernize analyzers exist. Downloading it makes
       # the lint surface move with golangci-lint's release cadence and puts this
       # step beyond the reach of any local check; building it makes go.mod the
-      # single source of truth, so the surface moves only on a deliberate
-      # x/tools bump and `go tool golangci-lint run` reproduces this step
+      # single source of truth, so the surface moves only on a deliberate bump
+      # of golangci-lint, x/tools or an analyzer go.mod pins, and
+      # `go tool golangci-lint run` reproduces this step
       # exactly. install-mode: none keeps the action's inline PR annotations
       # while running the binary built here. An output path ending in a
-      # separator names a directory, so Windows gets golangci-lint.exe.
+      # separator names a directory, so Windows gets golangci-lint.exe. The
+      # config check runs this one build too, through YAMMM_GOLANGCI_LINT
+      # (scripts/linter.sh).
       - name: Build the pinned linter
+        id: linter
         run: |
           go build -o "${{ runner.temp }}/bin/" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
           echo "${{ runner.temp }}/bin" >> "$GITHUB_PATH"
+          echo "path=${{ runner.temp }}/bin/golangci-lint$(go env GOEXE | tr -d '\r')" >> "$GITHUB_OUTPUT"
       # The action's own `verify` fetches the schema over the network, which
       # failed lint on transient fetch errors; the script reads the schema the
       # pinned linter's module ships. The pre-commit hook runs the same script.
       - name: Verify the linter config
+        env:
+          YAMMM_GOLANGCI_LINT: ${{ steps.linter.outputs.path }}
         run: scripts/lintconfig.sh
       # The analysis cache is never carried between runs. The action restores a
       # cache by key prefix when the exact key is absent, so a run inherits
@@ -194,6 +201,14 @@ jobs:
         run: |
           mkdir -p "${{ steps.go-caches.outputs.build }}"
           date +%s > "${{ steps.go-caches.outputs.build }}/trim.txt"
+      # The pinned linter, built alone before the tests and handed to them:
+      # built inside the test run, its compile ran within internal/scripttest's
+      # -timeout and took the runner's shared CPUs from every other test binary.
+      - name: Build the pinned linter
+        id: linter
+        run: |
+          go build -o "${{ runner.temp }}/bin/" github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+          echo "path=${{ runner.temp }}/bin/golangci-lint$(go env GOEXE | tr -d '\r')" >> "$GITHUB_OUTPUT"
       # The durations file holds the seconds of each package and of each test
       # that reported a result, so a package near its -timeout shows which
       # tests spend it. It is kept when the tests fail, the run it matters
@@ -202,6 +217,7 @@ jobs:
         if: ${{ !cancelled() }}
         env:
           TEST_DURATIONS: ${{ runner.temp }}/test-durations.tsv
+          YAMMM_GOLANGCI_LINT: ${{ steps.linter.outputs.path }}
         run: scripts/test.sh
       - name: Keep the test durations
         if: ${{ !cancelled() }}
@@ -220,17 +236,21 @@ jobs:
             ${{ steps.go-caches.outputs.mod }}
           key: ${{ steps.go-restore.outputs.cache-primary-key }}
   # Every target scripts/vet.sh lists, in a job of its own.
-  # scripts/vet.sh with no argument makes twelve vet runs over eleven targets
-  # where --host makes two over one: inside a host job that step ran 255 to
-  # 382 s against the other hosts' under 30 s, and made the Linux job the
-  # longest of the workflow in two of three measured runs. Beside the host
-  # jobs it costs the workflow its own runtime alone, and the release calls
-  # this workflow whole, so a tag still waits for it. The job runs no test:
+  # scripts/vet.sh with no argument makes fifteen vet runs over fourteen
+  # targets where --host makes two over one. At twelve over eleven, inside a
+  # host job that step ran 255 to 382 s against the other hosts' under 30 s,
+  # and made the Linux job the longest of the workflow in two of three
+  # measured runs. Beside the host jobs it costs the workflow its own runtime
+  # alone, and the release calls this workflow whole, so a tag still waits for
+  # it. The job runs no test:
   # internal/wiringtest's testlessJobs records that, and untimedJobs holds it
   # to its timeout.
   #
-  # With its entry the Vet step took 4 to 6 s; with none it took up to 451 s,
-  # and 20 minutes is 2.5 times that job's 476 s.
+  # At eleven targets, with its entry the Vet step took 4 to 6 s; with none, one
+  # measured run's Vet step took 451 s in a 476 s job, and 20 minutes was 2.5
+  # times that job.
+  # At fourteen targets, with no entry, six runs' jobs took 453 to 674 s, and 20
+  # minutes is 1.8 times the longest.
   cross-vet:
     name: Vet every target
     runs-on: ubuntu-24.04

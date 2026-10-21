@@ -1,5 +1,5 @@
-// Package doclint holds the module's documentation gates: doc links that name
-// nothing, doc comments go doc renders wrongly, dependency lines, cited
+// Package doclint holds documentation gates of the module, beside the docs
+// package's own example and corpus tests: doc links that name nothing, doc comments go doc renders wrongly, dependency lines, cited
 // diagnostic codes, command invocations, and process references in names.
 //
 // # Why
@@ -26,14 +26,20 @@
 //
 // # Resolution
 //
-// The resolution unit is the directory, not the package: every .go file in a
-// directory contributes names, test files included. A non-test file behind a
-// build constraint that the pinned linux/amd64 context excludes is outside this
-// gate, as it is outside go doc there; a test file is read under any
-// constraint. That is what lets a
-// production doc comment anchor a regression test by name — the convention the
-// repo's comment rules sanction — while still catching an anchor that names a
-// test somebody deleted.
+// The resolution unit is the directory, not the package: the .go files of a
+// directory contribute names, test files included, under the rules below, and
+// where git can list the tracked files only the tracked ones do. The gate's build
+// context pins GOOS and GOARCH to linux/amd64, sets no build tag, and takes
+// cgo, the Go release, GOEXPERIMENT and the architecture feature tags from the
+// run, so on a host that is not amd64 a file constrained by amd64.v1 is outside
+// the gate, and a run under GOEXPERIMENT=jsonv2 reads the files that
+// experiment selects. A non-test file behind a build constraint that context
+// excludes is outside this gate, as it is outside go doc there, unless no
+// non-test file of its directory is in that build: then links into the
+// directory resolve against those files' names, save one whose constraint is
+// the bare "ignore". A test file is read under any constraint. That is what lets a production doc
+// comment anchor a regression test by name while still catching an anchor
+// that names a test somebody deleted.
 //
 // A qualified link resolves its package part against the referencing file's own
 // imports first. This module has an adapter/json package, so a bare
@@ -57,8 +63,10 @@
 // # Code names
 //
 // [AssertCitedCodesExist] reads the diagnostic code names written in tracked Go
-// comments, Markdown files and shell scripts' comments, outside testdata and
-// the caller's exclusions, against the registry the caller passes. A renamed or removed code leaves its name in prose exactly as a
+// comments, in Markdown files and in the lines of a shell script that open on
+// "#", save a first line's "#!", outside testdata and the caller's exclusions,
+// against the registry the caller passes. A shell comment that follows a command on its line is not
+// read. A renamed or removed code leaves its name in prose exactly as a
 // removed symbol leaves its links, and a code name is not a doc link, so the
 // resolver cannot see it.
 //
@@ -87,7 +95,8 @@
 // and a fence's info string hold no invocation.
 //
 // The invocation ends at shell text: a word that opens a comment ("#"), a pipe,
-// "&&", "||", "&", or a redirection (">", "2>", "&>", or "<" alone). It also
+// "&&", "||", "&", or a redirection (">", digits before ">" as in "2>",
+// "&>", or "<" alone). It also
 // ends after a word that ends in ";". The words after the program name the
 // command, looked up as cobra's Find looks one up: a level at a time, and at
 // each level every word left is read with that level's flags by the rule of

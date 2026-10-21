@@ -418,10 +418,9 @@ func TestRegistry_Register_IdempotenceDoesNotWeakenNameCollision(t *testing.T) {
 //
 // Four benchmarks measure the cost of Register across two dimensions:
 // schema size (tiny vs synthetic-large) and path (fresh registration vs
-// idempotent re-register). The idempotent path pays two StructuralHash
-// computations per call; the fresh path pays zero. The Large pair reports
-// an "idempotent/fresh" ratio via b.ReportMetric so complexity-ceiling
-// regressions surface in the benchmark output.
+// idempotent re-register). The idempotent path pays one StructuralHash per
+// call, of the incoming schema: the registry keeps the held schema's hash
+// after the first comparison. The fresh path pays none.
 
 func BenchmarkRegisterFresh_TinySchema(b *testing.B) {
 	s := buildTinyBenchSchema(b)
@@ -469,15 +468,16 @@ func BenchmarkRegisterFresh_LargeSchema(b *testing.B) {
 func BenchmarkRegisterIdempotent_LargeSchema(b *testing.B) {
 	// Run paired with BenchmarkRegisterFresh_LargeSchema via
 	//   go test -bench 'BenchmarkRegister.*_LargeSchema' ./schema
-	// to observe the idempotent-vs-fresh cost ratio side-by-side. The
-	// idempotent path pays 2× StructuralHash on a ~120-type schema; the
-	// fresh path pays zero hash cost but performs the full type-index
-	// insert. An inline ratio-emission via testing.Benchmark is avoided
-	// here: invoking testing.Benchmark from inside a benchmark deadlocks
-	// on testing's internal lock. Tools like benchstat compute the ratio
-	// cleanly from the paired ns/op output. The benchmark is a diagnostic,
-	// not a CI gate: variance on shared runners would flake any tight
-	// threshold.
+	// to observe the idempotent-vs-fresh cost ratio side-by-side. Once the
+	// registry keeps the held schema's hash, the idempotent path pays one
+	// StructuralHash of the incoming ~120-type schema per call (the first call
+	// hashes the held schema too); the fresh path pays no hash cost but performs the
+	// full type-index insert. An inline ratio-emission via
+	// testing.Benchmark is avoided here: invoking testing.Benchmark from
+	// inside a benchmark deadlocks on testing's internal lock. Tools like
+	// benchstat, given -col .name, set the paired ns/op side by side.
+	// No gate reads the benchmark's number, since variance on shared runners
+	// would flake any tight threshold; scripts/test.sh runs it once.
 	r := schema.NewRegistry()
 	s1 := buildLargeBenchSchema(b)
 	if err := r.Register(s1); err != nil {

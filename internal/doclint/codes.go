@@ -80,7 +80,8 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 		}
 	}
 	removedCited := make(map[string]map[string]bool, len(rules.Removed))
-	for rel, names := range rules.Removed {
+	for _, rel := range slices.Sorted(maps.Keys(rules.Removed)) {
+		names := rules.Removed[rel]
 		removedCited[rel] = make(map[string]bool, len(names))
 		for _, name := range names {
 			removedCited[rel][name] = false
@@ -128,15 +129,15 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 			default:
 				n.Shell++
 			}
-			if _, ok := placeholders[c.name]; ok {
+			_, placeholder := placeholders[c.name]
+			if placeholder {
 				placeholders[c.name] = true
-				continue
 			}
-			if _, ok := removedCited[rel][c.name]; ok {
+			_, removed := removedCited[rel][c.name]
+			if removed {
 				removedCited[rel][c.name] = true
-				continue
 			}
-			if !registry.has(c.name) {
+			if !placeholder && !removed && !registry.has(c.name) {
 				t.Errorf("%s:%d: cites the diagnostic code %s, which %s", rel, c.line, c.name, registry.miss(c.name))
 			}
 		}

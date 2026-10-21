@@ -1,21 +1,14 @@
 name: Publish VS Code Extension
+# Called by the release workflow alone, after its test workflow, on a v* tag:
+# no event starts this workflow by itself, so no branch is published.
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: >
-          Version to publish (e.g., 0.2.0). Leave empty to use the version in package.json.
-
-        required: false
-        type: string
-      pre_release:
-        description: Publish as pre-release
-        required: false
-        type: boolean
-        default: false
+  workflow_call:
+    secrets:
+      VSCE_PAT:
+        required: true
 # Every job carries a timeout, so a hung runner costs minutes rather than
 # GitHub's six-hour default. 15 minutes is seven times the slowest job measured,
-# and a publish cut short is safe to dispatch again.
+# and a publish cut short is safe to run again.
 jobs:
   build:
     name: Build ${{ matrix.target }}
@@ -55,21 +48,23 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # The VSIX publishes at package.json's version, which must be the tag's,
+      # as the release assets are stamped with the tag.
+      - name: Check the version is the tag's
+        run: |
+          VERSION="v$(jq -r .version lsp/editors/vscode/package.json)"
+          if [ "${GITHUB_REF_TYPE}" != tag ] || [ "${GITHUB_REF_NAME}" != "${VERSION}" ]; then
+            echo "::error::package.json's version is ${VERSION}, and this run is ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}: the extension is published from its release tag alone"
+            exit 1
+          fi
       - name: Build LSP binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
-          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          # Stamp the bundled server with the version the VSIX publishes at:
-          # the explicit input, or package.json's version when the input is
-          # empty. Normalized to a leading "v" to match the release archives'
-          # github.ref_name stamping.
-          BUILD_VERSION="${INPUT_VERSION:-$(jq -r .version lsp/editors/vscode/package.json)}"
-          BUILD_VERSION="v${BUILD_VERSION#v}"
           mkdir -p lsp/editors/vscode/bin/${{ matrix.bin_dir }}
-          go build -trimpath -ldflags="-s -w -X main.version=${BUILD_VERSION}" \
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
             -o lsp/editors/vscode/bin/${{ matrix.bin_dir }}/yammm-lsp${{ matrix.ext }} \
             ./cmd/yammm-lsp
       - uses: actions/setup-node@v7
@@ -78,17 +73,9 @@ jobs:
       - name: Install dependencies
         working-directory: lsp/editors/vscode
         run: npm ci
-      - name: Update version
-        if: inputs.version != ''
-        working-directory: lsp/editors/vscode
-        env:
-          PUBLISH_VERSION: ${{ inputs.version }}
-        run: npm version "$PUBLISH_VERSION" --no-git-tag-version --allow-same-version
       - name: Package VSIX
         working-directory: lsp/editors/vscode
-        env:
-          PRE_RELEASE: ${{ inputs.pre_release && '--pre-release' || '' }}
-        run: npx vsce package --target ${{ matrix.target }} --no-dependencies "$PRE_RELEASE"
+        run: npx vsce package --target ${{ matrix.target }} --no-dependencies
       - name: Upload VSIX
         uses: actions/upload-artifact@v7
         with:
@@ -121,7 +108,7 @@ jobs:
         # cannot tell "already published" from "failed to publish": it stops on
         # the first already-published target and leaves every later platform
         # unpublished, which makes a partly-published version unrecoverable by
-        # re-dispatch. Re-running this step must always be safe.
+        # a re-run. Re-running this step must always be safe.
         run: |
           shopt -s nullglob
           vsixes=(vsix/*.vsix)

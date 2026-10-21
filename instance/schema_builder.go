@@ -14,15 +14,19 @@ import (
 // type at construction time and validates property names, relation names, and
 // cardinality invariants as they are added — shifting the failure domain from
 // "at ValidateOne time" to "at Build time." Shape errors (unknown property,
-// unknown relation, cardinality mismatch) accumulate on the builder and surface from Build()
+// unknown relation, cardinality mismatch, an edge the builder cannot write)
+// accumulate on the builder and surface from Build()
 // with a call-site file:line locator captured via runtime.Callers.
 //
 // SchemaBuilder is constructed via [BuilderFor].
 //
 // # Scope of validation
 //
-// Build catches shape errors (schema-structural): property/relation names
-// and cardinality.
+// Build catches shape errors (schema-structural): property and relation
+// names, association cardinality, and the shape of each edge: a relation that
+// is a composition or declares edge properties, which the builder does not
+// support, an empty target key, a target type that does not exist or has no
+// primary key, and a key whose arity is not the target's.
 // It does NOT catch value-level errors (wrong type, out-of-range, invalid PK);
 // those remain in [Validator.ValidateOne]'s domain. A SchemaBuilder that
 // returns a clean (RawInstance, nil) from Build is guaranteed to pass the
@@ -48,10 +52,10 @@ import (
 //
 // # Performance
 //
-// Each builder method captures the caller's program counter with
+// Property and EdgeTo capture the caller's program counter with
 // runtime.Callers so a Build-time shape error can name the call site; the PC
 // resolves to file:line only when an error is rendered, so a successful call
-// allocates nothing for it. [BenchmarkSchemaBuilder_CallerCapture] pins the
+// allocates nothing for it. [BenchmarkSchemaBuilder_CallerCapture] times the
 // per-call cost and TestSchemaBuilder_SuccessPath_IsAllocationFree the
 // zero-allocation success path.
 type SchemaBuilder struct {

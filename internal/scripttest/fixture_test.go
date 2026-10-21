@@ -17,7 +17,8 @@ import (
 )
 
 // fixtureModule is the module path each fixture declares, so the copies of
-// internal/testsummary, internal/testjson and internal/raceskip build unchanged.
+// internal/testsummary, internal/testjson, internal/raceskip and
+// internal/mutants build unchanged.
 const fixtureModule = "github.com/simon-lentz/yammm"
 
 // repoRoot is the repository root relative to this package's directory, where
@@ -66,7 +67,7 @@ func directiveOf(version string) string {
 // from the repository root, a directory's files by that path and a slash. go
 // test's result cache replays a pass of the package after a change to any other
 // tracked file outside the package, which keeps these slow tests out of a commit.
-var inputs = []string{".golangci.yml", "go.mod", "go.sum", "internal/gittree/", "internal/raceskip/", "internal/testjson/", "internal/testsummary/", "scripts/"}
+var inputs = []string{".golangci.yml", "go.mod", "go.sum", "internal/gittree/", "internal/mutants/", "internal/raceskip/", "internal/testjson/", "internal/testsummary/", "scripts/"}
 
 // isInput reports whether rel, a slash-separated repository path in its
 // cleaned form, is a listed file, a listed directory, or a file under one.
@@ -106,7 +107,7 @@ type result struct {
 	stderr string
 }
 
-// newFixture returns a module holding six of the scripts, the three packages
+// newFixture returns a module holding seven of the scripts, the four packages
 // scripts/test.sh builds, and one package with a passing test. Nothing is
 // indexed until the caller calls index.
 func newFixture(t *testing.T) *fixture {
@@ -116,10 +117,10 @@ func newFixture(t *testing.T) *fixture {
 	// scripts hold a run to go.mod's toolchain and refuse a mismatch, and a
 	// fixture pinned to one release would refuse every run under another.
 	f.write("go.mod", "module "+fixtureModule+"\n\ngo "+goDirective()+"\n")
-	for _, name := range []string{"test.sh", "committest.sh", "vet.sh", "packages.sh", "lintconfig.sh", "toolchain.sh"} {
+	for _, name := range []string{"test.sh", "committest.sh", "vet.sh", "packages.sh", "lintconfig.sh", "linter.sh", "toolchain.sh"} {
 		f.copyScript(name)
 	}
-	for _, dir := range []string{"internal/testsummary", "internal/testjson", "internal/raceskip"} {
+	for _, dir := range []string{"internal/testsummary", "internal/testjson", "internal/raceskip", "internal/mutants"} {
 		f.copyPackage(dir)
 	}
 	f.write("ok/ok.go", "package ok\n")
@@ -209,12 +210,28 @@ func (f *fixture) runFrom(dir, script string, args ...string) result {
 	return r
 }
 
+// skipOnWindows skips a test of a script mode no Windows job of CI runs: the
+// full scripts/vet.sh run or scripts/committest.sh. On Windows the full vet.sh
+// tests were this package's longest, in a binary that ran past its -timeout.
+// TestWorkflows_RunNoModeUntestedOnWindows in internal/wiringtest fails when a
+// Windows job runs such a mode, so the change that adds that job must also
+// change that check and remove the skip.
+func skipOnWindows(t *testing.T, mode string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skipf("no Windows job of CI runs %s (TestWorkflows_RunNoModeUntestedOnWindows)", mode)
+	}
+}
+
 // fixtureEnv keeps a fixture's go commands inside the fixture module and off
 // the network, whatever the enclosing run sets. It also drops TEST_DURATIONS,
 // which an enclosing gate run sets for itself and every fixture's test.sh would
-// write.
+// write, GITHUB_ACTIONS, so a fixture's test.sh prints no annotation into a
+// failed test's output, which a CI log would read as its own, and
+// YAMMM_GOLANGCI_LINT, which a CI test step sets for every package's tests, so
+// a fixture's scripts take only the build its own env names.
 func fixtureEnv() []string {
-	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "TEST_DURATIONS"}
+	dropped := []string{"GITHUB_ACTIONS", "GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "TEST_BENCH_LIMIT", "TEST_DURATIONS", "YAMMM_GOLANGCI_LINT", "YAMMM_PACKAGES_TRACKED"}
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
 		return slices.ContainsFunc(dropped, func(p string) bool { return strings.EqualFold(p, name) })

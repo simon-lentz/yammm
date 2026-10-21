@@ -37,7 +37,11 @@
 // The checkout's unstaged tree must be clean, and the out directory empty or
 // absent. A checkout is refused when git lists in it a submodule, a nested
 // repository as untracked, or a file the program cannot read, as a file git
-// marks skip-worktree and the checkout lacks. Each worker copies the files git lists in the checkout, tracked or
+// marks skip-worktree and the checkout lacks; and when the checkout's
+// scripts/packages.sh --check refuses it, as each gate script that takes its
+// package list would: for an untracked Go file in a tracked package, ignored or
+// not, or one git does not ignore in another directory go reads; a tracked one
+// below a go.mod git does not track; a go.work in effect; or no tracked Go file. Each worker copies the files git lists in the checkout, tracked or
 // untracked and not ignored, into <out dir>/work/wN with an index of the
 // tracked ones, and judges its mutants there one at a time. Before each test
 // run it holds the copy to what it copied, each file's bytes and mode and each
@@ -52,18 +56,30 @@
 // every other configuration builds with the toolchain's default experiments. A
 // caller's GOFLAGS reaches every configuration, and its CGO_ENABLED every one
 // but race, which sets CGO_ENABLED=1. Every build, listing and test of a worker
-// uses a build cache of the run's own; the toolchain and experiment checks and
-// the listings that read the mutants run before that cache exists, under the
-// caller's. A test run is `go test -json -count=1 -failfast=false -p=2` with
-// the -timeout the configuration's gate job gives go test (scripts/test.sh's
-// 10m, the mermaid job's 5m, the integration job's 20m), or a minute past
-// MUTATE_TIMEOUT when that is longer, so go test waits as long as in that job
-// for a binary's output to close whenever the limit leaves room. Its test binaries are started
-// by this program, as go test's -exec runner, which holds each to
-// MUTATE_TIMEOUT (default 300s; a whole number of seconds, minutes or hours up
-// to 24 hours): at the limit the binary is sent SIGQUIT, so it prints its
-// stacks, and is killed five seconds later. A host with no
+// uses a build cache of the run's own; the toolchain and experiment checks,
+// scripts/packages.sh --check and the listings that read the mutants run before
+// that cache exists, under the caller's. A test run is
+// `go test -json -count=1 -failfast=false -p=2` with the -timeout the
+// configuration's gate job gives the go test that runs its tests
+// (scripts/test.sh's 10m, the mermaid job's 5m, the integration job's 20m), or
+// a minute past MUTATE_TIMEOUT when that is longer, so go test waits as long as
+// in that job for a binary's output to close whenever the limit leaves room.
+// Its test binaries are started by this program, as go test's -exec runner,
+// which holds each to MUTATE_TIMEOUT (default 300s; a whole number of seconds,
+// minutes or hours up to 24 hours): at the limit the binary is sent SIGQUIT, so
+// it prints its stacks, and is killed five seconds later. A host with no
 // SIGQUIT kills it at the limit.
+//
+// Under the plain and jsonv2 configurations a mutant the tests leave SURVIVED
+// or NOTEST is judged again by its packages' benchmarks, each run once without
+// the race detector, as scripts/test.sh runs them, by
+// `go test -json -count=1 -p=2 -run=^$ -bench=. -benchtime=1x -timeout=2m`,
+// each binary held to TEST_BENCH_LIMIT (default 2m, read as MUTATE_TIMEOUT is).
+// Under -bench go test sets no bound on its wait for a binary's output to close,
+// so the runner waits a tenth of the limit, at least five seconds, and then fails
+// the binary. A benchmark that fails, a binary held to the limit and one whose
+// output stays open each make the mutant KILLED, as each fails the gate. The
+// benchmarks run before the change only for a mutant they judge, and must pass.
 //
 // A file the go command lists in its package is judged under the first
 // configuration in which a test binary of the named packages compiles it: the
@@ -99,14 +115,17 @@
 //     file is a Go file the go command does not ignore or a file go list
 //     names for a named package or a package their tests link.
 //     The tests cannot judge it here.
-//   - RED: the named packages do not pass before the change.
+//   - RED: the named packages' tests do not pass before the change, or, for a
+//     mutant the tests leave SURVIVED or NOTEST under a configuration that runs
+//     benchmarks, their benchmarks do not.
 //   - NOBUILD: the changed tree does not build, or a named package's test
 //     binary was not built, failed go test's vet or did not start, or a
 //     package whose binary did not run reported no result.
 //   - KILLED: a named package's test binary ended in failure by itself, or
 //     exited 0 and left a result the gate's summary fails: none or a printed
 //     fail, from a binary whose last framing line opened a test, or the go
-//     command's fail for one that left its output open.
+//     command's fail for one that left its output open; or the benchmark
+//     run, after tests that left SURVIVED or NOTEST, failed.
 //   - TIMEOUT: no package failed by itself and this program stopped one at the
 //     limit, whatever its tests reported before. Run the mutant again alone
 //     with a longer MUTATE_TIMEOUT.
@@ -134,25 +153,28 @@
 // passed or skipped up to that test's own result line, when it has one.
 // work/worker.N.out and work/results.wN.tsv are each worker's own record; with the logs already written they are all a
 // run stopped by a signal leaves, since it writes no results.tsv. The worker
-// trees, the runners' records and the build cache are removed at exit.
+// trees, the runners' records and the build cache are removed at exit; each
+// one the run cannot remove is named, and a run that would exit 0 exits 1.
 //
 // On unix, INT, TERM, HUP and QUIT each stop the run: every running go
 // command's process group is sent TERM and killed five seconds later, and a
 // second signal changes nothing. On another host an interrupt stops it and
 // each running go command is killed. The exit status is 0 when no row is ERROR
 // and the run completes; 1 when a row is ERROR or the run itself fails, as when a worker's
-// copy or record cannot be written; 2 for a refusal, or when the program
+// copy or record cannot be written or its tree cannot be removed; 2 for a refusal, or when the program
 // cannot find its own path; and 128 plus the signal's number for a run a
 // signal stopped.
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -236,14 +258,16 @@ func judgeSet(ctx context.Context, args, environ []string, self string, seed fs.
 		}
 		return 1
 	}
-	defer r.removeWork(stderr)
-	if seed != nil {
-		if err := os.CopyFS(r.cache, seed); err != nil {
-			fmt.Fprintf(stderr, "mutants: %v\n", err)
-			return 1
-		}
+	status := 1
+	if err := copySeed(r.cache, seed); err != nil {
+		fmt.Fprintf(stderr, "mutants: %v\n", err)
+	} else {
+		status = r.judge(ctx, stdout, stderr)
 	}
-	return r.judge(ctx, stdout, stderr)
+	if !r.removeWork(stderr) && status == 0 {
+		return 1
+	}
+	return status
 }
 
 // A run is one invocation: its checkout, mutants and out directory, and the
@@ -256,8 +280,9 @@ type run struct {
 	mutants  []mutant
 	workers  int
 	limit    time.Duration
-	asis     string // TMPDIR as the host resolves it, with a trailing separator
-	folded   string // the folded spelling, empty on a host without one
+	bench    time.Duration // the limit of one benchmark binary
+	asis     string        // TMPDIR as the host resolves it, with a trailing separator
+	folded   string        // the folded spelling, empty on a host without one
 	env      []string
 	exec     string // go test's -exec value: this program as the runner
 	tracked  []string
@@ -277,7 +302,10 @@ func newRun(ctx context.Context, args, environ []string, self string) (*run, err
 		r.workers = n
 	}
 	var err error
-	if r.limit, err = parseLimit(envValue(environ, limitVar)); err != nil {
+	if r.limit, err = parseLimit(limitVar, envValue(environ, limitVar), 300*time.Second); err != nil {
+		return nil, err
+	}
+	if r.bench, err = parseLimit(benchLimitVar, envValue(environ, benchLimitVar), benchLimit); err != nil {
 		return nil, err
 	}
 	if r.exec, err = execValue(self); err != nil {
@@ -305,6 +333,9 @@ func newRun(ctx context.Context, args, environ []string, self string) (*run, err
 	if err := checkExperiments(ctx, r.checkout, r.env); err != nil {
 		return nil, err
 	}
+	if err := r.refuseUntrackedGo(ctx); err != nil {
+		return nil, err
+	}
 	r.asis, r.folded, err = tmpSpellings(envValue(r.env, "TMPDIR"))
 	if err != nil {
 		return nil, err
@@ -322,33 +353,39 @@ func newRun(ctx context.Context, args, environ []string, self string) (*run, err
 	return r, nil
 }
 
-// limitVar names the variable that holds the limit of one test binary.
-const limitVar = "MUTATE_TIMEOUT"
+// The variables that hold the limit of one test binary, and of one benchmark
+// binary, which scripts/test.sh reads too.
+const (
+	limitVar      = "MUTATE_TIMEOUT"
+	benchLimitVar = "TEST_BENCH_LIMIT"
+)
 
-// parseLimit reads the limit: digits with no leading zero, then s, m or h,
-// from one second up to 24 hours.
-func parseLimit(value string) (time.Duration, error) {
+// parseLimit reads the limit variable name holds, unset when it is empty:
+// digits with no leading zero, then s, m or h, from one second up to 24 hours.
+func parseLimit(name, value string, unset time.Duration) (time.Duration, error) {
 	if value == "" {
-		return 300 * time.Second, nil
+		return unset, nil
 	}
 	units := map[byte]time.Duration{'s': time.Second, 'm': time.Minute, 'h': time.Hour}
 	unit, ok := units[value[len(value)-1]]
 	n, err := strconv.Atoi(value[:len(value)-1])
 	if !ok || err != nil || n < 1 || strconv.Itoa(n) != value[:len(value)-1] || time.Duration(n) > 24*time.Hour/unit {
-		return 0, refusef("%s must be a whole number of seconds, minutes or hours from 1 up to 24 hours, with no leading zero, such as 900s or 15m, got %q", limitVar, value)
+		return 0, refusef("%s must be a whole number of seconds, minutes or hours from 1 up to 24 hours, with no leading zero, such as 900s or 15m, got %q", name, value)
 	}
 	return time.Duration(n) * unit, nil
 }
 
 // execValue spells self as go test's -exec flag reads it: fields split at
-// white space, a quoted field kept whole, and no escape inside quotes.
+// white space, a field that opens on a quote kept whole to the same quote, and
+// a quote inside an unquoted field read as itself.
 func execValue(self string) (string, error) {
 	for _, quote := range []string{"", "'", `"`} {
-		if quote == "" && !strings.ContainsAny(self, " \t\n\r'\"") || quote != "" && !strings.Contains(self, quote) {
+		if quote == "" && !strings.ContainsAny(self, " \t\n\r") && !strings.HasPrefix(self, "'") && !strings.HasPrefix(self, `"`) ||
+			quote != "" && !strings.Contains(self, quote) {
 			return quote + self + quote + " " + superviseFlag, nil
 		}
 	}
-	return "", refusef("this program's path %q holds both quote characters, so go test cannot be given it as its -exec runner", self)
+	return "", refusef("this program's path %q holds white space and both quote characters, so go test cannot be given it as its -exec runner", self)
 }
 
 // realDir returns dir with every symbolic link resolved.
@@ -447,22 +484,54 @@ func tmpSpellings(tmp string) (asis, folded string, err error) {
 	return asis, folded, nil
 }
 
+// copySeed copies seed into the run's build cache, when there is one.
+func copySeed(cache string, seed fs.FS) error {
+	if seed == nil {
+		return nil
+	}
+	if err := os.CopyFS(cache, seed); err != nil {
+		return fmt.Errorf("the build cache seed: %w", err)
+	}
+	return nil
+}
+
+// refuseUntrackedGo refuses the checkout scripts/packages.sh --check refuses,
+// as each gate script that takes its package list does; the package document
+// names its refusals. A checkout without the script is not checked.
+func (r *run) refuseUntrackedGo(ctx context.Context) error {
+	script := filepath.Join(r.checkout, "scripts", "packages.sh")
+	if _, err := os.Lstat(script); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "bash", script, "--check")
+	cmd.Dir = r.checkout
+	cmd.Env = r.env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return refusef("scripts/packages.sh --check refuses the checkout, as each gate script that takes its package list would (%v):\n%s", err, bytes.TrimSpace(out))
+	}
+	return nil
+}
+
 // removeWork removes what only a running run needs: the worker trees, the
-// build cache and the runners' records. It reports a directory it cannot
-// remove, which the run then leaves behind.
-func (r *run) removeWork(stderr io.Writer) {
+// build cache and the runners' records. It names each directory it cannot
+// remove, which the run then leaves behind, and reports whether it removed all.
+func (r *run) removeWork(stderr io.Writer) (removed bool) {
 	entries, err := os.ReadDir(r.work)
 	if err != nil {
-		return
+		fmt.Fprintf(stderr, "mutants: %v\n", err)
+		return false
 	}
+	removed = true
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		if err := removeAll(filepath.Join(r.work, e.Name())); err != nil {
-			fmt.Fprintf(stderr, "mutants: %v\n", err)
+			fmt.Fprintf(stderr, "mutants: %v, which the run leaves behind\n", err)
+			removed = false
 		}
 	}
+	return removed
 }
 
 // removeAll removes a tree that may hold directories without write permission,

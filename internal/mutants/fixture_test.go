@@ -25,15 +25,16 @@ import (
 const (
 	asProgramVar = "MUTANTS_TEST_AS_PROGRAM" // run the harness over os.Args
 	seedVar      = "MUTANTS_TEST_SEED"       // with this directory as its cache seed
-	childVar     = "MUTANTS_TEST_CHILD"      // act as a supervised binary: exit3, sleep or deaf
+	childVar     = "MUTANTS_TEST_CHILD"      // act as a supervised binary: exit3, sleep, deaf, exit0 or interleave
 )
 
 func TestMain(m *testing.M) {
 	switch {
-	case os.Getenv(childVar) != "":
-		child(os.Getenv(childVar))
+	// The runner's own process carries childVar to the binary it starts.
 	case len(os.Args) > 1 && os.Args[1] == superviseFlag:
 		os.Exit(mainStatus(nil))
+	case os.Getenv(childVar) != "":
+		child(os.Getenv(childVar))
 	case os.Getenv(asProgramVar) != "":
 		os.Exit(mainStatus(os.DirFS(os.Getenv(seedVar))))
 	}
@@ -51,6 +52,14 @@ func child(mode string) {
 		os.Exit(3)
 	case "deaf":
 		ignoreStackRequest()
+	case "exit0":
+		exitAtStackRequest()
+	case "interleave":
+		for i := range 200 {
+			fmt.Fprintf(os.Stdout, "out %03d\n", i)
+			fmt.Fprintf(os.Stderr, "err %03d\n", i)
+		}
+		os.Exit(0)
 	}
 	time.Sleep(time.Hour)
 }
@@ -82,6 +91,20 @@ func goDirective() string {
 		v = v[:i]
 	}
 	return v
+}
+
+// skipJudgingOnWindows skips a test of the program's judging run, which no
+// Windows job of CI makes: there CI runs the program only as scripts/test.sh's
+// benchmark runner (-supervise), whose tests run on Windows. On Windows the
+// judging tests were nearly all of this package's time, in a binary near its
+// -timeout. TestWorkflows_RunNoModeUntestedOnWindows in internal/wiringtest
+// fails when a Windows job runs the program otherwise, so the change that adds
+// that job must also change that check and remove the skip.
+func skipJudgingOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("no Windows job of CI runs the judging run, only scripts/test.sh's runner (TestWorkflows_RunNoModeUntestedOnWindows)")
+	}
 }
 
 // newFixture returns an indexed checkout of one package, m, whose test passes.
@@ -123,7 +146,7 @@ func (f *fixture) mutant(id, file, search, replace, pkgs string) string {
 // environment keeps a run's go commands inside the fixture and off the
 // network, whatever the enclosing run sets.
 func (f *fixture) environment() []string {
-	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "GODEBUG", limitVar}
+	dropped := []string{"GOFLAGS", "GOPROXY", "GOTOOLCHAIN", "GOWORK", "GODEBUG", limitVar, benchLimitVar}
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		name, _, _ := strings.Cut(kv, "=")
 		return slices.ContainsFunc(dropped, func(d string) bool { return strings.EqualFold(d, name) })
@@ -192,7 +215,10 @@ var seedFiles = sync.OnceValues(func() (fstest.MapFS, error) {
 	for _, args := range [][]string{{"build", "./..."}, {"test", "-count=1", "./..."}} {
 		cmd := exec.CommandContext(context.Background(), "go", args...)
 		cmd.Dir = filepath.Join(dir, "co")
-		cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod", "GOPROXY=off", "GOTOOLCHAIN=local", "GOWORK=off", "GOCACHE="+cache)
+		// The run drops GOEXPERIMENT (cleanEnv), so a seed built under the
+		// caller's, as in the jsonv2 job, would match none of its builds.
+		env := slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "GOEXPERIMENT=") })
+		cmd.Env = append(env, "GOFLAGS=-mod=mod", "GOPROXY=off", "GOTOOLCHAIN=local", "GOWORK=off", "GOCACHE="+cache)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return nil, fmt.Errorf("go %s: %w\n%s", strings.Join(args, " "), err, out)
 		}

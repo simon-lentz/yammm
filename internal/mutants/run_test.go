@@ -2,7 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -17,6 +21,7 @@ import (
 // and the limit holds the run before the change too.
 func TestRun_StopsABinaryAtTheLimit(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("h/h.go", "package h\n\nfunc Wait() {}\n")
 	// Each printed line is one go test's own text could hold for a failure.
@@ -64,6 +69,7 @@ func TestRun_StopsABinaryAtTheLimit(t *testing.T) {
 // built the race standard library in a cache of their own.
 func TestRun_JudgesAFileUnderTheConfigurationThatCompilesIt(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.env = []string{"GOEXPERIMENT=jsonv2"}
 	f.write("bm/racy.go", "//go:build race\n\npackage bm\n\nconst Racy = true\n")
@@ -108,7 +114,7 @@ func TestRun_JudgesAFileUnderTheConfigurationThatCompilesIt(t *testing.T) {
 	f.mutant("race-red", "bm/racy.go", "Racy = true", "Racy = false", "./bm/")
 	f.mutant("race-build", "ro/race.go", "RaceOnly = 1", "RaceOnlyX = 1", "./ro/")
 
-	r := f.run(f.args("2")...)
+	r := f.run(f.args("3")...)
 
 	r.wantCode(t, 0)
 	rows := r.wantVerdicts(t, map[string]string{
@@ -138,6 +144,7 @@ const countingTest = "package m\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc 
 // and spelling, and once for each mutant and spelling.
 func TestRun_RunsThePackagesOnceBeforeTheChangeForASetAndSpelling(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("m/m_test.go", countingTest)
 	f.index()
@@ -191,6 +198,7 @@ func TestRun_RunsThePackagesOnceBeforeTheChangeForASetAndSpelling(t *testing.T) 
 // the worker puts back what it copied before each run.
 func TestRun_RestoresTheTreeATestChanged(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("data.txt", "one\n")
 	f.write("w/w.go", "package w\n\nconst W = 1\n")
@@ -223,6 +231,7 @@ func TestRun_RestoresTheTreeATestChanged(t *testing.T) {
 // a failure, and a package with no result is no kill.
 func TestRun_ReportsEveryPackageUnderACallersFailfast(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	for _, name := range []string{"p1", "p2", "p3", "p4"} {
 		f.write(name+"/p.go", "package "+name+"\n")
@@ -248,6 +257,7 @@ func TestRun_ReportsEveryPackageUnderACallersFailfast(t *testing.T) {
 // failure is no kill.
 func TestRun_ReadsABinaryThatDidNotStartAsNoBuild(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.mutant("m01", "m/m.go", "a + b", "a - b", "./m/")
 	f.mutant("m02", "m/m.go", "a + b", "a + b + 0", "./m/")
@@ -268,6 +278,7 @@ func TestRun_ReadsABinaryThatDidNotStartAsNoBuild(t *testing.T) {
 // binary's output to close, a tenth of it, is the gate's too.
 func TestRun_GivesATestTheGatesDeadline(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("d/d.go", "package d\n\nfunc On() bool { return true }\n")
 	f.write("d/d_test.go", "package d\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestDeadline(t *testing.T) {\n\tif dl, ok := t.Deadline(); !ok || time.Until(dl) < 9*time.Minute {\n\t\tt.Fatalf(\"deadline %v, %t\", dl, ok)\n\t}\n\tif !On() {\n\t\tt.Fatal(\"off\")\n\t}\n}\n")
@@ -284,6 +295,7 @@ func TestRun_GivesATestTheGatesDeadline(t *testing.T) {
 // gate's.
 func TestRun_GivesATestTheDeadlineOfItsConfigurationsGateJob(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("md/md.go", "//go:build mermaid\n\npackage md\n\nfunc On() bool { return true }\n")
 	f.write("md/md_test.go", "//go:build mermaid\n\npackage md\n\nimport (\n\t\"testing\"\n\t\"time\"\n)\n\nfunc TestDeadline(t *testing.T) {\n\tif dl, ok := t.Deadline(); !ok || time.Until(dl) > 6*time.Minute {\n\t\tt.Fatalf(\"deadline %v, %t\", dl, ok)\n\t}\n\tif !On() {\n\t\tt.Fatal(\"off\")\n\t}\n}\n")
@@ -299,9 +311,11 @@ func TestRun_GivesATestTheDeadlineOfItsConfigurationsGateJob(t *testing.T) {
 	}
 }
 
-// Each configuration's timeout is the -timeout its gate job gives go test:
-// scripts/test.sh's for the plain, race and jsonv2 builds, and the test
-// workflow's tagged jobs' for the others.
+// Each configuration's timeout is the -timeout its gate job gives a go test
+// that runs tests: scripts/test.sh's for the plain, race and jsonv2 builds,
+// less its benchmark run, which runs no test, and the test workflow's tagged
+// jobs' for the others. The benchmark run's -timeout and the default of its
+// TEST_BENCH_LIMIT are benchLimit.
 func TestConfigurations_TakeEachGateJobsTimeout(t *testing.T) {
 	t.Parallel()
 	read := func(path ...string) []byte {
@@ -313,12 +327,25 @@ func TestConfigurations_TakeEachGateJobsTimeout(t *testing.T) {
 	}
 	want := map[string][]string{}
 	for _, m := range regexp.MustCompile(`\bgo test [^\n]*-timeout=(\S+)`).FindAllSubmatch(read("scripts", "test.sh"), -1) {
+		if bytes.Contains(m[0], []byte(`-run '^$'`)) {
+			if d, err := time.ParseDuration(string(m[1])); err != nil || d != benchLimit {
+				t.Errorf("scripts/test.sh's benchmark run takes -timeout=%s, and benchLimit is %v", m[1], benchLimit)
+			}
+			continue
+		}
 		for _, name := range []string{"default", "race", "jsonv2"} {
 			want[name] = append(want[name], string(m[1]))
 		}
 	}
 	for _, m := range regexp.MustCompile(`\bgo test [^\n]*-tags (\S+) -timeout (\S+)`).FindAllSubmatch(read(".github", "workflows", "yammm_test.yml"), -1) {
 		want[string(m[1])] = append(want[string(m[1])], string(m[2]))
+	}
+	unset := regexp.MustCompile(`TEST_BENCH_LIMIT:-([^}]+)\}`).FindSubmatch(read("scripts", "test.sh"))
+	if unset == nil {
+		t.Fatal("scripts/test.sh gives TEST_BENCH_LIMIT no default")
+	}
+	if d, err := time.ParseDuration(string(unset[1])); err != nil || d != benchLimit {
+		t.Errorf("scripts/test.sh's TEST_BENCH_LIMIT default is %s, and benchLimit is %v", unset[1], benchLimit)
 	}
 	for _, c := range configurations() {
 		if len(want[c.name]) == 0 {
@@ -336,6 +363,7 @@ func TestConfigurations_TakeEachGateJobsTimeout(t *testing.T) {
 // summary fails a package that reports no result, though go test passes it.
 func TestRun_KillsAMutantThatMakesATestExitInsideIt(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("e/e.go", "package e\n\nfunc Done() bool { return true }\n")
 	f.write("e/e_test.go", "package e\n\nimport (\n\t\"syscall\"\n\t\"testing\"\n)\n\nfunc TestDone(t *testing.T) {\n\tif !Done() {\n\t\tsyscall.Exit(0)\n\t}\n}\n")
@@ -355,6 +383,7 @@ func TestRun_KillsAMutantThatMakesATestExitInsideIt(t *testing.T) {
 // gets a row, no run and no log; its asis spelling is still judged.
 func TestRun_RecordsNoFoldWhereTMPDIRHasNoFoldedSpelling(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	plain := filepath.Join(t.TempDir(), "plain")
 	if err := os.Mkdir(plain, 0o750); err != nil {
@@ -381,6 +410,7 @@ func TestRun_RecordsNoFoldWhereTMPDIRHasNoFoldedSpelling(t *testing.T) {
 // With no workers argument a run takes four.
 func TestRun_TakesFourWorkersByDefault(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	for _, id := range []string{"m1", "m2", "m3", "m4", "m5"} {
 		f.mutant(id, "m/m.go", "not in the file "+id, "x", "./m/")
@@ -396,9 +426,11 @@ func TestRun_TakesFourWorkersByDefault(t *testing.T) {
 }
 
 // A file's set holds every tracked package that imports it from its code, its
-// tests or its external tests, and ./docs; an untracked importer is no member.
+// tests or its external tests, and ./docs; an importer in a directory git
+// ignores is no member.
 func TestRun_ComputesTheSetFromEveryTrackedImporter(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	imports := "import \"example.com/fx/m\"\n\nvar _ = m.Add\n"
 	f.write("c/c.go", "package c\n\n"+imports)
@@ -408,6 +440,7 @@ func TestRun_ComputesTheSetFromEveryTrackedImporter(t *testing.T) {
 	f.write("xt/xt_test.go", "package xt_test\n\n"+imports)
 	f.write("docs/docs_test.go", "package docs\n")
 	f.write("other/o.go", "package other\n")
+	f.write(".gitignore", "u/\n")
 	f.index()
 	f.write("u/u.go", "package u\n\n"+imports)
 	f.mutant("m01", "m/m.go", "not in the file", "x", "")
@@ -423,6 +456,7 @@ func TestRun_ComputesTheSetFromEveryTrackedImporter(t *testing.T) {
 // A run that is red before the change still puts back what its tests wrote.
 func TestRun_RestoresTheTreeAfterARedRun(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("w/w.go", "package w\n\nconst W = 1\n")
 	f.write("w/w_test.go", "package w\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestWrites(t *testing.T) {\n"+
@@ -443,6 +477,7 @@ func TestRun_RestoresTheTreeAfterARedRun(t *testing.T) {
 // command spells every directory it lists from PWD.
 func TestRun_ComputesTheSetWhenTheCallerReachedTheCheckoutByALink(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("needs a symbolic link")
 	}
@@ -469,6 +504,7 @@ func TestRun_ComputesTheSetWhenTheCallerReachedTheCheckoutByALink(t *testing.T) 
 // file beside the mutants.
 func TestRun_ReadsNoDotEntryOrFileAsAMutant(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.mutant("m01", "m/m.go", "a + b", "a - b", "./m/")
 	gittree.WriteFile(t, filepath.Join(f.root, "mutants", ".git"), "HEAD", []byte("ref: refs/heads/main\n"), 0o600)
@@ -482,6 +518,7 @@ func TestRun_ReadsNoDotEntryOrFileAsAMutant(t *testing.T) {
 
 func TestRun_JudgesFromAnOutDirectoryInsideTheCheckout(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	for _, name := range []string{"runs/out", "runs/o[1]"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -507,6 +544,7 @@ func TestRun_JudgesFromAnOutDirectoryInsideTheCheckout(t *testing.T) {
 // Under a choice that lets go.mod pick, a check run there would pick the
 // caller's.
 func TestRun_PinsTheCheckoutsToolchainFromAnotherDirectory(t *testing.T) {
+	skipJudgingOnWindows(t)
 	for _, choice := range []string{"", "go" + goDirective() + "+auto"} {
 		t.Run("GOTOOLCHAIN="+choice, func(t *testing.T) {
 			f := newFixture(t)
@@ -528,6 +566,7 @@ func TestRun_PinsTheCheckoutsToolchainFromAnotherDirectory(t *testing.T) {
 
 func TestRun_RefusesACheckoutWithAFileGitCannotRead(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		t.Skip("needs a file its owner cannot read")
 	}
@@ -554,6 +593,7 @@ func TestRun_RefusesACheckoutWithAFileGitCannotRead(t *testing.T) {
 // worker's copy cannot be held to what was copied.
 func TestRun_ExitsOneWhenAMutantCannotBeJudged(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("data.txt", "one\n")
 	f.write("w/w.go", "package w\n\nconst W = 1\n")
@@ -571,5 +611,305 @@ func TestRun_ExitsOneWhenAMutantCannotBeJudged(t *testing.T) {
 	r.wantStderr(t, "1 row(s) are ERROR")
 	if log := r.log(t, "w01"); !strings.Contains(log, "data.txt is not what was copied, so the checkout changed during the run") {
 		t.Errorf("the log does not say why:\n%s", log)
+	}
+}
+
+// removeWork names each directory of the work it cannot remove and reports
+// that it left one, here one whose parent a test made unwritable.
+func TestRun_RemoveWorkNamesWhatItLeavesBehind(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("a directory's write bit stops no removal on Windows or for root")
+	}
+	work := t.TempDir()
+	gittree.WriteFile(t, work, "w1/x.txt", []byte("x\n"), 0o600)
+	if err := os.Chmod(work, 0o500); err != nil { //nolint:gosec // a directory the run must not be able to write
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(work, 0o700) }) //nolint:gosec // restoring the test's own directory
+	var stderr bytes.Buffer
+	if (&run{work: filepath.Join(work, "absent")}).removeWork(&stderr) || !strings.Contains(stderr.String(), "absent") {
+		t.Errorf("removeWork over a work directory it cannot read reports it removed all; stderr:\n%s", stderr.String())
+	}
+	stderr.Reset()
+	r := &run{work: work}
+	if r.removeWork(&stderr) {
+		t.Errorf("removeWork reports every directory removed; stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "w1") || !strings.Contains(stderr.String(), "which the run leaves behind") {
+		t.Errorf("stderr does not name w1 as left behind:\n%s", stderr.String())
+	}
+
+	if err := os.Chmod(work, 0o700); err != nil { //nolint:gosec // restoring the test's own directory
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	if !r.removeWork(&stderr) {
+		t.Errorf("removeWork reports a directory left behind; stderr:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(work, "w1")); !os.IsNotExist(err) {
+		t.Errorf("w1 is still there: %v", err)
+	}
+}
+
+// A run whose rows are all judged exits 1 when a worker tree outlives it, as
+// one does when a test denies deleting what its directory holds, and names it.
+func TestRun_ExitsOneWhenAWorkerTreeCannotBeRemoved(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	if runtime.GOOS != "darwin" {
+		t.Skip("an access list that denies delete_child is darwin's")
+	}
+	f := newFixture(t)
+	f.write("m/lock_test.go", "package m\n\nimport (\n\t\"os/exec\"\n\t\"testing\"\n)\n\n"+
+		"func TestLock(t *testing.T) {\n\tif out, err := exec.Command(\"chmod\", \"+a\", \"everyone deny delete_child\", \".\").CombinedOutput(); err != nil {\n\t\tt.Fatalf(\"%v: %s\", err, out)\n\t}\n}\n")
+	f.index()
+	f.mutant("m01", "m/m.go", "a + b", "a - b", "./m/")
+
+	r := f.run()
+	t.Cleanup(func() {
+		// t.Context is done before a cleanup runs.
+		//nolint:gosec // chmod, with the run's own out directory
+		if out, err := exec.CommandContext(context.Background(), "chmod", "-R", "-N", r.out).CombinedOutput(); err != nil {
+			t.Errorf("clear the access lists under %s: %v: %s", r.out, err, out)
+		}
+	})
+
+	r.wantVerdicts(t, map[string]string{"m01": verdictKilled})
+	r.wantCode(t, 1)
+	r.wantStderr(t, "which the run leaves behind")
+}
+
+// holdTest is the test file of a package whose On returns false, run in mode:
+// "test" or "bench" starts, when On returns true, a process that keeps the test
+// binary's output open for 75s or 30s from its start, past the binary's exit;
+// "slow" makes the benchmark run a minute.
+func holdTest(mode string) string {
+	return `package PKG
+
+import (
+	"os"
+	"os/exec"
+	"testing"
+	"time"
+)
+
+func TestMain(m *testing.M) {
+	if d, err := time.ParseDuration(os.Getenv("HOLD_FOR")); err == nil {
+		time.Sleep(d)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+func hold(tb testing.TB, d string) {
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(os.Environ(), "HOLD_FOR="+d)
+	// On Windows the process outlives go test, and no directory a live
+	// process works in can be removed, the worker tree's among them.
+	cmd.Dir = os.TempDir()
+	cmd.Stdout = os.Stdout
+	if err := cmd.Start(); err != nil {
+		tb.Fatal(err)
+	}
+}
+
+func TestOn(t *testing.T) {
+	if On() && "MODE" == "test" {
+		hold(t, "75s")
+	}
+}
+
+func BenchmarkOn(b *testing.B) {
+	if On() && "MODE" == "bench" {
+		hold(b, "30s")
+	}
+	if On() && "MODE" == "slow" {
+		time.Sleep(time.Minute)
+	}
+	for b.Loop() {
+	}
+}
+`
+}
+
+// The plain configuration judges a mutant as the gate runs its tests and then
+// its benchmarks, in one run:
+//   - a mutant only a benchmark sees is killed, as scripts/test.sh's run of every
+//     benchmark fails the gate, where a test alone passes;
+//   - a package whose only judge is a benchmark that ran and passed reads SURVIVED;
+//   - the benchmarks run before the change only for a mutant they judge: with a
+//     benchmark that fails already, a mutant the tests miss reads RED, and one
+//     they kill reads KILLED;
+//   - a test binary whose output stays open past go test's wait fails the run of
+//     its tests, as it fails the gate's -race run;
+//   - a benchmark binary's output is held to a wait of the runner's own, and a
+//     benchmark binary that runs to TEST_BENCH_LIMIT is killed, as
+//     scripts/test.sh fails it.
+func TestRun_JudgesTestsAndBenchmarksAsTheGateRunsThem(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	f.write("b/b.go", "package b\n\nfunc Name() string { return \"ASSOC\" }\n")
+	f.write("b/b_test.go", "package b\n\nimport \"testing\"\n\nfunc TestRuns(t *testing.T) {}\n\n"+
+		"func BenchmarkName(b *testing.B) {\n\tif Name() != \"ASSOC\" {\n\t\tb.Fatal(\"the benchmark's setup is wrong\")\n\t}\n\tfor b.Loop() {\n\t}\n}\n")
+	f.write("p/p.go", "package p\n\nfunc Name() string { return \"ASSOC\" }\n")
+	f.write("p/p_test.go", "package p\n\nimport \"testing\"\n\nfunc BenchmarkName(b *testing.B) {\n\tfor b.Loop() {\n\t\t_ = Name()\n\t}\n}\n")
+	f.write("r/r.go", "package r\n\nfunc Name() string { return \"ASSOC\" }\n\nfunc Other() int { return 1 }\n")
+	f.write("r/r_test.go", "package r\n\nimport \"testing\"\n\nfunc TestName(t *testing.T) {\n\tif Name() != \"ASSOC\" {\n\t\tt.Fatal(\"wrong name\")\n\t}\n}\n\n"+
+		"func BenchmarkBroken(b *testing.B) { b.Fatal(\"broken before any change\") }\n")
+	for pkg, mode := range map[string]string{"htest": "test", "hbench": "bench", "hslow": "slow"} {
+		f.write(pkg+"/"+pkg+".go", "package "+pkg+"\n\nfunc On() bool { return false }\n")
+		f.write(pkg+"/"+pkg+"_test.go", strings.ReplaceAll(strings.ReplaceAll(holdTest(mode), "PKG", pkg), "MODE", mode))
+		f.mutant(pkg, pkg+"/"+pkg+".go", "return false", "return true", "./"+pkg+"/")
+	}
+	f.index()
+	f.mutant("bench-kills", "b/b.go", "\"ASSOC\"", "\"assoc\"", "./b/")
+	f.mutant("bench-passes", "p/p.go", "\"ASSOC\"", "\"assoc\"", "./p/")
+	f.mutant("tests-kill", "r/r.go", "\"ASSOC\"", "\"assoc\"", "./r/")
+	f.mutant("tests-miss", "r/r.go", "return 1", "return 2", "./r/")
+	f.env = append(f.env, benchLimitVar+"=10s")
+
+	r := f.run(f.args("3")...)
+
+	r.wantCode(t, 0)
+	rows := r.wantVerdicts(t, map[string]string{
+		"bench-kills": verdictKilled, "bench-passes": verdictSurvived, "tests-kill": verdictKilled, "tests-miss": verdictRed,
+		"htest": verdictKilled, "hbench": verdictKilled, "hslow": verdictKilled,
+	})
+	for id, want := range map[string]string{
+		"bench-kills": "the benchmark's setup is wrong",
+		"tests-miss":  "broken before any change",
+		"htest":       "Test I/O incomplete",
+		"hbench":      "output was still open 5s after it exited",
+		"hslow":       "a benchmark binary ran to the gate's limit of 10s",
+	} {
+		if log := r.log(t, id); !strings.Contains(log, want) {
+			t.Errorf("%s's log does not hold %q:\n%s", id, want, log)
+		}
+		if got := rows[id+"/asis"]["configuration"]; got != "default" {
+			t.Errorf("%s is judged under %q, want default", id, got)
+		}
+	}
+}
+
+// A checkout scripts/packages.sh --check refuses is refused with its message,
+// whatever this host builds: an untracked Go file in a tracked package, ignored
+// or not, one in a new package git does not ignore, and a tracked package below
+// a go.mod git does not track. A package whose every Go file git ignores, and a
+// name go never reads, are judged around.
+func TestRun_RefusesWhatScriptsPackagesShRefuses(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	script, err := os.ReadFile(filepath.Join("..", "..", "scripts", "packages.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := "windows"
+	if runtime.GOOS == "windows" {
+		other = "linux"
+	}
+	for _, tt := range []struct {
+		name    string
+		tracked map[string]string
+		files   map[string]string
+		want    string // "" for a run that judges
+	}{
+		{"an untracked file in a tracked package", nil, map[string]string{"m/extra.go": "package m\n"}, "m/extra.go"},
+		{"an ignored file in a tracked package", map[string]string{".gitignore": "m/gen.go\n"}, map[string]string{"m/gen.go": "package m\n"}, "m/gen.go"},
+		{"an untracked test in a tracked package", nil, map[string]string{"m/extra_test.go": "package m\n"}, "m/extra_test.go"},
+		{"an untracked file in a package this host does not build", map[string]string{"o/o_" + other + ".go": "package o\n"}, map[string]string{"o/extra_" + other + ".go": "package o\n"}, "o/extra_" + other + ".go"},
+		{"a new package", nil, map[string]string{"n/n.go": "package n\n"}, "untracked package(s) that git does not ignore, which a tracked package can import and no commit holds; add or remove each:\n  n\n"},
+		{"a tracked package below an untracked go.mod", map[string]string{".gitignore": "k/go.mod\n", "k/k.go": "package k\n"}, map[string]string{"k/go.mod": "module k\n"}, "below a go.mod git does not track, which go reads as another module and no commit holds; remove each go.mod:\n  k\n"},
+		// One checkout judged around all three, since each run that judges costs a full one.
+		{
+			"a package git ignores, one whose every Go file git ignores, and a name go never reads",
+			map[string]string{".gitignore": "vendored/\ngen/*.go\n"},
+			map[string]string{"vendored/v.go": "package vendored\n", "gen/g.go": "package gen\n", "m/_scratch.go": "package m\n"},
+			"",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			gittree.WriteFile(t, f.checkout, "scripts/packages.sh", script, 0o700)
+			for name, content := range tt.tracked {
+				f.write(name, content)
+			}
+			f.index()
+			for name, content := range tt.files {
+				f.write(name, content)
+			}
+			f.mutant("m01", "m/m.go", "a + b", "a - b", "./m/")
+
+			r := f.run()
+
+			if tt.want == "" {
+				r.wantCode(t, 0)
+				r.wantVerdicts(t, map[string]string{"m01": verdictKilled})
+				return
+			}
+			r.wantCode(t, 2)
+			r.wantStderr(t, "scripts/packages.sh --check refuses the checkout, as each gate script that takes its package list would")
+			r.wantStderr(t, tt.want)
+			r.wantNothingStarted(t)
+		})
+	}
+}
+
+// With no seed, as the program runs, the run copies nothing into its cache and
+// still judges: a mutant whose search is not in its file reads NOMATCH, which
+// starts no go command.
+func TestJudgeSet_JudgesWithNoSeed(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	f.mutant("m01", "m/m.go", "no such text", "a - b", "./m/")
+	args := f.args("1")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := judgeSet(t.Context(), args, f.environment(), self, nil, &stdout, &stderr)
+	r := result{code: code, stdout: stdout.String(), stderr: stderr.String(), out: args[2]}
+	r.wantCode(t, 0)
+	r.wantVerdicts(t, map[string]string{"m01": verdictNoMatch})
+}
+
+// failingFS is a build cache seed that cannot be read.
+type failingFS struct{}
+
+func (failingFS) Open(string) (fs.File, error) { return nil, errors.New("the seed cannot be read") }
+
+// A seed the run cannot copy is named, nothing is judged, and the run exits 1;
+// a run with no seed copies nothing.
+func TestJudgeSet_ExitsOneWhenItCannotCopyItsSeed(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	f.mutant("m01", "m/m.go", "a + b", "a - b", "./m/")
+	args := f.args("1")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := judgeSet(t.Context(), args, f.environment(), self, failingFS{}, &stdout, &stderr); code != 1 {
+		t.Errorf("exit %d, want 1\nstderr:\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "the seed cannot be read") {
+		t.Errorf("stderr does not name the seed's failure:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(args[2], "results.tsv")); !os.IsNotExist(err) {
+		t.Errorf("a run that copied no seed wrote results.tsv: %v", err)
+	}
+
+	cache := t.TempDir()
+	if err := copySeed(cache, nil); err != nil {
+		t.Errorf("copySeed with no seed = %v, want nil", err)
+	}
+	if entries, _ := os.ReadDir(cache); len(entries) != 0 {
+		t.Errorf("copySeed with no seed wrote %d entries", len(entries))
 	}
 }

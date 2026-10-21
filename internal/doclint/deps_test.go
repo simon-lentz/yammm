@@ -1,6 +1,8 @@
 package doclint_test
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -137,5 +139,44 @@ func TestAssertDependencyLines_MissingRootIsReported(t *testing.T) {
 	}
 	if len(r.msgs) == 0 {
 		t.Error("a missing root was not reported")
+	}
+}
+
+// In a git work tree a row is read against the tracked files alone, as Load
+// reads them: an untracked file's import is not the directory's, and the same
+// file once tracked is.
+//
+// Not parallel: it builds its own repository (isolateFromEnclosingRepository).
+func TestAssertDependencyLines_ReadsTheTrackedFilesOnly(t *testing.T) {
+	isolateFromEnclosingRepository(t)
+	root := materialize(t, "depfixture")
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	git("add", "-A")
+	probe := filepath.Join(root, "correct", "probe.go")
+	if err := os.WriteFile(probe, []byte("package correct\n\nimport _ \"depfixture/other\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &recorder{}
+	if checked, _ := doclint.AssertDependencyLines(r, root); checked == 0 {
+		t.Fatalf("the gate checked no dependency line: %v", r.msgs)
+	}
+	if r.reports("correct imports other") {
+		t.Errorf("an untracked file's import was read: %v", r.msgs)
+	}
+
+	git("add", "correct/probe.go")
+	r = &recorder{}
+	doclint.AssertDependencyLines(r, root)
+	if !r.reports("correct imports other, which its dependency row does not name") {
+		t.Errorf("the same file, tracked, was not read: %v", r.msgs)
 	}
 }

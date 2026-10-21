@@ -80,6 +80,7 @@ func TestFixtureRepositories_IgnoreTheEnclosingRepositorysIndex(t *testing.T) {
 		"TestAssertCitedCodesExist_ReportsAFileItCannotRead",
 		"TestAssertCitedCodesExist_ReadsATrackedTreeBelowTheRepositoryTop",
 		"TestAssertNoDanglingLinks_ReadsTheTrackedTreeOnly",
+		"TestAssertDependencyLines_ReadsTheTrackedFilesOnly",
 	}
 	//nolint:gosec // runs this test binary again
 	child := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^("+strings.Join(targets, "|")+")$", "-test.count=1", "-test.v")

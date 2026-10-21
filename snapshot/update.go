@@ -284,10 +284,12 @@ func UpdateMetadata(
 // deferring the panic to the first input the fast path refuses hides the bug
 // until a document is malformed.
 //
-// When the fallback path fires, the returned [diag.Result] carries a
+// When the fallback path succeeds, the returned [diag.Result] carries a
 // Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], every warning the Load
-// and Marshal legs produced, and one further Warning if the input stated a
-// created_at this path could not parse.
+// and Marshal legs produced, and, unless the caller passed a non-zero
+// [WithUpdateCreatedAt], one further Warning if the input stated a created_at
+// this path could not parse. When its Load or its Marshal fails, the result is
+// the refusal and that leg's issues, with no W_UPDATE_METADATA_FALLBACK.
 // Its details include the distinct Error and Fatal codes that triggered it via
 // a comma-joined "triggering_codes" entry so consumers can log or surface
 // the transition without inspecting the error chain. Callers who want
@@ -303,7 +305,7 @@ func UpdateMetadata(
 //
 // Cost on the happy path matches [UpdateMetadata]. On the fallback path it
 // matches Load + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
-// three times slower on a 20 MB .ys; the W_UPDATE_METADATA_FALLBACK warning
+// three times slower on a 14.7 MB .ys; the W_UPDATE_METADATA_FALLBACK warning
 // makes the transition visible in consumer logs and dashboards.
 //
 // E_CONTEXT_CANCELLED is not a fallback trigger — it propagates as

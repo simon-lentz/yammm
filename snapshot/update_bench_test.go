@@ -17,7 +17,7 @@ import (
 	"github.com/simon-lentz/yammm/snapshot"
 )
 
-// benchInputs caches the generated ~20 MB Marshal output plus the
+// benchInputs caches the generated ~15 MB Marshal output plus the
 // loaded schema so every benchmark invocation measures the primitive
 // under test rather than the setup cost.
 type benchInputs struct {
@@ -31,10 +31,10 @@ var (
 	benchInputsVal  benchInputs
 )
 
-// loadBenchInputs materializes a realistic ~20 MB snapshot once and
-// caches it. The target size is approximate — scaled via instance count
-// to land between 15 MB and 25 MB on the in-tree test schema shape;
-// the benchmarks measure the update primitive, not the marshal setup.
+// loadBenchInputs materializes a realistic snapshot of about 14.7 MB once
+// and caches it. The instance count sets the size on the in-tree test
+// schema shape; the benchmarks measure the update primitive, not the
+// marshal setup.
 func loadBenchInputs(tb testing.TB) benchInputs {
 	tb.Helper()
 	benchInputsOnce.Do(func() {
@@ -55,7 +55,7 @@ func loadBenchInputs(tb testing.TB) benchInputs {
 		typ, _ := s.Type("Person")
 		g := graph.New(s)
 		ctx := context.Background()
-		// ~100_000 instances × ~200 bytes each ≈ 20 MB.
+		// 100_000 instances of about 147 bytes each: about 14.7 MB.
 		const n = 100_000
 		for i := range n {
 			inst := instance.NewValidInstance(
@@ -130,7 +130,7 @@ func BenchmarkLoadMarshalRoundTrip(b *testing.B) {
 }
 
 // TestUpdateMetadataRatioFloor asserts UpdateMetadata is at least 3×
-// faster than Load + Marshal on a 20 MB input. Median of 5 samples per
+// faster than Load + Marshal on a 14.7 MB input. Median of 5 samples per
 // path; runtime.GC between samples to damp CI-runner noise.
 //
 // Threshold rationale: 3× is the floor below which the primitive stops
@@ -139,12 +139,12 @@ func BenchmarkLoadMarshalRoundTrip(b *testing.B) {
 // floor is what this test asserts and the sampled numbers are logged
 // rather than pinned.
 //
-// Skipped under `go test -short` since the 20 MB setup is ~2 seconds
-// and the median-of-5 loop dominates short-test runtime. Also skipped
+// Skipped under `go test -short` since the median-of-5 loop over the
+// 14.7 MB input dominates short-test runtime. Also skipped
 // under the race detector: instrumentation slows the allocation-heavy
-// Load+Marshal baseline far more than the byte-splice fast path, so the
-// instrumented ratio neither measures the documented claim nor gates it
-// honestly — and the median-of-5 loop costs ~40s instrumented. The skip
+// Load+Marshal baseline and the byte-splice fast path by different factors,
+// so the instrumented ratio neither measures the documented claim nor gates it
+// honestly — and the median-of-5 loop takes many times longer instrumented. The skip
 // goes through [raceskip.Skip], so scripts/test.sh runs the test again
 // without -race, and that run is the gate.
 func TestUpdateMetadataRatioFloor(t *testing.T) {

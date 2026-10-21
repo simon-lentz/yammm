@@ -26,13 +26,18 @@ const (
 type record struct {
 	Dir        string // the binary's working directory, its package's
 	StartError string // why the binary did not start; empty when it did
-	Exit       int    // the binary's exit status; not 0 when a signal ended it
+	Exit       int    // the binary's own exit status; not 0 when a signal ended it
 	TimedOut   bool   // the runner stopped the binary at the limit
+	OutputOpen bool   // the binary's output stayed open past outputWait after it exited
 }
 
 // supervise runs the test binary args name, as go test's -exec runner. It
 // stops a binary that reaches the limit, records what happened, and exits with
-// the binary's status, so go test reports the package as it would without it.
+// the binary's status, so go test reports the package as it would without it;
+// a binary it stopped fails, whatever its status.
+// Under -bench go test waits for a binary's output with no bound, so for a
+// benchmark run the runner bounds that wait itself and fails a binary whose
+// output stays open, as go test fails a test binary's.
 func supervise(args, environ []string, stderr io.Writer) int {
 	dir, limit := envValue(environ, recordVar), envValue(environ, superviseLimitVar)
 	allowed, err := time.ParseDuration(limit)
@@ -51,11 +56,31 @@ func supervise(args, environ []string, stderr io.Writer) int {
 		key, _, _ := strings.Cut(kv, "=")
 		return key == recordVar || key == superviseLimitVar
 	})
-	if err := cmd.Start(); err != nil {
+	var out *relayed
+	if benchmarks(args[1:]) {
+		if out, err = relay(cmd); err != nil {
+			fmt.Fprintf(stderr, "mutants: %v\n", err)
+			return 2
+		}
+	}
+	err = cmd.Start()
+	if out != nil {
+		out.started()
+	}
+	if err != nil {
 		rec.StartError = err.Error()
 		fmt.Fprintf(stderr, "mutants: %v\n", err)
 	} else {
 		rec.Exit, rec.TimedOut = waitWithin(cmd, allowed)
+	}
+	if out != nil && rec.StartError == "" {
+		if wait := outputWait(allowed); !out.closedWithin(wait) {
+			rec.OutputOpen = true
+			fmt.Fprintf(stderr, "mutants: the test binary's output was still open %v after it exited\n", wait)
+		}
+	}
+	if rec.TimedOut {
+		fmt.Fprintf(stderr, "mutants: the test binary was stopped at the limit of %v\n", allowed)
 	}
 	if err := writeRecord(dir, rec); err != nil {
 		fmt.Fprintf(stderr, "mutants: %v\n", err)
@@ -64,7 +89,69 @@ func supervise(args, environ []string, stderr io.Writer) int {
 	if rec.StartError != "" {
 		return 1
 	}
+	// A binary that catches the request for its stacks can exit 0.
+	if rec.TimedOut || rec.OutputOpen {
+		return max(rec.Exit, 1)
+	}
 	return rec.Exit
+}
+
+// benchmarks reports whether go test's arguments to a test binary run a
+// benchmark.
+func benchmarks(args []string) bool {
+	return slices.ContainsFunc(args, func(arg string) bool {
+		pattern, ok := strings.CutPrefix(arg, "-test.bench=")
+		return ok && pattern != ""
+	})
+}
+
+// outputWait is how long the runner waits for a benchmark binary's output to
+// close after it exits: what go test waits for a test binary's under a
+// -timeout of the limit, a tenth of it and at least 5 seconds.
+func outputWait(limit time.Duration) time.Duration {
+	return max(limit/10, 5*time.Second)
+}
+
+// relayed is a command's output, both streams on one pipe of the runner's own,
+// copied to the runner's stdout, so they keep the order the binary wrote them
+// in, as on the one file or pipe go test gives a binary for both. A process
+// the binary leaves holding it holds the runner's pipe and not go test's.
+type relayed struct {
+	reader, writer *os.File
+	copied         chan struct{} // closed when the copy ends: at end of file, or a read or write error
+}
+
+func relay(cmd *exec.Cmd) (*relayed, error) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return nil, fmt.Errorf("the binary's output: %w", err)
+	}
+	r := &relayed{reader: reader, writer: writer, copied: make(chan struct{})}
+	cmd.Stdout, cmd.Stderr = writer, writer
+	go func() {
+		_, _ = io.Copy(os.Stdout, reader) //nolint:errcheck // a write error is go test's to report
+		close(r.copied)
+	}()
+	return r, nil
+}
+
+// started closes the runner's copy of the pipe's write end, so the reader
+// reaches end of file when the binary and what it started close theirs.
+func (r *relayed) started() {
+	_ = r.writer.Close()
+}
+
+// closedWithin reports whether the copy ended within wait, and closes the
+// reader when it did not. A copy also ends when a write to the runner's stdout
+// fails.
+func (r *relayed) closedWithin(wait time.Duration) bool {
+	select {
+	case <-r.copied:
+		return true
+	case <-time.After(wait):
+		_ = r.reader.Close()
+		return false
+	}
 }
 
 // waitWithin waits for cmd, and stops it when it has run for allowed: it asks

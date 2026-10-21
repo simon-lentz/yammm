@@ -47,7 +47,7 @@ func cleanEnv(ctx context.Context, environ []string) ([]string, error) {
 	if err != nil {
 		return nil, refusef("git rev-parse --local-env-vars: %v", err)
 	}
-	dropped := append(strings.Fields(string(out)), "GOEXPERIMENT", limitVar, recordVar, superviseLimitVar)
+	dropped := append(strings.Fields(string(out)), "GOEXPERIMENT", "YAMMM_PACKAGES_TRACKED", limitVar, benchLimitVar, recordVar, superviseLimitVar)
 	env := slices.DeleteFunc(slices.Clone(environ), func(kv string) bool {
 		key, _, _ := strings.Cut(kv, "=")
 		return slices.Contains(dropped, key)

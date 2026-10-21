@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"maps"
 	"os"
@@ -442,4 +443,125 @@ func TestTmpSpellings(t *testing.T) {
 			t.Errorf("a sibling directory t reads as the folded spelling %q, %v", folded, err)
 		}
 	}
+}
+
+// unlike names the first held path, in order, that the copy does not hold as
+// copied, with its cause read from the checkout: a path the checkout still
+// holds as copied was removed or changed by a process the run did not stop.
+func TestTree_UnlikeNamesTheCauseFromTheCheckout(t *testing.T) {
+	t.Parallel()
+	other := sha256.Sum256([]byte("other\n"))
+	rewrite := func(content string) func(t *testing.T, checkout string) {
+		return func(t *testing.T, checkout string) {
+			t.Helper()
+			gittree.WriteFile(t, checkout, "m/m.go", []byte(content), 0o600)
+		}
+	}
+	type row struct {
+		name   string
+		change func(t *testing.T, checkout string) // what the checkout gets, or nil
+		edit   func(now map[string]entry)
+		want   string // a part of the error, or "" for none
+	}
+	rows := []row{
+		{"the copy as copied", nil, func(map[string]entry) {}, ""},
+		{
+			"a held file gone", nil, func(now map[string]entry) { delete(now, "m/m.go") },
+			"m/m.go is gone after it was copied back, so a process the run did not stop removes it",
+		},
+		{
+			"a held file with other bytes", nil, func(now map[string]entry) { now["m/m.go"] = entry{mode: now["m/m.go"].mode, sum: other} },
+			"m/m.go is not what was copied back from the checkout, so a process the run did not stop changes it",
+		},
+		{
+			"a held file another kind", nil, func(now map[string]entry) { now["m/m.go"] = entry{mode: os.ModeDir} },
+			"m/m.go is not what was copied back from the checkout, so a process the run did not stop changes it",
+		},
+		{
+			"a held file gone, the checkout changed", rewrite("package m\n"), func(now map[string]entry) { delete(now, "m/m.go") },
+			"m/m.go is not what was copied, so the checkout changed during the run",
+		},
+		{
+			"a held file with other bytes, the checkout changed", rewrite("package m\n"), func(now map[string]entry) { now["m/m.go"] = entry{mode: now["m/m.go"].mode, sum: other} },
+			"m/m.go is not what was copied, so the checkout changed during the run",
+		},
+		{
+			"a held file gone, the checkout's file removed", func(t *testing.T, checkout string) {
+				t.Helper()
+				if err := os.Remove(filepath.Join(checkout, "m", "m.go")); err != nil {
+					t.Fatal(err)
+				}
+			}, func(now map[string]entry) { delete(now, "m/m.go") },
+			"m/m.go is not what was copied, so the checkout changed during the run",
+		},
+		{
+			"a held file that cannot be read", nil, func(now map[string]entry) { now["m/m.go"] = entry{mode: now["m/m.go"].mode} },
+			"m/m.go cannot be read",
+		},
+	}
+	if runtime.GOOS != "windows" {
+		rows = append(rows,
+			row{
+				"a held file with other bytes, the checkout's mode changed", func(t *testing.T, checkout string) {
+					t.Helper()
+					if err := os.Chmod(filepath.Join(checkout, "m", "m.go"), 0o700); err != nil { //nolint:gosec // a mode the copy did not take
+						t.Fatal(err)
+					}
+				}, func(now map[string]entry) { now["m/m.go"] = entry{mode: now["m/m.go"].mode, sum: other} },
+				"m/m.go is not what was copied, so the checkout changed during the run",
+			},
+			row{
+				"a held link with another target", nil, func(now map[string]entry) { now["m/link.go"] = entry{mode: now["m/link.go"].mode, sum: other} },
+				"m/link.go is not what was copied back from the checkout, so a process the run did not stop changes it",
+			},
+			row{
+				// The file takes the link's permission bits as far as the umask lets
+				// it; checkoutHolds compares the kind of entry first.
+				"a held link, the checkout's link made a file holding its target", func(t *testing.T, checkout string) {
+					t.Helper()
+					link := filepath.Join(checkout, "m", "link.go")
+					info, err := os.Lstat(link)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Remove(link); err != nil {
+						t.Fatal(err)
+					}
+					gittree.WriteFile(t, checkout, "m/link.go", []byte("m.go"), info.Mode().Perm())
+				}, func(now map[string]entry) { now["m/link.go"] = entry{mode: now["m/link.go"].mode, sum: other} },
+				"m/link.go is not what was copied, so the checkout changed during the run",
+			},
+		)
+	}
+	for _, tt := range rows {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tree := copied(t)
+			if tt.change != nil {
+				tt.change(t, tree.run.checkout)
+			}
+			now := maps.Clone(tree.files)
+			tt.edit(now)
+			err := tree.unlike(now)
+			switch {
+			case tt.want == "" && err != nil:
+				t.Errorf("unlike = %v, want nil", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
+				t.Errorf("unlike = %v, want an error holding %q", err, tt.want)
+			}
+		})
+	}
+
+	// With every held path gone, the first in path order is named, run after run.
+	t.Run("every held path gone", func(t *testing.T) {
+		t.Parallel()
+		tree := copied(t)
+		first := slices.Sorted(maps.Keys(tree.files))[0]
+		for range 20 {
+			err := tree.unlike(map[string]entry{})
+			if err == nil || !strings.Contains(err.Error(), ": "+first+" is gone after it was copied back") {
+				t.Fatalf("unlike = %v, want the first path in order, %s, named", err, first)
+			}
+		}
+	})
 }

@@ -54,6 +54,12 @@ repos:
   # replace directives name export directories that no longer exist. A
   # file-based hook sees only what git tracks, which is the same rule the repo
   # already applies to what may be committed.
+  #
+  # `go tool` runs the tool's binary from the shared build cache, linking it
+  # there first when it is absent. pre-commit runs a hook's file batches in
+  # parallel processes, so on a cold cache one batch could execute the binary
+  # while another still wrote it, which Linux refuses ("text file busy"):
+  # require_serial runs the batches one after another.
   - repo: local
     hooks:
       - id: gofumpt
@@ -61,12 +67,14 @@ repos:
         language: system
         types: [go]
         exclude: '(^|/)vendor/'
+        require_serial: true
         entry: go tool gofumpt -l -w
       - id: goimports
         name: goimports
         language: system
         types: [go]
         exclude: '(^|/)vendor/'
+        require_serial: true
         entry: go tool goimports -l -w
       - id: go-mod-tidy
         name: go mod tidy
@@ -113,20 +121,20 @@ repos:
   # --- lint, vet & test: the full gate ---
   #
   # `make gate` runs every hook above that names no stage, then these three: the
-  # pinned linter for this host and Windows, vet for every target scripts/vet.sh
-  # names, which CI gives a job of its own, and scripts/test.sh. No commit runs
-  # them.
+  # pinned linter for this host and windows/amd64, vet for every target
+  # scripts/vet.sh names, which CI gives a job of its own, and scripts/test.sh.
+  # No commit runs them.
   - repo: local
     hooks:
       - id: golangci-lint-full
-        name: golangci-lint (host, windows)
+        name: golangci-lint (host, windows/amd64)
         language: system
         stages: [manual]
         pass_filenames: false
         files: \.go$
         entry: scripts/lint.sh
       - id: go-vet-full
-        name: go vet (host, windows, unix family)
+        name: go vet (every target scripts/vet.sh lists)
         language: system
         stages: [manual]
         pass_filenames: false

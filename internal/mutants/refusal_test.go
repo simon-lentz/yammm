@@ -24,6 +24,7 @@ func (r result) wantNothingStarted(t *testing.T) {
 // anything is copied.
 func TestRun_RefusesEveryMalformedMutantByName(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := newFixture(t)
 	f.write("doc/notes.txt", "notes\n")
 	f.write("tagonly/t.go", "//go:build elsewhere\n\npackage tagonly\n")
@@ -115,6 +116,7 @@ func TestRun_RefusesEveryMalformedMutantByName(t *testing.T) {
 
 func TestRun_RefusesARunItCannotOwn(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	for _, row := range []struct {
 		name    string
 		arrange func(f *fixture, args []string) []string
@@ -217,15 +219,31 @@ func TestParseLimit(t *testing.T) {
 	for value, want := range map[string]time.Duration{
 		"": 300 * time.Second, "1s": time.Second, "900s": 900 * time.Second, "15m": 15 * time.Minute, "86400s": 24 * time.Hour, "1440m": 24 * time.Hour, "24h": 24 * time.Hour,
 	} {
-		if got, err := parseLimit(value); err != nil || got != want {
+		if got, err := parseLimit(limitVar, value, 300*time.Second); err != nil || got != want {
 			t.Errorf("parseLimit(%q) = %v, %v; want %v", value, got, err, want)
 		}
 	}
 	for _, value := range []string{"5", "5x", "0s", "-1s", "+1s", "1.5m", "5ms", "1xs", "05s", "86401s", "1441m", "25h", "9999999999s", "99999999999999999999s", "s", " 5s"} {
-		if got, err := parseLimit(value); err == nil {
+		if got, err := parseLimit(limitVar, value, 300*time.Second); err == nil {
 			t.Errorf("parseLimit(%q) = %v, want a refusal", value, got)
 		}
 	}
+}
+
+// TEST_BENCH_LIMIT is read by the rule of MUTATE_TIMEOUT, and a refusal names
+// the variable that holds the value.
+func TestNewRun_ReadsTheBenchmarkLimitScriptsTestShReads(t *testing.T) {
+	t.Parallel()
+	skipJudgingOnWindows(t)
+	f := newFixture(t)
+	f.index()
+	f.mutant("m01", "m/m.go", "a + b", "a - b", "./m/")
+	f.env = append(f.env, benchLimitVar+"=0s")
+
+	r := f.run()
+
+	r.wantCode(t, 2)
+	r.wantStderr(t, benchLimitVar+" must be a whole number of seconds, minutes or hours")
 }
 
 func TestExecValue(t *testing.T) {
@@ -234,7 +252,9 @@ func TestExecValue(t *testing.T) {
 		"/bin/mutants":       "/bin/mutants -supervise",
 		"/a dir/mutants":     "'/a dir/mutants' -supervise",
 		"/it's here/mutants": `"/it's here/mutants" -supervise`,
-		`/a"b/mutants`:       `'/a"b/mutants' -supervise`,
+		`/a"b/mutants`:       `/a"b/mutants -supervise`,
+		`/it's"b"/mutants`:   `/it's"b"/mutants -supervise`,
+		`/a "b/mutants`:      `'/a "b/mutants' -supervise`,
 		"/a\tb/mutants":      "'/a\tb/mutants' -supervise",
 		"/a\nb/mutants":      "'/a\nb/mutants' -supervise",
 		"/a\rb/mutants":      "'/a\rb/mutants' -supervise",
@@ -244,7 +264,7 @@ func TestExecValue(t *testing.T) {
 		}
 	}
 	if got, err := execValue(`/it's "here"/mutants`); err == nil {
-		t.Errorf("a path with both quote characters is spelled %q, want a refusal", got)
+		t.Errorf("a path with white space and both quote characters is spelled %q, want a refusal", got)
 	}
 }
 
@@ -279,7 +299,7 @@ func TestCleanEnv_DropsWhatBindsARunAndKeepsBuildFailuresInTheEvents(t *testing.
 	t.Parallel()
 	env, err := cleanEnv(t.Context(), []string{
 		"PATH=" + os.Getenv("PATH"), "GODEBUG=http2debug=1,gotestjsonbuildtext=1", "GIT_DIR=/elsewhere/.git", "GIT_INDEX_FILE=/elsewhere/index",
-		limitVar + "=5s", recordVar + "=/r", superviseLimitVar + "=1s", "KEPT=1",
+		limitVar + "=5s", benchLimitVar + "=5s", recordVar + "=/r", superviseLimitVar + "=1s", "KEPT=1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +307,7 @@ func TestCleanEnv_DropsWhatBindsARunAndKeepsBuildFailuresInTheEvents(t *testing.
 	if got := envValue(env, "GODEBUG"); got != "http2debug=1,gotestjsonbuildtext=0" {
 		t.Errorf("GODEBUG is %q", got)
 	}
-	for _, name := range []string{"GIT_DIR", "GIT_INDEX_FILE", limitVar, recordVar, superviseLimitVar} {
+	for _, name := range []string{"GIT_DIR", "GIT_INDEX_FILE", limitVar, benchLimitVar, recordVar, superviseLimitVar} {
 		if strings.Contains(strings.Join(env, "\n"), name+"=") {
 			t.Errorf("the run's environment holds %s", name)
 		}

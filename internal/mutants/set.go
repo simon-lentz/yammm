@@ -208,8 +208,9 @@ type packageSets struct {
 }
 
 // load lists the checkout's packages, once when the listing succeeds. A
-// package with no tracked Go file is left out, as scripts/packages.sh leaves it
-// out of the suite.
+// package with no tracked Go file, whose Go files git ignores once
+// scripts/packages.sh --check passes the checkout, is left out, as that script
+// leaves it out of the suite.
 func (s *packageSets) load(ctx context.Context) error {
 	if s.loaded {
 		return nil

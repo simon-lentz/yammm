@@ -6,7 +6,9 @@
 # schema comes from the module cache rather than golangci-lint.run: a fetch there
 # failed CI on transient network errors, and the module already holds the schema
 # its source builds against. `next` is the newest schema the module ships: its
-# versioned files stop a release short of the module's own version.
+# versioned files stop a release short of the module's own version. The linter
+# that verifies it is scripts/linter.sh's: the build YAMMM_GOLANGCI_LINT names,
+# or one made for this run.
 #
 # Usage: scripts/lintconfig.sh
 set -euo pipefail
@@ -22,4 +24,6 @@ if [ ! -f "${schema}" ]; then
 	printf 'lintconfig: schema not found at %s\n' "${schema}" >&2
 	exit 1
 fi
-go tool golangci-lint config verify --config=.golangci.yml --schema "${schema}"
+
+. scripts/linter.sh
+"${linter}" config verify --config=.golangci.yml --schema "${schema}"

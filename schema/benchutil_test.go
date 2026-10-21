@@ -36,14 +36,15 @@ func buildTinyBenchSchema(tb testing.TB) *schema.Schema {
 
 // buildLargeBenchSchema returns a synthetic wide schema at a representative
 // complexity ceiling for the StructuralHash benchmarks: 120 types with 5
-// properties each (600 properties total) plus 60 associations distributed
-// across the first 60 types (one each, pointing to type (i+7)%120).
+// properties each (600 properties total) plus 60 associations, one on each of
+// the first 60 types. The association on type i points to type (i*7)%120.
 //
 // The schema has a deterministic shape: types are named Type000..Type119,
 // properties are named pN_M where N is the type index and M is the property
-// index within the type. The +7 stride produces a non-trivial reference
-// graph (not self-loops, not all forward) so StructuralHash walks a
-// realistic mix of refs.
+// index within the type, and associations are named ASSOC_N, because a
+// relation name is UPPER_SNAKE. The stride of 7 gives 60 distinct targets.
+// Some point forward, some backward, and those of types 0, 20 and 40 point to
+// the type itself, so StructuralHash walks a mix of references.
 //
 // Use this helper for any future benchmark or stress test that wants a
 // wide-but-valid schema without re-authoring the shape.
@@ -54,7 +55,7 @@ func buildLargeBenchSchema(tb testing.TB) *schema.Schema {
 		typeCount         = 120
 		propsPerType      = 5 // 1 PK + 4 scalars
 		associationCount  = 60
-		associationStride = 7 // coprime to typeCount so (i+7)%120 visits many targets
+		associationStride = 7 // coprime to typeCount, so the targets (i*7)%120 are distinct
 	)
 
 	b := schema.NewBuilder().
@@ -76,7 +77,7 @@ func buildLargeBenchSchema(tb testing.TB) *schema.Schema {
 		if i < associationCount {
 			dst := fmt.Sprintf("Type%03d", (i*associationStride)%typeCount)
 			tb2.WithRelation(
-				fmt.Sprintf("assoc%03d", i),
+				fmt.Sprintf("ASSOC_%03d", i),
 				schema.LocalTypeRef(dst, location.Span{}),
 				true, // optional
 				true, // many

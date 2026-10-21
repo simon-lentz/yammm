@@ -51,6 +51,7 @@ func verdictFixture(t *testing.T) *fixture {
 
 func TestRun_GivesEachMutantItsVerdict(t *testing.T) {
 	t.Parallel()
+	skipJudgingOnWindows(t)
 	f := verdictFixture(t)
 	want := map[string]string{}
 	for _, m := range []struct{ id, file, search, replace, pkgs, verdict string }{

@@ -26,7 +26,8 @@ const (
 
 // AssertDependencyLines reports every dependency ROW in the module that
 // disagrees with the imports of the package its subject names, and returns how
-// many rows it read and how many "# Dependencies" headings it found.
+// many rows it read and how many doc.go files carry a "# Dependencies" heading
+// or a row.
 //
 // A row's subject names a package, which need not be the one whose doc.go
 // carries it: adapter/doc.go tabulates its whole family, one row per sibling,
@@ -64,7 +65,7 @@ func AssertDependencyLines(t TB, root string) (checked, headings int) {
 				t.Errorf("%s: the dependency row names %q, which is no package in this module", file, row.subject)
 				continue
 			}
-			actual, err := nonStdImports(filepath.Join(root, filepath.FromSlash(subject.Dir)), m.Path)
+			actual, err := nonStdImports(filepath.Join(root, filepath.FromSlash(subject.Dir)), m.Path, m.tracked)
 			if err != nil {
 				t.Errorf("%s: %v", file, err)
 				continue
@@ -99,10 +100,11 @@ func (m *Module) packageForSubject(subject, own string) (*Package, bool) {
 }
 
 // nonStdImports returns the non-test imports outside the standard library of
-// every Go file in dir, whatever its build constraints, since a row states what
-// a directory imports on every host. An in-module path is spelled relative to
-// the module, any other in full.
-func nonStdImports(dir, modulePath string) ([]string, error) {
+// the Go files in dir, whatever their build constraints save the bare
+// "ignore", since a row states what a directory imports on every host. Where
+// tracked is not nil it reads only the files tracked holds, as [Load] does. An
+// in-module path is spelled relative to the module, any other in full.
+func nonStdImports(dir, modulePath string, tracked map[string]bool) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading imports of %s: %w", dir, err)
@@ -112,6 +114,9 @@ func nonStdImports(dir, modulePath string) ([]string, error) {
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !isSourceFile(name) {
+			continue
+		}
+		if tracked != nil && !tracked[filepath.ToSlash(filepath.Join(dir, name))] {
 			continue
 		}
 		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ImportsOnly|parser.ParseComments)

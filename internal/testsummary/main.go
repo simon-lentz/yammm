@@ -2,20 +2,23 @@
 // the run by what each package reported, not by the go command's exit status
 // alone.
 //
-// It prints each package's result line, the output of every test that failed or
-// never finished, and all of a failed package's own output, which holds the
-// shuffle seed that reproduces its order. Then it names each package that
-// reported no result, each package that passed or skipped and ran no test, and
-// every skipped test with its reason. The arguments are the packages the run was asked for, and it exits
-// 1 when one of them failed or reported no result.
+// It prints each package's result line and the output of every test that
+// failed. For a package that failed or reported no result, it also prints the
+// output of each test that never finished and all of the package's own output,
+// which under -shuffle holds the seed that reproduces its order. Then it names
+// each package that reported no result, each package that passed or skipped
+// and ran no test, and every skipped test with its reason. The arguments are
+// the packages the run was asked for, and it exits 1 when one of them failed
+// or reported no result.
 //
 // go test -json gives a line written outside the testing package's framing
-// (a panic, a stack, a raw print from any test) to the test whose result line
-// it read last, until it reads another line naming a test or the package's
-// result. When a finished test's result line came last, a test binary's
-// timeout panic, the tests it names as running and every goroutine's stack
-// arrive that way, so a failed package also prints what followed a finished
-// test's own result line, which [testjson.SplitAtResult] finds.
+// (a panic, a stack, a raw print from any test) to the test that the last
+// framing line it read names, a "=== " line or a test's result line, until it
+// reads another such line or the package's result. When a finished test's
+// result line came last, a test binary's timeout panic, the tests it names as
+// running and every goroutine's stack arrive that way, so a failed package
+// also prints what followed a finished test's own result line, which
+// [testjson.SplitAtResult] finds.
 //
 // A test skipped through [raceskip.Skip] is also collected, a subtest by its
 // own name. With -race-skips=FILE, those tests are written to FILE, one line
@@ -33,14 +36,22 @@
 //
 // With -slowest=N, the summary lists before its verdict the N packages whose
 // results go test timed longest, longest first, each with its seconds to a
-// tenth; packages timed alike are in import-path order. The seconds are a
-// package's test binary's, so they leave out its build, and packages run at
-// once, so they can sum to more than the run took. A run of fewer than N
+// tenth; packages timed alike are in import-path order. A package's seconds
+// run from the start of its test run, after its build, to the run's end, so
+// they leave out its build, and packages run at once, so they can sum to more
+// than the run took. A run of fewer than N
 // packages lists them all.
+//
+// With -timeout=D, the go test -timeout of the run, the summary also names
+// each package whose result go test timed at over 70% of D, longest first: a
+// package that nears the limit is seen before it reaches it. A zero D, which
+// go test reads as no limit, names none. The list is a
+// warning and changes no exit status. With -annotate, each such package is
+// also printed as a GitHub Actions warning annotation.
 //
 // Usage:
 //
-//	go test -json ./... | testsummary [-race-skips=FILE] [-durations=FILE] [-slowest=N] [-require=NAME]... pkg...
+//	go test -json ./... | testsummary [-race-skips=FILE] [-durations=FILE] [-slowest=N] [-timeout=D [-annotate]] [-require=NAME]... pkg...
 package main
 
 import (
@@ -54,6 +65,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/internal/testjson"
@@ -69,6 +81,8 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	raceSkipsFile := fs.String("race-skips", "", "write the tests raceskip.Skip skipped to this file")
 	durationsFile := fs.String("durations", "", "write every timed result to this file")
 	slowest := fs.Int("slowest", 0, "list this many of the packages go test timed longest")
+	timeout := fs.Duration("timeout", 0, "the run's go test -timeout: name each package that took over 70% of it")
+	annotate := fs.Bool("annotate", false, "print each package over 70% of -timeout as a GitHub Actions warning")
 	var required []string
 	fs.Func("require", "a test that must run and pass; may be given more than once", func(name string) error {
 		if name == "" {
@@ -89,6 +103,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "testsummary: -slowest takes a count of zero or more, got %d\n", *slowest)
 		return 2
 	}
+	if *timeout < 0 {
+		fmt.Fprintf(stderr, "testsummary: -timeout takes a duration of zero or more, got %v\n", *timeout)
+		return 2
+	}
 
 	s, err := read(stdin, stdout)
 	if err != nil {
@@ -97,7 +115,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	}
 	// The report comes first, so a file that cannot be written does not hide
 	// the run's result.
-	status := s.report(want, required, *slowest, stdout, stderr)
+	status := s.report(want, required, *slowest, budget{*timeout, *annotate}, stdout, stderr)
 	for _, out := range []struct {
 		file    string
 		content func() []byte
@@ -301,7 +319,31 @@ func (s *summary) slowestPackages(n int) (heading string, items []string) {
 	return fmt.Sprintf("the %d slowest of %d packages", n, len(pkgs)), items
 }
 
-func (s *summary) report(want, required []string, slowest int, stdout, stderr io.Writer) int {
+// budget is the run's go test -timeout, and whether a package over 70% of it
+// is also printed as a GitHub Actions annotation. A zero timeout names none.
+type budget struct {
+	timeout  time.Duration
+	annotate bool
+}
+
+// overBudget returns each package result go test timed at over 70% of the
+// timeout, most seconds first and ties by import path.
+func (s *summary) overBudget(timeout time.Duration) []timing {
+	var over []timing
+	for _, r := range s.timed {
+		// Ten times the seconds against seven times the limit keeps the
+		// boundary exact for a whole-second limit: 420 s of 10m is not over.
+		if r.test == "" && timeout > 0 && r.seconds*10 > timeout.Seconds()*7 {
+			over = append(over, r)
+		}
+	}
+	slices.SortFunc(over, func(a, b timing) int {
+		return cmp.Or(cmp.Compare(b.seconds, a.seconds), strings.Compare(a.pkg, b.pkg))
+	})
+	return over
+}
+
+func (s *summary) report(want, required []string, slowest int, b budget, stdout, stderr io.Writer) int {
 	var missing, failed, noTests []string
 	for _, pkg := range want {
 		switch s.tally.Result(pkg) {
@@ -320,6 +362,17 @@ func (s *summary) report(want, required []string, slowest int, stdout, stderr io
 	list(stdout, fmt.Sprintf("%d test(s) skipped", len(s.skipped)), s.skipped)
 	heading, items := s.slowestPackages(slowest)
 	list(stdout, heading, items)
+	over := s.overBudget(b.timeout)
+	items = nil
+	for _, r := range over {
+		items = append(items, fmt.Sprintf("%6.1fs  %s", r.seconds, r.pkg))
+	}
+	list(stdout, fmt.Sprintf("%d package(s) took over 70%% of the %v -timeout", len(over), b.timeout), items)
+	if b.annotate {
+		for _, r := range over {
+			fmt.Fprintf(stdout, "::warning title=Test budget::%s took %.1fs, over 70%% of the %v -timeout\n", r.pkg, r.seconds, b.timeout)
+		}
+	}
 
 	status := 0
 	if len(missing) > 0 {
