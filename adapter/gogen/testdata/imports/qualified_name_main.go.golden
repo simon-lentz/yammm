@@ -78,8 +78,8 @@ const SerializedEntry = "qualified_name_main.yammm"
 //		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
 //
 // The synthetic root keeps the loaded type identities stable: no working
-// directory, checkout or mount point enters them. Any root of that form
-// serves; generation verified this one.
+// directory, checkout or mount point enters them. Any root WithSyntheticRoot
+// accepts serves; generation verified this one.
 func SerializedSources() map[string][]byte {
 	m := make(map[string][]byte, len(serializedSources))
 	for k, v := range serializedSources {

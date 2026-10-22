@@ -156,26 +156,34 @@ func WithSourcesOnly(only bool) LoadOption {
 // filesystem-derived: each source key is joined to root, so a type's SchemaPath
 // reads "embedded://app/a/b/x.yammm" instead of a path that moves with the
 // working directory, the checkout, or the container mount point. It is the way
-// to load embedded sources whose identities are persisted — a snapshot records
-// them, and a filesystem-derived one re-keys every record when the process
+// to load embedded sources that import one another and whose identities must
+// stay fixed: a SourceID
+// from the filesystem, and every TypeID built on it, changes as the process
 // moves. The root has the form scheme://authority, optionally followed by a
-// path, such as "embedded://app". It is normalized once: the scheme in lower
-// case, the path cleaned as path.Clean cleans it, and the whole in NFC; the
-// authority keeps its case and is not cleaned. A path climbing above it, and a
-// backslash, are refused.
+// path, such as "embedded://app", and is judged whole. Its scheme is an RFC
+// 3986 scheme of two characters or more, and not "string" in any case, which [LoadString]
+// mints. The text after the scheme is judged in NFC, where it holds letters,
+// digits, the marks - . _ ~ ! $ & ' ( ) * + , ; = and characters past ASCII
+// that print, as strconv.IsPrint reports; "/" separates the authority from
+// the path and the path's segments, and ":" and "@" are taken in the path
+// alone. So a query, a fragment, a percent escape, a space, a character that does not print
+// and a backslash are each refused, and so are text that is not valid UTF-8,
+// an authority that is "." or ".." and a path climbing above the authority. It
+// is normalized once: the scheme in lower case, the text in NFC, and the path
+// cleaned as path.Clean cleans it; the authority keeps its case and is not
+// cleaned.
 //
 // The root also stands in for the module root, so module-style imports resolve
 // under it. The load is rejected outright, rather than silently degraded, in
-// four cases: a root not of that form, or one
-// [github.com/simon-lentz/yammm/location.ValidateSyntheticSourceID] refuses; a
-// root without [WithSourcesOnly], where an import miss would fall back to disk
-// and mix a file-backed identity into the closure; a root together with a
+// four cases: a root not of that form; a
+// root without [WithSourcesOnly], which makes the given sources every source
+// the load reads, as a root that names every identity requires; a root together with a
 // non-empty moduleRoot argument, which names the same concept twice; and the
 // option passed to [Load] or [LoadString], where it can only ever be a no-op.
 //
 // A key is read by [github.com/simon-lentz/yammm/location.NormalizeSyntheticKey]:
-// it holds no backslash, and once cleaned and in NFC it is relative and names a
-// file, not the root or a directory above it. A key that escapes the root is
+// it holds no backslash and no character that does not print, and once cleaned
+// and in NFC it is relative and names a file, not the root or a directory above it. A key that escapes the root is
 // permitted and yields a ".."-bearing identity, which stays stable and
 // distinct. A relative import ("./x", "../x") resolves
 // against the importing source's key, as text, and one climbing above the root

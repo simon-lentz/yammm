@@ -39,9 +39,11 @@
 // repository as untracked, or a file the program cannot read, as a file git
 // marks skip-worktree and the checkout lacks; and when the checkout's
 // scripts/packages.sh --check refuses it, as each gate script that takes its
-// package list would: for an untracked Go file in a tracked package, ignored or
-// not, or one git does not ignore in another directory go reads; a tracked one
-// below a go.mod git does not track; a go.work in effect; or no tracked Go file. Each worker copies the files git lists in the checkout, tracked or
+// package list would: for an untracked Go file in a tracked package or in a
+// directory holding a tracked Go file whose nearest go.mod git does not track,
+// ignored or not, or one git does not ignore in another directory go reads or
+// below such untracked go.mod files alone; a tracked one whose nearest go.mod
+// git does not track; a go.work in effect; or no tracked Go file in a directory go reads. Each worker copies the files git lists in the checkout, tracked or
 // untracked and not ignored, into <out dir>/work/wN with an index of the
 // tracked ones, and judges its mutants there one at a time. Before each test
 // run it holds the copy to what it copied, each file's bytes and mode and each
@@ -49,7 +51,8 @@
 //
 // Every go command runs under the toolchain the checkout's go.mod names, with
 // the caller's environment and GOFLAGS, less the variables that bind git to one
-// repository, this program's own and GOEXPERIMENT, and with GODEBUG's
+// repository, this program's own, scripts/packages.sh's YAMMM_PACKAGES_TRACKED
+// and GOEXPERIMENT, and with GODEBUG's
 // gotestjsonbuildtext set to 0, so the go command names a failed build in its
 // events. The jsonv2 configuration
 // alone sets an experiment, and a run whose go env file sets one is refused, so
@@ -144,9 +147,10 @@
 // failing tests are the tests go test reported failed in a package that
 // failed, and of one whose binary exited 0 the tests still open when it exited:
 // those that started and reported nothing after, and those whose pass or skip
-// has no result line of their own, which the go command gave them. For TIMEOUT
-// they are the tests still open in a package stopped at the limit, in the same
-// two kinds. Each is a name a test binary can also print.
+// has no result line of their own, which the go command gave them. For TIMEOUT,
+// and for a KILLED benchmark run whose every failed package was stopped at the
+// limit, they are the tests still open in the stopped packages, in the same two
+// kinds. Each is a name a test binary can also print.
 // <out dir>/logs/<id>.<spelling>.log names, when a test run decides the
 // verdict, each package that has test files and did not pass with a test, and
 // holds what each that did not pass printed, less the output of each test that

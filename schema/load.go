@@ -361,6 +361,9 @@ func LoadString(ctx context.Context, sourceCode, sourceName string, opts ...Load
 	if !utf8.ValidString(sourceName) {
 		return fatalResult(fmt.Errorf("source name %q: %w", sourceName, location.ErrInvalidUTF8Path), diag.Result{})
 	}
+	if err := location.ValidateSyntheticSourceID("string://" + sourceName); err != nil {
+		return fatalResult(fmt.Errorf("source name %q: %w", sourceName, err), diag.Result{})
+	}
 
 	// Create a synthetic source ID (NewSourceID returns just SourceID, no error)
 	sourceID := location.NewSourceID("string://" + sourceName)
@@ -1716,42 +1719,60 @@ func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) 
 		return "", nil
 	}
 	root, err := syntheticRootForm(cfg.syntheticRoot)
-	if err == nil {
-		err = location.ValidateSyntheticSourceID(root)
-	}
 	if err != nil {
 		return "", fmt.Errorf("invalid synthetic root %q: %w", cfg.syntheticRoot, err)
 	}
 	if !cfg.sourcesOnly {
-		return "", fmt.Errorf("synthetic root %q requires WithSourcesOnly: without it an unresolved import "+
-			"reads from disk and mints a file-backed identity into the same closure", cfg.syntheticRoot)
+		return "", fmt.Errorf("synthetic root %q requires WithSourcesOnly: the root names every identity "+
+			"the load mints, so the given sources must be every source it reads", cfg.syntheticRoot)
 	}
 	if moduleRoot != "" {
 		return "", fmt.Errorf("synthetic root %q cannot be combined with module root %q: "+
 			"pass an empty module root, which the synthetic root stands in for", cfg.syntheticRoot, moduleRoot)
 	}
-	// NFC, as location.NormalizeSyntheticKey applies to the key half: two
-	// spellings of one root must mint one identity, as two spellings of one key do.
-	return norm.NFC.String(root), nil
+	return root, nil
 }
 
-// syntheticRootForm returns root with its scheme in lower case and its path
-// cleaned, or an error when root is not scheme://authority with an optional
-// path; its caller's NFC completes the one form. A backslash and a path
-// climbing above the authority are refused.
+// stringScheme is the scheme of the identity [LoadString] mints.
+const stringScheme = "string"
+
+// syntheticRootForm returns the one form of root, with its scheme in lower
+// case, its text in NFC and its path cleaned. It refuses a root that is not
+// scheme://authority with an optional path, a one-letter or "string" scheme,
+// text that is not UTF-8, an authority of "." or "..", a character
+// [rootCharacterFault] refuses, and a path that climbs above the authority.
 func syntheticRootForm(root string) (string, error) {
 	scheme, rest, ok := strings.Cut(root, "://")
 	if !ok || !isURIScheme(scheme) {
 		return "", errors.New("a synthetic root has the form scheme://authority, such as embedded://app")
 	}
-	authority, rootPath, _ := strings.Cut(rest, "/")
+	scheme = strings.ToLower(scheme)
 	switch {
-	case authority == "":
-		return "", errors.New("the root names no authority after its scheme")
-	case strings.ContainsRune(rest, '\\'):
-		return "", errors.New("the root holds a backslash; a synthetic root separates its segments with / alone")
+	case len(scheme) == 1:
+		return "", errors.New("the root's scheme is one letter, which reads as a drive; a scheme of two characters or more is no host path")
+	case scheme == stringScheme:
+		return "", errors.New("the scheme string names a LoadString source; a root takes another scheme")
 	}
-	form := strings.ToLower(scheme) + "://" + authority
+	if !utf8.ValidString(rest) {
+		return "", errors.New("the root is not valid UTF-8")
+	}
+	// NFC first, as location.NormalizeSyntheticKey applies it to a key: two
+	// spellings of one root mint one identity, and NFC can make a refused character.
+	rest = norm.NFC.String(rest)
+	authority, rootPath, _ := strings.Cut(rest, "/")
+	switch authority {
+	case "":
+		return "", errors.New("the root names no authority after its scheme")
+	case ".", "..":
+		return "", fmt.Errorf("the root's authority is the dot segment %q, which names nothing", authority)
+	}
+	if fault := rootCharacterFault(authority, false); fault != "" {
+		return "", errors.New(fault)
+	}
+	if fault := rootCharacterFault(rootPath, true); fault != "" {
+		return "", errors.New(fault)
+	}
+	form := scheme + "://" + authority
 	switch cleaned := path.Clean(strings.TrimLeft(rootPath, "/")); {
 	case cleaned == ".":
 	case cleaned == ".." || strings.HasPrefix(cleaned, "../"):
@@ -1760,6 +1781,29 @@ func syntheticRootForm(root string) (string, error) {
 		form += "/" + cleaned
 	}
 	return form, nil
+}
+
+// rootMarks are the marks RFC 3986 admits in a registered name and in a path
+// segment beside letters and digits: its unreserved marks and its sub-delims.
+const rootMarks = "-._~!$&'()*+,;="
+
+// rootCharacterFault describes the first character of text that RFC 3986 admits
+// in no registered name, or with inPath in no path, or returns "". Narrower
+// than the RFC, it admits no percent escape; wider, a character past ASCII that
+// [strconv.IsPrint] reports printable, as a synthetic identity holds alone.
+func rootCharacterFault(text string, inPath bool) string {
+	for _, r := range text {
+		switch {
+		case r >= utf8.RuneSelf && strconv.IsPrint(r):
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune(rootMarks, r):
+		case inPath && (r == '/' || r == ':' || r == '@'):
+		case r == ':' || r == '@':
+			return fmt.Sprintf("the root's authority holds %q; a root names no user and no port", r)
+		default:
+			return fmt.Sprintf("the root holds %q; after its scheme a root holds letters, digits, / and the marks - . _ ~ ! $ & ' ( ) * + , ; =, with : and @ in its path alone, and printable characters past ASCII, so no space, control or format character, backslash, percent escape, query or fragment", r)
+		}
+	}
+	return ""
 }
 
 // isURIScheme reports whether s is a URI scheme as RFC 3986 section 3.1 spells

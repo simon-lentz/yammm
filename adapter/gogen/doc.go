@@ -10,8 +10,8 @@
 // instance-data path: it never parses, validates, or serializes instances, and it
 // imports neither instance nor graph. It maps a completed schema to Go source,
 // nothing more. It also returns a plain error rather than the
-// [github.com/simon-lentz/yammm/diag.Result] the rest of the library threads
-// through, because its failures are refusals of its inputs and generator bugs (see
+// [github.com/simon-lentz/yammm/diag.Result] the library's loading, validation
+// and graph code return, because its failures are refusals of its inputs and generator bugs (see
 // Error Conditions), not data diagnostics with source locations.
 //
 // # Generated Declarations
@@ -20,6 +20,8 @@
 //
 //   - A named Go type for every DataType (type <Name> <base>), plus value constants
 //     when the DataType resolves to an Enum.
+//   - The inline enum a List DataType holds as its innermost element
+//     (type <DataType>Element string), plus its value constants.
 //   - A per-owner named type for every inline-enum property
 //     (type <Owner><Field> string), plus its value constants.
 //   - A Date type when a position emits Date, and one type per distinct
@@ -39,7 +41,8 @@
 //
 // A type's or a property's schema doc-comment, an edge property's included,
 // becomes the Go declaration's doc-comment, one "//" line for each of its
-// lines; a data type's, a relation's and the schema's own are not written.
+// lines; every other doc-comment, a data type's, a relation's, an invariant's,
+// an annotation's and the schema's own among them, is not written.
 // The text is the loaded schema's, whose continuation lines lost the
 // indentation they all share, byte for byte, when the parser read the comment,
 // so layout that indents every continuation line alike makes no code block;
@@ -56,9 +59,11 @@
 //
 // # Type Mapping
 //
-// Each property's constraint maps to a Go type:
+// Each property's constraint maps to a Go type, and a DataType reference to the
+// DataType's own type:
 //
-//	String, UUID, Pattern, Enum   →  string
+//	String, UUID, Pattern         →  string
+//	Enum                          →  <Owner><Field>     (generated, a string type)
 //	Integer                       →  int64
 //	Float                         →  float64
 //	Boolean                       →  bool
@@ -71,8 +76,8 @@
 // The library stores a Date as "2006-01-02" and a custom-layout Timestamp
 // through its declared layout, and adapter/json writes those strings, which a
 // bare time.Time cannot decode. The generated Date and per-layout types are
-// structs embedding time.Time — so every time.Time method is promoted and a
-// value is built as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that
+// structs embedding time.Time — so every time.Time method but MarshalJSON and
+// UnmarshalJSON is promoted, and a value is built as Date{Time: t} — carrying MarshalJSON and UnmarshalJSON that
 // speak the stored form. A per-layout type's bare spelling is "Timestamp" plus
 // the layout's letters and digits (Timestamp20060102150405 for "2006-01-02
 // 15:04:05"). When another entity claims that spelling, the layout takes its
@@ -98,7 +103,9 @@
 // writes it as a null element, which instance validation refuses
 // (E_TYPE_MISMATCH).
 //
-// Every field carries a json tag preserving the wire name verbatim. An optional
+// Every field but the time.Time a generated temporal type embeds (Date, a
+// per-layout type, or a DataType resolving to Date or Timestamp) carries a json
+// tag preserving the wire name verbatim. An optional
 // pointer field adds ,omitempty. An optional slice field adds ,omitzero, which
 // leaves out a nil slice and writes a present empty list as [], since the
 // library keeps an empty list apart from an absent one; encoding/json reads
@@ -148,11 +155,11 @@
 //
 // # Imports and Cross-Schema Schemas
 //
-// gogen handles the full range of yammm schemas, including schemas with imports.
+// gogen handles schemas with imports, save the layouts Error Conditions lists.
 // The entire import closure — the entry schema plus every transitively imported
 // schema, walked deterministically and deduped by source — is flattened into one
-// self-contained package, whose names the Names section states: a name unique in
-// the closure stays bare, and two schemas' Region are Type_geo__Region and
+// self-contained package, whose names the Names section states: a name whose
+// bare spelling no other entity or reserved name takes stays bare, and two schemas' Region are Type_geo__Region and
 // Type_common__Region. Inherited properties, associations, and compositions
 // resolve against their declaring schema, so a member inherited from a
 // cross-schema parent maps to the correct type.
@@ -161,7 +168,7 @@
 //
 // Every top-level declaration shares one Go package-block namespace: each type,
 // data type, per-layout type, EDGE_ struct, inline enum, List element enum and
-// enum value constant, and the names gogen emits or once emitted (Graph,
+// enum value constant, and the exported names gogen emits or once emitted (Graph,
 // SchemaHash, SerializedSources, SerializedEntry, SerializedModel,
 // SerializedModelEntry and Date), which are reserved. Each entity has a bare
 // spelling, built from the names as the schema writes them:
@@ -171,7 +178,8 @@
 //   - a per-layout type: "Timestamp" and the layout's letters and digits;
 //   - an EDGE_ struct: EDGE_<Owner>_<edge>_<Target>, its owner's and its
 //     target's names as exported identifiers and its relation's field name
-//     (the name in lower case), so Url's and URL's LINK associations share one;
+//     (the name in lower case), so Url's and URL's LINK associations to one
+//     target share one;
 //   - an inline enum: <Owner><Field>, where <Owner> is its type's bare
 //     spelling or its EDGE_ struct's;
 //   - the inline enum a List data type holds as its element: <DataType>Element;
@@ -237,19 +245,20 @@
 // generation-machine path, so the output is byte-reproducible across checkouts
 // and CI. The entry keys by its path under the load's recorded module root
 // ([github.com/simon-lentz/yammm/schema.Schema.ModuleRoot] — supplied by the
-// caller, discovered from a yammm.mod marker, or a synthetic root), compared as
+// caller, discovered from a yammm.mod marker, a synthetic root, or the entry
+// file's own directory), compared as
 // an identity, with ".." segments when the entry lies outside it. A file entry
 // loaded with no root keys against its own directory. A
 // [github.com/simon-lentz/yammm/schema.LoadString] source has no root and keys
-// by the base name it was loaded under, split at either separator; a name with
-// no base, such as ".", names no file and is refused.
+// by the base name it was loaded under, split at either separator and written
+// in NFC; a name with no base, such as ".", names no file and is refused.
 // Every imported source keys by the text that imports it, resolved against its
 // importer's key by [github.com/simon-lentz/yammm/schema.SyntheticImportKey],
 // the loader's own rule, so an import through a symlinked directory keys by
 // the path the import names, not by where the link resolves.
 //
-// Two layouts a load accepts have no store the re-load can read, and [Marshal]
-// refuses both, naming the paths: one source imported by two paths under two
+// Two import layouts a load accepts have no store the re-load can read, and
+// [Marshal] refuses both, naming the paths: one source imported by two paths under two
 // keys (a store holding both fails to re-load as one schema name registered
 // twice), and two sources
 // taking one key (a relative import through a symlink reads the link target's
@@ -259,7 +268,8 @@
 // LoadString name with no base, which names no file. So is a key the re-load's
 // key rule, [github.com/simon-lentz/yammm/location.NormalizeSyntheticKey],
 // refuses: one holding a backslash, which a Unix file name may hold and another
-// host reads as a separator, and one that looks absolute, such as the key of a
+// host reads as a separator, one holding a character that does not print, and
+// one that looks absolute, such as the key of a
 // source in a directory named "C:" directly under the root. The entry and a
 // source nothing imports key from their identities, so a symlinked path to one
 // is judged by where the link resolves. const SchemaHash carries the schema's
@@ -325,8 +335,15 @@
 //     key, a source has no path relative to the root, a LoadString name has
 //     no base, or a key is one the re-load's key rule refuses (see Embedded
 //     Source);
-//   - the generated source fails to format, fails to type-check, or the
-//     embedded store fails its round-trip hash check (each a generator bug).
+//   - the module root the load recorded no longer resolves as a host path;
+//   - a source the schema records holds no content;
+//   - any other failure, each a generator bug: emission meets a state it
+//     cannot write, such as an unresolved reference, alias or target, a kind
+//     it does not handle or whose constraint it does not carry, or a name with
+//     no Go spelling registered; the generated source
+//     fails to parse or to type-check or imports a package other than time and
+//     encoding/json, or the embedded store fails to re-load or fails its
+//     round-trip hash check.
 //
 // # Thread Safety
 //

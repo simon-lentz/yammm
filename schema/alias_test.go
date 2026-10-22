@@ -81,6 +81,9 @@ func TestIsValidAlias(t *testing.T) {
 		{name: "with digits", input: "parts2", expected: true},
 		{name: "single letter", input: "a", expected: true},
 		{name: "single uppercase", input: "A", expected: true},
+		{name: "each range end after the first letter", input: "Az09", expected: true},
+		{name: "a lower-case z first", input: "zone", expected: true},
+		{name: "an upper-case Z first", input: "Zone", expected: true},
 
 		// Invalid aliases
 		{name: "starts with digit", input: "2parts", expected: false},

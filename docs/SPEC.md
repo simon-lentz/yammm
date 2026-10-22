@@ -109,13 +109,13 @@ Tokens form the vocabulary of the YAMMM language. There are four classes: identi
 
 Identifiers name entities such as types, properties, and relationships. There are two classes of identifiers:
 
-**Upper-case identifiers** start with an ASCII upper-case letter (A-Z). Type names and data type aliases must take this form; relationship names and import aliases may:
+**Upper-case identifiers** start with an ASCII upper-case letter (A-Z). Type names and data type aliases must take this form. An import alias may, reserved keywords excepted. A relationship name takes the narrower `RelationName` form under [Associations](#associations), which admits no lower-case letter:
 
 ```text
 UC_WORD = upper_letter { upper_letter | lower_letter | decimal_digit | "_" } .
 ```
 
-**Lower-case identifiers** start with an ASCII lower-case letter (a-z). Property names and annotation names must take this form; relationship names and import aliases may:
+**Lower-case identifiers** start with an ASCII lower-case letter (a-z). Property names and annotation names must take this form. An import alias may, reserved keywords excepted. A relationship name never does:
 
 ```text
 LC_WORD = lower_letter { upper_letter | lower_letter | decimal_digit | "_" } .

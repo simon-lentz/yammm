@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/internal/parse"
 )
@@ -90,11 +91,10 @@ type Constraint interface {
 	NarrowsTo(child Constraint) bool
 
 	// IsResolved reports whether the constraint references are fully resolved.
-	// This method is primarily meaningful for AliasConstraint, which starts
-	// unresolved (referencing a DataType by name) and becomes resolved during
-	// schema completion when the underlying constraint is wired.
-	// All other constraint types always return true (they have no deferred
-	// references to resolve).
+	// An AliasConstraint is resolved when its resolution ends in a resolved
+	// constraint of another kind, and a ListConstraint when it holds an element
+	// that is.
+	// Every other kind holds no reference and returns true.
 	IsResolved() bool
 
 	// constraint is an unexported marker method to prevent external implementations.
@@ -340,7 +340,8 @@ func (BooleanConstraint) IsResolved() bool { return true }
 
 // TimestampConstraint constrains timestamp values with an optional format.
 type TimestampConstraint struct {
-	format string
+	format    string
+	badFormat bool // format is not valid UTF-8
 }
 
 // NewTimestampConstraint creates a TimestampConstraint with no format.
@@ -348,9 +349,11 @@ func NewTimestampConstraint() TimestampConstraint {
 	return TimestampConstraint{}
 }
 
-// NewTimestampConstraintFormatted creates a TimestampConstraint with a Go time format.
+// NewTimestampConstraintFormatted creates a TimestampConstraint with a Go time
+// format. The format is judged once here: one that is not valid UTF-8 is
+// recorded, and [Builder.Build] and [CheckConstraint] refuse the constraint.
 func NewTimestampConstraintFormatted(format string) TimestampConstraint {
-	return TimestampConstraint{format: format}
+	return TimestampConstraint{format: format, badFormat: !utf8.ValidString(format)}
 }
 
 func (TimestampConstraint) Kind() ConstraintKind { return KindTimestamp }
@@ -418,13 +421,43 @@ func (UUIDConstraint) IsResolved() bool { return true }
 
 // EnumConstraint constrains string values to a fixed set of allowed values.
 type EnumConstraint struct {
-	values []string
+	values  []string
+	invalid string // the first value no .yammm source can state, with the reason
 }
 
 // NewEnumConstraint creates an EnumConstraint with the given allowed values.
-// The values are stored in a defensive copy.
+// The values are stored in a defensive copy, and judged once here: the first
+// value that is empty, is not valid UTF-8 or repeats an earlier one is
+// recorded, and [Builder.Build] and [CheckConstraint] refuse the constraint.
 func NewEnumConstraint(values []string) EnumConstraint {
-	return EnumConstraint{values: slices.Clone(values)}
+	c := EnumConstraint{values: slices.Clone(values)}
+	c.invalid = enumValueFault(c.values)
+	return c
+}
+
+// enumValueFault describes the first value an Enum cannot hold, or returns "".
+func enumValueFault(values []string) string {
+	seen := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		switch {
+		case v == "":
+			return "enum value cannot be empty"
+		case !utf8.ValidString(v):
+			return fmt.Sprintf("enum value %q is not valid UTF-8", v)
+		}
+		if _, dup := seen[v]; dup {
+			return fmt.Sprintf("duplicate enum value %q", v)
+		}
+		seen[v] = struct{}{}
+	}
+	return ""
+}
+
+// parsedEnumConstraint creates an EnumConstraint that keeps values, which
+// internal/parse unquoted and kept as non-empty, distinct and valid UTF-8, so
+// it records no fault. It takes the slice as its own.
+func parsedEnumConstraint(values []string) EnumConstraint {
+	return EnumConstraint{values: values}
 }
 
 func (EnumConstraint) Kind() ConstraintKind { return KindEnum }
@@ -516,6 +549,17 @@ func NewPatternConstraint(patterns []*regexp.Regexp) PatternConstraint {
 			c.invalid = parse.SurrogateMessage(c.patterns[i], r)
 		}
 		c.compiled[i] = perl
+	}
+	return c
+}
+
+// parsedPatternConstraint creates a PatternConstraint that keeps compiled, the
+// regexps internal/parse built with [regexp.Compile] from the source's
+// patterns and judged there. It takes the slice as its own.
+func parsedPatternConstraint(compiled []*regexp.Regexp) PatternConstraint {
+	c := PatternConstraint{patterns: make([]string, len(compiled)), compiled: compiled}
+	for i, re := range compiled {
+		c.patterns[i] = re.String()
 	}
 	return c
 }
@@ -653,7 +697,9 @@ func (c ListConstraint) MaxLen() (int64, bool) { return c.maxLen, c.hasMax }
 func (c ListConstraint) String() string {
 	var sb strings.Builder
 	sb.WriteString("List<")
-	sb.WriteString(c.element.String())
+	if c.element != nil {
+		sb.WriteString(c.element.String())
+	}
 	sb.WriteString(">")
 	if c.hasMin || c.hasMax {
 		sb.WriteString("[")
@@ -681,6 +727,9 @@ func (c ListConstraint) Equal(other Constraint) bool {
 	if c.hasMin != o.hasMin || c.hasMax != o.hasMax || c.minLen != o.minLen || c.maxLen != o.maxLen {
 		return false
 	}
+	if c.element == nil || o.element == nil {
+		return c.element == nil && o.element == nil
+	}
 	return c.element.Equal(o.element)
 }
 
@@ -689,8 +738,9 @@ func (c ListConstraint) NarrowsTo(child Constraint) bool {
 	if !ok {
 		return false
 	}
-	// Element must narrow.
-	if !c.element.NarrowsTo(o.element) {
+	// Element must narrow; a List with no element judges nothing, so it narrows
+	// to nothing.
+	if c.element == nil || o.element == nil || !c.element.NarrowsTo(o.element) {
 		return false
 	}
 	// Child min must be >= parent min (if parent has a min).
@@ -705,7 +755,7 @@ func (c ListConstraint) NarrowsTo(child Constraint) bool {
 }
 
 func (c ListConstraint) IsResolved() bool {
-	return c.element.IsResolved()
+	return c.element != nil && c.element.IsResolved()
 }
 
 // AliasConstraint represents a reference to a named DataType.
@@ -713,17 +763,24 @@ func (c ListConstraint) IsResolved() bool {
 type AliasConstraint struct {
 	dataTypeName string     // the DataType name this references
 	resolved     Constraint // the resolved underlying constraint
+	badName      bool       // no .yammm source writes dataTypeName as a reference
 }
 
-// NewAliasConstraint creates an AliasConstraint referencing a DataType. The
-// resolved argument has one kind of reader: a raw-constraint caller with no
-// schema, such as [instance.CheckValue], [instance.CanonicalValue] or the
-// Neo4j adapter's Coerce, reads it as the alias's meaning. [Builder.Build] does not: it drops the argument at any List
-// depth and resolves the name through completion, as a loaded schema is
-// resolved, so a DataType reference means its declaration and nothing else.
+// NewAliasConstraint creates an AliasConstraint referencing a DataType. A
+// raw-constraint caller with no schema, such as [instance.CheckValue],
+// [instance.CanonicalValue] or the Neo4j adapter's Coerce, reads the resolved
+// argument as the alias's meaning. [Builder.Build] does
+// not: it drops the argument at any List depth and resolves the name through
+// completion, which builds each resolved alias with this function, so a
+// DataType reference means its declaration and nothing else.
 // [CheckConstraint] refuses a reference whose resolved argument is nil.
+//
+// The name is judged once here. A .yammm source writes a reference as a
+// datatype name, or as an import alias, a dot and a datatype name, and Build
+// and [CheckConstraint] refuse a reference under any other name.
 func NewAliasConstraint(dataTypeName string, resolved Constraint) AliasConstraint {
-	return AliasConstraint{dataTypeName: dataTypeName, resolved: resolved}
+	_, _, ok := referenceParts(dataTypeName)
+	return AliasConstraint{dataTypeName: dataTypeName, resolved: resolved, badName: !ok}
 }
 
 func (AliasConstraint) Kind() ConstraintKind { return KindAlias }
@@ -781,8 +838,8 @@ func (c AliasConstraint) NarrowsTo(child Constraint) bool {
 		return false
 	}
 	// Use ResolveAlias for cycle-safety before delegating.
-	// If ResolveAlias returns an AliasConstraint, a cycle was detected
-	// and we cannot determine narrowing - return false.
+	// ResolveAlias returns an AliasConstraint for a cycle or for a chain that
+	// ends unresolved, and narrowing cannot be decided for either.
 	term := ResolveAlias(c.resolved)
 	if _, ok := term.(AliasConstraint); ok {
 		return false // cycle or unresolved alias chain

@@ -126,8 +126,8 @@ the five origin values `explicit`, `discovered`, `synthetic`, `default` and
 ### Synthetic source identities
 
 `LoadSourcesWithEntry` derives each source's `SourceID` from the module root and
-the key, so the identities — and therefore every `TypeID`, and therefore every
-type row a `.ys` snapshot records — carry a filesystem path. That path moves with
+the key, so the identities — and therefore every `TypeID`, and the
+`schema_source` a `.ys` header records — carry a filesystem path. That path moves with
 the working directory, the checkout, and the container mount point.
 `WithSyntheticRoot` replaces it:
 
@@ -149,12 +149,14 @@ The option refuses rather than degrades. Each of these is an error:
 
 | Condition | Why |
 | --------- | --- |
-| A root not of the form `scheme://authority`, optionally followed by a path — empty, `embedded://`, `embedded:`, `.` — one that looks absolute, one holding a backslash, or one whose path climbs above its authority | Without an authority two roots join one identity (`embedded://` and `embedded:` both gave `embedded:/main.yammm`), a root with no scheme reads as a directory, and an absolute-looking root collides with file-backed identities. A root is normalized once — the scheme in lower case, the path cleaned, the whole in NFC — so `EMBEDDED://app/`, `embedded://app//` and `embedded://app/.` are all `embedded://app` |
-| A root without `WithSourcesOnly` | An unresolved import would read from disk and mix a file-backed identity into the same closure |
+| A root not of the form `scheme://authority`, optionally followed by a path — empty, `embedded://`, `embedded:`, `.`, `/abs` — one whose scheme is one letter or is `string` in any case, one whose authority is `.` or `..`, or one whose path climbs above its authority (`embedded://app/..`) | Without an authority two roots join one identity (`embedded://` and `embedded:` both gave `embedded:/main.yammm`), a root with no scheme reads as a directory, a one-letter scheme reads as a drive, and `string://` is the identity `LoadString` mints. A root is normalized once — the scheme in lower case, the text after it in NFC, the path cleaned — so `EMBEDDED://app/`, `embedded://app//` and `embedded://app/.` are all `embedded://app`. The authority keeps its case |
+| A root holding, after its scheme, a character outside its set — a `?`, a `#`, a `%`, a backslash, a space, a control, format or other character that does not print, one of `" < > [ ] ^ { \| }` or a backtick, or a `:` or `@` in its authority — or text that is not valid UTF-8 | After the scheme a root holds ASCII letters and digits, `/`, the marks `- . _ ~ ! $ & ' ( ) * + , ; =`, `:` and `@` in its path alone, and a character past ASCII that prints: a letter, mark, number, punctuation or symbol, as `strconv.IsPrint` reports. It names no server, so it takes no port, no user, no query and no fragment, and no percent escape, which would give one root two spellings. The set is applied to the root in NFC, so U+1FEF GREEK VARIA, which NFC makes a backtick, is refused |
+| A root without `WithSourcesOnly` | The root names every identity the load mints, so the given sources must be every source it reads; an import they do not hold fails as not among them |
 | A root together with a non-empty `moduleRoot` argument | The two name one concept and the load can honor only one |
 | The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there |
-| An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory is a source. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
+| An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory above it is a source. A key that spells a directory under the root is cleaned to a file key: `x.yammm/` and `x.yammm/.` are `x.yammm`. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
 | A source key holding a backslash | Windows reads a backslash as a separator and every other host as part of a file name, so one store would name different sources on each |
+| A source key holding a character that does not print — a control character, a bidi or other format character, a space past ASCII, a private-use or unassigned code point | Such a character renders as nothing or reorders the text around it, so two identities could read alike. Every synthetic identity the library judges is held to this rule, a `LoadString` name and a `Builder` source ID among them; `location.NewSourceID` judges nothing. `location`'s functions and `schema.SyntheticImportKey` return an error that wraps `location.ErrUnprintableSourceID`; a load and the Builder report its text, so `errors.Is` cannot match it there. The verdict follows the Unicode tables of the Go toolchain that builds yammm, so a character a later Unicode assigns is refused until that toolchain moves. The ASCII space stays legal in a key |
 
 A relative import (`"./x"`, `"../x"`) resolves against the importing source's
 key, as text: `"../dep"` from `a/b/main.yammm` is `a/dep.yammm`, and one that
@@ -168,9 +170,10 @@ through it. A key it returns is a fixed point: the rule returns it unchanged. `S
 root the load resolved imports against — so a schema loaded this way is a
 supported input to `gogen.Marshal`, whose embedded keys are relative to it.
 
-**Adopting a synthetic root re-keys every snapshot already written**, because the
-recorded type identities change. Treat the switch, and any later change to the
-root value, as a state-clearing change.
+**Adopting a synthetic root changes every `SourceID` and `TypeID` the library
+hands out**, and a later change to the root value changes them again. A `.ys`
+snapshot written before the switch still loads: a type row holds the schema's
+name and the type's name, and no path.
 
 ### Error Handling Pattern
 
@@ -292,9 +295,9 @@ s, result := schema.NewBuilder().
     Build()
 ```
 
-`Build()` refuses what the DSL refuses in a constraint, with `E_INVALID_CONSTRAINT` and no schema: an argument no `.yammm` source can state — inverted bounds, a non-finite `Float` bound, a negative length, an enum with an empty or repeated value or fewer than two values, an enum value or `Timestamp` format that is not valid UTF-8, a `Pattern` with no pattern or more than two, or one writing a surrogate code point with a `\x{…}` escape, a `Vector` dimension outside 1 to 65536 — a `List` with no element constraint, and a constraint of a Go type the `schema` package does not construct, such as a pointer to one, each at any `List` depth. It also refuses a datatype declared as another datatype alone (`AddDataType("B", schema.NewAliasConstraint("A", nil))`), which the DSL has no spelling for, and resolves every datatype reference by its name, in any declaration order, refusing a cycle as the DSL does.
+`Build()` refuses what the DSL refuses in a constraint, with `E_INVALID_CONSTRAINT` and no schema: an argument no `.yammm` source can state — inverted bounds, a non-finite `Float` bound, a negative length, an enum with an empty or repeated value or fewer than two values, an enum value or `Timestamp` format that is not valid UTF-8, a `Pattern` with no pattern or more than two, or one `regexp.Compile` refuses or that writes a surrogate code point with a `\x{…}` escape, a `Vector` dimension outside 1 to 65536 — a `List` with no element constraint, and a constraint of a Go type the `schema` package does not construct, such as a pointer to one, each at any `List` depth. It also refuses a datatype declared as another datatype alone (`AddDataType("B", schema.NewAliasConstraint("A", nil))`), which the DSL has no spelling for, and resolves every datatype reference by its name, in any declaration order, refusing a cycle as the DSL does. A reference under a name no `.yammm` source writes — anything but a datatype name, or an import alias, a dot and a datatype name, so `.T1`, `lib.`, `a.b.c`, a lower-case `t1` and a built-in type name such as `String` — is refused as a constraint argument, with `E_INVALID_CONSTRAINT`, at any `List` depth, and `schema.CheckConstraint` refuses it too. A name a source could write that no declaration answers is `E_UNKNOWN_TYPE`, unless its qualifier names an import the build refused, which reports that import alone.
 
-`schema.CheckConstraint(c) error` returns why `c` cannot judge a value, or `nil` when it can. It refuses what `Build()` refuses in a constraint, and a hand-built constraint meets no completion, so it also refuses a DataType reference that resolves to no constraint, at any `List` depth. The Neo4j adapter's `Coerce` and `CoerceParams` call it before they coerce a value.
+`schema.CheckConstraint(c) error` returns why `c` cannot judge a value, or `nil` when it can. It refuses what `Build()` refuses in a constraint, and a hand-built constraint meets no completion, so it also refuses a DataType reference that resolves to no constraint or to another reference alone, at any `List` depth. The Neo4j adapter's `Coerce` and `CoerceParams` call it before they coerce a value.
 
 `schema.NewPatternConstraint` keeps every pattern it is given, and compiles each again with `regexp.Compile` from its source text, as a `.yammm` source compiles it. A pattern therefore matches by its source's Perl reading however its regexp was built: under `regexp.CompilePOSIX`, `^b$` matches `"a\nb"`, and in a `PatternConstraint` it does not. A source that reading refuses, which POSIX syntax can accept (`a**`), is kept as given, and `Build()` and `schema.CheckConstraint` refuse the constraint, as the DSL refuses `Pattern["a**"]`.
 
@@ -325,7 +328,8 @@ names are UPPER_SNAKE and are not `UUID`. Violations fail the build with
 DSL, so they are not held to those productions. `Build()` refuses an empty
 schema name with `E_INVALID_NAME`, and completion refuses an empty invariant
 message with `E_INVALID_INVARIANT`. Import aliases are validated during
-completion (`E_INVALID_ALIAS`).
+completion (`E_INVALID_ALIAS`), unless a reference through one is refused first as a
+constraint argument (`E_INVALID_CONSTRAINT`).
 
 Every string value the Builder takes is valid UTF-8, as the DSL's string
 literals are: a schema name that is not is `E_INVALID_NAME`, an import path
@@ -339,8 +343,9 @@ A qualified reference (`alias.Type` in `Extends`, a relation or composition
 target, or a qualified datatype constraint) must resolve at build time: the
 alias must name a declared import backed by a registry (`WithRegistry` +
 `AddImport`). No later link step exists that could resolve one, so the build
-fails either way — but with different codes. An alias no `AddImport` declares
-fails with `E_UNKNOWN_TYPE`, with or without a registry. An alias that *is*
+fails either way — but with different codes. A well-formed alias no `AddImport` declares
+fails with `E_UNKNOWN_TYPE`, with or without a registry; a datatype reference
+whose qualifier no source writes is `E_INVALID_CONSTRAINT`. An alias that *is*
 declared but whose path resolves to nothing in the registry fails earlier, at
 import resolution, with `E_IMPORT_RESOLVE`.
 
@@ -1405,8 +1410,8 @@ The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries`) coer
 ```go
 // Coerce a single SCALAR value to the driver-native type the constraint requires
 // (e.g. a Timestamp["layout"] is parsed against its custom layout). Takes the
-// full Constraint, not just its Kind, so the custom layout is available; the
-// alias chain is resolved internally. Collection values are handled by
+// full Constraint, not just its Kind, so the custom layout is available; a
+// DataType reference is resolved internally. Collection values are handled by
 // CoerceParams, which element-coerces against the constraint. A non-nil
 // constraint is judged first by schema.CheckConstraint, and one it refuses is
 // an error whatever the value.
@@ -1422,9 +1427,9 @@ type ParamTypes map[string]schema.Constraint
 // CoerceParams coerces every value in a parameter map against its declared
 // constraint, walking one level of nested map[string]any and []map[string]any.
 // Scalars take Coerce's rule; []any lists are element-coerced against the
-// List element type. Every non-nil constraint in types is judged first by
-// schema.CheckConstraint, in sorted key order. Returns the first error, naming
-// the offending key.
+// List element type. A non-nil constraint in types that schema.CheckConstraint refuses
+// is an error before any value is coerced, and of several the error names the
+// first key in sorted order. Returns the first error, naming the offending key.
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error)
 
 // ParamTypesForType derives a ParamTypes from a schema type's properties, own
@@ -1447,7 +1452,7 @@ Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint
 
 **Zone handling, for `Timestamp`.** The driver sends an instant either as an offset or as a time-zone identifier the server must resolve, so `Coerce` expresses every instant in a location the driver can send. Two rules, in order: `time.Local` is always re-expressed in its offset — a value built by `time.Now` carries the host's location, whose name is `"Local"` on a host with no `TZ` set and which no server resolves; and any other location is kept only when the host's tz database resolves its name (an IANA name such as `Europe/Berlin`, or a legacy name such as `EST`), otherwise it too is re-expressed in its offset. A value parsed from text lands wherever `time.Parse` put it: a `Z` suffix yields `time.UTC`, which is kept as-is; an offset matching the host's local offset at that instant yields `time.Local`, which the first rule re-expresses; any other offset yields an unnamed zone, which the second rule re-expresses in its offset: the driver selects the offset encoding by zone name, so an unnamed zone is not yet that form. The coerced value depends on the text alone and not on where the process runs. The instant never moves. A consumer binary that must keep IANA names on a host without a tz database imports `time/tzdata`.
 
-The four transforming kinds (`Float`, `Integer`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a float or non-integer under `Integer`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value always passes through; an unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+The four transforming kinds (`Float`, `Integer`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a float or non-integer under `Integer`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value passes through, with two exceptions. A constraint `schema.CheckConstraint` refuses is an error whatever the value, a nil included. `CoerceParams` refuses a nil element of a `List` or `Vector` value whose elements are scalars; a `List` whose elements are lists or vectors passes through whole, with no element coerced and a nil at any depth kept. An unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
 The rendering counterpart — the string form the library stores for a `Timestamp`, `Date` or `UUID` — is `instance.CanonicalValue`, under [Value Functions](#value-functions).
 
@@ -1745,7 +1750,7 @@ Two schemas' `Region` are `Type_geo__Region` and `Type_common__Region`; a type a
 
 ### Imports
 
-gogen handles the full range of yammm schemas, including schemas with `import`s: the full import closure is flattened into one self-contained package, named by the rule [Names](#names) states. Embedded source keys are the names the re-load registers each source under, never absolute generation-machine paths, so generated output is byte-reproducible across checkouts and CI runners. The entry keys by its path under the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, then for a plain `Load` the directory of the nearest ancestor holding a `yammm.mod` and failing that the entry file's own directory, the canonicalized root argument for `LoadSourcesWithEntry`, and the synthetic root under `WithSyntheticRoot`), compared as an identity, so a root spelled with a decomposed character keys as its sources do, and an entry outside the root keys with leading `..` segments. A file entry loaded with no root keys against its own directory. A `LoadString` source has no root and keys by the base name it was loaded under, split at either separator; a name with no base, such as `.`, names no file and is refused. Every imported source keys by the text that imports it, resolved against its importer's key by `schema.SyntheticImportKey`, the loader's own rule — so an import through a symlinked directory (`lib -> real`, `import "lib/dep"`) keys as `lib/dep.yammm`, not by where the link resolves. The module root is therefore an input to the generated bytes alongside the schema, the options and the yammm version: committing a `yammm.mod` above a schema moves the keys for an otherwise unchanged generation, and a generator that passes the root explicitly sees no change. `Marshal` refuses two layouts a load accepts, naming the paths, because no store re-loads them: one source imported by two paths under two keys, and two sources taking one key (a relative import through a symlink reads the link target's neighbour on load and the key's text on re-load). It also refuses a source with no path relative to the root, such as one on another drive, because a key is never a generation-machine path, and a `LoadString` name with no base, which names no file. Before returning, it verifies the store re-loads hermetically through the recipe the generated file prints, under the synthetic root named there.
+gogen handles schemas with `import`s too: the full import closure is flattened into one self-contained package, named by the rule [Names](#names) states. Embedded source keys are the names the re-load registers each source under, never absolute generation-machine paths, so generated output is byte-reproducible across checkouts and CI runners. The entry keys by its path under the load's recorded module root (`Schema.ModuleRoot()` — the `WithModuleRoot` value when given, then for a plain `Load` the directory of the nearest ancestor holding a `yammm.mod` and failing that the entry file's own directory, the canonicalized root argument for `LoadSourcesWithEntry`, and the synthetic root under `WithSyntheticRoot`), compared as an identity, so a root spelled with a decomposed character keys as its sources do, and an entry outside the root keys with leading `..` segments. A file entry loaded with no root keys against its own directory. A `LoadString` source has no root and keys by the base name it was loaded under, split at either separator and written in NFC; a name with no base, such as `.`, names no file and is refused. Every imported source keys by the text that imports it, resolved against its importer's key by `schema.SyntheticImportKey`, the loader's own rule — so an import through a symlinked directory (`lib -> real`, `import "lib/dep"`) keys as `lib/dep.yammm`, not by where the link resolves. The module root is therefore an input to the generated bytes alongside the schema, the options and the yammm version: committing a `yammm.mod` above a schema moves the keys for an otherwise unchanged generation, and a generator that passes the root explicitly sees no change. `Marshal` refuses two layouts a load accepts, naming the paths, because no store re-loads them: one source imported by two paths under two keys, and two sources taking one key (a relative import through a symlink reads the link target's neighbour on load and the key's text on re-load). It also refuses a source with no path relative to the root, such as one on another drive, because a key is never a generation-machine path, and a `LoadString` name with no base, which names no file. Before returning, it verifies the store re-loads hermetically through the recipe the generated file prints, under the synthetic root named there.
 
 Re-load under a synthetic root:
 
@@ -1755,7 +1760,7 @@ s, result := schema.LoadSourcesWithEntry(ctx,
     schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
 ```
 
-The synthetic root is the recipe: it keeps the re-loaded type identities free of any working directory, checkout or mount point (see [Synthetic source identities](#synthetic-source-identities)). Any root of that form serves; `Marshal` verifies the one the generated file prints, and the package's tests re-load under another the store of every fixture that has a golden.
+The synthetic root is the recipe: it keeps the re-loaded type identities free of any working directory, checkout or mount point (see [Synthetic source identities](#synthetic-source-identities)). Any root `WithSyntheticRoot` accepts serves; `Marshal` verifies the one the generated file prints, and the package's tests re-load under another the store of every fixture that has a golden.
 
 **Removed in v0.13.0.** The shape-dependent `SerializedModel` and `SerializedModelEntry` declarations, and their `LoadString` / `LoadSourcesWithEntry`-with-`"."` recipes, are gone. Regenerate; every hand-written call site should already read the pair above, which v0.12.3 added.
 

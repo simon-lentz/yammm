@@ -58,15 +58,17 @@ import (
 // direct-Cypher param.
 //
 // Coerce takes the full [schema.Constraint] (not just its kind) so a Timestamp's
-// custom layout is honored; the constraint's alias chain is resolved internally.
+// custom layout is honored; a DataType reference is resolved internally.
 // It operates on scalar values — a List/collection value is element-coerced by
-// [CoerceParams] or the adapter write path, which apply the same rule to each
-// element. Calling Coerce with a collection constraint returns the value
+// [CoerceParams] or the adapter write path, which also require a Go string of
+// a String, UUID, Enum or Pattern element and a bool of a Boolean element,
+// where Coerce passes a scalar of those kinds through. Calling Coerce with a collection constraint returns the value
 // unchanged.
 //
 // A non-nil constraint is judged first by [schema.CheckConstraint]: Coerce
-// refuses a hand-built constraint [schema.Builder.Build] refuses, and a DataType
-// reference that resolves to no constraint, returning the value unchanged
+// refuses what CheckConstraint refuses: what [schema.Builder.Build] refuses in a
+// hand-built constraint, and a DataType reference that resolves to no
+// constraint or to another reference alone, returning the value unchanged
 // with an error, whatever the value. A nil value, or a nil constraint ("no type
 // to coerce against"), passes through unchanged. The default arm is unreachable in
 // practice — schema.Constraint is sealed, so every value carries one of the
@@ -188,13 +190,14 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 	}
 }
 
-// coerceValue coerces a single value against a schema constraint — the one
-// per-value rule shared by every coercion path. A []any is element-coerced via
+// coerceValue coerces a single value against a schema constraint — the
+// per-value rule CoerceParams and the write path's property and key coercion
+// share; [Coerce] applies the scalar rule alone. A []any is element-coerced via
 // [coerceSlice] against the constraint's List/Vector element type (and is an
 // error under a scalar constraint — a scalar cannot hold a list). Every other
 // value routes through the scalar rule, [coerceScalar]. A nil constraint passes
 // the value through unchanged. The constraint is one the caller has judged: a
-// loaded schema's, or one [CoerceParams] checked.
+// loaded or built schema's, or one [CoerceParams] checked.
 //
 // Shape note: a non-[]any value under a List or Vector constraint passes through
 // the scalar rule unchanged (it treats collection kinds as scalar-passthrough). This
@@ -234,18 +237,19 @@ type ParamTypes map[string]schema.Constraint
 // is never mutated, and for a non-empty params the returned top-level map is a
 // new one, so mutating its top-level keys cannot affect the input
 // (values that pass through uncoerced may still share backing storage, as on the
-// adapter write path). An empty params map is returned as-is — there is nothing
-// to copy. Walks one level of nested map[string]any and []map[string]any using
-// the "outer.inner" convention.
+// adapter write path). When no constraint in types is refused, an empty params
+// map is returned as-is — there is nothing to copy. Walks one level of nested
+// map[string]any and []map[string]any using the "outer.inner" convention.
 //
 // Keys are processed in sorted order, so when several values fail coercion the
 // returned error names the same (lexicographically first) offending key on every
 // run — failures are reproducible rather than dependent on map iteration order.
 //
-// Every non-nil constraint in types is judged by [schema.CheckConstraint] before
-// any value is coerced, in sorted key order, so a hand-built constraint that
-// [schema.Builder.Build] would refuse is an error naming its key, whether or not
-// params holds that key.
+// The non-nil constraints in types are judged by [schema.CheckConstraint] before
+// any value is coerced, so a hand-built constraint that [schema.Builder.Build]
+// would refuse is an error naming its key, whether or not params holds that
+// key. Of several refused keys the error names the first in sorted order. The
+// map returned with that error is nil, for an empty or a nil params too.
 //
 // Scalar values take [Coerce]'s rule; []any list values are element-coerced
 // against the List element type (a List<Float> of int64s reaches the driver as
@@ -257,12 +261,8 @@ type ParamTypes map[string]schema.Constraint
 // properties but does not pass through the adapter write path's coercion
 // (e.g. an enrichment MERGE built by hand).
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error) {
-	for _, k := range slices.Sorted(maps.Keys(types)) {
-		if c := types[k]; c != nil {
-			if err := schema.CheckConstraint(c); err != nil {
-				return nil, fmt.Errorf("param type %q: %w", k, err)
-			}
-		}
+	if key, err := firstRefusedType(types); err != nil {
+		return nil, fmt.Errorf("param type %q: %w", key, err)
 	}
 	if len(params) == 0 {
 		return params, nil
@@ -276,6 +276,25 @@ func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, erro
 		out[k] = cv
 	}
 	return out, nil
+}
+
+// firstRefusedType returns the lexicographically first key of types whose
+// non-nil constraint [schema.CheckConstraint] refuses, with that error. It
+// judges keys in map order and skips one that sorts after a key already refused.
+func firstRefusedType(types ParamTypes) (string, error) {
+	var (
+		first    string
+		firstErr error
+	)
+	for k, c := range types {
+		if c == nil || (firstErr != nil && k >= first) {
+			continue
+		}
+		if err := schema.CheckConstraint(c); err != nil {
+			first, firstErr = k, err
+		}
+	}
+	return first, firstErr
 }
 
 // coerceParam coerces a single top-level (key, value) pair. Nested maps and

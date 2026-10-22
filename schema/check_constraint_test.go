@@ -27,7 +27,7 @@ func TestCheckConstraint_RefusesWhatNoSchemaHolds(t *testing.T) {
 		"an unresolved DataType reference":                    {schema.NewAliasConstraint("Code", nil), `datatype "Code" resolves to no constraint`},
 		"a List of an unresolved reference":                   {schema.NewListConstraint(schema.NewAliasConstraint("Code", nil)), `datatype "Code" resolves to no constraint`},
 		"a reference resolved to a fault":                     {schema.NewAliasConstraint("Code", schema.IntegerBetween(5, 1)), "integer bounds inverted"},
-		"a reference resolved to an unresolved":               {schema.NewAliasConstraint("Code", schema.NewAliasConstraint("Inner", nil)), `datatype "Inner" resolves to no constraint`},
+		"a reference resolved to an unresolved":               {schema.NewAliasConstraint("Code", schema.NewAliasConstraint("Inner", nil)), `datatype "Code" resolves to datatype "Inner" alone`},
 		"a List of a reference resolved to a no-element List": {schema.NewListConstraint(schema.NewAliasConstraint("Tags", schema.NewListConstraint(nil))), "list has no element constraint"},
 	} {
 		t.Run(name, func(t *testing.T) {

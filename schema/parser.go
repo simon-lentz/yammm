@@ -229,15 +229,17 @@ func (p *schemaParser) constraint(c *parse.Constraint) (Constraint, DataTypeRef)
 	case parse.ConstraintString:
 		return stringConstraint(c), DataTypeRef{}
 	case parse.ConstraintEnum:
-		return NewEnumConstraint(c.EnumValues()), DataTypeRef{}
+		return parsedEnumConstraint(c.EnumValues()), DataTypeRef{}
 	case parse.ConstraintPattern:
-		return NewPatternConstraint(c.PatternRegexps()), DataTypeRef{}
+		return parsedPatternConstraint(c.PatternRegexps()), DataTypeRef{}
 	case parse.ConstraintTimestamp:
 		if format, ok := c.Format(); ok {
 			p.warnLossyTimestampFormat(format, c.FormatLit.Span)
 			return NewTimestampConstraintFormatted(format), DataTypeRef{}
 		}
-		return NewTimestampConstraint(), DataTypeRef{}
+		// The zero literal, not NewTimestampConstraint's result: the compiler
+		// boxes it with no allocation.
+		return TimestampConstraint{}, DataTypeRef{}
 	case parse.ConstraintDate:
 		return NewDateConstraint(), DataTypeRef{}
 	case parse.ConstraintUUID:

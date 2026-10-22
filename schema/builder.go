@@ -121,8 +121,9 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // Build refuses what the DSL refuses in a name, a string value, a
 // documentation string or a constraint, so a Builder-built schema remains
 // expressible in the DSL.
-// A declared name that the DSL's name productions
-// refuse is E_INVALID_NAME: type and datatype names are an uppercase letter
+// A declared type, datatype, property or relation name that the DSL's name
+// productions refuse is E_INVALID_NAME (an import alias is completion's
+// E_INVALID_ALIAS): type and datatype names are an uppercase letter
 // followed by letters, digits or underscores, and none is one of the eleven
 // built-in type names; property names start with a lowercase letter and are
 // none of as, part, in, nil, true and false; relation names are UPPER_SNAKE
@@ -132,8 +133,10 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // with no pattern, more than two or one regexp.Compile refuses, a Vector
 // dimension outside 1 to 65536, a List with no element, and a Go type this
 // package does not construct. So is a datatype declared as a bare reference to
-// another datatype, a Pattern writing a surrogate code point, and an enum value
-// or Timestamp format that is not valid UTF-8. Schema names and invariant names
+// another datatype, a DataType reference under a name no source writes (a
+// reference is a datatype name, or an import alias, a dot and a datatype
+// name), a Pattern writing a surrogate code point, and an enum value or
+// Timestamp format that is not valid UTF-8. Schema names and invariant names
 // are quoted strings in the DSL and stay free-form, but a string value is valid
 // UTF-8 wherever the Builder takes one: E_INVALID_NAME for the schema name,
 // E_IMPORT_RESOLVE for an import path, E_INVALID_INVARIANT for an invariant's
@@ -141,7 +144,8 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // doc comment holding it carries, by the rule the Comments section of
 // docs/SPEC.md states. One no doc comment can hold — with "*/", a NUL, a byte order mark or
 // bytes that are not UTF-8 — is E_SYNTAX. Import aliases are validated during
-// completion.
+// completion, unless a reference through one is refused first as a constraint
+// argument (E_INVALID_CONSTRAINT).
 //
 // # Import Requirements
 //
@@ -361,9 +365,10 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 	sourceID := b.sourceID
 
 	// If WithSourceID() was called with a synthetic SourceID (not file-backed),
-	// validate it via ValidateSyntheticSourceID. Emit E_INVALID_SYNTHETIC_ID if it
-	// resembles an absolute file path.
-	// Detection: !IsFilePath() means not file-backed; !IsZero() means it was set
+	// validate it via ValidateSyntheticSourceID. Emit E_INVALID_SYNTHETIC_ID for any
+	// refusal.
+	// Detection: sourceIDSet means WithSourceID was called; !IsZero() means the ID
+	// is not the zero one; !IsFilePath() means not file-backed.
 	if b.sourceIDSet && !sourceID.IsZero() && !sourceID.IsFilePath() {
 		if err := location.ValidateSyntheticSourceID(sourceID.String()); err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_SYNTHETIC_ID,
@@ -712,9 +717,11 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 
 // CheckConstraint returns why c cannot judge a value, or nil when it can. It
 // refuses what [Builder.Build] refuses in a constraint: a nil constraint, an
-// argument no .yammm source can state, a List with no element, more than two
-// patterns or one regexp.Compile refuses, and a constraint of a Go type this
-// package does not construct, such as a pointer to one. A raw constraint meets
+// argument no .yammm source can state, a DataType reference under a name no
+// source writes, a DataType reference resolved to another reference alone, as
+// a datatype declared as another alone is, a List with no element, more than two patterns or one
+// regexp.Compile refuses, and a constraint of a Go type this package does not
+// construct, such as a pointer to one. A raw constraint meets
 // no completion, so it also refuses a DataType reference that resolves to no
 // constraint, at any List depth. The Neo4j adapter's Coerce and CoerceParams
 // call it before they coerce a value.
@@ -725,10 +732,13 @@ func CheckConstraint(c Constraint) error {
 	if fault, found := constraintFault(c); found {
 		return fmt.Errorf("schema: %s", fault)
 	}
-	switch c := c.(type) {
+	switch held := c.(type) {
 	case ListConstraint:
-		return CheckConstraint(c.Element())
+		return CheckConstraint(held.Element())
 	case AliasConstraint:
+		if inner, isAlias := held.resolved.(AliasConstraint); isAlias {
+			return fmt.Errorf("schema: datatype %q resolves to datatype %q alone; a datatype declares a built-in type or a List", held.DataTypeName(), inner.DataTypeName())
+		}
 		terminal := ResolveAlias(c)
 		if open, isOpen := terminal.(AliasConstraint); isOpen {
 			return fmt.Errorf("schema: datatype %q resolves to no constraint", open.DataTypeName())
@@ -742,15 +752,22 @@ func CheckConstraint(c Constraint) error {
 // depth, that no .yammm source can state: an argument the DSL refuses, as
 // E_INVALID_CONSTRAINT or E_SYNTAX, or a Go type this package does not construct.
 // The Builder refuses it too, so a built schema stays expressible in the DSL. A
-// DataType reference is judged by its name, which completion resolves.
+// DataType reference is judged by the form of its name, which
+// [NewAliasConstraint] recorded; completion resolves what the name names.
 func constraintFault(c Constraint) (string, bool) {
 	switch c := c.(type) {
-	case BooleanConstraint, DateConstraint, UUIDConstraint, AliasConstraint:
-		// Nothing to judge: the DSL states every Boolean, Date and UUID, and a
-		// reference is judged by the name completion resolves.
+	case BooleanConstraint, DateConstraint, UUIDConstraint:
+		// Nothing to judge: the DSL states every Boolean, Date and UUID.
+	case AliasConstraint:
+		// Completion resolves the name. The zero AliasConstraint meets no
+		// constructor, so its empty name is read here.
+		if c.badName || c.dataTypeName == "" {
+			return fmt.Sprintf("datatype reference %q is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name", c.dataTypeName), true
+		}
 	case TimestampConstraint:
-		if !utf8.ValidString(c.Format()) {
-			return fmt.Sprintf("timestamp format %q is not valid UTF-8", c.Format()), true
+		// The zero TimestampConstraint holds no format, which is sound.
+		if c.badFormat {
+			return fmt.Sprintf("timestamp format %q is not valid UTF-8", c.format), true
 		}
 	case IntegerConstraint:
 		lo, hasLo := c.Min()
@@ -783,21 +800,13 @@ func constraintFault(c Constraint) (string, bool) {
 		}
 		return constraintFault(c.Element())
 	case EnumConstraint:
-		values := c.Values()
-		seen := make(map[string]bool, len(values))
-		for _, v := range values {
-			switch {
-			case v == "":
-				return "enum value cannot be empty", true
-			case !utf8.ValidString(v):
-				return fmt.Sprintf("enum value %q is not valid UTF-8", v), true
-			case seen[v]:
-				return fmt.Sprintf("duplicate enum value %q", v), true
-			}
-			seen[v] = true
-		}
-		if len(values) < 2 {
-			return fmt.Sprintf("enum must have at least two values (got %d)", len(values)), true
+		// The count is read here, not recorded: the zero EnumConstraint meets no
+		// constructor and holds no values.
+		switch n := len(c.values); {
+		case c.invalid != "":
+			return c.invalid, true
+		case n < 2:
+			return fmt.Sprintf("enum must have at least two values (got %d)", n), true
 		}
 	case PatternConstraint:
 		switch n := c.PatternCount(); {

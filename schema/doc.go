@@ -10,7 +10,7 @@
 //
 // # Key Types
 //
-// The schema object model consists of:
+// The schema object model's key types:
 //
 //   - [Schema]: Top-level container with types, data types, and imports
 //   - [Type]: Named type with properties, relations, invariants, and inheritance
@@ -47,17 +47,18 @@
 // a load that could not start or finish: an I/O failure, a cancellation, or
 // input a load cannot begin from, such as no sources, a source key the loader
 // refuses, two keys that name one source, or a source name that is not valid
-// UTF-8, or a source whose header cannot be parsed, which the parser reports
+// UTF-8 or holds a character that does not print, or a source whose header cannot be parsed, which the parser reports
 // as a Fatal E_SYNTAX. An empty schema name is an Error, E_INVALID_NAME, with a
 // nil Schema. Check result.HasErrors() to determine semantic success.
 //
 // # Load Options
 //
-// Load functions accept [LoadOption] values to configure behavior:
+// Load functions accept [LoadOption] values to configure behavior, among them:
 //
 //   - [WithRegistry]: schema registry for cross-schema type resolution
 //   - [WithModuleRoot]: root directory for module-style imports
-//   - [WithSourcesOnly]: resolve imports only against the in-memory sources
+//   - [WithSourcesOnly]: resolve imports only against the in-memory sources and
+//     the schemas a shared registry already holds
 //   - [WithSyntheticRoot]: synthetic identities for in-memory sources
 //   - [WithIssueLimit]: maximum diagnostic issues to collect (default 100)
 //   - [WithImportsAllowed]: with false, refuse import declarations
@@ -105,8 +106,8 @@
 // # Shared-Registry Semantics
 //
 // Passing the same *Registry to multiple Load calls in one process is safe
-// and efficient (since v0.3.0). Two coordinated behaviors make shared-Registry
-// usage first-class:
+// and efficient (since v0.3.0). Coordinated behaviors make shared-Registry
+// usage first-class, among them:
 //
 //   - [Registry.Register] is idempotent for exact-match: registering the same
 //     SourceID twice with the same bytes, the entry's and every import's, and
@@ -115,8 +116,10 @@
 //     SourceID are an error naming the change, and matching bytes with
 //     divergent hashes an error reporting both hashes.
 //   - loadImport short-circuits cross-Load via the shared Registry: when an
-//     import's SourceID is already registered, the loader reuses the existing
-//     *Schema pointer and skips the parse, compile, and re-register pipeline.
+//     import's SourceID is already registered, the loader skips the parse,
+//     compile, and re-register pipeline and reuses the existing *Schema pointer,
+//     unless the registered closure conflicts with the load's, which fails the
+//     import.
 //     This is where cross-pipeline schema-caching actually pays off — the
 //     idempotence contract alone only makes the final re-register a no-op
 //     after an unnecessary parse has already happened.
@@ -129,8 +132,9 @@
 //
 // [StructuralHash] computes a deterministic SHA-256 hash over the rules that
 // decide what instance data is valid, across the schema's whole import
-// closure — types, properties, relations, constraints and invariants, in
-// every member. Used by the snapshot package for compatibility verification.
+// closure — among them types, data types, the abstract and part markers,
+// properties, primary keys, supertypes, relations, constraints and invariants,
+// in every member. Used by the snapshot package for compatibility verification.
 //
 // Annotations are deliberately EXCLUDED from the hash: they drive downstream
 // store DDL and write shape, not which instance data is valid, so a schema
@@ -152,25 +156,32 @@
 //
 // — or the synthesized entry misses the table and the consumer silently
 // degrades. Everything Origin discards is annotation state; name, constraint,
-// datatype reference, optionality, primary-key status, span, and declaring
-// scope are all preserved on the copy, so a consumer that reads only those
+// datatype reference, optionality, primary-key status, doc comment, span, and
+// declaring scope are all preserved on the copy, so a consumer that reads only those
 // needs nothing.
 //
 // # Immutability
 //
-// All schema types are immutable after loading. This provides:
+// A loaded or built schema is immutable, and so is every value it hands out
+// save two it shares with the caller: the expression [Invariant.Expression]
+// returns and each pattern in the slice [PatternConstraint.CompiledPatterns]
+// returns. A caller must not change either, nor call [regexp.Regexp.Longest] on
+// such a pattern. This provides:
 //   - Thread-safety for concurrent access
 //   - Predictable behavior (no hidden mutations)
 //   - Safe sharing across goroutines
 //
-// Slice accessors return defensive copies. Use iterators (iter.Seq) for
-// zero-allocation traversal when possible.
+// Slice accessors return defensive copies, and an iterator (iter.Seq,
+// iter.Seq2) yields elements without handing out a slice. A [Registry] and the
+// builders change through their own methods.
 //
 // # Completion and Sealing
 //
-// Schemas undergo a completion phase that resolves all internal references:
+// Schemas undergo a completion phase that resolves their references and checks
+// what they declare, among its steps:
 //   - Import declarations are resolved to their target schemas
 //   - Type inheritance is computed ([Type.SuperTypes])
+//   - Relation targets are resolved
 //   - Property collisions are detected across the inheritance hierarchy
 //   - Alias constraints are resolved to their underlying types
 //
@@ -186,8 +197,9 @@
 //
 // # Thread Safety
 //
-// All schema types are immutable and safe for concurrent read access after
-// loading. [Registry] is safe for concurrent use (read-write).
+// A loaded or built schema is safe for concurrent reads while no caller changes
+// one of the two values the Immutability section names as shared. [Registry] is
+// safe for concurrent use (read-write).
 //
 // # Dependencies
 //

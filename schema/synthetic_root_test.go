@@ -396,9 +396,8 @@ func TestWithSyntheticRoot_InvalidRoot(t *testing.T) {
 	}
 }
 
-// TestWithSyntheticRoot_RequiresSourcesOnly pins the refusal rather than a
-// documented hazard: without hermetic resolution an import miss reads from disk
-// and mints a file-backed identity into the same closure.
+// TestWithSyntheticRoot_RequiresSourcesOnly pins the refusal: a root names every
+// identity the load mints, so the given sources must be every source it reads.
 func TestWithSyntheticRoot_RequiresSourcesOnly(t *testing.T) {
 	t.Parallel()
 

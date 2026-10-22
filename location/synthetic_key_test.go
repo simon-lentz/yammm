@@ -48,7 +48,7 @@ func TestNormalizeSyntheticKey(t *testing.T) {
 		{"C:/main.yammm", "must be relative to the synthetic root", ErrAbsolutePathSourceID},
 		{`C:\main.yammm`, "must be relative to the synthetic root", ErrAbsolutePathSourceID},
 		{`\\srv\share\x.yammm`, "must be relative to the synthetic root", ErrAbsolutePathSourceID},
-		{"a\xffb.yammm", "must be relative to the synthetic root", ErrInvalidUTF8Path},
+		{"a\xffb.yammm", `source key "a\xffb.yammm": location: path is not valid UTF-8`, ErrInvalidUTF8Path},
 		{"", "resolves to the synthetic root itself", nil},
 		{".", "resolves to the synthetic root itself", nil},
 		{"a/..", "resolves to the synthetic root itself", nil},

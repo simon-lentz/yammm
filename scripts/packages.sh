@@ -28,13 +28,16 @@
 # package holds a tracked Go file and in four cases more. None of the four
 # depends on the build, so every caller refuses one checkout alike, and the
 # run names every file or directory of the first three before it stops.
-#  - an untracked Go file, ignored or not, sits in a tracked directory, its
-#    name beginning with neither "." nor "_". A go command building that
+#  - an untracked Go file, ignored or not, sits in a tracked directory or in
+#    a directory that holds a tracked Go file and whose nearest go.mod git does
+#    not track, its name beginning with neither "." nor "_". A go command building that
 #    package compiles it unless a build constraint leaves it out, and CI's
 #    checkout does not hold it, so a gate would judge a tree no commit holds.
 #  - an untracked Go file git does not ignore sits in another directory go
-#    reads: a tracked package can import its package, with the same effect.
-#  - a tracked Go file sits below a go.mod git does not track, which makes this
+#    reads, where a tracked package can import its package with the same
+#    effect, or below go.mod files that are each one the run asks to remove,
+#    where one can once those go.mod files are gone.
+#  - a tracked Go file's nearest go.mod is one git does not track, which makes this
 #    checkout's go command read it as another module's and CI's as this one's.
 #  - a go.work is in effect: the go command then reads a workspace, and the
 #    package list is not this module's alone.
@@ -86,7 +89,9 @@ suite=$(mktemp)
 built=$(mktemp)
 modules=$(mktemp)
 shadowed=$(mktemp)
-trap 'rm -f "${tracked}" "${untracked}" "${listed}" "${excluded}" "${suite}" "${built}" "${modules}" "${shadowed}"' EXIT
+nested=$(mktemp)
+roots=$(mktemp)
+trap 'rm -f "${tracked}" "${untracked}" "${listed}" "${excluded}" "${suite}" "${built}" "${modules}" "${shadowed}" "${nested}" "${roots}"' EXIT
 
 # dirs reads NUL-separated file paths and prints, once each and "." for the
 # root, the directory of each Go file go would read: not a name that begins
@@ -172,8 +177,9 @@ dirs() {
 				fi
 				break
 			fi
-			# The parent by parameter expansion: a process per level would cost
-			# a few hundred spawns a run, which Git Bash on Windows makes slow.
+			# The parent by parameter expansion: a process per level would start
+			# one for every level the walk climbs, over a hundred a run, and Git
+			# Bash on Windows starts each one slowly.
 			case ${d} in
 			*/*) d=${d%/*} ;;
 			*) d=. ;;
@@ -184,8 +190,29 @@ dirs() {
 }
 
 module=$(go list -m | tr -d '\r')
-# refuse writes the tracked directories to ${tracked} and stops the run with
-# exit 1 at any of the refusals the header names.
+
+# gomods prints each directory at or above dir, below the root, that holds a
+# go.mod, and the line "/", which no relative path is, in place of one whose
+# go.mod git tracks.
+gomods() {
+	local d=$1
+	while [ "${d}" != . ]; do
+		if [ -f "${d}/go.mod" ]; then
+			if grep -qxF -- "${d}/go.mod" "${modules}"; then
+				printf '/\n'
+			else
+				printf '%s\n' "${d}"
+			fi
+		fi
+		case ${d} in
+		*/*) d=${d%/*} ;;
+		*) d=. ;;
+		esac
+	done
+}
+# refuse writes the tracked directories to ${tracked} and makes the header's
+# refusals but the go.work one, which every run makes before it. Every run but
+# a --check one also refuses a build that lists no tracked package, after it.
 refuse() {
 	refused=no
 	git ls-files -z -- 'go.mod' '*/go.mod' | tr '\0' '\n' >"${modules}"
@@ -195,17 +222,16 @@ refuse() {
 			exit 1
 	fi
 
-	# A tracked Go file below a go.mod git does not track is in another module for
-	# this checkout's go command, and in this one for CI's.
+	# A tracked Go file whose nearest go.mod git does not track is in another
+	# module for this checkout's go command, and in this one for CI's.
 	if [ -s "${shadowed}" ]; then
 		printf 'packages: %d tracked director(ies) below a go.mod git does not track, which go reads as another module and no commit holds; remove each go.mod:\n' "$(wc -l <"${shadowed}" | tr -d ' ')" >&2
 		sed 's/^/  /' "${shadowed}" >&2
 		refused=yes
 	fi
 
-	# An untracked Go file in a tracked directory, ignored or not: name each one.
-	# Each pathspec matches one directory's own files, its name's glob
-	# characters escaped.
+	# Name each untracked Go file not opening on "." or "_", ignored or not, in a
+	# directory ${tracked} or ${shadowed} lists.
 	pathspecs=()
 	while IFS= read -r dir; do
 		if [ "${dir}" = . ]; then
@@ -213,7 +239,7 @@ refuse() {
 		else
 			pathspecs+=(":(glob)$(printf '%s' "${dir}" | sed 's/[][*?\\]/\\&/g')/*.go")
 		fi
-	done <"${tracked}"
+	done < <(cat "${tracked}" "${shadowed}")
 	if [ "${#pathspecs[@]}" -gt 0 ]; then
 		git ls-files -z --others -- "${pathspecs[@]}" | tr '\0' '\n' | awk -F/ '$NF !~ /^[._]/' >"${untracked}"
 	fi
@@ -224,8 +250,24 @@ refuse() {
 	fi
 
 	# An untracked Go file git does not ignore, in a directory go reads and no
-	# tracked Go file is in, is a package a tracked package can import.
-	git ls-files -z --others --exclude-standard -- '*.go' | dirs | comm -23 - "${tracked}" >"${untracked}"
+	# tracked Go file is in, is a package a tracked package can import, and so is
+	# one every go.mod above which is one the run asks to remove.
+	git ls-files -z --others --exclude-standard -- '*.go' | dirs "${nested}" | comm -23 - "${tracked}" >"${untracked}"
+	if [ -s "${nested}" ] && [ -s "${shadowed}" ]; then
+		while IFS= read -r dir; do
+			mods=$(gomods "${dir}")
+			if ! printf '%s\n' "${mods}" | grep -qxF /; then
+				printf '%s\n' "${mods}"
+			fi
+		done <"${shadowed}" | sort -u >"${roots}"
+		while IFS= read -r dir; do
+			mods=$(gomods "${dir}")
+			if [ -s "${roots}" ] && ! printf '%s\n' "${mods}" | grep -qvxF -f "${roots}"; then
+				printf '%s\n' "${dir}"
+			fi
+		done < <(sort -u "${nested}" | comm -23 - "${shadowed}") >>"${untracked}"
+		sort -u -o "${untracked}" "${untracked}"
+	fi
 	if [ -s "${untracked}" ]; then
 		printf 'packages: %d untracked package(s) that git does not ignore, which a tracked package can import and no commit holds; add or remove each:\n' "$(wc -l <"${untracked}" | tr -d ' ')" >&2
 		sed 's/^/  /' "${untracked}" >&2
@@ -239,8 +281,10 @@ refuse() {
 
 # A caller that asks for several builds of one tree, as scripts/vet.sh does,
 # names a file of its own in YAMMM_PACKAGES_TRACKED: the first run writes the
-# tracked directories there once its refusals pass, and each later run reads
-# them and makes neither the refusals nor the walk again.
+# tracked directories there once refuse passes, and each later run reads them
+# and calls refuse no more, so it neither walks nor makes refuse's refusals
+# again. The go.work refusal and the refusal of a build that lists no tracked
+# package are made on every run.
 if [ -n "${YAMMM_PACKAGES_TRACKED:-}" ] && [ -s "${YAMMM_PACKAGES_TRACKED}" ]; then
 	cp "${YAMMM_PACKAGES_TRACKED}" "${tracked}"
 else

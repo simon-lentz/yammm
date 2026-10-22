@@ -683,7 +683,7 @@ func TestRun_ExitsOneWhenAWorkerTreeCannotBeRemoved(t *testing.T) {
 // holdTest is the test file of a package whose On returns false, run in mode:
 // "test" or "bench" starts, when On returns true, a process that keeps the test
 // binary's output open for 75s or 30s from its start, past the binary's exit;
-// "slow" makes the benchmark run a minute.
+// "slow", when On returns true, makes the benchmark run a minute.
 func holdTest(mode string) string {
 	return `package PKG
 

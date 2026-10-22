@@ -175,6 +175,75 @@ func TestPackagesScript_RefusesATrackedPackageBelowAnUntrackedGoMod(t *testing.T
 	r.wantStderr(t, "packages: 2 tracked director(ies) below a go.mod git does not track, which go reads as another module and no commit holds; remove each go.mod:\n  k\n  k/sub\n")
 }
 
+// An untracked Go file in a tracked directory below an untracked go.mod, ignored
+// or not, is named in the run that names the go.mod: removing the go.mod makes
+// the directory a package of this module, which compiles the file.
+func TestPackagesScript_NamesAnUntrackedGoFileBelowAnUntrackedGoMod(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write(".gitignore", "k/go.mod\nk/ignored.go\n")
+	f.write("k/k.go", "package k\n")
+	f.write("k/sub/s.go", "package sub\n")
+	f.index()
+	f.write("k/go.mod", "module k\n\ngo "+goDirective()+"\n")
+	f.write("k/extra.go", "package k\n")
+	f.write("k/ignored.go", "package k\n")
+	f.write("k/sub/extra.go", "package sub\n")
+
+	r := f.run("packages.sh", "--check")
+	r.wantCode(t, 1)
+	r.wantStderr(t, "packages: 2 tracked director(ies) below a go.mod git does not track, which go reads as another module and no commit holds; remove each go.mod:\n  k\n  k/sub\n")
+	r.wantStderr(t, "packages: 3 untracked Go file(s) in a tracked package, which a go command building it compiles and no commit holds; add or remove each:\n  k/extra.go\n  k/ignored.go\n  k/sub/extra.go\n")
+}
+
+// An untracked Go file git does not ignore, below a go.mod the run asks to
+// remove and in a directory holding no tracked Go file, is named in that run as
+// the untracked package removing the go.mod makes. One below an untracked
+// go.mod that shadows no tracked directory is not named.
+func TestPackagesScript_NamesAnUntrackedPackageBelowTheGoModItAsksToRemove(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write("x/y/a.go", "package y\n")
+	f.write("a/b/x.go", "package b\n")
+	f.write("m/go.mod", "module m\n\ngo "+goDirective()+"\n")
+	f.write("m/sub/x.go", "package sub\n")
+	f.index()
+	f.write("x/go.mod", "module x\n\ngo "+goDirective()+"\n")
+	f.write("x/c.go", "package x\n")
+	f.write("x/newpkg/n.go", "package newpkg\n")
+	f.write("scratch/go.mod", "module scratch\n\ngo "+goDirective()+"\n")
+	f.write("scratch/s.go", "package scratch\n")
+	// Two untracked go.mod files stacked above a tracked file: removing both
+	// makes a/c this module's package.
+	f.write("a/go.mod", "module a\n\ngo "+goDirective()+"\n")
+	f.write("a/b/go.mod", "module b\n\ngo "+goDirective()+"\n")
+	f.write("a/c/y.go", "package c\n")
+	// Below a tracked nested module: removing m/sub/go.mod makes m/sub/c module m's.
+	f.write("m/sub/go.mod", "module sub\n\ngo "+goDirective()+"\n")
+	f.write("m/sub/c/y.go", "package c\n")
+
+	r := f.run("packages.sh", "--check")
+	r.wantCode(t, 1)
+	r.wantStderr(t, "packages: 3 tracked director(ies) below a go.mod git does not track, which go reads as another module and no commit holds; remove each go.mod:\n  a/b\n  m/sub\n  x/y\n")
+	r.wantStderr(t, "packages: 3 untracked package(s) that git does not ignore, which a tracked package can import and no commit holds; add or remove each:\n  a/c\n  x\n  x/newpkg\n")
+}
+
+// A directory named "+" is a directory like any other: the untracked package
+// below the go.mod the run asks to remove is named.
+func TestPackagesScript_NamesAnUntrackedPackageBelowADirectoryNamedPlus(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.write("+/x.go", "package x\n")
+	f.index()
+	f.write("+/go.mod", "module plus\n\ngo "+goDirective()+"\n")
+	f.write("+/b/y.go", "package b\n")
+
+	r := f.run("packages.sh", "--check")
+	r.wantCode(t, 1)
+	r.wantStderr(t, "packages: 1 tracked director(ies) below a go.mod git does not track, which go reads as another module and no commit holds; remove each go.mod:\n  +\n")
+	r.wantStderr(t, "packages: 1 untracked package(s) that git does not ignore, which a tracked package can import and no commit holds; add or remove each:\n  +/b\n")
+}
+
 // go passes over a directory whose only Go file go never reads, one whose name
 // begins with "." or "_", a nested module, one a go.mod ignore directive names,
 // with or without a "/" at either end and whatever characters go mod edit -json

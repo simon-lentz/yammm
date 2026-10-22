@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -25,14 +26,16 @@ type completionRegistry interface {
 // flag replaces an earlier in-band convention (a zero SourceID meaning
 // "deferred"), so the state is read, not inferred.
 //
-// "Deferred" has one source that flows one way, not parallel representations
-// that must be kept in agreement by hand: the loader folds each importBinding
-// into this map (a failed binding becomes a deferred entry; see loadSource),
-// [completer.indexImports] then builds each schema Import from the map (a
+// "Deferred" has one source, not parallel representations that must be kept
+// in agreement by hand: the loader folds each importBinding into this map (a
+// failed binding becomes a deferred entry; see loadSource),
+// [completer.indexImports] marks deferred in it the alias of each declaration
+// it rejects as invalid or colliding (a repeated alias keeps its first
+// declaration's state) and then builds each schema Import from the map (a
 // deferred entry yields a zero-ResolvedSourceID Import that the loader's wiring
-// loop leaves schema-less), and completion reads only the map — via
-// [completer.classifyQualifier], the single interpreter named on
-// [resolvedImportMap], through which every qualifier-resolving site routes.
+// loop leaves schema-less), and completion reads an alias's state from the map
+// alone, never from an Import — via [completer.classifyQualifier], through
+// which every qualifier-resolving site routes.
 type importResolution struct {
 	deferred bool
 	sourceID location.SourceID
@@ -727,8 +730,9 @@ func convertAnnotations(decls []*annotationDecl) []*Annotation {
 // resolveAliasConstraints resolves every datatype reference in datatypes,
 // properties and edge properties. Datatypes resolve depth-first over the
 // reference graph, each once, so a datatype is complete before any reference
-// copies its constraint, whatever the declaration order. A reference cycle,
-// through an alias or a List element, is reported at every datatype on it.
+// copies its constraint, whatever the declaration order. A reference cycle
+// runs through List elements alone, since no door admits a datatype declared as
+// another, and is reported at every datatype on it.
 func (c *completer) resolveAliasConstraints() {
 	c.dtStates = make(map[*DataType]dtState, len(c.schema.dataTypes))
 	for _, dt := range c.schema.dataTypes {
@@ -824,7 +828,7 @@ func (c *completer) resolveConstraint(con Constraint, span location.Span) (Const
 // constraint it declares, so a later phase still judges its shape (a List
 // datatype is refused on an edge whether or not its element resolved).
 func (c *completer) resolveReference(dataTypeName string, span location.Span) (Constraint, bool) {
-	qualifier, name := parseQualifiedName(dataTypeName)
+	qualifier, name, _ := referenceParts(dataTypeName)
 	if qualifier == "" {
 		dt, found := c.dataIndex[name]
 		if !found {
@@ -957,14 +961,25 @@ func (c *completer) primaryKeyTypeDeferred(constraint Constraint) bool {
 	return isAlias && !terminal.IsResolved()
 }
 
-// parseQualifiedName splits a qualified name into qualifier and local name.
-// For "foo.Bar", returns ("foo", "Bar"). For "Bar", returns ("", "Bar").
-func parseQualifiedName(name string) (qualifier, localName string) {
-	before, after, ok := strings.Cut(name, ".")
-	if !ok {
-		return "", name
+// referenceParts splits a datatype reference as the DSL writes one, Name or
+// alias.Name, into its import qualifier and its datatype name. ok is false for
+// any other text, which is returned whole as the name, so it names no datatype.
+func referenceParts(ref string) (qualifier, name string, ok bool) {
+	before, after, qualified := strings.Cut(ref, ".")
+	if !qualified {
+		return "", ref, isDataTypeName(ref)
 	}
-	return before, after
+	if isValidAlias(before) && !isReservedKeyword(before) && isDataTypeName(after) {
+		return before, after, true
+	}
+	return "", ref, false
+}
+
+// isDataTypeName reports whether s is a name the DSL declares a datatype by:
+// an uppercase letter, then letters, digits and underscores, and no built-in
+// type name.
+func isDataTypeName(s string) bool {
+	return isValidAlias(s) && s[0] <= 'Z' && !parse.IsDatatypeKeyword(s)
 }
 
 // validateRelationProperties validates edge properties on all relations.

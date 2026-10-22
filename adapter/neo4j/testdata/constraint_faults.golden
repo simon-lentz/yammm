@@ -1,0 +1,516 @@
+nil
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car" has nil constraint
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" has nil constraint
+	CheckConstraint: schema: no constraint
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+enum accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+enum zero value
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum must have at least two values (got 0)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum must have at least two values (got 0)
+	CheckConstraint: schema: enum must have at least two values (got 0)
+	Coerce: "x", coerce: schema: enum must have at least two values (got 0)
+	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 0)
+enum nil values
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum must have at least two values (got 0)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum must have at least two values (got 0)
+	CheckConstraint: schema: enum must have at least two values (got 0)
+	Coerce: "x", coerce: schema: enum must have at least two values (got 0)
+	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 0)
+enum no values
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum must have at least two values (got 0)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum must have at least two values (got 0)
+	CheckConstraint: schema: enum must have at least two values (got 0)
+	Coerce: "x", coerce: schema: enum must have at least two values (got 0)
+	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 0)
+enum one value
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum must have at least two values (got 1)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum must have at least two values (got 1)
+	CheckConstraint: schema: enum must have at least two values (got 1)
+	Coerce: "x", coerce: schema: enum must have at least two values (got 1)
+	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 1)
+enum one empty value
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value cannot be empty
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value cannot be empty
+	CheckConstraint: schema: enum value cannot be empty
+	Coerce: "x", coerce: schema: enum value cannot be empty
+	CoerceParams: map[], param type "v": schema: enum value cannot be empty
+enum one value not UTF-8
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value "\xff" is not valid UTF-8
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value "\xff" is not valid UTF-8
+	CheckConstraint: schema: enum value "\xff" is not valid UTF-8
+	Coerce: "x", coerce: schema: enum value "\xff" is not valid UTF-8
+	CoerceParams: map[], param type "v": schema: enum value "\xff" is not valid UTF-8
+enum empty first
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value cannot be empty
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value cannot be empty
+	CheckConstraint: schema: enum value cannot be empty
+	Coerce: "x", coerce: schema: enum value cannot be empty
+	CoerceParams: map[], param type "v": schema: enum value cannot be empty
+enum empty last
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value cannot be empty
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value cannot be empty
+	CheckConstraint: schema: enum value cannot be empty
+	Coerce: "x", coerce: schema: enum value cannot be empty
+	CoerceParams: map[], param type "v": schema: enum value cannot be empty
+enum two empty
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value cannot be empty
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value cannot be empty
+	CheckConstraint: schema: enum value cannot be empty
+	Coerce: "x", coerce: schema: enum value cannot be empty
+	CoerceParams: map[], param type "v": schema: enum value cannot be empty
+enum not UTF-8
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value "\xff" is not valid UTF-8
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value "\xff" is not valid UTF-8
+	CheckConstraint: schema: enum value "\xff" is not valid UTF-8
+	Coerce: "x", coerce: schema: enum value "\xff" is not valid UTF-8
+	CoerceParams: map[], param type "v": schema: enum value "\xff" is not valid UTF-8
+enum duplicate
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": duplicate enum value "a"
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": duplicate enum value "a"
+	CheckConstraint: schema: duplicate enum value "a"
+	Coerce: "x", coerce: schema: duplicate enum value "a"
+	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
+enum duplicate pair
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": duplicate enum value "a"
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": duplicate enum value "a"
+	CheckConstraint: schema: duplicate enum value "a"
+	Coerce: "x", coerce: schema: duplicate enum value "a"
+	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
+enum duplicate before empty
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": duplicate enum value "a"
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": duplicate enum value "a"
+	CheckConstraint: schema: duplicate enum value "a"
+	Coerce: "x", coerce: schema: duplicate enum value "a"
+	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
+enum empty before duplicate
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value cannot be empty
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value cannot be empty
+	CheckConstraint: schema: enum value cannot be empty
+	Coerce: "x", coerce: schema: enum value cannot be empty
+	CoerceParams: map[], param type "v": schema: enum value cannot be empty
+enum not UTF-8 twice
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value "\xff" is not valid UTF-8
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value "\xff" is not valid UTF-8
+	CheckConstraint: schema: enum value "\xff" is not valid UTF-8
+	Coerce: "x", coerce: schema: enum value "\xff" is not valid UTF-8
+	CoerceParams: map[], param type "v": schema: enum value "\xff" is not valid UTF-8
+enum duplicate before not UTF-8
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": duplicate enum value "a"
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": duplicate enum value "a"
+	CheckConstraint: schema: duplicate enum value "a"
+	Coerce: "x", coerce: schema: duplicate enum value "a"
+	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
+enum not UTF-8 before empty
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value "\xff" is not valid UTF-8
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value "\xff" is not valid UTF-8
+	CheckConstraint: schema: enum value "\xff" is not valid UTF-8
+	Coerce: "x", coerce: schema: enum value "\xff" is not valid UTF-8
+	CoerceParams: map[], param type "v": schema: enum value "\xff" is not valid UTF-8
+enum empty before not UTF-8
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum value cannot be empty
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum value cannot be empty
+	CheckConstraint: schema: enum value cannot be empty
+	Coerce: "x", coerce: schema: enum value cannot be empty
+	CoerceParams: map[], param type "v": schema: enum value cannot be empty
+enum values changed after construction
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+enum pointer
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": a constraint of Go type *schema.EnumConstraint is none this package constructs
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": a constraint of Go type *schema.EnumConstraint is none this package constructs
+	CheckConstraint: schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
+	Coerce: "x", coerce: schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
+	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.EnumConstraint is none this package constructs
+enum fault in a List
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": enum must have at least two values (got 1)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": enum must have at least two values (got 1)
+	CheckConstraint: schema: enum must have at least two values (got 1)
+	Coerce: "x", coerce: schema: enum must have at least two values (got 1)
+	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 1)
+enum fault in a List of a List
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": duplicate enum value "a"
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": duplicate enum value "a"
+	CheckConstraint: schema: duplicate enum value "a"
+	Coerce: "x", coerce: schema: duplicate enum value "a"
+	CoerceParams: map[], param type "v": schema: duplicate enum value "a"
+enum fault behind a List length fault
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": list length bounds inverted: min 5 > max 1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": list length bounds inverted: min 5 > max 1
+	CheckConstraint: schema: list length bounds inverted: min 5 > max 1
+	Coerce: "x", coerce: schema: list length bounds inverted: min 5 > max 1
+	CoerceParams: map[], param type "v": schema: list length bounds inverted: min 5 > max 1
+enum fault behind a reference
+	Build property: E_UNKNOWN_TYPE: unknown type "Kind" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Kind" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: enum must have at least two values (got 1)
+	Coerce: "x", coerce: schema: enum must have at least two values (got 1)
+	CoerceParams: map[], param type "v": schema: enum must have at least two values (got 1)
+enum accepted behind a reference
+	Build property: E_UNKNOWN_TYPE: unknown type "Kind" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Kind" alone; a datatype declares a built-in type or a List
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+boolean accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+date accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", coerce Date: cannot parse "x" as a YYYY-MM-DD date
+	CoerceParams: map[], param "v": coerce Date: cannot parse "x" as a YYYY-MM-DD date
+uuid accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+timestamp accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", coerce Timestamp: cannot parse "x" against format "2006-01-02"
+	CoerceParams: map[], param "v": coerce Timestamp: cannot parse "x" against format "2006-01-02"
+timestamp format not UTF-8
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": timestamp format "\xff" is not valid UTF-8
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": timestamp format "\xff" is not valid UTF-8
+	CheckConstraint: schema: timestamp format "\xff" is not valid UTF-8
+	Coerce: "x", coerce: schema: timestamp format "\xff" is not valid UTF-8
+	CoerceParams: map[], param type "v": schema: timestamp format "\xff" is not valid UTF-8
+integer accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", coerce Integer: cannot convert string to int64
+	CoerceParams: map[], param "v": coerce Integer: cannot convert string to int64
+integer inverted
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": integer bounds inverted: min 5 > max 1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": integer bounds inverted: min 5 > max 1
+	CheckConstraint: schema: integer bounds inverted: min 5 > max 1
+	Coerce: "x", coerce: schema: integer bounds inverted: min 5 > max 1
+	CoerceParams: map[], param type "v": schema: integer bounds inverted: min 5 > max 1
+float accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", coerce Float: cannot convert string to float64
+	CoerceParams: map[], param "v": coerce Float: cannot convert string to float64
+float infinite max
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": non-finite float bound +Inf; a Float bound is a finite number
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": non-finite float bound +Inf; a Float bound is a finite number
+	CheckConstraint: schema: non-finite float bound +Inf; a Float bound is a finite number
+	Coerce: "x", coerce: schema: non-finite float bound +Inf; a Float bound is a finite number
+	CoerceParams: map[], param type "v": schema: non-finite float bound +Inf; a Float bound is a finite number
+float infinite min
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": non-finite float bound -Inf; a Float bound is a finite number
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": non-finite float bound -Inf; a Float bound is a finite number
+	CheckConstraint: schema: non-finite float bound -Inf; a Float bound is a finite number
+	Coerce: "x", coerce: schema: non-finite float bound -Inf; a Float bound is a finite number
+	CoerceParams: map[], param type "v": schema: non-finite float bound -Inf; a Float bound is a finite number
+float NaN min
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": non-finite float bound NaN; a Float bound is a finite number
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": non-finite float bound NaN; a Float bound is a finite number
+	CheckConstraint: schema: non-finite float bound NaN; a Float bound is a finite number
+	Coerce: "x", coerce: schema: non-finite float bound NaN; a Float bound is a finite number
+	CoerceParams: map[], param type "v": schema: non-finite float bound NaN; a Float bound is a finite number
+float NaN max
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": non-finite float bound NaN; a Float bound is a finite number
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": non-finite float bound NaN; a Float bound is a finite number
+	CheckConstraint: schema: non-finite float bound NaN; a Float bound is a finite number
+	Coerce: "x", coerce: schema: non-finite float bound NaN; a Float bound is a finite number
+	CoerceParams: map[], param type "v": schema: non-finite float bound NaN; a Float bound is a finite number
+float inverted
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": float bounds inverted: min 2.5 > max 1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": float bounds inverted: min 2.5 > max 1
+	CheckConstraint: schema: float bounds inverted: min 2.5 > max 1
+	Coerce: "x", coerce: schema: float bounds inverted: min 2.5 > max 1
+	CoerceParams: map[], param type "v": schema: float bounds inverted: min 2.5 > max 1
+float infinite min before infinite max
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": non-finite float bound +Inf; a Float bound is a finite number
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": non-finite float bound +Inf; a Float bound is a finite number
+	CheckConstraint: schema: non-finite float bound +Inf; a Float bound is a finite number
+	Coerce: "x", coerce: schema: non-finite float bound +Inf; a Float bound is a finite number
+	CoerceParams: map[], param type "v": schema: non-finite float bound +Inf; a Float bound is a finite number
+string accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+string negative min
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": string minimum length cannot be negative: -1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": string minimum length cannot be negative: -1
+	CheckConstraint: schema: string minimum length cannot be negative: -1
+	Coerce: "x", coerce: schema: string minimum length cannot be negative: -1
+	CoerceParams: map[], param type "v": schema: string minimum length cannot be negative: -1
+string negative max
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": string maximum length cannot be negative: -1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": string maximum length cannot be negative: -1
+	CheckConstraint: schema: string maximum length cannot be negative: -1
+	Coerce: "x", coerce: schema: string maximum length cannot be negative: -1
+	CoerceParams: map[], param type "v": schema: string maximum length cannot be negative: -1
+string inverted
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": string length bounds inverted: min 5 > max 1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": string length bounds inverted: min 5 > max 1
+	CheckConstraint: schema: string length bounds inverted: min 5 > max 1
+	Coerce: "x", coerce: schema: string length bounds inverted: min 5 > max 1
+	CoerceParams: map[], param type "v": schema: string length bounds inverted: min 5 > max 1
+string negative min before negative max
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": string minimum length cannot be negative: -1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": string minimum length cannot be negative: -1
+	CheckConstraint: schema: string minimum length cannot be negative: -1
+	Coerce: "x", coerce: schema: string minimum length cannot be negative: -1
+	CoerceParams: map[], param type "v": schema: string minimum length cannot be negative: -1
+list accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+list zero value
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": list has no element constraint
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": list has no element constraint
+	CheckConstraint: schema: list has no element constraint
+	Coerce: "x", coerce: schema: list has no element constraint
+	CoerceParams: map[], param type "v": schema: list has no element constraint
+list no element
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": list has no element constraint
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": list has no element constraint
+	CheckConstraint: schema: list has no element constraint
+	Coerce: "x", coerce: schema: list has no element constraint
+	CoerceParams: map[], param type "v": schema: list has no element constraint
+list negative min
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": list minimum length cannot be negative: -1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": list minimum length cannot be negative: -1
+	CheckConstraint: schema: list minimum length cannot be negative: -1
+	Coerce: "x", coerce: schema: list minimum length cannot be negative: -1
+	CoerceParams: map[], param type "v": schema: list minimum length cannot be negative: -1
+list negative max
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": list maximum length cannot be negative: -1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": list maximum length cannot be negative: -1
+	CheckConstraint: schema: list maximum length cannot be negative: -1
+	Coerce: "x", coerce: schema: list maximum length cannot be negative: -1
+	CoerceParams: map[], param type "v": schema: list maximum length cannot be negative: -1
+list inverted
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": list length bounds inverted: min 5 > max 1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": list length bounds inverted: min 5 > max 1
+	CheckConstraint: schema: list length bounds inverted: min 5 > max 1
+	Coerce: "x", coerce: schema: list length bounds inverted: min 5 > max 1
+	CoerceParams: map[], param type "v": schema: list length bounds inverted: min 5 > max 1
+list inverted before no element
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": list length bounds inverted: min 5 > max 1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": list length bounds inverted: min 5 > max 1
+	CheckConstraint: schema: list length bounds inverted: min 5 > max 1
+	Coerce: "x", coerce: schema: list length bounds inverted: min 5 > max 1
+	CoerceParams: map[], param type "v": schema: list length bounds inverted: min 5 > max 1
+list negative min before negative max
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": list minimum length cannot be negative: -1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": list minimum length cannot be negative: -1
+	CheckConstraint: schema: list minimum length cannot be negative: -1
+	Coerce: "x", coerce: schema: list minimum length cannot be negative: -1
+	CoerceParams: map[], param type "v": schema: list minimum length cannot be negative: -1
+list element fault
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": integer bounds inverted: min 5 > max 1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": integer bounds inverted: min 5 > max 1
+	CheckConstraint: schema: integer bounds inverted: min 5 > max 1
+	Coerce: "x", coerce: schema: integer bounds inverted: min 5 > max 1
+	CoerceParams: map[], param type "v": schema: integer bounds inverted: min 5 > max 1
+list element fault at depth two
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": string minimum length cannot be negative: -1
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": string minimum length cannot be negative: -1
+	CheckConstraint: schema: string minimum length cannot be negative: -1
+	Coerce: "x", coerce: schema: string minimum length cannot be negative: -1
+	CoerceParams: map[], param type "v": schema: string minimum length cannot be negative: -1
+list pointer
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": a constraint of Go type *schema.ListConstraint is none this package constructs
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": a constraint of Go type *schema.ListConstraint is none this package constructs
+	CheckConstraint: schema: a constraint of Go type *schema.ListConstraint is none this package constructs
+	Coerce: "x", coerce: schema: a constraint of Go type *schema.ListConstraint is none this package constructs
+	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.ListConstraint is none this package constructs
+pattern accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+pattern zero value
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": pattern constraint needs at least one pattern
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": pattern constraint needs at least one pattern
+	CheckConstraint: schema: pattern constraint needs at least one pattern
+	Coerce: "x", coerce: schema: pattern constraint needs at least one pattern
+	CoerceParams: map[], param type "v": schema: pattern constraint needs at least one pattern
+pattern none
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": pattern constraint needs at least one pattern
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": pattern constraint needs at least one pattern
+	CheckConstraint: schema: pattern constraint needs at least one pattern
+	Coerce: "x", coerce: schema: pattern constraint needs at least one pattern
+	CoerceParams: map[], param type "v": schema: pattern constraint needs at least one pattern
+pattern three
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": pattern constraint exceeds maximum of 2 patterns (got 3)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": pattern constraint exceeds maximum of 2 patterns (got 3)
+	CheckConstraint: schema: pattern constraint exceeds maximum of 2 patterns (got 3)
+	Coerce: "x", coerce: schema: pattern constraint exceeds maximum of 2 patterns (got 3)
+	CoerceParams: map[], param type "v": schema: pattern constraint exceeds maximum of 2 patterns (got 3)
+pattern Perl syntax refuses
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	CheckConstraint: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	Coerce: "x", coerce: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+pattern surrogate
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": regex pattern "\\x{D800}" names the surrogate code point U+D800, which no string holds
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": regex pattern "\\x{D800}" names the surrogate code point U+D800, which no string holds
+	CheckConstraint: schema: regex pattern "\\x{D800}" names the surrogate code point U+D800, which no string holds
+	Coerce: "x", coerce: schema: regex pattern "\\x{D800}" names the surrogate code point U+D800, which no string holds
+	CoerceParams: map[], param type "v": schema: regex pattern "\\x{D800}" names the surrogate code point U+D800, which no string holds
+pattern three before one refused
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": pattern constraint exceeds maximum of 2 patterns (got 3)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": pattern constraint exceeds maximum of 2 patterns (got 3)
+	CheckConstraint: schema: pattern constraint exceeds maximum of 2 patterns (got 3)
+	Coerce: "x", coerce: schema: pattern constraint exceeds maximum of 2 patterns (got 3)
+	CoerceParams: map[], param type "v": schema: pattern constraint exceeds maximum of 2 patterns (got 3)
+pattern two refused
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	CheckConstraint: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	Coerce: "x", coerce: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+pattern surrogate before one refused
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds
+	CheckConstraint: schema: regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds
+	Coerce: "x", coerce: schema: regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds
+	CoerceParams: map[], param type "v": schema: regex pattern "\\x{DFFF}" names the surrogate code point U+DFFF, which no string holds
+pattern refused before surrogate
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	CheckConstraint: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	Coerce: "x", coerce: schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+	CoerceParams: map[], param type "v": schema: invalid regex pattern "a**": error parsing regexp: invalid nested repetition operator: `**`
+vector accepted
+	Build property: ok
+	Build datatype: ok
+	CheckConstraint: ok
+	Coerce: "x", ok
+	CoerceParams: map[v:x], ok
+vector zero
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": vector dimensions must be between 1 and 65536 (got 0)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": vector dimensions must be between 1 and 65536 (got 0)
+	CheckConstraint: schema: vector dimensions must be between 1 and 65536 (got 0)
+	Coerce: "x", coerce: schema: vector dimensions must be between 1 and 65536 (got 0)
+	CoerceParams: map[], param type "v": schema: vector dimensions must be between 1 and 65536 (got 0)
+vector negative
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": vector dimensions must be between 1 and 65536 (got -1)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": vector dimensions must be between 1 and 65536 (got -1)
+	CheckConstraint: schema: vector dimensions must be between 1 and 65536 (got -1)
+	Coerce: "x", coerce: schema: vector dimensions must be between 1 and 65536 (got -1)
+	CoerceParams: map[], param type "v": schema: vector dimensions must be between 1 and 65536 (got -1)
+vector past the maximum
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": vector dimensions must be between 1 and 65536 (got 65537)
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": vector dimensions must be between 1 and 65536 (got 65537)
+	CheckConstraint: schema: vector dimensions must be between 1 and 65536 (got 65537)
+	Coerce: "x", coerce: schema: vector dimensions must be between 1 and 65536 (got 65537)
+	CoerceParams: map[], param type "v": schema: vector dimensions must be between 1 and 65536 (got 65537)
+pointer to a string
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": a constraint of Go type *schema.StringConstraint is none this package constructs
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": a constraint of Go type *schema.StringConstraint is none this package constructs
+	CheckConstraint: schema: a constraint of Go type *schema.StringConstraint is none this package constructs
+	Coerce: "x", coerce: schema: a constraint of Go type *schema.StringConstraint is none this package constructs
+	CoerceParams: map[], param type "v": schema: a constraint of Go type *schema.StringConstraint is none this package constructs
+reference accepted
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Code" alone; a datatype declares a built-in type or a List
+	CheckConstraint: ok
+	Coerce: "x", coerce Integer: cannot convert string to int64
+	CoerceParams: map[], param "v": coerce Integer: cannot convert string to int64
+reference unresolved
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Code" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype "Code" resolves to no constraint
+	Coerce: "x", coerce: schema: datatype "Code" resolves to no constraint
+	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to no constraint
+reference unresolved in a List
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	CheckConstraint: schema: datatype "Code" resolves to no constraint
+	Coerce: "x", coerce: schema: datatype "Code" resolves to no constraint
+	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to no constraint
+reference resolved to a fault
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Code" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: integer bounds inverted: min 5 > max 1
+	Coerce: "x", coerce: schema: integer bounds inverted: min 5 > max 1
+	CoerceParams: map[], param type "v": schema: integer bounds inverted: min 5 > max 1
+reference resolved to an unresolved reference
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Code" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+	Coerce: "x", coerce: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+reference zero value
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": datatype reference "" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype reference "" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	Coerce: "x", coerce: schema: datatype reference "" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	CoerceParams: map[], param type "v": schema: datatype reference "" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+reference name no source writes
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": datatype reference "lower" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "lower" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype reference "lower" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	Coerce: "x", coerce: schema: datatype reference "lower" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	CoerceParams: map[], param type "v": schema: datatype reference "lower" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+reference name no source writes, unresolved
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": datatype reference "a.b.C" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "a.b.C" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype reference "a.b.C" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	Coerce: "x", coerce: schema: datatype reference "a.b.C" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	CoerceParams: map[], param type "v": schema: datatype reference "a.b.C" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+reference name no source writes in a List
+	Build property: E_INVALID_CONSTRAINT: property "v" in type "Car": datatype reference "type.Code" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V": datatype reference "type.Code" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	CheckConstraint: schema: datatype reference "type.Code" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	Coerce: "x", coerce: schema: datatype reference "type.Code" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+	CoerceParams: map[], param type "v": schema: datatype reference "type.Code" is not one a .yammm source can write; a reference is a datatype name, or an import alias, a dot and a datatype name
+reference resolved through a name no source writes
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Code" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
+	Coerce: "x", coerce: schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
+	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
+reference resolved through a fault behind a name no source writes
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Code" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
+	Coerce: "x", coerce: schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
+	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "lower" alone; a datatype declares a built-in type or a List
+reference resolved to a well-formed reference
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Code" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+	Coerce: "x", coerce: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+reference resolved to a reference of its own name
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_INVALID_CONSTRAINT: datatype "V" is declared as datatype "Code" alone; a datatype declares a built-in type or a List
+	CheckConstraint: schema: datatype "Code" resolves to datatype "Code" alone; a datatype declares a built-in type or a List
+	Coerce: "x", coerce: schema: datatype "Code" resolves to datatype "Code" alone; a datatype declares a built-in type or a List
+	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "Code" alone; a datatype declares a built-in type or a List
+reference resolved to a reference in a List
+	Build property: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	Build datatype: E_UNKNOWN_TYPE: unknown type "Code" in datatype reference; a property type must be a built-in or a declared datatype
+	CheckConstraint: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+	Coerce: "x", coerce: schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List
+	CoerceParams: map[], param type "v": schema: datatype "Code" resolves to datatype "Inner" alone; a datatype declares a built-in type or a List

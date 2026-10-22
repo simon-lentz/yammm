@@ -1,0 +1,54 @@
+code: Pattern["^[A-Z]{2}-[0-9]+$"] as Pattern["^[A-Z]{2}-[0-9]+$"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^[A-Z]{2}-[0-9]+$": false:"" false:"" false:"" false:"" false:"" true:"NY-12" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:""
+both: Pattern["^a", "b$"] as Pattern["^a", "b$"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^a": false:"" true:"a" true:"a" true:"a" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:""
+	"b$": false:"" false:"" true:"b" true:"b" true:"b" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"b" false:""
+first: Pattern["a|ab"] as Pattern["a|ab"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"a|ab": false:"" true:"a" true:"a" true:"a" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"a" false:""
+fold: Pattern["(?i)hello"] as Pattern["(?i)hello"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"(?i)hello": false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"HeLLo" false:"" false:"" false:"" false:"" false:"" false:""
+class: Pattern["^[\\p{Greek}\\d]+$"] as Pattern["^[\\p{Greek}\\d]+$"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^[\\p{Greek}\\d]+$": false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"αβγ9" false:"" true:"12345" true:"123456" false:"" false:""
+escaped: Pattern["^\\x{1F600}\\Q.*\\E$"] as Pattern["^\\x{1F600}\\Q.*\\E$"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^\\x{1F600}\\Q.*\\E$": false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"😀.*" false:"" false:"" false:"" false:""
+lazy: Pattern["a+?"] as Pattern["a+?"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"a+?": false:"" true:"a" true:"a" true:"a" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"a" false:""
+zip: Zip as Pattern["^[0-9]{5}$"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^[0-9]{5}$": false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"12345" false:"" false:"" false:""
+zips: Zips as Pattern["^[0-9]{5}$"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^[0-9]{5}$": false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"12345" false:"" false:"" false:""
+nested: List<List<Pattern["^x"]>> as Pattern["^x"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^x": false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"x" false:""
+NEAR.note: Pattern["^n"] as Pattern["^n"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^n": false:"" false:"" false:"" false:"" false:"" false:"" true:"n" false:"" false:"" false:"" false:"" false:"" false:"" true:"n"
+type Zip: Pattern["^[0-9]{5}$"] as Pattern["^[0-9]{5}$"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^[0-9]{5}$": false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"12345" false:"" false:"" false:""
+type Zips: List<Zip>[1, 3] as Pattern["^[0-9]{5}$"]
+	equal to the constructor's: true, true
+	CheckConstraint: <nil>
+	"^[0-9]{5}$": false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" false:"" true:"12345" false:"" false:"" false:""
+structural hash: sha256:57c55f3962f3b773d6d4124decbbc275e156dd72f61871320bba70dade8b9831

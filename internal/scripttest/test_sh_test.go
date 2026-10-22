@@ -98,7 +98,7 @@ func TestTestScript_StopsABenchmarkAtTheLimit(t *testing.T) {
 	t.Parallel()
 	rows := map[string]string{
 		"a benchmark that hangs":                             "func BenchmarkHangs(b *testing.B) { time.Sleep(time.Hour) }\n",
-		"a benchmark that exits 0 when asked for its stacks": "func BenchmarkHangs(b *testing.B) {\n\tasked := make(chan os.Signal, 1)\n\tsignal.Notify(asked, syscall.SIGQUIT)\n\tgo func() {\n\t\t<-asked\n\t\tos.Exit(0)\n\t}()\n\ttime.Sleep(time.Hour)\n}\n",
+		"a benchmark that exits 0 when asked for its stacks": "func BenchmarkHangs(b *testing.B) {\n\tasked := make(chan os.Signal, 1)\n\tsignal.Notify(asked, syscall.SIGQUIT)\n\tgo func() {\n\t\t<-asked\n\t\tsyscall.Exit(0)\n\t}()\n\ttime.Sleep(time.Hour)\n}\n",
 	}
 	for name, bench := range rows {
 		t.Run(name, func(t *testing.T) {
@@ -118,9 +118,9 @@ func TestTestScript_StopsABenchmarkAtTheLimit(t *testing.T) {
 				return
 			}
 			r.wantCode(t, 1)
-			// The benchmark's name is in the stacks SIGQUIT prints; a host with
-			// no SIGQUIT kills the binary, and only the runner names the stop.
-			if runtime.GOOS != "windows" {
+			// SIGQUIT's stacks name a benchmark that hangs. One that catches the
+			// signal prints none, and on Windows the runner kills the binary.
+			if runtime.GOOS != "windows" && !strings.Contains(bench, "signal") {
 				r.wantStdout(t, "BenchmarkHangs")
 			}
 			r.wantStdout(t, "mutants: the test binary was stopped at the limit of 5s")

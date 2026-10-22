@@ -215,8 +215,8 @@ var seedFiles = sync.OnceValues(func() (fstest.MapFS, error) {
 	for _, args := range [][]string{{"build", "./..."}, {"test", "-count=1", "./..."}} {
 		cmd := exec.CommandContext(context.Background(), "go", args...)
 		cmd.Dir = filepath.Join(dir, "co")
-		// The run drops GOEXPERIMENT (cleanEnv), so a seed built under the
-		// caller's, as in the jsonv2 job, would match none of its builds.
+		// cleanEnv drops the caller's GOEXPERIMENT and only the jsonv2 build sets
+		// one, so a seed built under the caller's would match none of the others.
 		env := slices.DeleteFunc(os.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "GOEXPERIMENT=") })
 		cmd.Env = append(env, "GOFLAGS=-mod=mod", "GOPROXY=off", "GOTOOLCHAIN=local", "GOWORK=off", "GOCACHE="+cache)
 		if out, err := cmd.CombinedOutput(); err != nil {

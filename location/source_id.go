@@ -1,8 +1,10 @@
 package location
 
 import (
+	"errors"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -53,9 +55,10 @@ func NewSourceID(identifier string) SourceID {
 
 // MustNewSourceID creates a synthetic SourceID with validation.
 //
-// Panics if the identifier resembles an absolute file path (Unix or Windows),
-// which would violate the String() injectivity invariant and cause collision
-// hazards with file-backed SourceIDs.
+// Panics when [ValidateSyntheticSourceID] refuses the identifier: an empty one,
+// one that is not UTF-8 or holds a character that does not print, and one that
+// resembles an absolute file path (Unix or Windows), which would violate the
+// String() injectivity invariant and collide with file-backed SourceIDs.
 //
 // Use in application code, tests, and high-level APIs.
 func MustNewSourceID(identifier string) SourceID {
@@ -66,9 +69,10 @@ func MustNewSourceID(identifier string) SourceID {
 }
 
 // ValidateSyntheticSourceID reports whether an identifier is safe as a
-// synthetic SourceID: not empty ([ErrEmptySourceID]), not shaped like an
-// absolute file path ([ErrAbsolutePathSourceID]), and valid UTF-8
-// ([ErrInvalidUTF8Path]). MustNewSourceID calls it.
+// synthetic SourceID: not empty ([ErrEmptySourceID]), valid UTF-8
+// ([ErrInvalidUTF8Path]), holding only characters [strconv.IsPrint] reports
+// printable ([ErrUnprintableSourceID]), and not shaped like an absolute file
+// path ([ErrAbsolutePathSourceID]). MustNewSourceID calls it.
 func ValidateSyntheticSourceID(identifier string) error {
 	if identifier == "" {
 		return ErrEmptySourceID
@@ -76,8 +80,13 @@ func ValidateSyntheticSourceID(identifier string) error {
 	if !utf8.ValidString(identifier) {
 		return fmt.Errorf("%w: %q", ErrInvalidUTF8Path, identifier)
 	}
+	for _, r := range identifier {
+		if !strconv.IsPrint(r) {
+			return fmt.Errorf("%w: %q holds %U", ErrUnprintableSourceID, identifier, r)
+		}
+	}
 	if looksLikeAbsolute(identifier) {
-		return fmt.Errorf("%w: %q; use a scheme prefix (e.g., test://, inline:) to avoid collision with file-backed sources", ErrAbsolutePathSourceID, identifier)
+		return fmt.Errorf("%w: %q; it starts as a file-backed source's path does: with a slash, two backslashes, or a drive letter, a colon and a separator", ErrAbsolutePathSourceID, identifier)
 	}
 	return nil
 }
@@ -90,8 +99,10 @@ func ValidateSyntheticSourceID(identifier string) error {
 // A normalized key is a fixed point, and its form does not depend on the host.
 func NormalizeSyntheticKey(key string) (string, error) {
 	if key != "" {
-		if err := ValidateSyntheticSourceID(key); err != nil {
+		if err := ValidateSyntheticSourceID(key); errors.Is(err, ErrAbsolutePathSourceID) {
 			return "", fmt.Errorf("source key %q must be relative to the synthetic root: %w", key, err)
+		} else if err != nil {
+			return "", fmt.Errorf("source key %q: %w", key, err)
 		}
 	}
 	// One host reads a backslash as a separator and another as part of a file

@@ -2,14 +2,8 @@ package schema
 
 import (
 	"maps"
-	"regexp"
 	"strings"
 )
-
-// validAliasRE matches identifiers that are valid per the grammar: start with
-// a letter (A-Z or a-z), followed by any combination of letters, digits, or
-// underscores.
-var validAliasRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
 // reservedKeywordsMap contains all words that cannot be used as import aliases.
 // The rule table holds no keywords, so each of these lexes as an ordinary word
@@ -73,7 +67,17 @@ func isReservedKeyword(alias string) bool {
 // digits, and underscores. This does NOT check for reserved keywords; use
 // isReservedKeyword for that.
 func isValidAlias(alias string) bool {
-	return validAliasRE.MatchString(alias)
+	if alias == "" {
+		return false
+	}
+	for i := range len(alias) {
+		c := alias[i]
+		letter := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+		if !letter && (i == 0 || (c != '_' && (c < '0' || c > '9'))) {
+			return false
+		}
+	}
+	return true
 }
 
 // deriveAliasFromPath extracts the default alias from an import path.

@@ -329,10 +329,10 @@ func (c *completer) resolveTypeRef(ref TypeRef) *Type {
 }
 
 // resolveImportedSchema resolves a non-empty import qualifier to the imported
-// schema through the resolution map — [completer.classifyQualifier], the single
-// interpreter of that map — returning false when the qualifier is absent or
-// deferred, or when its resolved schema is not registered. It is the
-// completion-time counterpart to the runtime [Schema.ResolveType] /
+// schema through the resolution map — read by [completer.classifyQualifier], as
+// every qualifier-resolving site reads it — returning false when the qualifier
+// is absent or deferred, or when its resolved schema is not registered. It is
+// the completion-time counterpart to the runtime [Schema.ResolveType] /
 // [Schema.ResolveDataType], which read the wired Import objects instead; routing
 // completion through classifyQualifier keeps a qualifier's deferred/resolved
 // state read in one place during a load, not two. The caller must have already
