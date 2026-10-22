@@ -1,7 +1,7 @@
 # YAMMM
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/simon-lentz/yammm.svg)](https://pkg.go.dev/github.com/simon-lentz/yammm)
-[![Go Version](https://img.shields.io/badge/go-1.26+-blue.svg)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/go-1.26.5+-blue.svg)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and validating Go data against them at runtime. It provides post-validation services including graph traversal and integrity checking.
@@ -31,7 +31,7 @@ YAMMM is a Go library for defining schemas in a small DSL (`.yammm` files) and v
 go get github.com/simon-lentz/yammm
 ```
 
-Requires Go 1.26 or later.
+Requires Go 1.26.5 or later.
 
 ## Quick Start
 
