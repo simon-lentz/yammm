@@ -1,6 +1,7 @@
 package parse
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -126,24 +127,21 @@ func TestChecks_ConstraintDiagnostics(t *testing.T) {
 			name: "every duplicate after the first is reported",
 			decl: `e Enum["a", "a", "a"]`,
 			want: []wantIssue{
-				{diag.E_INVALID_CONSTRAINT, diag.Error, 2, 21, `Enum["a", "a", "a"]`, "enum must have at least two values (got 1)"},
 				{diag.E_INVALID_CONSTRAINT, diag.Error, 12, 15, `"a"`, `duplicate enum value "a"`},
 				{diag.E_INVALID_CONSTRAINT, diag.Error, 17, 20, `"a"`, `duplicate enum value "a"`},
 			},
 		},
 		{
-			name: "duplicate enum value is dropped and the survivor count reported",
+			name: "a duplicate enum value is dropped and reported alone, since the source wrote two values",
 			decl: `e Enum["a", "a"]`,
 			want: []wantIssue{
-				{diag.E_INVALID_CONSTRAINT, diag.Error, 2, 16, `Enum["a", "a"]`, "enum must have at least two values (got 1)"},
 				{diag.E_INVALID_CONSTRAINT, diag.Error, 12, 15, `"a"`, `duplicate enum value "a"`},
 			},
 		},
 		{
-			name: "empty enum value is dropped",
+			name: "an empty enum value is dropped and reported alone",
 			decl: `e Enum["", "b"]`,
 			want: []wantIssue{
-				{diag.E_INVALID_CONSTRAINT, diag.Error, 2, 15, `Enum["", "b"]`, "enum must have at least two values (got 1)"},
 				{diag.E_INVALID_CONSTRAINT, diag.Error, 7, 9, `""`, "enum value cannot be empty"},
 			},
 		},
@@ -243,7 +241,6 @@ func TestChecks_UnquoteFailuresAreSyntaxErrors(t *testing.T) {
 			src:  checkSource(`e Enum["\x", "b"]`),
 			base: len(checkPrelude),
 			want: []wantIssue{
-				{diag.E_INVALID_CONSTRAINT, diag.Error, 2, 17, `Enum["\x", "b"]`, "enum must have at least two values (got 1)"},
 				{diag.E_SYNTAX, diag.Error, 7, 11, `"\x"`, "invalid enum value: unquote string: invalid syntax"},
 			},
 		},
@@ -295,8 +292,8 @@ func TestChecks_UnquoteResolvesLexerEscapeVocabulary(t *testing.T) {
 		{"literal single quote in double quotes", `"a'b"`, `a'b`},
 		{"zero escape is not octal", `'\012'`, "\x0012"},
 		{"valid multi-byte rune", "\"café\"", "café"},
-		{"invalid utf-8 byte", "\"a\xffb\"", "a�b"},
-		{"truncated utf-8 sequence", "\"a\xe2\x82b\"", "a��b"},
+		{"escapes that write a three-byte character", `"\xef\xbf\xbd"`, "\uFFFD"},
+		{"the last ASCII byte as an escape", `"\x7f"`, "\x7f"},
 	}
 	for _, tc := range accepted {
 		t.Run(tc.name, func(t *testing.T) {
@@ -306,6 +303,25 @@ func TestChecks_UnquoteResolvesLexerEscapeVocabulary(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("unquote(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// A literal holding text the source rules refuse has no value: the bytes come
+	// back as written, for a judgement of form alone, and no character stands
+	// in for them.
+	for _, tc := range []struct{ name, in, written string }{
+		{"invalid utf-8 byte", "\"a\xffb\"", "a\xffb"},
+		{"truncated utf-8 sequence", "\"a\xe2\x82b\"", "a\xe2\x82b"},
+		{"raw NUL", "\"a\x00b\"", "a\x00b"},
+		{"raw byte order mark", "\"a\uFEFFb\"", "a\uFEFFb"},
+		{"an escape and a raw byte that make one character", "\"\\xc3\xa9\"", "é"},
+		{"a raw byte and an escape that make one character", "\"\xc3\\xa9\"", "é"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := unquote(tc.in)
+			if !errors.Is(err, errRefusedText) || got != tc.written {
+				t.Errorf("unquote(%q) = %q, %v; want %q and errRefusedText", tc.in, got, err, tc.written)
 			}
 		})
 	}
@@ -520,24 +536,23 @@ func TestChecks_PatternListRejectsATrailingComma(t *testing.T) {
 	}
 }
 
-// TestChecks_PatternArityCountsWhatCompiles pins the count against the
-// generated parser's, which appends only patterns that unquote and compile. A
-// count of written literals reports an arity error production never raises, and
-// a pattern past the cap keeps its own diagnostic either way.
-func TestChecks_PatternArityCountsWhatCompiles(t *testing.T) {
+// TestChecks_PatternArityCountsEveryWrittenPattern pins that the pattern limit
+// counts the patterns the source wrote, as the schema Builder counts them: a
+// pattern refused for its own fault keeps its diagnostic and still counts.
+func TestChecks_PatternArityCountsEveryWrittenPattern(t *testing.T) {
 	for _, tc := range []struct {
 		name, prop string
 		wantCodes  []diag.Code
 	}{
 		{
-			"an uncompilable third pattern leaves two survivors",
+			"an uncompilable third pattern counts",
 			`p Pattern["a", "b", "("]`,
-			[]diag.Code{diag.E_INVALID_CONSTRAINT},
+			[]diag.Code{diag.E_INVALID_CONSTRAINT, diag.E_INVALID_CONSTRAINT},
 		},
 		{
-			"an unquotable middle pattern leaves two survivors",
+			"a middle pattern regexp refuses counts",
 			`p Pattern["a", "\\x", "b"]`,
-			[]diag.Code{diag.E_INVALID_CONSTRAINT},
+			[]diag.Code{diag.E_INVALID_CONSTRAINT, diag.E_INVALID_CONSTRAINT},
 		},
 		{
 			"three that compile is three",

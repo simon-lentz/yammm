@@ -121,24 +121,24 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_INVALID_CONSTRAINT` | Constraint definition is invalid |
 | `E_INVALID_INVARIANT` | An invariant's expression or message is invalid |
 | `E_DUPLICATE_INVARIANT` | One invariant message declared twice on a type |
-| `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ |
+| `E_INVARIANT_CONFLICT` | Two inherited definitions of one invariant message differ (a literal with no value matches any literal of its kind) |
 | `E_REVERSE_CLAUSE_REMOVED` | Schema carries the reverse clause removed in v0.15.0 (v0.15+) |
 | `E_INVALID_NAME` | A name the schema refuses: an identifier's format, an empty schema name, a member named `self`, a name the Builder takes that the DSL cannot state, or an invariant reading a relation in a casing other than its name or field name |
 | `E_UPSTREAM_FAIL` | Imported schema failed to compile |
 | `E_PROPERTY_CONFLICT` | Conflicting property definitions from inheritance |
-| `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, or property datatype) |
+| `E_UNKNOWN_TYPE` | Referenced type or datatype not found (`extends`, relation target, a property datatype, or a datatype declaration's reference such as a `List` element) |
 | `E_DUPLICATE_TYPE` | Type name defined multiple times |
 | `E_DUPLICATE_SCHEMA` | Two schemas in one registry, or in one import closure, declare one name |
-| `E_RELATION_COLLISION` | A type carries conflicting relation definitions under one name: inherited definitions that differ, or an association and a composition sharing a name |
+| `E_RELATION_COLLISION` | A type carries two relation definitions under one field name that do not merge: an inherited one that differs from another it carries, or an association and a composition (two relations one type declares under one exact name are `E_DUPLICATE_RELATION`) |
 | `E_MISSING_SOURCE_ID` | Required SourceID is missing |
 | `E_INVALID_SYNTHETIC_ID` | Synthetic SourceID has invalid format |
 | `E_LIST_ON_EDGE` | List type used in relationship property |
 | `E_INVALID_PRIMARY_KEY_TYPE` | Type not allowed as primary key |
 | `E_NO_PRIMARY_KEY` | Concrete type declares or inherits no primary key |
-| `E_LOAD_IO_FAILURE` | I/O error during schema loading |
-| `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, or is larger than the size limit |
-| `E_LOAD_SOURCE_CHANGED` | A source a shared registry holds with content that differs from the load's: re-registered after an edit, or imported where the load's own bytes for it differ from the ones the registry compiled |
-| `E_UNKNOWN_ANNOTATION` | Annotation name not in the built-in registry for its placement |
+| `E_LOAD_IO_FAILURE` | I/O error during schema loading, or a load whose arguments or options the loader refuses |
+| `E_LOAD_MODULE_ROOT_MALFORMED` | A `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link whose target cannot be read |
+| `E_LOAD_SOURCE_CHANGED` | A source a shared registry holds with content that differs from the load's: re-registered after an edit, or imported where the load's own bytes for it differ from the ones the registry compiled, or a Builder schema registered under a loaded schema's identity |
+| `E_UNKNOWN_ANNOTATION` | Annotation name the built-in registry holds at neither placement (one it holds only at the other placement is `E_INVALID_ANNOTATION`) |
 | `E_UNKNOWN_ANNOTATION_TARGET` | Annotation property-reference argument names no property of the type |
 | `E_INVALID_ANNOTATION` | Annotation placement, arity, argument-kind, keyword, or duplicate violation, or conflicting annotations a type inherits for one property |
 | `E_INVALID_ANNOTATION_TARGET` | Annotation attached to an ineligible property |

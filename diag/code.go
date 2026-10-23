@@ -181,7 +181,8 @@ var (
 	E_DUPLICATE_INVARIANT = NewCode("E_DUPLICATE_INVARIANT", CategorySchema)
 
 	// E_INVARIANT_CONFLICT indicates a type inherits two definitions of one
-	// invariant message with different expressions.
+	// invariant message with different expressions. A literal with no value
+	// matches any literal of its kind.
 	E_INVARIANT_CONFLICT = NewCode("E_INVARIANT_CONFLICT", CategorySchema)
 
 	// E_REVERSE_CLAUSE_REMOVED indicates a schema still carries the

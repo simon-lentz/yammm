@@ -47,9 +47,9 @@ Inside a production, `"a" ... "z"` is a character range — the closed set from 
 
 ## Source Code Representation
 
-Source code is Unicode text encoded in UTF-8. A byte sequence that is not valid UTF-8 is a syntax error (`E_SYNTAX`), reported at the bytes inside a comment or a string or regex literal and failing the construct that holds it anywhere else, and so is the NUL character (U+0000), which a string literal writes with the `\0` escape instead. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
+Source code is Unicode text encoded in UTF-8. A byte sequence that is not valid UTF-8 is a syntax error (`E_SYNTAX`), reported once for each run of one kind inside a comment or a string or regex literal, and once anywhere else, where the parser recovers from it as from any unexpected token, and so is the NUL character (U+0000), which a string literal writes with the `\0` escape instead. The text is not canonicalized, so a single accented code point is distinct from the same character constructed from combining an accent and a letter. For simplicity, this document will use the unqualified term _character_ to refer to a Unicode code point in the source text.
 
-A schema file can start with one UTF-8 byte order mark (U+FEFF). The lexer skips it: it is no token, though line 1's columns count it, and the formatter never writes one: `yammm fmt --check` reports a file that starts with one as unformatted, and `yammm fmt --write` removes it. A byte order mark anywhere else is a syntax error (`E_SYNTAX`), inside a comment or a literal too; a string literal writes U+FEFF with the `\uFEFF` escape. The `yammm.mod` marker file is the exception, below.
+A schema file can start with one UTF-8 byte order mark (U+FEFF). The lexer skips it: it is no token, though line 1's columns count it. The language server is the exception: for a file it reads from disk, it counts line 1's characters from the first character after the mark. The formatter removes a leading one: `yammm fmt --check` reports a file that starts with one as unformatted, and `yammm fmt --write` removes it. A byte order mark anywhere else is a syntax error (`E_SYNTAX`), inside a comment or a literal too; a string literal writes U+FEFF with the `\uFEFF` escape. `yammm fmt` does not refuse a mark inside a comment or a string literal: it writes the mark back where it stands, and `yammm validate` refuses the file. The `yammm.mod` marker file is the exception, below.
 
 Each code point is distinct; upper and lower case letters are different characters.
 
@@ -388,7 +388,7 @@ The nearest marker wins, so a nested marker deliberately narrows a sub-module's 
 
 **Size:** A schema source — the entry file or an import — is read up to 16 MiB; a larger file is refused before it is parsed.
 
-**Security:** A load that reads imports from disk sandboxes their paths using `os.Root` to prevent path traversal attacks: `os.Root` resolves every component, a symlink's target included, against an open handle on the module root and rejects a path that would leave it. The module root is that sandbox's boundary, so committing a `yammm.mod` grants the loader read access to that directory's whole subtree for imports — which is what makes a repository-relative import resolve. A load under `schema.WithSyntheticRoot` reads no disk: it requires `WithSourcesOnly`, so every import is looked up among the sources the caller passed, and a relative import resolves against the importing source's key as text, so one that climbs above the root keeps its `..` rather than being rejected (`schema.SyntheticImportKey` states the rule).
+**Security:** A load that reads imports from disk sandboxes their paths using `os.Root` to prevent path traversal attacks: `os.Root` resolves every component, a symlink's target included, against an open handle on the module root and rejects a path that would leave it. The module root is that sandbox's boundary, so committing a `yammm.mod` grants the loader read access to that directory's whole subtree for imports — which is what makes a repository-relative import resolve. A load under `schema.WithSyntheticRoot` reads no disk: every import is looked up among the sources the caller passed, with or without `WithSourcesOnly`, and a relative import resolves against the importing source's key as text, so one that climbs above the root keeps its `..` rather than being rejected (`schema.SyntheticImportKey` states the rule).
 
 **Default alias derivation:** When no explicit `as` clause is provided, the alias is derived from the last path segment:
 
@@ -556,7 +556,7 @@ Inheritance rules:
 
 `E_PROPERTY_CONFLICT` is reported once per conflict per affected type, so ancestors that merely carry a conflicting property forward do not repeat the diagnostic. The message names the declaration that survived the merge and the first one that clashed with it; the diagnostic's related locations name **every** declaration involved — both the full set that merged into the surviving definition (including declarations absorbed as equal-or-wider, and any that later took over as a narrower survivor) and every declaration on the conflicting side. Resolving the conflict may require editing any of them, so none is omitted. Each subtype that inherits a conflicting combination re-detects and reports it independently.
 
-**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. One definition reached through two ancestors merges silently.
+**Invariant merging:** Own invariants come first, then those inherited from each direct supertype in declaration order, each supertype contributing the set it has already merged. An invariant's message is its identity, and must not be empty (`E_INVALID_INVARIANT`). A subtype's declaration overrides an inherited one of the same name at any depth — a grandparent's rule cannot reappear past a parent that replaced it. One type may not declare a message twice (`E_DUPLICATE_INVARIANT`), and two inherited definitions of one message must carry the same expression; a disagreement is `E_INVARIANT_CONFLICT`, reported once on the type that inherits them, naming every rival. Expressions are compared structurally, as the structural hash compares them: `n > 1` and `n > 1.0` are different expressions, because an integer and a float literal are different literals. A literal with no value, whose own diagnostic already refuses the source, matches any literal of the kind the source wrote there (a string, an integer, a float or a regular expression), so the definitions of one message conflict only when no value for each such literal makes them all one, whatever order the supertypes are named in. One definition reached through two ancestors merges silently.
 
 ### Constraint Narrowing
 
@@ -797,7 +797,7 @@ Represents a value from a fixed set of string options:
 EnumT = "Enum" "[" STRING "," STRING { "," STRING } [ "," ] "]" .
 ```
 
-At least two options must be provided, and they must be distinct and non-empty: an empty or repeated value is dropped before the count is taken, so `Enum["a", "a"]` and `Enum["a", ""]` are both refused.
+At least two options must be provided, and they must be distinct and non-empty. The count is of the values written, and an empty or repeated value is refused at the value, so `Enum["a", "a"]` and `Enum["a", ""]` are each refused with one diagnostic, at the second value, and `Enum["a"]` is refused for its count.
 
 Examples:
 
@@ -822,7 +822,7 @@ email Pattern["^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"]
 phone Pattern["^\\d{3}-\\d{3}-\\d{4}$"]
 ```
 
-When two patterns are provided, the value must match both.
+When two patterns are provided, the value must match both. A list of more than two is `E_INVALID_CONSTRAINT`, counting every pattern written, so a pattern refused for its own fault counts too and draws its own diagnostic beside the count's.
 
 A pattern follows Go's `regexp` syntax, and one that does not compile is `E_INVALID_CONSTRAINT`. So is a pattern that writes a surrogate code point (U+D800 to U+DFFF) with a `\x{…}` escape, alone or in a class: Go compiles it, but no string holds a surrogate, so the surrogate matches nothing and has no reading a JSON Schema validator shares. A class that spans the surrogate block, such as `[\x{D000}-\x{E000}]`, writes none.
 
@@ -1473,7 +1473,7 @@ name               // implicit property reference
 $item.price        // lambda parameter property
 ```
 
-Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage, so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. A builtin's result is typed by its subkind — `Len`, `Sum`, `Count`, `Compare` and the numeric functions yield a number; `Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring` and `TypeOf` a string; `Split` and `Match` a list of strings; the predicates and `IsNil` a boolean; `Min` and `Max` with an argument the receiver or the argument, ranked by the total order — so the stage after it is judged: `name -> Len -> Upper` is refused, as `age -> Upper` is. It rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters or arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where a number is — because an invariant that fails on every instance is a defect in the schema, not in the data.
+Invariant expressions are checked **statically** at schema load. The checker types every sub-expression — an instance, an association key, a list, a scalar — and follows the type through member access, indexing and every pipeline stage whose builtin declares its result (`Reduce` declares none), so a lambda parameter is the element its collection holds and `ITEMS -> Map |$i| { $i.PART } -> All |$p| { $p.sku != "" }` binds `$p` to a `Part`. A builtin's result is typed by its subkind — `Len`, `Sum`, `Count`, `Compare` and the numeric functions yield a number; `Upper`, `Lower`, `Trim`, `TrimPrefix`, `TrimSuffix`, `Join`, `Replace`, `Substring` and `TypeOf` a string; `Split` and `Match` a list of strings; the predicates and `IsNil` a boolean; `Min` and `Max` with an argument the receiver or the argument, ranked by the total order — so the stage after it is judged: `name -> Len -> Upper` is refused, as `age -> Upper` is. Among what it rejects: a reference to a property not declared on the type (`E_UNKNOWN_PROPERTY`), however the instance was reached; a member read through an association key, a scalar or a list (`E_INVALID_INVARIANT`); an undefined named variable; a function name the language does not define; and a call shape its builtin refuses — a missing or unexpected lambda, too many parameters, too few or too many arguments; and a receiver or an argument of a kind its builtin refuses on every input (`E_INVALID_INVARIANT`) — `age -> Upper` on a number, `name -> Match("nor")` with a string where a pattern is required, `name -> Substring("a")` with a string where a number is — because an invariant that fails on every instance is a defect in the schema, not in the data.
 
 **The nil guards are typed by one rule.** `Default`, `Coalesce` and `Lest` evaluate to one of their alternatives — the receiver, or the fallback that stands in for it when the receiver is nil — and `Then` to its body, or nil for an absent receiver. The checker types each as what every alternative agrees on, so the stage after the guard is typed by a value it predicted. Alternatives of different kinds — a string beside a number, a list beside a scalar, an instance beside either — are refused at load (`E_INVALID_INVARIANT`): `(name -> Coalesce(1)) -> Upper` and `(note -> Lest { 1 }) -> Upper` are refused as `(name -> Default(1)) -> Upper` is, and `note -> Lest { true }` is refused because with `note` present the invariant evaluates to a string. The nil literal stands in for any receiver and the empty list literal for any list. Two instance types agree on the members both declare, whatever their ancestry: after `(A_SLOT -> Default(B_SLOT))` a member declared on `A` and on `B` reads, and a member declared on one of them alone is `E_UNKNOWN_PROPERTY`, since the evaluator would read nil there on the input that selects the other. A conditional and a list literal join their branches the same way, and admit alternatives of different kinds as a value of unknown kind. At evaluation time, a declared-but-absent optional property evaluates to `nil` — this is what makes the `IsNil` / `Then` / `Lest` / `Default` guard idioms work. Member access on a non-map value is an evaluation error; member access on `nil` evaluates to `nil`.
 
@@ -1738,26 +1738,26 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_DUPLICATE_SCHEMA` — two schemas in one registry, or in one import closure, declare one name
 - `E_INHERIT_CYCLE` — circular inheritance chain
 - `E_UNKNOWN_TYPE` — unresolvable type reference
-- `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — property definition errors
+- `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — a property declared twice on one type or an edge property twice on one association, or an invariant reading a member the type it reads does not declare
 - `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION` — relation conflicts
-- `E_DUPLICATE_INVARIANT`, `E_INVARIANT_CONFLICT` — an invariant message declared twice on one type, or inherited with two different expressions
+- `E_DUPLICATE_INVARIANT`, `E_INVARIANT_CONFLICT` — an invariant message declared twice on one type, or inherited with two different expressions (a literal with no value matches any literal of its kind)
 - `E_CASE_COLLISION` — names differ only by case
 - `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
 - `E_RESERVED_PREFIX` — name uses a reserved prefix
 - `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
 - `E_INVALID_CONSTRAINT` — constraint definition error
 - `E_INVALID_INVARIANT` — an invariant's expression or message is invalid
-- `E_INVALID_NAME` — a name the schema refuses: an identifier whose format its production refuses, an empty schema name, a property or relation field named `self`, a name the `schema.Builder` takes that the DSL cannot state (a built-in type name as a type, datatype or relation name, or a schema name that is not UTF-8), or an invariant that reads a relation in a casing other than its name or its field name
+- `E_INVALID_NAME` — a name the schema refuses: an identifier whose format its production refuses, an empty schema name, a property or relation field named `self`, a name the `schema.Builder` takes that the DSL cannot state (a built-in type name as a type, datatype or relation name, a property named `as`, `part`, `in`, `nil`, `true` or `false`, or a schema name that is not UTF-8), or an invariant that reads a relation in a casing other than its name or its field name
 - `E_INVALID_PRIMARY_KEY_TYPE` — disallowed type for primary key
 - `E_NO_PRIMARY_KEY` — concrete type declares or inherits no primary key
 - `E_LIST_ON_EDGE` — List type used in relationship property
 - `E_PROPERTY_CONFLICT` — conflicting inherited properties
 - `E_UPSTREAM_FAIL` — imported schema failed to compile
 - `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
-- `E_LOAD_IO_FAILURE` — I/O error during schema loading
-- `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines
+- `E_LOAD_IO_FAILURE` — I/O error during schema loading, or a load whose arguments or options the loader refuses
+- `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link whose target cannot be read
 - `E_LOAD_SOURCE_CHANGED` — a source a shared registry holds with content that differs from the load's: re-registered after an edit, registered with its sources where the registry's schema has none, or imported where the load's own bytes for it differ from the ones the registry compiled
-- `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, or duplicate errors
+- `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, argument kind or value, duplicate, or inherited-disagreement errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)
 - `W_TIMESTAMP_LOSSY_FORMAT` (Warning) — a `Timestamp["layout"]` declares a layout that cannot reproduce an instant
@@ -1858,7 +1858,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 
 - Schema files use the `.yammm` extension
 - Snapshot files use the `.ys` extension
-- UTF-8 encoding is required; one leading byte order mark is accepted and never written
+- A schema file is UTF-8. It can start with one byte order mark, which the formatter removes; a snapshot file that starts with one is refused (`E_SNAPSHOT_MALFORMED`)
 - One schema per file
 - Import paths are case-sensitive on case-sensitive filesystems
 - `/` separates an import path's segments on every host, and only a `./` or `../` prefix makes an import relative. An import path holding a backslash is refused: Windows reads a backslash as a separator and every other host as part of a file name, so the path would name a different file on each

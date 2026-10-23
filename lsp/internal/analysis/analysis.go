@@ -13,7 +13,6 @@ import (
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 
 	"github.com/simon-lentz/yammm/diag"
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
@@ -24,10 +23,11 @@ import (
 // diagnosticSource is the value used for the Source field in LSP diagnostics.
 const diagnosticSource = "yammm"
 
-// canonicalSourceID mints a SourceID whose key matches the loader's, so
-// SpanToLSPRange finds the content instead of falling back to rune columns.
+// canonicalSourceID mints a SourceID whose key matches the loader's, so an
+// overlay is registered once, as text the client sent, and not again under the
+// loader's key as a file read from disk.
 // The server already hands Analyze canonical paths; this holds the property
-// for a caller that does not.
+// for a caller that passes an absolute path that is not canonical.
 func canonicalSourceID(path string) (location.SourceID, error) {
 	id, err := location.SourceIDFromPath(path)
 	if err != nil {
@@ -36,14 +36,18 @@ func canonicalSourceID(path string) (location.SourceID, error) {
 	return id, nil
 }
 
-// Snapshot represents an immutable analysis result for a single entry file.
-// It captures the complete state needed for LSP features: parsed schema,
-// diagnostics, symbol indices, and source content for position conversion.
+// Snapshot represents the analysis result for a single entry file. Once the
+// workspace publishes it, nothing changes it. It holds what the LSP features
+// read of an analysis: the parsed schema, diagnostics, symbol indices, source
+// content for position conversion, the module root, the entry's version and
+// its imported paths.
 //
-// Snapshots are created by [Analyzer.Analyze] and stored in
-// [github.com/simon-lentz/yammm/lsp/internal/workspace.Workspace]
-// keyed by entry file URI. Each edit triggers a new snapshot, replacing
-// the previous one.
+// Snapshots are created by [Analyzer.Analyze] and [Analyzer.SnapshotForResult].
+// [github.com/simon-lentz/yammm/lsp/internal/workspace.Workspace] keeps the
+// latest one per entry file URI, and a markdown document's block snapshots in
+// a list of its own. An edit schedules a new analysis, which replaces the
+// previous snapshot when it completes; an analysis a later edit overtakes is
+// cancelled and its result dropped.
 type Snapshot struct {
 	// CreatedAt records when this snapshot was created.
 	CreatedAt time.Time
@@ -67,9 +71,10 @@ type Snapshot struct {
 	// determine if the schema is semantically valid.
 	Result diag.Result
 
-	// Sources holds the content of all files in the import closure.
-	// Used for UTF-16 position conversion via LineStartByte.
-	Sources *source.Registry
+	// Sources holds every overlay the analysis was given, as text the client
+	// sent, and every other source the load read, whether or not it produced
+	// a schema. Position conversion reads it.
+	Sources *lsputil.Texts
 
 	// LSPDiagnostics contains diagnostics converted to LSP protocol format,
 	// ready for publishing via textDocument/publishDiagnostics.
@@ -193,11 +198,12 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 	}
 }
 
-// Analyze performs analysis on a schema file and returns an immutable snapshot.
+// Analyze performs analysis on a schema file and returns a snapshot.
 //
 // The return values follow the standard entry point pattern:
-//   - error != nil: Catastrophic failure (I/O error, internal corruption).
-//     A partial snapshot may still be returned with available diagnostics.
+//   - error != nil: the result holds a Fatal issue, such as an I/O failure, a
+//     cancellation, input the load cannot begin from, or a header that does
+//     not parse. The snapshot is still returned, with the diagnostics.
 //   - error == nil && !snapshot.Result.OK(): Semantic failure. The schema
 //     has parse or validation errors, but analysis completed normally.
 //     The snapshot contains diagnostics describing the issues.
@@ -208,18 +214,19 @@ func NewAnalyzer(logger *slog.Logger) *Analyzer {
 // to [schema.LoadSourcesWithEntry]. For example, callers may pass
 // [schema.WithImportsAllowed] with false to reject import declarations.
 //
-// Source-registry invariance: The Analyzer creates its own [source.Registry],
-// pre-registers overlay content, and — after the load — copies the loaded
-// schema's full source closure into it, covering the sources the load
-// resolved from disk. The registry is stored in the resulting [Snapshot]
+// Source-registry invariance: The Analyzer creates its own [lsputil.Texts],
+// registers overlay content as text the client sent, and — after the load —
+// registers every other source the load read as a file, whether or not the
+// load produced a schema. The Texts is stored in the resulting [Snapshot]
 // and is authoritative for position conversion and symbol indexing.
 //
 // The overlays map provides in-memory content that takes precedence over
 // disk files. Keys should be canonical absolute paths (matching SourceID.String()).
-// Files not in overlays are read from disk during import resolution.
+// Files not in overlays are read from disk during import resolution, under a
+// non-empty module root and unless opts restrict the load to the given sources.
 //
-// The ctx parameter supports cancellation; if cancelled, Analyze returns
-// early with a partial or nil snapshot.
+// The ctx parameter supports cancellation; if cancelled, Analyze returns the
+// partial snapshot with an error.
 func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[string][]byte, moduleRoot string, posEncoding lsputil.PositionEncoding, opts ...schema.LoadOption) (*Snapshot, error) {
 	a.logger.Debug(
 		"starting analysis",
@@ -229,7 +236,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	)
 
 	// Create fresh source registry for this analysis
-	sourceRegistry := source.NewRegistry()
+	sourceRegistry := lsputil.NewTexts()
 
 	// Pre-register overlay content
 	for path, content := range overlays {
@@ -258,35 +265,31 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	// Perform the load with explicit entry path.
 	// This ensures the correct document is analyzed even when multiple
 	// documents are open (overlays from different files).
+	var loaded *schema.Sources
 	schemaResult, diagResult := schema.LoadSourcesWithEntry(
 		ctx,
 		sources,
 		entryPath,
 		moduleRoot,
-		opts...,
+		append(slices.Clone(opts), schema.CaptureSources(&loaded))...,
 	)
 
-	// Copy the loaded schema's source closure into the analyzer's registry:
-	// the load reads sources the overlays did not provide (disk-resolved
-	// imports), and position conversion plus symbol indexing need their
-	// content. Same-content re-registration of the overlays is a no-op. On
-	// a failed load there is no schema, so the registry holds the overlays
-	// alone; diagnostic spans still carry line/column positions.
-	if schemaResult != nil {
-		if srcs := schemaResult.Sources(); srcs != nil {
-			for _, id := range srcs.SourceIDs() {
-				content, ok := srcs.ContentBySource(id)
-				if !ok {
-					continue
-				}
-				if err := sourceRegistry.Register(id, content); err != nil {
-					a.logger.Warn(
-						"failed to register loaded source",
-						slog.String("source", id.String()),
-						slog.Any("error", err),
-					)
-				}
-			}
+	// Register every source the load read beyond the overlays: imports
+	// resolved from disk, which position conversion and symbol indexing
+	// need. The capture holds them for a load that produced no schema too,
+	// and a diagnostic in such a file converts from its content like any
+	// other. An overlay is already registered and keeps its origin.
+	for _, id := range loaded.SourceIDs() {
+		content, ok := loaded.ContentBySource(id)
+		if !ok {
+			continue
+		}
+		if err := sourceRegistry.RegisterFile(id, content); err != nil {
+			a.logger.Warn(
+				"failed to register loaded source",
+				slog.String("source", id.String()),
+				slog.Any("error", err),
+			)
 		}
 	}
 
@@ -379,7 +382,7 @@ func (a *Analyzer) SnapshotForResult(entryPath string, result diag.Result, posEn
 		)
 	}
 
-	sourceRegistry := source.NewRegistry()
+	sourceRegistry := lsputil.NewTexts()
 	snapshot := &Snapshot{
 		CreatedAt:       time.Now(),
 		EntrySourceID:   entrySourceID,
@@ -453,7 +456,7 @@ func (a *Analyzer) extractImportPaths(s *schema.Schema, seen map[string]struct{}
 
 // convertDiagnostics converts diag.Result to LSP diagnostics.
 // entryPath is used as the fallback URI for span-less diagnostics (e.g., I/O errors).
-func (a *Analyzer) convertDiagnostics(result diag.Result, sources *source.Registry, entryPath string, enc lsputil.PositionEncoding) []URIDiagnostic {
+func (a *Analyzer) convertDiagnostics(result diag.Result, sources *lsputil.Texts, entryPath string, enc lsputil.PositionEncoding) []URIDiagnostic {
 	// Compute entry URI once for span-less diagnostics
 	entryURI := entryPath
 	if !lsputil.HasURIScheme(entryPath) {
@@ -525,7 +528,7 @@ func convertSeverity(sev diag.Severity) *protocol.DiagnosticSeverity {
 }
 
 // ConvertRelatedInfo converts location.RelatedInfo to LSP DiagnosticRelatedInformation.
-func (a *Analyzer) ConvertRelatedInfo(related []location.RelatedInfo, sources *source.Registry, enc lsputil.PositionEncoding) []protocol.DiagnosticRelatedInformation {
+func (a *Analyzer) ConvertRelatedInfo(related []location.RelatedInfo, sources *lsputil.Texts, enc lsputil.PositionEncoding) []protocol.DiagnosticRelatedInformation {
 	if len(related) == 0 {
 		return nil
 	}

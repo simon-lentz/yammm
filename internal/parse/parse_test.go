@@ -571,20 +571,39 @@ func TestParse_DetachedAnnotationRecordsItsPropertyLine(t *testing.T) {
 	}
 }
 
-// TestParse_InvariantExprSpanCoversTheExpression pins the extent a formatter
-// slices to leave an invariant's own spacing untouched. A collapsed span reads
-// as an empty string and deletes the expression on rewrite.
-func TestParse_InvariantExprSpanCoversTheExpression(t *testing.T) {
-	src := "schema \"s\"\ntype T {\n\tn Integer primary\n\t! \"m\" n > 0\n}\n"
+// TestParse_ExpressionsPairWithTheTreesInvariants pins the extents a formatter
+// reads to leave an invariant's own spacing untouched, against the tree: a
+// clean source's Expressions holds one extent for each invariant, in the order
+// the tree's types and their invariants stand, and each lies inside its
+// invariant's Span, after the message. A collapsed extent covers no token, so
+// the formatter would respace the expression it should leave as written.
+func TestParse_ExpressionsPairWithTheTreesInvariants(t *testing.T) {
+	src := "schema \"s\"\n" +
+		"type T {\n\tn Integer primary\n\t! \"m\" n > 0\n\t! \"two\"  n  <  9\n}\n" +
+		"type U {\n\tid String primary\n\t/* why */\n\t! 'q' id =~ /a b/\n}\n"
+	want := []string{"n > 0", "n  <  9", "id =~ /a b/"}
 
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
 
 	if len(issues) != 0 {
 		t.Fatalf("unexpected issues: %v", issues)
 	}
-	inv := file.Types[0].Invariants[0]
-	if got := src[inv.ExprSpan.Start.Byte:inv.ExprSpan.End.Byte]; got != "n > 0" {
-		t.Errorf("ExprSpan covers %q, want %q", got, "n > 0")
+	var invariants []*Invariant
+	for _, ty := range file.Types {
+		invariants = append(invariants, ty.Invariants...)
+	}
+	if len(file.Expressions) != len(want) || len(invariants) != len(want) {
+		t.Fatalf("%d extents and %d invariants, want %d of each", len(file.Expressions), len(invariants), len(want))
+	}
+	for i, extent := range file.Expressions {
+		if got := src[extent.Start.Byte:extent.End.Byte]; got != want[i] {
+			t.Errorf("Expressions[%d] covers %q, want %q", i, got, want[i])
+		}
+		inv := invariants[i]
+		if extent.Start.Byte < inv.MessageSpan.End.Byte || extent.End.Byte > inv.Span.End.Byte {
+			t.Errorf("Expressions[%d] is [%d,%d), outside its invariant: the message ends at %d and the invariant at %d",
+				i, extent.Start.Byte, extent.End.Byte, inv.MessageSpan.End.Byte, inv.Span.End.Byte)
+		}
 	}
 }
 

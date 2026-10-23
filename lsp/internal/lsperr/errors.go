@@ -1,6 +1,6 @@
 // Package lsperr defines sentinel errors for internal classification
-// within the yammm-lsp server. These errors are used for middleware-level
-// log escalation, structured error wrapping, and test assertions.
+// within the yammm-lsp server. They wrap an error the server logs, so the log
+// record names its class.
 //
 // They are NOT for "document not open" or "stale snapshot" — those remain
 // nil, nil returns per LSP convention (returning an error changes the

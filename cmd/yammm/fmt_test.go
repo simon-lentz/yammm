@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -302,5 +303,31 @@ func TestFmtCheck_LineEndingDifferenceIsUnformatted(t *testing.T) {
 	}
 	if out != path+"\n" {
 		t.Errorf("output = %q, want the path reported", out)
+	}
+}
+
+// TestFmt_ASyntaxDiagnosticNamesTheFilesByteOffset pins that fmt places a
+// syntax diagnostic at the file's own byte offset, as validate does, though
+// the formatter parses the text with each CR LF made one LF.
+func TestFmt_ASyntaxDiagnosticNamesTheFilesByteOffset(t *testing.T) {
+	t.Parallel()
+	src := "schema \"s\"\r\n\r\ntype T {\r\n\tid String primary\r\n\te Enum[\"a\", \"\\xZZ\"]\r\n}\r\n"
+	path := writeFmtFixture(t, "crlf.yammm", src)
+	byteOf := regexp.MustCompile(`"byte":\s*(\d+)`)
+	first := func(args ...string) string {
+		t.Helper()
+		_, out, errOut := executeCmdOutput(t, args...)
+		m := byteOf.FindStringSubmatch(out + errOut)
+		if m == nil {
+			t.Fatalf("%v printed no byte offset:\n%s%s", args, out, errOut)
+		}
+		return m[1]
+	}
+	want := strconv.Itoa(strings.Index(src, `"\xZZ"`))
+	if got := first("validate", "--format", "json", path); got != want {
+		t.Fatalf("validate places the escape at byte %s, want %s", got, want)
+	}
+	if got := first("fmt", "--format", "json", path); got != want {
+		t.Errorf("fmt places the escape at byte %s, want the file's offset %s", got, want)
 	}
 }

@@ -7,7 +7,9 @@ var ErrNilResult = errors.New("json adapter: nil graph result")
 
 // ErrUnrepresentable marks a write refused because the snapshot holds a value
 // JSON cannot write: a non-finite float at any depth, or a Go value
-// encoding/json refuses, which only a bypass-built snapshot holds. It is the
+// encoding/json refuses, which only a bypass-built snapshot holds. A
+// json.Number whose text is no number literal is refused by the encoder with
+// an error this does not mark. It is the
 // class, matched with errors.Is; the message names the instance or the edge
 // and the property. It separates a refusal of the data from an I/O
 // failure, which no message text can.

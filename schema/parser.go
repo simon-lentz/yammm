@@ -67,6 +67,10 @@ func (p *schemaParser) Parse(source []byte) *model {
 func (p *schemaParser) importDecl(imp *parse.Import) *importDecl {
 	alias := imp.Alias
 	if !imp.HasAlias {
+		// A path with no value derives no alias.
+		if imp.PathRefused {
+			return &importDecl{PathRefused: true, Span: imp.Span}
+		}
 		alias = deriveAliasFromPath(imp.Path)
 	}
 	if isReservedKeyword(alias) {
@@ -75,7 +79,7 @@ func (p *schemaParser) importDecl(imp *parse.Import) *importDecl {
 			WithSpan(imp.Span).Build())
 		return nil
 	}
-	return &importDecl{Path: imp.Path, Alias: alias, Span: imp.Span}
+	return &importDecl{Path: imp.Path, PathRefused: imp.PathRefused, PathRaw: imp.PathRaw, Alias: alias, Span: imp.Span}
 }
 
 func (p *schemaParser) typeDecl(t *parse.TypeDecl) *typeDecl {
@@ -101,6 +105,7 @@ func (p *schemaParser) typeDecl(t *parse.TypeDecl) *typeDecl {
 		out.Invariants = append(out.Invariants, &invariantDecl{
 			Name:          inv.Message,
 			Expr:          inv.Expr,
+			NoValue:       inv.NoValue,
 			Documentation: inv.Doc,
 			Span:          inv.Span,
 		})
@@ -288,7 +293,7 @@ func lossyTimestampFormat(format string) bool {
 	back, err := time.Parse(format, probe.Format(format))
 	if err != nil {
 		// A layout Go cannot parse its own output under is not something this
-		// warning can speak to; it is either exotic or already an E_SYNTAX.
+		// warning can speak to.
 		return false
 	}
 	return !back.Equal(probe)

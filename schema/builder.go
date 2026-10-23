@@ -144,8 +144,9 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // doc comment holding it carries, by the rule the Comments section of
 // docs/SPEC.md states. One no doc comment can hold — with "*/", a NUL, a byte order mark or
 // bytes that are not UTF-8 — is E_SYNTAX. Import aliases are validated during
-// completion, unless a reference through one is refused first as a constraint
-// argument (E_INVALID_CONSTRAINT).
+// completion, which Build does not reach when it refuses its input first, as
+// it does a constraint argument (E_INVALID_CONSTRAINT), the source ID or an
+// import it cannot resolve.
 //
 // # Import Requirements
 //
@@ -723,8 +724,9 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 // regexp.Compile refuses, and a constraint of a Go type this package does not
 // construct, such as a pointer to one. A raw constraint meets
 // no completion, so it also refuses a DataType reference that resolves to no
-// constraint, at any List depth. The Neo4j adapter's Coerce and CoerceParams
-// call it before they coerce a value.
+// constraint, at any List depth. The Neo4j adapter's Coerce and CoerceParams,
+// and instance.CheckValue and CanonicalValue, call it before they read a
+// value.
 func CheckConstraint(c Constraint) error {
 	if c == nil {
 		return errors.New("schema: no constraint")
@@ -732,20 +734,27 @@ func CheckConstraint(c Constraint) error {
 	if fault, found := constraintFault(c); found {
 		return fmt.Errorf("schema: %s", fault)
 	}
-	switch held := c.(type) {
-	case ListConstraint:
-		return CheckConstraint(held.Element())
-	case AliasConstraint:
-		if inner, isAlias := held.resolved.(AliasConstraint); isAlias {
-			return fmt.Errorf("schema: datatype %q resolves to datatype %q alone; a datatype declares a built-in type or a List", held.DataTypeName(), inner.DataTypeName())
+	// constraintFault judged every List level, so only the innermost element
+	// is left to resolve: judging each level again costs the depth squared.
+	for {
+		list, isList := c.(ListConstraint)
+		if !isList {
+			break
 		}
-		terminal := ResolveAlias(c)
-		if open, isOpen := terminal.(AliasConstraint); isOpen {
-			return fmt.Errorf("schema: datatype %q resolves to no constraint", open.DataTypeName())
-		}
-		return CheckConstraint(terminal)
+		c = list.Element()
 	}
-	return nil
+	held, isAlias := c.(AliasConstraint)
+	if !isAlias {
+		return nil
+	}
+	if inner, isAlias := held.resolved.(AliasConstraint); isAlias {
+		return fmt.Errorf("schema: datatype %q resolves to datatype %q alone; a datatype declares a built-in type or a List", held.DataTypeName(), inner.DataTypeName())
+	}
+	terminal := ResolveAlias(c)
+	if open, isOpen := terminal.(AliasConstraint); isOpen {
+		return fmt.Errorf("schema: datatype %q resolves to no constraint", open.DataTypeName())
+	}
+	return CheckConstraint(terminal)
 }
 
 // constraintFault describes the first fault of c, or of a List element at any

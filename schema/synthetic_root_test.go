@@ -396,18 +396,35 @@ func TestWithSyntheticRoot_InvalidRoot(t *testing.T) {
 	}
 }
 
-// TestWithSyntheticRoot_RequiresSourcesOnly pins the refusal: a root names every
-// identity the load mints, so the given sources must be every source it reads.
-func TestWithSyntheticRoot_RequiresSourcesOnly(t *testing.T) {
-	t.Parallel()
-
-	_, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
-		schema.WithSyntheticRoot("embedded://app"))
-	if !res.HasErrors() {
-		t.Fatal("expected a synthetic root without WithSourcesOnly to be rejected")
+// TestWithSyntheticRoot_IsHermeticByItself pins that a root makes the load
+// sources-only, with WithSourcesOnly(true) and without it: the load succeeds,
+// and an import the given sources do not hold fails as not among them, though
+// the working directory holds a file under that key.
+func TestWithSyntheticRoot_IsHermeticByItself(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "a", "b"), 0o750); err != nil {
+		t.Fatal(err)
 	}
-	if msg := firstError(res); !strings.Contains(msg, "requires WithSourcesOnly") {
-		t.Errorf("expected the WithSourcesOnly error, got: %s", msg)
+	if err := os.WriteFile(filepath.Join(dir, "a", "b", "x.yammm"), syntheticRootSources()["a/b/x.yammm"], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	for name, opts := range map[string][]schema.LoadOption{
+		"the root alone":            {schema.WithSyntheticRoot("embedded://app")},
+		"the root and sources-only": {schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "", opts...)
+			if s == nil || res.HasErrors() {
+				t.Fatalf("the load failed: %s", firstError(res))
+			}
+			entryOnly := map[string][]byte{"main.yammm": syntheticRootSources()["main.yammm"]}
+			_, res = schema.LoadSourcesWithEntry(t.Context(), entryOnly, "main.yammm", "", opts...)
+			const want = `cannot read import "a/b/x": not among the pre-registered sources; synthetic root embedded://app; `
+			if !res.HasCode(diag.E_IMPORT_RESOLVE) || firstError(res) != want {
+				t.Errorf("an import the sources do not hold drew %q; want E_IMPORT_RESOLVE %q", firstError(res), want)
+			}
+		})
 	}
 }
 

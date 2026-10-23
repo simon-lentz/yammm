@@ -36,7 +36,10 @@ type projSchema struct {
 	Imports   []projImport   `json:"imports,omitempty"`
 	DataTypes []projDataType `json:"datatypes,omitempty"`
 	Types     []projType     `json:"types,omitempty"`
-	Diags     []projDiag     `json:"diags,omitempty"`
+	// Expressions is every invariant expression's own extent, in source order:
+	// [File.Expressions], which holds one for an invariant the tree leaves out.
+	Expressions []projSpan `json:"expressions,omitempty"`
+	Diags       []projDiag `json:"diags,omitempty"`
 }
 
 type projImport struct {
@@ -112,11 +115,10 @@ type projArg struct {
 }
 
 type projInv struct {
-	Msg      string   `json:"msg"` // raw STRING spelling
-	Doc      string   `json:"doc,omitempty"`
-	Expr     string   `json:"expr"`      // canonical S-expression rendering
-	ExprSpan projSpan `json:"expr_span"` // the constraint expression's own extent
-	Span     projSpan `json:"span"`
+	Msg  string   `json:"msg"` // raw STRING spelling
+	Doc  string   `json:"doc,omitempty"`
+	Expr string   `json:"expr"` // canonical S-expression rendering
+	Span projSpan `json:"span"`
 }
 
 // projConstraint is the syntax-level shape of a data type reference: the kind
@@ -173,6 +175,9 @@ func project(name, src string) (*projSchema, []diag.Issue) {
 	for _, ty := range file.Types {
 		out.Types = append(out.Types, p.typeDecl(ty))
 	}
+	for _, e := range file.Expressions {
+		out.Expressions = append(out.Expressions, p.span(e))
+	}
 	for _, iss := range issues {
 		out.Diags = append(out.Diags, p.diag(iss))
 	}
@@ -205,11 +210,10 @@ func (p projector) typeDecl(ty *TypeDecl) projType {
 	}
 	for _, inv := range ty.Invariants {
 		nt.Invariants = append(nt.Invariants, projInv{
-			Msg:      inv.MessageRaw,
-			Doc:      inv.Doc,
-			Expr:     renderExpr(inv.Expr),
-			ExprSpan: p.span(inv.ExprSpan),
-			Span:     p.span(inv.Span),
+			Msg:  inv.MessageRaw,
+			Doc:  inv.Doc,
+			Expr: renderExpr(inv.Expr),
+			Span: p.span(inv.Span),
 		})
 	}
 	return nt

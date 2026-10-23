@@ -100,7 +100,7 @@ type Document extends Auditable, Named {
 }
 ```
 
-Multiple parents allowed (comma-separated). Inherits properties, associations, compositions, and invariants. An invariant's message is its identity: a child's declaration overrides an inherited one of the same name; declaring one message twice on a type is `E_DUPLICATE_INVARIANT`, and inheriting two different expressions under one message from two parents is `E_INVARIANT_CONFLICT`. A part type may not inherit an association.
+Multiple parents allowed (comma-separated). Inherits properties, associations, compositions, invariants and type-level `@@` annotations. An invariant's message is its identity: a child's declaration overrides an inherited one of the same name; declaring one message twice on a type is `E_DUPLICATE_INVARIANT`, and inheriting two different expressions under one message from two parents is `E_INVARIANT_CONFLICT` (a literal with no value, which already refuses the source, matches any literal of its kind). A part type may not inherit an association.
 
 ---
 

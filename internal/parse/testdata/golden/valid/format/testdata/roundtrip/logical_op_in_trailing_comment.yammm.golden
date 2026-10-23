@@ -60,10 +60,6 @@
         {
           "msg": "\"left and right must both be positive and bounded\"",
           "expr": "(\u0026\u0026 (\u0026\u0026 (\u003e (. ($ \"self\") \"left\") 0) (\u003e (. ($ \"self\") \"right\") 0)) (\u003c (. ($ \"self\") \"left\") 1000))",
-          "expr_span": {
-            "s": 340,
-            "e": 394
-          },
           "span": {
             "s": 287,
             "e": 394
@@ -74,6 +70,12 @@
         "s": 224,
         "e": 411
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 340,
+      "e": 394
     }
   ]
 }

@@ -65,10 +65,6 @@
         {
           "msg": "\"adults only\"",
           "expr": "(\u003e= (p \"age\") 18)",
-          "expr_span": {
-            "s": 143,
-            "e": 152
-          },
           "span": {
             "s": 127,
             "e": 152
@@ -78,10 +74,6 @@
           "msg": "\"age within bounds\"",
           "doc": "Snapshot bound, revisit at next census.",
           "expr": "(\u0026\u0026 (\u003e= (p \"age\") 0) (\u003c= (p \"age\") 150))",
-          "expr_span": {
-            "s": 223,
-            "e": 247
-          },
           "span": {
             "s": 154,
             "e": 247
@@ -92,6 +84,16 @@
         "s": 17,
         "e": 249
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 143,
+      "e": 152
+    },
+    {
+      "s": 223,
+      "e": 247
     }
   ]
 }

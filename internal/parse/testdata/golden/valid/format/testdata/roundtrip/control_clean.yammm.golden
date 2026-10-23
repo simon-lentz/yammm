@@ -97,10 +97,6 @@
         {
           "msg": "\"amount must be positive\"",
           "expr": "(\u003e (. ($ \"self\") \"amount\") 0)",
-          "expr_span": {
-            "s": 507,
-            "e": 523
-          },
           "span": {
             "s": 479,
             "e": 523
@@ -179,6 +175,12 @@
         "s": 527,
         "e": 630
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 507,
+      "e": 523
     }
   ]
 }

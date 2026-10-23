@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
@@ -29,7 +28,7 @@ func TestResolveSymbol_LocalType(t *testing.T) {
 	s, result := schema.LoadString(t.Context(), src, "test.yammm")
 	require.True(t, result.OK(), "schema should parse without errors: %v", result)
 
-	reg := source.NewRegistry()
+	reg := lsputil.NewTexts()
 	require.NoError(t, reg.Register(s.SourceID(), []byte(src)))
 
 	typ, ok := s.Type("Person")
@@ -91,7 +90,7 @@ func TestSymbolToLocation(t *testing.T) {
 	s, result := schema.LoadString(context.Background(), src, "types.yammm")
 	require.True(t, result.OK(), "schema should parse without errors: %v", result)
 
-	reg := source.NewRegistry()
+	reg := lsputil.NewTexts()
 	require.NoError(t, reg.Register(s.SourceID(), []byte(src)))
 
 	typ, ok := s.Type("Customer")

@@ -36,7 +36,8 @@
 // non-finite float at any depth, which a validated Float never is, or a Go
 // value encoding/json refuses, which only a bypass-built snapshot holds, is
 // refused with an error marked [ErrUnrepresentable], so a caller separates it
-// from an I/O failure without matching the message text.
+// from an I/O failure without matching the message text. A json.Number that
+// holds no number literal is the exception: it is refused unmarked.
 //
 // Use [WithIndent] for pretty-printed output. The object shape keys instances
 // by the name the entry schema addresses each root type by, and two such names
@@ -130,8 +131,9 @@
 // UTF-8 sequence decomposes byte by byte, as it does for a schema source.
 //
 // A leading byte order mark is trimmed before decoding and its length added back
-// to every offset, so it occupies column 1 and every position after it sits one
-// column further: positions are measured in the file the caller passed.
+// to every byte offset, so it occupies column 1 of line 1 and every later
+// position on line 1 sits one column further: positions are measured in the
+// file the caller passed.
 //
 // # Type Tag Resolution
 //
@@ -141,8 +143,12 @@
 //
 // # Byte Order Mark
 //
-// ParseObject skips one leading UTF-8 byte order mark, as the CSV adapter's
-// parse methods do. A second mark is a parse error.
+// ParseObject skips one leading UTF-8 byte order mark and counts it in the
+// positions it reports: one column on line 1, and three bytes in every byte
+// offset. A second mark is a parse error, E_ADAPTER_PARSE. The CSV adapter's
+// parse methods skip one leading mark too and share neither rule: a second
+// mark stays in the first header column's name, and the column an
+// [encoding/csv] parse error's message names does not count the mark.
 //
 // # Thread Safety
 //

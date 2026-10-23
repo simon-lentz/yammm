@@ -32,10 +32,6 @@
         {
           "msg": "\"must_be_enabled\"",
           "expr": "(\u0026\u0026 (! (p \"disabled\")) (p \"active\"))",
-          "expr_span": {
-            "s": 80,
-            "e": 99
-          },
           "span": {
             "s": 60,
             "e": 99
@@ -46,6 +42,12 @@
         "s": 15,
         "e": 101
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 80,
+      "e": 99
     }
   ]
 }

@@ -8,7 +8,6 @@ import (
 
 	"github.com/creachadair/jrpc2"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
@@ -111,7 +110,7 @@ func callHandler(t *testing.T, h jrpc2.Handler, params any, result any) error {
 }
 
 // buildTestSnapshot creates a minimal analysis.Snapshot with a type symbol at a
-// known position. The source content is registered in the source.Registry so
+// known position. The source content is registered in the snapshot's Texts so
 // that PositionFromLSP succeeds.
 //
 // Source layout (0-indexed lines):
@@ -129,7 +128,7 @@ func buildTestSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snapshot) {
 	s, result := schema.LoadString(t.Context(), content, "test.yammm")
 	require.True(t, result.OK(), "schema should parse without errors: %v", result)
 
-	reg := source.NewRegistry()
+	reg := lsputil.NewTexts()
 	require.NoError(t, reg.Register(s.SourceID(), []byte(content)))
 
 	sourceID := s.SourceID()

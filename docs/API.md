@@ -136,14 +136,16 @@ s, result := schema.LoadSourcesWithEntry(ctx,
     gen.SerializedSources(),  // a generated package's embedded sources
     gen.SerializedEntry,
     "",                       // no module root: the synthetic root stands in
-    schema.WithSourcesOnly(true),
     schema.WithSyntheticRoot("embedded://app"),
 )
 ```
 
 A source keyed `a/b/x.yammm` then has the identity `embedded://app/a/b/x.yammm`
 on every machine. The root also stands in for the module root, so module-style
-imports resolve under it.
+imports resolve under it. The root names every identity the load mints, so the
+given sources are every source the load reads: an import they do not hold fails
+as not among them, and the load reads no disk, whether or not `WithSourcesOnly`
+is passed.
 
 The option refuses rather than degrades. Each of these is an error:
 
@@ -151,7 +153,6 @@ The option refuses rather than degrades. Each of these is an error:
 | --------- | --- |
 | A root not of the form `scheme://authority`, optionally followed by a path — empty, `embedded://`, `embedded:`, `.`, `/abs` — one whose scheme is one letter or is `string` in any case, one whose authority is `.` or `..`, or one whose path climbs above its authority (`embedded://app/..`) | Without an authority two roots join one identity (`embedded://` and `embedded:` both gave `embedded:/main.yammm`), a root with no scheme reads as a directory, a one-letter scheme reads as a drive, and `string://` is the identity `LoadString` mints. A root is normalized once — the scheme in lower case, the text after it in NFC, the path cleaned — so `EMBEDDED://app/`, `embedded://app//` and `embedded://app/.` are all `embedded://app`. The authority keeps its case |
 | A root holding, after its scheme, a character outside its set — a `?`, a `#`, a `%`, a backslash, a space, a control, format or other character that does not print, one of `" < > [ ] ^ { \| }` or a backtick, or a `:` or `@` in its authority — or text that is not valid UTF-8 | After the scheme a root holds ASCII letters and digits, `/`, the marks `- . _ ~ ! $ & ' ( ) * + , ; =`, `:` and `@` in its path alone, and a character past ASCII that prints: a letter, mark, number, punctuation or symbol, as `strconv.IsPrint` reports. It names no server, so it takes no port, no user, no query and no fragment, and no percent escape, which would give one root two spellings. The set is applied to the root in NFC, so U+1FEF GREEK VARIA, which NFC makes a backtick, is refused |
-| A root without `WithSourcesOnly` | The root names every identity the load mints, so the given sources must be every source it reads; an import they do not hold fails as not among them |
 | A root together with a non-empty `moduleRoot` argument | The two name one concept and the load can honor only one |
 | The option passed to `Load` or `LoadString` | It could only ever be a silent no-op there |
 | An absolute source key — as given, or once cleaned and in NFC (`./C:/x.yammm`, or a key spelled with U+212A KELVIN SIGN, which NFC makes `K`) — or one naming the root itself or a directory above it (`..`) | An absolute key collides with file-backed identities, and neither the root nor a directory above it is a source. A key that spells a directory under the root is cleaned to a file key: `x.yammm/` and `x.yammm/.` are `x.yammm`. A key that escapes the root is allowed: it keeps its leading `..` and yields a stable, distinct identity |
@@ -297,7 +298,7 @@ s, result := schema.NewBuilder().
 
 `Build()` refuses what the DSL refuses in a constraint, with `E_INVALID_CONSTRAINT` and no schema: an argument no `.yammm` source can state — inverted bounds, a non-finite `Float` bound, a negative length, an enum with an empty or repeated value or fewer than two values, an enum value or `Timestamp` format that is not valid UTF-8, a `Pattern` with no pattern or more than two, or one `regexp.Compile` refuses or that writes a surrogate code point with a `\x{…}` escape, a `Vector` dimension outside 1 to 65536 — a `List` with no element constraint, and a constraint of a Go type the `schema` package does not construct, such as a pointer to one, each at any `List` depth. It also refuses a datatype declared as another datatype alone (`AddDataType("B", schema.NewAliasConstraint("A", nil))`), which the DSL has no spelling for, and resolves every datatype reference by its name, in any declaration order, refusing a cycle as the DSL does. A reference under a name no `.yammm` source writes — anything but a datatype name, or an import alias, a dot and a datatype name, so `.T1`, `lib.`, `a.b.c`, a lower-case `t1` and a built-in type name such as `String` — is refused as a constraint argument, with `E_INVALID_CONSTRAINT`, at any `List` depth, and `schema.CheckConstraint` refuses it too. A name a source could write that no declaration answers is `E_UNKNOWN_TYPE`, unless its qualifier names an import the build refused, which reports that import alone.
 
-`schema.CheckConstraint(c) error` returns why `c` cannot judge a value, or `nil` when it can. It refuses what `Build()` refuses in a constraint, and a hand-built constraint meets no completion, so it also refuses a DataType reference that resolves to no constraint or to another reference alone, at any `List` depth. The Neo4j adapter's `Coerce` and `CoerceParams` call it before they coerce a value.
+`schema.CheckConstraint(c) error` returns why `c` cannot judge a value, or `nil` when it can. It refuses what `Build()` refuses in a constraint, and a hand-built constraint meets no completion, so it also refuses a DataType reference that resolves to no constraint or to another reference alone, at any `List` depth. The Neo4j adapter's `Coerce` and `CoerceParams`, and `instance.CheckValue` and `CanonicalValue`, call it before they read a value.
 
 `schema.NewPatternConstraint` keeps every pattern it is given, and compiles each again with `regexp.Compile` from its source text, as a `.yammm` source compiles it. A pattern therefore matches by its source's Perl reading however its regexp was built: under `regexp.CompilePOSIX`, `^b$` matches `"a\nb"`, and in a `PatternConstraint` it does not. A source that reading refuses, which POSIX syntax can accept (`a**`), is kept as given, and `Build()` and `schema.CheckConstraint` refuse the constraint, as the DSL refuses `Pattern["a**"]`.
 
@@ -328,8 +329,9 @@ names are UPPER_SNAKE and are not `UUID`. Violations fail the build with
 DSL, so they are not held to those productions. `Build()` refuses an empty
 schema name with `E_INVALID_NAME`, and completion refuses an empty invariant
 message with `E_INVALID_INVARIANT`. Import aliases are validated during
-completion (`E_INVALID_ALIAS`), unless a reference through one is refused first as a
-constraint argument (`E_INVALID_CONSTRAINT`).
+completion (`E_INVALID_ALIAS`), which `Build()` does not reach when it refuses its
+input first, as it does a constraint argument (`E_INVALID_CONSTRAINT`), the source
+ID or an import it cannot resolve.
 
 Every string value the Builder takes is valid UTF-8, as the DSL's string
 literals are: a schema name that is not is `E_INVALID_NAME`, an import path
@@ -515,9 +517,11 @@ The validator's per-value rules, exported for a caller that admits or renders sc
 
 ```go
 // CheckValue reports whether val conforms to c by the rule the validator applies
-// to every property value: Go kind, bounds, enum membership, pattern, list length
-// and element rule, with an alias resolved to its DataType. A nil value and a nil
-// constraint are both valid — presence is the caller's rule.
+// to every property value: Go kind and form, bounds, enum membership, pattern,
+// list length and element rule and a Vector's dimension, with an alias resolved
+// to its DataType. A nil constraint is valid, and so is a nil value under a
+// constraint schema.CheckConstraint accepts — presence is the caller's rule. A non-nil constraint is judged first by
+// schema.CheckConstraint, and one it refuses is an error whatever the value.
 func CheckValue(val any, c schema.Constraint) error
 
 // CanonicalValue returns val in the single stored representation c defines — the
@@ -526,13 +530,15 @@ func CheckValue(val any, c schema.Constraint) error
 // the element constraint, a Timestamp rendered through its declared format
 // (RFC 3339 with fractional seconds otherwise), a UUID in canonical lowercase
 // form, a Date as "2006-01-02" in the value's own location, and a String, Enum,
-// Pattern or Boolean carried by a named Go type as the base value. A nil value
-// and a nil constraint pass through. On error the returned value is val
-// unchanged, so a caller that heals what it can may ignore the error.
+// Pattern or Boolean carried by a named Go type as the base value. A nil
+// constraint passes val through, and so does a nil value under a constraint
+// schema.CheckConstraint accepts; one it refuses is an error, as it is for
+// CheckValue. On error the returned value is
+// val unchanged, so a caller that heals what it can may ignore the error.
 func CanonicalValue(val any, c schema.Constraint) (any, error)
 ```
 
-`CheckValue`'s error is the checker's message and is meant for reading, not matching, with one exception: a panic inside a check or a coercion is recovered into an `*InternalError` that matches `errors.Is(err, instance.ErrInternalFailure)`, exactly as it does inside the validator. `CanonicalValue` is the rule `adapter/json` and `adapter/csv` render through, and the approved facade over it for the adapter layer.
+`CheckValue`'s error is the checker's message and is meant for reading, not matching, with two exceptions: a constraint `schema.CheckConstraint` refuses returns that refusal, and a panic inside a check or a coercion is recovered into an `*InternalError` that matches `errors.Is(err, instance.ErrInternalFailure)`, exactly as it does inside the validator. Both functions judge a constraint as `adapter/neo4j.Coerce` does, so a hand-built constraint `schema.Builder.Build` would refuse, or a DataType reference that resolves to no constraint or to another reference alone, is an error with no value checked. `CanonicalValue` is the rule `adapter/json` and `adapter/csv` render through, and the approved facade over it for the adapter layer.
 
 ## Graph Construction
 
@@ -1227,7 +1233,7 @@ byType, result := adapter.ParseObject(ctx, source, data)
 
 Every valid type name whose value is an array is an entry of the returned map, an empty array included, unless a fault or a cancellation stops the parse before it is read; so a caller that validates each entry reaches every type name whose array was read, and a name the schema does not declare draws `E_INSTANCE_TYPE_NOT_FOUND` from `instance.Validator` whatever its array holds. Three shapes a JSON decoder would resolve silently are Error `E_ADAPTER_PARSE` diagnostics instead, each reported where it stands, because what a decoder keeps of them is one reader's convention and not the document's meaning. A type name repeated as a root key is reported at the repeat, and both arrays' instances are in the entry, each indexing its own array, where decoding keeps the last array and drops the first batch whole. A member name repeated inside one object, at any depth of an instance, is reported at each repeat, and the instance is produced holding the value the decoder kept — the last, which `encoding/json` keeps. Names compare as the decoder reads them: escapes resolved, and each byte of an invalid UTF-8 sequence read as U+FFFD. Anything but white space and closed comments after the root object is reported where it starts, whether or not it reads as a JSON value; an unterminated block comment is content. And a fault the decoder cannot read past — a syntax error, a truncated document — is reported and parsing stops there, returning every instance read before it and reading nothing after it. The fault is placed at the first byte no continuation of the document can repair, the document read as JSONC: jsonc blanks a comma a closing delimiter follows, so a comma that opens an object or an array can still be repaired, and so can a comment still open. A document that ends too soon, inside a comment included, is placed at its end. The nesting limit is the running `encoding/json`'s: its own implementation counts it within each value it decodes whole, and the v2 implementation Go 1.27 builds by default counts it from the root.
 
-**Every instance carries provenance.** `source` names the document, and each `RawInstance.Provenance` holds that name, the instance's path in the document (`$.Person[0]`, indexing the array as the document writes it, so a failed element still consumes its index) and a point span at its opening brace. A parse diagnostic carries a span in `source` wherever its offset lies in the data or at its end; the cancellation diagnostic carries none. Columns count runes from the line start of the bytes passed in, not of the buffer JSONC preprocessing returns — that buffer writes each byte of a closed comment as one byte, a space unless it is a tab or a line break (JSONC Support below states an unclosed block comment's), so a multibyte rune inside a comment would move every later column on its line — and a malformed UTF-8 sequence decomposes exactly as it does for schema sources. A leading byte order mark is trimmed before decoding and its length added back, so it occupies column 1 and every position after it sits one column further.
+**Every instance carries provenance.** `source` names the document, and each `RawInstance.Provenance` holds that name, the instance's path in the document (`$.Person[0]`, indexing the array as the document writes it, so a failed element still consumes its index) and a point span at its opening brace. A parse diagnostic carries a span in `source` wherever its offset lies in the data or at its end; the cancellation diagnostic carries none. Columns count runes from the line start of the bytes passed in, not of the buffer JSONC preprocessing returns — that buffer writes each byte of a closed comment as one byte, a space unless it is a tab or a line break (JSONC Support below states an unclosed block comment's), so a multibyte rune inside a comment would move every later column on its line — and a malformed UTF-8 sequence decomposes exactly as it does for schema sources. A leading byte order mark is trimmed before decoding and its length added back to every byte offset, so it occupies column 1 of line 1 and every later position on line 1 sits one column further.
 
 ### Serialization
 
@@ -1243,7 +1249,7 @@ n, err := adapter.WriteObject(ctx, w, snap, writeOpts...)
 
 The object output is keyed by the name the entry schema addresses each root type by — bare for a local type, `alias.Name` for a directly imported one. Two such names never collide, because every snapshot root is a type the entry schema can name; `graph.RebuildSnapshot` and `snapshot.Load` refuse any other root. So there is no collision for the writers to check.
 
-Every constructor of a snapshot holds it to the facts `Graph.Add` keeps (the graph package doc's "Structural facts"), so every relation the writers meet renders in a shape `ParseObject` and the validator accept. A value can still have no JSON form: a non-finite float at any depth, which a validated `Float` never is, or a Go value `encoding/json` refuses, which only a bypass-built snapshot holds, is refused with an error matching `json.ErrUnrepresentable`, naming the instance or edge and the property, so a caller separates it from an I/O failure without matching the message text. The writers' remaining arms — a type the entry schema cannot name, an instance or an edge target whose type does not resolve — are invariant guards no constructor lets a snapshot reach, and carry no class.
+Every constructor of a snapshot holds it to the facts `Graph.Add` keeps (the graph package doc's "Structural facts"), so every relation the writers meet renders in a shape `ParseObject` and the validator accept. A value can still have no JSON form: a non-finite float at any depth, which a validated `Float` never is, or a Go value `encoding/json` refuses, which only a bypass-built snapshot holds, is refused with an error matching `json.ErrUnrepresentable` (a `json.Number` whose text is no number literal is refused by the encoder with an error that does not match it), naming the instance or edge and the property, so a caller separates it from an I/O failure without matching the message text. The writers' remaining arms — a type the entry schema cannot name, an instance or an edge target whose type does not resolve — are invariant guards no constructor lets a snapshot reach, and carry no class.
 
 **Cancellation.** Every JSON entry point observes its context at each unit of work it has. `ParseObject` checks once per top-level key, the unit it reads, and returns the types read so far beside a Fatal `E_CONTEXT_CANCELLED` — Fatal because `HasFatal` is documented to mean the run did not finish. `MarshalObject` checks once per type group and returns an error wrapping the context's; `WriteObject` checks again once the document is built and writes nothing if it is cancelled by then. The CSV writers are finer, checking per instance, so one very large type group stops sooner there than here.
 
@@ -1452,7 +1458,7 @@ Coercion rules: `Float` ← any Go integer width (`int`, `int8`…`int64`, `uint
 
 **Zone handling, for `Timestamp`.** The driver sends an instant either as an offset or as a time-zone identifier the server must resolve, so `Coerce` expresses every instant in a location the driver can send. Two rules, in order: `time.Local` is always re-expressed in its offset — a value built by `time.Now` carries the host's location, whose name is `"Local"` on a host with no `TZ` set and which no server resolves; and any other location is kept only when the host's tz database resolves its name (an IANA name such as `Europe/Berlin`, or a legacy name such as `EST`), otherwise it too is re-expressed in its offset. A value parsed from text lands wherever `time.Parse` put it: a `Z` suffix yields `time.UTC`, which is kept as-is; an offset matching the host's local offset at that instant yields `time.Local`, which the first rule re-expresses; any other offset yields an unnamed zone, which the second rule re-expresses in its offset: the driver selects the offset encoding by zone name, so an unnamed zone is not yet that form. The coerced value depends on the text alone and not on where the process runs. The instant never moves. A consumer binary that must keep IANA names on a host without a tz database imports `time/tzdata`.
 
-The four transforming kinds (`Float`, `Integer`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a float or non-integer under `Integer`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value passes through, with two exceptions. A constraint `schema.CheckConstraint` refuses is an error whatever the value, a nil included. `CoerceParams` refuses a nil element of a `List` or `Vector` value whose elements are scalars; a `List` whose elements are lists or vectors passes through whole, with no element coerced and a nil at any depth kept. An unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+The four transforming kinds (`Float`, `Integer`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a float or non-integer under `Integer`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient as a scalar: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value passes through, with two exceptions. A constraint `schema.CheckConstraint` refuses is an error whatever the value, a nil included. `CoerceParams` refuses a nil element of a `List` or `Vector` value whose elements are scalars; a `List` whose elements are lists or vectors passes through whole, with no element coerced and a nil at any depth kept. An unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
 The rendering counterpart — the string form the library stores for a `Timestamp`, `Date` or `UUID` — is `instance.CanonicalValue`, under [Value Functions](#value-functions).
 
@@ -1729,7 +1735,7 @@ A named DataType is rendered faithfully in every position — scalar field, list
 - **Struct per type** (including abstract and part types). A type's doc comment carries through as its struct's Go doc comment, and a property's, an edge property's included, as its field's; a data type's, a relation's and the schema's own are not written. The text is the loaded schema's, whose continuation lines lost the indentation they all share, byte for byte, when the parser read the comment (see [Comments](SPEC.md#comments)), so layout that indents every continuation line alike makes no code block; lines indented by different bytes, such as a tab on one and spaces on another, share none and keep theirs, which the Go doc-comment formatter reads as a code block.
 - **`EDGE_<Owner>_<edge>_<Target>` structs** for associations — that spelling is the struct's bare one, from its owner's and its target's names (see [Names](#names)) — carrying the target type's primary keys as `_target_<pk>` fields with the association's own properties beside them, the shape `adapter/json` exchanges. (An association whose target type has no primary key is rejected: the edge would have no `_target_` fields to identify a target node.)
 - **`Graph` aggregate** — one slice field per concrete type the entry schema can name, tagged `,omitempty` and keyed by its `schema.AddressableTag`, the name the JSON adapter keys its object by: the bare type name for the entry schema's own types, `alias.Name` for a directly imported one, so `adapter/json` output decodes into it. A type the entry schema reaches only through another import has no such name and takes no field; its struct is still emitted, as every type in the closure is. The keys are the envelope keys `adapter/jschema` emits.
-- **`SerializedSources` / `SerializedEntry`** — the embedded-source surface, emitted identically by every generated package whatever its source count: `func SerializedSources() map[string][]byte` returns every source the schema's load held, by key, and `const SerializedEntry` names the entry key. They read an unexported package-level store, so the identifiers a consumer sees do not vary with how many files a schema spans. A `SchemaHash` const carries the structural hash. The embedded source is **guaranteed re-loadable through the recipe the file prints**: `Marshal` re-loads the store exactly as emitted, under a synthetic root with `WithSourcesOnly`, and returns the bytes only when the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
+- **`SerializedSources` / `SerializedEntry`** — the embedded-source surface, emitted identically by every generated package whatever its source count: `func SerializedSources() map[string][]byte` returns every source the schema's load held, by key, and `const SerializedEntry` names the entry key. They read an unexported package-level store, so the identifiers a consumer sees do not vary with how many files a schema spans. A `SchemaHash` const carries the structural hash. The embedded source is **guaranteed re-loadable through the recipe the file prints**: `Marshal` re-loads the store exactly as emitted, under a synthetic root, which reads no disk, and returns the bytes only when the `StructuralHash` matches, so a non-re-loadable model is a generation error, never a silent claim.
 
 ### Names
 
@@ -1757,7 +1763,7 @@ Re-load under a synthetic root:
 ```go
 s, result := schema.LoadSourcesWithEntry(ctx,
     gen.SerializedSources(), gen.SerializedEntry, "",
-    schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://app"))
+    schema.WithSyntheticRoot("embedded://app"))
 ```
 
 The synthetic root is the recipe: it keeps the re-loaded type identities free of any working directory, checkout or mount point (see [Synthetic source identities](#synthetic-source-identities)). Any root `WithSyntheticRoot` accepts serves; `Marshal` verifies the one the generated file prints, and the package's tests re-load under another the store of every fixture that has a golden.
@@ -1766,7 +1772,7 @@ The synthetic root is the recipe: it keeps the re-loaded type identities free of
 
 ### Validation
 
-Generated source is run through `go/format` and then type-checked with `go/types` before return, so duplicate declarations, unused imports, and undefined references surface as generation errors rather than broken Go. The type-check uses a hermetic stub importer for `time` and `encoding/json`, declaring exactly what generated code calls, so `Marshal` needs no Go toolchain, GOROOT, or build cache at runtime.
+Generated source is run through `go/format` until a pass writes it back unchanged, at most eight passes, and then type-checked with `go/types` before return, so duplicate declarations, unused imports, and undefined references surface as generation errors rather than broken Go. The type-check uses a hermetic stub importer for `time` and `encoding/json`, declaring exactly what generated code calls, so `Marshal` needs no Go toolchain, GOROOT, or build cache at runtime.
 
 ### CLI
 
@@ -1890,13 +1896,17 @@ func TokenStream(text string) (string, error)
 var ErrNotPreserved error
 
 // TokenStream's error when the source does not parse. Issue is the parser's
-// diagnostic, positioned in the text and naming no source.
+// first diagnostic for text the grammar does not match or an escape the
+// language does not have, naming no source. Its
+// line and column are positions in the text TokenStream was given; its byte
+// offset counts each CRLF and each lone CR of that text as one byte.
 type SyntaxError struct {
     Issue diag.Issue
 }
 
-// Two pipeline phases (3 and 4) and two measurement helpers. Nothing outside
-// this package calls them, apart from the gate that pins these signatures.
+// Two pipeline phases (3 and 4) and two helpers. Nothing outside
+// this package calls them, apart from the gate that pins these signatures and
+// the package's own external tests.
 func WrapLongLines(text string) string
 func AlignColumns(text string) string
 func NormalizeIndentation(line string) string
@@ -1911,12 +1921,12 @@ formatted, err := format.TokenStream(input)
 
 `TokenStream` returns an error, and no output, in two cases.
 
-- **The source fails to parse** — an issue's `Code().Category()` is `diag.CategorySyntax`. The error is a `*format.SyntaxError` carrying that issue, and its `Error()` reads `parse failed: ` and the message. A source that parses but is semantically invalid (inverted bounds, say) formats successfully.
-- **The output would not preserve the source.** Whitespace, and a trailing comma before `]` or `{`, are the only things the formatter may change. After phase 5, when the output differs from the input, the two token sequences are compared with those set aside, and every comment's text line by line. On a mismatch the error wraps `format.ErrNotPreserved`: the defect is the formatter's, never the input's. An input already formatted is returned unchanged and costs no comparison.
+- **The source fails to parse** — the grammar does not match its tokens, or a string holds an escape the language does not have (malformed digits, or a surrogate code point), save in an invariant expression or an annotation argument, which format as written. The error is a `*format.SyntaxError` carrying the first such issue, and its `Error()` reads `parse failed: ` and the message. A source that parses but that a load refuses formats successfully: inverted bounds, a character the source rules refuse inside a comment or a literal, or an escape whose value is not UTF-8.
+- **The output would not preserve the source.** Whitespace, a trailing comma before `]` or `{`, and a leading byte order mark are the only things the formatter may change. After phase 5, when the output differs from the input with its line ends made LF, the two token sequences are compared with those set aside, and every comment's text line by line. On a mismatch the error wraps `format.ErrNotPreserved`: the defect is the formatter's, never the input's. An input already formatted is returned unchanged and costs no comparison.
 
 The CLI reports a parse failure as the positioned `E_SYNTAX` diagnostic, naming the file as `validate` does, and exits with `ExitValidation`; it maps a refusal to `ExitRuntime`, leaving the file unchanged. The LSP returns no edits for either, and logs a refusal as a warning.
 
-Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so a CRLF file always reports as unformatted under `yammm fmt --check`. A leading UTF-8 byte order mark is no token, so the output never carries one and a marked file reports as unformatted the same way.
+Before phase 1, line endings normalize to LF: CRLF and a lone CR both become LF, so a CRLF file always reports as unformatted under `yammm fmt --check`. A leading UTF-8 byte order mark is no token, so the output never carries a leading one and a marked file reports as unformatted the same way; a mark inside a comment or a literal is written back where it stands.
 
 The formatter then applies a five-phase pipeline:
 

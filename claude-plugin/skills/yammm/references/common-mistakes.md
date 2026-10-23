@@ -131,7 +131,7 @@ type User {
 
 ## 7. Single-Option Enum
 
-Enums require at least two options. A single-option Enum is a parse error.
+Enums require at least two options. A single-option Enum is refused with `E_INVALID_CONSTRAINT`.
 
 ```yammm-invalid
 // WRONG -- only one option: E_INVALID_CONSTRAINT

@@ -146,10 +146,6 @@
         {
           "msg": "\"member_then_index\"",
           "expr": "(== (@ (p \"tags\") 0) (@ (. ($ \"self\") \"tags\") 0))",
-          "expr_span": {
-            "s": 201,
-            "e": 225
-          },
           "span": {
             "s": 179,
             "e": 225
@@ -158,10 +154,6 @@
         {
           "msg": "\"member_then_pipeline\"",
           "expr": "(\u003e (Len (. ($ \"self\") \"name\") (args ) (params ) \u003cnil\u003e) 0)",
-          "expr_span": {
-            "s": 252,
-            "e": 273
-          },
           "span": {
             "s": 227,
             "e": 273
@@ -170,10 +162,6 @@
         {
           "msg": "\"index_then_member\"",
           "expr": "(\u003e (. (@ (p \"LINES\") 0) \"qty\") 0)",
-          "expr_span": {
-            "s": 297,
-            "e": 313
-          },
           "span": {
             "s": 275,
             "e": 313
@@ -182,10 +170,6 @@
         {
           "msg": "\"lambda_member_then_pipeline\"",
           "expr": "(All (p \"LINES\") (args ) (params l) (\u003e (Len (. ($ \"l\") \"sku\") (args ) (params ) \u003cnil\u003e) 0))",
-          "expr_span": {
-            "s": 347,
-            "e": 386
-          },
           "span": {
             "s": 315,
             "e": 386
@@ -194,10 +178,6 @@
         {
           "msg": "\"pipeline_then_member\"",
           "expr": "(\u003e (. (First (p \"LINES\") (args ) (params ) \u003cnil\u003e) \"qty\") 0)",
-          "expr_span": {
-            "s": 413,
-            "e": 435
-          },
           "span": {
             "s": 388,
             "e": 435
@@ -208,6 +188,28 @@
         "s": 87,
         "e": 437
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 201,
+      "e": 225
+    },
+    {
+      "s": 252,
+      "e": 273
+    },
+    {
+      "s": 297,
+      "e": 313
+    },
+    {
+      "s": 347,
+      "e": 386
+    },
+    {
+      "s": 413,
+      "e": 435
     }
   ]
 }

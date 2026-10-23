@@ -1,11 +1,13 @@
 package parse
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alecthomas/participle/v2/lexer"
 
@@ -72,6 +74,8 @@ type exprParser struct {
 	diags   *[]exprDiag
 	tok     tokenTypes
 	lastEnd int
+	// noValue records each literal that has no value, see [exprResult.NoValue].
+	noValue []NoValueLiteral
 }
 
 func newExprParser(lx *lexer.PeekingLexer, diags *[]exprDiag, tok tokenTypes) *exprParser {
@@ -242,8 +246,9 @@ func (p *exprParser) prefix() (expr.Expression, error) {
 	return nil, p.errf(t, "unexpected token %q in an expression", t.Value)
 }
 
-// literal converts a literal token, reporting a diagnostic and substituting
-// nil when the conversion fails. The expression stays well-formed either way,
+// literal converts a literal token. When the conversion fails it substitutes
+// a nil literal and reports a diagnostic, save for text the source rules
+// refuse, which they report. The expression stays well-formed either way,
 // which is what keeps one bad literal from cascading.
 func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 	p.next()
@@ -251,40 +256,61 @@ func (p *exprParser) literal(t *lexer.Token) expr.Expression {
 	switch t.Type {
 	case p.tok.str:
 		s, err := unquote(t.Value)
-		if err != nil {
+		switch {
+		case errors.Is(err, errRefusedText):
+			// The source rules report the literal's bytes, and one break is
+			// one diagnostic.
+			return p.literalWithNoValue(StringLiteral)
+		case err != nil:
 			// This site supplies its own context, so it reports the cause
 			// alone rather than double-prefixing a text consumers match.
 			p.diagf(start, end, "invalid string literal: %s", strings.TrimPrefix(err.Error(), unquotePrefix))
-			return expr.NewLiteral(nil)
+			return p.literalWithNoValue(StringLiteral)
 		}
 		return expr.NewLiteral(s)
 	case p.tok.integer:
 		i, err := strconv.ParseInt(t.Value, 10, 64)
 		if err != nil {
 			p.diagf(start, end, "invalid integer literal: %v", err)
-			return expr.NewLiteral(nil)
+			return p.literalWithNoValue(IntegerLiteral)
 		}
 		return expr.NewLiteral(i)
 	case p.tok.float:
 		f, err := strconv.ParseFloat(t.Value, 64)
 		if err != nil {
 			p.diagf(start, end, "invalid float literal: %v", err)
-			return expr.NewLiteral(nil)
+			return p.literalWithNoValue(FloatLiteral)
 		}
 		return expr.NewLiteral(f)
 	default: // REGEXP
-		re, err := regexp.Compile(t.Value[1 : len(t.Value)-1])
-		if _, refused := nextTextFault(t.Value, 0); refused {
-			// The source rules already report the literal's bytes; one
-			// diagnostic is enough, as for a string literal.
-			return expr.NewLiteral(nil)
+		// A literal the source rules refuse has no value, and its bytes are
+		// reported where they stand. One holding a byte that is no part of a
+		// character has no text to compile. A NUL and a byte order mark are
+		// characters regexp reads, so a compile error beside one is the
+		// pattern's own and is reported.
+		if !utf8.ValidString(t.Value) {
+			return p.literalWithNoValue(RegexLiteral)
 		}
+		re, err := regexp.Compile(t.Value[1 : len(t.Value)-1])
 		if err != nil {
 			p.diagf(start, end, "invalid regexp literal: %v", err)
-			return expr.NewLiteral(nil)
+			return p.literalWithNoValue(RegexLiteral)
+		}
+		if _, refused := nextTextFault(t.Value, 0); refused {
+			return p.literalWithNoValue(RegexLiteral)
 		}
 		return expr.NewLiteral(re)
 	}
+}
+
+// literalWithNoValue stands in for a literal of kind that has no value, whose
+// own diagnostic is reported where it stands. The nil literal keeps the
+// expression well formed, and noValue names it with its kind, so no later
+// check judges a nil the source did not write.
+func (p *exprParser) literalWithNoValue(kind LiteralKind) expr.Expression {
+	lit := &expr.Literal{}
+	p.noValue = append(p.noValue, NoValueLiteral{Literal: lit, Kind: kind})
+	return lit
 }
 
 // lcWord resolves a lowercase word in operand position: the three literal

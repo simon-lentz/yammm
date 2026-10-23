@@ -154,6 +154,10 @@ type completer struct {
 	// keyed as an invariant expression writes them.
 	staticMembers map[*Type]staticMembers
 	invariantSeen map[string]bool // diagnostics already reported for the invariant being typed
+	// noValue maps each literal that stands in for one with no value, in any
+	// invariant this completion converts, to the kind of literal the source
+	// wrote. Only a load that is refused holds one.
+	noValue map[*expr.Literal]parse.LiteralKind
 
 	// pendingShadowed holds the annotations own re-declarations dropped, queued
 	// during linearization and emitted by [completer.flushShadowedAnnotations]
@@ -417,7 +421,7 @@ func (c *completer) indexImports() {
 	}
 
 	for _, id := range c.model.Imports {
-		if id == nil {
+		if id == nil || id.unnamed() {
 			continue
 		}
 
@@ -431,8 +435,8 @@ func (c *completer) indexImports() {
 		// and never the duplicate report).
 		if existing, dup := aliasIndex[id.Alias]; dup {
 			c.errorf(id.Span, diag.E_DUPLICATE_IMPORT,
-				"alias %q already used for import %q; use explicit 'as' to disambiguate\n    existing: import %q\n    new:      import %q",
-				id.Alias, existing.Path, existing.Path, id.Path)
+				"alias %q already used for import %s; use explicit 'as' to disambiguate\n    existing: import %s\n    new:      import %s",
+				id.Alias, existing.shownPath(), existing.shownPath(), id.shownPath())
 			continue
 		}
 		aliasIndex[id.Alias] = id
@@ -658,7 +662,8 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 
 // convertInvariants converts invariantDecl to Invariant. An invariant's
 // message is its identity, so a message declared twice on one type is a
-// duplicate: the first declaration is kept and the second reported.
+// duplicate: the first declaration with a message and an expression is kept,
+// and each later one reported.
 func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) []*Invariant {
 	invs := make([]*Invariant, 0, len(decls))
 	first := make(map[string]*invariantDecl, len(decls))
@@ -687,6 +692,12 @@ func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) [
 			continue
 		}
 		first[id.Name] = id
+		for _, nv := range id.NoValue {
+			if c.noValue == nil {
+				c.noValue = make(map[*expr.Literal]parse.LiteralKind)
+			}
+			c.noValue[nv.Literal] = nv.Kind
+		}
 		invs = append(invs, newInvariant(id.Name, id.Expr, id.Span, id.Documentation))
 	}
 

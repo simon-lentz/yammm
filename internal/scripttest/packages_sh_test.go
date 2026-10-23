@@ -1,6 +1,8 @@
 package scripttest
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -384,4 +386,40 @@ func TestPackagesScript_ReadsAnIgnorePatternThatHoldsANewlineAsOne(t *testing.T)
 	r := f.run("packages.sh")
 	r.wantCode(t, 0)
 	r.wantStdout(t, fixtureModule+"/a\n"+fixtureModule+"/b\n")
+}
+
+// A --check run makes the refusals whatever YAMMM_PACKAGES_TRACKED names: a
+// file an earlier run of the same tree wrote holds the tracked directories it
+// passed, and an untracked Go file added since is still refused. A run that
+// lists packages reads that file and makes no such refusal, as the script
+// states.
+func TestPackagesScript_CheckRefusesWhateverTheTrackedFileHolds(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.index()
+	f.env = []string{"YAMMM_PACKAGES_TRACKED=" + filepath.Join(t.TempDir(), "tracked")}
+	f.run("packages.sh").wantCode(t, 0)
+
+	f.write("ok/helper.go", "package ok\n")
+	r := f.run("packages.sh", "--check")
+	r.wantCode(t, 1)
+	r.wantStderr(t, "packages: 1 untracked Go file(s) in a tracked package, which a go command building it compiles and no commit holds; add or remove each:\n  ok/helper.go\n")
+	f.run("packages.sh").wantCode(t, 0)
+}
+
+// A --check run that passes writes no file under YAMMM_PACKAGES_TRACKED: a
+// later listing run would otherwise read a tracked list no refusal made for it,
+// and a path in a directory that does not exist would fail the check itself.
+func TestPackagesScript_CheckWritesNoTrackedFile(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	f.index()
+	dir := t.TempDir()
+	for _, path := range []string{filepath.Join(dir, "absent"), filepath.Join(dir, "missing", "tracked")} {
+		f.env = []string{"YAMMM_PACKAGES_TRACKED=" + path}
+		f.run("packages.sh", "--check").wantCode(t, 0)
+		if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("--check left %s behind: %v", path, err)
+		}
+	}
 }

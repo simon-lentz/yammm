@@ -3,6 +3,7 @@ package parse
 import (
 	"regexp"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -23,6 +24,25 @@ type File struct {
 	Doc  string
 	Span location.Span // the schema header's extent, not the whole file
 
+	// Unparsed holds the diagnostics for text the grammar does not match: a
+	// construct that did not parse, and an escape the language does not have,
+	// save in an invariant expression, where it is E_INVALID_INVARIANT, and in
+	// an annotation argument, which keeps its written spelling.
+	// They are in position order. Text the source rules refuse inside a
+	// comment or a literal, and an escape whose value is not UTF-8, are not
+	// among them: the token stream is whole beside either, and the tree keeps
+	// its shape, save an invariant whose message has no value, which is left
+	// out, and a literal with no value in an invariant expression, which a nil
+	// literal stands in for. A reader of those two alone, as the formatter is,
+	// refuses a source on Unparsed and on no other diagnostic.
+	Unparsed []diag.Issue
+
+	// Expressions holds the extent of every invariant expression the grammar
+	// matched, in source order, which a formatter needs to leave an
+	// expression's own spacing untouched. It holds the expression of an
+	// invariant that is not in the tree because its message has no value.
+	Expressions []location.Span
+
 	Imports   []*Import
 	DataTypes []*DataTypeDecl
 	Types     []*TypeDecl
@@ -30,11 +50,14 @@ type File struct {
 
 // Import is one import declaration. Alias holds only an alias the source wrote
 // out; deriving one from the path is a loading decision and does not happen
-// here.
+// here. PathRefused reports that the path literal has no value, so Path is
+// empty and names no file; the declaration is kept because its alias is still
+// declared.
 type Import struct {
-	Path     string
-	PathRaw  string
-	PathSpan location.Span
+	Path        string
+	PathRefused bool
+	PathRaw     string
+	PathSpan    location.Span
 
 	Alias     string
 	HasAlias  bool
@@ -117,20 +140,39 @@ type Property struct {
 	Span         location.Span
 }
 
-// Invariant is one '!' member: its message, its expression, and the byte
-// extent of the expression alone, which a formatter needs to leave the
-// expression's own spacing untouched.
+// Invariant is one '!' member: its message and its expression. The byte
+// extent of the expression alone is in [File.Expressions].
 type Invariant struct {
 	Message     string
 	MessageRaw  string
 	MessageSpan location.Span
 
-	Expr     expr.Expression // never nil: no Invariant is built without one
-	ExprSpan location.Span
+	Expr expr.Expression // never nil: no Invariant is built without one
+	// NoValue holds each literal in Expr that has no value. Each is a nil
+	// literal the source did not write, and its own diagnostic is reported
+	// where it stands.
+	NoValue []NoValueLiteral
 
 	Doc  string
 	Span location.Span
 }
+
+// NoValueLiteral is a nil literal in an invariant expression that stands in
+// for a literal with no value, and the kind of literal the source wrote there.
+type NoValueLiteral struct {
+	Literal *expr.Literal
+	Kind    LiteralKind
+}
+
+// LiteralKind is the kind of literal token the source wrote.
+type LiteralKind uint8
+
+const (
+	StringLiteral LiteralKind = iota + 1
+	IntegerLiteral
+	FloatLiteral
+	RegexLiteral
+)
 
 // Annotation is one '@name(args)' or '@@name(args)' member. HasParens reports
 // whether an argument list was parsed, so it is true exactly when Args is
@@ -215,8 +257,11 @@ type Bounds struct {
 
 // Literal is one written literal argument of a constraint. Kept reports
 // whether the value survived into the constraint: a literal that failed to
-// unquote, was empty, duplicated an earlier value, or failed to compile is
-// recorded here with its extent but does not reach the constraint itself.
+// unquote, holds text the source rules refuse, was empty, duplicated an
+// earlier value, failed to compile, names a surrogate, or is a pattern after
+// MaxPatterns others were kept is recorded here with its extent but does not
+// reach the constraint itself. Text is empty for a literal with no
+// value.
 type Literal struct {
 	Raw   string
 	Text  string

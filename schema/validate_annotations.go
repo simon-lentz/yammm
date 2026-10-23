@@ -647,12 +647,14 @@ func validateIndexType(c *completer, t *Type, _ *Property, a *Annotation) {
 // be judged at annotation-validation time, in which case the eligibility check
 // must defer. Two shapes qualify, and both already carry their own diagnostic:
 //
-//   - A nil constraint, left by parse-error recovery on a property whose type
-//     failed to build (E_SYNTAX or E_INVALID_CONSTRAINT). Checking eligibility
+//   - A nil constraint, which a property's type the schema parser could not
+//     build leaves: a Vector dimension refused with E_INVALID_CONSTRAINT, or a
+//     List of one. Checking eligibility
 //     here would blame the annotation for the type's failure and describe a
 //     property that plainly declares a type as "missing type".
-//   - A constraint bottoming out in an unresolved alias (a deferred import, a
-//     cyclic local chain), which alias resolution owns.
+//   - A constraint bottoming out in an unresolved alias: a deferred import, a
+//     reference refused with E_UNKNOWN_TYPE, or a reference to a datatype whose
+//     own constraint the schema parser could not build, each already reported.
 //
 // The second test is shared with the primary-key rule via
 // [completer.primaryKeyTypeDeferred]. That predicate is named and documented for

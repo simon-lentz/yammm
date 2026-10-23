@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"unicode/utf8"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
@@ -40,16 +39,19 @@ func ByteLenToCharLen(content []byte, byteLen int, enc PositionEncoding) int {
 // Mid-surrogate positions (UTF-16): If char points to the second code unit
 // of a surrogate pair, we floor to the start of that rune.
 //
+// The character is counted in the text the client holds of the source, which
+// [Texts] defines.
+//
 // Returns (offset, false) if the source is not found or the line is invalid.
 // Callers should bail out when ok is false to avoid incorrect navigation.
-func ByteOffsetFromLSP(sources *source.Registry, id location.SourceID, line, char int, enc PositionEncoding) (int, bool) {
+func ByteOffsetFromLSP(sources *Texts, id location.SourceID, line, char int, enc PositionEncoding) (int, bool) {
 	// Handle nil registry
 	if sources == nil {
 		return 0, false
 	}
 
 	// LSP line is 0-based; registry API is 1-based
-	lineStart, ok := sources.LineStartByte(id, line+1)
+	lineStart, ok := sources.characterOrigin(id, line+1)
 	if !ok {
 		return 0, false // line not found or source unknown
 	}
@@ -139,16 +141,19 @@ func ClampToLineEnd(content []byte, lineStart, offset int) int {
 }
 
 // PositionFromLSP converts an LSP position to an internal location.Position.
-// Uses the source registry for accurate UTF-16 -> rune column conversion.
+// It converts the client's column, in UTF-16 units or in bytes as the
+// negotiated encoding says, to a rune column through the text registered for
+// the source, counting line 1 of a file read from disk from after a leading
+// byte order mark.
 //
 // This is the primary entry point for inbound LSP position conversion.
-// Use this in all providers (definition, hover, completion) instead of
-// naive column arithmetic.
+// The hover and definition providers use it instead of naive column
+// arithmetic; completion takes a byte offset from [ByteOffsetFromLSP].
 //
 // Returns (position, false) if the source is not found or the line is invalid.
 // Callers should bail out when ok is false to avoid incorrect navigation.
 func PositionFromLSP(
-	sources *source.Registry,
+	sources *Texts,
 	sourceID location.SourceID,
 	lspLine, lspChar int,
 	enc PositionEncoding,
@@ -228,12 +233,19 @@ func ByteToUTF16Offset(content []byte, lineStart, targetByte int) int {
 	return utf16Units
 }
 
-// SpanToLSPRange converts a location.Span to an LSP Range.
-// Uses the source registry for accurate UTF-16 or UTF-8 conversion.
+// SpanToLSPRange converts a location.Span to an LSP Range. For a source that
+// sources holds, it converts each byte offset to UTF-16 units or UTF-8 bytes
+// and counts each character in the text the client holds of the source, which
+// [Texts] defines. For a source that sources does not hold, for a position
+// with no byte offset, and for a line the held text does not reach, it returns
+// the rune column less one in either encoding; an end that is not known takes
+// the start's position.
+// It returns zero positions and false for a nil sources, a zero span and a
+// span whose start is not known.
 //
 // The encoding parameter should be the negotiated position encoding from
 // the client (default UTF-16).
-func SpanToLSPRange(sources *source.Registry, span location.Span, enc PositionEncoding) (start, end [2]int, ok bool) {
+func SpanToLSPRange(sources *Texts, span location.Span, enc PositionEncoding) (start, end [2]int, ok bool) {
 	if span.IsZero() || !span.Start.IsKnown() {
 		return [2]int{}, [2]int{}, false
 	}
@@ -250,14 +262,14 @@ func SpanToLSPRange(sources *source.Registry, span location.Span, enc PositionEn
 	startLine := max(span.Start.Line-1, 0)
 	var startChar int
 	if hasContent && span.Start.Byte >= 0 {
-		lineStartByte, lineOk := sources.LineStartByte(span.Source, span.Start.Line)
+		lineStartByte, lineOk := sources.characterOrigin(span.Source, span.Start.Line)
 		if lineOk {
 			switch enc {
 			case PositionEncodingUTF16:
 				startChar = ByteToUTF16Offset(content, lineStartByte, span.Start.Byte)
 			case PositionEncodingUTF8:
 				// UTF-8 mode: character offset IS byte offset from line start
-				startChar = span.Start.Byte - lineStartByte
+				startChar = max(span.Start.Byte-lineStartByte, 0)
 			default:
 				startChar = ByteToUTF16Offset(content, lineStartByte, span.Start.Byte)
 			}
@@ -275,14 +287,14 @@ func SpanToLSPRange(sources *source.Registry, span location.Span, enc PositionEn
 	if span.End.IsKnown() {
 		endLine = max(span.End.Line-1, 0)
 		if hasContent && span.End.Byte >= 0 {
-			lineStartByte, lineOk := sources.LineStartByte(span.Source, span.End.Line)
+			lineStartByte, lineOk := sources.characterOrigin(span.Source, span.End.Line)
 			if lineOk {
 				switch enc {
 				case PositionEncodingUTF16:
 					endChar = ByteToUTF16Offset(content, lineStartByte, span.End.Byte)
 				case PositionEncodingUTF8:
 					// UTF-8 mode: character offset IS byte offset from line start
-					endChar = span.End.Byte - lineStartByte
+					endChar = max(span.End.Byte-lineStartByte, 0)
 				default:
 					endChar = ByteToUTF16Offset(content, lineStartByte, span.End.Byte)
 				}
@@ -298,10 +310,11 @@ func SpanToLSPRange(sources *source.Registry, span location.Span, enc PositionEn
 	return [2]int{startLine, startChar}, [2]int{endLine, endChar}, true
 }
 
-// SpanToProtocolRange converts a yammm Span to an LSP protocol.Range using the
-// source registry for accurate byte-to-character-offset conversion. Falls back to
-// naive column-based approximation (1-based to 0-based) when the registry lookup fails.
-func SpanToProtocolRange(sources *source.Registry, span location.Span, enc PositionEncoding) protocol.Range {
+// SpanToProtocolRange converts a yammm Span to an LSP protocol.Range through
+// [SpanToLSPRange]. When that gives no range (a zero span, an unknown start or
+// nil sources), the range is the span's own lines and columns, each less one
+// and at least zero.
+func SpanToProtocolRange(sources *Texts, span location.Span, enc PositionEncoding) protocol.Range {
 	start, end, ok := SpanToLSPRange(sources, span, enc)
 	if ok {
 		return protocol.Range{

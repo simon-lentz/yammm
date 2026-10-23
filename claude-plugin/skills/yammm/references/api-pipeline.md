@@ -93,7 +93,6 @@ Two options apply to `LoadSourcesWithEntry` alone; `Load` and `LoadString` refus
 
 ```go
 schema.LoadSourcesWithEntry(ctx, sources, "main.yammm", "",
-    schema.WithSourcesOnly(true),               // hermetic: imports resolve only against the in-memory sources
     schema.WithSyntheticRoot("embedded://app"), // identities under a root no checkout or mount point moves
 )
 ```

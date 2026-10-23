@@ -299,8 +299,10 @@ func TestRecovery_DeclarationResyncHasAByteFloor(t *testing.T) {
 }
 
 // TestRecovery_DeclarationLevelRegexIsNotADocComment is the declaration-level
-// twin of the member-level rule: "/*/" lexes as REGEXP, and a text-prefix test
-// halts declaration resync on it and re-reports the same construct.
+// twin of the member-level rule: "/*/" lexes as REGEXP, since no "*/" after it
+// closes a comment, so the alias that wants a constraint there fails once.
+// Declaration resync passes the literal with the failed alias and stops at the
+// next declaration keyword, which keeps the type that follows.
 func TestRecovery_DeclarationLevelRegexIsNotADocComment(t *testing.T) {
 	src := "schema \"s\"\ntype A = \n/*/ \ntype B {\n\tid String primary\n}\n"
 	file, issues := Parse([]byte(src), location.NewSourceID("s.yammm"))
@@ -394,6 +396,9 @@ func TestRecovery_ErrorWithoutAPositionIsStillReported(t *testing.T) {
 	}
 	if covered := src[got.Span().Start.Byte:got.Span().End.Byte]; covered != "id" {
 		t.Errorf("span covers %q, want the construct's first token %q", covered, "id")
+	}
+	if len(b.unparsed) != 1 || b.unparsed[0].Message() != got.Message() || b.unparsed[0].Span() != got.Span() {
+		t.Errorf("unparsed = %v, want the issue, which is text the grammar does not match", b.unparsed)
 	}
 }
 
@@ -659,6 +664,9 @@ func assertNodeSpansWithinSource(t *testing.T, src string, f *File) {
 
 	check("file", f.Span)
 	check("schema name", f.NameSpan)
+	for _, e := range f.Expressions {
+		check("invariant expression", e)
+	}
 	for _, imp := range f.Imports {
 		check("import", imp.Span)
 		check("import path", imp.PathSpan)
@@ -689,7 +697,6 @@ func assertNodeSpansWithinSource(t *testing.T, src string, f *File) {
 		for _, inv := range ty.Invariants {
 			check("invariant", inv.Span)
 			check("invariant message", inv.MessageSpan)
-			check("invariant expression", inv.ExprSpan)
 		}
 		for _, ann := range ty.Annotations {
 			checkAnnotation("type annotation", ann)

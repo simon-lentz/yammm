@@ -31,7 +31,7 @@ func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 		"\n" +
 		"type Doc {\n" +
 		"\tid String primary\n" +
-		"\ttitle Enum[\"🎉日\", \"🎉日\"]\n" +
+		"\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]\n" +
 		"}\n"
 
 	// Compared across encodings below: a pass-through conversion would make the
@@ -89,12 +89,11 @@ func TestAnalyze_DiagnosticRangesConvertFromParseSpans(t *testing.T) {
 }
 
 // TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths pins the conversion
-// when the client's path crosses a symlink (macOS /tmp → /private): the
-// analyzer must canonicalise its own registry keys, because on a failed load
-// no back-fill re-keys them and a miss falls back to rune columns — identical
-// under both encodings, which is what the final assertion catches. The
-// workspace path is deliberately NOT pre-resolved; resolving it is what hides
-// the bug.
+// when the client's path crosses a symlink (macOS /tmp → /private): each
+// diagnostic's range is counted in the encoding asked for, not in rune
+// columns, which are identical under both encodings and which the final
+// assertion catches. The workspace path is deliberately NOT pre-resolved, so
+// the analysis meets the path the client sent.
 func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 	t.Parallel()
 
@@ -102,7 +101,7 @@ func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 		"\n" +
 		"type Doc {\n" +
 		"\tid String primary\n" +
-		"\ttitle Enum[\"🎉日\", \"🎉日\"]\n" +
+		"\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]\n" +
 		"}\n"
 
 	// Spell the base as the filesystem lists it, so the symlink below is the
@@ -143,24 +142,24 @@ func TestAnalyze_DiagnosticRangesConvertAcrossSymlinkedPaths(t *testing.T) {
 		}
 	}
 
-	// Exact columns, not merely a pair that differs. The duplicate-enum
-	// diagnostics start at the Enum construct and at the second value; on
-	// this line the three unit systems disagree there, so a wrong answer
-	// cannot hide behind a right one.
+	// Exact columns, not merely a pair that differs. The pattern-limit
+	// diagnostic starts at the Pattern construct and the compile diagnostic at
+	// the fourth pattern; on this line the three unit systems disagree there,
+	// so a wrong answer cannot hide behind a right one.
 	//
-	//	title Enum["🎉日", "🎉日"]
-	//	       ^7                    both encodings
-	//	                   ^19       UTF-16 units
-	//	                   ^23       UTF-8 bytes
-	//	                   ^18       runes — the fallback this pins against
-	wantUTF16 := []uint32{7, 19}
-	wantUTF8 := []uint32{7, 23}
+	//	title Pattern["🎉日", "🎉日", "🎉日", "("]
+	//	       ^7                                     both encodings
+	//	                                    ^36       UTF-16 units
+	//	                                    ^48       UTF-8 bytes
+	//	                                    ^33       runes — the fallback this pins against
+	wantUTF16 := []uint32{7, 36}
+	wantUTF8 := []uint32{7, 48}
 
 	if got := starts[lsputil.PositionEncodingUTF16]; !slices.Equal(got, wantUTF16) {
-		t.Errorf("UTF-16 starts = %v, want %v — rune columns would be [7 18]", got, wantUTF16)
+		t.Errorf("UTF-16 starts = %v, want %v — rune columns would be [7 33]", got, wantUTF16)
 	}
 	if got := starts[lsputil.PositionEncodingUTF8]; !slices.Equal(got, wantUTF8) {
-		t.Errorf("UTF-8 starts = %v, want %v — rune columns would be [7 18]", got, wantUTF8)
+		t.Errorf("UTF-8 starts = %v, want %v — rune columns would be [7 33]", got, wantUTF8)
 	}
 }
 
@@ -176,7 +175,7 @@ func columnUnits(line string, enc lsputil.PositionEncoding) int {
 func TestAnalyze_DiagnosticRangeFixtureDistinguishesEncodings(t *testing.T) {
 	t.Parallel()
 
-	const line = "\ttitle Enum[\"🎉日\", \"🎉日\"]"
+	const line = "\ttitle Pattern[\"🎉日\", \"🎉日\", \"🎉日\", \"(\"]"
 	bytes := len(line)
 	runes := utf8.RuneCountInString(line)
 	units := len(utf16.Encode([]rune(line)))

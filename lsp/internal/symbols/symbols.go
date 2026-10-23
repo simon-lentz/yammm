@@ -7,9 +7,10 @@ import (
 	"slices"
 	"unicode/utf8"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
+
+	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 )
 
 // SymbolKind represents the kind of a symbol.
@@ -107,7 +108,7 @@ type SymbolIndex struct {
 // ExtractSymbols extracts all declaration symbols from a schema.
 // The sources parameter is optional; if provided, it enables more precise
 // name span computation for types without parser-generated NameSpan.
-func ExtractSymbols(s *schema.Schema, sources *source.Registry) []Symbol {
+func ExtractSymbols(s *schema.Schema, sources *lsputil.Texts) []Symbol {
 	if s == nil {
 		return nil
 	}
@@ -173,7 +174,7 @@ func ExtractSymbols(s *schema.Schema, sources *source.Registry) []Symbol {
 
 // extractTypeSymbols extracts symbols from a single type.
 // The sources parameter is optional; if provided, enables precise name span fallback.
-func extractTypeSymbols(t *schema.Type, schemaName string, sourceID location.SourceID, sources *source.Registry) []Symbol {
+func extractTypeSymbols(t *schema.Type, schemaName string, sourceID location.SourceID, sources *lsputil.Texts) []Symbol {
 	if t.Span().IsZero() {
 		return nil
 	}
@@ -362,7 +363,7 @@ func ExtractReferences(s *schema.Schema) []ReferenceSymbol {
 // BuildSymbolIndex builds a complete symbol index for a schema.
 // The sources parameter is optional; if provided, enables more precise
 // name span computation for types without parser-generated NameSpan.
-func BuildSymbolIndex(s *schema.Schema, sources *source.Registry) *SymbolIndex {
+func BuildSymbolIndex(s *schema.Schema, sources *lsputil.Texts) *SymbolIndex {
 	syms := ExtractSymbols(s, sources)
 
 	// Build name index for O(1) lookup by name

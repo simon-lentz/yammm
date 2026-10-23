@@ -94,29 +94,56 @@ type textFault struct {
 	why        string
 }
 
+// The three kinds of text the source rules refuse inside a comment or a
+// literal. No other character is one.
+const (
+	faultNone = iota
+	faultInvalid
+	faultMark
+	faultNUL
+)
+
+var faultMessages = [...]string{
+	faultInvalid: "invalid UTF-8 encoding",
+	faultMark:    "byte order mark (U+FEFF) past the start of the source",
+	faultNUL:     `NUL character (U+0000) in the source; a string writes it as \0`,
+}
+
+// faultAt returns the kind of refused text s starts with, and its length in
+// bytes: one byte that is not valid UTF-8, one byte order mark, or one NUL.
+func faultAt(s string) (kind, size int) {
+	r, size := utf8.DecodeRuneInString(s)
+	switch {
+	case r == utf8.RuneError && size == 1:
+		return faultInvalid, 1
+	case strings.HasPrefix(s, byteOrderMark):
+		return faultMark, size
+	case r == 0 && size == 1:
+		return faultNUL, 1
+	}
+	return faultNone, size
+}
+
 // nextTextFault returns the first run at or after from that the source rules
-// refuse: bytes that are not valid UTF-8 (a run of them is one fault), a byte
-// order mark, or a NUL. No other character is one the source rules refuse
-// inside a comment or a literal.
+// refuse: bytes that are not valid UTF-8, byte order marks, or NULs. Adjacent
+// faults of one kind are one run, so a source reports as many faults as it
+// has runs and not as many as it has bytes.
 func nextTextFault(s string, from int) (textFault, bool) {
 	for i := from; i < len(s); {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		switch {
-		case r == utf8.RuneError && size == 1:
-			j := i + 1
-			for j < len(s) {
-				if r, n := utf8.DecodeRuneInString(s[j:]); r != utf8.RuneError || n != 1 {
-					break
-				}
-				j++
-			}
-			return textFault{i, j, "invalid UTF-8 encoding"}, true
-		case strings.HasPrefix(s[i:], byteOrderMark):
-			return textFault{i, i + size, "byte order mark (U+FEFF) past the start of the source"}, true
-		case r == 0:
-			return textFault{i, i + 1, `NUL character (U+0000) in the source; a string writes it as \0`}, true
+		kind, size := faultAt(s[i:])
+		if kind == faultNone {
+			i += size
+			continue
 		}
-		i += size
+		j := i + size
+		for j < len(s) {
+			next, n := faultAt(s[j:])
+			if next != kind {
+				break
+			}
+			j += n
+		}
+		return textFault{i, j, faultMessages[kind]}, true
 	}
 	return textFault{}, false
 }

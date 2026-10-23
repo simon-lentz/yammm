@@ -6,7 +6,6 @@ import (
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 )
@@ -16,7 +15,7 @@ import (
 type SnapshotView struct {
 	EntryVersion    int
 	SymbolsBySource map[location.SourceID]*SymbolIndex
-	Sources         *source.Registry
+	Sources         *lsputil.Texts
 }
 
 // DocumentSymbolsFor returns document symbols for the given document within a snapshot.
@@ -54,7 +53,7 @@ type DocSymWithKey struct {
 // BuildDocumentSymbols converts a SymbolIndex to hierarchical DocumentSymbols.
 // The sources parameter provides source content for position encoding conversion.
 // The enc parameter is the negotiated LSP position encoding (UTF-16 or UTF-8).
-func BuildDocumentSymbols(idx *SymbolIndex, sources *source.Registry, enc lsputil.PositionEncoding) []protocol.DocumentSymbol {
+func BuildDocumentSymbols(idx *SymbolIndex, sources *lsputil.Texts, enc lsputil.PositionEncoding) []protocol.DocumentSymbol {
 	if idx == nil || len(idx.Symbols) == 0 {
 		return nil
 	}
@@ -193,7 +192,7 @@ func AttachChildren(syms []DocSymWithKey, childrenByParent map[string][]DocSymWi
 // SymbolToDocumentSymbol converts a Symbol to a protocol.DocumentSymbol.
 // The sources parameter provides source content for position encoding conversion.
 // The enc parameter is the negotiated LSP position encoding (UTF-16 or UTF-8).
-func SymbolToDocumentSymbol(sym *Symbol, sources *source.Registry, enc lsputil.PositionEncoding) protocol.DocumentSymbol {
+func SymbolToDocumentSymbol(sym *Symbol, sources *lsputil.Texts, enc lsputil.PositionEncoding) protocol.DocumentSymbol {
 	kind := SymbolKindToLSP(sym.Kind)
 
 	// Build detail string

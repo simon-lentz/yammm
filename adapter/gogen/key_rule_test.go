@@ -5,8 +5,10 @@ import (
 	"errors"
 	"path"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/simon-lentz/yammm/adapter/gogen"
 	"github.com/simon-lentz/yammm/location"
@@ -47,7 +49,8 @@ func TestMarshal_KeyTheReloadCannotReadIsRefused(t *testing.T) {
 			continue
 		}
 		msg := err.Error()
-		if !strings.Contains(msg, "has no key the re-load can read") || !strings.Contains(msg, tc.why) || !strings.Contains(msg, tc.entry) {
+		quoted := strconv.Quote(tc.entry)
+		if !strings.Contains(msg, "has no key the re-load can read") || !strings.Contains(msg, tc.why) || !strings.Contains(msg, quoted[1:len(quoted)-1]) {
 			t.Errorf("%s: Marshal = %v, want the key refusal naming the source and saying %q", tc.entry, err, tc.why)
 		}
 		if strings.Contains(msg, "does not re-load") {
@@ -156,5 +159,37 @@ func TestEmbeddedKeys_AgreeWithTheLoadersKeyRule(t *testing.T) {
 				t.Errorf("gogen's store %v holds no %q, the key the loader registers the import under", keysOf(store), wantDep)
 			}
 		})
+	}
+}
+
+// TestMarshal_AnUnprintableIdentityIsNamedQuoted pins that a refusal naming a
+// file-backed source whose name holds a character that does not print writes
+// that character as its escape: a bidi control, a no-break space or a line
+// break printed raw would reorder the message, hide in it, or split it into a
+// second line.
+func TestMarshal_AnUnprintableIdentityIsNamedQuoted(t *testing.T) {
+	t.Parallel()
+	names := []string{"a\u202eb.yammm", "a\u00a0b.yammm", "a\u200eb.yammm"}
+	if runtime.GOOS != "windows" {
+		names = append(names, "a\nb.yammm")
+	}
+	for _, name := range names {
+		root := t.TempDir()
+		writeTree(t, root, map[string]string{name: keyRuleDep})
+		_, err := gogen.Marshal(loadEntry(t, root, name))
+		if err == nil {
+			t.Errorf("%q: Marshal succeeded, want the key refusal", name)
+			continue
+		}
+		msg := err.Error()
+		for _, r := range msg {
+			if !unicode.IsPrint(r) {
+				t.Errorf("%q: the refusal holds %U unescaped: %q", name, r, msg)
+			}
+		}
+		quoted := strconv.Quote(name)
+		if !strings.Contains(msg, quoted[1:len(quoted)-1]) {
+			t.Errorf("%q: the refusal %q does not name the source quoted", name, msg)
+		}
 	}
 }

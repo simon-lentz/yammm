@@ -44,12 +44,13 @@
 //	s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot)
 //
 // A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
-// a load that could not start or finish: an I/O failure, a cancellation, or
+// a load that could not start or finish for one of these reasons: an I/O failure, a cancellation, or
 // input a load cannot begin from, such as no sources, a source key the loader
 // refuses, two keys that name one source, or a source name that is not valid
 // UTF-8 or holds a character that does not print, or a source whose header cannot be parsed, which the parser reports
-// as a Fatal E_SYNTAX. An empty schema name is an Error, E_INVALID_NAME, with a
-// nil Schema. Check result.HasErrors() to determine semantic success.
+// as a Fatal E_SYNTAX. A schema name with no value is an Error, E_SYNTAX, an
+// empty one an Error, E_INVALID_NAME, and a malformed yammm.mod marker an
+// Error, E_LOAD_MODULE_ROOT_MALFORMED, each with a nil Schema. Check result.HasErrors() to determine semantic success.
 //
 // # Load Options
 //
@@ -62,7 +63,7 @@
 //   - [WithSyntheticRoot]: synthetic identities for in-memory sources
 //   - [WithIssueLimit]: maximum diagnostic issues to collect (default 100)
 //   - [WithImportsAllowed]: with false, refuse import declarations
-//   - [WithLogger]: structured logger for diagnostics
+//   - [WithLogger]: structured logger for the load's progress; diagnostics go to the result
 //
 // # Builder API
 //
@@ -144,9 +145,10 @@
 // # Merged Views and Property Identity
 //
 // A property inherited from several ancestors carries the UNION of their
-// annotations, which no single declared property holds. Such an entry in
-// [Type.AllProperties] / [Type.AllPropertiesSlice] is therefore a synthesized
-// copy, not the *Property its declaring type holds in [Type.PropertiesSlice].
+// annotations. When that union differs from the annotations of the declaration
+// the entry is taken from, the entry in
+// [Type.AllProperties] / [Type.AllPropertiesSlice] is a synthesized copy, not
+// the *Property its declaring type holds in [Type.PropertiesSlice].
 //
 // [Property.Origin] bridges the two views: it returns the property as declared,
 // and p itself when nothing was merged. Any map keyed by declared properties

@@ -3,7 +3,6 @@ package lsputil
 import (
 	"testing"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +41,7 @@ func TestToUInteger_Negative(t *testing.T) {
 func TestByteOffsetFromLSP_UTF16_ASCII(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://ascii.yammm")
 	// Line 1: "hello\n" (bytes 0-5, 6 total including newline)
 	// Line 2: "world\n" (bytes 6-11)
@@ -76,7 +75,7 @@ func TestByteOffsetFromLSP_UTF16_ASCII(t *testing.T) {
 func TestByteOffsetFromLSP_UTF16_BMP(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://bmp.yammm")
 	// "héllo" = h(1) + é(2) + l(1) + l(1) + o(1) = 6 bytes
 	// UTF-16: h(1) + é(1) + l(1) + l(1) + o(1) = 5 code units
@@ -110,7 +109,7 @@ func TestByteOffsetFromLSP_UTF16_BMP(t *testing.T) {
 func TestByteOffsetFromLSP_UTF16_Surrogate(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://emoji.yammm")
 	// "a😀b" = a(1) + 😀(4) + b(1) = 6 bytes
 	// UTF-16: a(1) + 😀(2 surrogates) + b(1) = 4 code units
@@ -143,7 +142,7 @@ func TestByteOffsetFromLSP_UTF16_Surrogate(t *testing.T) {
 func TestByteOffsetFromLSP_UTF16_CJK(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://cjk.yammm")
 	// "日本語" = 9 bytes (3 per char), 3 UTF-16 code units (all BMP)
 	content := []byte("日本語\n")
@@ -174,7 +173,7 @@ func TestByteOffsetFromLSP_UTF16_CJK(t *testing.T) {
 func TestByteOffsetFromLSP_UTF8_Encoding(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://utf8.yammm")
 	content := []byte("héllo\n")
 	require.NoError(t, sources.Register(sourceID, content), "Register()")
@@ -205,7 +204,7 @@ func TestByteOffsetFromLSP_UTF8_Encoding(t *testing.T) {
 func TestByteOffsetFromLSP_MultiLine(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://multiline.yammm")
 	// Line 1: "type 日本 {\n" = 11 bytes (type=4, space=1, 日=3, 本=3, space=1, {=1, \n=1)
 	// Wait, let me recalculate:
@@ -248,7 +247,7 @@ func TestByteOffsetFromLSP_MultiLine(t *testing.T) {
 func TestByteOffsetFromLSP_InvalidLine(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://invalid.yammm")
 	content := []byte("hello\n")
 	require.NoError(t, sources.Register(sourceID, content), "Register()")
@@ -261,7 +260,7 @@ func TestByteOffsetFromLSP_InvalidLine(t *testing.T) {
 func TestByteOffsetFromLSP_UnknownSource(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://unknown.yammm")
 
 	// Unknown source should return ok=false
@@ -272,7 +271,7 @@ func TestByteOffsetFromLSP_UnknownSource(t *testing.T) {
 func TestByteOffsetFromLSP_DefaultEncoding(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://default.yammm")
 	// "a😀" = a(1) + 😀(4) = 5 bytes
 	// UTF-16: a(1) + 😀(2) = 3 code units
@@ -321,7 +320,7 @@ func TestUtf16CharToByteOffset_InvalidUTF8(t *testing.T) {
 func TestSpanToLSPRange_ZeroSpan(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	var span location.Span // zero span
 
 	_, _, ok := SpanToLSPRange(sources, span, PositionEncodingUTF16)
@@ -331,7 +330,7 @@ func TestSpanToLSPRange_ZeroSpan(t *testing.T) {
 func TestSpanToLSPRange_UnknownStart(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://file.yammm")
 	span := location.Span{
 		Source: sourceID,
@@ -345,7 +344,7 @@ func TestSpanToLSPRange_UnknownStart(t *testing.T) {
 func TestSpanToLSPRange_Valid(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://file.yammm")
 	span := location.Span{
 		Source: sourceID,
@@ -374,7 +373,7 @@ func TestSpanToLSPRange_Valid(t *testing.T) {
 func TestSpanToLSPRange_PointSpan(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://file.yammm")
 	// Point span: only start is set
 	span := location.Span{
@@ -402,7 +401,7 @@ func TestSpanToLSPRange_PointSpan(t *testing.T) {
 func TestSpanToLSPRange_NegativeLine(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://file.yammm")
 	// Line 1 should become 0, not negative
 	span := location.Span{
@@ -423,7 +422,7 @@ func TestSpanToLSPRange_NegativeLine(t *testing.T) {
 func TestSpanToLSPRange_UnknownByte(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://file.yammm")
 	// Register content so hasContent is true
 	content := []byte("type MyType {\n  name String\n}\n")
@@ -456,7 +455,7 @@ func TestSpanToLSPRange_UnknownByte(t *testing.T) {
 func TestSpanToLSPRange_MixedByteKnowledge(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://mixed.yammm")
 	content := []byte("héllo world\n")
 	require.NoError(t, sources.Register(sourceID, content), "Register()")
@@ -487,7 +486,7 @@ func TestSpanToLSPRange_MixedByteKnowledge(t *testing.T) {
 func TestByteOffsetFromLSP_UTF8_ClampsToEOL(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://utf8eol.yammm")
 	// Line 1: "abc\n" (bytes 0-3, newline at 3)
 	// Line 2: "def\n" (bytes 4-7)
@@ -521,7 +520,7 @@ func TestByteOffsetFromLSP_UTF8_ClampsToEOL(t *testing.T) {
 func TestByteOffsetFromLSP_UTF8_LastLineNoNewline(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://noeol.yammm")
 	// Last line has no trailing newline
 	content := []byte("abc\ndef")
@@ -598,7 +597,7 @@ func TestSpanToLSPRange_UTF8_ASCII(t *testing.T) {
 	// In UTF-8 mode, character offset IS byte offset from line start.
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://utf8ascii.yammm")
 	// Line 1: "type Foo {\n" (bytes 0-10)
 	// Line 2: "}\n" (bytes 11-12)
@@ -633,7 +632,7 @@ func TestSpanToLSPRange_UTF8_MultibyteChars(t *testing.T) {
 	// The character "é" is 2 bytes in UTF-8.
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://utf8multi.yammm")
 	// "héllo\n" - 'é' is bytes 1-2 (2 bytes), total 7 bytes for line
 	// Byte offsets: h=0, é=1-2, l=3, l=4, o=5, \n=6
@@ -668,7 +667,7 @@ func TestSpanToLSPRange_UTF8_SecondLine(t *testing.T) {
 	// Verifies byte offset is calculated relative to line start, not file start.
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := NewTexts()
 	sourceID := location.MustNewSourceID("test://utf8line2.yammm")
 	// Line 1: "abc\n" (bytes 0-3, newline at 3)
 	// Line 2: "defgh\n" (bytes 4-9, newline at 9)

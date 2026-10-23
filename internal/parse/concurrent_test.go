@@ -232,6 +232,7 @@ func TestRender_CarriesEveryNodeField(t *testing.T) {
 		"\tn Integer required\n" +
 		"\t@index\n" +
 		"\t--> R (many) B { since Timestamp }\n" +
+		"\t! \"m\" n > 0\n" +
 		"}\n"
 
 	file, issues := Parse([]byte(src), location.NewSourceID("c.yammm"))
@@ -239,8 +240,10 @@ func TestRender_CarriesEveryNodeField(t *testing.T) {
 		t.Fatalf("fixture must parse clean: %v", issues)
 	}
 	got := render(file, issues)
+	expression := strings.Index(src, "n > 0")
 
 	for _, want := range []struct{ what, text string }{
+		{"invariant expression extent", fmt.Sprintf("!@%d-%d/", expression, expression+len("n > 0"))},
 		{"import path", "x.yammm"},
 		{"import alias", "alpha"},
 		{"abstract flag", "Base/truefalse"},
@@ -300,7 +303,6 @@ func render(f *File, issues []diag.Issue) string {
 		for _, inv := range ty.Invariants {
 			out.WriteString(inv.Message)
 			fp.span(inv.MessageSpan)
-			fp.span(inv.ExprSpan)
 			fp.expr(inv.Expr)
 			out.WriteByte('~')
 		}
@@ -308,6 +310,11 @@ func render(f *File, issues []diag.Issue) string {
 			fp.annotation(a)
 		}
 		out.WriteByte(';')
+	}
+	out.WriteByte('|')
+	for _, e := range f.Expressions {
+		out.WriteByte('!')
+		fp.span(e)
 	}
 	out.WriteByte('|')
 	for _, iss := range issues {

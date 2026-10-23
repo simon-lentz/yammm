@@ -1,15 +1,20 @@
 package instance
 
 import (
+	"fmt"
+
 	"github.com/simon-lentz/yammm/instance/internal/eval"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // CheckValue reports whether val conforms to c, by the rule [Validator]
-// applies to every property value: Go kind, bounds, enum membership, pattern,
-// list length and element rule, with an alias resolved to its DataType. A nil
-// value and a nil constraint are both valid — presence is the caller's rule,
-// as it is the validator's.
+// applies to every property value: Go kind and form, bounds, enum membership,
+// pattern, list length and element rule and a Vector's dimension, with an
+// alias resolved to its DataType. A nil
+// constraint is valid, and so is a nil value under a constraint
+// [schema.CheckConstraint] accepts — presence is the caller's rule, as it is
+// the validator's. A non-nil constraint is judged first by
+// [schema.CheckConstraint], and one it refuses is an error whatever the value.
 //
 // This is the check half of the boundary contract [CanonicalValue] renders the
 // other half of, exported for a caller that admits schema-typed values at a
@@ -19,6 +24,9 @@ import (
 func CheckValue(val any, c schema.Constraint) error {
 	if c == nil {
 		return nil
+	}
+	if err := schema.CheckConstraint(c); err != nil {
+		return fmt.Errorf("instance: %w", err)
 	}
 	return checkValueRecovering(val, c)
 }

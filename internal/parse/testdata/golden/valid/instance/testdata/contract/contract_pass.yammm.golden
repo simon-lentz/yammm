@@ -88,10 +88,6 @@
         {
           "msg": "\"p_all_empty_true\"",
           "expr": "(All ([]) (args ) (params x) (\u003e ($ \"x\") 0))",
-          "expr_span": {
-            "s": 173,
-            "e": 198
-          },
           "span": {
             "s": 152,
             "e": 198
@@ -100,10 +96,6 @@
         {
           "msg": "\"p_any_empty_false\"",
           "expr": "(! (Any ([]) (args ) (params x) (\u003e ($ \"x\") 0)))",
-          "expr_span": {
-            "s": 222,
-            "e": 250
-          },
           "span": {
             "s": 200,
             "e": 250
@@ -112,10 +104,6 @@
         {
           "msg": "\"p_allornone_empty_true\"",
           "expr": "(AllOrNone ([]) (args ) (params x) (\u003e ($ \"x\") 0))",
-          "expr_span": {
-            "s": 279,
-            "e": 310
-          },
           "span": {
             "s": 252,
             "e": 310
@@ -124,10 +112,6 @@
         {
           "msg": "\"p_allornone_mixed_false\"",
           "expr": "(! (AllOrNone ([] 1 (-x 1)) (args ) (params x) (\u003e ($ \"x\") 0)))",
-          "expr_span": {
-            "s": 340,
-            "e": 379
-          },
           "span": {
             "s": 312,
             "e": 379
@@ -136,10 +120,6 @@
         {
           "msg": "\"p_nil_input_is_empty_all\"",
           "expr": "(All (p \"absent_list\") (args ) (params x) (\u003e ($ \"x\") 0))",
-          "expr_span": {
-            "s": 410,
-            "e": 444
-          },
           "span": {
             "s": 381,
             "e": 444
@@ -148,10 +128,6 @@
         {
           "msg": "\"p_nil_len_zero\"",
           "expr": "(== (Len (p \"absent_list\") (args ) (params ) \u003cnil\u003e) 0)",
-          "expr_span": {
-            "s": 465,
-            "e": 488
-          },
           "span": {
             "s": 446,
             "e": 488
@@ -160,10 +136,6 @@
         {
           "msg": "\"p_unique\"",
           "expr": "(== (Len (Unique ([] 1 2 2 3) (args ) (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) 3)",
-          "expr_span": {
-            "s": 503,
-            "e": 537
-          },
           "span": {
             "s": 490,
             "e": 537
@@ -172,10 +144,6 @@
         {
           "msg": "\"p_compact\"",
           "expr": "(== (Len (Compact ([] 1 nil 2) (args ) (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) 2)",
-          "expr_span": {
-            "s": 553,
-            "e": 587
-          },
           "span": {
             "s": 539,
             "e": 587
@@ -184,10 +152,6 @@
         {
           "msg": "\"p_sort\"",
           "expr": "(== (Sort ([] 3 1 2) (args ) (params ) \u003cnil\u003e) ([] 1 2 3))",
-          "expr_span": {
-            "s": 600,
-            "e": 632
-          },
           "span": {
             "s": 589,
             "e": 632
@@ -196,10 +160,6 @@
         {
           "msg": "\"p_reverse\"",
           "expr": "(== (Reverse ([] 1 2) (args ) (params ) \u003cnil\u003e) ([] 2 1))",
-          "expr_span": {
-            "s": 648,
-            "e": 677
-          },
           "span": {
             "s": 634,
             "e": 677
@@ -208,10 +168,6 @@
         {
           "msg": "\"p_flatten_one_level\"",
           "expr": "(== (Len (Flatten ([] ([] 1 2) ([] 3)) (args ) (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) 3)",
-          "expr_span": {
-            "s": 703,
-            "e": 739
-          },
           "span": {
             "s": 679,
             "e": 739
@@ -220,10 +176,6 @@
         {
           "msg": "\"p_contains\"",
           "expr": "(Contains ([] 1 2 3) (args 2) (params ) \u003cnil\u003e)",
-          "expr_span": {
-            "s": 756,
-            "e": 780
-          },
           "span": {
             "s": 741,
             "e": 780
@@ -232,10 +184,6 @@
         {
           "msg": "\"p_contains_crosstype_false\"",
           "expr": "(! (Contains ([] 1 2 3) (args \"2\") (params ) \u003cnil\u003e))",
-          "expr_span": {
-            "s": 813,
-            "e": 842
-          },
           "span": {
             "s": 782,
             "e": 842
@@ -244,10 +192,6 @@
         {
           "msg": "\"p_first_empty_nil\"",
           "expr": "(== (First ([]) (args ) (params ) \u003cnil\u003e) nil)",
-          "expr_span": {
-            "s": 866,
-            "e": 886
-          },
           "span": {
             "s": 844,
             "e": 886
@@ -256,10 +200,6 @@
         {
           "msg": "\"p_last_empty_nil\"",
           "expr": "(== (Last ([]) (args ) (params ) \u003cnil\u003e) nil)",
-          "expr_span": {
-            "s": 909,
-            "e": 928
-          },
           "span": {
             "s": 888,
             "e": 928
@@ -268,10 +208,6 @@
         {
           "msg": "\"p_first\"",
           "expr": "(== (First ([] 1 2 3) (args ) (params ) \u003cnil\u003e) 1)",
-          "expr_span": {
-            "s": 942,
-            "e": 965
-          },
           "span": {
             "s": 930,
             "e": 965
@@ -280,10 +216,6 @@
         {
           "msg": "\"p_sum_empty_zero\"",
           "expr": "(== (Sum ([]) (args ) (params ) \u003cnil\u003e) 0)",
-          "expr_span": {
-            "s": 988,
-            "e": 1002
-          },
           "span": {
             "s": 967,
             "e": 1002
@@ -292,10 +224,6 @@
         {
           "msg": "\"p_sum_mixed_float\"",
           "expr": "(== (Sum ([] 1 2.5) (args ) (params ) \u003cnil\u003e) 3.5)",
-          "expr_span": {
-            "s": 1026,
-            "e": 1048
-          },
           "span": {
             "s": 1004,
             "e": 1048
@@ -304,10 +232,6 @@
         {
           "msg": "\"p_reduce_init\"",
           "expr": "(== (Reduce ([] 1 2 3) (args 0) (params acc x) (+ ($ \"acc\") ($ \"x\"))) 6)",
-          "expr_span": {
-            "s": 1068,
-            "e": 1120
-          },
           "span": {
             "s": 1050,
             "e": 1120
@@ -316,10 +240,6 @@
         {
           "msg": "\"p_reduce_seed_first\"",
           "expr": "(== (Reduce ([] 1 2 3) (args ) (params acc x) (+ ($ \"acc\") ($ \"x\"))) 6)",
-          "expr_span": {
-            "s": 1146,
-            "e": 1195
-          },
           "span": {
             "s": 1122,
             "e": 1195
@@ -328,10 +248,6 @@
         {
           "msg": "\"p_map\"",
           "expr": "(== (Sum (Map ([] 1 2 3) (args ) (params x) (* ($ \"x\") 2)) (args ) (params ) \u003cnil\u003e) 12)",
-          "expr_span": {
-            "s": 1207,
-            "e": 1252
-          },
           "span": {
             "s": 1197,
             "e": 1252
@@ -340,10 +256,6 @@
         {
           "msg": "\"p_filter\"",
           "expr": "(== (Len (Filter ([] 1 2 3) (args ) (params x) (\u003e ($ \"x\") 1)) (args ) (params ) \u003cnil\u003e) 2)",
-          "expr_span": {
-            "s": 1267,
-            "e": 1314
-          },
           "span": {
             "s": 1254,
             "e": 1314
@@ -352,10 +264,6 @@
         {
           "msg": "\"p_count\"",
           "expr": "(== (Count ([] 1 2 3) (args ) (params x) (\u003e ($ \"x\") 1)) 2)",
-          "expr_span": {
-            "s": 1328,
-            "e": 1367
-          },
           "span": {
             "s": 1316,
             "e": 1367
@@ -364,10 +272,6 @@
         {
           "msg": "\"p_abs\"",
           "expr": "(== (Abs (-x 5) (args ) (params ) \u003cnil\u003e) 5)",
-          "expr_span": {
-            "s": 1410,
-            "e": 1426
-          },
           "span": {
             "s": 1400,
             "e": 1426
@@ -376,10 +280,6 @@
         {
           "msg": "\"p_round_bankers_down\"",
           "expr": "(== (Round 2.5 (args ) (params ) \u003cnil\u003e) 2)",
-          "expr_span": {
-            "s": 1453,
-            "e": 1470
-          },
           "span": {
             "s": 1428,
             "e": 1470
@@ -388,10 +288,6 @@
         {
           "msg": "\"p_round_bankers_up\"",
           "expr": "(== (Round 3.5 (args ) (params ) \u003cnil\u003e) 4)",
-          "expr_span": {
-            "s": 1495,
-            "e": 1512
-          },
           "span": {
             "s": 1472,
             "e": 1512
@@ -400,10 +296,6 @@
         {
           "msg": "\"p_round_int_passthrough\"",
           "expr": "(== (Round 7 (args ) (params ) \u003cnil\u003e) 7)",
-          "expr_span": {
-            "s": 1542,
-            "e": 1557
-          },
           "span": {
             "s": 1514,
             "e": 1557
@@ -412,10 +304,6 @@
         {
           "msg": "\"p_floor\"",
           "expr": "(== (Floor 2.7 (args ) (params ) \u003cnil\u003e) 2)",
-          "expr_span": {
-            "s": 1571,
-            "e": 1590
-          },
           "span": {
             "s": 1559,
             "e": 1590
@@ -424,10 +312,6 @@
         {
           "msg": "\"p_ceil\"",
           "expr": "(== (Ceil 2.1 (args ) (params ) \u003cnil\u003e) 3)",
-          "expr_span": {
-            "s": 1603,
-            "e": 1621
-          },
           "span": {
             "s": 1592,
             "e": 1621
@@ -436,10 +320,6 @@
         {
           "msg": "\"p_floor_int_passthrough\"",
           "expr": "(== (Floor 3 (args ) (params ) \u003cnil\u003e) 3)",
-          "expr_span": {
-            "s": 1651,
-            "e": 1666
-          },
           "span": {
             "s": 1623,
             "e": 1666
@@ -448,10 +328,6 @@
         {
           "msg": "\"p_min_two\"",
           "expr": "(== (Min 2 (args 3) (params ) \u003cnil\u003e) 2)",
-          "expr_span": {
-            "s": 1682,
-            "e": 1698
-          },
           "span": {
             "s": 1668,
             "e": 1698
@@ -460,10 +336,6 @@
         {
           "msg": "\"p_max_two\"",
           "expr": "(== (Max 2 (args 3) (params ) \u003cnil\u003e) 3)",
-          "expr_span": {
-            "s": 1714,
-            "e": 1730
-          },
           "span": {
             "s": 1700,
             "e": 1730
@@ -472,10 +344,6 @@
         {
           "msg": "\"p_min_slice\"",
           "expr": "(== (Min ([] 3 1 2) (args ) (params ) \u003cnil\u003e) 1)",
-          "expr_span": {
-            "s": 1748,
-            "e": 1769
-          },
           "span": {
             "s": 1732,
             "e": 1769
@@ -484,10 +352,6 @@
         {
           "msg": "\"p_max_slice\"",
           "expr": "(== (Max ([] 3 1 2) (args ) (params ) \u003cnil\u003e) 3)",
-          "expr_span": {
-            "s": 1787,
-            "e": 1808
-          },
           "span": {
             "s": 1771,
             "e": 1808
@@ -496,10 +360,6 @@
         {
           "msg": "\"p_compare_num\"",
           "expr": "(== (Compare 1 (args 2) (params ) \u003cnil\u003e) (-x 1))",
-          "expr_span": {
-            "s": 1828,
-            "e": 1849
-          },
           "span": {
             "s": 1810,
             "e": 1849
@@ -508,10 +368,6 @@
         {
           "msg": "\"d_compare_strings_works\"",
           "expr": "(== (Compare \"a\" (args \"b\") (params ) \u003cnil\u003e) (-x 1))",
-          "expr_span": {
-            "s": 1879,
-            "e": 1904
-          },
           "span": {
             "s": 1851,
             "e": 1904
@@ -520,10 +376,6 @@
         {
           "msg": "\"p_upper\"",
           "expr": "(== (Upper \"Hello\" (args ) (params ) \u003cnil\u003e) \"HELLO\")",
-          "expr_span": {
-            "s": 1948,
-            "e": 1975
-          },
           "span": {
             "s": 1936,
             "e": 1975
@@ -532,10 +384,6 @@
         {
           "msg": "\"p_lower\"",
           "expr": "(== (Lower \"Hello\" (args ) (params ) \u003cnil\u003e) \"hello\")",
-          "expr_span": {
-            "s": 1989,
-            "e": 2016
-          },
           "span": {
             "s": 1977,
             "e": 2016
@@ -544,10 +392,6 @@
         {
           "msg": "\"p_trim\"",
           "expr": "(== (Trim \"  x  \" (args ) (params ) \u003cnil\u003e) \"x\")",
-          "expr_span": {
-            "s": 2029,
-            "e": 2051
-          },
           "span": {
             "s": 2018,
             "e": 2051
@@ -556,10 +400,6 @@
         {
           "msg": "\"p_len_runes\"",
           "expr": "(== (Len \"préfix\" (args ) (params ) \u003cnil\u003e) 6)",
-          "expr_span": {
-            "s": 2069,
-            "e": 2090
-          },
           "span": {
             "s": 2053,
             "e": 2090
@@ -568,10 +408,6 @@
         {
           "msg": "\"p_substring_one_arg\"",
           "expr": "(== (Substring \"abc\" (args 1) (params ) \u003cnil\u003e) \"bc\")",
-          "expr_span": {
-            "s": 2116,
-            "e": 2145
-          },
           "span": {
             "s": 2092,
             "e": 2145
@@ -580,10 +416,6 @@
         {
           "msg": "\"p_substring_two_arg\"",
           "expr": "(== (Substring \"abc\" (args 0 2) (params ) \u003cnil\u003e) \"ab\")",
-          "expr_span": {
-            "s": 2171,
-            "e": 2203
-          },
           "span": {
             "s": 2147,
             "e": 2203
@@ -592,10 +424,6 @@
         {
           "msg": "\"d_substring_negative_start\"",
           "expr": "(== (Substring \"abc\" (args (-x 2)) (params ) \u003cnil\u003e) \"bc\")",
-          "expr_span": {
-            "s": 2236,
-            "e": 2266
-          },
           "span": {
             "s": 2205,
             "e": 2266
@@ -604,10 +432,6 @@
         {
           "msg": "\"d_substring_end_clamped\"",
           "expr": "(== (Substring \"abc\" (args 1 99) (params ) \u003cnil\u003e) \"bc\")",
-          "expr_span": {
-            "s": 2296,
-            "e": 2329
-          },
           "span": {
             "s": 2268,
             "e": 2329
@@ -616,10 +440,6 @@
         {
           "msg": "\"p_split\"",
           "expr": "(== (Len (Split \"a,b\" (args \",\") (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) 2)",
-          "expr_span": {
-            "s": 2343,
-            "e": 2374
-          },
           "span": {
             "s": 2331,
             "e": 2374
@@ -628,10 +448,6 @@
         {
           "msg": "\"p_join\"",
           "expr": "(== (Join ([] \"a\" \"b\") (args \"-\") (params ) \u003cnil\u003e) \"a-b\")",
-          "expr_span": {
-            "s": 2387,
-            "e": 2419
-          },
           "span": {
             "s": 2376,
             "e": 2419
@@ -640,10 +456,6 @@
         {
           "msg": "\"p_startswith\"",
           "expr": "(StartsWith \"abc\" (args \"ab\") (params ) \u003cnil\u003e)",
-          "expr_span": {
-            "s": 2438,
-            "e": 2463
-          },
           "span": {
             "s": 2421,
             "e": 2463
@@ -652,10 +464,6 @@
         {
           "msg": "\"p_endswith\"",
           "expr": "(EndsWith \"abc\" (args \"bc\") (params ) \u003cnil\u003e)",
-          "expr_span": {
-            "s": 2480,
-            "e": 2503
-          },
           "span": {
             "s": 2465,
             "e": 2503
@@ -664,10 +472,6 @@
         {
           "msg": "\"p_replace_all\"",
           "expr": "(== (Replace \"aaa\" (args \"a\" \"b\") (params ) \u003cnil\u003e) \"bbb\")",
-          "expr_span": {
-            "s": 2523,
-            "e": 2558
-          },
           "span": {
             "s": 2505,
             "e": 2558
@@ -676,10 +480,6 @@
         {
           "msg": "\"p_trimprefix\"",
           "expr": "(== (TrimPrefix \"abc\" (args \"ab\") (params ) \u003cnil\u003e) \"c\")",
-          "expr_span": {
-            "s": 2577,
-            "e": 2609
-          },
           "span": {
             "s": 2560,
             "e": 2609
@@ -688,10 +488,6 @@
         {
           "msg": "\"d_trimprefix_absent_noop\"",
           "expr": "(== (TrimPrefix \"abc\" (args \"x\") (params ) \u003cnil\u003e) \"abc\")",
-          "expr_span": {
-            "s": 2640,
-            "e": 2673
-          },
           "span": {
             "s": 2611,
             "e": 2673
@@ -700,10 +496,6 @@
         {
           "msg": "\"p_trimsuffix\"",
           "expr": "(== (TrimSuffix \"abc\" (args \"bc\") (params ) \u003cnil\u003e) \"a\")",
-          "expr_span": {
-            "s": 2692,
-            "e": 2724
-          },
           "span": {
             "s": 2675,
             "e": 2724
@@ -712,10 +504,6 @@
         {
           "msg": "\"p_match_captures\"",
           "expr": "(== (Len (Match \"abc\" (args /b(c)/) (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) 2)",
-          "expr_span": {
-            "s": 2747,
-            "e": 2781
-          },
           "span": {
             "s": 2726,
             "e": 2781
@@ -724,10 +512,6 @@
         {
           "msg": "\"p_match_miss_nil\"",
           "expr": "(== (Match \"abc\" (args /z/) (params ) \u003cnil\u003e) nil)",
-          "expr_span": {
-            "s": 2804,
-            "e": 2832
-          },
           "span": {
             "s": 2783,
             "e": 2832
@@ -736,10 +520,6 @@
         {
           "msg": "\"p_then_nil_shortcircuit\"",
           "expr": "(== (Then nil (args ) (params v) false) nil)",
-          "expr_span": {
-            "s": 2888,
-            "e": 2923
-          },
           "span": {
             "s": 2860,
             "e": 2923
@@ -748,10 +528,6 @@
         {
           "msg": "\"p_then_nonnil\"",
           "expr": "(Then 5 (args ) (params v) (\u003e ($ \"v\") 4))",
-          "expr_span": {
-            "s": 2943,
-            "e": 2968
-          },
           "span": {
             "s": 2925,
             "e": 2968
@@ -760,10 +536,6 @@
         {
           "msg": "\"p_lest_nil_runs_body\"",
           "expr": "(Lest nil (args ) (params ) true)",
-          "expr_span": {
-            "s": 2995,
-            "e": 3015
-          },
           "span": {
             "s": 2970,
             "e": 3015
@@ -772,10 +544,6 @@
         {
           "msg": "\"p_lest_nonnil_passthrough\"",
           "expr": "(== (Lest 5 (args ) (params ) 99) 5)",
-          "expr_span": {
-            "s": 3047,
-            "e": 3068
-          },
           "span": {
             "s": 3017,
             "e": 3068
@@ -784,10 +552,6 @@
         {
           "msg": "\"p_with_always_runs\"",
           "expr": "(With nil (args ) (params v) (== ($ \"v\") nil))",
-          "expr_span": {
-            "s": 3093,
-            "e": 3123
-          },
           "span": {
             "s": 3070,
             "e": 3123
@@ -796,10 +560,6 @@
         {
           "msg": "\"p_default_nil\"",
           "expr": "(== (Default nil (args 7) (params ) \u003cnil\u003e) 7)",
-          "expr_span": {
-            "s": 3143,
-            "e": 3165
-          },
           "span": {
             "s": 3125,
             "e": 3165
@@ -808,10 +568,6 @@
         {
           "msg": "\"p_default_nonnil\"",
           "expr": "(== (Default 5 (args 7) (params ) \u003cnil\u003e) 5)",
-          "expr_span": {
-            "s": 3188,
-            "e": 3208
-          },
           "span": {
             "s": 3167,
             "e": 3208
@@ -820,10 +576,6 @@
         {
           "msg": "\"p_default_list_fallback_types_the_next_stage\"",
           "expr": "(== (First (Default (p \"absent_list\") (args ([] 7)) (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) 7)",
-          "expr_span": {
-            "s": 3259,
-            "e": 3302
-          },
           "span": {
             "s": 3210,
             "e": 3302
@@ -832,10 +584,6 @@
         {
           "msg": "\"p_max_two_on_a_defaulted_scalar\"",
           "expr": "(== (Max (Default (p \"absent_str\") (args \"a\") (params ) \u003cnil\u003e) (args \"z\") (params ) \u003cnil\u003e) \"z\")",
-          "expr_span": {
-            "s": 3340,
-            "e": 3387
-          },
           "span": {
             "s": 3304,
             "e": 3387
@@ -844,10 +592,6 @@
         {
           "msg": "\"p_coalesce\"",
           "expr": "(== (Coalesce nil (args nil 3) (params ) \u003cnil\u003e) 3)",
-          "expr_span": {
-            "s": 3404,
-            "e": 3432
-          },
           "span": {
             "s": 3389,
             "e": 3432
@@ -856,10 +600,6 @@
         {
           "msg": "\"p_coalesce_all_nil\"",
           "expr": "(== (Coalesce nil (args nil nil) (params ) \u003cnil\u003e) nil)",
-          "expr_span": {
-            "s": 3457,
-            "e": 3491
-          },
           "span": {
             "s": 3434,
             "e": 3491
@@ -868,10 +608,6 @@
         {
           "msg": "\"p_isnil_nil\"",
           "expr": "(IsNil nil (args ) (params ) \u003cnil\u003e)",
-          "expr_span": {
-            "s": 3530,
-            "e": 3542
-          },
           "span": {
             "s": 3514,
             "e": 3542
@@ -880,10 +616,6 @@
         {
           "msg": "\"p_isnil_zero_false\"",
           "expr": "(! (IsNil 0 (args ) (params ) \u003cnil\u003e))",
-          "expr_span": {
-            "s": 3567,
-            "e": 3580
-          },
           "span": {
             "s": 3544,
             "e": 3580
@@ -892,10 +624,6 @@
         {
           "msg": "\"p_isnil_emptystr_false\"",
           "expr": "(! (IsNil \"\" (args ) (params ) \u003cnil\u003e))",
-          "expr_span": {
-            "s": 3609,
-            "e": 3623
-          },
           "span": {
             "s": 3582,
             "e": 3623
@@ -904,10 +632,6 @@
         {
           "msg": "\"p_isnil_absent_prop\"",
           "expr": "(IsNil (p \"absent_str\") (args ) (params ) \u003cnil\u003e)",
-          "expr_span": {
-            "s": 3649,
-            "e": 3668
-          },
           "span": {
             "s": 3625,
             "e": 3668
@@ -916,10 +640,6 @@
         {
           "msg": "\"d_typeof_int\"",
           "expr": "(== (TypeOf 5 (args ) (params ) \u003cnil\u003e) \"integer\")",
-          "expr_span": {
-            "s": 3687,
-            "e": 3711
-          },
           "span": {
             "s": 3670,
             "e": 3711
@@ -928,10 +648,6 @@
         {
           "msg": "\"d_typeof_float\"",
           "expr": "(== (TypeOf 5.5 (args ) (params ) \u003cnil\u003e) \"float\")",
-          "expr_span": {
-            "s": 3732,
-            "e": 3756
-          },
           "span": {
             "s": 3713,
             "e": 3756
@@ -940,10 +656,6 @@
         {
           "msg": "\"d_typeof_string\"",
           "expr": "(== (TypeOf \"x\" (args ) (params ) \u003cnil\u003e) \"string\")",
-          "expr_span": {
-            "s": 3778,
-            "e": 3803
-          },
           "span": {
             "s": 3758,
             "e": 3803
@@ -952,10 +664,6 @@
         {
           "msg": "\"d_typeof_bool\"",
           "expr": "(== (TypeOf true (args ) (params ) \u003cnil\u003e) \"boolean\")",
-          "expr_span": {
-            "s": 3823,
-            "e": 3850
-          },
           "span": {
             "s": 3805,
             "e": 3850
@@ -964,10 +672,6 @@
         {
           "msg": "\"d_typeof_nil\"",
           "expr": "(== (TypeOf nil (args ) (params ) \u003cnil\u003e) \"nil\")",
-          "expr_span": {
-            "s": 3869,
-            "e": 3891
-          },
           "span": {
             "s": 3852,
             "e": 3891
@@ -976,10 +680,6 @@
         {
           "msg": "\"d_typeof_list\"",
           "expr": "(== (TypeOf ([] 1) (args ) (params ) \u003cnil\u003e) \"list\")",
-          "expr_span": {
-            "s": 3911,
-            "e": 3936
-          },
           "span": {
             "s": 3893,
             "e": 3936
@@ -988,10 +688,6 @@
         {
           "msg": "\"d_typeof_pattern\"",
           "expr": "(== (TypeOf /x/ (args ) (params ) \u003cnil\u003e) \"pattern\")",
-          "expr_span": {
-            "s": 3959,
-            "e": 3987
-          },
           "span": {
             "s": 3938,
             "e": 3987
@@ -1000,10 +696,6 @@
         {
           "msg": "\"p_eq_crosstype_false\"",
           "expr": "(! (== 1 \"1\"))",
-          "expr_span": {
-            "s": 4060,
-            "e": 4071
-          },
           "span": {
             "s": 4035,
             "e": 4071
@@ -1012,10 +704,6 @@
         {
           "msg": "\"p_neq_crosstype_true\"",
           "expr": "(!= 1 \"1\")",
-          "expr_span": {
-            "s": 4098,
-            "e": 4106
-          },
           "span": {
             "s": 4073,
             "e": 4106
@@ -1024,10 +712,6 @@
         {
           "msg": "\"d_lt_crosstype_strata_true\"",
           "expr": "(\u003c 1 \"a\")",
-          "expr_span": {
-            "s": 4139,
-            "e": 4146
-          },
           "span": {
             "s": 4108,
             "e": 4146
@@ -1036,10 +720,6 @@
         {
           "msg": "\"d_gt_crosstype_strata\"",
           "expr": "(\u003e \"a\" 1)",
-          "expr_span": {
-            "s": 4174,
-            "e": 4181
-          },
           "span": {
             "s": 4148,
             "e": 4181
@@ -1048,10 +728,6 @@
         {
           "msg": "\"d_lt_crosstype_strata_false\"",
           "expr": "(! (\u003c \"a\" 1))",
-          "expr_span": {
-            "s": 4215,
-            "e": 4225
-          },
           "span": {
             "s": 4183,
             "e": 4225
@@ -1060,10 +736,6 @@
         {
           "msg": "\"d_nil_lt_number\"",
           "expr": "(\u003c nil 0)",
-          "expr_span": {
-            "s": 4247,
-            "e": 4254
-          },
           "span": {
             "s": 4227,
             "e": 4254
@@ -1072,10 +744,6 @@
         {
           "msg": "\"d_bool_ordered\"",
           "expr": "(\u003c false true)",
-          "expr_span": {
-            "s": 4275,
-            "e": 4287
-          },
           "span": {
             "s": 4256,
             "e": 4287
@@ -1084,10 +752,6 @@
         {
           "msg": "\"d_nan_eq_nan\"",
           "expr": "(== (* 0 (/ 1 0)) (* 0 (/ 1 0)))",
-          "expr_span": {
-            "s": 4306,
-            "e": 4350
-          },
           "span": {
             "s": 4289,
             "e": 4350
@@ -1096,10 +760,6 @@
         {
           "msg": "\"d_nan_unique_collapses\"",
           "expr": "(== (Len (Unique ([] (* 0 (/ 1 0)) (* 0 (/ 1 0))) (args ) (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) 1)",
-          "expr_span": {
-            "s": 4379,
-            "e": 4441
-          },
           "span": {
             "s": 4352,
             "e": 4441
@@ -1108,10 +768,6 @@
         {
           "msg": "\"d_float_div_zero_inf\"",
           "expr": "(\u003e (/ 1 0) 999999999)",
-          "expr_span": {
-            "s": 4468,
-            "e": 4489
-          },
           "span": {
             "s": 4443,
             "e": 4489
@@ -1120,10 +776,6 @@
         {
           "msg": "\"p_string_order\"",
           "expr": "(\u003e \"2030-01-02\" \"2030-01-01\")",
-          "expr_span": {
-            "s": 4510,
-            "e": 4537
-          },
           "span": {
             "s": 4491,
             "e": 4537
@@ -1132,10 +784,6 @@
         {
           "msg": "\"d_timestamp_order_is_string_order\"",
           "expr": "(\u003e \"2030-01-01T10:00:00+09:00\" \"2030-01-01T02:00:00Z\")",
-          "expr_span": {
-            "s": 4577,
-            "e": 4629
-          },
           "span": {
             "s": 4539,
             "e": 4629
@@ -1144,10 +792,6 @@
         {
           "msg": "\"p_int_div_truncates\"",
           "expr": "(== (/ 7 2) 3)",
-          "expr_span": {
-            "s": 4690,
-            "e": 4700
-          },
           "span": {
             "s": 4666,
             "e": 4700
@@ -1156,10 +800,6 @@
         {
           "msg": "\"d_int_div_truncates_toward_zero\"",
           "expr": "(== (/ (-x 7) 2) (-x 3))",
-          "expr_span": {
-            "s": 4738,
-            "e": 4752
-          },
           "span": {
             "s": 4702,
             "e": 4752
@@ -1168,10 +808,6 @@
         {
           "msg": "\"p_mixed_div_float\"",
           "expr": "(== (/ 7 2) 3.5)",
-          "expr_span": {
-            "s": 4776,
-            "e": 4790
-          },
           "span": {
             "s": 4754,
             "e": 4790
@@ -1180,10 +816,6 @@
         {
           "msg": "\"p_mod\"",
           "expr": "(== (% 7 3) 1)",
-          "expr_span": {
-            "s": 4802,
-            "e": 4812
-          },
           "span": {
             "s": 4792,
             "e": 4812
@@ -1192,10 +824,6 @@
         {
           "msg": "\"d_mod_sign_of_dividend\"",
           "expr": "(== (% (-x 7) 3) (-x 1))",
-          "expr_span": {
-            "s": 4841,
-            "e": 4855
-          },
           "span": {
             "s": 4814,
             "e": 4855
@@ -1204,10 +832,6 @@
         {
           "msg": "\"p_promote_int_float\"",
           "expr": "(== (+ 1 2.5) 3.5)",
-          "expr_span": {
-            "s": 4881,
-            "e": 4895
-          },
           "span": {
             "s": 4857,
             "e": 4895
@@ -1216,10 +840,6 @@
         {
           "msg": "\"p_string_concat\"",
           "expr": "(== (+ \"a\" \"b\") \"ab\")",
-          "expr_span": {
-            "s": 4917,
-            "e": 4934
-          },
           "span": {
             "s": 4897,
             "e": 4934
@@ -1228,10 +848,6 @@
         {
           "msg": "\"d_list_concat\"",
           "expr": "(== (First (+ ([] 1) ([] 2)) (args ) (params ) \u003cnil\u003e) 1)",
-          "expr_span": {
-            "s": 4954,
-            "e": 4979
-          },
           "span": {
             "s": 4936,
             "e": 4979
@@ -1240,10 +856,6 @@
         {
           "msg": "\"p_in\"",
           "expr": "(in 2 ([] 1 2))",
-          "expr_span": {
-            "s": 5039,
-            "e": 5050
-          },
           "span": {
             "s": 5030,
             "e": 5050
@@ -1252,10 +864,6 @@
         {
           "msg": "\"p_in_crosstype_false\"",
           "expr": "(! (in \"2\" ([] 1 2)))",
-          "expr_span": {
-            "s": 5077,
-            "e": 5093
-          },
           "span": {
             "s": 5052,
             "e": 5093
@@ -1264,10 +872,6 @@
         {
           "msg": "\"p_regex_match\"",
           "expr": "(=~ \"user@host.com\" /.+@.+\\..+/)",
-          "expr_span": {
-            "s": 5113,
-            "e": 5143
-          },
           "span": {
             "s": 5095,
             "e": 5143
@@ -1276,10 +880,6 @@
         {
           "msg": "\"p_typecheck_int\"",
           "expr": "(=~ 5 (dt Integer))",
-          "expr_span": {
-            "s": 5165,
-            "e": 5177
-          },
           "span": {
             "s": 5145,
             "e": 5177
@@ -1288,10 +888,6 @@
         {
           "msg": "\"p_typecheck_float\"",
           "expr": "(=~ 5.5 (dt Float))",
-          "expr_span": {
-            "s": 5201,
-            "e": 5213
-          },
           "span": {
             "s": 5179,
             "e": 5213
@@ -1300,10 +896,6 @@
         {
           "msg": "\"p_typecheck_string_refuses_a_number\"",
           "expr": "(! (=~ 5 (dt String)))",
-          "expr_span": {
-            "s": 5255,
-            "e": 5269
-          },
           "span": {
             "s": 5215,
             "e": 5269
@@ -1312,10 +904,6 @@
         {
           "msg": "\"p_typecheck_timestamp_fraction\"",
           "expr": "(=~ \"2030-01-01T00:00:00.5Z\" (dt Timestamp))",
-          "expr_span": {
-            "s": 5306,
-            "e": 5343
-          },
           "span": {
             "s": 5271,
             "e": 5343
@@ -1324,10 +912,6 @@
         {
           "msg": "\"d_int_matches_float\"",
           "expr": "(=~ 5 (dt Float))",
-          "expr_span": {
-            "s": 5369,
-            "e": 5379
-          },
           "span": {
             "s": 5345,
             "e": 5379
@@ -1336,10 +920,6 @@
         {
           "msg": "\"d_wholefloat_is_not_integer\"",
           "expr": "(!~ 5 (dt Integer))",
-          "expr_span": {
-            "s": 5413,
-            "e": 5427
-          },
           "span": {
             "s": 5381,
             "e": 5427
@@ -1348,10 +928,6 @@
         {
           "msg": "\"d_exponent_literal_is_not_integer\"",
           "expr": "(!~ 100 (dt Integer))",
-          "expr_span": {
-            "s": 5467,
-            "e": 5483
-          },
           "span": {
             "s": 5429,
             "e": 5483
@@ -1360,10 +936,6 @@
         {
           "msg": "\"p_typecheck_date\"",
           "expr": "(=~ \"2030-01-01\" (dt Date))",
-          "expr_span": {
-            "s": 5506,
-            "e": 5526
-          },
           "span": {
             "s": 5485,
             "e": 5526
@@ -1372,10 +944,6 @@
         {
           "msg": "\"p_typecheck_not_date\"",
           "expr": "(!~ \"x\" (dt Date))",
-          "expr_span": {
-            "s": 5553,
-            "e": 5564
-          },
           "span": {
             "s": 5528,
             "e": 5564
@@ -1384,10 +952,6 @@
         {
           "msg": "\"p_typecheck_uuid\"",
           "expr": "(=~ \"550e8400-e29b-41d4-a716-446655440000\" (dt UUID))",
-          "expr_span": {
-            "s": 5587,
-            "e": 5633
-          },
           "span": {
             "s": 5566,
             "e": 5633
@@ -1396,10 +960,6 @@
         {
           "msg": "\"p_xor\"",
           "expr": "(^ true false)",
-          "expr_span": {
-            "s": 5645,
-            "e": 5657
-          },
           "span": {
             "s": 5635,
             "e": 5657
@@ -1408,10 +968,6 @@
         {
           "msg": "\"p_xor_same_false\"",
           "expr": "(! (^ true true))",
-          "expr_span": {
-            "s": 5680,
-            "e": 5694
-          },
           "span": {
             "s": 5659,
             "e": 5694
@@ -1420,10 +976,6 @@
         {
           "msg": "\"p_ternary_true\"",
           "expr": "(== (? true 1 2) 1)",
-          "expr_span": {
-            "s": 5757,
-            "e": 5780
-          },
           "span": {
             "s": 5738,
             "e": 5780
@@ -1432,10 +984,6 @@
         {
           "msg": "\"p_ternary_false\"",
           "expr": "(== (? false 1 2) 2)",
-          "expr_span": {
-            "s": 5802,
-            "e": 5826
-          },
           "span": {
             "s": 5782,
             "e": 5826
@@ -1444,10 +992,6 @@
         {
           "msg": "\"p_index\"",
           "expr": "(== (@ ([] 10 20 30) 1) 20)",
-          "expr_span": {
-            "s": 5840,
-            "e": 5861
-          },
           "span": {
             "s": 5828,
             "e": 5861
@@ -1456,10 +1000,6 @@
         {
           "msg": "\"p_index_string_rune\"",
           "expr": "(== (@ \"abé\" 2) \"é\")",
-          "expr_span": {
-            "s": 5887,
-            "e": 5904
-          },
           "span": {
             "s": 5863,
             "e": 5904
@@ -1468,10 +1008,6 @@
         {
           "msg": "\"d_index_oob_nil\"",
           "expr": "(== (@ ([] 10) 5) nil)",
-          "expr_span": {
-            "s": 5926,
-            "e": 5942
-          },
           "span": {
             "s": 5906,
             "e": 5942
@@ -1480,10 +1016,6 @@
         {
           "msg": "\"p_index_list_property\"",
           "expr": "(== (@ (p \"tags\") 0) \"alpha\")",
-          "expr_span": {
-            "s": 5970,
-            "e": 5988
-          },
           "span": {
             "s": 5944,
             "e": 5988
@@ -1492,10 +1024,6 @@
         {
           "msg": "\"p_index_list_property_last\"",
           "expr": "(== (@ (p \"tags\") 2) \"gamma\")",
-          "expr_span": {
-            "s": 6021,
-            "e": 6039
-          },
           "span": {
             "s": 5990,
             "e": 6039
@@ -1504,10 +1032,6 @@
         {
           "msg": "\"d_index_list_property_oob_nil\"",
           "expr": "(== (@ (p \"tags\") 9) nil)",
-          "expr_span": {
-            "s": 6075,
-            "e": 6089
-          },
           "span": {
             "s": 6041,
             "e": 6089
@@ -1516,10 +1040,6 @@
         {
           "msg": "\"d_index_list_property_negative_nil\"",
           "expr": "(== (@ (p \"tags\") (-x 1)) nil)",
-          "expr_span": {
-            "s": 6130,
-            "e": 6145
-          },
           "span": {
             "s": 6091,
             "e": 6145
@@ -1528,10 +1048,6 @@
         {
           "msg": "\"p_member_then_index\"",
           "expr": "(== (@ (. ($ \"self\") \"tags\") 0) \"alpha\")",
-          "expr_span": {
-            "s": 6171,
-            "e": 6195
-          },
           "span": {
             "s": 6147,
             "e": 6195
@@ -1540,10 +1056,6 @@
         {
           "msg": "\"p_member_then_pipeline\"",
           "expr": "(== (Len (. ($ \"self\") \"tags\") (args ) (params ) \u003cnil\u003e) 3)",
-          "expr_span": {
-            "s": 6224,
-            "e": 6246
-          },
           "span": {
             "s": 6197,
             "e": 6246
@@ -1552,10 +1064,6 @@
         {
           "msg": "\"p_postfix_chain_equals_grouped\"",
           "expr": "(== (@ (. ($ \"self\") \"tags\") 0) (@ (. ($ \"self\") \"tags\") 0))",
-          "expr_span": {
-            "s": 6283,
-            "e": 6315
-          },
           "span": {
             "s": 6248,
             "e": 6315
@@ -1564,10 +1072,6 @@
         {
           "msg": "\"d_self_is_map\"",
           "expr": "(== (TypeOf ($ \"self\") (args ) (params ) \u003cnil\u003e) \"map\")",
-          "expr_span": {
-            "s": 6335,
-            "e": 6361
-          },
           "span": {
             "s": 6317,
             "e": 6361
@@ -1576,10 +1080,6 @@
         {
           "msg": "\"d_self_len_counts_properties\"",
           "expr": "(\u003e (Len ($ \"self\") (args ) (params ) \u003cnil\u003e) 0)",
-          "expr_span": {
-            "s": 6396,
-            "e": 6414
-          },
           "span": {
             "s": 6363,
             "e": 6414
@@ -1588,10 +1088,6 @@
         {
           "msg": "\"d_numeric_var_unset_nil\"",
           "expr": "(== ($ \"0\") nil)",
-          "expr_span": {
-            "s": 6444,
-            "e": 6453
-          },
           "span": {
             "s": 6416,
             "e": 6453
@@ -1602,6 +1098,512 @@
         "s": 24,
         "e": 6455
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 173,
+      "e": 198
+    },
+    {
+      "s": 222,
+      "e": 250
+    },
+    {
+      "s": 279,
+      "e": 310
+    },
+    {
+      "s": 340,
+      "e": 379
+    },
+    {
+      "s": 410,
+      "e": 444
+    },
+    {
+      "s": 465,
+      "e": 488
+    },
+    {
+      "s": 503,
+      "e": 537
+    },
+    {
+      "s": 553,
+      "e": 587
+    },
+    {
+      "s": 600,
+      "e": 632
+    },
+    {
+      "s": 648,
+      "e": 677
+    },
+    {
+      "s": 703,
+      "e": 739
+    },
+    {
+      "s": 756,
+      "e": 780
+    },
+    {
+      "s": 813,
+      "e": 842
+    },
+    {
+      "s": 866,
+      "e": 886
+    },
+    {
+      "s": 909,
+      "e": 928
+    },
+    {
+      "s": 942,
+      "e": 965
+    },
+    {
+      "s": 988,
+      "e": 1002
+    },
+    {
+      "s": 1026,
+      "e": 1048
+    },
+    {
+      "s": 1068,
+      "e": 1120
+    },
+    {
+      "s": 1146,
+      "e": 1195
+    },
+    {
+      "s": 1207,
+      "e": 1252
+    },
+    {
+      "s": 1267,
+      "e": 1314
+    },
+    {
+      "s": 1328,
+      "e": 1367
+    },
+    {
+      "s": 1410,
+      "e": 1426
+    },
+    {
+      "s": 1453,
+      "e": 1470
+    },
+    {
+      "s": 1495,
+      "e": 1512
+    },
+    {
+      "s": 1542,
+      "e": 1557
+    },
+    {
+      "s": 1571,
+      "e": 1590
+    },
+    {
+      "s": 1603,
+      "e": 1621
+    },
+    {
+      "s": 1651,
+      "e": 1666
+    },
+    {
+      "s": 1682,
+      "e": 1698
+    },
+    {
+      "s": 1714,
+      "e": 1730
+    },
+    {
+      "s": 1748,
+      "e": 1769
+    },
+    {
+      "s": 1787,
+      "e": 1808
+    },
+    {
+      "s": 1828,
+      "e": 1849
+    },
+    {
+      "s": 1879,
+      "e": 1904
+    },
+    {
+      "s": 1948,
+      "e": 1975
+    },
+    {
+      "s": 1989,
+      "e": 2016
+    },
+    {
+      "s": 2029,
+      "e": 2051
+    },
+    {
+      "s": 2069,
+      "e": 2090
+    },
+    {
+      "s": 2116,
+      "e": 2145
+    },
+    {
+      "s": 2171,
+      "e": 2203
+    },
+    {
+      "s": 2236,
+      "e": 2266
+    },
+    {
+      "s": 2296,
+      "e": 2329
+    },
+    {
+      "s": 2343,
+      "e": 2374
+    },
+    {
+      "s": 2387,
+      "e": 2419
+    },
+    {
+      "s": 2438,
+      "e": 2463
+    },
+    {
+      "s": 2480,
+      "e": 2503
+    },
+    {
+      "s": 2523,
+      "e": 2558
+    },
+    {
+      "s": 2577,
+      "e": 2609
+    },
+    {
+      "s": 2640,
+      "e": 2673
+    },
+    {
+      "s": 2692,
+      "e": 2724
+    },
+    {
+      "s": 2747,
+      "e": 2781
+    },
+    {
+      "s": 2804,
+      "e": 2832
+    },
+    {
+      "s": 2888,
+      "e": 2923
+    },
+    {
+      "s": 2943,
+      "e": 2968
+    },
+    {
+      "s": 2995,
+      "e": 3015
+    },
+    {
+      "s": 3047,
+      "e": 3068
+    },
+    {
+      "s": 3093,
+      "e": 3123
+    },
+    {
+      "s": 3143,
+      "e": 3165
+    },
+    {
+      "s": 3188,
+      "e": 3208
+    },
+    {
+      "s": 3259,
+      "e": 3302
+    },
+    {
+      "s": 3340,
+      "e": 3387
+    },
+    {
+      "s": 3404,
+      "e": 3432
+    },
+    {
+      "s": 3457,
+      "e": 3491
+    },
+    {
+      "s": 3530,
+      "e": 3542
+    },
+    {
+      "s": 3567,
+      "e": 3580
+    },
+    {
+      "s": 3609,
+      "e": 3623
+    },
+    {
+      "s": 3649,
+      "e": 3668
+    },
+    {
+      "s": 3687,
+      "e": 3711
+    },
+    {
+      "s": 3732,
+      "e": 3756
+    },
+    {
+      "s": 3778,
+      "e": 3803
+    },
+    {
+      "s": 3823,
+      "e": 3850
+    },
+    {
+      "s": 3869,
+      "e": 3891
+    },
+    {
+      "s": 3911,
+      "e": 3936
+    },
+    {
+      "s": 3959,
+      "e": 3987
+    },
+    {
+      "s": 4060,
+      "e": 4071
+    },
+    {
+      "s": 4098,
+      "e": 4106
+    },
+    {
+      "s": 4139,
+      "e": 4146
+    },
+    {
+      "s": 4174,
+      "e": 4181
+    },
+    {
+      "s": 4215,
+      "e": 4225
+    },
+    {
+      "s": 4247,
+      "e": 4254
+    },
+    {
+      "s": 4275,
+      "e": 4287
+    },
+    {
+      "s": 4306,
+      "e": 4350
+    },
+    {
+      "s": 4379,
+      "e": 4441
+    },
+    {
+      "s": 4468,
+      "e": 4489
+    },
+    {
+      "s": 4510,
+      "e": 4537
+    },
+    {
+      "s": 4577,
+      "e": 4629
+    },
+    {
+      "s": 4690,
+      "e": 4700
+    },
+    {
+      "s": 4738,
+      "e": 4752
+    },
+    {
+      "s": 4776,
+      "e": 4790
+    },
+    {
+      "s": 4802,
+      "e": 4812
+    },
+    {
+      "s": 4841,
+      "e": 4855
+    },
+    {
+      "s": 4881,
+      "e": 4895
+    },
+    {
+      "s": 4917,
+      "e": 4934
+    },
+    {
+      "s": 4954,
+      "e": 4979
+    },
+    {
+      "s": 5039,
+      "e": 5050
+    },
+    {
+      "s": 5077,
+      "e": 5093
+    },
+    {
+      "s": 5113,
+      "e": 5143
+    },
+    {
+      "s": 5165,
+      "e": 5177
+    },
+    {
+      "s": 5201,
+      "e": 5213
+    },
+    {
+      "s": 5255,
+      "e": 5269
+    },
+    {
+      "s": 5306,
+      "e": 5343
+    },
+    {
+      "s": 5369,
+      "e": 5379
+    },
+    {
+      "s": 5413,
+      "e": 5427
+    },
+    {
+      "s": 5467,
+      "e": 5483
+    },
+    {
+      "s": 5506,
+      "e": 5526
+    },
+    {
+      "s": 5553,
+      "e": 5564
+    },
+    {
+      "s": 5587,
+      "e": 5633
+    },
+    {
+      "s": 5645,
+      "e": 5657
+    },
+    {
+      "s": 5680,
+      "e": 5694
+    },
+    {
+      "s": 5757,
+      "e": 5780
+    },
+    {
+      "s": 5802,
+      "e": 5826
+    },
+    {
+      "s": 5840,
+      "e": 5861
+    },
+    {
+      "s": 5887,
+      "e": 5904
+    },
+    {
+      "s": 5926,
+      "e": 5942
+    },
+    {
+      "s": 5970,
+      "e": 5988
+    },
+    {
+      "s": 6021,
+      "e": 6039
+    },
+    {
+      "s": 6075,
+      "e": 6089
+    },
+    {
+      "s": 6130,
+      "e": 6145
+    },
+    {
+      "s": 6171,
+      "e": 6195
+    },
+    {
+      "s": 6224,
+      "e": 6246
+    },
+    {
+      "s": 6283,
+      "e": 6315
+    },
+    {
+      "s": 6335,
+      "e": 6361
+    },
+    {
+      "s": 6396,
+      "e": 6414
+    },
+    {
+      "s": 6444,
+      "e": 6453
     }
   ]
 }

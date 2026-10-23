@@ -136,7 +136,7 @@ const recipeRoot = "embedded://your-app"
 // emitted SchemaHash. A failure is a generator bug surfaced as an error.
 func (g *generator) finish(data []byte) ([]byte, error) {
 	got, res := schema.LoadSourcesWithEntry(context.Background(), g.embedded, g.entryKey, "",
-		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(recipeRoot))
+		schema.WithSyntheticRoot(recipeRoot))
 	if res.HasErrors() {
 		return nil, fmt.Errorf("gogen: embedded SerializedSources does not re-load: %w", res.Err())
 	}
@@ -230,14 +230,38 @@ func (g *generator) emit() ([]byte, error) {
 	}
 	out.Write(g.buf.Bytes())
 
-	formatted, err := format.Source(out.Bytes())
+	formatted, err := formatToFixedPoint(out.Bytes(), format.Source)
 	if err != nil {
-		return nil, fmt.Errorf("gogen: generated source did not parse: %w", err)
+		return nil, err
 	}
 	if err := typeCheck(formatted); err != nil {
 		return nil, fmt.Errorf("gogen: generated source did not type-check: %w", err)
 	}
 	return formatted, nil
+}
+
+// maxFormatPasses bounds [formatToFixedPoint]: nothing proves that gofmt
+// settles on every source.
+const maxFormatPasses = 8
+
+// formatToFixedPoint formats src until gofmt writes a text back byte for byte,
+// and returns that text: source gofmt leaves as written. One pass does not
+// give it. gofmt formats a doc comment as go/doc/comment reads it, and for
+// some comments, such as a list item, a numbered item and then an indented
+// line, a second pass reads the first pass's layout differently and writes it
+// again.
+func formatToFixedPoint(src []byte, gofmt func([]byte) ([]byte, error)) ([]byte, error) {
+	for range maxFormatPasses {
+		formatted, err := gofmt(src)
+		if err != nil {
+			return nil, fmt.Errorf("gogen: generated source did not parse: %w", err)
+		}
+		if bytes.Equal(formatted, src) {
+			return formatted, nil
+		}
+		src = formatted
+	}
+	return nil, fmt.Errorf("gogen: gofmt still rewrites the generated source after %d passes", maxFormatPasses)
 }
 
 // typeCheck parses and type-checks src with go/types, catching what

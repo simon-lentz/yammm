@@ -30,7 +30,7 @@
 //
 // [BuilderFor] and [SchemaBuilder] provide fluent, schema-aware construction
 // of [RawInstance] values. Unlike a free-form map literal, SchemaBuilder
-// validates property names, relation names, and cardinality at
+// validates property names, relation names, cardinality and each edge's shape at
 // [SchemaBuilder.Build] time with call-site
 // file:line locators — shifting shape errors out of ValidateOne's domain:
 //
@@ -49,7 +49,7 @@
 //
 // # Validation Semantics
 //
-// The validator performs:
+// The validator performs, among other checks:
 //   - Type resolution (qualified and unqualified type names)
 //   - Property type validation against schema constraints
 //   - Required property enforcement
@@ -57,7 +57,7 @@
 //   - Edge object validation (associations and compositions)
 //   - Invariant expression evaluation
 //
-// [Validator.ValidateForComposition] is a second entry point for streaming
+// [Validator.ValidateForComposition] is another entry point for streaming
 // composition scenarios where composed children are validated separately
 // from their parent.
 //
@@ -78,7 +78,9 @@
 // does this value conform, and what is its stored form — exported for a
 // boundary this library does not own: a hand-built export, a direct-Cypher
 // parameter map, a pre-filter in front of a write the validator never sees.
-// Both accept nil.
+// Both accept a nil constraint, and a nil value under a constraint
+// [schema.CheckConstraint] accepts; both refuse a constraint it refuses,
+// whatever the value.
 //
 // # Thread Safety
 //

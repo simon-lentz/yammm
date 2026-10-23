@@ -586,14 +586,17 @@ func CoerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 
 // coerceRelProps coerces a relationship property map against the relation's
 // declared property constraints, so typed edge properties (e.g. a Timestamp or
-// Float on an association) reach the driver as native types. Each value routes
-// through [coerceValue], the same chokepoint the node path uses.
+// Float on an association) reach the driver as native types. Each non-nil
+// value of a property rel declares routes through [coerceValue], the same
+// chokepoint the node path uses.
 //
 // Edge properties are scalar by language rule: List and Vector types on a
 // relationship are rejected at schema-load (diag.E_LIST_ON_EDGE /
-// diag.E_INVALID_CONSTRAINT, both alias-aware), so the list arm of coerceValue
-// is unreachable here. It is shared anyway rather than special-casing a
-// scalar-only path, so this stays correct if that rule ever changes.
+// diag.E_INVALID_CONSTRAINT, both alias-aware), so a declared edge property's
+// constraint is never a List. A []any value a caller passes to
+// [CoerceRelProps] still reaches coerceValue's list arm, which refuses it
+// against the scalar constraint. The arm is shared rather than special-casing
+// a scalar-only path, so this stays correct if that rule ever changes.
 //
 // Properties not declared on rel pass through unchanged; a nil relation, or one
 // with no declared properties, returns props untouched. Properties are processed

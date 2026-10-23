@@ -78,7 +78,7 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 
 	formatted, err := format.TokenStream(string(content))
 	if syntaxErr, ok := errors.AsType[*format.SyntaxError](err); ok {
-		if result, ok := syntaxResult(path, syntaxErr.Issue); ok {
+		if result, ok := syntaxResult(path, content, syntaxErr.Issue); ok {
 			sink.Add(result)
 			return &cli.ExitError{Code: cli.ExitForResult(result)}
 		}
@@ -113,10 +113,11 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 	}
 }
 
-// syntaxResult places the formatter's syntax diagnostic in the file at path:
-// the formatter parses text, so its issue names no source. It reports false
-// when the issue has no position or the path names no source.
-func syntaxResult(path string, iss diag.Issue) (diag.Result, bool) {
+// syntaxResult places the formatter's syntax diagnostic in the file at path,
+// whose bytes are content: the formatter parses text, so its issue names no
+// source. It reports false when the issue has no position or the path names
+// no source.
+func syntaxResult(path string, content []byte, iss diag.Issue) (diag.Result, bool) {
 	if !iss.HasSpan() {
 		return diag.Result{}, false
 	}
@@ -126,9 +127,28 @@ func syntaxResult(path string, iss diag.Issue) (diag.Result, bool) {
 	}
 	span := iss.Span()
 	span.Source = source
+	span.Start.Byte = fileOffset(content, span.Start.Byte)
+	span.End.Byte = fileOffset(content, span.End.Byte)
 	c := diag.NewCollectorUnlimited()
 	c.Collect(diag.FromIssue(iss).WithSpan(span).Build())
 	return c.Result(), true
+}
+
+// fileOffset returns the offset in content of the byte at offset in the text
+// the formatter parsed, in which each CR LF of content is one LF; a lone CR
+// keeps its one byte. An unknown offset, -1, is returned as it is.
+func fileOffset(content []byte, offset int) int {
+	if offset < 0 {
+		return offset
+	}
+	at := 0
+	for range offset {
+		if at+1 < len(content) && content[at] == '\r' && content[at+1] == '\n' {
+			at++
+		}
+		at++
+	}
+	return at
 }
 
 // formatFailure maps a formatter error to the exit code it earns. A refusal is

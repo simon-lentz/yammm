@@ -1,6 +1,8 @@
 package instance
 
 import (
+	"fmt"
+
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -11,7 +13,10 @@ import (
 // its declared format (RFC 3339 with fractional seconds otherwise), a UUID in
 // canonical lowercase form, a Date as "2006-01-02" in the value's own
 // location, and a String, Enum, Pattern or Boolean carried by a named Go type
-// as the base value. A nil value and a nil constraint pass through untouched.
+// as the base value. A nil constraint passes val through untouched, and so
+// does a constraint [schema.CheckConstraint] accepts a nil val. A non-nil
+// constraint is judged first by [schema.CheckConstraint], and one it refuses
+// is an error whatever the value, as it is for [CheckValue].
 //
 // This is the render half of the boundary contract [CheckValue] checks the
 // other half of, exported for a caller that renders schema-typed values at a
@@ -24,7 +29,13 @@ import (
 // the coercion returns an [InternalError] that matches [ErrInternalFailure],
 // as it does for the validator.
 func CanonicalValue(val any, c schema.Constraint) (any, error) {
-	if val == nil || c == nil {
+	if c == nil {
+		return val, nil
+	}
+	if err := schema.CheckConstraint(c); err != nil {
+		return val, fmt.Errorf("instance: %w", err)
+	}
+	if val == nil {
 		return val, nil
 	}
 	out, err := coerceValueRecovering(val, c)

@@ -36,7 +36,7 @@ const SerializedEntry = "composite_pk.yammm"
 // the name the re-load registers it under. Re-load with:
 //
 //	schema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, "",
-//		schema.WithSourcesOnly(true), schema.WithSyntheticRoot("embedded://your-app"))
+//		schema.WithSyntheticRoot("embedded://your-app"))
 //
 // The synthetic root keeps the loaded type identities stable: no working
 // directory, checkout or mount point enters them. Any root WithSyntheticRoot

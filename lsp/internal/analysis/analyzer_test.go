@@ -13,6 +13,7 @@ import (
 
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
 
 	"github.com/simon-lentz/yammm/lsp/internal/lsputil"
 	"github.com/simon-lentz/yammm/lsp/internal/symbols"
@@ -267,13 +268,14 @@ func TestSources_PopulatesSourceRegistry(t *testing.T) {
 	assert.Equal(t, 0, offset, "LineStartByte(1) should be 0 (first line starts at byte 0)")
 }
 
-// TestSources_FailedLoadKeepsOverlays pins the failure-path registry
-// contract: when the load produces no schema, the registry holds exactly
-// the pre-registered overlays — disk-read sources from the aborted load do
-// not appear. Diagnostic spans carry line/column positions natively, so
-// rendering still works; only sub-column UTF-16 precision for sources
-// outside the overlay set is unavailable on this path.
-func TestSources_FailedLoadKeepsOverlays(t *testing.T) {
+// TestSources_FailedLoadKeepsEverySourceItRead holds the failure-path
+// registry contract: when the load produces no schema, the registry still
+// holds the overlays and every file the load read, so a diagnostic in an
+// imported file converts from that file's content. The import's type starts
+// at a comment that holds a rune outside the Basic Multilingual Plane. A count
+// of runes leaves the range's start at 15 and puts its end at 54, one UTF-16
+// unit short of 55.
+func TestSources_FailedLoadKeepsEverySourceItRead(t *testing.T) {
 	t.Parallel()
 
 	tmpDir := t.TempDir()
@@ -281,7 +283,7 @@ func TestSources_FailedLoadKeepsOverlays(t *testing.T) {
 	// The imported file is INVALID (no primary key), so the load fails
 	// after reading it from disk.
 	partsPath := filepath.Join(tmpDir, "parts.yammm")
-	partsContent := `schema "parts" type Wheel { diameter Integer }`
+	partsContent := "schema \"parts\" /* \U0001F600 */ type Wheel { diameter Integer }"
 	require.NoError(t, os.WriteFile(partsPath, []byte(partsContent), 0o600))
 
 	mainPath := filepath.Join(tmpDir, "main.yammm")
@@ -302,8 +304,40 @@ func TestSources_FailedLoadKeepsOverlays(t *testing.T) {
 	// The registry keys an overlay by the loader's identity for it: the
 	// identity of the file's on-disk spelling.
 	mainSourceID := spelledSourceID(t, mainPath)
+	partsSourceID := spelledSourceID(t, partsPath)
 	assert.True(t, snapshot.Sources.Has(mainSourceID), "overlay content stays available")
-	assert.Equal(t, 1, snapshot.Sources.Len(), "no partially-loaded sources beyond the overlays")
+	assert.True(t, snapshot.Sources.Has(partsSourceID), "the import the failed load read is available")
+	assert.Equal(t, 2, snapshot.Sources.Len())
+
+	// The type's span runs from its comment, after `schema "parts" `, to the
+	// closing brace: 15 units, then 3 + 2 + 4 for the comment and 31 for the
+	// declaration.
+	var ranges [][2]uint32
+	for _, d := range snapshot.LSPDiagnostics {
+		if d.Diagnostic.Code != nil && d.Diagnostic.Code.Value == "E_NO_PRIMARY_KEY" {
+			ranges = append(ranges, [2]uint32{d.Diagnostic.Range.Start.Character, d.Diagnostic.Range.End.Character})
+		}
+	}
+	assert.Equal(t, [][2]uint32{{15, 55}}, ranges, "the missing-key diagnostic's range in the import")
+}
+
+// TestAnalyze_LeavesTheCallersOptionSliceAlone hands Analyze options in a
+// slice with room for one more: the option Analyze adds for itself must not
+// be written into that room.
+func TestAnalyze_LeavesTheCallersOptionSliceAlone(t *testing.T) {
+	t.Parallel()
+
+	opts := make([]schema.LoadOption, 1, 2)
+	opts[0] = schema.WithImportsAllowed(true)
+
+	analyzer := NewAnalyzer(slog.New(slog.DiscardHandler))
+	_, err := analyzer.Analyze(t.Context(), "/test/entry.yammm", map[string][]byte{
+		"/test/entry.yammm": []byte("schema \"entry\"\n"),
+	}, "", lsputil.PositionEncodingUTF16, opts...)
+	require.NoError(t, err)
+
+	whole := opts[:cap(opts)]
+	assert.Nil(t, whole[len(whole)-1], "the caller's spare element")
 }
 
 func TestSources_DiskFallback(t *testing.T) {

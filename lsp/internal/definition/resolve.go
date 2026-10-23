@@ -5,7 +5,6 @@
 package definition
 
 import (
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
@@ -18,7 +17,7 @@ import (
 // SymbolToLocation converts a Symbol to an LSP Location using proper position conversion.
 // mapURI maps a source path to the client's document URI (important for symlink scenarios).
 func SymbolToLocation(
-	sources *source.Registry,
+	sources *lsputil.Texts,
 	sym *symbols.Symbol,
 	enc lsputil.PositionEncoding,
 	mapURI func(string) string,

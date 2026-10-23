@@ -139,9 +139,9 @@ func withSourceRegistry(reg *source.Registry) LoadOption {
 
 // WithSourcesOnly selects whether import resolution is restricted to the
 // pre-registered in-memory sources: with true a miss fails with E_IMPORT_RESOLVE
-// and the module-root sandbox is never opened, the hermetic load
-// [WithSyntheticRoot] requires; with false, the default, a miss falls back to the
-// module root on disk. It decides where an import is read from, never a source's
+// and the module-root sandbox is never opened; with false, the default, a miss
+// falls back to the module root on disk. A load under [WithSyntheticRoot] is
+// restricted to the in-memory sources whatever this option says. It decides where an import is read from, never a source's
 // identity: without a synthetic root a key is resolved on the host under the
 // module root, or the working directory when the root is empty, as [Load]
 // resolves a path, through symlinks and in the disk's spelling. Only [LoadSourcesWithEntry] takes it; [Load] and [LoadString] refuse
@@ -174,12 +174,15 @@ func WithSourcesOnly(only bool) LoadOption {
 // cleaned.
 //
 // The root also stands in for the module root, so module-style imports resolve
-// under it. The load is rejected outright, rather than silently degraded, in
-// four cases: a root not of that form; a
-// root without [WithSourcesOnly], which makes the given sources every source
-// the load reads, as a root that names every identity requires; a root together with a
-// non-empty moduleRoot argument, which names the same concept twice; and the
-// option passed to [Load] or [LoadString], where it can only ever be a no-op.
+// under it. A root names every identity the load mints, so the given sources
+// are every source the load reads: the load resolves imports as under
+// [WithSourcesOnly] with true, whether or not that option is passed, and a miss
+// fails with E_IMPORT_RESOLVE and reads no disk. The load is rejected outright,
+// rather than silently degraded, in three cases of the root: a root not of
+// that form; a root together with a non-empty moduleRoot argument, which names
+// the same concept twice; and the option passed to [Load] or [LoadString],
+// where it can only ever be a no-op. A key the key rule below refuses is
+// rejected outright too.
 //
 // A key is read by [github.com/simon-lentz/yammm/location.NormalizeSyntheticKey]:
 // it holds no backslash and no character that does not print, and once cleaned

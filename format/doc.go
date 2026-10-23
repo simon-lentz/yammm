@@ -22,13 +22,18 @@
 //	}
 //
 // A source that does not parse returns a [*SyntaxError] carrying the parser's
-// positioned diagnostic.
+// positioned diagnostic. A source parses when the grammar matches its tokens
+// and every escape in a string outside an invariant expression and an
+// annotation argument is one the language has, with well-formed digits and no
+// surrogate code point. So one a load refuses for another reason
+// still formats: inverted bounds, a character the source rules refuse inside a
+// comment or a literal, or an escape whose value is not UTF-8.
 //
 // # Preservation
 //
-// Whitespace, and a trailing comma before "]" or "{", are the only things the
-// formatter may change. After phase 5, when the output differs from the input,
-// [TokenStream] compares the two token sequences with those set aside, and every
+// Whitespace, a trailing comma before "]" or "{", and a leading byte order mark
+// are the only things the formatter may change. After phase 5, when the output
+// differs from the input with its line ends made LF, [TokenStream] compares the two token sequences with those set aside, and every
 // comment's text line by line. On a mismatch it returns an error wrapping
 // [ErrNotPreserved] and no output: the defect is the formatter's, never the
 // input's, so a caller writes nothing. An input already formatted is returned
@@ -44,7 +49,9 @@
 //     intentional section breaks.
 //  3. Line wrapping: wraps long lines (enums, extends clauses, invariants)
 //     at the [LineWidthThreshold] (100 display cells).
-//  4. Column alignment: aligns property types and modifiers within type blocks.
+//  4. Column alignment: pads the name column of each run of properties, of
+//     relationships and of datatype declarations, and lines up their trailing
+//     comments.
 //  5. Text finalization: trims trailing whitespace from each line, removes
 //     trailing blank lines, and ensures the file ends with a newline.
 //
@@ -83,10 +90,11 @@
 // # Additional Functions
 //
 // Two pipeline phases and two helpers are exported. Nothing outside this
-// package calls them, apart from the gate that pins these signatures:
+// package calls them, apart from the gate that pins these signatures and the
+// package's own external tests:
 //
 //   - [WrapLongLines]: phase 3, wrap lines exceeding [LineWidthThreshold]
-//   - [AlignColumns]: phase 4, align property types and modifiers within type blocks
+//   - [AlignColumns]: phase 4, pad the name column of each run of like members
 //   - [NormalizeIndentation]: a phase-1 helper over one line, convert spaces to tabs
 //   - [DisplayWidth]: the one width function, counting display cells
 //

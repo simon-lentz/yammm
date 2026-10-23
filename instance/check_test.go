@@ -2,6 +2,7 @@ package instance_test
 
 import (
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -52,26 +53,44 @@ func TestCheckValue_AppliesTheValidatorsRule(t *testing.T) {
 	}
 }
 
-// TestCheckValue_RecoversAPanicIntoAnInternalError pins the recovery the
-// validator applies to every check. The sealed Constraint interface offers no
-// checker that panics on purpose, so the lever is a malformed constraint: a
-// zero ListConstraint carries a nil element, and the element check
-// dereferences it.
-func TestCheckValue_RecoversAPanicIntoAnInternalError(t *testing.T) {
+// TestCheckValue_RefusesAConstraintCheckConstraintRefuses pins the judgement
+// CheckValue and CanonicalValue make before any value is read: a constraint
+// schema.CheckConstraint refuses is an error whatever the value, nil
+// included, and never an internal failure. A List with no element, a nil
+// pointer as its element, a reference resolved to another reference alone,
+// inverted bounds and a List of a reference to no constraint each answer so.
+func TestCheckValue_RefusesAConstraintCheckConstraintRefuses(t *testing.T) {
 	t.Parallel()
-	err := instance.CheckValue([]any{"x"}, schema.ListConstraint{})
-	if err == nil {
-		t.Fatal("expected the malformed constraint to surface as an error")
-	}
-	if !errors.Is(err, instance.ErrInternalFailure) {
-		t.Errorf("error does not match ErrInternalFailure: %v", err)
-	}
-	internal, ok := errors.AsType[*instance.InternalError](err)
-	if !ok {
-		t.Fatalf("error is %T, want *instance.InternalError", err)
-	}
-	if internal.Kind != instance.KindConstraintPanic {
-		t.Errorf("kind = %v, want KindConstraintPanic", internal.Kind)
+	for name, c := range map[string]schema.Constraint{
+		"a List with no element":                    schema.ListConstraint{},
+		"a List whose element is a nil pointer":     schema.NewListConstraint((*schema.StringConstraint)(nil)),
+		"a reference resolved to another reference": schema.NewAliasConstraint("A", schema.NewAliasConstraint("B", schema.NewStringConstraint())),
+		"inverted bounds":                           schema.IntegerBetween(5, 1),
+		"a List of a reference resolved to nothing": schema.NewListConstraint(schema.NewAliasConstraint("A", nil)),
+	} {
+		want := schema.CheckConstraint(c)
+		if want == nil {
+			t.Fatalf("%s: CheckConstraint accepts it, so the row judges nothing", name)
+		}
+		for _, val := range []any{[]any{"x"}, "x", int64(3), nil} {
+			err := instance.CheckValue(val, c)
+			if err == nil || err.Error() != "instance: "+want.Error() {
+				t.Errorf("%s: CheckValue(%v) = %v, want the refusal %q", name, val, err, want)
+			}
+			if errors.Is(err, instance.ErrInternalFailure) {
+				t.Errorf("%s: CheckValue(%v) = %v, an internal failure", name, val, err)
+			}
+			got, err := instance.CanonicalValue(val, c)
+			if err == nil || err.Error() != "instance: "+want.Error() {
+				t.Errorf("%s: CanonicalValue(%v) = %v, want the refusal %q", name, val, err, want)
+			}
+			if errors.Is(err, instance.ErrInternalFailure) {
+				t.Errorf("%s: CanonicalValue(%v) = %v, an internal failure", name, val, err)
+			}
+			if !reflect.DeepEqual(got, val) {
+				t.Errorf("%s: CanonicalValue(%v) returned %v, want the value unchanged", name, val, got)
+			}
+		}
 	}
 }
 

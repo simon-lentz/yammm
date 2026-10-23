@@ -405,7 +405,7 @@ func (g *generator) emitSerializedModel() error {
 	for _, id := range ids { // SourceIDs() is sorted/deterministic
 		content, ok := srcs.ContentBySource(id)
 		if !ok {
-			return fmt.Errorf("gogen: source %s content unavailable", id)
+			return fmt.Errorf("gogen: source %q content unavailable", id)
 		}
 		key := keys[id]
 		g.embedded[key] = content
@@ -430,7 +430,7 @@ func (g *generator) emitUniformSources(entryKey string) {
 	g.buf.WriteString("// the name the re-load registers it under. Re-load with:\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("//\tschema.LoadSourcesWithEntry(ctx, SerializedSources(), SerializedEntry, \"\",\n")
-	g.buf.WriteString("//\t\tschema.WithSourcesOnly(true), schema.WithSyntheticRoot(" + strconv.Quote(recipeRoot) + "))\n")
+	g.buf.WriteString("//\t\tschema.WithSyntheticRoot(" + strconv.Quote(recipeRoot) + "))\n")
 	g.buf.WriteString("//\n")
 	g.buf.WriteString("// The synthetic root keeps the loaded type identities stable: no working\n")
 	g.buf.WriteString("// directory, checkout or mount point enters them. Any root WithSyntheticRoot\n")
@@ -453,7 +453,7 @@ func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID
 	via := map[location.SourceID]string{}
 	assign := func(id location.SourceID, key, how string) error {
 		if other, taken := owners[key]; taken {
-			return fmt.Errorf("gogen: sources %s (%s) and %s (%s) both take the embedded key %q; an embedded model holds one source per key", other, via[other], id, how, key)
+			return fmt.Errorf("gogen: sources %q (%s) and %q (%s) both take the embedded key %q; an embedded model holds one source per key", other, via[other], id, how, key)
 		}
 		keys[id], owners[key], via[id] = key, id, how
 		return nil
@@ -472,12 +472,12 @@ func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID
 			target := imp.ResolvedSourceID()
 			ik, err := schema.SyntheticImportKey(keys[sch.SourceID()], imp.Path())
 			if err != nil {
-				return nil, fmt.Errorf("gogen: import %q in %s: %w", imp.Path(), sch.SourceID(), err)
+				return nil, fmt.Errorf("gogen: import %q in %q: %w", imp.Path(), sch.SourceID(), err)
 			}
-			how := fmt.Sprintf("imported as %q by %s", imp.Path(), sch.SourceID())
+			how := fmt.Sprintf("imported as %q by %q", imp.Path(), sch.SourceID())
 			if have, seen := keys[target]; seen {
 				if have != ik {
-					return nil, fmt.Errorf("gogen: source %s is %s under the key %q and %s under the key %q; an embedded model re-loads a source under one key, so import it by one path", target, via[target], have, how, ik)
+					return nil, fmt.Errorf("gogen: source %q is %s under the key %q and %s under the key %q; an embedded model re-loads a source under one key, so import it by one path", target, via[target], have, how, ik)
 				}
 				continue
 			}
@@ -543,7 +543,7 @@ func (k keyRoot) key(id location.SourceID) (string, error) {
 	}
 	key, err := location.NormalizeSyntheticKey(candidate)
 	if err != nil {
-		return "", fmt.Errorf("gogen: source %s has no key the re-load can read: %w", id, err)
+		return "", fmt.Errorf("gogen: source %q has no key the re-load can read: %w", id, err)
 	}
 	return key, nil
 }
@@ -567,7 +567,7 @@ func (k keyRoot) candidate(id location.SourceID) (string, error) {
 		}
 		return "", fmt.Errorf("gogen: source %q names no file, so it has no key; load it under a name ending in a file name", name)
 	}
-	return "", fmt.Errorf("gogen: source %s has no key relative to the schema's root; generated keys are never generation-machine paths", id)
+	return "", fmt.Errorf("gogen: source %q has no key relative to the schema's root; generated keys are never generation-machine paths", id)
 }
 
 func (g *generator) emitType(t *schema.Type) error {
@@ -748,8 +748,14 @@ var docLineEnds = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
 // emitDoc writes a yammm doc-comment as Go line comments, one per line. A line
 // Go would read as a build line ([buildLineHazard]) is written as a one-line
-// block comment instead, in the same comment group, so go/doc reads the doc
-// unchanged. No doc of a loaded schema holds "*/".
+// block comment instead, in the same comment group, so go/doc reads the doc's
+// words unchanged. No doc of a loaded schema holds "*/".
+//
+// A form feed in such a line is written as a space. go/printer counts a form
+// feed in a comment's text as a line end, so after a block comment holding
+// one it writes what follows on the comment's own line: the next comment of
+// the group, or the field, which then has no doc comment. Go's build-line
+// readers read a form feed as white space too.
 func (g *generator) emitDoc(doc string) {
 	if doc == "" {
 		return
@@ -757,7 +763,7 @@ func (g *generator) emitDoc(doc string) {
 	for line := range strings.SplitSeq(docLineEnds.Replace(doc), "\n") {
 		line = strings.TrimRight(line, " \t")
 		if buildLineHazard(line) {
-			fmt.Fprintf(g.buf, "/*%s*/\n", line)
+			fmt.Fprintf(g.buf, "/*%s*/\n", strings.ReplaceAll(line, "\f", " "))
 			continue
 		}
 		fmt.Fprintf(g.buf, "// %s\n", line)

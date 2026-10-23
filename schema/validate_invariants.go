@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
 
@@ -84,6 +85,20 @@ var (
 	otherScalarType = staticType{kind: kindScalar, scalar: scalarOther}
 	nilType         = staticType{kind: kindNil}
 )
+
+// noValueType is the static type of a literal with no value: the kind of
+// literal the source wrote, of no value.
+func noValueType(kind parse.LiteralKind) staticType {
+	switch kind {
+	case parse.StringLiteral:
+		return stringType
+	case parse.IntegerLiteral, parse.FloatLiteral:
+		return numberType
+	case parse.RegexLiteral:
+		return otherScalarType
+	}
+	return unknownType
+}
 
 func listOf(elem staticType) staticType {
 	e := elem
@@ -430,6 +445,11 @@ func (c *completer) typeExpr(e expr.Expression, sc *staticScope, owner *Type, in
 	case nil:
 		return unknownType
 	case *expr.Literal:
+		// A literal with no value has its own diagnostic, so the checker
+		// judges it by the kind of literal the source wrote and nothing more.
+		if kind, ok := c.noValue[ex]; ok {
+			return noValueType(kind)
+		}
 		switch ex.Val.(type) {
 		case []expr.Expression, []string:
 			return unknownType

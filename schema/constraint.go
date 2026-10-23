@@ -2,6 +2,7 @@ package schema
 
 import (
 	"fmt"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -76,15 +77,19 @@ type Constraint interface {
 	Equal(other Constraint) bool
 
 	// NarrowsTo reports whether the child constraint is a valid narrowing of
-	// this (parent) constraint. Returns true when every value accepted by child
-	// would also be accepted by this constraint (child's valid set is a subset
-	// of parent's valid set).
+	// this (parent) constraint. It returns true only when every value accepted
+	// by child would also be accepted by this constraint (child's valid set is
+	// a subset of parent's valid set), and may return false for such a pair
+	// the rules below do not read, as a child of another kind. That reading holds for constraints
+	// [CheckConstraint] accepts; a value is never checked against one it
+	// refuses, so such a constraint has no valid set to compare.
 	//
 	// For bounds-based constraints (String, Integer, Float): child min >= parent min
 	// and child max <= parent max.
 	// For EnumConstraint: child values must be a subset of parent values.
 	// For ListConstraint: the child's element must narrow the parent's, and its
-	// length bounds must narrow as above.
+	// length bounds must narrow as above. A List with no element narrows to
+	// nothing, and nothing narrows to it.
 	// For parameterless or non-narrowable constraints (Boolean, Date, UUID,
 	// Timestamp, Pattern, Vector): delegates to Equal (no narrowing supported).
 	// For AliasConstraint: resolves alias chain first, then delegates.
@@ -659,27 +664,28 @@ type ListConstraint struct {
 
 // NewListConstraint creates a ListConstraint with no length bounds. The
 // element must be non-nil: [Builder.Build] and [CheckConstraint] refuse a List
-// with no element, which is what the zero ListConstraint holds.
+// with no element, which is what the zero ListConstraint holds. A nil pointer
+// is no element, whatever type it points to.
 func NewListConstraint(element Constraint) ListConstraint {
-	return ListConstraint{element: element}
+	return ListConstraint{element: held(element)}
 }
 
-// ListMinLen creates a ListConstraint with a minimum length bound and a non-nil
-// element.
+// ListMinLen creates a ListConstraint with a minimum length bound. The element
+// must be non-nil, as for [NewListConstraint].
 func ListMinLen(element Constraint, lo int64) ListConstraint {
-	return ListConstraint{element: element, minLen: lo, hasMin: true}
+	return ListConstraint{element: held(element), minLen: lo, hasMin: true}
 }
 
-// ListMaxLen creates a ListConstraint with a maximum length bound and a non-nil
-// element.
+// ListMaxLen creates a ListConstraint with a maximum length bound. The element
+// must be non-nil, as for [NewListConstraint].
 func ListMaxLen(element Constraint, hi int64) ListConstraint {
-	return ListConstraint{element: element, maxLen: hi, hasMax: true}
+	return ListConstraint{element: held(element), maxLen: hi, hasMax: true}
 }
 
-// ListLenBetween creates a ListConstraint with both min and max length bounds
-// and a non-nil element.
+// ListLenBetween creates a ListConstraint with both min and max length bounds.
+// The element must be non-nil, as for [NewListConstraint].
 func ListLenBetween(element Constraint, lo, hi int64) ListConstraint {
-	return ListConstraint{element: element, minLen: lo, maxLen: hi, hasMin: true, hasMax: true}
+	return ListConstraint{element: held(element), minLen: lo, maxLen: hi, hasMin: true, hasMax: true}
 }
 
 func (ListConstraint) Kind() ConstraintKind { return KindList }
@@ -773,14 +779,25 @@ type AliasConstraint struct {
 // not: it drops the argument at any List depth and resolves the name through
 // completion, which builds each resolved alias with this function, so a
 // DataType reference means its declaration and nothing else.
-// [CheckConstraint] refuses a reference whose resolved argument is nil.
+// [CheckConstraint] refuses a reference whose resolved argument is nil, and a
+// nil pointer is nil here, whatever type it points to.
 //
 // The name is judged once here. A .yammm source writes a reference as a
 // datatype name, or as an import alias, a dot and a datatype name, and Build
 // and [CheckConstraint] refuse a reference under any other name.
 func NewAliasConstraint(dataTypeName string, resolved Constraint) AliasConstraint {
 	_, _, ok := referenceParts(dataTypeName)
-	return AliasConstraint{dataTypeName: dataTypeName, resolved: resolved, badName: !ok}
+	return AliasConstraint{dataTypeName: dataTypeName, resolved: held(resolved), badName: !ok}
+}
+
+// held returns c, or nil for a nil pointer. Every constraint is a value type,
+// so a nil pointer holds no constraint, and a method called through one
+// panics; a List or an alias that holds one would panic in its own methods.
+func held(c Constraint) Constraint {
+	if v := reflect.ValueOf(c); v.Kind() == reflect.Pointer && v.IsNil() {
+		return nil
+	}
+	return c
 }
 
 func (AliasConstraint) Kind() ConstraintKind { return KindAlias }

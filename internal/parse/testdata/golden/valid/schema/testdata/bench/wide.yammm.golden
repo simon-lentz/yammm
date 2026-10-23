@@ -426,10 +426,6 @@
         {
           "msg": "\"an active organisation has no retirement stamp\"",
           "expr": "(|| (p \"active\") (!= (p \"retired_at\") nil))",
-          "expr_span": {
-            "s": 956,
-            "e": 983
-          },
           "span": {
             "s": 905,
             "e": 983
@@ -438,10 +434,6 @@
         {
           "msg": "\"the name is not blank\"",
           "expr": "(\u003e (Len (p \"name\") (args ) (params ) \u003cnil\u003e) 0)",
-          "expr_span": {
-            "s": 1011,
-            "e": 1026
-          },
           "span": {
             "s": 985,
             "e": 1026
@@ -681,10 +673,6 @@
         {
           "msg": "\"utilisation stays within the unit interval\"",
           "expr": "(\u0026\u0026 (\u003e= (p \"utilisation\") 0) (\u003c= (p \"utilisation\") 1))",
-          "expr_span": {
-            "s": 1420,
-            "e": 1460
-          },
           "span": {
             "s": 1373,
             "e": 1460
@@ -693,10 +681,6 @@
         {
           "msg": "\"an open facility has capacity\"",
           "expr": "(|| (== (p \"open\") false) (\u003e (p \"capacity\") 0))",
-          "expr_span": {
-            "s": 1496,
-            "e": 1525
-          },
           "span": {
             "s": 1462,
             "e": 1525
@@ -788,10 +772,6 @@
         {
           "msg": "\"the floor is not below ground level\"",
           "expr": "(\u003e= (p \"floor\") 0)",
-          "expr_span": {
-            "s": 1686,
-            "e": 1696
-          },
           "span": {
             "s": 1646,
             "e": 1696
@@ -1051,10 +1031,6 @@
         {
           "msg": "\"a route does not start where it ends\"",
           "expr": "(!= (p \"origin\") (p \"destination\"))",
-          "expr_span": {
-            "s": 2094,
-            "e": 2115
-          },
           "span": {
             "s": 2053,
             "e": 2115
@@ -1063,10 +1039,6 @@
         {
           "msg": "\"distance is positive\"",
           "expr": "(\u003e (p \"distance_km\") 0)",
-          "expr_span": {
-            "s": 2142,
-            "e": 2159
-          },
           "span": {
             "s": 2117,
             "e": 2159
@@ -1075,10 +1047,6 @@
         {
           "msg": "\"air routes are quick\"",
           "expr": "(|| (!= (p \"mode\") \"air\") (\u003c= (p \"transit_days\") 7))",
-          "expr_span": {
-            "s": 2186,
-            "e": 2220
-          },
           "span": {
             "s": 2161,
             "e": 2220
@@ -1403,10 +1371,6 @@
         {
           "msg": "\"a delivered shipment was collected\"",
           "expr": "(|| (!= (p \"status\") \"delivered\") (!= (p \"collected_at\") nil))",
-          "expr_span": {
-            "s": 2809,
-            "e": 2853
-          },
           "span": {
             "s": 2770,
             "e": 2853
@@ -1415,10 +1379,6 @@
         {
           "msg": "\"a cancelled shipment was never delivered\"",
           "expr": "(|| (!= (p \"status\") \"cancelled\") (== (p \"delivered_at\") nil))",
-          "expr_span": {
-            "s": 2900,
-            "e": 2944
-          },
           "span": {
             "s": 2855,
             "e": 2944
@@ -1427,10 +1387,6 @@
         {
           "msg": "\"declared value is not negative\"",
           "expr": "(\u003e= (p \"declared_value\") 0)",
-          "expr_span": {
-            "s": 2981,
-            "e": 3002
-          },
           "span": {
             "s": 2946,
             "e": 3002
@@ -1439,10 +1395,6 @@
         {
           "msg": "\"weight is positive\"",
           "expr": "(\u003e (p \"weight_kg\") 0)",
-          "expr_span": {
-            "s": 3027,
-            "e": 3042
-          },
           "span": {
             "s": 3004,
             "e": 3042
@@ -1553,10 +1505,6 @@
         {
           "msg": "\"a parcel weighs something\"",
           "expr": "(\u003e (p \"weight_kg\") 0)",
-          "expr_span": {
-            "s": 3264,
-            "e": 3279
-          },
           "span": {
             "s": 3234,
             "e": 3279
@@ -1742,10 +1690,6 @@
         {
           "msg": "\"an exception carries a note\"",
           "expr": "(|| (!= (p \"kind\") \"exception\") (\u003e (Len (p \"note\") (args ) (params ) \u003cnil\u003e) 0))",
-          "expr_span": {
-            "s": 3580,
-            "e": 3618
-          },
           "span": {
             "s": 3548,
             "e": 3618
@@ -1957,10 +1901,6 @@
         {
           "msg": "\"the minimum is not below the base rate\"",
           "expr": "(\u003e= (p \"minimum\") 0)",
-          "expr_span": {
-            "s": 3991,
-            "e": 4005
-          },
           "span": {
             "s": 3948,
             "e": 4005
@@ -1969,10 +1909,6 @@
         {
           "msg": "\"the surcharge is a fraction\"",
           "expr": "(\u0026\u0026 (\u003e= (p \"surcharge\") 0) (\u003c= (p \"surcharge\") 1))",
-          "expr_span": {
-            "s": 4039,
-            "e": 4075
-          },
           "span": {
             "s": 4007,
             "e": 4075
@@ -1981,10 +1917,6 @@
         {
           "msg": "\"rates are not negative\"",
           "expr": "(\u0026\u0026 (\u003e= (p \"per_kg\") 0) (\u003e= (p \"per_km\") 0))",
-          "expr_span": {
-            "s": 4104,
-            "e": 4134
-          },
           "span": {
             "s": 4077,
             "e": 4134
@@ -2132,10 +2064,6 @@
         {
           "msg": "\"a contact is reachable\"",
           "expr": "(\u003e (Len (p \"email\") (args ) (params ) \u003cnil\u003e) 0)",
-          "expr_span": {
-            "s": 4395,
-            "e": 4411
-          },
           "span": {
             "s": 4368,
             "e": 4411
@@ -2146,6 +2074,80 @@
         "s": 4138,
         "e": 4413
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 956,
+      "e": 983
+    },
+    {
+      "s": 1011,
+      "e": 1026
+    },
+    {
+      "s": 1420,
+      "e": 1460
+    },
+    {
+      "s": 1496,
+      "e": 1525
+    },
+    {
+      "s": 1686,
+      "e": 1696
+    },
+    {
+      "s": 2094,
+      "e": 2115
+    },
+    {
+      "s": 2142,
+      "e": 2159
+    },
+    {
+      "s": 2186,
+      "e": 2220
+    },
+    {
+      "s": 2809,
+      "e": 2853
+    },
+    {
+      "s": 2900,
+      "e": 2944
+    },
+    {
+      "s": 2981,
+      "e": 3002
+    },
+    {
+      "s": 3027,
+      "e": 3042
+    },
+    {
+      "s": 3264,
+      "e": 3279
+    },
+    {
+      "s": 3580,
+      "e": 3618
+    },
+    {
+      "s": 3991,
+      "e": 4005
+    },
+    {
+      "s": 4039,
+      "e": 4075
+    },
+    {
+      "s": 4104,
+      "e": 4134
+    },
+    {
+      "s": 4395,
+      "e": 4411
     }
   ]
 }

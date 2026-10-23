@@ -41,10 +41,11 @@
 #    checkout's go command read it as another module's and CI's as this one's.
 #  - a go.work is in effect: the go command then reads a workspace, and the
 #    package list is not this module's alone.
-# With --check the run stops after these refusals, lists nothing and exits 0;
-# internal/mutants refuses a checkout by it.
+# With --check the run makes these refusals whatever YAMMM_PACKAGES_TRACKED
+# names, stops, lists nothing and exits 0; internal/mutants refuses a checkout
+# by it.
 #
-# Usage: [YAMMM_PACKAGES_TRACKED=FILE] scripts/packages.sh --check
+# Usage: scripts/packages.sh --check
 #        [YAMMM_PACKAGES_TRACKED=FILE] scripts/packages.sh [--unbuilt FILE] [go list build flags...]
 set -euo pipefail
 
@@ -279,17 +280,20 @@ refuse() {
 
 }
 
-# A caller that asks for several builds of one tree, as scripts/vet.sh does,
-# names a file of its own in YAMMM_PACKAGES_TRACKED: the first run writes the
+# A caller that asks for several builds of one tree, as scripts/vet.sh and
+# scripts/test.sh do, names a file of its own in YAMMM_PACKAGES_TRACKED: the
+# first run writes the
 # tracked directories there once refuse passes, and each later run reads them
 # and calls refuse no more, so it neither walks nor makes refuse's refusals
-# again. The go.work refusal and the refusal of a build that lists no tracked
-# package are made on every run.
-if [ -n "${YAMMM_PACKAGES_TRACKED:-}" ] && [ -s "${YAMMM_PACKAGES_TRACKED}" ]; then
+# again. The go.work refusal is made on every run, and the refusal of a build
+# that lists no tracked package on every run but a --check one, which stops
+# before it. A --check run makes refuse's refusals, its one purpose, and reads
+# and writes no such file.
+if [ "${check}" = no ] && [ -n "${YAMMM_PACKAGES_TRACKED:-}" ] && [ -s "${YAMMM_PACKAGES_TRACKED}" ]; then
 	cp "${YAMMM_PACKAGES_TRACKED}" "${tracked}"
 else
 	refuse
-	if [ -n "${YAMMM_PACKAGES_TRACKED:-}" ]; then
+	if [ "${check}" = no ] && [ -n "${YAMMM_PACKAGES_TRACKED:-}" ]; then
 		cp "${tracked}" "${YAMMM_PACKAGES_TRACKED}"
 	fi
 fi

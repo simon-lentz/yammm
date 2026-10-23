@@ -150,10 +150,6 @@
         {
           "msg": "\"name_not_empty\"",
           "expr": "(!= (p \"name\") \"\")",
-          "expr_span": {
-            "s": 278,
-            "e": 288
-          },
           "span": {
             "s": 259,
             "e": 288
@@ -162,10 +158,6 @@
         {
           "msg": "\"norm_not_empty\"",
           "expr": "(\u003e (Len (p \"name_norm\") (args ) (params ) \u003cnil\u003e) 0)",
-          "expr_span": {
-            "s": 312,
-            "e": 332
-          },
           "span": {
             "s": 293,
             "e": 332
@@ -174,10 +166,6 @@
         {
           "msg": "\"dates_valid\"",
           "expr": "(|| (== (p \"end_date\") nil) (\u003e (p \"end_date\") (p \"start_date\")))",
-          "expr_span": {
-            "s": 353,
-            "e": 393
-          },
           "span": {
             "s": 337,
             "e": 393
@@ -186,10 +174,6 @@
         {
           "msg": "\"confidence_valid\"",
           "expr": "(\u0026\u0026 (\u003e= (p \"confidence\") 0) (\u003c= (p \"confidence\") 1))",
-          "expr_span": {
-            "s": 419,
-            "e": 457
-          },
           "span": {
             "s": 398,
             "e": 457
@@ -198,10 +182,6 @@
         {
           "msg": "\"all_positive_qty\"",
           "expr": "(All (p \"ITEMS\") (args ) (params item) (\u003e (. ($ \"item\") \"quantity\") 0))",
-          "expr_span": {
-            "s": 483,
-            "e": 526
-          },
           "span": {
             "s": 462,
             "e": 526
@@ -210,10 +190,6 @@
         {
           "msg": "\"has_items\"",
           "expr": "(\u003e (Len (p \"ITEMS\") (args ) (params ) \u003cnil\u003e) 0)",
-          "expr_span": {
-            "s": 545,
-            "e": 561
-          },
           "span": {
             "s": 531,
             "e": 561
@@ -222,10 +198,6 @@
         {
           "msg": "\"pipeline_check\"",
           "expr": "(!= (Trim (Upper (p \"name\") (args ) (params ) \u003cnil\u003e) (args ) (params ) \u003cnil\u003e) \"\")",
-          "expr_span": {
-            "s": 585,
-            "e": 612
-          },
           "span": {
             "s": 566,
             "e": 612
@@ -234,10 +206,6 @@
         {
           "msg": "\"replace_check\"",
           "expr": "(!= (Replace (p \"name\") (args \"old\" \"new\") (params ) \u003cnil\u003e) \"\")",
-          "expr_span": {
-            "s": 635,
-            "e": 670
-          },
           "span": {
             "s": 617,
             "e": 670
@@ -246,10 +214,6 @@
         {
           "msg": "\"not_disabled\"",
           "expr": "(|| (! (p \"active\")) (\u003e (p \"confidence\") 0.5))",
-          "expr_span": {
-            "s": 692,
-            "e": 719
-          },
           "span": {
             "s": 675,
             "e": 719
@@ -258,10 +222,6 @@
         {
           "msg": "\"grouping\"",
           "expr": "(\u0026\u0026 (\u003e (p \"count\") 0) (\u003c (p \"confidence\") 1))",
-          "expr_span": {
-            "s": 737,
-            "e": 770
-          },
           "span": {
             "s": 724,
             "e": 770
@@ -270,10 +230,6 @@
         {
           "msg": "\"ternary_check\"",
           "expr": "(\u003e (? (p \"active\") (p \"confidence\") 0) 0)",
-          "expr_span": {
-            "s": 793,
-            "e": 828
-          },
           "span": {
             "s": 775,
             "e": 828
@@ -336,6 +292,52 @@
         "s": 832,
         "e": 923
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 278,
+      "e": 288
+    },
+    {
+      "s": 312,
+      "e": 332
+    },
+    {
+      "s": 353,
+      "e": 393
+    },
+    {
+      "s": 419,
+      "e": 457
+    },
+    {
+      "s": 483,
+      "e": 526
+    },
+    {
+      "s": 545,
+      "e": 561
+    },
+    {
+      "s": 585,
+      "e": 612
+    },
+    {
+      "s": 635,
+      "e": 670
+    },
+    {
+      "s": 692,
+      "e": 719
+    },
+    {
+      "s": 737,
+      "e": 770
+    },
+    {
+      "s": 793,
+      "e": 828
     }
   ]
 }

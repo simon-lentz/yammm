@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 
@@ -386,7 +385,7 @@ func TestSymbolKind_StringValues(t *testing.T) {
 func TestSpanToLSPRange_Conversion(t *testing.T) {
 	t.Parallel()
 
-	sources := source.NewRegistry()
+	sources := lsputil.NewTexts()
 	sourceID := location.MustNewSourceID("test://range.yammm")
 	span := location.Range(sourceID, 5, 10, 7, 20) // 1-based
 

@@ -116,8 +116,10 @@ func TestParse_AStringValueIsValidUTF8(t *testing.T) {
 	if len(issues) != 0 || f.Name != "café" {
 		t.Errorf("escapes forming UTF-8: name %q, issues %v; want café and none", f.Name, issues)
 	}
-	if _, err := unquote(`"\xff"`); err == nil || err.Error() != cause {
-		t.Errorf(`unquote("\xff") = %v, want %q`, err, cause)
+	for _, literal := range []string{`"\xff"`, `"\x80"`, `"a\x80"`, `"\xc3"`, `"\xc3\x41"`} {
+		if _, err := unquote(literal); err == nil || err.Error() != cause {
+			t.Errorf("unquote(%s) = %v, want %q", literal, err, cause)
+		}
 	}
 }
 

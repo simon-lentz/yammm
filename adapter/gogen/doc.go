@@ -1,6 +1,7 @@
 // Package gogen generates Go source from a yammm schema: one struct per type,
-// named Enum/DataType types, generated temporal types, EDGE_ association
-// structs, a Graph aggregate, and the embedded schema source. Output is
+// named Enum/DataType types and their value constants, generated temporal
+// types, EDGE_ association structs, a Graph aggregate, and the embedded schema
+// source with its SchemaHash. Output is
 // stdlib-only — it imports at most "time" and "encoding/json". Call [Marshal]
 // with a loaded, resolved schema; it returns formatted, type-checked bytes.
 //
@@ -54,8 +55,10 @@
 // follows. A line Go would read as a build line — "+build ignore" as a "//"
 // line, which gofmt moves into the file's build constraints — is written as a
 // one-line /* */ comment in the same comment group, which neither gofmt nor go
-// vet reads as one, so the doc reads unchanged; gofmt then leaves that group
-// as written.
+// vet reads as one, so the doc's words read unchanged; gofmt then leaves that group
+// as written. A form feed in such a line is written as a space: gofmt counts
+// a form feed in a comment as a line end, and would join the next line of the
+// group, or the field the comment documents, to a /* */ comment holding one.
 //
 // # Type Mapping
 //
@@ -166,11 +169,15 @@
 //
 // # Names
 //
-// Every top-level declaration shares one Go package-block namespace: each type,
-// data type, per-layout type, EDGE_ struct, inline enum, List element enum and
-// enum value constant, and the exported names gogen emits or once emitted (Graph,
-// SchemaHash, SerializedSources, SerializedEntry, SerializedModel,
-// SerializedModelEntry and Date), which are reserved. Each entity has a bare
+// Every top-level declaration shares one Go package-block namespace. A schema
+// names each type, data type, per-layout type, EDGE_ struct, inline enum, List
+// element enum and enum value constant, and the exported names gogen emits or
+// once emitted (Graph, SchemaHash, SerializedSources, SerializedEntry,
+// SerializedModel, SerializedModelEntry and Date) are reserved. The unexported
+// declarations gogen adds (serializedSources, marshalTemporal,
+// unmarshalTemporal and a layout constant per temporal type with a codec of
+// its own) start in lower
+// case, so no exported spelling meets them. Each entity has a bare
 // spelling, built from the names as the schema writes them:
 //
 //   - a type or a data type: its name as an exported identifier, under the
@@ -190,7 +197,8 @@
 // has that spelling. Otherwise every claimant takes its exact spelling: a word
 // that names its family, "_", and the parts of its identity joined by "__",
 // each part with every rune other than a letter or a digit written "_<hex>_",
-// its code point in upper-case hexadecimal:
+// its code point in upper-case hexadecimal, save the enum part of a value
+// constant, which the table states:
 //
 //	Type_<schema>__<Name>                                   a type
 //	DataType_<schema>__<Name>                               a data type
@@ -234,9 +242,9 @@
 //     schema's load held, by its key, and const SerializedEntry names the
 //     entry's key. The recommended re-load is
 //     [github.com/simon-lentz/yammm/schema.LoadSourcesWithEntry] with an empty
-//     module root, [github.com/simon-lentz/yammm/schema.WithSourcesOnly] and
-//     [github.com/simon-lentz/yammm/schema.WithSyntheticRoot], which gives type
-//     identities no working directory, checkout, or container mount point can move.
+//     module root and [github.com/simon-lentz/yammm/schema.WithSyntheticRoot],
+//     which reads no disk and gives type identities no working directory,
+//     checkout, or container mount point can move.
 //
 // The backing store is an unexported package-level map, so the identifiers a
 // consumer sees do not vary with how many files a schema happens to span.
@@ -276,14 +284,17 @@
 // [github.com/simon-lentz/yammm/schema.StructuralHash]. Before returning,
 // [Marshal] re-loads the store exactly as emitted, through the recipe the
 // generated file prints, and confirms it produces the input's StructuralHash —
-// hermetically, under [github.com/simon-lentz/yammm/schema.WithSourcesOnly], so
-// a mis-keyed source fails generation rather than being silently satisfied by
-// an on-disk file. [Marshal] returns only bytes that check passed.
+// hermetically: a synthetic root reads no disk, so a mis-keyed source fails
+// generation rather than being silently satisfied by an on-disk file.
+// [Marshal] returns only bytes that check passed.
 //
 // # Output Guarantees
 //
-// Generated source is gofmt-formatted and then type-checked with go/types before
-// [Marshal] returns. Type-checking is hermetic: the output imports at most "time"
+// Generated source is formatted until gofmt writes it back byte for byte, so
+// gofmt leaves the file [Marshal] returns as written, and is then type-checked
+// with go/types. One gofmt pass does not give that for every doc comment: a
+// list item, a numbered item and then an indented line are laid out again by
+// a second pass. Type-checking is hermetic: the output imports at most "time"
 // and "encoding/json" and calls only time.Time.Format, time.Parse, json.Marshal
 // and json.Unmarshal, so a synthetic importer declaring exactly those satisfies
 // it with no Go toolchain, GOROOT, or build cache — [Marshal] behaves identically
@@ -342,8 +353,8 @@
 //     it does not handle or whose constraint it does not carry, or a name with
 //     no Go spelling registered; the generated source
 //     fails to parse or to type-check or imports a package other than time and
-//     encoding/json, or the embedded store fails to re-load or fails its
-//     round-trip hash check.
+//     encoding/json, gofmt still rewrites it after eight passes, or the
+//     embedded store fails to re-load or fails its round-trip hash check.
 //
 // # Thread Safety
 //
@@ -366,8 +377,8 @@
 //
 // They do reach the generator indirectly: a property inherited from several
 // ancestors carries the union of their annotations, so the merged view yields a
-// synthesized copy rather than the declared *Property. Every pointer-keyed
-// lookup here therefore goes through [github.com/simon-lentz/yammm/schema.Property.Origin].
+// synthesized copy rather than the declared *Property. Every lookup keyed by a
+// *Property here therefore goes through [github.com/simon-lentz/yammm/schema.Property.Origin].
 //
 // # Dependencies
 //

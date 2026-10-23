@@ -60,10 +60,6 @@
         {
           "msg": "'a single-quoted invariant message that is long enough to need wrapping'",
           "expr": "(\u0026\u0026 (\u0026\u0026 (\u003e (. ($ \"self\") \"left\") 0) (\u003e (. ($ \"self\") \"right\") 0)) (\u003c (. ($ \"self\") \"left\") 1000))",
-          "expr_span": {
-            "s": 163,
-            "e": 217
-          },
           "span": {
             "s": 88,
             "e": 217
@@ -74,6 +70,12 @@
         "s": 25,
         "e": 219
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 163,
+      "e": 217
     }
   ]
 }

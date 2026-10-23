@@ -58,17 +58,19 @@ const (
 var lineEndingReplacer = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
 // TokenStream applies parse-tree-assisted token-stream formatting. It returns
-// an error, and no output, when the source does not parse or when the output
-// would not carry the source's tokens and comments. The second error wraps
-// [ErrNotPreserved] and is a defect in the formatter.
+// an error, and no output, when the grammar does not match the source or when
+// the output would not carry the source's tokens and comments. The second
+// error wraps [ErrNotPreserved] and is a defect in the formatter.
 func TokenStream(text string) (string, error) {
 	return tokenStream(text, rewrite)
 }
 
 // SyntaxError is [TokenStream]'s error for a source that does not parse. Issue
-// is the parser's syntax diagnostic, positioned in the text TokenStream was
-// given and naming no source, so a caller that knows the file can render it
-// the way a load would.
+// is the parser's first diagnostic for text the grammar does not match or an
+// escape the language does not have, and it names no source, so a caller that
+// knows the file can name it. Its line and column are positions in the text
+// TokenStream was given. Its byte offset counts each CRLF and each lone CR of
+// that text as one byte.
 type SyntaxError struct {
 	Issue diag.Issue
 }
@@ -118,13 +120,12 @@ func tokenStream(text string, phases func([]line) string) (string, error) {
 func lexicalLines(text string) ([]line, []parse.Token, error) {
 	normalized := lineEndingReplacer.Replace(text)
 
-	// Fail on syntax alone: a source that is semantically invalid but parses,
-	// such as inverted bounds, still formats.
-	file, allTokens, issues := parse.LexAndParse(normalized, location.SourceID{})
-	for _, iss := range issues {
-		if iss.Code().Category() == diag.CategorySyntax {
-			return nil, nil, &SyntaxError{Issue: iss}
-		}
+	// Fail on the grammar alone: a source that parses still formats, whether
+	// it is semantically invalid, such as inverted bounds, or holds text the
+	// source rules refuse inside a comment or a literal.
+	file, allTokens, _ := parse.LexAndParse(normalized, location.SourceID{})
+	if len(file.Unparsed) > 0 {
+		return nil, nil, &SyntaxError{Issue: file.Unparsed[0]}
 	}
 
 	ranges := invariantExpressionRanges(file)
@@ -227,14 +228,11 @@ func lexicalLines(text string) ([]line, []parse.Token, error) {
 // and the declaration pair rules do not apply.
 func invariantExpressionRanges(file *parse.File) []tokenRange {
 	var ranges []tokenRange
-	for _, t := range file.Types {
-		for _, inv := range t.Invariants {
-			span := inv.ExprSpan
-			if span.End.Byte <= span.Start.Byte {
-				continue
-			}
-			ranges = append(ranges, tokenRange{start: span.Start.Byte, end: span.End.Byte})
+	for _, span := range file.Expressions {
+		if span.End.Byte <= span.Start.Byte {
+			continue
 		}
+		ranges = append(ranges, tokenRange{start: span.Start.Byte, end: span.End.Byte})
 	}
 	if len(ranges) == 0 {
 		return nil

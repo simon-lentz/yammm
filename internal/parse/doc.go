@@ -3,8 +3,8 @@
 //
 // # Position in the stack
 //
-// parse sits below the schema object model. It depends only on the foundation
-// packages — [github.com/simon-lentz/yammm/diag],
+// parse sits below the schema object model. Of this module's packages it
+// depends only on the foundation packages — [github.com/simon-lentz/yammm/diag],
 // [github.com/simon-lentz/yammm/location] and
 // [github.com/simon-lentz/yammm/schema/expr] — and knows nothing about type
 // resolution, inheritance, imports or any other semantic phase. Everything it
@@ -20,19 +20,43 @@
 // it emits five codes. E_SYNTAX covers text that does not fit the grammar, and
 // the source rules: a byte that is not valid UTF-8, a byte order mark past the
 // start and a NUL are refused at the byte inside a comment or a string or
-// regex literal, and fail the construct holding them anywhere else; a string
-// literal whose escapes write bytes that are not UTF-8 is refused at the
-// literal, except an annotation argument, which keeps its written spelling. E_INVALID_CONSTRAINT covers a
-// constraint whose written arguments contradict themselves — inverted bounds,
-// an unparseable bound, a duplicate enum value, a regex that does not compile
-// or that writes a surrogate code point. E_INVALID_INVARIANT covers a literal inside
+// regex literal, one diagnostic for each run of one kind; anywhere else one
+// diagnostic, and the parser recovers from it as from any unexpected token: a
+// schema header holding it is a Fatal E_SYNTAX; any other import, declaration
+// or member holding it is cut where the parser can end it or lost, as
+// Recovery's paragraph on how far a failed parse propagates says; a member on
+// whose line it comes first is lost; and nothing between two declarations
+// fails, though every import after it is lost with a diagnostic of its own;
+// a string literal whose escapes write bytes that are not UTF-8 is refused at
+// the literal — under E_INVALID_INVARIANT, below, when the literal stands
+// inside an invariant expression, unless that invariant's message holds an
+// escape that will not unquote, which is then its one diagnostic — except an
+// annotation argument, which keeps its written spelling and draws nothing. A
+// literal refused either way has no value: no later check judges a value it
+// does not have, and an enum's and a pattern list's count read it as a value
+// written. Of a regex whose escapes unquote, one holding a NUL or a byte order
+// mark is still compiled, as written, so its own compile error stands beside
+// the source rule's (in an invariant, unless its message holds an escape that
+// will not unquote, as above), and one holding a byte that is not UTF-8 is not
+// compiled and draws the byte's diagnostic alone. E_INVALID_CONSTRAINT covers a
+// constraint whose written arguments the DSL refuses, among them inverted
+// bounds, an unparseable bound, an empty or duplicate enum value,
+// an enum of fewer than two values, more than two patterns, a regex that does
+// not compile or that writes a surrogate code point, and a vector dimension
+// out of range. E_INVALID_INVARIANT covers a literal inside
 // an invariant expression that will not convert, such as a number out of range
 // or an unquotable string. E_INVALID_NAME covers an empty schema name and a
 // relation name that is not UPPER_SNAKE, and E_REVERSE_CLAUSE_REMOVED a
 // relation that still writes the removed reverse clause. Parse never reports anything that needs another
 // declaration, another file, or a resolved name to decide.
 //
-// Three consequences are worth stating because callers depend on them.
+// Four consequences are worth stating because callers depend on them.
+// E_SYNTAX does not say that the source failed to parse: a caller that needs
+// the token stream and the tree's shape alone reads [File.Unparsed], which
+// holds the diagnostics for text the grammar does not match, an escape the
+// language does not have outside an invariant expression among them, and
+// leaves out the source rules' and an escape whose value is not UTF-8. A \u
+// escape naming a surrogate is one the language does not have.
 // Callers that want syntax errors alone must filter on the code category
 // (diag.CategorySyntax), not on the presence of any diagnostic at all.
 // Only E_SYNTAX is diag.CategorySyntax: the other four are
@@ -79,9 +103,8 @@
 // package's: see group.Parse, disjunction.Parse and parseContext.Stop at the
 // pinned version. A failed optional part is sometimes discarded, leaving the
 // construct around it intact, and sometimes takes that construct down with it.
-// This package does not restate the rule that picks between them — three
-// attempts to paraphrase it were each found wrong, and the behaviour is
-// recorded by measurement instead.
+// This package does not restate the rule that picks between them; the
+// behaviour is recorded by measurement instead.
 //
 // [TestAbandonment_GroupsReportAgainstTheEnclosingConstruct] and
 // [TestRecovery_UnterminatedGroupsAreReported] hold what the parser does at the
@@ -91,16 +114,18 @@
 // row reports E_SYNTAX at diag.Error, so no malformed source loads through the
 // sites they cover.
 //
-// Naming the recovery region rather than the construct that failed is
-// deliberate: three mechanisms that named the construct were built and all
-// three were withdrawn.
+// A diagnostic names the recovery region rather than the construct that
+// failed: the construct is participle's to decide, and the region is what the
+// parser can state.
 //
 // # Spans
 //
 // Positions are byte-native. Every span is built from byte offsets:
 // spanFromOffsets derives each end's line and column from the source text,
 // counting columns in runes as the lexer does, so a span agrees with the
-// positions the lexer records for a token. Span ends are exclusive.
+// positions the lexer records for a token, save after a lone CR, which
+// spanOf's comment states, and on line 1 after a leading byte order mark,
+// which a span counts as a column and the lexer does not. Span ends are exclusive.
 //
 // [location.RangeWithBytes] panics when the end precedes the start, so every
 // span this package builds — for nodes and for diagnostics, in the recovery
@@ -125,10 +150,8 @@
 //     falls through to division — the same reading the LSP's brace scanner
 //     encodes.
 //   - FLOAT, word-boundary-anchored, comes before INVALID_NUMBER, which comes
-//     before INTEGER. "2.5e10" must lex as one FLOAT, which first-match
-//     ordering alone cannot express: INVALID_NUMBER's optional-exponent path
-//     would otherwise reinterpret "e10" as trailing identifier junk. The
-//     trailing \b makes FLOAT decline exactly the inputs where junk follows, so
+//     before INTEGER, so "2.5e10" lexes as one FLOAT. The trailing \b makes
+//     FLOAT decline exactly the inputs where junk follows, so
 //     "1.5x" and "1.5e5x" fall through to INVALID_NUMBER while every valid
 //     float wins. INTEGER needs no boundary: a digit run with trailing junk was
 //     already taken by INVALID_NUMBER.
@@ -142,17 +165,18 @@
 //
 // The table contains no keywords. Every keyword lexes as LC_WORD or UC_WORD
 // and reserved-word behavior is a parser decision, expressed as negative
-// lookahead groups in the grammar's struct tags and as the reservedLC and
-// datatypeKeywords maps. The struct tags are compile-time strings, so those
+// lookahead groups in the grammar's struct tags and as the reservedLC,
+// datatypeKeywords and propertyNameExclusions maps. The struct tags are compile-time strings, so those
 // groups are written out in place rather than composed from the maps;
 // [TestTags_LookaheadGroupsAreAtTheirCanonicalSites] holds every copy to its
 // map and every site to its set.
 //
 // The string-escape set matches the language's STRING rule exactly: a
-// backslash before a letter outside the escape vocabulary makes the whole
+// backslash before any character outside the escape vocabulary makes the whole
 // literal fail to lex, falling through to ANY_OTHER at the opening quote. A \x
 // or \u escape lexes whatever follows it, and unquoting refuses malformed
-// digits and a value that is not valid UTF-8.
+// digits, a surrogate code point, a value that is not valid UTF-8 and text the
+// source rules refuse.
 //
 // # Expression precedence
 //

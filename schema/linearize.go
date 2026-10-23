@@ -3,10 +3,12 @@ package schema
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/internal/parse"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema/expr"
 )
@@ -1097,6 +1099,11 @@ func (c *completer) flushShadowedAnnotations() {
 // declaration overrides an inherited one of the same name, one definition
 // reached through two ancestors merges, and two inherited definitions of one
 // name that differ are a conflict, reported once on the combining type.
+//
+// A definition holding a literal with no value differs from another only when
+// no value would make the two one, so the definitions of a name are unified,
+// not compared with the first alone: a later definition conflicts when it
+// cannot be made one with every definition merged before it.
 func (c *completer) mergeInvariants(t *Type) []*Invariant {
 	result := t.InvariantsSlice()
 	own := make(map[string]bool, len(result))
@@ -1107,6 +1114,8 @@ func (c *completer) mergeInvariants(t *Type) []*Invariant {
 	// One conflict is one diagnostic naming every rival, as mergeRelations
 	// reports a relation clash: the walk collects, then reports once per name.
 	inherited := make(map[string]*Invariant)
+	merged := make(map[string]*Invariant)
+	at := make(map[string]int)
 	rivals := make(map[string][]*Invariant)
 	var conflicted []string
 	for _, superType := range c.directSuperTypes(t) {
@@ -1115,18 +1124,30 @@ func (c *completer) mergeInvariants(t *Type) []*Invariant {
 				continue
 			}
 			if first, seen := inherited[inv.Name()]; seen {
-				if first != inv && !sameExpression(first.Expression(), inv.Expression()) &&
-					!slices.Contains(rivals[inv.Name()], inv) {
-					if rivals[inv.Name()] == nil {
-						conflicted = append(conflicted, inv.Name())
-					}
-					rivals[inv.Name()] = append(rivals[inv.Name()], inv)
+				if first == inv || slices.Contains(rivals[inv.Name()], inv) {
+					continue
 				}
+				if one, ok := c.unifyInvariants(merged[inv.Name()], inv); ok {
+					merged[inv.Name()] = one
+					continue
+				}
+				if rivals[inv.Name()] == nil {
+					conflicted = append(conflicted, inv.Name())
+				}
+				rivals[inv.Name()] = append(rivals[inv.Name()], inv)
 				continue
 			}
 			inherited[inv.Name()] = inv
+			merged[inv.Name()] = inv
+			at[inv.Name()] = len(result)
 			result = append(result, inv)
 		}
+	}
+	// A unification that gave a literal with no value the value another
+	// definition writes is what a subtype inherits, so a later merge is held
+	// to it too.
+	for name, one := range merged {
+		result[at[name]] = one
 	}
 
 	for _, name := range conflicted {
@@ -1152,6 +1173,89 @@ func sameExpression(a, b expr.Expression) bool {
 	hashExpression(&ba, a)
 	hashExpression(&bb, b)
 	return bytes.Equal(ba.Bytes(), bb.Bytes())
+}
+
+// unifyInvariants returns the one definition a and b both are once each
+// literal with no value in either is given a value, and whether there is one.
+// A literal with no value is one with a literal of the kind the source wrote,
+// which it then becomes, or with another such literal of that kind. With no
+// such literal in either, a and b are one when their expressions are the same,
+// and the result is a.
+func (c *completer) unifyInvariants(a, b *Invariant) (*Invariant, bool) {
+	if len(c.noValue) == 0 {
+		return a, sameExpression(a.Expression(), b.Expression())
+	}
+	e, ok := unifyNode(a.Expression(), b.Expression(), c.noValue)
+	if !ok {
+		return nil, false
+	}
+	return newInvariant(a.Name(), e, a.Span(), a.Documentation()), true
+}
+
+func unifyNode(a, b expr.Expression, noValue map[*expr.Literal]parse.LiteralKind) (expr.Expression, bool) {
+	litA, isLitA := a.(*expr.Literal)
+	litB, isLitB := b.(*expr.Literal)
+	if isLitA && isLitB {
+		kindA, noValueA := noValue[litA]
+		kindB, noValueB := noValue[litB]
+		switch {
+		case noValueA && noValueB:
+			return a, kindA == kindB
+		case noValueA:
+			return b, literalKindOf(litB.Val) == kindA
+		case noValueB:
+			return a, literalKindOf(litA.Val) == kindB
+		}
+		if argsA, isList := litA.Val.([]expr.Expression); isList {
+			argsB, isList := litB.Val.([]expr.Expression)
+			if !isList || len(argsA) != len(argsB) {
+				return nil, false
+			}
+			args := make([]expr.Expression, len(argsA))
+			for i := range argsA {
+				arg, ok := unifyNode(argsA[i], argsB[i], noValue)
+				if !ok {
+					return nil, false
+				}
+				args[i] = arg
+			}
+			return expr.NewLiteral(args), true
+		}
+		return a, sameExpression(litA, litB)
+	}
+	sexprA, isSExprA := a.(expr.SExpr)
+	sexprB, isSExprB := b.(expr.SExpr)
+	if isSExprA && isSExprB {
+		if len(sexprA) != len(sexprB) {
+			return nil, false
+		}
+		out := make(expr.SExpr, len(sexprA))
+		for i := range sexprA {
+			node, ok := unifyNode(sexprA[i], sexprB[i], noValue)
+			if !ok {
+				return nil, false
+			}
+			out[i] = node
+		}
+		return out, true
+	}
+	return a, sameExpression(a, b)
+}
+
+// literalKindOf is the kind of literal token that writes a value of v's Go
+// type, or zero for a value no string, integer, float or regex literal writes.
+func literalKindOf(v any) parse.LiteralKind {
+	switch v.(type) {
+	case string:
+		return parse.StringLiteral
+	case int64:
+		return parse.IntegerLiteral
+	case float64:
+		return parse.FloatLiteral
+	case *regexp.Regexp:
+		return parse.RegexLiteral
+	}
+	return 0
 }
 
 // mergeAnnotations merges own type-level annotations with inherited ones.

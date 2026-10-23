@@ -407,6 +407,9 @@ type exprResult struct {
 	E          expr.Expression
 	Diags      []exprDiag
 	Start, End int
+	// NoValue holds each literal in E that has no value: E holds a nil
+	// literal in its place, which the source did not write.
+	NoValue []NoValueLiteral
 }
 
 func (exprResult) exprCapture() {}
@@ -478,7 +481,7 @@ func buildParsers() {
 		if err != nil {
 			return nil, err
 		}
-		return exprResult{E: e, Diags: diags, Start: start, End: p.lastEnd}, nil
+		return exprResult{E: e, Diags: diags, Start: start, End: p.lastEnd, NoValue: p.noValue}, nil
 	})
 	opts := []participle.Option{
 		participle.Lexer(def),

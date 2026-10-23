@@ -89,8 +89,11 @@ modify files in place.
 line, and exits 1 when the list is not empty — the shape `gofmt -l` uses, so it
 drops into a pre-commit hook without a shell loop. Every path is checked, so one
 run reports every offender. `--check` and `--write` together are a usage error
-(exit 2). A file that does not parse is reported as the positioned `E_SYNTAX`
-diagnostic `validate` reports, naming the file, and exits 1.
+(exit 2). A file the grammar does not match, or that holds an escape the
+language does not have outside an invariant expression or an annotation
+argument, is reported as the positioned `E_SYNTAX` diagnostic `validate`
+reports, naming the file, and exits 1. Any other diagnostic `validate` reports
+does not stop `fmt`.
 
 When formatting would change a schema's tokens or comments, `fmt` refuses. The
 defect is the formatter's, never the schema's: it writes nothing, leaves the
@@ -408,8 +411,9 @@ Two consequences worth knowing:
 - **An unchanged, still-passing schema may emit new stderr output.** Warnings
   that already existed but that no command printed are now visible. The
   `-_`-in-a-constraint-bound warning (`E_INVALID_CONSTRAINT`, "minus sign before
-  `_` (unbounded) has no effect") is the common one; `yammm snapshot verify`,
-  `yammm export`, and `yammm snapshot save --into` additionally surface the
+  '_' (unbounded) has no effect") is the common one; `yammm snapshot verify`,
+  `yammm snapshot info` without `--header-only`, `yammm export`, and
+  `yammm snapshot save --into` additionally surface the
   snapshot decoder's `W_SNAPSHOT_PATH_FALLBACK` on otherwise unchanged `.ys`
   files. From v0.15.0, `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` is an Error on
   these body-reading commands — the document is refused, not warned about;

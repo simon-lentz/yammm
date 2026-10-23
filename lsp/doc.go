@@ -49,16 +49,16 @@
 // The server consists of:
 //   - Server: Main LSP server handling protocol lifecycle
 //   - Feature providers: definition, hover, completion, symbols, formatting
-//   - internal/workspace: Manages open documents, markdown lifecycle, analysis scheduling, dependency tracking, and URI mapping
+//   - internal/workspace: Manages open documents, workspace roots and module roots, markdown lifecycle, analysis scheduling, per-entry snapshots, diagnostic publishing, dependency tracking, and URI mapping
 //   - internal/docstate: Pure document types (.yammm overlays, text normalization, brace scanning) — true leaf, no internal imports
 //   - internal/analysis: Wraps schema loading for import-aware analysis
-//   - internal/completion: Completion provider (keywords, types)
+//   - internal/completion: Completion provider (keywords, types, snippets, annotation names and their arguments)
 //   - internal/definition: Go-to-definition provider
 //   - internal/hover: Hover information provider
 //   - internal/symbols: Symbol extraction and indexing
 //   - internal/markdown: Code block extraction from Markdown
-//   - internal/lsputil: URI/path conversion and position encoding
-//   - internal/lsperr: Sentinel errors for middleware log escalation and test assertions
+//   - internal/lsputil: URI/path conversion, position encoding, and the source texts of an analysis
+//   - internal/lsperr: Sentinel errors that classify a logged failure
 //   - internal/protocol: LSP protocol type definitions
 //
 // # Go API
@@ -93,11 +93,17 @@
 // character positions.
 //
 // Documents must be opened (via textDocument/didOpen) before most LSP features
-// work for that document. Specifically, hover, definition, completion, and
-// formatting require the document to be open. This is because the server
+// work for that document. Specifically, hover, definition, completion,
+// document symbols and formatting require the document to be open. This is because the server
 // relies on overlay content for the most current text and analysis snapshots
 // for semantic information. Imported files referenced by an open document
 // are loaded from disk automatically during analysis.
+//
+// A position counts characters in the text the client holds. For an open
+// document that is the text the client sent, a leading byte order mark
+// included. For an imported file read from disk it is the file's text without
+// one leading byte order mark, which an editor decodes away when it opens the
+// file.
 //
 // Only file:// URIs are supported. Documents with other URI schemes (such as
 // untitled:, vscode-notebook-cell://, or custom editor schemes) are silently
@@ -107,8 +113,8 @@
 // # Thread Safety
 //
 // The [Server] handles concurrent LSP requests internally via the jrpc2
-// server. Callers should not invoke server methods concurrently — the
-// protocol layer serializes requests.
+// server, which runs requests on concurrent goroutines and notifications in
+// order. Callers should not invoke server methods concurrently.
 //
 // # Dependencies
 //

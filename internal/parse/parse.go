@@ -36,6 +36,28 @@ func LexAndParse(src string, sourceID location.SourceID) (*File, []Token, []diag
 }
 
 func parseSource(text string, sourceID location.SourceID, withTokens bool) (*File, []Token, []diag.Issue) {
+	b := parsed(text, sourceID)
+
+	var stream []Token
+	if withTokens {
+		stream = make([]Token, 0, len(b.toks))
+		for _, t := range b.toks {
+			if t.EOF() {
+				break
+			}
+			stream = append(stream, Token{
+				Kind:  b.ps.names[t.Type],
+				Value: t.Value,
+				Start: t.Pos.Offset,
+				End:   t.Pos.Offset + len(t.Value),
+			})
+		}
+	}
+	return b.file, stream, b.issues
+}
+
+// parsed parses text and returns the builder that holds the result.
+func parsed(text string, sourceID location.SourceID) *builder {
 	ps := mustParsers()
 
 	base := lexStart(text)
@@ -59,30 +81,16 @@ func parseSource(text string, sourceID location.SourceID, withTokens bool) (*Fil
 	b.parseFile(plex)
 	b.checkSourceText()
 	slices.SortStableFunc(b.issues, compareIssues)
-
-	var stream []Token
-	if withTokens {
-		stream = make([]Token, 0, len(b.toks))
-		for _, t := range b.toks {
-			if t.EOF() {
-				break
-			}
-			stream = append(stream, Token{
-				Kind:  ps.names[t.Type],
-				Value: t.Value,
-				Start: t.Pos.Offset,
-				End:   t.Pos.Offset + len(t.Value),
-			})
-		}
-	}
-	return b.file, stream, b.issues
+	b.file.Unparsed = b.unparsed
+	return b
 }
 
 // checkSourceText reports every run of text the source rules refuse inside a
 // comment or a string or regex literal, at the run itself. These four tokens
 // hold any character but their own delimiters, and all but a doc comment end
 // at a line break; anywhere else such a character lexes as ANY_OTHER, and the
-// construct holding it fails.
+// parser recovers from it as from any unexpected token (the package doc's
+// "What Parse reports" section).
 func (b *builder) checkSourceText() {
 	tok := b.ps.tok
 	for i := range b.toks {
@@ -154,8 +162,22 @@ type builder struct {
 	// from zero on every call, which made a parse quadratic in file size.
 	lineStarts []int
 
+	// runeMarks[i] is the number of runes before [builder.runeMark] i, so a
+	// column counts fewer than runeStride and three bytes from a mark, in
+	// whatever order positions are asked for. Counting from the line's start
+	// made a parse quadratic in a line's length for spans nested on one line. Built at the first position asked for.
+	// counted is the bytes positionAt has counted runes over, the marks
+	// included, the measure of that cost: [TestParse_PositionsCostALinesLengthOnce]
+	// and [TestParse_NestedPositionsCostTheSourceOnce] bound it.
+	runeMarks []int
+	counted   int
+
 	file   *File
 	issues []diag.Issue
+
+	// unparsed holds the issues that become File.Unparsed. Each construct
+	// reports its own as it is read, so they are in position order.
+	unparsed []diag.Issue
 }
 
 // lineStarts returns the byte offset of each line's first byte, starting at 0.
@@ -210,8 +232,8 @@ func (b *builder) parseHeader(plex *lexer.PeekingLexer) {
 	b.file.Doc = stripDoc(head.Doc)
 	b.file.Span = b.spanOf(head.Pos, head.EndPos)
 
-	name, ok := b.unquoteAt(&head.Name, "invalid schema name")
-	if !ok {
+	name, err := b.unquoteAt(&head.Name, "invalid schema name")
+	if err != nil {
 		b.file.SchemaNameFailed = true
 		return
 	}
@@ -245,15 +267,13 @@ func (b *builder) parseImports(plex *lexer.PeekingLexer) {
 }
 
 func (b *builder) addImport(imp *importNode) {
-	path, ok := b.unquoteAt(&imp.Path, "invalid import path")
-	if !ok {
-		return
-	}
+	path, err := b.unquoteAt(&imp.Path, "invalid import path")
 	n := &Import{
-		Path:     path,
-		PathRaw:  imp.Path.Raw,
-		PathSpan: b.spanOf(imp.Path.Pos, imp.Path.EndPos),
-		Span:     b.spanOf(imp.Pos, imp.EndPos),
+		Path:        path,
+		PathRefused: err != nil,
+		PathRaw:     imp.Path.Raw,
+		PathSpan:    b.spanOf(imp.Path.Pos, imp.Path.EndPos),
+		Span:        b.spanOf(imp.Pos, imp.EndPos),
 	}
 	if imp.Alias != nil {
 		n.HasAlias = true
@@ -323,7 +343,7 @@ func (b *builder) parseMembers(plex *lexer.PeekingLexer, nt *TypeDecl) int {
 	for {
 		t := plex.Peek()
 		if t.EOF() {
-			b.report(diag.Error, diag.E_SYNTAX, b.pointAt(t.Pos), "unexpected end of input in a type body")
+			b.reportUnparsed(diag.Error, b.pointAt(t.Pos), "unexpected end of input in a type body")
 			return len(b.src)
 		}
 		if t.Type == b.ps.tok.rbrace {
@@ -487,8 +507,10 @@ func (b *builder) annotation(name lcWordNode, args *argsNode, doc string, span l
 
 // arg classifies one annotation argument. A quoted string that will not
 // unquote degrades to a literal carrying its raw spelling as Text, with Raw
-// empty, and draws no diagnostic at all — no check owns an annotation
-// argument. The value is preserved as written so a later phase can decide.
+// empty, and draws no diagnostic here — no check of this package owns an
+// annotation argument, though text the source rules refuse is reported at its
+// bytes; schema's annotation rules judge it. The value is
+// preserved as written so a later phase can decide.
 func (b *builder) arg(a *argNode) Arg {
 	out := Arg{Span: b.spanOf(a.Pos, a.EndPos)}
 	switch {
@@ -512,25 +534,29 @@ func (b *builder) addInvariant(nt *TypeDecl, inv *invNode) {
 	// two-value form is what errcheck's check-type-assertions requires.
 	res, ok := inv.Expr.(exprResult)
 	if !ok {
-		b.report(diag.Error, diag.E_SYNTAX, b.pointAt(inv.Pos), "invariant missing expression")
+		b.reportUnparsed(diag.Error, b.pointAt(inv.Pos), "invariant missing expression")
 		return
 	}
-	// The message decides whether this invariant is kept at all, so it is
+	// The message decides whether an invariant is built at all, so it is
 	// resolved before the expression's own literal diagnostics are reported:
-	// an invariant being discarded must not ask the author to fix a literal
-	// inside it, which is a diagnostic the generated parser never reaches.
-	msg, ok := b.unquoteAt(&inv.Msg, "invalid invariant message")
-	if !ok {
-		return
+	// a message that will not unquote must not ask the author to fix a
+	// literal inside the expression too. A message the source rules refuse at
+	// the byte is no such failure, and the expression is reported beside it.
+	b.file.Expressions = append(b.file.Expressions, b.spanFromOffsets(res.Start, res.End))
+	msg, err := b.unquoteAt(&inv.Msg, "invalid invariant message")
+	if err == nil || errors.Is(err, errRefusedText) {
+		for _, d := range res.Diags {
+			b.report(diag.Error, diag.E_INVALID_INVARIANT, b.spanFromOffsets(d.Start, d.End), d.Msg)
+		}
 	}
-	for _, d := range res.Diags {
-		b.report(diag.Error, diag.E_INVALID_INVARIANT, b.spanFromOffsets(d.Start, d.End), d.Msg)
+	if err != nil {
+		return
 	}
 	ni := &Invariant{
 		MessageRaw:  inv.Msg.Raw,
 		MessageSpan: b.spanOf(inv.Msg.Pos, inv.Msg.EndPos),
 		Expr:        res.E,
-		ExprSpan:    b.spanFromOffsets(res.Start, res.End),
+		NoValue:     res.NoValue,
 		Doc:         stripDoc(inv.Doc),
 		Span:        b.spanOf(inv.Pos, inv.EndPos),
 	}
@@ -718,23 +744,23 @@ func resumeFloor(err error, from int) int {
 // expected-set.
 func (b *builder) syntaxErr(sev diag.Severity, err error, what string, from, to int) {
 	if bad := b.firstInvalidNumber(from, to); bad != nil {
-		b.report(sev, diag.E_SYNTAX, b.tokenSpan(bad), InvalidNumberMessage(bad.Value))
+		b.reportUnparsed(sev, b.tokenSpan(bad), InvalidNumberMessage(bad.Value))
 		return
 	}
 	if ut, ok := errors.AsType[*participle.UnexpectedTokenError](err); ok {
 		start := ut.Unexpected.Pos.Offset
 		span := b.spanFromOffsets(start, start+len(ut.Unexpected.Value))
-		b.report(sev, diag.E_SYNTAX, span, fmt.Sprintf("unexpected token %q %s", ut.Unexpected, what))
+		b.reportUnparsed(sev, span, fmt.Sprintf("unexpected token %q %s", ut.Unexpected, what))
 		return
 	}
 	if pe, ok := errors.AsType[participle.Error](err); ok {
 		at := pe.Position().Offset
-		b.report(sev, diag.E_SYNTAX, b.tokenSpanAt(at), pe.Message())
+		b.reportUnparsed(sev, b.tokenSpanAt(at), pe.Message())
 		return
 	}
 	// An error carrying no position of its own: report it on the construct's
 	// first token, since blaming byte 0 points at an unrelated line.
-	b.report(sev, diag.E_SYNTAX, b.tokenSpanAt(from), err.Error())
+	b.reportUnparsed(sev, b.tokenSpanAt(from), err.Error())
 }
 
 // tokenSpanAt returns the extent of the token starting at offset, or a
@@ -773,6 +799,14 @@ func (b *builder) firstInvalidNumber(from, to int) *lexer.Token {
 
 func (b *builder) report(sev diag.Severity, code diag.Code, span location.Span, msg string) {
 	b.issues = append(b.issues, diag.NewIssue(sev, code, msg).WithSpan(span).Build())
+}
+
+// reportUnparsed reports E_SYNTAX for text the grammar does not match, and
+// records the issue for [File.Unparsed].
+func (b *builder) reportUnparsed(sev diag.Severity, span location.Span, msg string) {
+	issue := diag.NewIssue(sev, diag.E_SYNTAX, msg).WithSpan(span).Build()
+	b.issues = append(b.issues, issue)
+	b.unparsed = append(b.unparsed, issue)
 }
 
 // reportf reports an error-severity diagnostic. Every formatted diagnostic
@@ -862,8 +896,51 @@ func (b *builder) positionAt(offset int) lexer.Position {
 	return lexer.Position{
 		Offset: offset,
 		Line:   line + 1,
-		Column: 1 + utf8.RuneCountInString(b.src[b.lineStarts[line]:offset]),
+		Column: 1 + b.runesBefore(offset) - b.runesBefore(b.lineStarts[line]),
 	}
+}
+
+// runeStride is the bytes between the offsets two of [builder.runeMarks]'
+// marks are taken at; each mark then moves back to a character's start.
+const runeStride = 8
+
+// runeMark returns mark i: the character boundary at or before byte
+// i*runeStride, as positionAt moves an offset.
+func (b *builder) runeMark(i int) int {
+	at := i * runeStride
+	if start := validRuneStartAt(b.src, at); start >= 0 {
+		return start
+	}
+	return at
+}
+
+// runesBefore returns the number of runes in the source before offset, a
+// character boundary: the count at the mark at or below it, and the runes
+// between the two. A byte that is not valid UTF-8 is one rune, as the lexer's
+// column counter counts it.
+func (b *builder) runesBefore(offset int) int {
+	if b.runeMarks == nil {
+		b.markRunes()
+	}
+	i := offset / runeStride
+	return b.runeMarks[i] + b.runesBetween(b.runeMark(i), offset)
+}
+
+// markRunes counts the source's runes once, recording the count at each mark.
+// Marks are character boundaries, so the counts between them add up.
+func (b *builder) markRunes() {
+	b.runeMarks = make([]int, len(b.src)/runeStride+1)
+	prev := 0
+	for i := 1; i < len(b.runeMarks); i++ {
+		mark := b.runeMark(i)
+		b.runeMarks[i] = b.runeMarks[i-1] + b.runesBetween(prev, mark)
+		prev = mark
+	}
+}
+
+func (b *builder) runesBetween(start, end int) int {
+	b.counted += end - start
+	return utf8.RuneCountInString(b.src[start:end])
 }
 
 // ---- small helpers ----

@@ -15,10 +15,6 @@
         {
           "msg": "\"all_positive\"",
           "expr": "(All (p \"ITEMS\") (args ) (params item) (\u003e (. ($ \"item\") \"qty\") 0))",
-          "expr_span": {
-            "s": 52,
-            "e": 90
-          },
           "span": {
             "s": 35,
             "e": 90
@@ -27,10 +23,6 @@
         {
           "msg": "\"adult_status\"",
           "expr": "(== (? (\u003e= (p \"age\") 18) \"adult\" \"minor\") (p \"category\"))",
-          "expr_span": {
-            "s": 112,
-            "e": 157
-          },
           "span": {
             "s": 95,
             "e": 157
@@ -39,10 +31,6 @@
         {
           "msg": "\"must_be_enabled\"",
           "expr": "(\u0026\u0026 (! (p \"disabled\")) (p \"active\"))",
-          "expr_span": {
-            "s": 182,
-            "e": 201
-          },
           "span": {
             "s": 162,
             "e": 201
@@ -51,10 +39,6 @@
         {
           "msg": "\"grouping\"",
           "expr": "(\u0026\u0026 (\u003e (p \"a\") 0) (\u003c (p \"b\") 100))",
-          "expr_span": {
-            "s": 219,
-            "e": 239
-          },
           "span": {
             "s": 206,
             "e": 239
@@ -63,10 +47,6 @@
         {
           "msg": "\"replace\"",
           "expr": "(Replace (p \"items\") (args \"old\" \"new\") (params ) \u003cnil\u003e)",
-          "expr_span": {
-            "s": 256,
-            "e": 286
-          },
           "span": {
             "s": 244,
             "e": 286
@@ -77,6 +57,28 @@
         "s": 15,
         "e": 288
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 52,
+      "e": 90
+    },
+    {
+      "s": 112,
+      "e": 157
+    },
+    {
+      "s": 182,
+      "e": 201
+    },
+    {
+      "s": 219,
+      "e": 239
+    },
+    {
+      "s": 256,
+      "e": 286
     }
   ]
 }

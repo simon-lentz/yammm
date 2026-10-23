@@ -506,7 +506,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 				cancelled(ctx, collector, prov, base)
 				return nil, collector.Result()
 			}
-			// This should not happen after successful CheckValue
+			// This should not happen after the value check above passed
 			issue := diag.NewIssue(
 				diag.Error,
 				ErrTypeMismatch,
@@ -1033,7 +1033,8 @@ func provenancePathBuilder(prov *location.Provenance) path.Builder {
 	return prov.Path()
 }
 
-// checkValueWithRecovery calls the Checker's CheckValue with panic recovery.
+// checkValueWithRecovery runs the value check with panic recovery, the rule
+// CheckValue shares.
 func (v *Validator) checkValueWithRecovery(val any, c schema.Constraint) error {
 	return checkValueRecovering(val, c)
 }

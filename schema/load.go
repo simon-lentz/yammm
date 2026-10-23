@@ -960,6 +960,10 @@ func (l *loader) loadImports(ctx context.Context, sourceID location.SourceID, m 
 		if l.aliasBound(imp.Alias) {
 			continue
 		}
+		if imp.PathRefused {
+			l.markImportFailed(imp)
+			continue
+		}
 		if err := l.loadImport(ctx, sourceID, imp); err != nil {
 			return err // propagate cancellation
 		}
@@ -1592,8 +1596,8 @@ func (l *loader) readImportFile(relativePath string, imp *importDecl) ([]byte, l
 		}
 	}
 
-	// Under WithSourcesOnly the in-memory set is the whole universe:
-	// a miss is an error, never a filesystem read.
+	// Under WithSourcesOnly or a synthetic root the in-memory set is the
+	// whole universe: a miss is an error, never a filesystem read.
 	if l.cfg.sourcesOnly {
 		return nil, location.SourceID{}, errors.New("not among the pre-registered sources")
 	}
@@ -1713,7 +1717,8 @@ func (l *loader) inMemorySource(key string) (location.SourceID, string, error) {
 
 // normalizeSyntheticRoot validates cfg's synthetic root against the load it was
 // given to and returns the value the derivation sites use, or "" when the
-// option was not passed.
+// option was not passed. A root makes the load sources-only: it names every
+// identity the load mints, so the given sources are every source it reads.
 func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) {
 	if !cfg.syntheticRootSet {
 		return "", nil
@@ -1722,10 +1727,7 @@ func normalizeSyntheticRoot(cfg *loadConfig, moduleRoot string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("invalid synthetic root %q: %w", cfg.syntheticRoot, err)
 	}
-	if !cfg.sourcesOnly {
-		return "", fmt.Errorf("synthetic root %q requires WithSourcesOnly: the root names every identity "+
-			"the load mints, so the given sources must be every source it reads", cfg.syntheticRoot)
-	}
+	cfg.sourcesOnly = true
 	if moduleRoot != "" {
 		return "", fmt.Errorf("synthetic root %q cannot be combined with module root %q: "+
 			"pass an empty module root, which the synthetic root stands in for", cfg.syntheticRoot, moduleRoot)

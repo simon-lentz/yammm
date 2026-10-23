@@ -9,7 +9,6 @@ import (
 
 	"github.com/simon-lentz/yammm/lsp/internal/protocol"
 
-	"github.com/simon-lentz/yammm/internal/source"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 
@@ -18,8 +17,8 @@ import (
 
 // testSources creates a minimal source registry for testing symbol structure.
 // UTF-16 conversion will fall back to naive rune column conversion.
-func testSources() *source.Registry {
-	return source.NewRegistry()
+func testSources() *lsputil.Texts {
+	return lsputil.NewTexts()
 }
 
 // testEncoding returns the default position encoding used in tests.

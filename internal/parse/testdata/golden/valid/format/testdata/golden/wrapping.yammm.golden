@@ -140,10 +140,6 @@
         {
           "msg": "\"id_valid\"",
           "expr": "(!= (p \"id\") \"\")",
-          "expr_span": {
-            "s": 471,
-            "e": 479
-          },
           "span": {
             "s": 458,
             "e": 479
@@ -152,10 +148,6 @@
         {
           "msg": "\"status_check\"",
           "expr": "(|| (== (p \"status\") \"active\") (== (p \"status\") \"inactive\"))",
-          "expr_span": {
-            "s": 501,
-            "e": 543
-          },
           "span": {
             "s": 484,
             "e": 543
@@ -164,10 +156,6 @@
         {
           "msg": "\"geoid_valid\"",
           "expr": "(|| (|| (\u0026\u0026 (== (p \"geo_type\") \"state\") (!= (p \"geoid\") \"\")) (\u0026\u0026 (== (p \"geo_type\") \"county\") (!= (p \"geoid\") \"\"))) (\u0026\u0026 (== (p \"geo_type\") \"place\") (!= (p \"geoid\") \"\")))",
-          "expr_span": {
-            "s": 564,
-            "e": 681
-          },
           "span": {
             "s": 548,
             "e": 681
@@ -176,10 +164,6 @@
         {
           "msg": "\"complex_check\"",
           "expr": "(|| (|| (\u0026\u0026 (== (p \"status\") \"active\") (\u003e (p \"confidence\") 0.5)) (\u0026\u0026 (== (p \"status\") \"pending\") (\u003e (p \"confidence\") 0.3))) (== (p \"status\") \"override\"))",
-          "expr_span": {
-            "s": 704,
-            "e": 813
-          },
           "span": {
             "s": 686,
             "e": 813
@@ -284,6 +268,24 @@
         "s": 977,
         "e": 1032
       }
+    }
+  ],
+  "expressions": [
+    {
+      "s": 471,
+      "e": 479
+    },
+    {
+      "s": 501,
+      "e": 543
+    },
+    {
+      "s": 564,
+      "e": 681
+    },
+    {
+      "s": 704,
+      "e": 813
     }
   ]
 }
