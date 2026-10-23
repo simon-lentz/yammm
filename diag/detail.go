@@ -1,5 +1,10 @@
 package diag
 
+import (
+	"strconv"
+	"unicode/utf8"
+)
+
 // Detail provides key-value context for diagnostic issues.
 //
 // Details are used to add structured information to issues that can be
@@ -40,7 +45,8 @@ const (
 	// and E_UNKNOWN_EDGE_FIELD ("case_fold_shadowed").
 	DetailKeyReason = "reason"
 
-	// DetailKeyField is the data-level field name (for unknown/unexpected fields).
+	// DetailKeyField is the data-level field name a diagnostic names, quoted
+	// when it is not valid UTF-8: see [TypeField].
 	DetailKeyField = "field"
 
 	// DetailKeyJSONField is a relation's JSON field name in a path: the
@@ -212,22 +218,35 @@ func TypeProp(typeName, propName string) []Detail {
 
 // RelationField creates detail entries for edge field diagnostics.
 //
-// Use for diagnostics like E_UNKNOWN_EDGE_FIELD.
+// Use for diagnostics like E_UNKNOWN_EDGE_FIELD. The field detail holds
+// fieldName as [TypeField] holds it.
 func RelationField(relationName, fieldName string) []Detail {
 	return []Detail{
 		{Key: DetailKeyRelationName, Value: relationName},
-		{Key: DetailKeyField, Value: fieldName},
+		{Key: DetailKeyField, Value: fieldText(fieldName)},
 	}
 }
 
 // TypeField creates detail entries for unknown field diagnostics.
 //
-// Use for diagnostics like E_UNKNOWN_FIELD.
+// Use for diagnostics like E_UNKNOWN_FIELD. The field detail holds fieldName
+// as it is written when it is valid UTF-8, and otherwise as the quoted Go
+// string [strconv.Quote] returns, so the detail is valid UTF-8 whatever the
+// data held.
 func TypeField(typeName, fieldName string) []Detail {
 	return []Detail{
 		{Key: DetailKeyTypeName, Value: typeName},
-		{Key: DetailKeyField, Value: fieldName},
+		{Key: DetailKeyField, Value: fieldText(fieldName)},
 	}
+}
+
+// fieldText returns name as the field detail holds it. The data writes a field
+// name, so no schema rule has judged its bytes.
+func fieldText(name string) string {
+	if utf8.ValidString(name) {
+		return name
+	}
+	return strconv.Quote(name)
 }
 
 // PathRelation creates detail entries for diagnostics involving relation path

@@ -43,6 +43,23 @@ func constraintFail(format string, args ...any) *CheckError {
 	return &CheckError{Kind: KindConstraintFail, Msg: fmt.Sprintf(format, args...)}
 }
 
+// textOf reads val as the text of a kind held as a string, through the
+// carriers [value.GetString] reads; want names what the kind accepts. A string
+// value is valid UTF-8, so a string that is not is refused as a value that is
+// no string is: a type mismatch, before any rule of the kind reads its bytes.
+// The message quotes the string's head ([quotedText]), so the diagnostic is
+// valid UTF-8 itself and its length does not follow the string's.
+func textOf(val any, want string) (string, *CheckError) {
+	s, ok := value.GetString(val)
+	if !ok {
+		return "", typeMismatch("expected %s, got %T", want, val)
+	}
+	if !utf8.ValidString(s) {
+		return "", typeMismatch("expected %s, got a string that is not valid UTF-8: %s", want, quotedText(s))
+	}
+	return s, nil
+}
+
 // floatText renders a refused float for a diagnostic with a float indicator,
 // so a whole float reads as the float it is: 5.0, never 5. The digits are
 // encoding/json's, as the writers emit them: a float32 held in val, a named one
@@ -51,8 +68,8 @@ func constraintFail(format string, args ...any) *CheckError {
 // encode (NaN, ±Inf) is spelled as strconv spells it.
 func floatText(val, norm any) string {
 	rv := reflect.ValueOf(val)
-	for rv.Kind() == reflect.Pointer && !rv.IsNil() {
-		rv = rv.Elem()
+	if d, ok := value.Deref(rv); ok && d.IsValid() {
+		rv = d
 	}
 	var f any
 	switch rv.Kind() {
@@ -74,17 +91,48 @@ func floatText(val, norm any) string {
 	return string(b)
 }
 
-// maxNumberText bounds how much of a number literal a diagnostic repeats: a
-// literal can run to megabytes, and the message is written once per value.
-const maxNumberText = 32
+// maxValueText bounds how much of a refused value's text a diagnostic repeats:
+// a number literal or a string can run to megabytes, and the message is
+// written once per value.
+const maxValueText = 32
 
-// numberText renders a number literal for a diagnostic, cut to its first
-// maxNumberText bytes with its length beside it when it is longer.
-func numberText(n json.Number) string {
-	if len(n) <= maxNumberText {
-		return string(n)
+// headOf returns s whole when it is no longer than maxValueText bytes, and
+// otherwise its longest prefix of whole characters within that bound, with
+// true. A byte that is no part of a character counts as one character.
+func headOf(s string) (head string, cut bool) {
+	if len(s) <= maxValueText {
+		return s, false
 	}
-	return fmt.Sprintf("%s… (%d characters)", n[:maxNumberText], len(n))
+	end := 0
+	for {
+		_, size := utf8.DecodeRuneInString(s[end:])
+		if end+size > maxValueText {
+			return s[:end], true
+		}
+		end += size
+	}
+}
+
+// numberText renders a number literal for a diagnostic, cut to its head with
+// its length beside it when it is longer.
+func numberText(n json.Number) string {
+	head, cut := headOf(string(n))
+	if !cut {
+		return head
+	}
+	return fmt.Sprintf("%s… (%d characters)", head, len(n))
+}
+
+// quotedText renders a refused string for a diagnostic as [numberText] renders
+// a literal, quoted so that a byte that is no part of a character is spelled
+// as an escape. The length is in bytes: such a string has no count of
+// characters.
+func quotedText(s string) string {
+	head, cut := headOf(s)
+	if !cut {
+		return strconv.Quote(head)
+	}
+	return fmt.Sprintf("%s… (%d bytes)", strconv.Quote(head), len(s))
 }
 
 // CheckValue validates that val conforms to the given constraint, by the one
@@ -183,6 +231,9 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		// value.Canonical returns its input beside an error; every arm here
 		// returns nil beside one, so a caller never mistakes the input for a
 		// stored form.
+		if err := invalidText(val); err != nil {
+			return nil, err
+		}
 		out, err := value.Canonical(val, c)
 		if err != nil {
 			return nil, err //nolint:wrapcheck // the canonicalizer's errors name the value and the layout; a wrapper here adds nothing
@@ -193,10 +244,14 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		// adapter/gogen's output. Store the base value: accepting the carrier
 		// and then persisting it would put a type the wire and the writers
 		// never see into the validated instance.
-		if s, ok := value.GetString(val); ok {
-			return s, nil
+		s, ok := value.GetString(val)
+		if !ok {
+			return nil, fmt.Errorf("cannot coerce %T to string", val)
 		}
-		return nil, fmt.Errorf("cannot coerce %T to string", val)
+		if err := invalidText(val); err != nil {
+			return nil, err
+		}
+		return s, nil
 	case schema.KindBoolean:
 		if b, ok := value.GetBool(val); ok {
 			return b, nil
@@ -206,6 +261,17 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 		// Defensive: schema.Constraint is sealed, so every kind is handled above.
 		return val, nil
 	}
+}
+
+// invalidText refuses a string that is not valid UTF-8, as [textOf] refuses it
+// on the check side, so a caller that coerces without checking stores no such
+// string. The coercion judges no length, membership or pattern. Any other
+// value passes.
+func invalidText(val any) error {
+	if s, ok := value.GetString(val); ok && !utf8.ValidString(s) {
+		return fmt.Errorf("cannot coerce a string that is not valid UTF-8: %s", quotedText(s))
+	}
+	return nil
 }
 
 // coerceInteger converts an integer value to int64. A float is refused whole or
@@ -232,6 +298,9 @@ func coerceInteger(val any) (any, error) {
 		}
 	case value.FloatKind:
 		return nil, fmt.Errorf("cannot coerce float %s to int64", floatText(val, norm))
+	}
+	if n, ok := noFloat64Holds(val); ok {
+		return nil, fmt.Errorf("cannot coerce %s to int64: no finite float64 holds it", numberText(n))
 	}
 	return nil, fmt.Errorf("cannot coerce %T to int64", val)
 }
@@ -273,21 +342,29 @@ func coerceFloat(val any) (any, error) {
 	return nil, fmt.Errorf("cannot coerce %T to float64", val)
 }
 
-// asNumber returns val as a json.Number, through any pointers to one. A number
+// asNumber returns val as a json.Number, through the pointers [value.Deref]
+// follows. A number
 // literal is read as its own text at a Float: [value.Classify] reads the
 // integer literal -0 as the int64 0, which has no sign.
 func asNumber(val any) (json.Number, bool) {
-	rv := reflect.ValueOf(val)
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
-			return "", false
-		}
-		rv = rv.Elem()
-	}
+	rv, _ := value.Deref(reflect.ValueOf(val))
 	if !rv.IsValid() || rv.Type() != reflect.TypeFor[json.Number]() {
 		return "", false
 	}
 	return json.Number(rv.String()), true
+}
+
+// noFloat64Holds returns val as a number literal when it is one that spells a
+// number no finite float64 holds, through the pointers [value.Deref] follows: the literal
+// [checkFloat] and [coerceFloat] refuse in those words. An Integer refuses it
+// in the same words, where it would otherwise name the literal's Go type.
+func noFloat64Holds(val any) (json.Number, bool) {
+	n, ok := asNumber(val)
+	if !ok {
+		return "", false
+	}
+	_, err := n.Float64()
+	return n, errors.Is(err, strconv.ErrRange)
 }
 
 // coerceVector converts any numeric slice to []float64, each element through
@@ -314,12 +391,13 @@ func coerceVector(val any) (any, error) {
 	return result, nil
 }
 
-// checkString validates that val is a string with optional length bounds.
-// Per SPEC, string length is counted in runes (characters), not bytes.
+// checkString validates that val is a string of valid UTF-8 with optional
+// length bounds. Per SPEC, string length is counted in runes (characters), not
+// bytes.
 func checkString(val any, c schema.Constraint) error {
-	s, ok := value.GetString(val)
-	if !ok {
-		return typeMismatch("expected string, got %T", val)
+	s, refused := textOf(val, "string")
+	if refused != nil {
+		return refused
 	}
 
 	// Check length bounds if available
@@ -359,6 +437,9 @@ func checkInteger(val any, c schema.Constraint) error {
 	case value.FloatKind:
 		return typeMismatch("expected integer, got float %s", floatText(val, norm))
 	default:
+		if n, ok := noFloat64Holds(val); ok {
+			return typeMismatch("expected integer, got a number no float64 holds: %s", numberText(n))
+		}
 		return typeMismatch("expected integer, got %T", val)
 	}
 
@@ -438,16 +519,22 @@ func checkBoolean(val any) error {
 }
 
 // checkTimestamp validates that val is a valid timestamp.
-// Accepts time.Time (always valid) or string (parsed against format).
+// Accepts a time.Time whose stored text reads back, or a string parsed
+// against the format.
 func checkTimestamp(val any, c schema.Constraint) error {
-	// Accept time.Time directly - always valid
-	if _, ok := val.(time.Time); ok {
-		return nil
+	// A time.Time is judged as the text it is stored as, so the Go path and the
+	// text path refuse the same values.
+	if t, ok := val.(time.Time); ok {
+		s, readsBack := value.TimestampText(t, c)
+		if readsBack {
+			return nil
+		}
+		val = s
 	}
 
-	s, ok := value.GetString(val)
-	if !ok {
-		return typeMismatch("expected timestamp string or time.Time, got %T", val)
+	s, refused := textOf(val, "timestamp string or time.Time")
+	if refused != nil {
+		return refused
 	}
 
 	// Check for custom format
@@ -468,20 +555,25 @@ func checkTimestamp(val any, c schema.Constraint) error {
 }
 
 // checkDate validates that val is a valid date.
-// Accepts time.Time (always valid) or string (parsed as YYYY-MM-DD).
+// Accepts a time.Time whose stored text reads back, or a string parsed as
+// YYYY-MM-DD.
 //
 // The time.Time arm has to be here rather than only in the coercer: CheckValue
 // runs first, so rejecting the type here would make the coercer's Date arm
 // unreachable and the generated time.Time field unusable.
 func checkDate(val any) error {
-	// Accept time.Time directly - always valid
-	if _, ok := val.(time.Time); ok {
-		return nil
+	// A time.Time is judged as the text it is stored as, as checkTimestamp does.
+	if t, ok := val.(time.Time); ok {
+		s, readsBack := value.DateText(t)
+		if readsBack {
+			return nil
+		}
+		val = s
 	}
 
-	s, ok := value.GetString(val)
-	if !ok {
-		return typeMismatch("expected date string or time.Time, got %T", val)
+	s, refused := textOf(val, "date string or time.Time")
+	if refused != nil {
+		return refused
 	}
 	if _, err := time.Parse(time.DateOnly, s); err != nil {
 		return constraintFail("invalid date format: %s (expected YYYY-MM-DD)", s)
@@ -497,9 +589,9 @@ func checkUUID(val any) error {
 		return nil
 	}
 
-	s, ok := value.GetString(val)
-	if !ok {
-		return typeMismatch("expected UUID string or uuid.UUID, got %T", val)
+	s, refused := textOf(val, "UUID string or uuid.UUID")
+	if refused != nil {
+		return refused
 	}
 	if _, err := uuid.Parse(s); err != nil {
 		return constraintFail("invalid UUID: %s", s)
@@ -509,9 +601,9 @@ func checkUUID(val any) error {
 
 // checkEnum validates that val is one of the allowed enum values.
 func checkEnum(val any, c schema.Constraint) error {
-	s, ok := value.GetString(val)
-	if !ok {
-		return typeMismatch("expected string for enum, got %T", val)
+	s, refused := textOf(val, "string for enum")
+	if refused != nil {
+		return refused
 	}
 
 	ec, ok := c.(schema.EnumConstraint)
@@ -528,9 +620,9 @@ func checkEnum(val any, c schema.Constraint) error {
 
 // checkPattern validates that val matches all constraint patterns.
 func checkPattern(val any, c schema.Constraint) error {
-	s, ok := value.GetString(val)
-	if !ok {
-		return typeMismatch("expected string for pattern, got %T", val)
+	s, refused := textOf(val, "string for pattern")
+	if refused != nil {
+		return refused
 	}
 
 	pc, ok := c.(schema.PatternConstraint)
@@ -711,7 +803,7 @@ func IsUUID() TypeChecker {
 }
 
 // IsTimestamp returns a TypeChecker that validates timestamp values: a
-// time.Time, or a string in RFC 3339. A bare datatype names no layout, so a
+// time.Time whose RFC 3339 text reads back, or a string in RFC 3339. A bare datatype names no layout, so a
 // value stored under a Timestamp["layout"] property matches only when that
 // layout is RFC 3339.
 func IsTimestamp() TypeChecker {

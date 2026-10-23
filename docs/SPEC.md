@@ -837,7 +837,7 @@ format     = STRING .
 
 The format string follows Go's time formatting conventions. When omitted, RFC 3339 with fractional seconds (`"2006-01-02T15:04:05.999999999Z07:00"`) is used.
 
-**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string** rendered through the declared format when one is given and through RFC 3339 with nanoseconds otherwise. A string is parsed and re-rendered, so one instant reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting.
+**Accepted input and stored form.** A `Timestamp` property accepts a Go `time.Time` or a string, and **stores the string** rendered through the declared format when one is given and through RFC 3339 with nanoseconds otherwise. A string is parsed and re-rendered, so one instant at one offset reaches one spelling however it was written: `"…+00:00"` stores as `"…Z"`, and `".500Z"` stores as `".5Z"`. The UTC offset survives — an offset records where an observation happened and is data, not formatting. A `time.Time` is judged as the text it stores, so one whose text the same rule refuses is refused, such as a time outside years 0 to 9999.
 
 **A declared format that cannot represent an instant loses what it omits.** A layout carrying no zone, no fractional second, or neither drops that part of every value stored under it, and a reader parsing the text back gets a different instant. Declaring such a layout draws `W_TIMESTAMP_LOSSY_FORMAT` at schema load; the declaration is accepted, because a wall-clock layout is a legitimate domain choice.
 
@@ -857,7 +857,7 @@ Represents a date value (without time component):
 DateT = "Date" .
 ```
 
-A `Date` property accepts a Go `time.Time` or a `"YYYY-MM-DD"` string, and **stores the string**. A `time.Time` is truncated to its calendar day **in its own location**: an instant at 00:30 `+02:00` is the 19th, and the same instant written 22:30 `Z` is the 18th. The location the caller built the value in decides.
+A `Date` property accepts a Go `time.Time` or a `"YYYY-MM-DD"` string, and **stores the string**. A `time.Time` is truncated to its calendar day **in its own location**: an instant at 00:30 `+02:00` is the 19th, and the same instant written 22:30 `Z` is the 18th. The location the caller built the value in decides. A `time.Time` whose text is no `"YYYY-MM-DD"` date, such as one outside years 0 to 9999, is refused.
 
 Example:
 
@@ -1418,7 +1418,7 @@ Supported datatype keywords for type checking:
 - `Timestamp` - checks for valid timestamp values
 - `Date` - checks for valid date values
 
-Each check applies the rule a property of that kind applies: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts a `time.Time` or an RFC 3339 string. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
+Each check applies the rule a property of that kind applies: `=~ Float` is false for NaN and infinities, `=~ String` is false for a number, and `=~ Timestamp` accepts an RFC 3339 string or a `time.Time` whose RFC 3339 text reads back. `Vector`, `List`, `Enum` and `Pattern` are datatype keywords but not type checks — they name a shape or a constraint, not a kind a value can have — and `=~` against one is refused at schema load with `E_INVALID_INVARIANT`.
 
 Numeric type checks follow the property rules: `5 =~ Float` holds, because an integer widens to a float, and `5.0 =~ Integer` does not — a float is never an integer, whole or not.
 
@@ -1808,7 +1808,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — a root whose type declares no primary key
-- `E_GRAPH_INVALID_PK` — primary key empty, of the wrong arity, with a component `graph.ParseKey` cannot read back, with a key property absent or null, or disagreeing with the instance's own key properties; or an association target key of the wrong arity or with such a component
+- `E_GRAPH_INVALID_PK` — primary key empty, of the wrong arity, with a component that does not read back as the value every writer writes (one of no form, a string that is not valid UTF-8, a `json.Number` that is empty or spells a number no finite `float64` holds, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` its key constraint does not render), with a key property absent or null, or disagreeing with the instance's own key properties; or an association target key of the wrong arity or with such a component
 - `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or a `.ys` document
 - `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one
 - `E_GRAPH_ABSTRACT_TYPE` — an instance of an abstract type reached the graph

@@ -455,7 +455,7 @@ var (
 	E_GRAPH_ABSTRACT_TYPE = NewCode("E_GRAPH_ABSTRACT_TYPE", CategoryGraph)
 
 	// E_GRAPH_INVALID_PK indicates a primary key that is empty, has the wrong
-	// arity, holds a component graph.ParseKey cannot read back, has a key
+	// arity, holds a component the graph package's key rule refuses, has a key
 	// property that is absent or null, or disagrees with the instance's own key properties;
 	// or an association target key of the wrong arity or with such a component.
 	E_GRAPH_INVALID_PK = NewCode("E_GRAPH_INVALID_PK", CategoryGraph)

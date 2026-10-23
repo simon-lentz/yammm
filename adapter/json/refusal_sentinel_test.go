@@ -101,57 +101,53 @@ func TestWriters_ANonFiniteFloatIsRefusedAsTheClass(t *testing.T) {
 
 // refusingJSON and refusingText spell themselves for encoding/json and refuse,
 // as a caller's own type can; spelled spells itself and succeeds. Each is a
-// string, which a Float constraint cannot render, so it reaches the writer as
-// held and encoding/json only through its method.
+// named type over string, and spelledStruct a struct that spells itself.
 type (
-	refusingJSON string
-	refusingText string
-	spelled      string
+	refusingJSON  string
+	refusingText  string
+	spelled       string
+	spelledStruct struct{ s string }
 )
 
 func (refusingJSON) MarshalJSON() ([]byte, error) { return nil, errors.New("no spelling") }
 func (refusingText) MarshalText() ([]byte, error) { return nil, errors.New("no spelling") }
 func (s spelled) MarshalJSON() ([]byte, error)    { return []byte(`{"spelled":"` + string(s) + `"}`), nil }
 
-// A value encoding/json refuses is refused as the class wherever it stands,
-// naming the site, whatever its kind: a string's own method can refuse as a
-// container's contents can. Before the writer asked encoding/json
-// about a scalar, such a value failed the whole document outside the class.
-func TestWriters_AValueEncodingJSONRefusesIsRefusedAsTheClass(t *testing.T) {
+func (s spelledStruct) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + s.s + `"`), nil
+}
+
+// A named type over a scalar is written as the base value it holds, the one
+// form every writer writes: its own method is never asked, so one that would
+// refuse or spell another value writes the text it holds. A struct that spells
+// itself is no such form, and is refused as the class, naming the site.
+func TestWriters_ANamedTypeIsWrittenAsItsBaseValue(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
-		name, mentions string
-		props          map[string]any
-		weight         any
+		name, want string
+		props      map[string]any
+		weight     any
 	}{
-		{"a MarshalJSON refusal at a property", `property "ratio"`, map[string]any{"ratio": refusingJSON("x")}, 1.5},
-		{"a MarshalText refusal at a property", `property "ratio"`, map[string]any{"ratio": refusingText("x")}, 1.5},
-		{"a refusal inside a list", `property "series"`, map[string]any{"series": []any{1.5, refusingJSON("x")}}, 1.5},
-		{"a refusal at an edge property", `edge property "weight"`, nil, refusingText("w")},
+		{"a MarshalJSON refusal at a property", `"ratio":"x"`, map[string]any{"ratio": refusingJSON("x")}, 1.5},
+		{"a MarshalText refusal at a property", `"ratio":"x"`, map[string]any{"ratio": refusingText("x")}, 1.5},
+		{"a refusal inside a list", `"series":[1.5,"x"]`, map[string]any{"series": []any{1.5, refusingJSON("x")}}, 1.5},
+		{"a refusal at an edge property", `"weight":"w"`, nil, refusingText("w")},
+		{"a type spelling another value", `"ratio":"x"`, map[string]any{"ratio": spelled("x")}, 1.5},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			snap := nonFiniteSnapshot(t, c.props, c.weight)
-			a := New()
-			_, err := a.MarshalObject(context.Background(), snap)
-			if !errors.Is(err, ErrUnrepresentable) {
-				t.Errorf("MarshalObject: %v does not match ErrUnrepresentable", err)
-			}
-			if err != nil && !strings.Contains(err.Error(), c.mentions) {
-				t.Errorf("the refusal does not name %s: %v", c.mentions, err)
-			}
-			if _, werr := a.WriteObject(context.Background(), io.Discard, snap); !errors.Is(werr, ErrUnrepresentable) {
-				t.Errorf("WriteObject: %v does not match ErrUnrepresentable", werr)
+			data, err := New().MarshalObject(context.Background(), nonFiniteSnapshot(t, c.props, c.weight))
+			if err != nil || !strings.Contains(string(data), c.want) {
+				t.Errorf("MarshalObject = %s, %v; want the base value written, %s", data, err, c.want)
 			}
 		})
 	}
-
-	data, err := New().MarshalObject(context.Background(), nonFiniteSnapshot(t, map[string]any{"ratio": spelled("x")}, 1.5))
-	if err != nil {
-		t.Fatalf("a value that spells itself was refused: %v", err)
+	snap := nonFiniteSnapshot(t, map[string]any{"ratio": spelledStruct{"x"}}, 1.5)
+	if _, err := New().MarshalObject(context.Background(), snap); !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), `property "ratio"`) {
+		t.Errorf("a struct that spells itself: MarshalObject = %v; want a refusal matching ErrUnrepresentable naming property \"ratio\"", err)
 	}
-	if !strings.Contains(string(data), `"ratio":{"spelled":"x"}`) {
-		t.Errorf("got %s, want the value written as it spells itself", data)
+	if _, err := New().WriteObject(context.Background(), io.Discard, snap); !errors.Is(err, ErrUnrepresentable) {
+		t.Errorf("a struct that spells itself: WriteObject = %v; want a refusal matching ErrUnrepresentable", err)
 	}
 }
 

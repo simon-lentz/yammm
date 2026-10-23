@@ -379,7 +379,7 @@ func (r *structureRules) association(rec associationRecord) {
 			var msg string
 			if declared := keyArity(targetType); rec.targetKey.Len() != declared {
 				msg = fmt.Sprintf("carries a %d-part target key; the target declares %d", rec.targetKey.Len(), declared)
-			} else if i := unreadableComponent(rec.targetKey); i >= 0 {
+			} else if i := unreadableComponent(targetType, rec.targetKey); i >= 0 {
 				msg = fmt.Sprintf("carries a target key whose component %d is not a scalar graph.ParseKey reads back", i)
 			}
 			if msg != "" {

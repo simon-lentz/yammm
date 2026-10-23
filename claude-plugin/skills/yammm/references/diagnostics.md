@@ -1,6 +1,6 @@
 # Diagnostics Reference
 
-Every yammm operation returns `(value, diag.Result)` with structured diagnostics. Each issue has a stable error code, severity, message, and source location.
+yammm reports problems as structured diagnostics in a `diag.Result`. A function that returns one returns it last, after its value when it has one: `schema.Load` returns `(*Schema, diag.Result)`, and `Graph.Add` returns a `diag.Result` alone. Each issue has a stable error code, a severity and a message, and a source location where one applies. Some entry points return a Go `error` instead, among them the JSON and CSV adapters' writers and `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`. `graph.BatchAssembler`'s `Add`, `AddValid`, `AddValidOrMerge` and `Finalize` return an `error` too; when the cause is a failed result, the error carries that `diag.Result`, and `diag.AsContextualError` recovers it.
 
 ---
 
@@ -182,7 +182,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: several targets at `Graph.Add`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or `.ys` document (v0.15+) |
 | `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one (v0.15+) |
 | `E_GRAPH_ABSTRACT_TYPE` | Instance of an abstract type rejected by the graph (v0.15+) |
-| `E_GRAPH_INVALID_PK` | Primary key empty, of the wrong arity, with a component `graph.ParseKey` cannot read back, with a key property absent or null, or disagreeing with its own key properties; or an association target key of the wrong arity or with such a component (v0.15+) |
+| `E_GRAPH_INVALID_PK` | Primary key empty, of the wrong arity, with a component that does not read back as the value every writer writes (one of no form, a string that is not valid UTF-8, a `json.Number` that is empty or spells a number no finite `float64` holds, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` its key constraint does not render), with a key property absent or null, or disagreeing with its own key properties; or an association target key of the wrong arity or with such a component (v0.15+) |
 
 ### Snapshot
 

@@ -7,7 +7,8 @@
 //
 // # Architectural Boundary
 //
-// Adapters are the outermost layer of the module. This design provides:
+// Adapters are the outermost layer of the library; only the command-line
+// programs under cmd/ sit above them. This design provides:
 //
 //   - Dependency hygiene via import granularity: Go packages are granular at the
 //     import level. Consumers who import only schema and instance depend on no
@@ -28,8 +29,9 @@
 // The data adapters read and write one way. The JSON and CSV parsers return
 // [instance.RawInstance] values for the validator. The JSON and CSV serializers
 // and the Neo4j adapter's batch node and edge queries take a complete
-// [graph.Snapshot]; the Neo4j adapter's statement builders take labels and
-// keys. No adapter takes an [instance.ValidInstance].
+// [graph.Snapshot]; the Neo4j adapter's other functions take no snapshot. No
+// adapter takes an
+// [instance.ValidInstance].
 //
 // The generator adapters (gogen, jschema, markdown) take neither: they
 // are schema-in, bytes-out. Each consumes a completed schema and emits an
@@ -58,8 +60,9 @@
 //	                                github.com/yuin/goldmark/text,
 //	                                github.com/yuin/goldmark/util,
 //	                                golang.org/x/net/html
-//	adapter/neo4j     ──imports──▶  schema, graph, immutable, diag, location,
+//	adapter/neo4j     ──imports──▶  schema, graph, instance, immutable, diag, location,
 //	                                adapter/internal/constraintof,
+//	                                github.com/google/uuid,
 //	                                github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 //
 // # Layering Discipline
@@ -72,8 +75,8 @@
 // rune-aware identifier-casing transform, to derive Go identifiers, and no
 // other production package imports it. The rule binds production code
 // alone: adapter tests import the module's test support (internal/yammmtest,
-// internal/instancetest) and the internals a test checks against
-// (internal/source, internal/parse).
+// internal/instancetest, internal/raceskip) and the internals a test checks
+// against (internal/source, internal/parse).
 //
 // The adapter layer's own internal packages — adapter/internal/typetag for a
 // type tag's syntax and adapter/internal/refusal for a refusal's class, which

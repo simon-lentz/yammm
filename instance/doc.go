@@ -91,5 +91,5 @@
 // # Dependencies
 //
 //	instance  ──imports──▶  schema, diag, location, location/path, immutable,
-//	                        instance/internal/eval, internal/trace
+//	                        instance/internal/eval, internal/trace, internal/value
 package instance

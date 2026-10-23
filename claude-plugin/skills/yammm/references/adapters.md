@@ -173,7 +173,7 @@ A type's write-once properties come from its `@writeOnce` annotations (`Immutabl
 
 ### Parameter Coercion (Direct-Cypher Path)
 
-Values passing through `BatchNodeQueries` are coerced to driver-native types automatically. Consumers hand-building Cypher parameters use the same chokepoint directly:
+Values passing through `BatchNodeQueries` are read in their one form (`instance.ScalarOf`) and then coerced to driver-native types automatically. Consumers hand-building Cypher parameters use the coercion step directly; it does not read the form, so it judges a pointer or a named type as the value it is, not as the scalar it holds:
 
 ```go
 v, err := neo4jAdapter.Coerce(constraint, raw)   // one value against one constraint
@@ -204,8 +204,8 @@ before write time.
 
 ### Diffing Against a Live Database
 
-Both diffs are scoped by an `*OwnedLabels` — the exact set of labels the adapter
-emits for the schema. Build it once and pass it to both halves. The trailing
+Both diffs are scoped by an `*OwnedLabels` — the labels the schema owns, a
+superset of those the adapter emits for it. Build it once and pass it to both halves. The trailing
 variadic argument is the **other** side's remote objects: index and constraint
 names share one Neo4j namespace, and every emitted statement carries
 `IF NOT EXISTS`, so a declaration whose name the database already holds is a
@@ -293,10 +293,10 @@ A write reports through an `error`, not a `diag.Result`, so the adapters carry s
 
 | Sentinel | Adapter | Meaning |
 | -------- | ------- | ------- |
-| `csv.ErrUnrepresentable` | CSV | The snapshot holds a value CSV cannot write so that its own parser reads it back unchanged: a composed child, a lone all-empty association, a cell holding a CR LF, a list of one empty element, a null list element, a composite value (a map, an array, a pointer or a struct) |
+| `csv.ErrUnrepresentable` | CSV | The snapshot holds a value CSV cannot write so that its own parser reads it back unchanged: a composed child, a lone all-empty association, a cell holding a CR LF, a list of one empty element, a null list element, a value no column renders (a value of no form, such as a map, an array, a struct, a channel or a pointer to one, or a time or a UUID its column does not render), a string that is not valid UTF-8, a number its parser does not read back as a number (a `NaN`, an infinity, a `json.Number` whose text is no number literal, is empty, or no finite `float64` holds) |
 | `csv.ErrConfig` | CSV | The adapter holds a setting it cannot use: a list separator the parser could not find again, or a delimiter `encoding/csv` refuses. Refused before any writer is requested. The parse-side twin is `E_CSV_CONFIG` |
 | `csv.ErrNilSnapshot`, `json.ErrNilResult` | CSV, JSON | A write method received a nil snapshot |
-| `json.ErrUnrepresentable` | JSON | The snapshot holds a value JSON cannot write: a non-finite float (NaN or an infinity) at any depth, which a validated `Float` never is, or a Go value `encoding/json` refuses; a `json.Number` whose text is no number literal is refused by the encoder unmarked |
+| `json.ErrUnrepresentable` | JSON | The snapshot holds a value JSON cannot write as itself: a non-finite float (NaN or an infinity) at any depth, which a validated `Float` never is; a string that is not valid UTF-8 at any depth; a `json.Number` whose text is no number literal, is empty, or no finite `float64` holds; a `time.Time` outside a `Timestamp` or a `Date`, a `uuid.UUID` outside a `UUID`, or a time at its kind whose text does not read back, such as one outside years 0 to 9999; or a value that is no scalar, list or string-keyed map (`instance.ScalarOf`) |
 
 An I/O failure and a cancellation match none of these classes.
 

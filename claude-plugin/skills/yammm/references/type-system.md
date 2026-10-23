@@ -94,9 +94,9 @@ Date-time value with optional format specification.
 
 **Syntax:** `Timestamp` or `Timestamp["format"]`
 
-- Default format is RFC3339: `"2006-01-02T15:04:05Z07:00"`
+- Default format is RFC 3339: a string is read as `"2006-01-02T15:04:05Z07:00"`, fractional seconds included, and stored as `"2006-01-02T15:04:05.999999999Z07:00"`
 - Format string follows Go time formatting conventions
-- Accepts a string or a `time.Time`; **stores the string**, rendered through the declared format when there is one and through RFC 3339 with nanoseconds otherwise
+- Accepts a string or a `time.Time`; **stores the string**, rendered through the declared format when there is one and through RFC 3339 with nanoseconds otherwise; a `time.Time` whose stored text that rule refuses is refused, such as one outside years 0 to 9999
 - A declared format that cannot represent an instant (no zone, no fraction, or neither) loses what it omits and draws `W_TIMESTAMP_LOSSY_FORMAT` at schema load
 
 ```yammm-snippet
@@ -110,7 +110,7 @@ Date value without a time component. No parameters.
 
 **Syntax:** `Date`
 
-- Accepts a `"YYYY-MM-DD"` string or a `time.Time`; **stores the string**. A `time.Time` truncates to its calendar day **in its own location**, so 00:30 `+02:00` is the 19th and the same instant at 22:30 `Z` is the 18th
+- Accepts a `"YYYY-MM-DD"` string or a `time.Time`; **stores the string**. A `time.Time` truncates to its calendar day **in its own location**, so 00:30 `+02:00` is the 19th and the same instant at 22:30 `Z` is the 18th; one whose text is no `YYYY-MM-DD` date, such as one outside years 0 to 9999, is refused
 
 ### UUID
 
@@ -127,8 +127,8 @@ Fixed-dimension numeric vector for embeddings, coordinates, etc.
 **Syntax:** `Vector[dimensions]`
 
 - Dimensions must be a positive integer
-- Accepts float slices/arrays (`[]float32`/`[]float64`)
-- NaN, Inf, and non-float elements rejected
+- Accepts a Go slice of numbers: `[]float64`, `[]float32`, an integer slice such as `[]int`, a `[]json.Number`, `[]any` (what a JSON decoder produces), or a named type over one of them. Each element is stored as a `float64`. A Go array and a pointer to a slice are refused
+- NaN, Inf, and non-numeric elements rejected
 - Cannot be a primary key
 - Cannot be used in relationship properties
 

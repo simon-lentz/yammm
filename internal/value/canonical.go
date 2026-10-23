@@ -61,7 +61,11 @@ func Canonical(val any, c schema.Constraint) (any, error) {
 func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 	layout := timestampLayout(c)
 	if t, ok := val.(time.Time); ok {
-		return t.Format(layout), nil
+		s, readsBack := TimestampText(t, c)
+		if !readsBack {
+			return val, fmt.Errorf("value: a time.Time renders as %q, which is no timestamp the layout reads back", s)
+		}
+		return s, nil
 	}
 	// The string form is whatever GetString reads, as the check side accepts
 	// it: a carrier the check passes is one this side renders.
@@ -74,6 +78,23 @@ func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 		return val, err
 	}
 	return t.Format(layout), nil
+}
+
+// TimestampText returns t in the text a Timestamp c stores, and reports
+// whether that text reads back under the rule a string at c is checked by. A
+// year outside 0 to 9999, for one, renders as text no layout reads back.
+func TimestampText(t time.Time, c schema.Constraint) (string, bool) {
+	s := t.Format(timestampLayout(c))
+	_, err := parseTimestamp(s, c)
+	return s, err == nil
+}
+
+// DateText returns t in the text a Date stores, and reports whether that text
+// reads back as a date. A year outside 0 to 9999 renders as text that does not.
+func DateText(t time.Time) (string, bool) {
+	s := t.Format(time.DateOnly)
+	_, err := time.Parse(time.DateOnly, s)
+	return s, err == nil
 }
 
 // timestampLayout returns the declared Go layout, or RFC 3339 with fractional
@@ -136,7 +157,11 @@ func canonicalUUID(val any) (any, error) {
 // three kinds read alike, not because a second spelling is waiting for it.
 func canonicalDate(val any) (any, error) {
 	if t, ok := val.(time.Time); ok {
-		return t.Format(time.DateOnly), nil
+		s, readsBack := DateText(t)
+		if !readsBack {
+			return val, fmt.Errorf("value: a time.Time renders as %q, which is no YYYY-MM-DD date", s)
+		}
+		return s, nil
 	}
 	s, ok := GetString(val)
 	if !ok {

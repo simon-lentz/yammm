@@ -31,8 +31,9 @@
 //
 // This package is the single authority on what a value IS. A predeclared type
 // is answered by a type switch; anything else falls back to its underlying
-// kind, so a pointer takes the strata and the extracted value of what it points
-// at, and a named scalar (type MyInt int) takes those of its base. The fallback
+// kind. A pointer is read through, at most 64 deep ([Deref]), to the strata and
+// value of what it points at, and a longer chain, as one that points to itself
+// is, has neither; a named scalar (type MyInt int) takes those of its base. The fallback
 // runs only when the type switch misses, so canonical input pays nothing for it.
 //
 // The named-type rule is not a convenience. adapter/gogen emits
@@ -137,7 +138,7 @@
 //	internal/value  ──imports──▶  immutable, schema, github.com/google/uuid
 //
 // Comparison and kind detection depend on stdlib and immutable; [Canonical] is what
-// reaches schema and github.com/google/uuid, because a canonical form is
-// defined by a constraint. The edge is one-directional: schema does not import
+// reaches schema, because a canonical form is defined by a constraint, and it
+// and [Scalar] reach github.com/google/uuid, whose UUID each reads as itself. The edge is one-directional: schema does not import
 // this package, and adding that edge would create a cycle.
 package value

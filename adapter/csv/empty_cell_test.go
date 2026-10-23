@@ -895,11 +895,11 @@ func TestWriters_AValueACellCannotSpellIsRefused(t *testing.T) {
 		samples        any
 	}{
 		{"a null list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", nil}},
-		{"a map value", "a map: a map, an array, a pointer or a struct has no spelling", map[string]any{"at": "2026-08-19T13:00:00Z"}},
-		{"a map list element", "list element 0: a map: a map, an array", []any{map[string]any{"at": "x"}}},
-		{"an int-keyed map", "a value of type map[int]interface {}: a map, an array", map[int]any{1: "x"}},
-		{"an array", "a value of type [2]string: a map, an array", [2]string{"a", "b"}},
-		{"a struct", "a value of type struct { A int }: a map, an array", struct{ A int }{1}},
+		{"a map value", "a map: a value no column renders, such as a map, an array, a struct, or a time or a UUID its column does not render, has no spelling", map[string]any{"at": "2026-08-19T13:00:00Z"}},
+		{"a map list element", "list element 0: a map: a value no column renders", []any{map[string]any{"at": "x"}}},
+		{"an int-keyed map", "a value of type map[int]interface {}: a value no column renders", map[int]any{1: "x"}},
+		{"an array", "a value of type [2]string: a value no column renders", [2]string{"a", "b"}},
+		{"a struct", "a value of type struct { A int }: a value no column renders", struct{ A int }{1}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

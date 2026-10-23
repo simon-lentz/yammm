@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
@@ -358,9 +360,9 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		segs := make([]string, len(edges))
 		for j, e := range edges {
 			raw := e.Target().PrimaryKey().Get(i).Unwrap()
-			text, ok := scalarCell(canonicalOrRaw(raw, pk.Constraint()))
-			if !ok {
-				return fmt.Errorf("csv adapter: association %q: target key component %d, of type %T: %w", rel.Name(), i, raw, errNoCellSpelling)
+			text, err := cellText(canonicalOrRaw(raw, pk.Constraint()))
+			if err != nil {
+				return fmt.Errorf("csv adapter: association %q: target key component %d, of type %T: %w", rel.Name(), i, raw, err)
 			}
 			segs[j] = escapeListElem(text, a.config.listSep)
 		}
@@ -373,9 +375,9 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		segs := make([]string, len(edges))
 		for j, e := range edges {
 			if v, ok := e.Properties().Get(p.Name()); ok && !v.IsNil() {
-				text, ok := scalarCell(canonicalOrRaw(v.Unwrap(), p.Constraint()))
-				if !ok {
-					return fmt.Errorf("csv adapter: association %q: edge property %q, of type %T: %w", rel.Name(), p.Name(), v.Unwrap(), errNoCellSpelling)
+				text, err := cellText(canonicalOrRaw(v.Unwrap(), p.Constraint()))
+				if err != nil {
+					return fmt.Errorf("csv adapter: association %q: edge property %q, of type %T: %w", rel.Name(), p.Name(), v.Unwrap(), err)
 				}
 				segs[j] = escapeListElem(text, a.config.listSep)
 			}
@@ -391,33 +393,58 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 	return refusal.New(ErrUnrepresentable, "csv adapter: association %q: its target's key and every edge property render empty, so its columns would read back as no association", rel.Name())
 }
 
+// cellText renders one scalar value as [scalarCell] renders it, or returns the
+// refusal it owes: [errNoCellSpelling] for a value no cell spells,
+// [errInvalidUTF8] for text that is not valid UTF-8, and [errUnreadNumber] for
+// a float or a json.Number whose cell [floatFromCell] does not read. A Float
+// column reads every number an Integer column reads, so a cell it refuses
+// reads back as a number in no column.
+func cellText(v any) (string, error) {
+	text, unjudged, ok := scalarCell(v)
+	if !ok {
+		return "", errNoCellSpelling
+	}
+	if !utf8.ValidString(text) {
+		return "", errInvalidUTF8
+	}
+	if unjudged {
+		if _, err := floatFromCell(text); err != nil {
+			return "", errUnreadNumber
+		}
+	}
+	return text, nil
+}
+
 // scalarCell renders one scalar value as cell text. A finite float carries a
 // decimal point whatever constraint holds it, as the JSON and .ys writers mark
 // one: a whole float under an Integer is written 5.0, which the Integer column
 // refuses on the way back, rather than 5, which it would read as the integer
 // the snapshot never held. A cell carries no type, so a String column reads
-// the same float back as the text 5.0. It reports false for a value no cell
-// spells: a map, an array, a pointer, a struct or another composite a
-// bypass-built snapshot can hold.
-func scalarCell(v any) (string, bool) {
+// the same float back as the text 5.0. unjudged reports a number whose text
+// may be none the parser reads: a float, which can be a NaN or an infinity,
+// and a json.Number, whose text is its cell; an integer's digits always read.
+// ok is false for a value no cell spells: a map, an array, a struct or another
+// value that is no scalar, which a bypass-built snapshot can hold.
+func scalarCell(v any) (text string, unjudged, ok bool) {
 	if v == nil {
-		return "", true
+		return "", false, true
 	}
 	switch rv := reflect.ValueOf(v); rv.Kind() {
 	case reflect.String:
-		return rv.String(), true
+		_, unjudged = v.(json.Number)
+		return rv.String(), unjudged, true
 	case reflect.Bool:
-		return strconv.FormatBool(rv.Bool()), true
+		return strconv.FormatBool(rv.Bool()), false, true
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(rv.Int(), 10), true
+		return strconv.FormatInt(rv.Int(), 10), false, true
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return strconv.FormatUint(rv.Uint(), 10), true
+		return strconv.FormatUint(rv.Uint(), 10), false, true
 	case reflect.Float32:
-		return floatCell(rv.Float(), 32), true
+		return floatCell(rv.Float(), 32), true, true
 	case reflect.Float64:
-		return floatCell(rv.Float(), 64), true
+		return floatCell(rv.Float(), 64), true, true
 	}
-	return "", false
+	return "", false, false
 }
 
 // floatCell writes f in plain decimal notation at bitSize, with ".0" appended
@@ -430,13 +457,19 @@ func floatCell(f float64, bitSize int) string {
 	return s
 }
 
-// canonicalOrRaw renders raw in the form its constraint stores, and returns it
-// untouched when the constraint cannot render it. An export has no diagnostic
-// channel, so one malformed cell must not fail the whole file.
+// canonicalOrRaw renders raw in the form its constraint stores, after reading
+// it in the one form every writer writes ([instance.ScalarOf]), and returns
+// that form when the constraint cannot render it. An export has no diagnostic
+// channel, so one malformed cell must not fail the whole file. A value of no
+// such form returns as it is, which [cellText] refuses as no cell spelling.
 func canonicalOrRaw(raw any, c schema.Constraint) any {
-	canonical, err := instance.CanonicalValue(raw, c)
-	if err != nil {
+	held, ok := instance.ScalarOf(raw)
+	if !ok {
 		return raw
+	}
+	canonical, err := instance.CanonicalValue(held, c)
+	if err != nil {
+		return held
 	}
 	return canonical
 }
@@ -446,10 +479,22 @@ func canonicalOrRaw(raw any, c schema.Constraint) any {
 // for a List<String>, an empty list for a List<List<T>> — or is refused. It carries [ErrUnrepresentable] and keeps its own text.
 var errNullListElement = refusal.New(ErrUnrepresentable, "a null list element has no spelling in a cell, so the element would not survive the round trip")
 
-// errNoCellSpelling refuses a value the list grammar has no spelling for: a
-// map, an array, a pointer, a struct. It carries [ErrUnrepresentable] and
+// errNoCellSpelling refuses a value the list grammar has no spelling for: one
+// no column renders, such as a map, an array or a struct, a pointer to one, or
+// a time or a UUID its column does not render. It carries [ErrUnrepresentable] and
 // keeps its own text.
-var errNoCellSpelling = refusal.New(ErrUnrepresentable, "a map, an array, a pointer or a struct has no spelling in a cell, so the value would not survive the round trip")
+var errNoCellSpelling = refusal.New(ErrUnrepresentable, "a value no column renders, such as a map, an array, a struct, or a time or a UUID its column does not render, has no spelling in a cell, so the value would not survive the round trip")
+
+// errInvalidUTF8 refuses a string that is not valid UTF-8: a cell would carry
+// its bytes, and the validator refuses the row that reads them back. It carries
+// [ErrUnrepresentable] and keeps its own text.
+var errInvalidUTF8 = refusal.New(ErrUnrepresentable, "a string that is not valid UTF-8 reads back as a value the validator refuses, so the value would not survive the round trip")
+
+// errUnreadNumber refuses a number whose cell no column of this adapter's
+// parser reads as a number: a NaN, an infinity, and a json.Number whose text
+// is no JSON number literal or spells a number no finite float64 holds. It
+// carries [ErrUnrepresentable] and keeps its own text.
+var errUnreadNumber = refusal.New(ErrUnrepresentable, "a number whose cell this adapter reads back as a number in no column, so the value would not survive the round trip")
 
 // errListOfOneEmptyElement refuses a list whose one element renders as "": the
 // list grammar writes [""] and [] alike, so the list would read back as an
@@ -471,9 +516,9 @@ func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) (strin
 	s, ok := val.Slice()
 	if !ok {
 		raw := val.Unwrap()
-		text, ok := scalarCell(canonicalOrRaw(raw, c))
-		if !ok {
-			return "", fmt.Errorf("a value of type %T: %w", raw, errNoCellSpelling)
+		text, err := cellText(canonicalOrRaw(raw, c))
+		if err != nil {
+			return "", fmt.Errorf("a value of type %T: %w", raw, err)
 		}
 		return text, nil
 	}

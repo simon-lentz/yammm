@@ -9,11 +9,14 @@ import (
 	"math"
 	"slices"
 	"time"
+	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -335,7 +338,11 @@ func (a *Adapter) BatchEdgeQueries(
 			}
 			if hasProps {
 				if edge.HasProperties() {
-					relProps, err := coerceRelProps(edge.Properties().Clone(), rel)
+					held := edge.Properties().Clone()
+					if k, err := formProps(held, relConstraint(rel)); err != nil {
+						return nil, fmt.Errorf("relation %q: property %q: %w", sig.relType, k, err)
+					}
+					relProps, err := coerceRelProps(held, rel)
 					if err != nil {
 						return nil, fmt.Errorf("relation %q: %w", sig.relType, err)
 					}
@@ -378,28 +385,164 @@ func (a *Adapter) BatchEdgeQueries(
 // the failure is reproducible rather than map-iteration-order dependent. The
 // output map is independent of key order (maps are unordered); only error
 // selection is affected.
+//
+// Every value is first read in its one form, declared or not, and a value
+// [heldForm] refuses is an error too.
 func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[string]any, error) {
 	raw := props.Clone()
-	if schemaType == nil {
-		return raw, nil
-	}
-
 	for _, key := range slices.Sorted(maps.Keys(raw)) {
 		val := raw[key]
 		if val == nil {
 			continue
 		}
-		prop, found := schemaType.Property(key)
-		if !found {
-			continue
+		c := constraintof.Property(schemaType, key)
+		val, err := heldForm(val, c)
+		if err != nil {
+			return nil, fmt.Errorf("property %q: %w", key, err)
 		}
-		cv, err := coerceValue(prop.Constraint(), val)
+		cv, err := coerceValue(c, val)
 		if err != nil {
 			return nil, fmt.Errorf("property %q: %w", key, err)
 		}
 		raw[key] = cv
 	}
 	return raw, nil
+}
+
+// errInvalidText refuses a string that is not valid UTF-8. The driver sends a
+// string's bytes unchecked and the server stores U+FFFD for each invalid
+// sequence with no error, so the node would hold another value than the
+// snapshot does, and two strings that differ in invalid bytes alone would be
+// stored as one. A validated string is valid UTF-8, so only a bypass-built
+// snapshot holds such a string.
+var errInvalidText = errors.New("holds a string that is not valid UTF-8, which the server would store with U+FFFD in place of each invalid sequence")
+
+// errNoForm refuses a value that is no scalar, list or string-keyed map: the
+// one form every writer of this module writes ([instance.ScalarOf]). Only a
+// bypass-built snapshot holds one.
+var errNoForm = errors.New("holds a value that is no scalar, list or string-keyed map, which no writer of this module writes as itself")
+
+// errUnrendered refuses a time.Time or a uuid.UUID at a position whose
+// constraint does not render it: a Timestamp or Date renders a time, a UUID
+// renders a uuid.UUID. Only a bypass-built snapshot holds one.
+var errUnrendered = errors.New("holds a time or a UUID its constraint does not render, which no writer of this module writes as itself")
+
+// formProps rewrites each value of props in its one form ([heldForm]) at the
+// constraint constraintOf returns for its name, and returns the least name
+// whose value is refused, with its fault. A batch of sound rows allocates
+// nothing for the check.
+func formProps(props map[string]any, constraintOf func(string) schema.Constraint) (string, error) {
+	var bad string
+	var badErr error
+	for k, v := range props {
+		f, err := heldForm(v, constraintOf(k))
+		if err != nil {
+			if badErr == nil || k < bad {
+				bad, badErr = k, err
+			}
+			continue
+		}
+		props[k] = f
+	}
+	return bad, badErr
+}
+
+// heldForm returns v in the one form every writer writes ([instance.ScalarOf]),
+// the driver's own value for each scalar, at c, the constraint v's position
+// declares, or nil. A list and a string-keyed map are read element by element;
+// one nested past [maxFormDepth], as a cycle is, has no form ([errNoForm]). A
+// string or a map's key that is not valid UTF-8, which the driver sends as its
+// bytes, is [errInvalidText]; a time or a UUID c does not render is
+// [errUnrendered]. A uuid.UUID is returned as its text, which the driver sends.
+func heldForm(v any, c schema.Constraint) (any, error) {
+	f, _, err := heldFormAt(v, c, 0)
+	return f, err
+}
+
+// maxFormDepth bounds how deep [heldForm] reads.
+const maxFormDepth = 256
+
+// heldFormAt is [heldForm] at a depth. It reports whether the form differs
+// from x, so a list or a map is copied only when an element changed: a value
+// can share storage with the snapshot.
+func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
+	if depth > maxFormDepth {
+		return nil, false, errNoForm
+	}
+	switch t := x.(type) {
+	case nil, bool, int64, float64:
+		return x, false, nil
+	case string:
+		if !utf8.ValidString(t) {
+			return nil, false, errInvalidText
+		}
+		return x, false, nil
+	case []any:
+		elem := constraintof.Element(c)
+		out := t
+		for i, e := range t {
+			f, changed, err := heldFormAt(e, elem, depth+1)
+			if err != nil {
+				return nil, false, err
+			}
+			if changed {
+				if len(out) > 0 && &out[0] == &t[0] {
+					out = slices.Clone(t)
+				}
+				out[i] = f
+			}
+		}
+		if len(out) == 0 || &out[0] == &t[0] {
+			return x, false, nil
+		}
+		return out, true, nil
+	case map[string]any:
+		var out map[string]any
+		for k, e := range t {
+			if !utf8.ValidString(k) {
+				return nil, false, errInvalidText
+			}
+			f, changed, err := heldFormAt(e, nil, depth+1)
+			if err != nil {
+				return nil, false, err
+			}
+			if changed {
+				if out == nil {
+					out = maps.Clone(t)
+				}
+				out[k] = f
+			}
+		}
+		if out == nil {
+			return x, false, nil
+		}
+		return out, true, nil
+	}
+	held, ok := instance.ScalarOf(x)
+	if !ok {
+		return nil, false, errNoForm
+	}
+	switch h := held.(type) {
+	case string:
+		if !utf8.ValidString(h) {
+			return nil, false, errInvalidText
+		}
+	case time.Time:
+		if !renders(c, schema.KindTimestamp, schema.KindDate) {
+			return nil, false, errUnrendered
+		}
+	case uuid.UUID:
+		if !renders(c, schema.KindUUID) {
+			return nil, false, errUnrendered
+		}
+		return h.String(), true, nil
+	}
+	return held, true, nil
+}
+
+// renders reports whether c, resolved through its aliases, is of one of kinds.
+func renders(c schema.Constraint, kinds ...schema.ConstraintKind) bool {
+	return c != nil && slices.Contains(kinds, schema.ResolveAlias(c).Kind())
 }
 
 // coerceSlice converts a []any to a concrete typed slice using the constraint's
@@ -570,7 +713,10 @@ func widenInt64(v any) (int64, bool) {
 
 // CoerceRelProps returns a copy of props with each property rel declares
 // coerced to the driver-native type its constraint requires, through the same
-// [Coerce] rule the adapter's own write path applies to edge properties. props
+// [Coerce] rule the adapter's own write path applies to edge properties once it
+// has read each value in its one form
+// ([github.com/simon-lentz/yammm/instance.ScalarOf]), which CoerceRelProps does
+// not do. props
 // is never mutated and the result shares no top-level storage with it; a nil
 // rel, or one with no declared properties, returns a copy with every value
 // unchanged, and a nil map returns nil. Keys are processed in sorted order, so
@@ -622,6 +768,21 @@ func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 	return props, nil
 }
 
+// relConstraint returns the constraint rel declares for a property name, or
+// nil for a name it does not declare or a nil rel.
+func relConstraint(rel *schema.Relation) func(string) schema.Constraint {
+	return func(name string) schema.Constraint {
+		if rel == nil {
+			return nil
+		}
+		p, ok := rel.Property(name)
+		if !ok {
+			return nil
+		}
+		return p.Constraint()
+	}
+}
+
 // coerceKey converts one primary-key value to the driver-native type its
 // declared constraint requires, using the same [coerceValue] chokepoint the
 // property path uses.
@@ -629,11 +790,17 @@ func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 // A MERGE binds the key and SETs the property from two different maps, so a key
 // left raw where its property is coerced makes the two carry different Go types
 // for every transforming kind (Date, Timestamp, Float): the pattern matches no
-// stored node, and each write inserts another duplicate. A shape carrying no
-// constraint for the key passes the value through, which is what a shape that
-// never declared the key's type can honestly do.
+// stored node, and each write inserts another duplicate. The key is read in its
+// one form first ([heldForm]); a shape carrying no constraint for the key then
+// passes that form through, which is what a shape that never declared the
+// key's type can honestly do.
 func coerceKey(shape *NodeShape, name string, raw any) (any, error) {
-	cv, err := coerceValue(shape.keyConstraints[name], raw)
+	c := shape.keyConstraints[name]
+	held, err := heldForm(raw, c)
+	if err != nil {
+		return nil, fmt.Errorf("primary key %q: %w", name, err)
+	}
+	cv, err := coerceValue(c, held)
 	if err != nil {
 		return nil, fmt.Errorf("primary key %q: %w", name, err)
 	}

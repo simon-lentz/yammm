@@ -65,11 +65,12 @@ func TypeStrata(a any) int {
 // pointers first. It is the fallback the predeclared type switch cannot answer:
 // a pointer, or a named type over a predeclared base.
 func strataOfKind(rv reflect.Value) int {
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
-			return NilStrata
-		}
-		rv = rv.Elem()
+	rv, ok := Deref(rv)
+	if !ok {
+		return InvalidStrata
+	}
+	if !rv.IsValid() {
+		return NilStrata
 	}
 	switch rv.Kind() {
 	case reflect.Bool:

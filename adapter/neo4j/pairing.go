@@ -8,7 +8,8 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// OwnedLabels is the exact set of Neo4j labels an adapter emits for one schema.
+// OwnedLabels is the set of Neo4j labels one schema owns: every named,
+// non-abstract member type's label, a superset of the labels an adapter emits for it.
 // Construct via [Adapter.OwnedLabels]; the zero value and a nil pointer own
 // nothing.
 //

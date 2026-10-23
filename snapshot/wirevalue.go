@@ -7,6 +7,7 @@ import (
 	"math"
 	"reflect"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
@@ -107,13 +108,14 @@ func wireProps(props immutable.Properties, t *schema.Type) (map[string]any, stri
 	m := props.Clone()
 	bad := ""
 	for name, v := range m {
-		if t != nil {
-			if prop, ok := t.Property(name); ok {
+		v, ok := wireForm(v)
+		if ok && t != nil {
+			if prop, found := t.Property(name); found {
 				v = wireValue(v, prop.Constraint())
-				m[name] = v
 			}
 		}
-		if !wireWritable(v) && (bad == "" || name < bad) {
+		m[name] = v
+		if (!ok || !wireWritable(v)) && (bad == "" || name < bad) {
 			bad = name
 		}
 	}
@@ -128,29 +130,73 @@ func wireEdgeProps(props immutable.Properties, rel *schema.Relation) (map[string
 	m := props.Clone()
 	bad := ""
 	for name, v := range m {
-		if rel != nil {
-			if p, ok := rel.Property(name); ok {
+		v, ok := wireForm(v)
+		if ok && rel != nil {
+			if p, found := rel.Property(name); found {
 				v = wireValue(v, p.Constraint())
-				m[name] = v
 			}
 		}
-		if !wireWritable(v) && (bad == "" || name < bad) {
+		m[name] = v
+		if (!ok || !wireWritable(v)) && (bad == "" || name < bad) {
 			bad = name
 		}
 	}
 	return m, bad
 }
 
-// wireWritable reports whether encoding/json writes v, a value wireValue
-// returned: no JSON number spells a non-finite float, and any other Go value is
-// judged by encoding/json itself, as adapter/json judges the same value.
+// wireForm reads a cloned value in the one form every writer writes: a list
+// and a string-keyed map element by element, every other value through
+// [value.Scalar]. It reports false for a value of no such form, which no
+// writer writes as itself.
+func wireForm(v any) (any, bool) {
+	switch t := v.(type) {
+	case []any:
+		for i, e := range t {
+			f, ok := wireForm(e)
+			if !ok {
+				return nil, false
+			}
+			t[i] = f
+		}
+		return t, true
+	case map[string]any:
+		for k, e := range t {
+			f, ok := wireForm(e)
+			if !ok {
+				return nil, false
+			}
+			t[k] = f
+		}
+		return t, true
+	}
+	return value.Scalar(v)
+}
+
+// wireWritable reports whether encoding/json writes v, a value [wireForm] read
+// and wireValue returned, as the value it is: no JSON number spells a
+// non-finite float, encoding/json writes each byte of a string that is not
+// valid UTF-8 as U+FFFD, a map's key included, and an empty json.Number as 0,
+// which Load reads back as the integer 0. A time.Time or a uuid.UUID is written
+// only where its constraint rendered it as text, so one left is refused.
 func wireWritable(v any) bool {
 	switch t := v.(type) {
-	case nil, string, bool, int64:
+	case nil, bool, int64, uint64:
 		return true
+	case string:
+		return utf8.ValidString(t)
+	case json.Number:
+		if t == "" {
+			return false
+		}
+		_, err := json.Marshal(t)
+		return err == nil
 	case wireFloat:
 		return !math.IsNaN(float64(t)) && !math.IsInf(float64(t), 0)
 	case wireFloat32:
+		return !math.IsNaN(float64(t)) && !math.IsInf(float64(t), 0)
+	case float64:
+		return !math.IsNaN(t) && !math.IsInf(t, 0)
+	case float32:
 		return !math.IsNaN(float64(t)) && !math.IsInf(float64(t), 0)
 	case []any:
 		for _, e := range t {
@@ -160,15 +206,14 @@ func wireWritable(v any) bool {
 		}
 		return true
 	case map[string]any:
-		for _, e := range t {
-			if !wireWritable(e) {
+		for k, e := range t {
+			if !utf8.ValidString(k) || !wireWritable(e) {
 				return false
 			}
 		}
 		return true
 	}
-	_, err := json.Marshal(v)
-	return err == nil
+	return false
 }
 
 // wireValue rewrites one cloned value under its resolved constraint kind. A

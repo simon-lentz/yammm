@@ -876,7 +876,7 @@ func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance, canon *can
 }
 
 // checkKey rejects an empty key, a key whose arity disagrees with the type's
-// declared primary keys, a component [ParseKey] cannot read back, a key
+// declared primary keys, a component [unreadableComponent] refuses, a key
 // property that is absent or null, and a component that disagrees with its key property. A key states what the
 // instance's own properties state, so a key property the instance does not
 // hold leaves the key unstated. Every constructor of a snapshot shares it, so
@@ -888,7 +888,7 @@ func checkKey(typ *schema.Type, key immutable.Key, property func(string) (immuta
 	if declared := keyArity(typ); key.Len() != declared {
 		return fmt.Errorf("primary key has %d components; type declares %d", key.Len(), declared)
 	}
-	if i := unreadableComponent(key); i >= 0 {
+	if i := unreadableComponent(typ, key); i >= 0 {
 		return fmt.Errorf("primary key component %d is not a scalar graph.ParseKey reads back", i)
 	}
 	i := 0

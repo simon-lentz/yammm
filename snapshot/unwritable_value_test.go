@@ -115,7 +115,7 @@ func TestMarshal_RefusesAnUnwritableValueByName(t *testing.T) {
 		{"non-finite float32 at a Float property", unwritableEmployee(t, s, map[string]any{"rating": float32(math.NaN())}, "c1", fine), "rating", ""},
 		{"non-finite float inside a list", unwritableEmployee(t, s, map[string]any{"scores": []any{1.5, math.Inf(1)}}, "c1", fine), "scores", ""},
 		{"non-finite float inside a map", unwritableEmployee(t, s, map[string]any{"note": map[string]any{"x": math.Inf(-1)}}, "c1", fine), "note", ""},
-		{"a Go value encoding/json refuses", unwritableEmployee(t, s, map[string]any{"note": make(chan int)}, "c1", fine), "note", ""},
+		{"a value of no form", unwritableEmployee(t, s, map[string]any{"note": make(chan int)}, "c1", fine), "note", ""},
 		{"non-finite float at an edge property", unwritableEmployee(t, s, nil, "c1", map[string]any{"weight": math.Inf(1)}), "weight", "WORKS_AT"},
 		{"non-finite float at an unresolved record's property", unwritableEmployee(t, s, nil, "c9", map[string]any{"weight": math.Inf(-1)}), "weight", "WORKS_AT"},
 	} {

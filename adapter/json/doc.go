@@ -26,18 +26,32 @@
 // unresolved edge is not written, so an invariant that reads its relation, even
 // an optional one, can fail on the way back; persist such a snapshot in the .ys
 // format when its edges must survive. Any other snapshot is written as held —
-// each value in the form its constraint stores where the constraint renders it,
-// a nil value as null at a property or inside a list — and the validator judges
-// the result.
+// each value in its one form, in the form its constraint stores where the
+// constraint renders it, a nil value as null at a property, inside a list or
+// as a map's value —
+// save the values the next paragraph refuses, and the validator judges the
+// result.
 //
 // Every constructor of a snapshot holds its structure to what [graph.Graph.Add]
 // builds, so every relation this writer meets renders in a shape its own
-// parser and the validator accept. A value can still have no JSON form: a
-// non-finite float at any depth, which a validated Float never is, or a Go
-// value encoding/json refuses, which only a bypass-built snapshot holds, is
-// refused with an error marked [ErrUnrepresentable], so a caller separates it
-// from an I/O failure without matching the message text. A json.Number that
-// holds no number literal is the exception: it is refused unmarked.
+// parser and the validator accept. A value can still have no JSON form that
+// reads back as itself, and only a snapshot whose values no validator refused
+// at Error holds one (one a bypass constructor built, or one snapshot.Load read
+// without revalidating at Error): a
+// non-finite float at any depth, which a validated Float never is; a string
+// that is not valid UTF-8, a map's key included, which encoding/json would
+// write with U+FFFD in place of each invalid byte; a json.Number whose text is
+// no number literal, is empty, or spells a number no finite float64 holds,
+// where no Integer or Float converts it; a
+// time.Time outside a Timestamp or a Date, or a uuid.UUID outside a UUID,
+// which render them, and a time whose text at its kind does not read back, as a year outside
+// 0 to 9999 does not; and a value of no form every writer of this module writes
+// ([github.com/simon-lentz/yammm/instance.ScalarOf]), such as a struct, an
+// array or a map keyed by no string. A pointer is read as the scalar it points
+// to and a named type as its base value; no value's own MarshalJSON or
+// MarshalText is asked. Each refusal is an error marked [ErrUnrepresentable],
+// so a caller separates it from an I/O failure without matching the message
+// text.
 //
 // Use [WithIndent] for pretty-printed output. The object shape keys instances
 // by the name the entry schema addresses each root type by, and two such names

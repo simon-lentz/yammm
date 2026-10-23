@@ -42,9 +42,9 @@ type IndexDiffResult struct {
 	// verified.
 	Unverified []IndexUnverified
 
-	// Excluded counts the remote indexes that entered no bucket at all, because
-	// the comparison had nothing to say about them: the schema owns no label they
-	// carry, or they are of a shape it cannot declare (TEXT, POINT, a
+	// Excluded counts the remote indexes the diff holds back from its drop
+	// bucket, which can still stand as a drift or unverified entry's Actual: the
+	// schema owns no label they carry, or they are of a shape it cannot declare (TEXT, POINT, a
 	// multi-label FULLTEXT, a relationship index, a constraint's backing
 	// index). See [ConstraintDiffResult.Excluded], which carries the same
 	// meaning and the same reason for existing.

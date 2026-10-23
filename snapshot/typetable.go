@@ -60,7 +60,7 @@ func (e *unwritableValueError) Error() string {
 	if e.relation != "" {
 		where += fmt.Sprintf(" under %q", e.relation)
 	}
-	return fmt.Sprintf("%s: property %q holds a value the wire cannot carry: a non-finite float, or a Go value encoding/json refuses",
+	return fmt.Sprintf("%s: property %q holds a value the wire cannot carry: a non-finite float, a string that is not valid UTF-8, an empty json.Number or one that is no number literal, a time or a UUID its constraint does not render as text that reads back, or a value that is no scalar, list or string-keyed map",
 		where, e.property)
 }
 

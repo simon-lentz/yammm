@@ -221,7 +221,7 @@ func (b *instanceBuilder) checkEdgeProperties(typeName string, rel *schema.Relat
 }
 
 // checkTargetKeys reports each target key whose arity disagrees with the
-// target type's primary key, or whose component [ParseKey] cannot read back. No instance
+// target type's primary key, or whose component [unreadableComponent] refuses. No instance
 // can ever carry such a key, so the record would stay unresolved for the life
 // of the graph.
 func (b *instanceBuilder) checkTargetKeys(typeName string, rel *schema.Relation, edgeData *instance.ValidEdgeData) {
@@ -235,7 +235,7 @@ func (b *instanceBuilder) checkTargetKeys(typeName string, rel *schema.Relation,
 		if n := t.TargetKey().Len(); n != declared {
 			msg = fmt.Sprintf("association %q on type %q carries a %d-part target key; the target declares %d",
 				rel.Name(), typeName, n, declared)
-		} else if i := unreadableComponent(t.TargetKey()); i >= 0 {
+		} else if i := unreadableComponent(target, t.TargetKey()); i >= 0 {
 			msg = fmt.Sprintf("association %q on type %q carries a target key whose component %d is not a scalar graph.ParseKey reads back",
 				rel.Name(), typeName, i)
 		}

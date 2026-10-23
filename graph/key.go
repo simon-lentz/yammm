@@ -1,13 +1,20 @@
 package graph
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
+	"time"
+	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/value"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // FormatKey renders primary key components as the JSON array string the
@@ -139,18 +146,56 @@ func decodeKeyArray(s string) ([]any, error) {
 }
 
 // unreadableComponent returns the index of the first component of k that
-// [ParseKey] cannot read back — one rendering as a JSON array or object, or as
-// a number no finite float64 holds — or -1. A string, a bool, an int64 and a
-// finite float64 settle without rendering.
-func unreadableComponent(k immutable.Key) int {
+// [ParseKey] cannot read back as the value it is, or -1: one of no form every
+// writer writes ([value.Scalar]: a struct, an array, a list or a map among
+// them), a string that is not valid UTF-8, each invalid byte of which the
+// rendering writes as U+FFFD, an empty json.Number, which renders as 0, or a
+// number no finite float64 holds. A component whose rendering differs from its
+// form's is refused too: the key's address renders the component through its
+// type's methods, and every writer writes the form. So is a time.Time or a
+// uuid.UUID whose key property's constraint does not render it, which no writer
+// writes. A string, a bool, an int64 and a finite float64 settle without
+// rendering. k has typ's key arity.
+func unreadableComponent(typ *schema.Type, k immutable.Key) int {
+	pks := typ.PrimaryKeysSlice()
 	for i := range k.Len() {
-		v := k.Get(i)
-		switch v.Unwrap().(type) {
-		case string, bool, int64, float64, nil:
+		raw := k.Get(i).Unwrap()
+		switch u := raw.(type) {
+		case string:
+			if !utf8.ValidString(u) {
+				return i
+			}
+			continue
+		case bool, int64, float64, nil:
 			continue
 		}
-		b, err := json.Marshal(v.Clone())
+		held, ok := value.Scalar(raw)
+		if !ok {
+			return i
+		}
+		switch u := held.(type) {
+		case string:
+			if !utf8.ValidString(u) {
+				return i
+			}
+		case json.Number:
+			if u == "" {
+				return i
+			}
+		case time.Time:
+			if !keyRenders(pks[i].Constraint(), schema.KindTimestamp, schema.KindDate) {
+				return i
+			}
+		case uuid.UUID:
+			if !keyRenders(pks[i].Constraint(), schema.KindUUID) {
+				return i
+			}
+		}
+		b, err := json.Marshal(held)
 		if err != nil {
+			return i
+		}
+		if r, err := json.Marshal(raw); err != nil || !bytes.Equal(r, b) {
 			return i
 		}
 		if _, err := ParseKey("[" + string(b) + "]"); err != nil {
@@ -158,4 +203,10 @@ func unreadableComponent(k immutable.Key) int {
 		}
 	}
 	return -1
+}
+
+// keyRenders reports whether c, resolved through its aliases, is of one of
+// kinds: the kinds that render a time.Time or a uuid.UUID as text.
+func keyRenders(c schema.Constraint, kinds ...schema.ConstraintKind) bool {
+	return c != nil && slices.Contains(kinds, schema.ResolveAlias(c).Kind())
 }

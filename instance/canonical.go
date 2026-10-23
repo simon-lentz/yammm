@@ -3,6 +3,7 @@ package instance
 import (
 	"fmt"
 
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -43,4 +44,15 @@ func CanonicalValue(val any, c schema.Constraint) (any, error) {
 		return val, err
 	}
 	return out, nil
+}
+
+// ScalarOf returns v in the one form every writer of this module writes, read
+// through at most 64 pointers and interfaces: a string, a bool, an int64, a uint64, a
+// float32 or a float64 for a value of that kind, a named type as its base value,
+// a json.Number, a time.Time or a uuid.UUID as itself, and nil for any nil. It
+// reports false for every other value, a list and a map included, which a
+// writer walks itself, reading each element through ScalarOf. A writer writes a time.Time only at a Timestamp or a Date, and a uuid.UUID
+// only at a UUID, each of which renders it.
+func ScalarOf(v any) (any, bool) {
+	return value.Scalar(v)
 }

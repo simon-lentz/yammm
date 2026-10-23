@@ -1,12 +1,14 @@
 // Package neo4j generates Neo4j 5 constraint and index DDL, label mappings,
-// graph shape metadata, parameterized write queries, schema inference, and
-// constraint/index drift diffs from yammm schemas and live Neo4j databases.
+// graph shape metadata, parameterized write queries, introspection queries,
+// schema inference, and constraint/index drift diffs from yammm schemas and
+// live Neo4j databases.
 //
 // # Architectural Position
 //
 // The neo4j adapter lives alongside [github.com/simon-lentz/yammm/adapter/json]
 // in the adapter layer. It depends on library packages (schema, graph,
-// immutable, diag, location); library packages never depend on adapters.
+// instance, immutable, diag, location); library packages never depend on
+// adapters.
 //
 // # Neo4j Driver Dependency (Type-Only)
 //
@@ -37,8 +39,9 @@
 // Generation is ALL-OR-NOTHING: any validation error returns (nil, result), so
 // one unemittable property withholds the whole schema's DDL. That is deliberate
 // — a partial script looks complete and silently drops the guarantees it omits —
-// but it means the diagnostic is all the user gets, so each one names the
-// property and the reason.
+// but it means the diagnostic is all the user gets, so each one names what it
+// refuses and why: a property, or for a label collision or an invalid label the
+// type and the label.
 //
 // The one shape a valid schema can hit here is a list whose ELEMENT is itself a
 // collection: List<List<T>>, List<Vector[N]>, or a list of a list-typed alias.
@@ -73,7 +76,8 @@
 // may have been assembled outside those guarantees.
 //
 // Index names are always emitted — {label}_{props}_idx for range,
-// {label}_{prop}_vector_idx for vector — because diff and DROP tooling need
+// {label}_{prop}_vector_idx for vector, {label}_{props}_fulltext_idx for
+// fulltext — because diff and DROP tooling need
 // stable names and this new surface has no unnamed back-compat to preserve.
 // Because statements carry IF NOT EXISTS, two indexes sharing an emitted name
 // would make the database silently skip the second. The readable name is not
@@ -84,8 +88,8 @@
 // it does not cross-check emitted constraint names, whose disjoint suffixes make
 // an index-vs-constraint collision negligible.
 //
-// Unlike constraints, indexes are emitted for every edition: range and vector
-// indexes are core query features on both Community and Enterprise. Abstract
+// Unlike constraints, indexes are emitted for every edition: range, vector and
+// fulltext indexes are core query features on both Community and Enterprise. Abstract
 // types are skipped; part types are not (they receive a label and constraints,
 // so they receive index DDL too). The emitted CREATE VECTOR INDEX ... OPTIONS
 // statement form requires Neo4j 5.15+.
@@ -94,8 +98,9 @@
 //
 // [Adapter.Label] generates namespaced Neo4j labels from schema and type names.
 // [Adapter.DetectLabelCollisions] checks for collisions after sanitization.
-// [SanitizeIdentifier] and [ValidateIdentifier] apply Neo4j naming rules,
-// rejecting reserved keywords with [ErrReservedKeyword].
+// [SanitizeIdentifier] rewrites a name into the characters a Neo4j identifier
+// takes, and [ValidateIdentifier] applies Neo4j's naming rules, rejecting
+// reserved keywords with [ErrReservedKeyword].
 //
 // # Cypher Reserved Words
 //
@@ -128,7 +133,8 @@
 // # Graph Shape
 //
 // [Adapter.ShapeForSchema] converts a schema into a [GraphShape] describing
-// the Neo4j node structure (labels, primary keys, required fields per type).
+// the Neo4j node structure (labels, primary keys, required fields and
+// @writeOnce keys per type).
 // The shape is required input for write query generation.
 //
 // # Write Surface
@@ -142,9 +148,10 @@
 // a shape the adapter did not build carries no key constraints, so merge keys
 // would reach the driver uncoerced while the same properties are coerced from
 // the schema. [GraphShape.Types] is keyed by [schema.TypeID], so two closure
-// types sharing one bare name each get their own label. A snapshot's roots are
-// types the entry schema can name, so a rendered label collision between two of
-// them cannot arise; two SCHEMA names that sanitize alike still can, and
+// types sharing one bare name each get their own label. Two root types render
+// one label only where their sanitized schema and type names compose one
+// label, as two SCHEMA names that sanitize alike do, or a type name holding the
+// separator beside a schema name that ends in what precedes it;
 // [Adapter.ShapeForSchema] refuses that closure.
 //
 // # Composition Ownership
@@ -204,8 +211,9 @@
 //
 // The guarantee does not depend on the caller holding a [schema.Type]: the keys
 // travel on the shape, which every write entry point already receives. Nothing
-// in the write surface removes a key from that set, so there is no way to opt a
-// @writeOnce property back into being rewritten.
+// in the write surface removes a key from that set; a caller that sets
+// [NodeShape.ImmutableKeys] to an empty, non-nil slice on a shape it holds opts that type's @writeOnce
+// properties back into being rewritten.
 //
 // # Cypher Builders
 //
@@ -249,8 +257,10 @@
 //
 // # Diff Scope and Name Blocking
 //
-// Both diff entry points take an [*OwnedLabels] — the exact set of labels this
-// adapter emits for a schema, built once with [Adapter.OwnedLabels] and passed
+// Both diff entry points take an [*OwnedLabels] — the labels a schema owns,
+// every named, non-abstract member type's label, a superset of the labels
+// this adapter emits
+// ([Adapter.OwnedLabels] says which the emitters leave out), built once with [Adapter.OwnedLabels] and passed
 // to both halves:
 //
 //	owned := adapter.OwnedLabels(ctx, s)
@@ -264,9 +274,10 @@
 // a sibling schema name, that satisfies the rule without belonging to the
 // schema. See [OwnedLabels] for what the set covers and what it cannot see.
 //
-// Both results carry an Excluded count — the remote objects that entered NO
-// bucket, because the comparison had nothing to say about them: the schema owns
-// no label they carry, or they are of a kind this configuration cannot declare.
+// Both results carry an Excluded count — the remote objects the diff holds back
+// from its drop bucket: the schema owns no label they carry, or they are of a
+// kind this configuration cannot declare ([RemoteIndex.Declarable] for an
+// index). Such an object can still stand as a drift entry's Actual.
 // It is deliberately not drift; in a database shared with other applications a
 // non-zero count is the normal state. It exists so that "0 to drop" cannot be
 // read as "the database is accounted for": ownership is derived from the schema
@@ -288,8 +299,9 @@
 //
 // [Adapter.DiffConstraints] produces a [ConstraintDiffResult] classifying
 // desired vs. actual constraints into FIVE categories: matched, drifted (a
-// different definition under the same identity, or a name the database already
-// holds), to-create, to-drop, and unverified (present, but the server did not
+// different definition under the same identity, a name the database already
+// holds, or a UNIQUE or NODE KEY declaration whose label and properties a RANGE
+// index already serves under another name), to-create, to-drop, and unverified (present, but the server did not
 // report what was needed to compare it). A caller deciding "is this in sync?"
 // must consult Unverified as well: treating it as matched reports an unchecked
 // constraint as verified.
@@ -324,8 +336,8 @@
 // its name differs too, and drift when it holds the desired index's name. A
 // schema-owned remote index that [RemoteIndex.Declarable] accepts and no
 // declaration matches is reported as a drop — the drift the index feature
-// exists to surface. An owned index it refuses is never a drop: it is counted in [IndexDiffResult.Excluded], a
-// blocker included, unless it is a constraint's backing index that serves a
+// exists to surface. An owned index it refuses is never a drop: it is counted,
+// once per name, in [IndexDiffResult.Excluded], a blocker included, unless it is a constraint's backing index that serves a
 // declaration and serves queries ([RemoteIndex.IsOnline]), which is a match. Drops are reported, never applied.
 //
 // # Configuration
@@ -371,9 +383,6 @@
 // which Neo4j 5.9 added for scalar types and 5.10 for LIST types. With
 // [WithScalarTypeConstraints](false) it targets Neo4j 5.0+.
 // [WithNodeKeyConstraints](true) needs no newer release than the default.
-// Minimum recommended version: Neo4j 5.13+ (fixes the orphaned index
-// bug where interrupted constraint creation leaves an orphaned backing
-// index that blocks subsequent IF NOT EXISTS retries).
 // The emitted CREATE VECTOR INDEX ... OPTIONS statement form (from @vector
 // annotations) requires Neo4j 5.15+.
 //
@@ -396,7 +405,8 @@
 //
 // # Dependencies
 //
-//	adapter/neo4j  ──imports──▶  schema, graph, immutable, diag, location,
+//	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag, location,
 //	                             adapter/internal/constraintof,
+//	                             github.com/google/uuid,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j

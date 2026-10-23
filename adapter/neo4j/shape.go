@@ -114,11 +114,10 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 		schemaID: s.SourceID(),
 	}
 
-	// Defense-in-depth, like [Adapter.DetectLabelCollisions]: the source
-	// registry rejects a duplicated schema name (E_DUPLICATE_SCHEMA), and
-	// [SanitizeIdentifier] is the identity on front-door names, so no
-	// loader-built closure can reach this refusal. It guards construction
-	// paths that bypass the loader.
+	// The source registry rejects a duplicated schema name
+	// (E_DUPLICATE_SCHEMA), but a schema name is a free string, and
+	// [SanitizeIdentifier] maps "geo-regions" and "geo_regions" to one label
+	// prefix, so a loader-built closure reaches this refusal too.
 	seenLabels := make(map[string]schema.TypeID)
 	for t, label := range a.emittableTypes(ctx, s, collector) {
 		if first, dup := seenLabels[label]; dup {

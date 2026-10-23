@@ -16,11 +16,13 @@ type ConstraintDiffResult struct {
 	Match []ConstraintMatch
 
 	// Drift contains constraints present in the database that do not enforce what
-	// the schema declares, and that a CREATE cannot fix. Three producers, so
+	// the schema declares, and that a CREATE cannot fix. Four producers, so
 	// [ConstraintDrift.Actual] is not always a constraint the schema owns or
 	// could declare: a TYPE constraint whose enforced type differs; a constraint
 	// holding a desired constraint's name under a different definition; and a
-	// desired constraint whose name is already taken — there Actual is the
+	// desired constraint whose name is already taken; and a UNIQUE or NODE KEY
+	// declaration a RANGE index on its label and properties already serves under
+	// another name — in the last two Actual is the
 	// blocker, which may be on a label this schema does not own, of a kind it
 	// cannot declare, or an INDEX rather than a constraint. See
 	// [ConstraintDrift.Actual] for how to tell them apart before issuing a DROP.
@@ -46,8 +48,8 @@ type ConstraintDiffResult struct {
 	// folding them into Match would report an unchecked constraint as verified.
 	Unverified []ConstraintUnverified
 
-	// Excluded counts the remote constraints that entered no bucket at all,
-	// because the comparison had nothing to say about them: the schema owns no
+	// Excluded counts the remote constraints the diff holds back from its drop
+	// bucket, which can still stand as a drift entry's Actual: the schema owns no
 	// label they carry, or they are of a kind this configuration cannot declare.
 	//
 	// It exists because the five buckets are a statement about what WAS compared,

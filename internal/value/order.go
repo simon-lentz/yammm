@@ -30,8 +30,8 @@ func sliceAccessor(v any) (int, func(int) any) {
 		}
 	}
 	rv := reflect.ValueOf(v)
-	for rv.Kind() == reflect.Pointer {
-		rv = rv.Elem()
+	if d, ok := Deref(rv); ok && d.IsValid() {
+		rv = d
 	}
 	return rv.Len(), func(i int) any { return rv.Index(i).Interface() }
 }
@@ -360,22 +360,37 @@ func GetInt64(val any) (int64, bool) {
 }
 
 // underlying dereferences val to a non-pointer reflect.Value. It reports false
-// for nil and for a nil pointer, so a caller's fast-path type switch keeps
+// for nil, for a nil pointer and for a chain of more than [maxPointerDepth]
+// pointers, as one that points to itself is, so a caller's fast-path type switch keeps
 // answering for every predeclared type and only a pointer or named type
 // reaches reflect.
 func underlying(val any) (reflect.Value, bool) {
 	if val == nil {
 		return reflect.Value{}, false
 	}
-	rv := reflect.ValueOf(val)
-	for rv.Kind() == reflect.Pointer {
+	rv, _ := Deref(reflect.ValueOf(val))
+	return rv, rv.IsValid()
+}
+
+// Deref follows rv through at most [maxPointerDepth] pointers and returns what
+// they point to, or the zero Value for a nil pointer and for a longer chain, as
+// one that points to itself is. It reports false for the longer chain alone. Every pointer walk of the
+// value layer goes through it, so none of them can run without end.
+func Deref(rv reflect.Value) (reflect.Value, bool) {
+	for depth := 0; rv.Kind() == reflect.Pointer; depth++ {
 		if rv.IsNil() {
+			return reflect.Value{}, true
+		}
+		if depth == maxPointerDepth {
 			return reflect.Value{}, false
 		}
 		rv = rv.Elem()
 	}
-	return rv, rv.IsValid()
+	return rv, true
 }
+
+// maxPointerDepth bounds how many pointers [Deref] follows.
+const maxPointerDepth = 64
 
 // GetFloat64 extracts a float64 from any float type.
 // Returns (value, true) if the input is float32 or float64.

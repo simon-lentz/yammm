@@ -7,8 +7,10 @@
 // file takes '\t'. The parse side and the write side read one delimiter, so an
 // adapter reads back the file it writes. [encoding/csv]'s quoting holds under
 // every delimiter: a cell that starts with '"' is a quoted field, and the writer
-// quotes a cell holding the delimiter, a quote or a line break, or starting
-// with white space. A TSV file is
+// quotes a cell as [encoding/csv.Writer] does: one holding the delimiter, a
+// quote or a line break, one starting with white space, and the cell \. alone;
+// it also quotes the empty field of a one-field row itself (under Empty Cells).
+// A TSV file is
 // therefore CSV with tabs, not the quote-free IANA text/tab-separated-values
 // format. The first row is always the header,
 // because its column names are what map a cell to a property: the package has
@@ -50,7 +52,7 @@
 //
 // A record the reader refuses — one whose field count differs from the
 // header's, a bare quote in an unquoted field, a character after a quoted
-// field's closing quote — is reported as an Error at the line the fault is on,
+// field's closing quote, a quoted field the input ends inside — is reported as an Error at the line the fault is on,
 // and the parse goes on with the next record. A quoted field that is never
 // closed runs to the end of the input, so its record is the last one
 // reported. [encoding/csv]'s LazyQuotes is off, so a malformed quoted field is
@@ -106,13 +108,18 @@
 // own decision over every key the object holds, plain and dotted alike, and
 // each target of an edge group is its own object, decided by
 // [instance.ClaimEdgeKeys]. A key that claims a member takes that member's
-// coercion and empty value, and every key keeps the header's spelling.
+// coercion and empty value, and every key keeps the header's spelling. A row
+// parsed with no type (a nil one handed to ParseTyped, or one a resolver does
+// not find) forms no group: every cell is carried as its text under its
+// header name, an empty cell as "" and a dotted name as written.
 //
 // A dotted field's group is split into targets only where its key claims an
-// association. Any other group — one whose field names a composition, a
-// property or nothing, or whose key is shadowed or collides — is carried as
+// association. Any other group that holds a filled cell and was not dropped
+// for a count clash — one whose field names a composition, a property or
+// nothing, or whose key is shadowed or collides — is carried as
 // one object of its filled cells' text under the field's spelling, for the
-// validator to judge as it judges that JSON object.
+// validator to judge as it judges that JSON object, unless a plain column of
+// the same name holds a value (two values for one key, below).
 //
 // [WithStrictPropertyNames] matches names exactly instead, as
 // [instance.WithStrictPropertyNames] makes the validator match them. Give the
@@ -123,10 +130,12 @@
 //
 // A key that claims no member is carried as its text, as a JSON key is, for
 // the validator to report as unknown, shadowed or colliding, or to ignore under
-// [instance.WithAllowUnknownFields]; its empty cell is skipped. That holds at
-// every position: a column naming no property, a suffix naming neither a key
-// component nor an edge property, and a key component the target does not
-// declare.
+// [instance.WithAllowUnknownFields]; its empty cell is skipped, where the row
+// has a type. That holds at every position: a column naming no property, a
+// suffix naming neither a key component nor an edge property, a key component
+// the target does not declare, a column or suffix whose spelling is shadowed
+// or collides, a cell of a dotted group whose key claims no association, and a
+// target key suffix parsed without [WithSchema].
 //
 // Two values for one key are refused, as a JSON object that repeats a member
 // is: where a plain column and the dotted columns of the same field both hold
@@ -175,9 +184,12 @@
 // a cell carries the text the validator stores — including foreign-key columns,
 // whose components render through the TARGET type's primary-key constraints,
 // and list elements, which render through the element constraint. A scalar the
-// constraint cannot render is written as it arrived: an export returns an error
-// rather than a diag.Result, so one malformed cell must not fail the file. A
-// composite value has no spelling in a cell and is refused (under Empty Cells).
+// constraint cannot render, a pointer to one read as the scalar, is written as
+// it arrived when it reads back: an
+// export returns an error rather than a diag.Result, so one malformed cell must
+// not fail the file. A string that is not valid UTF-8, a number this parser
+// does not read back as a number, and a composite value, which has no spelling
+// in a cell, are refused (under Empty Cells).
 //
 // # List Properties
 //
@@ -255,13 +267,24 @@
 //     edge properties are all absent or "" writes the cell an absent edge
 //     writes. The writer refuses both with an error naming the instance,
 //     rather than let an element or an association vanish on the way back.
-//   - A null list element, and a composite value its constraint cannot
-//     render: a map, an array, a pointer or a struct, or a time.Time outside a
-//     Timestamp or a Date. The list grammar has no spelling for either: a null
+//   - A null list element, and a value its constraint cannot render: one of
+//     no form ([github.com/simon-lentz/yammm/instance.ScalarOf]), such as a
+//     map, an array, a struct, a channel or a pointer to one; a time.Time
+//     outside a Timestamp or a Date, or one there whose text does not read
+//     back; and a uuid.UUID outside a UUID. The list grammar has no spelling
+//     for either: a null
 //     element would be written as an empty one, and a composite as Go's
 //     rendering of it, which reads back as a string. A validated graph holds
 //     neither. The writer refuses both with an error naming the property or
 //     edge property, or the association and the target key component.
+//   - A string that is not valid UTF-8, and a number no column of this parser
+//     reads back as a number: a NaN, an infinity, and a json.Number whose text
+//     is no JSON number literal, is empty, or spells a number no finite float64
+//     holds, where no Integer or Float constraint converts it. A cell carries a string's bytes, which the validator refuses on
+//     the way back, and such a number would read back as text or not at all.
+//     A validated graph holds neither. The writer refuses each with an error
+//     naming the property or edge property, or the association and the target
+//     key component, a list element included.
 //   - A cell whose text holds a CR LF: [encoding/csv]'s reader turns every CR
 //     LF into LF, inside a quoted field too. The writer refuses it with an
 //     error naming the column and the instance. A lone CR is written. A file
@@ -289,8 +312,9 @@
 // key component keeps its text either way: every kind a primary key may take
 // (String, UUID, Date, Timestamp) reads as the text it was written as. A Date
 // or Timestamp component that does not parse draws E_CSV_COERCE with the
-// option and the validator's error without it. What the option decides is an
-// EMPTY segment, under Empty Cells above.
+// option and the validator's error without it. Beside that error, what the
+// option decides is an EMPTY segment, under Empty Cells above, and which key
+// columns decide the target count, in the paragraph before.
 //
 // During snapshot serialization ([Adapter.MarshalSnapshot], [Adapter.WriteSnapshot]),
 // edge columns are populated from the snapshot's edge index via [graph.Snapshot]

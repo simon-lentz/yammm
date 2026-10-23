@@ -1,6 +1,6 @@
 # Go API Pipeline Reference
 
-The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist/export**. Every public entry point returns `(value, diag.Result)` with stable error codes and precise source locations.
+The yammm Go library follows a four-stage pipeline: **load schema -> validate instances -> build graph -> persist/export**. An operation that reports diagnostics returns a `diag.Result`, beside the value where the call produces one, with stable error codes and, where a diagnostic has a source position, its span. Some operations return an `error` instead, among them the JSON and CSV adapters' write methods, the Neo4j adapter's `BatchNodeQueries` and `BatchEdgeQueries`, `gogen.Marshal`, `jschema.Marshal` and `markdown.Marshal`, `graph.BatchAssembler`'s `Add`, `AddValid`, `AddValidOrMerge` and `Finalize`, and `instance.BuilderFor`.
 
 ---
 
@@ -339,10 +339,11 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 
 ## Test Helpers
 
-Two packages provide shared vocabulary for consumer test suites:
+One package provides shared vocabulary for consumer test suites:
 
-- **`internal/instancetest`** — `VI(typeName, opts...)` builds a `*ValidInstance` fixture directly (no validation pass), defaulting every field a scenario does not name; options include `PK(parts...)`, `Props(m)`, `Edges(m)`, `Composed(m)`, `Provenance(p)`, `TypeID(id)`.
 - **`snapshot/snapshottest`** — `BuildSnapshot(tb, s, instances...)` constructs a snapshot from pre-validated instances; `AssertRoundTrip(tb, snap, s, opts...)` pins Marshal→Load structural equivalence; `AssertDeterministic(tb, snap, opts...)` pins byte-stable marshaling; `DiffSnapshots(tb, want, got)` is the underlying go-cmp comparison.
+
+Build its instances through `instance.Validator`, or with `instance.NewValidInstance` for a fixture with no validation pass. `internal/instancetest` is this module's own test support: Go refuses an import of an `internal/` package from another module.
 
 ---
 

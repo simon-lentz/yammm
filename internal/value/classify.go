@@ -57,20 +57,20 @@ func (k Kind) String() string {
 // constraint's to judge, elementwise.
 //
 // Pointers are dereferenced before classification, so *int and int return the
-// same Kind; a nil pointer returns UnspecifiedKind. A named type over a basic
+// same Kind; a nil pointer, and a chain [Deref] does not follow, return
+// UnspecifiedKind. A named type over a basic
 // kind classifies as its base kind.
 func Classify(val any) (Kind, any) {
 	if val == nil {
 		return UnspecifiedKind, val
 	}
 
-	rv := reflect.ValueOf(val)
-	for rv.Kind() == reflect.Pointer {
-		if rv.IsNil() {
+	if rv := reflect.ValueOf(val); rv.Kind() == reflect.Pointer {
+		d, _ := Deref(rv)
+		if !d.IsValid() {
 			return UnspecifiedKind, nil
 		}
-		rv = rv.Elem()
-		val = rv.Interface()
+		val = d.Interface()
 	}
 
 	switch v := val.(type) {
@@ -100,7 +100,7 @@ func Classify(val any) (Kind, any) {
 		return FloatKind, val
 	}
 
-	if kind, base, ok := classifyNamedBase(rv); ok {
+	if kind, base, ok := classifyNamedBase(reflect.ValueOf(val)); ok {
 		return kind, base
 	}
 

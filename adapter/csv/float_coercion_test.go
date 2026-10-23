@@ -73,7 +73,7 @@ func TestScalarCell_RendersEveryKindItNames(t *testing.T) {
 		{nil, ""},
 		{uint8(3), "3"},
 	} {
-		if got, ok := scalarCell(c.in); !ok || got != c.want {
+		if got, _, ok := scalarCell(c.in); !ok || got != c.want {
 			t.Errorf("scalarCell(%#v) = %q, %v, want %q", c.in, got, ok, c.want)
 		}
 	}

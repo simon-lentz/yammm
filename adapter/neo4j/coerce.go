@@ -14,17 +14,21 @@ import (
 // Coerce converts a single raw value to the Neo4j-driver-native type the given
 // schema constraint requires, so the value satisfies Neo4j TYPE constraints:
 //
-//   - Float: any Go signed/unsigned integer width or float32 -> float64; a
+//   - Float: an int, int8 to int64, uint, uint8 to uint64 or float32 ->
+//     float64 (a uintptr or a named type is a coercion failure); a
 //     float64 passes through. Repairs the JSON round-trip where a whole-number
 //     Float decodes as int64 and Neo4j rejects it against an IS :: FLOAT
 //     constraint. A non-numeric value is a coercion failure and returns an error.
-//   - Integer: any Go signed/unsigned integer width -> int64; an int64 passes
+//   - Integer: an int, int8 to int64, uint, uint8 to uint64 -> int64 (a uintptr
+//     or a named type is a coercion failure); an int64 passes
 //     through. A float is a coercion failure and returns an error, whole or
-//     not, as the validator's Integer rule refuses it: a caller holding an
-//     Integer as float64 decoded its JSON without UseNumber, and converting it
-//     would send an integer the document never wrote. A uint past the int64
-//     range is a failure too, as it is on the list path ([coerceSlice]), which
-//     applies the same rule per element.
+//     not, as the validator's Integer rule refuses it: converting it would
+//     send an integer the caller's data never wrote. A json.Number is a
+//     coercion failure too, at an Integer and at a Float, though the validator
+//     reads one: a caller that decodes JSON with UseNumber converts each
+//     number to an int64 or a float64 before it calls Coerce. A uint past the
+//     int64 range is a failure too, as it is on the list path ([coerceSlice]),
+//     which applies the same rule per element.
 //   - Timestamp: a string -> time.Time (Neo4j ZONED DATETIME), parsed against the
 //     constraint's custom Go layout when it declares one (Timestamp["…"]) and
 //     against RFC3339 otherwise; a time.Time passes through. A string that does
@@ -52,17 +56,20 @@ import (
 // The non-transforming kinds stay lenient — a correct value of those kinds is
 // already driver-native, so there is nothing to repair or reject, and instance
 // validation is their type authority. On the validated node path a transforming
-// kind only ever receives the types its strict set accepts (Float: float64, or
-// int64 after a snapshot round-trip; Integer: int64; Timestamp: string or
-// time.Time; Date: string), so strictness can only newly fire on a hand-built
-// direct-Cypher param.
+// kind only ever receives the types its strict set accepts (Float: float64;
+// Integer: int64; Timestamp and Date: the string the validator stores), so
+// strictness fires only on a value no validator refused at Error: a hand-built
+// direct-Cypher param, a snapshot a bypass constructor built, or one
+// snapshot.Load read without revalidating at Error.
 //
 // Coerce takes the full [schema.Constraint] (not just its kind) so a Timestamp's
 // custom layout is honored; a DataType reference is resolved internally.
 // It operates on scalar values — a List/collection value is element-coerced by
-// [CoerceParams] or the adapter write path, which also require a Go string of
-// a String, UUID, Enum or Pattern element and a bool of a Boolean element,
-// where Coerce passes a scalar of those kinds through. Calling Coerce with a collection constraint returns the value
+// [CoerceParams], which also requires a Go string of a String, UUID, Enum or
+// Pattern element and a bool of a Boolean element, where Coerce passes a
+// scalar of those kinds through. The adapter write path reads every value and
+// element in its one form first ([github.com/simon-lentz/yammm/instance.ScalarOf]),
+// so a named string, a pointer and a uuid.UUID at a UUID pass there. Calling Coerce with a collection constraint returns the value
 // unchanged.
 //
 // A non-nil constraint is judged first by [schema.CheckConstraint]: Coerce
@@ -236,14 +243,13 @@ type ParamTypes map[string]schema.Constraint
 // declared for its key in types. Keys absent from types pass through. params
 // is never mutated, and for a non-empty params the returned top-level map is a
 // new one, so mutating its top-level keys cannot affect the input
-// (values that pass through uncoerced may still share backing storage, as on the
-// adapter write path). When no constraint in types is refused, an empty params
+// (values that pass through uncoerced may still share backing storage). When no constraint in types is refused, an empty params
 // map is returned as-is — there is nothing to copy. Walks one level of nested
 // map[string]any and []map[string]any using the "outer.inner" convention.
 //
-// Keys are processed in sorted order, so when several values fail coercion the
-// returned error names the same (lexicographically first) offending key on every
-// run — failures are reproducible rather than dependent on map iteration order.
+// Keys are processed in sorted order, and the rows of a nested []map[string]any
+// in order, so when several values fail coercion the returned error names the
+// same offending key on every run — failures are reproducible rather than dependent on map iteration order.
 //
 // The non-nil constraints in types are judged by [schema.CheckConstraint] before
 // any value is coerced, so a hand-built constraint that [schema.Builder.Build]
@@ -253,9 +259,9 @@ type ParamTypes map[string]schema.Constraint
 //
 // Scalar values take [Coerce]'s rule; []any list values are element-coerced
 // against the List element type (a List<Float> of int64s reaches the driver as
-// []float64, a List<Date> of strings as []dbtype.Date) — the same rule the
-// adapter write path applies, so a direct-Cypher boundary cannot silently skip
-// list coercion.
+// []float64, a List<Date> of strings as []dbtype.Date) — the rule the adapter
+// write path applies once it has read each element in its one form, so a
+// direct-Cypher boundary cannot silently skip list coercion.
 //
 // Call this at any direct-Cypher parameter boundary that writes schema-typed
 // properties but does not pass through the adapter write path's coercion
