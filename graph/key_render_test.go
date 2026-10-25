@@ -183,3 +183,29 @@ func TestKeys_ATimeOrAUUIDComponentItsConstraintDoesNotRenderIsRefused(t *testin
 		}
 	}
 }
+
+// A time.Time or a uuid.UUID is read against its own key property's constraint
+// at every position of a composite key, not only the first.
+func TestAdd_AcceptsATimeAndAUUIDPastTheFirstKeyComponent(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, res := schema.LoadString(ctx, `schema "ev"
+
+type Ev {
+	name String primary
+	at Timestamp primary
+	u UUID primary
+}
+`, "ev.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema: %s", res)
+	}
+	ev, _ := s.Type("Ev")
+	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	u := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+	inst := instance.NewValidInstance("Ev", ev.ID(), immutable.WrapKey([]any{"x", &at, &u}),
+		immutable.WrapProperties(map[string]any{"name": "x", "at": &at, "u": &u}), nil, nil, nil)
+	if r := graph.New(s).Add(ctx, inst); !r.OK() {
+		t.Errorf("Add refused a key whose time and UUID its constraints render: %s", r)
+	}
+}

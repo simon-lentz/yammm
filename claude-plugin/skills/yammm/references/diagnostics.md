@@ -71,7 +71,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 3. **Schema compilation error** -- See the Schema Compilation section. Type conflicts, missing types, invalid constraints.
 4. **Validation error** -- See the Instance Validation section. `E_TYPE_MISMATCH`, `E_CONSTRAINT_FAIL`, `E_MISSING_REQUIRED`, etc.
 5. **Invariant error** -- `E_INVARIANT_FAIL` (expression returned false) or `E_EVAL_ERROR` (expression bug).
-6. **Graph error** -- `E_DUPLICATE_PK` (duplicate key) or `E_UNRESOLVED_REQUIRED` (missing required association).
+6. **Graph error** -- a code of the Graph table below, such as `E_DUPLICATE_PK` (duplicate key) or `E_UNRESOLVED_REQUIRED` (missing required association).
 7. **Snapshot error** -- See the Snapshot section. Corrupt, incompatible, or dangling references.
 8. **Adapter error** -- `E_ADAPTER_PARSE` (the input is not well formed, in either data format), `E_ADAPTER_IO` (the input could not be read; exit 3), `E_CSV_COERCE` (a CSV cell), `E_CSV_CONFIG` (the CSV adapter's own settings), or Neo4j-specific codes in the Adapter section.
 
@@ -172,7 +172,7 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_DUPLICATE_PK` | Duplicate primary key in graph |
+| `E_DUPLICATE_PK` | Duplicate primary key: two instances added to a graph, or two roots whose stored keys the key rule both accepts in a snapshot, a `.ys` document or a data command's input |
 | `E_DUPLICATE_COMPOSED_PK` | Two children of one `(many)` composition share a primary key, or a `(one)` composition holds several |
 | `E_UNRESOLVED_REQUIRED` | Required association is unresolved |
 | `E_GRAPH_TYPE_NOT_FOUND` | Type not found in graph operations |
@@ -182,30 +182,30 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: several targets at `Graph.Add`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or `.ys` document (v0.15+) |
 | `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one (v0.15+) |
 | `E_GRAPH_ABSTRACT_TYPE` | Instance of an abstract type rejected by the graph (v0.15+) |
-| `E_GRAPH_INVALID_PK` | Primary key empty, of the wrong arity, with a component that does not read back as the value every writer writes (one of no form, a string that is not valid UTF-8, a `json.Number` that is empty or spells a number no finite `float64` holds, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` its key constraint does not render), with a key property absent or null, or disagreeing with its own key properties; or an association target key of the wrong arity or with such a component (v0.15+) |
+| `E_GRAPH_INVALID_PK` | A keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with its own key properties; any instance's key, a keyless part's included, with a component that does not read back as the value every writer writes (such as one of no form, a string that is not valid UTF-8, a `json.Number` that is empty or spells a number no finite `float64` holds, a number `graph.ParseKey` reads back at another rendering, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` no key property's constraint renders, as in every keyless part's key); or an association target key of the wrong arity or with such a component (v0.15+) |
 
 ### Snapshot
 
 | Code | Meaning |
 | ---- | ------- |
-| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, wrong structure, or content a structural rule refuses (an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict); from `snapshot.Marshal`, an indent that is not whitespace or a property value the wire cannot carry |
+| `E_SNAPSHOT_MALFORMED` | `.ys` file not valid JSON, a wrong outer shape (the four top-level keys in order, each once and none null, nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, or a duplicate with no conflict or another one; from `snapshot.Marshal`, an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, or a property value the wire cannot carry; from `snapshot.UpdateMetadata`, such metadata too |
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
 | `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema |
 | `E_SNAPSHOT_TYPE_MISMATCH` | A type row that contradicts its position: a root's that is not its group's, a duplicate instance's that is not its record's, a composed child's or association record's target row that is not the relation's declared target, or a composed duplicate's row that is not its composition's declared target |
 | `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict or parent, or an unresolved record's source names no instance |
-| `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children stand under a name the type does not declare as a composition |
+| `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children or a composed duplicate record stand under a name the parent's type does not declare as a composition |
 | `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a root duplicate record names a type that cannot be a root: abstract, part, or no primary key |
 | `E_SNAPSHOT_UNNAMEABLE_TYPE` | An instances group or a root duplicate record names a type the entry schema reaches only through an intermediate import, so it has no name form |
-| `W_SNAPSHOT_VALUE_DROPPED` | Writer held a value the wire cannot carry at that position and did not write it |
+| `W_SNAPSHOT_VALUE_DROPPED` | A write path held a value it could not write at that position and left it out |
 | `E_SNAPSHOT_COMPOSED_ON_DUPLICATE` | Duplicate record has composed children |
 | `E_SNAPSHOT_EDGES_ON_DUPLICATE` | Duplicate record has edges |
 | `E_SNAPSHOT_DEPTH_EXCEEDED` | Composed nesting exceeds depth limit (32) |
 | `E_SNAPSHOT_INTEGRITY_MISMATCH` | Integrity hash doesn't match content |
 | `E_SNAPSHOT_UNSUPPORTED_HASH_ALGORITHM` | Schema hash algorithm not recognized — Error on body-reading surfaces, Warning on header-only reads (v0.15+) |
 | `W_SNAPSHOT_PATH_FALLBACK` | Provenance path could not be parsed (Warning) |
-| `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `ScanDirSlice` fails to read (v0.3+), or a reader `snapshot.HeaderOnlyRead` reads failing with an error that is not a truncation, Fatal (from the release after v0.21.0) |
+| `E_SNAPSHOT_IO` | A file that fails to open during `snapshot.ScanDir`, a directory `ScanDirSlice` fails to read (v0.3+), or a reader `snapshot.HeaderOnlyRead` reads failing with an error that is not a truncation, Fatal (unreleased; on the line after v0.21.0, not in v0.21.1) |
 | `E_UPDATE_METADATA_BODY_OFFSET` | `snapshot.UpdateMetadata` body-offset tracker could not resolve the reused-body byte range (v0.3+) |
 | `W_UPDATE_METADATA_FALLBACK` | `snapshot.UpdateMetadataOrReMarshal` fell back from the fast path to `Load + Marshal` (Warning, v0.3+) |
 | `W_SNAPSHOT_VALUE_NONCONFORMING` | A stored `Timestamp`, `Date` or `UUID` value does not conform to its schema constraint; reported only under `snapshot.WithValueConformance`, and not a full re-validation (Warning, v0.13+) |

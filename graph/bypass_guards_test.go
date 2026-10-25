@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -733,14 +734,22 @@ part type Wheel {
 }
 
 // TestAdd_BypassGuard_KeyComponentParseKeyCannotRead pins that a stored key
-// is one graph.ParseKey reads back: a list, a map and a number no float64
-// holds are refused even when the key property holds the same value, at
+// is one graph.ParseKey reads back at the same rendering: a list, a map, a
+// number no float64 holds, and a number ParseKey reads back at another
+// rendering (a uint64 or a json.Number past int64, or a json.Number spelled
+// "1.0") are refused even when the key property holds the same value, at
 // Graph.Add and at RebuildSnapshot.
 func TestAdd_BypassGuard_KeyComponentParseKeyCannotRead(t *testing.T) {
 	t.Parallel()
 	s := loadGuardSchema(t)
 	car := mustTypeID(t, s, "Car")
-	for _, v := range []any{[]any{"v1"}, map[string]any{"v": "1"}, json.Number("1e400")} {
+	for _, v := range []any{
+		[]any{"v1"},
+		map[string]any{"v": "1"},
+		json.Number("1e400"),
+		uint64(math.MaxUint64), json.Number("12345678901234567890"), json.Number("1.0"),
+		math.Copysign(0, -1),
+	} {
 		vi := instancetest.VI("Car", instancetest.TypeID(car), instancetest.PK(v), instancetest.Props(map[string]any{"vin": v}))
 		if res := graph.New(s).Add(t.Context(), vi); !res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(res.String(), "not a scalar") {
 			t.Errorf("key [%v]: Add = %s, want E_GRAPH_INVALID_PK naming the component", v, res)
@@ -750,6 +759,24 @@ func TestAdd_BypassGuard_KeyComponentParseKeyCannotRead(t *testing.T) {
 		}}})
 		if !res.HasCode(diag.E_GRAPH_INVALID_PK) || !strings.Contains(res.String(), "not a scalar") {
 			t.Errorf("key [%v]: RebuildSnapshot = %s, want E_GRAPH_INVALID_PK naming the component", v, res)
+		}
+	}
+}
+
+// A number key component ParseKey reads back at the same rendering is
+// accepted, whatever its Go type: the rule is the rendering, not the type.
+// float64(5) renders as the literal 5, which reads back as int64(5) and renders
+// alike.
+func TestAdd_AcceptsANumberKeyThatRendersBackUnchanged(t *testing.T) {
+	t.Parallel()
+	s := loadGuardSchema(t)
+	car := mustTypeID(t, s, "Car")
+	for _, v := range []any{
+		float64(5), uint64(5), int64(math.MaxInt64), json.Number("9007199254740993"), json.Number("1.5"),
+	} {
+		vi := instancetest.VI("Car", instancetest.TypeID(car), instancetest.PK(v), instancetest.Props(map[string]any{"vin": v}))
+		if res := graph.New(s).Add(t.Context(), vi); res.HasCode(diag.E_GRAPH_INVALID_PK) {
+			t.Errorf("key [%v] (%T): Add = %s, want no key refusal", v, v, res)
 		}
 	}
 }

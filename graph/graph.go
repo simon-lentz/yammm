@@ -475,14 +475,12 @@ func (g *Graph) AddComposed(
 	// The child's own key and subtree run the same rules Add applies to a root
 	// and the builder applies to an inline child, and the tree it returns is
 	// what attaches on success.
-	if childTyp.HasPrimaryKey() {
-		if err := checkInstanceKey(childTyp, child, g.canon); err != nil {
-			return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-				fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
-				WithDetail(diag.DetailKeyTypeName, child.TypeName()).
-				WithDetail(diag.DetailKeyRelationName, relationName).
-				WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
-		}
+	if err := checkInstanceKey(childTyp, child, g.canon); err != nil {
+		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
+			fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
+			WithDetail(diag.DetailKeyTypeName, child.TypeName()).
+			WithDetail(diag.DetailKeyRelationName, relationName).
+			WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
 	}
 	// The key is canonicalized once and read by the sibling scan, the duplicate
 	// record and the installed instance alike — see [instanceBuilder.child].
@@ -672,8 +670,8 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 
 // Snapshot creates a point-in-time snapshot of the graph.
 //
-// The returned [Snapshot] is immutable and independent of subsequent
-// graph modifications. All slice accessors on Snapshot return sorted data.
+// The returned [Snapshot] is independent of subsequent graph modifications,
+// and no method of it changes it. All slice accessors on Snapshot return sorted data.
 //
 // Snapshot acquires a read lock; concurrent Add, AddOrMerge and AddComposed
 // calls block until Snapshot completes.
@@ -870,9 +868,30 @@ func (g *Graph) iterEdges(inst *instance.ValidInstance) map[string]*instance.Val
 	return maps.Collect(inst.Edges())
 }
 
-// checkInstanceKey applies [checkKey] to a validated instance.
+// checkInstanceKey applies [checkStoredKey] to a validated instance.
 func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance, canon *canonicalizer) error {
-	return checkKey(typ, inst.PrimaryKey(), inst.Property, canon)
+	return checkStoredKey(typ, inst.PrimaryKey(), inst.Property, canon)
+}
+
+// checkStoredKey holds a stored key to the rule its type takes: a keyed type's
+// key to [checkKey], and a keyless part's key to one fact, that each component
+// is a scalar [ParseKey] reads back. The snapshot reader refuses such a
+// component on every instance, a keyless one included, so a key every
+// constructor refuses is one no snapshot carries to the wire.
+func checkStoredKey(typ *schema.Type, key immutable.Key, property func(string) (immutable.Value, bool), canon *canonicalizer) error {
+	if !typ.HasPrimaryKey() {
+		return readableKey(typ, key)
+	}
+	return checkKey(typ, key, property, canon)
+}
+
+// readableKey refuses a key of typ that holds a component [ParseKey] cannot
+// read back.
+func readableKey(typ *schema.Type, key immutable.Key) error {
+	if i := unreadableComponent(typ, key); i >= 0 {
+		return fmt.Errorf("primary key component %d is not a scalar graph.ParseKey reads back", i)
+	}
+	return nil
 }
 
 // checkKey rejects an empty key, a key whose arity disagrees with the type's
@@ -888,8 +907,8 @@ func checkKey(typ *schema.Type, key immutable.Key, property func(string) (immuta
 	if declared := keyArity(typ); key.Len() != declared {
 		return fmt.Errorf("primary key has %d components; type declares %d", key.Len(), declared)
 	}
-	if i := unreadableComponent(typ, key); i >= 0 {
-		return fmt.Errorf("primary key component %d is not a scalar graph.ParseKey reads back", i)
+	if err := readableKey(typ, key); err != nil {
+		return err
 	}
 	i := 0
 	for pk := range typ.PrimaryKeys() {

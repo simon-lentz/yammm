@@ -6,6 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"reflect"
+	"slices"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -334,4 +339,213 @@ type unresolvedWire struct {
 type diagWire struct {
 	Duplicates []dupWire        `json:"duplicates"`
 	Unresolved []unresolvedWire `json:"unresolved"`
+}
+
+// checkDocument holds data to the document's outermost shape and to its
+// member names. Every surface that holds the whole document runs it before it
+// decodes the header, so a document one of them accepts is one Load decodes
+// as written, and a fault in the header is reported as itself.
+func checkDocument(data []byte) error {
+	if err := checkTopLevelKeys(data); err != nil {
+		return err
+	}
+	return checkMemberNames(data)
+}
+
+// invalidMetadata refuses the first metadata key, in key order, that is not
+// valid UTF-8 or names a value that is not. encoding/json writes each such
+// byte as U+FFFD, so the document would read back other text, and two such
+// keys as one repeated member.
+func invalidMetadata(m map[string]string) error {
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		switch {
+		case !utf8.ValidString(k):
+			return fmt.Errorf("metadata key %q is not valid UTF-8", k)
+		case !utf8.ValidString(m[k]):
+			return fmt.Errorf("metadata value of %q is not valid UTF-8", k)
+		}
+	}
+	return nil
+}
+
+// wireShape is how the reader decodes one JSON value of the document: a
+// struct's members by their JSON names, or a map's or a slice's element. A nil
+// shape decodes into any, whose objects are maps.
+type wireShape struct {
+	isStruct bool
+	names    []string              // a struct's JSON names, in field order
+	members  map[string]*wireShape // a struct's, by JSON name
+	elem     *wireShape            // a map's or a slice's
+}
+
+// documentShape is the document as the reader decodes it, section by section,
+// derived from the wire structs, so it cannot drift from them.
+var documentShape = func() *wireShape {
+	memo := make(map[reflect.Type]*wireShape)
+	doc := &wireShape{isStruct: true, members: make(map[string]*wireShape)}
+	for _, section := range []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{"yammm_snapshot", reflect.TypeFor[headerWire]()},
+		{"types", reflect.TypeFor[[]typeTableEntry]()},
+		{"instances", reflect.TypeFor[[]instanceGroupWire]()},
+		{"diagnostics", reflect.TypeFor[diagWire]()},
+	} {
+		doc.names = append(doc.names, section.name)
+		doc.members[section.name] = shapeOf(section.typ, memo)
+	}
+	return doc
+}()
+
+// shapeOf returns t's shape, memoized so a struct that holds itself through a
+// map or a slice (instWire's composed children) terminates.
+func shapeOf(t reflect.Type, memo map[reflect.Type]*wireShape) *wireShape {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if s, ok := memo[t]; ok {
+		return s
+	}
+	switch t.Kind() {
+	case reflect.Struct:
+		s := &wireShape{isStruct: true, members: make(map[string]*wireShape, t.NumField())}
+		memo[t] = s
+		for f := range t.Fields() {
+			name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+			s.names = append(s.names, name)
+			s.members[name] = shapeOf(f.Type, memo)
+		}
+		return s
+	case reflect.Map, reflect.Slice:
+		s := &wireShape{}
+		memo[t] = s
+		s.elem = shapeOf(t.Elem(), memo)
+		return s
+	default:
+		return nil
+	}
+}
+
+// member returns the shape of the value under name in an object of shape s,
+// and, when s is a struct that declares no member name and one name differs
+// from it only in case, that declared name.
+func (s *wireShape) member(name string) (*wireShape, string) {
+	switch {
+	case s == nil:
+		return nil, ""
+	case !s.isStruct:
+		return s.elem, ""
+	}
+	if m, ok := s.members[name]; ok {
+		return m, ""
+	}
+	for _, declared := range s.names {
+		if strings.EqualFold(declared, name) {
+			return nil, declared
+		}
+	}
+	return nil, ""
+}
+
+// smallObject is how many member names [checkMemberNames] compares one by
+// one as it reads them; a larger object's names are sorted and compared once,
+// when it closes.
+const smallObject = 16
+
+// checkMemberNames returns an error for the first object of data that repeats
+// a member name, or that decodes into a wire struct and holds a name differing
+// from a declared one only in case. Names compare as decoded text, so a name
+// spelled with an escape repeats the same name without one, and two names that
+// hold different bytes that are not UTF-8 repeat each other when they decode
+// to one text. data must be JSON that encoding/json has read whole;
+// [checkTopLevelKeys] reads it so.
+func checkMemberNames(data []byte) error {
+	type frame struct {
+		start int        // index in names of an object's first name; -1 for an array
+		shape *wireShape // how the container decodes
+		next  *wireShape // how the next value in it decodes
+	}
+	var (
+		stack  []frame
+		names  [][]byte
+		atName bool
+	)
+	open := func(object bool) {
+		shape := documentShape
+		if len(stack) > 0 {
+			shape = stack[len(stack)-1].next
+		}
+		f := frame{start: -1, shape: shape}
+		if object {
+			f.start = len(names)
+		} else if shape != nil {
+			f.next = shape.elem
+		}
+		stack = append(stack, f)
+		atName = object
+	}
+	for i := 0; i < len(data); i++ {
+		switch data[i] {
+		case '{':
+			open(true)
+		case '[':
+			open(false)
+		case '}', ']':
+			top := stack[len(stack)-1]
+			if top.start >= 0 {
+				if own := names[top.start:]; len(own) > smallObject {
+					// The object's own names, sorted in place: the stack drops them next.
+					slices.SortFunc(own, bytes.Compare)
+					for j := 1; j < len(own); j++ {
+						if bytes.Equal(own[j-1], own[j]) {
+							return repeatedMemberError(own[j])
+						}
+					}
+				}
+				names = names[:top.start]
+			}
+			stack = stack[:len(stack)-1]
+			atName = false
+		case ',':
+			atName = stack[len(stack)-1].start >= 0
+		case '"':
+			end, escaped := i+1, false
+			for data[end] != '"' {
+				if data[end] == '\\' {
+					end++
+					escaped = true
+				}
+				end++
+			}
+			if atName {
+				name := data[i+1 : end]
+				// encoding/json writes each byte that is not UTF-8 as U+FFFD.
+				if escaped || !utf8.Valid(name) {
+					var decoded string
+					if err := json.Unmarshal(data[i:end+1], &decoded); err != nil {
+						return fmt.Errorf("member name %s does not decode: %w", data[i:end+1], err)
+					}
+					name = []byte(decoded)
+				}
+				top := &stack[len(stack)-1]
+				if own := names[top.start:]; len(own) < smallObject && slices.ContainsFunc(own, func(n []byte) bool { return bytes.Equal(n, name) }) {
+					return repeatedMemberError(name)
+				}
+				next, declared := top.shape.member(string(name))
+				if declared != "" {
+					return fmt.Errorf("an object holds the member %q, which encoding/json reads as the member %q; every member is spelled as the format declares it", name, declared)
+				}
+				top.next = next
+				names = append(names, name)
+				atName = false
+			}
+			i = end
+		}
+	}
+	return nil
+}
+
+func repeatedMemberError(name []byte) error {
+	return fmt.Errorf("an object repeats the member %q; every member name occurs once in its object", name)
 }

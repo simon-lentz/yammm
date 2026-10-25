@@ -32,14 +32,19 @@
 // "Structural facts" — type identity, root and denoted types, composition
 // slots, keys and their key properties, declared names, association shapes,
 // the unresolved records graph.Graph.Add derives, and each duplicate's derived
-// conflict — or holds two roots at one address ([diag.E_DUPLICATE_PK]). No option
-// excuses them, and [Verify] and [Info] run the same checks; a schema-less
-// read judges none that needs a schema.
+// conflict — or holds two roots whose stored keys the key rule both accepts
+// at one address ([diag.E_DUPLICATE_PK]). No option excuses them, and
+// [Verify] and [Info] run the same checks; a schema-less read judges none
+// that needs a schema.
 //
-// What a .ys can still hold is data a validated graph would not: values
-// outside their constraints and invariant violations. [WithRevalidation] is
-// the option that reports them — the real validator, run per root at load
-// time — and [WithValueConformance] the narrower canonical-form check.
+// What a .ys can still hold is data a validated graph would not: an instance
+// the validator refuses for its values rather than its structure, such as a
+// property outside its constraint, a required property absent, or an
+// invariant violation. [WithRevalidation] is the option that reports them —
+// the real validator, run at load time over each root whose type the
+// structural checks accept and whose own tree the structural walk accepts —
+// and [WithValueConformance] the narrower
+// canonical-form check.
 // Duplicates and unresolved records ride the document as data
 // ([graph.Snapshot.Duplicates], [graph.Snapshot.Unresolved]); a rejected
 // duplicate's payload is outside the attestation, and whether an unresolved
@@ -75,7 +80,7 @@
 //	// Write .ys bytes atomically to disk (tmp+fsync+rename)
 //	if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 //
-//	// Iterate every .ys file in a directory (header-only, lazy)
+//	// Iterate the .ys files of a directory that ScanDir admits (header-only, lazy)
 //	for entry, err := range snapshot.ScanDir(ctx, dir) {
 //	    if err != nil { /* dir-level or ctx-cancel failure */ }
 //	    if entry.Result.HasErrors() { /* per-file failure */ }
@@ -108,9 +113,10 @@
 //
 // [HeaderOnly] reads header metadata from a .ys file without decoding the
 // instance body or verifying the integrity hash. Returns a [HeaderInfo] with
-// the header fields plus the types array. It decodes the header alone, and
-// still scans the whole document once to check its top-level shape;
-// [HeaderOnlyRead] reads the header alone. Either suits dispatch-style
+// the header fields plus the types array. It decodes the header and the types
+// table alone, and still scans the whole document to check its top-level
+// shape and the member names of every object;
+// [HeaderOnlyRead] reads the header and the types table alone. Either suits dispatch-style
 // workloads that scan many .ys files to classify state or compare schema
 // hashes. When counts, diagnostics, or verified integrity are required, use
 // [Info] instead.
@@ -160,8 +166,8 @@
 // rename is not durable across a crash. It does not check that the bytes are
 // a valid .ys document.
 //
-// [ScanDir] iterates every .ys file in a directory and yields one
-// [ScanEntry] per file, with the header parsed lazily via
+// [ScanDir] iterates the .ys files in a directory that its filtering rule
+// admits and yields one [ScanEntry] per file, with the header parsed lazily via
 // [HeaderOnlyRead] on demand. The iterator's second yielded value is
 // non-nil only for operation-level failures (dir-open, context
 // cancellation); per-file failures (corrupt header, per-file I/O)
@@ -185,14 +191,16 @@
 //
 // [UpdateMetadataOrReMarshal] is the default consumer entry point:
 // it runs [UpdateMetadata] on the happy path and transparently falls
-// back to [Load] + [Marshal] on any Error or Fatal but a cancellation
-// (a body-offset failure or a malformed header among them), surfacing
-// a Warning-severity [diag.W_UPDATE_METADATA_FALLBACK] on the returned
-// [diag.Result] so operators can observe fallback frequency.
+// back to [Load] + [Marshal] on any Error or Fatal (a body-offset failure
+// or a malformed header among them) but a cancellation or metadata that is
+// not valid UTF-8, which no path can write. A fallback that succeeds
+// surfaces a Warning-severity [diag.W_UPDATE_METADATA_FALLBACK] on the
+// returned [diag.Result] so operators can observe fallback frequency.
 //
 // [WithUpdateCreatedAt] overrides the created_at header field on
-// [UpdateMetadata] and [UpdateMetadataOrReMarshal]; the default is to
-// preserve the existing value byte-for-byte.
+// [UpdateMetadata] and [UpdateMetadataOrReMarshal]; by default each keeps the
+// existing value byte-for-byte, except that the fallback path drops, with a
+// Warning, a value it cannot parse.
 //
 // # Marshal Options
 //
@@ -201,23 +209,23 @@
 //   - [WithIndent]: pretty-print JSON output with the given indent string
 //   - [WithCreatedAt]: embed a creation timestamp in the snapshot
 //   - [WithCreatedAtFrom]: embed the creation timestamp another header states
-//   - [WithMetadata]: embed arbitrary key-value metadata
+//   - [WithMetadata]: embed key-value metadata, each key and value valid UTF-8
 //
 // # Update Options
 //
 // [UpdateMetadata] and [UpdateMetadataOrReMarshal] accept [UpdateOption]
 // values:
 //
-//   - [WithUpdateCreatedAt]: override the existing created_at (preserved by default)
+//   - [WithUpdateCreatedAt]: override the existing created_at (preserved by default, save where the fallback cannot parse it)
 //
 // # Load Options
 //
 // [Load] and [Verify] accept [LoadOption] values:
 //
-//   - [WithIssueLimit]: maximum issues stored (default 100; 0 for unlimited); the walk always completes
+//   - [WithIssueLimit]: maximum issues stored (default 100; 0 for unlimited); the walk completes unless the context is cancelled
 //   - [WithIntegrityCheck]: with false, skip SHA-256 integrity verification (useful for debugging)
 //   - [WithValueConformance]: report stored Timestamp/Date/UUID values that do not conform to their constraints (Warning)
-//   - [WithRevalidation]: run every instance back through the real validator, reported at the given severity
+//   - [WithRevalidation]: run each root whose type the structural checks accept and whose own tree the walk accepts, with its composed children, edges and the target_missing records the checks accept, back through the real validator, reported at the given severity
 //
 // # Scan Options
 //
@@ -231,12 +239,17 @@
 // returns an error, and [ScanDir] and [ScanDirWith] yield a [diag.Result] per
 // entry, in [ScanEntry.Result]:
 //
-//   - Fatal: I/O failure, context cancellation, a body the metadata update
+//   - Fatal: an I/O failure, a cancelled context, a body the metadata update
 //     cannot locate, or a broken invariant (E_INTERNAL)
-//   - Error: schema hash mismatch, integrity check failure, structural
-//     corruption; and at [Marshal], a value the wire cannot carry, a tree
-//     nested past the reader's bound, an indent that is not whitespace, or a
-//     type whose schema is outside the entry schema's import closure
+//   - Error: the input is refused. Among the causes are a schema hash
+//     mismatch, an integrity check failure, a structural break, and a
+//     version, feature or type this library does not read; at [Marshal], a
+//     value the wire cannot carry, a tree nested past the reader's bound, an
+//     indent that is not JSON whitespace, or a type whose schema is outside the
+//     entry schema's import closure; and at [Marshal] and the metadata update,
+//     a metadata key or value that is not valid UTF-8
+//   - Any severity: a [WithRevalidation] finding takes the severity the
+//     caller passed
 //   - OK: success (may include warnings)
 //
 // # File Extension

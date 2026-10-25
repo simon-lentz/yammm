@@ -507,9 +507,9 @@ func TestWireProbe_DuplicateKeyDisagreesWithItsInstance(t *testing.T) {
 	edited := spliceOnce(t, data, `"instance":{"key":["a9"]`, `"instance":{"key":["a8"]`)
 
 	loadSig, verifySig, _ := loadAndVerify(ctx, t, edited, s)
-	// The third: a root duplicate's conflict is the root at its own key, and
-	// the stated conflict, a9, is not at the edited a8.
-	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED x3] verify[error:E_SNAPSHOT_MALFORMED x3]",
+	// One for the record's key against its instance's, one for the instance's
+	// key against its property; the refused key resolves no conflict.
+	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED x2] verify[error:E_SNAPSHOT_MALFORMED x2]",
 		"load["+loadSig+"] verify["+verifySig+"]")
 }
 

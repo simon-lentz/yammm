@@ -61,18 +61,22 @@ func FormatKey(values ...any) string {
 // float64, an int-shaped literal is int64. Two consequences follow:
 //
 //   - An int-shaped literal beyond the int64 range comes back as float64, with
-//     the precision loss that implies. FormatKey writes one for a whole float64
-//     of magnitude 2^63 to below 1e21, on either sign, and for a uint64 above
-//     math.MaxInt64.
+//     the precision loss that implies. FormatKey writes one for any value
+//     encoding/json renders as such a literal, as a whole float64 of magnitude
+//     2^63 to below 1e21 or a uint64 above math.MaxInt64 is rendered.
 //   - A literal that is valid JSON but has no finite Go value, such as 1e999,
-//     is an error naming the component's index. FormatKey never writes one.
+//     is an error naming the component's index. FormatKey writes one only for a
+//     value that encoding/json renders as such a literal, which no value of
+//     its documented component types is.
 //
-// The round-trip law holds over normalized components — string, int64, bool,
-// nil, and non-whole float64: ParseKey(FormatKey(vs...)) returns vs, and
-// FormatKey(ParseKey(s)...) returns s for any s that FormatKey produced from
-// such values. One carve-out is documented rather than hidden: FormatKey renders
-// float64(5) as the literal 5, and ParseKey reads that literal back as int64(5).
-// The snapshot wire has the same asymmetry, for the same reason.
+// The round-trip law holds over normalized components — a string that is
+// valid UTF-8, int64, bool, nil, and non-whole float64: ParseKey(FormatKey(vs...))
+// returns vs, and FormatKey(ParseKey(s)...) returns s for any s that FormatKey
+// produced from such values. Two carve-outs are documented rather than hidden:
+// FormatKey renders float64(5) as the literal 5, which ParseKey reads back as
+// int64(5) at the same rendering, and a float64 negative zero as -0, which
+// ParseKey reads back as int64(0), rendered 0. The snapshot wire has the same
+// asymmetry, for the same reason.
 //
 // The string must hold exactly one JSON array and nothing else; surrounding
 // whitespace is tolerated, trailing content is not. A component that is itself
@@ -146,19 +150,25 @@ func decodeKeyArray(s string) ([]any, error) {
 }
 
 // unreadableComponent returns the index of the first component of k that
-// [ParseKey] cannot read back as the value it is, or -1: one of no form every
+// [ParseKey] cannot read back at the same rendering, or -1: one of no form every
 // writer writes ([value.Scalar]: a struct, an array, a list or a map among
 // them), a string that is not valid UTF-8, each invalid byte of which the
-// rendering writes as U+FFFD, an empty json.Number, which renders as 0, or a
-// number no finite float64 holds. A component whose rendering differs from its
-// form's is refused too: the key's address renders the component through its
+// rendering writes as U+FFFD, an empty json.Number, which renders as 0, a
+// number no finite float64 holds, or a number ParseKey reads back at another
+// rendering, as a float64 negative zero reads back as 0, whose address a
+// reload would move. A component whose rendering differs from its form's is
+// refused too: the key's address renders the component through its
 // type's methods, and every writer writes the form. So is a time.Time or a
 // uuid.UUID whose key property's constraint does not render it, which no writer
-// writes. A string, a bool, an int64 and a finite float64 settle without
-// rendering. k has typ's key arity.
+// writes; a keyless part's key has no key property, so a time or a UUID there
+// is refused. A string, a bool and an int64 settle without rendering. k has typ's key arity when typ declares a key.
 func unreadableComponent(typ *schema.Type, k immutable.Key) int {
 	pks := typ.PrimaryKeysSlice()
 	for i := range k.Len() {
+		var c schema.Constraint
+		if i < len(pks) {
+			c = pks[i].Constraint()
+		}
 		raw := k.Get(i).Unwrap()
 		switch u := raw.(type) {
 		case string:
@@ -166,7 +176,7 @@ func unreadableComponent(typ *schema.Type, k immutable.Key) int {
 				return i
 			}
 			continue
-		case bool, int64, float64, nil:
+		case bool, int64, nil:
 			continue
 		}
 		held, ok := value.Scalar(raw)
@@ -183,11 +193,11 @@ func unreadableComponent(typ *schema.Type, k immutable.Key) int {
 				return i
 			}
 		case time.Time:
-			if !keyRenders(pks[i].Constraint(), schema.KindTimestamp, schema.KindDate) {
+			if !keyRenders(c, schema.KindTimestamp, schema.KindDate) {
 				return i
 			}
 		case uuid.UUID:
-			if !keyRenders(pks[i].Constraint(), schema.KindUUID) {
+			if !keyRenders(c, schema.KindUUID) {
 				return i
 			}
 		}
@@ -198,7 +208,11 @@ func unreadableComponent(typ *schema.Type, k immutable.Key) int {
 		if r, err := json.Marshal(raw); err != nil || !bytes.Equal(r, b) {
 			return i
 		}
-		if _, err := ParseKey("[" + string(b) + "]"); err != nil {
+		// A component must render back unchanged, or a reload moves the address:
+		// a uint64 or a json.Number past int64 reads back as the nearest float64,
+		// which can render otherwise.
+		rendered := "[" + string(b) + "]"
+		if back, err := ParseKey(rendered); err != nil || FormatKey(back...) != rendered {
 			return i
 		}
 	}

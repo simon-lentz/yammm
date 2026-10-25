@@ -147,7 +147,7 @@ if err != nil {
 data, result := snapshot.Marshal(ctx, res.Snapshot)
 ```
 
-To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which refuses a snapshot that breaks the schema's structural facts — new adds resolve against the seeded instances and `Finalize` checks the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
+To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts but the Records fact, whose records it derives again — new adds resolve against the seeded instances and `Finalize` checks the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
 
 ### Build Instances Programmatically
 
@@ -232,7 +232,7 @@ Diagnostic-producing operations return `(T, diag.Result)`:
 - `result.HasErrors()`: Semantic failure (structured issues)
 - `result.OK()`: Success (may have warnings)
 
-Pure adapter transformations (JSON/CSV serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return `(T, error)`; the Neo4j adapter's DDL and shape builders report through a `diag.Result`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
+Pure adapter transformations (JSON/CSV serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/csv`'s `WriteSnapshot`, which returns the `error` alone, and `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 
 ## Schema Language
 

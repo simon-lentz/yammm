@@ -53,14 +53,16 @@ type ScanEntry struct {
 	ModTime time.Time
 }
 
-// ScanDir iterates over every .ys file in dir, yielding one
-// (ScanEntry, nil) per file. The iterator is lazy: the directory is
+// ScanDir iterates over the .ys files in dir that the filtering below admits,
+// yielding one (ScanEntry, nil) per file. The iterator is lazy: the directory is
 // read once on first iteration, and each file's header is parsed
 // on-demand via [HeaderOnlyRead]. Callers can break early without
 // paying the parse cost for remaining files.
 //
 // ScanDir inherits [HeaderOnlyRead]'s limit: it validates each file's
-// header and types table, never the document's outermost shape. It does
+// header and types table, and judges neither the document's outermost shape
+// nor its member names beyond refusing a first section other than the header
+// and a missing types section. It does
 // not accept a misshapen document by omission — it does not see one. Use
 // [HeaderOnly], [Verify] or [Load] when that matters.
 //
@@ -69,9 +71,9 @@ type ScanEntry struct {
 // of the directory listed.
 //
 // Filtering:
-//   - Only regular files and broken symlinks are included. A symlink is
-//     followed and included when its target is a regular file or cannot
-//     be stat'd; a directory, FIFO, socket, or device is skipped whatever
+//   - Only regular files and symlinks are included, and a symlink only
+//     when its target is a regular file or cannot be stat'd, a broken link
+//     among them; a directory, FIFO, socket, or device is skipped whatever
 //     its name.
 //   - Of those, only files whose basename ends with ".ys" are included.
 //   - Files whose basename ends with [TmpSuffix] are skipped (the

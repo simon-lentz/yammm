@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
@@ -44,10 +43,12 @@ import (
 // the bound reads identically from both sides. Fatal E_INTERNAL marks only a
 // broken invariant of the snapshot itself. Panics if snap is nil.
 //
-// Two further refusals, both Error: an indent that is not whitespace, which
-// would produce bytes that are not JSON ([diag.E_SNAPSHOT_MALFORMED]); and a
-// denoted type whose schema is outside the entry schema's import closure, which
-// the document has no portable name for ([diag.E_SNAPSHOT_UNKNOWN_TYPE]).
+// Three further refusals, each Error: an indent that is not JSON whitespace, which
+// would produce bytes that are not JSON ([diag.E_SNAPSHOT_MALFORMED]); a
+// metadata key or value that is not valid UTF-8, which encoding/json would
+// write as U+FFFD ([diag.E_SNAPSHOT_MALFORMED]); and a denoted type whose
+// schema is outside the entry schema's import closure, which the document has
+// no portable name for ([diag.E_SNAPSHOT_UNKNOWN_TYPE]).
 func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
 	if snap == nil {
 		panic("snapshot.Marshal: nil Snapshot")
@@ -62,8 +63,13 @@ func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte,
 	if bad, ok := nonWhitespaceIndent(cfg.indent); ok {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("indent must be whitespace; it is written between JSON tokens and %q produces a document that is not JSON", bad)).
+			fmt.Sprintf("indent must be JSON whitespace; it is written between JSON tokens and %q produces a document that is not JSON", bad)).
 			Build())
+		return nil, c.Result()
+	}
+	if err := invalidMetadata(cfg.metadata); err != nil {
+		c := diag.NewCollector(0)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, "snapshot.Marshal: "+err.Error()).Build())
 		return nil, c.Result()
 	}
 	s := snap.Schema()
@@ -508,13 +514,16 @@ func assembleDocument(
 	return finalBytes, diag.OK()
 }
 
-// nonWhitespaceIndent reports the first non-whitespace rune in an indent, if
-// any. The indent is emitted verbatim between JSON tokens, so anything else
-// makes the output unparseable — and the writer returned OK on it, leaving a
-// caller to discover the corruption at the next read.
+// nonWhitespaceIndent reports the first rune in an indent that is not JSON
+// whitespace, if any: space, tab, line feed and carriage return are the four
+// RFC 8259 allows between tokens. The indent is emitted verbatim between JSON
+// tokens, so anything else, a vertical tab or a no-break space among them,
+// makes the output unparseable.
 func nonWhitespaceIndent(indent string) (string, bool) {
 	for _, r := range indent {
-		if !unicode.IsSpace(r) {
+		switch r {
+		case ' ', '\t', '\n', '\r':
+		default:
 			return string(r), true
 		}
 	}

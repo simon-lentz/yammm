@@ -11,13 +11,16 @@ import (
 // Instance represents an instance node in the graph. [Instance.Validated]
 // reports whether it came through the validator.
 //
-// Instance provides read-only access to instance data. It is safe for
+// Instance provides read access to instance data. It is safe for
 // concurrent read access from multiple goroutines.
 //
-// Instances are created internally, by [Graph.Add], [Graph.AddComposed],
-// [RebuildSnapshot] and the snapshot copies [Graph.Snapshot] and the import take.
-// They are accessed via [Snapshot.AllInstances], [Snapshot.InstancesOf], or
-// [Snapshot.InstanceByKey].
+// Instances are created internally, by [Graph.Add], [Graph.AddOrMerge],
+// [Graph.AddComposed], [RebuildSnapshot] and the snapshot copies
+// [Graph.Snapshot] and the import take.
+// A root is accessed via [Snapshot.AllInstances], [Snapshot.InstancesOf], or
+// [Snapshot.InstanceByKey]; a composed child via [Instance.Composed]; and the
+// instances an edge, a duplicate or an unresolved record names via that
+// record's methods.
 type Instance struct {
 	// typeName is the canonical instance tag form.
 	// Local types: unqualified (e.g., "Person")
@@ -137,8 +140,8 @@ func (i *Instance) Validated() bool {
 // Composed returns composed children for the given relation name.
 //
 // Returns nil if the relation does not exist or has no children.
-// The returned slice is a defensive copy; modifications do not affect
-// the graph.
+// The slice is a copy, so changing it does not affect the instance; the
+// children are the snapshot's own.
 func (i *Instance) Composed(relationName string) []*Instance {
 	if i == nil || i.composed == nil {
 		return nil

@@ -54,11 +54,12 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 	SchemaHash          string
 	SchemaHashAlgorithm int
 	IntegrityHash       string
-	CreatedAt           string            // RFC 3339 or empty
+	CreatedAt           string            // as the header states it: RFC 3339 as yammm writes it, or empty
 	Metadata            map[string]string // user-provided annotations, nil if absent
 
-	// Content summary. Types is the whole denotation set; InstanceCounts
-	// holds one entry per type the snapshot itself holds.
+	// Content summary. Types holds one entry per types-table row;
+	// InstanceCounts holds one entry per type an instances group names whose
+	// row resolves, the number of its roots.
 	Types           []TypeRef
 	InstanceCounts  map[TypeRef]int
 	TotalInstances  int
@@ -66,8 +67,8 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 	DuplicateCount  int
 	UnresolvedCount int
 
-	// Attestation is the header's validity claim, or nil for a document
-	// written before v0.15.0. See [github.com/simon-lentz/yammm/graph.Attestation].
+	// Attestation is the header's validity claim, or nil for a document that
+	// states none. See [github.com/simon-lentz/yammm/graph.Attestation].
 	Attestation *graph.Attestation
 
 	// File metadata.
@@ -90,7 +91,7 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // [HeaderOnly] — it returns after parsing the header and skips decoding
 // the instance body, though it still scans the whole document to check
 // its shape. [HeaderOnlyRead] is the streaming sibling whose cost is
-// proportional to the header alone.
+// proportional to the header and the types table alone.
 //
 // Diagnostics are capped at the same default [Load] uses (100). This surface
 // takes no option that raises it; a caller needing every issue on a
@@ -99,8 +100,10 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // Returns (nil, result) when the header or the types table breaks a rule — an
 // unreadable or malformed header, an unsupported version, an unrecognized
 // feature, an unrecognized schema hash algorithm, a types table that states
-// one identity twice — when a section does not decode, or when the context is
-// cancelled. A document that decodes but fails a structural check returns a
+// one identity twice — when the document's top level is not the format's four
+// keys, in order, each once and none null, with nothing after them, when an
+// object repeats a member name or spells one the format declares in another
+// case, when a section does not decode, or when the context is cancelled. A document that decodes but fails a structural check returns a
 // summary beside Error-severity diagnostics — an integrity mismatch reports
 // IntegrityStatus "mismatch", and an instances group whose row names no table
 // entry is reported and left out of the instance counts, while an edge or a
@@ -109,10 +112,15 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 //
 // Info runs the structural validation [Load] and [Verify] run and stops before
 // materialization. It resolves no schema, so a document Info summarizes cleanly
-// can still fail Load or Verify on schema resolution and on every structural
-// check that needs a schema: the graph package doc's "Structural facts", and two
-// spellings of one timestamp, date or UUID key, which Info compares as written
-// and Load and Verify fold.
+// can still fail Load or Verify on the schema hash, on schema resolution, on
+// each check of the graph package doc's "Structural facts" that needs a
+// schema, on two spellings of one Timestamp or UUID key, which Info compares
+// as written and Load and Verify fold, and under [WithRevalidation] on the
+// values. Info runs the checks that need none, such as a key component
+// [graph.ParseKey] cannot read back, an undocumented reason and two roots
+// whose stored keys it accepts at one address, comparing keys as the reader's
+// number rule renders
+// them.
 //
 // Info follows the library's standard (T, diag.Result) return pattern.
 func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
@@ -123,6 +131,10 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 	}
 
 	sd := newStreamDecoder(data, nil, defaultLoadConfig())
+	if err := checkDocument(data); err != nil {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+		return nil, sd.collector.Result()
+	}
 
 	// Decode header + types.
 	if err := sd.decodeHeader(); err != nil {
@@ -193,15 +205,15 @@ type HeaderInfo struct {
 	SchemaHash          string
 	SchemaHashAlgorithm int
 	IntegrityHash       string
-	CreatedAt           string            // RFC 3339 or empty
+	CreatedAt           string            // as the header states it: RFC 3339 as yammm writes it, or empty
 	Metadata            map[string]string // user-provided annotations, nil if absent
 
 	// Types array (adjacent to the header in the wire format; read in
 	// the same streaming pass by decodeHeader).
 	Types []TypeRef
 
-	// Attestation is the header's validity claim, or nil for a document
-	// written before v0.15.0. See [github.com/simon-lentz/yammm/graph.Attestation].
+	// Attestation is the header's validity claim, or nil for a document that
+	// states none. See [github.com/simon-lentz/yammm/graph.Attestation].
 	Attestation *graph.Attestation
 
 	// FileSize is the document's size in bytes, or zero when unknown. Three
@@ -216,16 +228,17 @@ type HeaderInfo struct {
 //
 // HeaderOnly is the right choice for dispatch-style workloads that scan
 // many .ys files to classify lifecycle state, compare schema hashes, or
-// inspect metadata annotations like CreatedAt. It decodes the header
-// alone, where [Info] decodes the body to populate its counts; its one pass
-// over the whole document checks the outermost shape, below.
+// inspect metadata annotations like CreatedAt. It decodes the header and
+// the types table alone, where [Info] decodes the body to populate its counts; its scan of
+// the whole document checks the outermost shape and every member name, below.
 //
-// HeaderOnly holds the whole document, so it checks the outermost shape:
-// sections absent, repeated, out of order, or followed by trailing bytes are
-// rejected here. [HeaderOnlyRead] and [ScanDir] read through a capped reader
-// and never hold the body, so they cannot make that check — and say so on
-// their own documentation rather than accepting a misshapen document
-// silently.
+// HeaderOnly holds the whole document, so it checks the outermost shape as
+// [Load] does: the top level must be the format's four keys, in order, each
+// once and none null, with nothing after them, and no object may repeat a
+// member name or spell one the format declares in another case.
+// [HeaderOnlyRead] and [ScanDir] read through a capped reader and never hold
+// the body, so they cannot make those checks — and say so on their own
+// documentation rather than accepting a misshapen document silently.
 //
 // Integrity is not verified. The returned [HeaderInfo.IntegrityHash] is
 // the value stored in the file, not a verification result. Callers that
@@ -253,7 +266,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 	// every other whole-document surface runs. HeaderOnlyRead and ScanDir do
 	// not hold it and say so on their own godoc.
 	c := diag.NewCollector(0)
-	if err := checkTopLevelKeys(data); err != nil {
+	if err := checkDocument(data); err != nil {
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, c.Result()
 	}
@@ -298,8 +311,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 // 16 MiB accommodates typical .ys headers (< 1 KiB) with substantial
 // margin for callers that carry large work-set arrays in header metadata —
 // for example a consumer's state-batched pipelines, which persist target_keys /
-// processed_keys / failed_keys per batch and whose densest states produce
-// headers in the 100 KiB–1 MiB range. Callers whose headers legitimately
+// processed_keys / failed_keys per batch in the header. Callers whose headers legitimately
 // exceed even this bound should split metadata across multiple documents
 // or use [Info] / [Load] (which do not cap input size) against a
 // pre-materialized byte slice.
@@ -319,10 +331,11 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // Schema cross-check: HeaderOnlyRead takes no schema parameter and performs
 // no schema-hash verification during the read, matching [HeaderOnly]. Dispatch callers compare
 // [HeaderInfo.SchemaHash] against their loaded schema themselves via the
-// [HeaderInfo.SchemaHashMatches] helper — a cheap string equality check
-// against schema.StructuralHash(s) that captures intent at dispatch
-// sites. Callers that need schema-hash verification inside the read call
-// should materialize the bytes first and use [HeaderOnly] or [Info].
+// [HeaderInfo.SchemaHashMatches] helper — a string equality check against
+// schema.StructuralHash(s), which hashes s's import closure on each call, that
+// captures intent at dispatch sites. Callers that need schema-hash
+// verification inside the read call should materialize the bytes first and
+// use [Verify] or [Load], which take the schema.
 //
 // Read-error handling: a reader that returns io.EOF or
 // io.ErrUnexpectedEOF, or an error wrapping either, partway through the
@@ -339,17 +352,21 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // I/O should apply their own per-read deadline wrapping if finer-grained
 // cancellation is required.
 //
-// Cost: proportional to the actual header size (typically < 1 KiB), not
-// the underlying file size. The returned [HeaderInfo.FileSize] is not
+// Cost: proportional to the size of the header and the types table
+// (typically < 1 KiB), not the underlying file size. The returned [HeaderInfo.FileSize] is not
 // populated (zero value) in the reader variant — a size is not knowable
 // from an io.Reader. Consumers that need one use the []byte form via
 // [HeaderOnly], or [ScanDir], which stats the handle it opened and fills
-// the field in for every entry it yields.
+// the field in for every entry whose header it reads and whose handle it
+// can stat.
 //
 // Shape: HeaderOnlyRead reads through a reader capped at [MaxHeaderSize] and
-// never holds the body, so it cannot check the document's outermost shape. A
-// document whose sections are absent, repeated, out of order, or followed by
-// trailing bytes reads its header here without complaint. It does not accept
+// never holds the body, so it cannot check the document's outermost shape or
+// its member names. A document whose sections are absent, repeated, out of
+// order, or followed by trailing bytes, or whose objects repeat a member name,
+// reads its header here without complaint; of these, only a first section
+// other than the header and a missing types section are refused. It does not
+// accept
 // such a document by omission — it does not see it. Use [HeaderOnly], [Verify]
 // or [Load] when that matters.
 //
@@ -429,7 +446,7 @@ func (sd *streamDecoder) headerAttestation() *graph.Attestation {
 // The layout is RFC 3339. yammm writes UTC at second precision, so a time
 // passed to [WithCreatedAt] does not round-trip its sub-second part. The parser
 // accepts more than yammm writes, deliberately: [UpdateMetadata] preserves a
-// foreign header's bytes, and fractional seconds and non-UTC offsets both parse
+// foreign header's created_at bytes, and fractional seconds and non-UTC offsets both parse
 // under this layout and keep their offset in the result.
 func (h *HeaderInfo) CreatedAtTime() (time.Time, bool) {
 	if h == nil {
@@ -444,8 +461,8 @@ func (h *HeaderInfo) CreatedAtTime() (time.Time, bool) {
 // [HeaderOnlyRead] to detect snapshots produced under a different schema
 // version — e.g., a consumer's stale-schema path.
 //
-// The comparison is a cheap string equality against
-// schema.StructuralHash(s); the helper exists so the cross-check is a
+// The comparison is a string equality against schema.StructuralHash(s),
+// which hashes s's import closure on each call; the helper exists so the cross-check is a
 // single method call that signals intent at dispatch sites and keeps the
 // "forgot to compare" foot-gun out of consumer code paths.
 //

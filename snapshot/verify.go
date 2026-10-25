@@ -29,6 +29,10 @@ func Verify(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOpti
 
 	cfg := applyLoadOptions(opts)
 	sd := newStreamDecoder(data, s, cfg)
+	if err := checkDocument(data); err != nil {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+		return sd.collector.Result()
+	}
 
 	// Steps 1-3: Decode and validate header, types, schema hash.
 	if err := sd.decodeHeader(); err != nil {

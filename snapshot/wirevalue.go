@@ -32,13 +32,22 @@ func (f wireFloat) MarshalJSON() ([]byte, error) {
 }
 
 // wireFloat32 is [wireFloat] for a value the caller stored in 32 bits.
-// Emitting it at bitSize 64 spends 17 digits describing 32 bits of value.
+// Emitting it at bitSize 64 spends 17 digits describing 32 bits of value, so
+// it is emitted at 32 unless that text, which the reader parses at 64 bits,
+// rounds back to another float32: then the 64-bit form keeps the value.
 type wireFloat32 float32
 
 // MarshalJSON is [wireFloat.MarshalJSON] at bitSize 32.
 // [TestWireFloat32_MatchesEncodingJSON] holds it in lockstep.
 func (f wireFloat32) MarshalJSON() ([]byte, error) {
-	return appendWireFloat(float64(f), 32)
+	b, err := appendWireFloat(float64(f), 32)
+	if err != nil {
+		return nil, err
+	}
+	if back, err := strconv.ParseFloat(string(b), 64); err != nil || float32(back) != float32(f) {
+		return appendWireFloat(float64(f), 64)
+	}
+	return b, nil
 }
 
 // appendWireFloat formats v as encoding/json's float encoder would at bitSize,

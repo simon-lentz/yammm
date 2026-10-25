@@ -183,7 +183,7 @@ Validates a persisted snapshot against its schema. Checks integrity hash, schema
 | ---- | ----------- |
 | `--skip-integrity-check` | Skip integrity hash verification (hand-edited files) |
 | `--value-conformance` | Report stored `Timestamp`/`Date`/`UUID` values that do not conform to their constraints |
-| `--revalidate` | Run every instance back through the validator; findings reported as warnings (v0.15+) |
+| `--revalidate` | Run each root instance, with its composed children, its edges and the `target_missing` records the structural checks accept, back through the validator; findings are reported as warnings, and a run with warnings alone exits 0. A duplicate record's instance is not run, and neither is a root whose type the structural checks refuse or whose own tree the structural walk refuses (v0.15+) |
 
 ### snapshot info
 
@@ -193,7 +193,7 @@ yammm snapshot info output.ys
 
 Displays metadata about a `.ys` file: schema name, version, instance counts, integrity status, timestamps, custom metadata, and the header's attestation (the writer's validity claim, v0.15+).
 
-`--header-only` reads the header alone and reports the file's size. `--dir <path>` scans every `.ys` file in a directory, header-only. The text and `--format json` modes render one structure, so a field one reports the other reports too, and absent `metadata` renders as `{}`. Under `--format json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning.
+`--header-only` reads the header and the types table alone and reports the file's size. `--dir <path>` scans the `.ys` files of a directory that `snapshot.ScanDir`'s filtering admits, header-only. For one file, the text and `--format json` modes render one structure, so a field one reports the other reports too, and absent `metadata` reads `none` in text and `{}` in JSON; under `--dir` a JSON entry carries the name, path, size, modification time and the header, `null` where it did not parse, where a text row names the file and its status, then the schema, version and `created_at` of a file that read or the first error of one that did not. Under `--format json`, each `--dir` entry carries its result under `diagnostics` in the wire the diagnostic stream uses: `issues`, plus `limitReached` and `droppedCount` when the entry's issues were truncated. In text, a `warn` row names its first warning.
 
 ### snapshot update-metadata
 

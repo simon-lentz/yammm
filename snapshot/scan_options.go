@@ -41,9 +41,10 @@ type ScanCandidate struct {
 
 // Info describes the file the open would read: the stat follows a symlink, so
 // it answers for the target rather than the link — the same file the fstat
-// behind [ScanEntry.FileSize] and [ScanEntry.ModTime] answers for. One
-// candidate costs at most one stat however often Info is called, and nothing
-// at all when no filter asks. A failure is returned rather than swallowed; a
+// behind [ScanEntry.FileSize] and [ScanEntry.ModTime] answers for. A candidate
+// the scan builds costs at most one stat however often Info is called, and a
+// filter's Info costs none past the stat the filtering rule took of a
+// symlink; a caller-built one stats Path on every call. A failure is returned rather than swallowed; a
 // filter that admits the entry anyway gets the documented per-file
 // E_SNAPSHOT_IO entry from the open.
 func (c ScanCandidate) Info() (fs.FileInfo, error) {

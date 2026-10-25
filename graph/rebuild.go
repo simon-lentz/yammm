@@ -100,9 +100,9 @@ type UnresolvedParts struct {
 // RebuildSnapshot constructs a Snapshot from pre-resolved parts.
 //
 // This is the deserialization entry point for the snapshot package.
-// It accepts fully-resolved data (instances, edges, diagnostics) and
-// assembles them into an immutable Snapshot without re-running validation
-// or edge resolution.
+// It accepts fully-resolved data (the denoted types, instances, edges,
+// duplicates, unresolved records and the attestation) and assembles them into a Snapshot without re-running validation or edge
+// resolution.
 //
 // Most users should construct snapshots via [Graph.Add] + [Graph.Snapshot].
 // RebuildSnapshot exists for [snapshot.Load] and testing.
@@ -296,37 +296,56 @@ func validateParts(r *structureRules, parts SnapshotParts) {
 	}
 	for _, ip := range parts.Instances {
 		checkTree(r, "instance", ip)
-		if _, ok := r.s.TypeByID(ip.TypeID); ok {
-			r.address(ip.TypeID, ip.PrimaryKey)
+		if t, ok := r.s.TypeByID(ip.TypeID); ok {
+			address(r, t, ip)
 		}
 	}
 
-	for _, ep := range parts.Edges {
+	for i, ep := range parts.Edges {
+		before := r.c.ErrorCount()
 		r.identity(ep.SourceType, positionAt("edge source", ep.SourceKey.String()))
-		r.association(associationRecord{
+		if r.association(associationRecord{
 			position: "edge from", source: ep.SourceType, sourceKey: ep.SourceKey, relation: ep.Relation,
-			targetKey: ep.TargetKey, properties: ep.Properties,
-		})
+			targetKey: ep.TargetKey, properties: ep.Properties, refused: r.c.ErrorCount() > before,
+		}) {
+			if r.refusedEdges == nil {
+				r.refusedEdges = make(map[int]bool)
+			}
+			r.refusedEdges[i] = true
+		}
 	}
 
-	for _, dp := range parts.Duplicates {
-		// A root duplicate names no parent, so its ParentType is zero by right.
-		if dp.Relation != "" {
+	for i, dp := range parts.Duplicates {
+		switch {
+		case dp.Relation != "":
 			r.identity(dp.ParentType, positionAt("duplicate parent", dp.ParentKey.String()))
+		case !dp.ParentType.IsZero() || dp.ParentKey.Len() > 0:
+			// A root duplicate's conflict is the root at its own type and key, so
+			// a parent it names is a field no rule reads.
+			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf(
+				"duplicate record %d is a root duplicate, and names the parent %s[%s], which only a composed one has",
+				i, dp.ParentType, dp.ParentKey.String()))
 		}
 		checkTree(r, "duplicate instance", dp.Instance)
 	}
 
-	for _, up := range parts.Unresolved {
+	for i, up := range parts.Unresolved {
+		before := r.c.ErrorCount()
 		r.identity(up.SourceType, positionAt("unresolved source", up.SourceKey.String()))
 		r.unresolvedReason(up.Reason, up.TargetKey, up.Properties)
-		r.association(associationRecord{
+		if r.association(associationRecord{
 			position: "unresolved record of", source: up.SourceType, sourceKey: up.SourceKey, relation: up.Relation,
-			targetKey: up.TargetKey, reason: up.Reason, properties: up.Properties,
-		})
+			targetKey: up.TargetKey, reason: up.Reason, properties: up.Properties, refused: r.c.ErrorCount() > before,
+		}) {
+			if r.refusedRecords == nil {
+				r.refusedRecords = make(map[int]bool)
+			}
+			r.refusedRecords[i] = true
+		}
 	}
-	r.oneOverflow()
+	// The record facts first: a slot they refuse is none oneOverflow judges.
 	recordFacts(r, parts)
+	r.oneOverflow()
 }
 
 // rebuildInstance creates an Instance from InstanceParts, recursing into

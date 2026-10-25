@@ -26,7 +26,7 @@ Warnings are rendered to stderr.`,
 
 	cmd.Flags().Bool("skip-integrity-check", false, "skip integrity hash verification (for hand-edited files)")
 	cmd.Flags().Bool("value-conformance", false, "report stored Timestamp/Date/UUID values that do not conform to their constraints")
-	cmd.Flags().Bool("revalidate", false, "run every instance back through the validator and report findings as warnings")
+	cmd.Flags().Bool("revalidate", false, "run root instances back through the validator and report findings as warnings")
 
 	registerModuleRootFlag(cmd)
 	return cmd

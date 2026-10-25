@@ -319,22 +319,20 @@ func (b *instanceBuilder) child(
 	// Canonicalized once, here: the sibling scan and the installed instance
 	// read one value, so two spellings of one key cannot pass as two children.
 	key := b.g.canon.key(child.TypeID(), child.PrimaryKey())
-	if childTyp.HasPrimaryKey() {
-		if err := checkInstanceKey(childTyp, child, b.g.canon); err != nil {
-			b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-				fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
-				WithDetail(diag.DetailKeyTypeName, child.TypeName()).
-				WithDetail(diag.DetailKeyRelationName, relationName).
-				WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
-			return
-		}
-		if seen != nil && rel.IsMany() {
-			keyStr := key.String()
-			if first, dup := seen[keyStr]; dup {
-				b.c.Collect(b.g.siblingDuplicateIssue(parentName, relationName, rel, keyStr, first, index))
-			} else {
-				seen[keyStr] = index
-			}
+	if err := checkInstanceKey(childTyp, child, b.g.canon); err != nil {
+		b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
+			fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
+			WithDetail(diag.DetailKeyTypeName, child.TypeName()).
+			WithDetail(diag.DetailKeyRelationName, relationName).
+			WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
+		return
+	}
+	if childTyp.HasPrimaryKey() && seen != nil && rel.IsMany() {
+		keyStr := key.String()
+		if first, dup := seen[keyStr]; dup {
+			b.c.Collect(b.g.siblingDuplicateIssue(parentName, relationName, rel, keyStr, first, index))
+		} else {
+			seen[keyStr] = index
 		}
 	}
 

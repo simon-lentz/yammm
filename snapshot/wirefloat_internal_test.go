@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -144,7 +145,8 @@ func TestWireNumeric_EveryNumericKind(t *testing.T) {
 }
 
 // A float32 emits the shortest form that reads back as the same float32,
-// which is what encoding/json writes and what v0.11.0 wrote. Widening to
+// which is what encoding/json writes and what v0.11.0 wrote, save the values
+// TestWireFloat32_ReadsBackAtSixtyFourBits names. Widening to
 // float64 and formatting at bitSize 64 spends 17 significant digits
 // describing 32 bits of value. Vector embeddings are the natural float32
 // shape, so this is the position the defect costs most.
@@ -187,8 +189,8 @@ func TestWireNumeric_Float32KeepsItsWidth(t *testing.T) {
 	}
 }
 
-// wireFloat32.MarshalJSON is encoding/json's float encoder at bitSize 32.
-// This holds the two in lockstep, and it is the only coverage of the float32
+// wireFloat32.MarshalJSON is encoding/json's float encoder at bitSize 32 for
+// every value whose text reads back at 64 bits. This holds the two in lockstep, and it is the only coverage of the float32
 // exponent cutoff, which encoding/json compares in float32 rather than in
 // float64.
 func TestWireFloat32_MatchesEncodingJSON(t *testing.T) {
@@ -434,5 +436,40 @@ func TestWireNumeric_InexactValuesPassThrough(t *testing.T) {
 				t.Errorf("wireNumeric(%v) wrapped = %v, want %v", tc.in, wrapped, tc.wrapped)
 			}
 		})
+	}
+}
+
+// The reader parses a number at 64 bits, so a float32's shortest 32-bit text
+// is rounded twice on the way back: for bits 363742205 (7.038531e-26) the
+// float64 that text names rounds to the next float32. Such a value is written
+// in its 64-bit form, which reads back as itself; its neighbours keep theirs.
+func TestWireFloat32_ReadsBackAtSixtyFourBits(t *testing.T) {
+	t.Parallel()
+	twice := math.Float32frombits(363742205)
+	for _, c := range []struct {
+		v    float32
+		wide bool
+	}{
+		{twice, true},
+		{-twice, true},
+		{math.Float32frombits(363742204), false},
+		{math.Float32frombits(363742206), false},
+		{0.1, false},
+	} {
+		b, err := wireFloat32(c.v).MarshalJSON()
+		if err != nil {
+			t.Fatalf("wireFloat32(%v).MarshalJSON: %v", c.v, err)
+		}
+		back, err := strconv.ParseFloat(string(b), 64)
+		if err != nil {
+			t.Fatalf("%s does not parse: %v", b, err)
+		}
+		if float32(back) != c.v {
+			t.Errorf("wireFloat32(bits %d) = %s, which reads back as bits %d", math.Float32bits(c.v), b, math.Float32bits(float32(back)))
+		}
+		short := strconv.FormatFloat(float64(c.v), 'g', -1, 32)
+		if wide := !bytes.Equal(b, []byte(short)); wide != c.wide {
+			t.Errorf("wireFloat32(bits %d) = %s; the 32-bit form is %s, wide = %v, want %v", math.Float32bits(c.v), b, short, wide, c.wide)
+		}
 	}
 }

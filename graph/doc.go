@@ -19,8 +19,10 @@
 // forward references, duplicate detection and merges atomically using internal
 // synchronization.
 //
-// [Snapshot] is an immutable snapshot; it is safe for concurrent read access
-// from multiple goroutines.
+// [Snapshot] has no method that changes it, and it is safe for concurrent read
+// access from multiple goroutines. Its accessors copy each slice they return,
+// but the records in it are the snapshot's own: a caller that assigns through
+// one (*e = Edge{}) changes the snapshot for every reader.
 //
 // # Basic Usage
 //
@@ -167,14 +169,19 @@
 //   - Composition slots. A slot is a composition its parent's type declares,
 //     holds instances of its declared target, holds one child at most under a
 //     (one) composition, and holds each canonical key of a keyed part once.
-//   - Keys. A keyed instance's stored key has one component per declared
-//     primary key, each a scalar [ParseKey] reads back as the value every
-//     writer writes, and each agrees with its key property, which is present
-//     and not null. So a component of no form, a string that is not valid
-//     UTF-8, a json.Number that is empty or spells a number no finite float64
-//     holds, one whose rendering differs from its
-//     form's, and a time.Time or uuid.UUID its key property's constraint does
-//     not render are refused. Two roots of one type never share a canonical
+//   - Keys. Every stored key, a keyless part's included, holds only scalars
+//     that render as every writer writes them and that [ParseKey] reads back
+//     at that rendering, so a reload keeps every address. A keyed
+//     instance's stored key has one component per declared primary key,
+//     and each agrees with its key property, which is present and not
+//     null. So a component of no form, a string that is not valid UTF-8, a
+//     json.Number that is empty or spells a number no finite float64 holds,
+//     a number ParseKey reads back at another rendering (such as a uint64 or
+//     a json.Number past int64 that reads back as a float64 rendered otherwise,
+//     a json.Number spelled 1.0, or a float64 negative zero), one whose
+//     rendering differs from its form's, and a time.Time or
+//     uuid.UUID no key property's constraint renders, as in every keyless
+//     part's key, are refused. Two roots of one type never share a canonical
 //     address.
 //   - Names. Every stored property and edge property name is declared.
 //   - Associations. Every edge and unresolved record is under an association
@@ -194,8 +201,9 @@
 //     once, and only under a required association. A "target_missing" record
 //     names a target no root holds.
 //   - Duplicates. A duplicate's instance holds no composed children, and a
-//     root duplicate's type can hold a root. Its conflict is derived from its
-//     position, never taken from a constructor's input: for a root duplicate, the root at its own type and key; for a
+//     root duplicate's type can hold a root and it names no parent. Its
+//     conflict is derived from its position, never taken from a constructor's
+//     input: for a root duplicate, the root at its own type and key; for a
 //     composed duplicate, whose type is its composition's declared target,
 //     the sole child of a (one) slot or the child of a keyed (many) slot at
 //     its own key. A duplicate with no such conflict, as under a keyless
@@ -312,15 +320,16 @@
 // [ErrAssemblerFinalized] is the sentinel returned from Add / AddValid /
 // AddValidOrMerge after Finalize.
 //
-// [Instance] provides immutable access to a graph node's data, through
+// [Instance] provides read access to a graph node's data, through
 // accessors such as [Instance.TypeName], [Instance.PrimaryKey], [Instance.Properties],
 // [Instance.Composed], [Instance.ComposedRelations], [Instance.Provenance].
 //
 // [Edge] represents a resolved association between two instances, read
 // through accessors such as [Edge.Relation], [Edge.Source], [Edge.Target], [Edge.Properties].
 //
-// [UnresolvedEdge] records an association whose target was not found at
-// graph-construction time (absent, empty, or target_missing). Edge
+// [UnresolvedEdge] records an association the graph could not resolve at
+// construction time: a target it holds no root for (target_missing), or a
+// required one the data left absent or empty. Edge
 // properties declared on the forward reference survive Marshal/Load
 // symmetric with [Edge.Properties] and are accessed via
 // [UnresolvedEdge.Property] and [UnresolvedEdge.Properties]. The .ys
@@ -360,13 +369,14 @@
 // render alike and an output document may key them by name. See "Root type
 // eligibility" above, and [schema.AddressableTag] for the name itself.
 //
-// So every place that must denote a type exactly takes an identity, and
+// So every place that must denote a type exactly takes or returns an identity, and
 // [BatchAssembler.Add], which takes an entry-schema name, has the validator
 // resolve it to one identity first:
 //
 //   - [Snapshot.Types]
 //   - [Snapshot.InstancesOf]
 //   - [Snapshot.InstanceByKey]
+//   - [Instance.TypeID]
 //   - [Graph.AddComposed]'s parentType parameter
 //   - [SnapshotParts.Types], and [InstanceParts.TypeID], which files a root
 //   - the type fields on [EdgeParts], [DuplicateParts] and [UnresolvedParts]
@@ -409,7 +419,9 @@
 //   - [diag.Result.HasErrors]: semantic failure (duplicate PK, type not found)
 //   - [diag.Result.OK]: success (may have warnings)
 //
-// Programmer errors (nil receiver, nil instance, schema mismatch) panic.
+// Programmer errors panic: a nil receiver, instance or context, a nil schema
+// or snapshot at a constructor, an instance of another schema, or a key value
+// [FormatKey] cannot encode.
 //
 // [Graph.Add] emits the following. The first four judge a root's type in the
 // order listed, and a type breaking two draws the first:
@@ -421,8 +433,8 @@
 //     composed child is not an instance of its relation's target type
 //   - E_GRAPH_ABSTRACT_TYPE: the type is abstract
 //   - E_GRAPH_INVALID_PK: a primary key — the instance's own, or a composed
-//     child's of a keyed part type — is empty, has the wrong arity, holds a
-//     component the Keys fact refuses, has a key
+//     child's, a keyless part's included — holds a component the Keys fact
+//     refuses; a keyed type's key is empty, has the wrong arity, has a key
 //     property that is absent or null, or disagrees with its own key
 //     property; or an association target key has the wrong arity or a
 //     component the Keys fact refuses
@@ -440,13 +452,13 @@
 //
 //   - E_GRAPH_TYPE_NOT_FOUND: the PARENT's identity is not in the schema's
 //     import closure, or is the zero TypeID
-//   - E_GRAPH_PARENT_NOT_FOUND: no instance carries that identity and key
+//   - E_GRAPH_PARENT_NOT_FOUND: no root carries that identity and key
 //   - E_GRAPH_INVALID_COMPOSITION: the named relation is not a composition, or
 //     the child is not an instance of its target type
-//   - E_GRAPH_INVALID_PK: the child's key, or a descendant's, is empty, has
-//     the wrong arity, holds a component the Keys fact refuses, has a
-//     key property that is absent or null, or disagrees with its own key
-//     property
+//   - E_GRAPH_INVALID_PK: the child's key, or a descendant's, holds a
+//     component the Keys fact refuses, a keyless part's included, or, for a
+//     keyed type's key, is empty, has the wrong arity, has a key property
+//     that is absent or null, or disagrees with its own key property
 //   - E_DUPLICATE_COMPOSED_PK: the parent's (one) slot already holds a child,
 //     or its keyed (many) slot holds a sibling at the child's key
 //   - E_GRAPH_CARDINALITY, E_GRAPH_UNKNOWN_RELATION, E_DUPLICATE_COMPOSED_PK,
@@ -477,8 +489,9 @@
 // [RebuildSnapshot] and the import report a broken structural fact with the
 // code [Graph.Add] reports it with. The one exception is at [RebuildSnapshot]:
 // parts that break the identity, root, denoted-type, name, address, reason,
-// records or duplicate rule come only from a broken caller, so it reports them
-// as Fatal E_INTERNAL. [RebuildSnapshot] panics on a nil schema, as [New]
+// records or duplicate rule, or that name an edge or record end no instance of
+// the parts holds, come only from a broken caller, so it reports them as Fatal
+// E_INTERNAL. [RebuildSnapshot] panics on a nil schema, as [New]
 // does.
 //
 // # Diagnostics Lifecycle
@@ -500,14 +513,15 @@
 //
 // # Ordering Guarantees
 //
-// All slice-returning [Snapshot] methods produce deterministically sorted output,
-// independent of [Graph.Add] call order or concurrency:
+// Every slice-returning [Snapshot] method produces deterministically sorted
+// output, independent of [Graph.Add] call order or concurrency:
 //
 //   - [Snapshot.Types]: lexicographic by the TypeID's String (the schema
 //     path, ":", then the name)
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
+//   - [Snapshot.EdgesFrom]: the order of [Snapshot.Edges], over one source
 //   - [Snapshot.Duplicates]: (type, primaryKey, relation, conflictType,
 //     conflictKey, parent slot, rejected instance's properties, rejected
 //     instance's provenance)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -16,7 +17,7 @@ import (
 // An empty key and an absent key are one state. immutable.Key.Len() and
 // immutable.Key.String() already collapse them, so every position that reads a
 // key must branch on length. These tests pin the two boundaries where the
-// distinction leaked: the reader's conflict-address arm, and the string form
+// distinction leaked: the reader's conflict key, and the string form
 // graph.UnresolvedEdge.TargetKey carries.
 
 // TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey pins the documented
@@ -94,8 +95,8 @@ func composedSiblingCollision(ctx context.Context, t *testing.T, s *schema.Schem
 }
 
 // spliceConflictBlock rewrites the conflict block of the document's single
-// duplicate record. Marshal never writes an empty conflict key — it omits the
-// key for a keyless conflict — so these shapes exist only by splicing.
+// duplicate record. Marshal writes a null conflict key for a keyless conflict
+// alone, so an empty key beside a keyed one exists only by splicing.
 func spliceConflictBlock(t *testing.T, data []byte, replacement string) []byte {
 	t.Helper()
 	const opener = `"conflict":{`
@@ -134,48 +135,6 @@ func emptyConflictKeyDoc(t *testing.T) []byte {
 	data := v3Doc(t)
 	return spliceConflictBlock(t, data,
 		fmt.Sprintf(`"type":%d,"key":[]`, childRow(t, data, "Child")))
-}
-
-// TestLoad_EmptyConflictKeyRefusesUnaddressableSlot pins both halves of the
-// sole-occupant clamp. An empty key addresses the slot alone, which says
-// nothing when the slot holds two children, and nothing when its one occupant
-// is not the type the conflict block states. Either shape is a malformed
-// address and draws a dangling-reference Error.
-func TestLoad_EmptyConflictKeyRefusesUnaddressableSlot(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	s := testSchemaWithComposition(t)
-	siblings := composedSiblingCollision(ctx, t, s)
-	soleOccupant := v3Doc(t)
-
-	t.Run("two occupants", func(t *testing.T) {
-		t.Parallel()
-		data, res := snapshot.Marshal(ctx, siblings)
-		if err := res.Err(); err != nil {
-			t.Fatalf("marshal: %v", err)
-		}
-		edited := spliceConflictBlock(t, data,
-			fmt.Sprintf(`"type":%d,"key":[]`, childRow(t, data, "Child")))
-
-		_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-		if !hasCode(loadRes, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
-			t.Errorf("an empty conflict key addressing a two-child slot loaded without %s: %v",
-				diag.E_SNAPSHOT_DANGLING_REFERENCE, loadRes)
-		}
-	})
-
-	t.Run("sole occupant of another type", func(t *testing.T) {
-		t.Parallel()
-		data := soleOccupant
-		edited := spliceConflictBlock(t, data,
-			fmt.Sprintf(`"type":%d,"key":[]`, childRow(t, data, "Parent")))
-
-		_, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-		if !hasCode(loadRes, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
-			t.Errorf("an empty conflict key naming the wrong type row loaded without %s: %v",
-				diag.E_SNAPSHOT_DANGLING_REFERENCE, loadRes)
-		}
-	})
 }
 
 // TestInfo_ReportsAnUnresolvableInstancesEntry pins that Info reports a short
@@ -222,39 +181,44 @@ func TestInfo_ReportsAnUnresolvableInstancesEntry(t *testing.T) {
 	}
 }
 
-// TestLoadVerify_EmptyConflictKeyAgreeWithTheGraph pins the reader against
-// graph.resolveDuplicateConflict on the one input where they used to disagree.
-// An empty conflict key addresses the slot alone, which resolves when the slot
-// has a sole occupant of the stated type. A reader that split on nil-ness
-// instead took the keyed arm here, found no occupant whose key renders "[]",
-// and refused a document the graph model accepts.
-func TestLoadVerify_EmptyConflictKeyAgreeWithTheGraph(t *testing.T) {
+// TestLoadVerify_RefuseAnEmptyConflictKeyUnderAKeyedManyComposition pins the
+// conflict address of a keyed (many) duplicate: graph.Add records it against
+// the child at its own key, and graph.RebuildSnapshot derives it so, so a
+// record that states no conflict key states no conflict, whatever the slot
+// holds. Each shape draws the one issue, and Load and Verify agree.
+func TestLoadVerify_RefuseAnEmptyConflictKeyUnderAKeyedManyComposition(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
-	edited := emptyConflictKeyDoc(t)
+	sole := v3Doc(t)
+	siblings, res := snapshot.Marshal(ctx, composedSiblingCollision(ctx, t, s))
+	if err := res.Err(); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
 
-	loaded, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-	verifyRes := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-
-	if loadRes.HasErrors() {
-		t.Errorf("Load refused an empty conflict key the graph model resolves: %v", loadRes)
-	}
-	if verifyRes.HasErrors() {
-		t.Errorf("Verify refused an empty conflict key the graph model resolves: %v", verifyRes)
-	}
-	if loadRes.HasErrors() != verifyRes.HasErrors() {
-		t.Errorf("Load and Verify disagree: load errors=%v, verify errors=%v",
-			loadRes.HasErrors(), verifyRes.HasErrors())
-	}
-	if loaded == nil {
-		t.Fatal("Load returned no snapshot")
-	}
-	if n := len(loaded.Duplicates()); n != 1 {
-		t.Fatalf("loaded %d duplicates, want 1", n)
-	}
-	if conflict := loaded.Duplicates()[0].Conflict(); conflict == nil {
-		t.Error("the duplicate's conflict pointer is nil — the slot address did not resolve")
+	for name, edited := range map[string][]byte{
+		"a sole occupant, the key empty": emptyConflictKeyDoc(t),
+		"a sole occupant, the key null": spliceConflictBlock(t, sole,
+			fmt.Sprintf(`"type":%d,"key":null`, childRow(t, sole, "Child"))),
+		"two occupants": spliceConflictBlock(t, siblings,
+			fmt.Sprintf(`"type":%d,"key":[]`, childRow(t, siblings, "Child"))),
+		"a sole occupant of another type than the block states": spliceConflictBlock(t, sole,
+			fmt.Sprintf(`"type":%d,"key":[]`, childRow(t, sole, "Parent"))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			loaded, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+			verifyRes := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false))
+			if loaded != nil {
+				t.Error("Load returned a snapshot")
+			}
+			for surface, res := range map[string]diag.Result{"Load": loadRes, "Verify": verifyRes} {
+				if res.Len() != 1 || !hasCode(res, diag.E_SNAPSHOT_MALFORMED) ||
+					!strings.Contains(res.String(), "its conflict is the child at its own key") {
+					t.Errorf("%s reports %v, want one %s naming the child at its own key", surface, res, diag.E_SNAPSHOT_MALFORMED)
+				}
+			}
+		})
 	}
 }
 

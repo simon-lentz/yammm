@@ -68,7 +68,8 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //     Error E_SNAPSHOT_MALFORMED, and whitespace between the header's closing
 //     brace and the comma after it Fatal E_UPDATE_METADATA_BODY_OFFSET;
 //     [UpdateMetadataOrReMarshal] falls back to [Load] and [Marshal] for
-//     either input.
+//     either input, unless newMeta holds a key or value that is not valid
+//     UTF-8.
 //
 // Wire-format precondition. UpdateMetadata depends on the field-order
 // and body-suffix stability contracts documented in the comment block
@@ -91,26 +92,27 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 // caller that needs the timestamp as a value reads it with
 // [HeaderInfo.CreatedAtTime] and leaves the option alone.
 //
-// UpdateMetadata copies the body bytes verbatim and does not validate what
-// they contain: it re-verifies no integrity hash, resolves no schema, and
-// reads no instance. It does check everything it can see without decoding the
-// body — the four-key top-level shape, and a types table that states one
-// identity twice — because the output carries a freshly computed integrity
-// hash, so accepting a document no read path accepts would hand back a
-// malformed document that passes verification. Callers needing more than that
-// pair UpdateMetadata with a prior [Verify] on the same bytes; [HeaderOnly] is
-// not that check, because it now validates the same outermost shape and adds
-// only the header and types table.
+// UpdateMetadata copies the body bytes verbatim and decodes no instance: it
+// re-verifies no integrity hash, resolves no schema, and of the body it
+// decodes the types table alone. It does refuse every input the failure modes
+// below name, because the output carries a freshly computed integrity hash, so accepting a document no read path accepts would
+// hand back a malformed document that passes verification. Callers needing
+// more than that pair UpdateMetadata with a prior [Verify] on the same bytes;
+// [HeaderOnly] is not that check, because it reads no instance either.
 //
 // Diagnostics are capped at the same default [Load] uses (100); this surface
 // takes no option that raises it.
 //
 // Failure modes and error codes:
 //
-//   - [diag.E_SNAPSHOT_MALFORMED] — the input header does not parse or states
-//     a null features field, its top-level keys are not the four the format
-//     fixes in their fixed order and none null, or its types table states one
-//     identity on two rows.
+//   - [diag.E_SNAPSHOT_MALFORMED] — the input does not begin with '{', its
+//     header or types table does not parse, its header states no features
+//     field or a null one, its top level is not one closed JSON object holding the four
+//     keys the format fixes, in their fixed order, each once, none null and
+//     each valid JSON, with nothing after it, its types
+//     table states one identity on two rows, an object of the document repeats
+//     a member name or spells one the format declares in another case, or
+//     newMeta holds a key or value that is not valid UTF-8.
 //   - [diag.E_SNAPSHOT_UNSUPPORTED_FEATURE] — the header names a feature this
 //     version does not implement. Refused rather than carried through, because
 //     the output would claim support it does not have.
@@ -126,15 +128,15 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //     range for the body. This indicates the input does not match the
 //     shape Marshal produces. Byte-identical recovery is not possible;
 //     consumers using [UpdateMetadataOrReMarshal] get automatic
-//     Load + Marshal fallback with a paired W_UPDATE_METADATA_FALLBACK
-//     warning.
+//     Load + Marshal fallback, save for newMeta that is not valid UTF-8,
+//     and a W_UPDATE_METADATA_FALLBACK warning when the fallback succeeds.
 //   - [diag.E_CONTEXT_CANCELLED] — ctx was cancelled at entry.
 //
 // Thread safety: UpdateMetadata is a pure function over its inputs.
 // It is safe for concurrent use; it does not mutate data or newMeta.
 //
-// Metadata-key convention (non-enforced): yammm treats keys as opaque
-// strings. Consumers using structured metadata should namespace their
+// Metadata-key convention (non-enforced): yammm treats a key as an opaque
+// string and requires only that it be valid UTF-8. Consumers using structured metadata should namespace their
 // keys (e.g., myapp.pipeline_completed) to avoid collisions with
 // other metadata consumers who share a .ys file.
 func UpdateMetadata(
@@ -157,10 +159,10 @@ func UpdateMetadata(
 	}
 
 	// The output carries a freshly computed integrity hash, so a shape no
-	// read path accepts must not be blessed here. The four-key check reads
-	// tokens and skips values, so the body stays undecoded and the
-	// trust-the-body contract holds.
-	if err := checkTopLevelKeys(data); err != nil {
+	// read path accepts must not be blessed here. The shape and member-name
+	// checks read tokens and bytes and decode no value, so the body stays
+	// undecoded and the trust-the-body contract holds.
+	if err := checkDocument(data); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("snapshot.UpdateMetadata: %v", err)).Build())
@@ -201,6 +203,14 @@ func UpdateMetadata(
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_UPDATE_METADATA_BODY_OFFSET,
 			fmt.Sprintf("snapshot.UpdateMetadata: expected ',' at body offset %d, got %q — input does not match Marshal-produced shape",
 				bodyOffset, data[bodyOffset])).Build())
+		return nil, c.Result()
+	}
+
+	// Judged once the document is: a fault of the document is reported first.
+	if err := invalidMetadata(newMeta); err != nil {
+		c := diag.NewCollector(0)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			fmt.Sprintf("snapshot.UpdateMetadata: %v", err)).Build())
 		return nil, c.Result()
 	}
 
@@ -271,13 +281,14 @@ func UpdateMetadata(
 	return out, sd.collector.Result()
 }
 
-// UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; on any Error or
-// Fatal issue other than E_CONTEXT_CANCELLED (E_SNAPSHOT_MALFORMED at Error,
-// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another), transparently falls
-// back to [Load] + [Marshal] using s for the Load. The fallback
-// carries the input's indentation and its created_at across — the created_at
-// byte-for-byte, as the fast path keeps it — so the result differs from a
-// direct Marshal only where the input document did.
+// UpdateMetadataOrReMarshal runs [UpdateMetadata] on data; when the fast path
+// reports an Error or a Fatal (E_SNAPSHOT_MALFORMED at Error,
+// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another), it transparently falls
+// back to [Load] + [Marshal] using s for the Load, unless ctx was cancelled or
+// newMeta holds a key or value that is not valid UTF-8 (both below). The
+// fallback carries the input's indentation and, when it parses, its created_at
+// across — the created_at byte-for-byte, as the fast path keeps it — so the
+// result differs from a direct Marshal only where the input document did.
 //
 // Panics if s is nil (programming error), on every call rather than only the
 // ones that reach the fallback: the function cannot complete without it, and
@@ -309,7 +320,9 @@ func UpdateMetadata(
 // makes the transition visible in consumer logs and dashboards.
 //
 // E_CONTEXT_CANCELLED is not a fallback trigger — it propagates as
-// cancellation without re-attempting via the slow path.
+// cancellation without re-attempting via the slow path. Nor is a newMeta key
+// or value that is not valid UTF-8, which no path can write: the result names
+// it once, with E_SNAPSHOT_MALFORMED, beside any refusal of the document.
 //
 // Thread safety: UpdateMetadataOrReMarshal is a pure function over
 // its inputs. It is safe for concurrent use; it does not mutate
@@ -334,6 +347,19 @@ func UpdateMetadataOrReMarshal(
 	}
 	if hasCancellation(res) {
 		return nil, res
+	}
+	// Metadata no path can write takes no fallback: Marshal would refuse it
+	// again after a whole Load. UpdateMetadata names it unless it stopped at
+	// the document first.
+	if err := invalidMetadata(newMeta); err != nil {
+		if strings.Contains(res.String(), err.Error()) {
+			return nil, res
+		}
+		c := diag.NewCollector(0)
+		c.Merge(res)
+		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+			"snapshot.UpdateMetadataOrReMarshal: "+err.Error()).Build())
+		return nil, c.Result()
 	}
 
 	triggeringCodes := distinctTriggeringCodes(res)

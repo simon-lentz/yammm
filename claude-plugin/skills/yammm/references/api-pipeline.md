@@ -244,7 +244,7 @@ if result.HasErrors() {
 snap := g.Snapshot()
 ```
 
-Returns an immutable `*graph.Snapshot` -- a point-in-time view of the graph.
+Returns a `*graph.Snapshot` -- a point-in-time view of the graph that no method changes.
 
 ### Graph Instance (Read API)
 
@@ -271,7 +271,7 @@ edge.Properties()                  // immutable.Properties
 
 ## Stage 4: Snapshot Persistence
 
-Serialize graph snapshots to the `.ys` binary format for storage, transfer, and verification.
+Serialize graph snapshots to the `.ys` format, a JSON document, for storage, transfer, and verification.
 
 ```go
 import "github.com/simon-lentz/yammm/snapshot"
@@ -322,7 +322,7 @@ newMeta["pipeline_completed"] = "true"
 updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 ```
 
-`UpdateMetadataOrReMarshal(ctx, data, newMeta, s, opts...)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Load + Marshal` on any recoverable failure, emitting `W_UPDATE_METADATA_FALLBACK` so the transition is observable. The strict-fast-path primitive `UpdateMetadata(ctx, data, newMeta, opts...)` stays exported for consumers where a round-trip is unacceptable. CLI form: `yammm snapshot update-metadata --set k=v`.
+`UpdateMetadataOrReMarshal(ctx, data, newMeta, s, opts...)` is the default entry point: it rewrites the header's metadata map (a full replace — clone the old map and mutate) while reusing the body bytes verbatim (fast path), and transparently falls back to `Load + Marshal` on any Error or Fatal but a cancellation and metadata that is not valid UTF-8, emitting `W_UPDATE_METADATA_FALLBACK` when the fallback succeeds so the transition is observable. The strict-fast-path primitive `UpdateMetadata(ctx, data, newMeta, opts...)` stays exported for consumers where a round-trip is unacceptable. CLI form: `yammm snapshot update-metadata --set k=v`.
 
 ---
 
@@ -330,9 +330,9 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 
 - **Loaded schemas** (`*schema.Schema`) are immutable and safe for concurrent use
 - **Validated instances** (`*instance.ValidInstance`) are immutable
-- **Graph snapshots** (`*graph.Snapshot`) are immutable
-- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns an immutable snapshot
-- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and refuses a snapshot that breaks the schema's structural facts). See the Batch Assembly section of `docs/API.md`
+- **Graph snapshots** (`*graph.Snapshot`) have no method that changes them; an accessor returns the snapshot's own records, so never assign through one
+- **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns a snapshot later Adds do not change
+- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts but the Records fact, whose records it derives again). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---

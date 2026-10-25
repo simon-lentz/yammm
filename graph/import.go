@@ -49,7 +49,9 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 	for _, id := range snap.types {
 		for _, inst := range snap.instances[id] {
 			checkTree(r, "instance", inst)
-			r.address(id, inst.primaryKey)
+			if t, ok := s.TypeByID(id); ok {
+				address(r, t, inst)
+			}
 		}
 	}
 	for _, e := range snap.edges {
@@ -69,15 +71,36 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 		}
 		// An identity s cannot resolve is the identity rule's to report: a
 		// parent's through its type's entry, the instance's through checkTree.
-		if _, ok := s.TypeByID(dup.instance.typeID); !ok {
+		t, ok := s.TypeByID(dup.instance.typeID)
+		if !ok {
 			continue
 		}
 		if _, ok := s.TypeByID(dup.parent.typeID); !ok {
 			continue
 		}
-		if _, why := derivedConflict(s, canon, nil, dup.instance, dup.parent, dup.relation); why != "" {
+		at := oneSlot{source: dup.parent.typeID, key: canon.key(dup.parent.typeID, dup.parent.primaryKey).String()}
+		// A slot checkSlot refused for its name is that rule's one issue; one it
+		// refused for its children still judges the record's own position, but
+		// holds no occupants the record's conflict is resolved against.
+		slotRefused := r.refusedCompositions[oneSlot{source: at.source, key: at.key, relation: dup.relation}]
+		refuse := func(why string) {
 			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf("duplicate record %d, %s[%s], %s",
 				i, dup.instance.typeID, dup.instance.primaryKey.String(), why))
+		}
+		if rel, why := compositionOf(s, dup.instance, dup.parent, dup.relation); rel == nil {
+			if !slotRefused || declaresComposition(s, dup.parent.typeID, dup.relation) {
+				refuse(why)
+			}
+			continue
+		}
+		// A refused slot, a duplicate whose key the key rule refuses, a parent
+		// that holds no address, or an address two roots stand at resolves no
+		// conflict.
+		if slotRefused || checkStoredKey(t, dup.instance.primaryKey, dup.instance.nodeProperties().Get, canon) != nil || !r.addresses[at] || r.refused[at] {
+			continue
+		}
+		if _, why := derivedConflict(s, canon, nil, dup.instance, dup.parent, dup.relation); why != "" {
+			refuse(why)
 		}
 	}
 	for _, u := range snap.unresolved {

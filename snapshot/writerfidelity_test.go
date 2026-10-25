@@ -28,16 +28,20 @@ func TestWriter_RefusesNonWhitespaceIndent(t *testing.T) {
 		t.Fatalf("load fixture: %s", res)
 	}
 
-	out, mres := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent("xx"))
-	if !mres.HasCode(diag.E_SNAPSHOT_MALFORMED) {
-		t.Fatalf("Marshal accepted a non-whitespace indent and returned %d bytes: %s", len(out), mres)
-	}
-	if out != nil {
-		t.Errorf("Marshal returned bytes alongside its refusal")
+	// A vertical tab, a form feed and a no-break space are whitespace to Go and
+	// not to JSON, which allows only the four the control uses.
+	for _, bad := range []string{"xx", "\v", "\f", "\u00a0"} {
+		out, mres := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent(bad))
+		if !mres.HasCode(diag.E_SNAPSHOT_MALFORMED) {
+			t.Errorf("Marshal accepted the indent %q and returned %d bytes: %s", bad, len(out), mres)
+		}
+		if out != nil {
+			t.Errorf("Marshal returned bytes alongside its refusal of %q", bad)
+		}
 	}
 
-	// The control: whitespace indents still marshal, and still parse.
-	for _, ok := range []string{"", "  ", "\t"} {
+	// The control: JSON whitespace indents still marshal, and still parse.
+	for _, ok := range []string{"", "  ", "\t", "\n", "\r\n"} {
 		got, r := snapshot.Marshal(t.Context(), snap, snapshot.WithIndent(ok))
 		if r.HasErrors() {
 			t.Errorf("indent %q refused: %s", ok, r)

@@ -152,9 +152,8 @@ type unresProjection struct {
 // the test with a (-want +got) diff on mismatch. Values compare exactly,
 // dynamic type included — an int64/float64 mismatch is a real defect, not a
 // wire artifact to tolerate — with one deliberate exception: a float32
-// widened to float64 compares equal, because the widening is exact and the
-// wire carries value fidelity, not width. Load materializes dynamic numeric
-// values as int64 and float64 only.
+// compares equal to the float64 Load returns for it, because the wire carries
+// value fidelity, not width (see [widenFloat32]).
 func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 	tb.Helper()
 	// EquateEmpty: a built snapshot carries nil property maps where a loaded
@@ -256,15 +255,17 @@ func widenFloat32Map(m map[string]any) map[string]any {
 	return m
 }
 
-// widenFloat32 projects a float32 as the float64 its 32-bit shortest wire
-// form parses to — the value Load hands every reader — recursively through
-// containers. Two snapshots that differ only in float width at the same
-// 32-bit value project identically; a narrowed or drifted value still shows.
+// widenFloat32 projects a float32 as the float64 Load hands every reader —
+// the one its 32-bit shortest wire form parses to, or its own value where that
+// form would round to another float32, which the writer then writes in its
+// 64-bit form — recursively through containers. Two snapshots that differ only
+// in float width at the same 32-bit value project identically; a narrowed or
+// drifted value still shows.
 func widenFloat32(v any) any {
 	switch n := v.(type) {
 	case float32:
 		f, err := strconv.ParseFloat(strconv.FormatFloat(float64(n), 'g', -1, 32), 64)
-		if err != nil {
+		if err != nil || float32(f) != n {
 			return float64(n)
 		}
 		return f

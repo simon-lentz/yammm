@@ -250,3 +250,17 @@ func TestLoad_UnnameableDenotedTypeIsRefusedWhateverTheOptions(t *testing.T) {
 		}
 	}
 }
+
+// A root of a type the entry schema cannot name draws its one refusal under
+// WithRevalidation too: the validator does not run it, and so reports no
+// finding of its own for the root's values.
+func TestLoad_AnUnnameableRootIsNotRevalidated(t *testing.T) {
+	t.Parallel()
+	data, s := unnameableDocument(t, `[{"key":["d1"],"properties":{"id":"d1","power":"high"},"provenance":null}]`)
+	for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
+		_, res := snapshot.Load(context.Background(), data, s, snapshot.WithIntegrityCheck(false), snapshot.WithRevalidation(sev))
+		if res.Len() != 1 || !res.HasCode(diag.E_SNAPSHOT_UNNAMEABLE_TYPE) {
+			t.Errorf("revalidating at %s: %s, want one %s", sev, res, diag.E_SNAPSHOT_UNNAMEABLE_TYPE)
+		}
+	}
+}

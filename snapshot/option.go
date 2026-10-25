@@ -35,7 +35,8 @@ func applyOptions(opts []Option) config {
 // header. The canonical-form technique works identically regardless of
 // indentation.
 //
-// The indent must be whitespace. [Marshal] refuses anything else with an
+// The indent must be JSON whitespace: space, tab, line feed or carriage
+// return. [Marshal] refuses anything else with an
 // Error-severity [diag.E_SNAPSHOT_MALFORMED] rather than emitting it: the
 // string is written between JSON tokens, so a non-whitespace one produces a
 // document that is not JSON at all — which this package's own [Load] refuses
@@ -69,10 +70,11 @@ func withCreatedAtText(text string) Option {
 // byte, for a caller re-marshaling a document it has read.
 //
 // Prefer it over [WithCreatedAt] whenever the timestamp comes from an existing
-// header: [HeaderInfo.CreatedAtTime] does not round-trip a foreign header's
-// sub-second part or offset. It takes a parsed header rather than a string
-// because an Option cannot report an error. A nil header, or one whose
-// created_at is empty, sets nothing; it wins over [WithCreatedAt].
+// header: [WithCreatedAt] writes its time at second precision in UTC, so it
+// does not round-trip a foreign header's sub-second part or offset. It takes
+// a parsed header rather than a string because an Option cannot report an
+// error. A nil header sets nothing; otherwise the last WithCreatedAtFrom sets
+// the text, which wins over [WithCreatedAt] unless it is empty.
 func WithCreatedAtFrom(header *HeaderInfo) Option {
 	return func(c *config) {
 		if header == nil {
@@ -86,9 +88,12 @@ func WithCreatedAtFrom(header *HeaderInfo) Option {
 // If not set, the metadata field is omitted from the header (omitempty).
 // Metadata is informational and does not affect schema compatibility. The
 // integrity hash covers the full document including metadata; changing
-// metadata requires re-marshaling, which recomputes the integrity hash.
+// metadata means a new hash, which re-marshaling and [UpdateMetadata] each
+// compute.
 // The map is shallow-copied at call time; subsequent mutations to the
-// caller's map do not affect the serialized output.
+// caller's map do not affect the serialized output. Each key and value must be
+// valid UTF-8: [Marshal] refuses one that is not, since encoding/json would
+// write each byte that is not as U+FFFD.
 func WithMetadata(m map[string]string) Option {
 	return func(c *config) {
 		if len(m) == 0 {
@@ -141,8 +146,8 @@ func applyLoadOptions(opts []LoadOption) loadConfig {
 }
 
 // WithIssueLimit sets the maximum number of issues [Load] and [Verify] store.
-// The walk always completes: past the limit the collector keeps the most
-// severe issues seen, and [github.com/simon-lentz/yammm/diag.Result.DroppedCount],
+// The walk completes unless the context is cancelled: past the limit the
+// collector keeps the most severe issues seen, and [github.com/simon-lentz/yammm/diag.Result.DroppedCount],
 // [github.com/simon-lentz/yammm/diag.Result.LimitReached] and
 // [github.com/simon-lentz/yammm/diag.Result.TruncationNote] report the rest
 // exactly. Set to 0 for unlimited. Default is 100, matching schema.Load.
@@ -167,18 +172,22 @@ func WithIssueLimit(limit int) LoadOption {
 //
 // Warning severity is deliberate: Load still returns the snapshot together
 // with the findings. Reporting a document is not refusing it, and the values
-// themselves are rendered rather than rejected — [Load] never re-validates.
+// themselves are rendered rather than rejected — this option re-validates
+// nothing.
 func WithValueConformance(report bool) LoadOption {
 	return func(c *loadConfig) {
 		c.valueConformance = report
 	}
 }
 
-// WithRevalidation makes [Load] and [Verify] run every root instance, its
-// composed children, edges and invariants included, back through the real
+// WithRevalidation makes [Load] and [Verify] run root instances, their
+// composed children, edges, target_missing records and invariants included,
+// back through the real
 // validator ([github.com/simon-lentz/yammm/instance.Validator]) and report each
 // finding at the given severity; at Error a document that fails refuses to
-// load. It judges values — bounds, enums, patterns, invariants — which the
+// load. A root is run only when the structural checks accepted its type and
+// raised no Error as they walked its tree, and no duplicate record's instance
+// is run. It judges values — bounds, enums, patterns, invariants — which the
 // structural checks every read runs leave alone, and reports an unresolved
 // record under a required association as
 // [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED].

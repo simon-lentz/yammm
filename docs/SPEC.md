@@ -1680,8 +1680,8 @@ type Person {
 ### Evaluation Notes
 
 - The evaluator only works against the in-memory instance graph
-- There is no implicit database lookup or multi-hop relation navigation
-- Evaluation errors (undefined named variables, type errors) surface as error-severity diagnostics; validation continues collecting further issues. A reference to an undeclared property is a load-time error, not an evaluation error, and a declared-but-absent property evaluates to `nil`
+- There is no implicit database lookup. An association reads as its target key, so no navigation passes through one; a composition reads as its children, whose members an expression reads in turn, at any depth
+- Evaluation errors surface as error-severity diagnostics, among them a type error, an integer division or modulo by zero, an integer overflow, and a `$` read of a member the instance leaves unset; validation continues collecting further issues. A named variable that nothing binds is a load-time error, not an evaluation error, and so is a reference to an undeclared property wherever the checker knows the type it reads from. A declared member the instance leaves unset evaluates to `nil` read by its bare name; read as a `$` variable it binds nothing, which is the evaluation error above
 - A genuine panic is recovered as a Fatal `E_INTERNAL` carrying a Go stack trace, which stops that instance's validation. Division by zero is not a panic — see Division semantics
 
 ### Evaluation Model
@@ -1787,17 +1787,17 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UNKNOWN_FIELD` — unexpected field in instance data
 - `E_CONSTRAINT_FAIL` — constraint check failed
 - `E_INVARIANT_FAIL` — invariant check failed
-- `E_EVAL_ERROR` — expression evaluation error, including a call to an unknown built-in function
+- `E_EVAL_ERROR` — expression evaluation error. A call to an unknown built-in function is refused at load with `E_INVALID_INVARIANT`, so no loaded schema reaches the evaluator's own refusal of one
 - `E_MISSING_FK_TARGET` — foreign key target missing
 - `E_PARTIAL_COMPOSITE_FK` — partial composite foreign key
 - `E_UNKNOWN_EDGE_FIELD` — unknown field in edge data
-- `E_EDGE_SHAPE_MISMATCH` — edge has wrong shape (object vs array)
+- `E_EDGE_SHAPE_MISMATCH` — an edge or a composition value has a JSON shape its relation does not take, such as an object where an array belongs or the reverse, a null or a scalar, or a composed child or a `(many)` edge element that is not an object
 - `E_UNRESOLVED_REQUIRED_COMPOSITION` — required composition unresolved
 - `E_COMPOSITION_NOT_FOUND` — referenced composition not found
 - `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the same bound the snapshot writer and reader enforce; a validated instance is always one a snapshot can carry
-- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately. `snapshot.Load` and `snapshot.Verify` raise it for a `(one)` slot a document fills more than once; `snapshot.Info` reads without a schema and makes no such claim
+- `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately. `graph.RebuildSnapshot` and the import raise it over the parts and snapshots they are given, and `snapshot.Load` and `snapshot.Verify` raise it for two children of a keyed `(many)` slot at one canonical key and for a `(one)` slot a document holds several children in; `snapshot.Info` reads without a schema and makes no such claim
 - `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key, or a CSV type-column value
-- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field or edge property after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
+- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field, edge property or `_target_` foreign-key field after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
 
@@ -1808,24 +1808,24 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — a root whose type declares no primary key
-- `E_GRAPH_INVALID_PK` — primary key empty, of the wrong arity, with a component that does not read back as the value every writer writes (one of no form, a string that is not valid UTF-8, a `json.Number` that is empty or spells a number no finite `float64` holds, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` its key constraint does not render), with a key property absent or null, or disagreeing with the instance's own key properties; or an association target key of the wrong arity or with such a component
+- `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; any instance's key, a keyless part's included, with a component that does not read back as the value every writer writes (such as one of no form, a string that is not valid UTF-8, a `json.Number` that is empty or spells a number no finite `float64` holds, a number `graph.ParseKey` reads back at another rendering, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` no key property's constraint renders, as in every keyless part's key); or an association target key of the wrong arity or with such a component
 - `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or a `.ys` document
 - `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one
 - `E_GRAPH_ABSTRACT_TYPE` — an instance of an abstract type reached the graph
 
 **Snapshot** — persistence errors:
 
-- `E_SNAPSHOT_MALFORMED` — invalid JSON, missing required fields, or content a structural rule refuses: an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, a duplicate with no conflict. `snapshot.Marshal` raises it for input that would write such a file: an indent that is not whitespace, or a property value the wire cannot carry
+- `E_SNAPSHOT_MALFORMED` — invalid JSON, missing required fields, a wrong outer shape (the four top-level keys, in order, each once and none null, with nothing after them, and no object repeating a member name or spelling a declared one in another case), or content a structural rule refuses, such as an undeclared name, a stored key its key properties contradict, a key or target key component `graph.ParseKey` cannot read back, a target key of the wrong arity, an undocumented reason, a record contradicting itself, records `graph.Add` would not derive, or a duplicate with no conflict or another one. `snapshot.Marshal` raises it for input that would write such a file: an indent that is not JSON whitespace, a metadata key or value that is not valid UTF-8, or a property value the wire cannot carry; `snapshot.UpdateMetadata` raises it for such metadata too
 - `E_SNAPSHOT_UNSUPPORTED_VERSION` — unrecognized format version
 - `E_SNAPSHOT_UNSUPPORTED_FEATURE` — unrecognized feature flag
 - `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` — schema structural hash mismatch
 - `E_SNAPSHOT_UNKNOWN_TYPE` — type name not found in schema
-- `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under, or a composed child's or an association record's target row is not the relation's declared target
+- `E_SNAPSHOT_TYPE_MISMATCH` — an instance or duplicate record states a type row other than the one it is filed under, a composed duplicate record is typed other than its composition's declared target, or a composed child's or an association record's target row is not the relation's declared target
 - `E_SNAPSHOT_DANGLING_REFERENCE` — an edge target, a duplicate's conflict or parent, or an unresolved record's source not found
-- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children stand under a name the type does not declare as a composition
+- `E_SNAPSHOT_INVALID_COMPOSED` — composed child carries edges, or composed children or a composed duplicate record stand under a name the parent's type does not declare as a composition
 - `E_SNAPSHOT_INVALID_ROOT` — an instances group, empty or not, or a root duplicate record names a type that cannot hold a root instance: abstract, a part type, or declaring no primary key. Refused whatever the load options say — none of the three describes a graph any caller could have built
 - `E_SNAPSHOT_UNNAMEABLE_TYPE` — an instances group, empty or not, or a root duplicate record names a type the entry schema reaches only through an intermediate import, so the schema has no name form for it. `adapter/json` and `adapter/csv` key their output by the name of each type a snapshot denotes, so such a document describes a snapshot they cannot render. Refused whatever the load options say, and the hint names the remedy, which is to import the declaring schema directly
-- `E_DUPLICATE_PK` — two root instances in one group state the same primary key. Listed here as well as under Graph: `snapshot.Load`, `snapshot.Verify` and `snapshot.Info` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Info` resolves no schema, so it compares keys as written and folds only identical spellings, where `Load` and `Verify` fold a timestamp, date or UUID key written two ways
+- `E_DUPLICATE_PK` — two root instances in one group, both of whose stored keys the key rule accepts, state one primary key. Listed here as well as under Graph: `snapshot.Load`, `snapshot.Verify` and `snapshot.Info` emit it, because the wire has a diagnostics section for a rejected duplicate and two live instances at one address is not a shape it can carry. `Info` resolves no schema, so it compares keys as the reader's number rule renders them, where `Load` and `Verify` also fold a timestamp or UUID key written two ways
 - `E_SNAPSHOT_COMPOSED_ON_DUPLICATE`, `E_SNAPSHOT_EDGES_ON_DUPLICATE` — illegal data on duplicate records
 - `E_SNAPSHOT_DEPTH_EXCEEDED` — composed nesting exceeds depth limit (32)
 - `E_SNAPSHOT_INTEGRITY_MISMATCH` — integrity hash does not match
@@ -1835,7 +1835,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UPDATE_METADATA_BODY_OFFSET` — `UpdateMetadata` could not resolve the byte range of the body it reuses
 - `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Load` + `Marshal`
 - `W_SNAPSHOT_VALUE_NONCONFORMING` (Warning) — under `WithValueConformance`, a stored `Timestamp`, `Date` or `UUID` does not conform to its declared constraint
-- `W_SNAPSHOT_VALUE_DROPPED` (Warning) — the writer held a value the wire cannot carry at that position and did not write it. The document is well-formed; the warning names what is missing from it
+- `W_SNAPSHOT_VALUE_DROPPED` (Warning) — a write path held a value it could not write at that position and left it out. The document is well-formed; the warning names what is missing from it
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 

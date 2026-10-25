@@ -213,8 +213,9 @@ func NewBatchAssembler(ctx context.Context, s *schema.Schema) *BatchAssembler {
 //     Unresolved — are what persist and import.
 //
 // snap is held to s as [NewFromSnapshot] holds it, under the package doc's
-// "Structural facts": a snapshot that breaks one is refused with a nil
-// assembler and a diagnostic naming each position. A snapshot taken from a
+// "Structural facts": a snapshot built against another schema that breaks one,
+// the Records fact aside, is refused with a nil assembler and a diagnostic
+// naming each position. A snapshot taken from a
 // [Graph] bound to s, or loaded via
 // [github.com/simon-lentz/yammm/snapshot.Load] against s, is never refused.
 //

@@ -20,17 +20,22 @@ import (
 // used when the data was originally validated. Load verifies compatibility
 // using [schema.StructuralHash].
 //
-// Load does not re-validate instance data by default: it returns what was
-// written, and the document's validity is the writer's claim (see the
-// package's Validity Contract). [WithRevalidation] runs every instance back
-// through the real validator; [WithValueConformance] is the narrower
-// canonical-form check. Load always performs structural validation of the
-// .ys format itself.
+// Load does not re-validate instance data by default: whether a value
+// satisfies its constraint, and whether an invariant holds, is the writer's
+// claim (see the package's Validity Contract). [WithRevalidation] runs root
+// instances, with their composed children, edges and target_missing records,
+// back through the real validator;
+// [WithValueConformance] is the narrower canonical-form check. Whatever the
+// options say, Load refuses a document that breaks the .ys format or a fact of
+// the graph package doc's "Structural facts".
 //
-// Dynamic numeric values materialize as int64 or float64: the wire carries no
-// width, so a float32 stored at write time returns as float64 carrying the
-// same value exactly — converting it back to float32 returns the original. A
-// literal no finite float64 can hold returns as a json.Number, unconverted.
+// A dynamic numeric value materializes as an int64 or a float64, save the two
+// cases this paragraph ends on: the wire carries no width, so a float32
+// stored at write time returns as a float64 that converts back to the original
+// float32 — the float64 its shortest 32-bit wire form parses to, or its own
+// value where that form would round twice. A literal no finite float64 can
+// hold returns as a json.Number, unconverted, and so does a number nested more
+// than 64 levels deep in a dynamic value.
 //
 // The returned Snapshot's Schema() method returns the schema provided to
 // Load, not the schema used at original construction time.
@@ -51,6 +56,10 @@ func Load(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption
 
 	cfg := applyLoadOptions(opts)
 	sd := newStreamDecoder(data, s, cfg)
+	if err := checkDocument(data); err != nil {
+		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
+		return nil, sd.collector.Result()
+	}
 
 	// Steps 1-3: Decode and validate header, types, schema hash.
 	if err := sd.decodeHeader(); err != nil {

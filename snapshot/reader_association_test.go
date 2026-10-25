@@ -288,8 +288,9 @@ func TestReader_JudgesARootTypeInAddsOrder(t *testing.T) {
 }
 
 // A stored key or a record's target key whose component is a JSON array or
-// object, or a number no float64 holds, is one graph.ParseKey cannot read back. Every read refuses it, the
-// schema-less Info included.
+// object, a number no float64 holds, or a number graph.ParseKey reads back as
+// another rendering is one graph.ParseKey cannot read back as written. Every
+// read refuses it, the schema-less Info included.
 func TestReader_RefusesAKeyComponentParseKeyCannotRead(t *testing.T) {
 	t.Parallel()
 	s := loadReaderSchema(t)
@@ -298,6 +299,9 @@ func TestReader_RefusesAKeyComponentParseKeyCannotRead(t *testing.T) {
 		{"an instance key", `"key":["c1"]`, `"key":[["c1"]]`, "whose component 0 is not a scalar"},
 		{"a record's target key", `"target_key":["c9"]`, `"target_key":[{"id":"c9"}]`, "whose component 0 is not a scalar"},
 		{"a number no float64 holds", `"key":["c1"]`, `"key":[1e400]`, "whose component 0 is not a scalar"},
+		{"a number past int64", `"key":["c1"]`, `"key":[18446744073709551615]`, "whose component 0 is not a scalar"},
+		{"a whole number spelled 1.0", `"key":["c1"]`, `"key":[1.0]`, "whose component 0 is not a scalar"},
+		{"a target key number past int64", `"target_key":["c9"]`, `"target_key":[18446744073709551615]`, "whose component 0 is not a scalar"},
 	} {
 		edited := editOnce(t, doc, c.from, c.to)
 		requireReaderRule(t, c.name, readBoth(t, s, edited), diag.E_SNAPSHOT_MALFORMED, c.phrase)

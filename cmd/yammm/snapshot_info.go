@@ -21,17 +21,17 @@ func newSnapshotInfoCmd() *cobra.Command {
 		Use:   "info [<snapshot.ys>]",
 		Short: "Print summary information about a snapshot file or directory of snapshots",
 		Long: "Read metadata and statistics from a .ys file without loading the schema. " +
-			"Pass --header-only to read only the header, skipping the instance body and " +
+			"Pass --header-only to read only the header and the types table, skipping the instance body and " +
 			"integrity check — useful for dispatch-style workloads scanning many files. " +
-			"Pass --dir <path> to iterate every .ys file in a directory (header-only; " +
+			"Pass --dir <path> to iterate the .ys files of a directory that the scan admits (header-only; " +
 			"mutually exclusive with the positional file argument).",
 		Args: cobra.MaximumNArgs(1),
 		RunE: withDiagnostics(runSnapshotInfo),
 	}
 	cmd.Flags().Bool("header-only", false,
-		"read header only (skip instance body and integrity check; cost is O(header) ~ < 1 KiB per file)")
+		"read header only (skip instance body and integrity check; cost is the header and the types table, typically < 1 KiB per file)")
 	cmd.Flags().String("dir", "",
-		"scan every .ys file in the given directory (header-only; mutually exclusive with the positional file argument)")
+		"scan the .ys files of the given directory that the scan admits (header-only; mutually exclusive with the positional file argument)")
 	return cmd
 }
 

@@ -35,17 +35,19 @@ type Attestation struct {
 	Associations bool
 }
 
-// Snapshot is an immutable snapshot of the graph at a point in time.
+// Snapshot is a snapshot of the graph at a point in time.
 //
-// Snapshot provides read-only access to all instances, edges, duplicates,
-// and diagnostics. It is safe for concurrent read access from multiple
-// goroutines.
+// Snapshot has no method that changes it, and it is safe for concurrent read
+// access from multiple goroutines. Its accessors return the snapshot's own
+// instances, edges, duplicates and records, so an assignment through one
+// changes the snapshot; see the package doc's "Thread Safety".
 //
 // Types are identified by [schema.TypeID], never by name; see the package doc
 // for why, and [schema.TagForm] for rendering one as a name.
 //
-// All slice-returning methods produce deterministically sorted output,
-// independent of Add() call order or concurrency, and every ordering below
+// Every slice-returning method produces deterministically sorted output,
+// independent of Add() call order or concurrency ([Snapshot.EdgesFrom] in
+// [Snapshot.Edges]' order), and every ordering below
 // compares types by TypeID so two types rendering one name still sort apart:
 //   - [Snapshot.Types]: lexicographic by the TypeID's String (the schema
 //     path, ":", then the name)
@@ -58,9 +60,9 @@ type Attestation struct {
 //     targetKey, reason, required, edge properties)
 //
 // Every arm of each tuple is compared, so records that differ in an arm sort
-// apart. The provenance arm compares a source name and a span start, and a
-// loaded provenance carries no span, so two loaded duplicates that differ only
-// in their provenance's path tie.
+// apart, save the provenance arm, which compares a source name and a span
+// start, and a loaded provenance carries no span, so two loaded duplicates
+// that differ only in their provenance's path tie.
 //
 // No instance map is exposed, so there is no iteration order to be surprised
 // by: [Snapshot.AllInstances] yields every root instance in the order above,
@@ -126,7 +128,7 @@ func (r *Snapshot) Schema() *schema.Schema {
 // Every one can hold a root under the package doc's "Root type eligibility",
 // so [schema.AddressableTag] accepts it; a composed child's type is a part
 // type and is never denoted, so walk [Instance.ComposedRelations] for a
-// subtree. Returns a defensive copy.
+// subtree. The slice is a copy, and a [schema.TypeID] is a value.
 func (r *Snapshot) Types() []schema.TypeID {
 	if r == nil || len(r.types) == 0 {
 		return nil
@@ -141,7 +143,7 @@ func (r *Snapshot) Types() []schema.TypeID {
 // Instances are sorted by primary key using [FormatKey] string comparison.
 // Returns nil if the type has no instances in the graph.
 //
-// Returns a defensive copy.
+// The slice is a copy; the instances are the snapshot's own.
 func (r *Snapshot) InstancesOf(id schema.TypeID) []*Instance {
 	if r == nil || r.instances == nil {
 		return nil
@@ -206,7 +208,7 @@ func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool)
 // Edges are sorted by the tuple (sourceType, sourceKey, relation, targetType,
 // targetKey, edge properties), comparing types by identity.
 //
-// Returns a defensive copy.
+// The slice is a copy; the edges are the snapshot's own.
 func (r *Snapshot) Edges() []*Edge {
 	if r == nil || len(r.edges) == 0 {
 		return nil
@@ -227,7 +229,8 @@ func (r *Snapshot) Edges() []*Edge {
 // or from a mutable Graph always return nil (the index uses pointer identity).
 //
 // Returns nil if the instance has no outgoing edges.
-// Returns a defensive copy; modifications do not affect the snapshot.
+// The slice is a copy, so changing it does not affect the snapshot; the edges
+// are the snapshot's own.
 func (r *Snapshot) EdgesFrom(inst *Instance) []*Edge {
 	if r == nil || inst == nil || r.edgeIndex == nil {
 		return nil
@@ -268,10 +271,10 @@ func (r *Snapshot) Diagnostics() diag.Result {
 // it carries none. See [Attestation] for what each dimension means, what it
 // does not prove, and why absence is distinct from a false claim.
 //
-// The result is a COPY. Snapshot is immutable and safe for concurrent reads,
-// and its two fields are exported, so returning the stored pointer would let
-// one caller rewrite another's claim — the defensive-copy rule [Snapshot.Types],
-// [Snapshot.Duplicates] and [Snapshot.Unresolved] already follow.
+// The result is a COPY. Snapshot is safe for concurrent reads, and its two
+// fields are exported, so returning the stored pointer would let one caller
+// rewrite another's claim by a field assignment, as [Snapshot.Types] copies
+// the identities it returns.
 func (r *Snapshot) Attestation() *Attestation {
 	if r == nil || r.attestation == nil {
 		return nil
@@ -286,7 +289,7 @@ func (r *Snapshot) Attestation() *Attestation {
 // conflictType, conflictKey, parent slot, rejected instance's properties,
 // rejected instance's provenance).
 // Returns nil if no duplicates were detected.
-// Returns a defensive copy.
+// The slice is a copy; the records are the snapshot's own (see [Duplicate]).
 func (r *Snapshot) Duplicates() []*Duplicate {
 	if r == nil || len(r.duplicates) == 0 {
 		return nil
@@ -298,12 +301,12 @@ func (r *Snapshot) Duplicates() []*Duplicate {
 
 // Unresolved returns unresolved edge records in sorted order.
 //
-// Unresolved edges are associations whose target instances are not in the
-// graph. They are sorted by the tuple (sourceType, sourceKey, relation,
+// Unresolved edges are associations the graph could not resolve: a target it
+// holds no root for, or a required one the data left absent or empty. They are sorted by the tuple (sourceType, sourceKey, relation,
 // targetType, targetKey, reason, required, edge properties).
 //
 // Returns nil if all edges are resolved.
-// Returns a defensive copy.
+// The slice is a copy; the records are the snapshot's own.
 func (r *Snapshot) Unresolved() []*UnresolvedEdge {
 	if r == nil || len(r.unresolved) == 0 {
 		return nil

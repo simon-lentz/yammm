@@ -406,18 +406,20 @@ var (
 // Graph codes.
 var (
 	// E_DUPLICATE_PK indicates a primary key stated twice for one type: by two
-	// instances added to a graph, by two root instances in a snapshot that a graph
-	// imports under another schema or snapshot.Load, Verify or Info reads, or by
-	// two root instances a yammm data command reads from its data files and
-	// --into file, one of them refused.
+	// instances added to a graph, by two root instances whose stored keys the
+	// key rule both accepts in a snapshot that a graph imports under another
+	// schema or snapshot.Load, Verify or Info reads, or by two root instances a
+	// yammm data command reads from its data files and --into file, one of
+	// them refused.
 	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
 
 	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a
 	// child: two children of one (many) slot share a primary key, or a (one)
-	// slot is given several. The validator and graph assembly raise it, and
-	// snapshot.Load and Verify raise it for a (one) slot a document fills more
-	// than once. Info reads without a schema, which the check needs to know a
-	// relation's cardinality, so it makes no such claim.
+	// slot is given several. The validator, graph assembly, graph.RebuildSnapshot
+	// and the import raise it, and snapshot.Load and Verify raise it for a (one)
+	// slot a document fills more than once and for two children of a keyed
+	// (many) slot at one canonical key. Info reads without a schema, which the checks need to know a
+	// relation's cardinality and its target's key, so it makes no such claim.
 	E_DUPLICATE_COMPOSED_PK = NewCode("E_DUPLICATE_COMPOSED_PK", CategoryGraph)
 
 	// E_UNRESOLVED_REQUIRED indicates a required association is unresolved.
@@ -432,8 +434,10 @@ var (
 	// E_GRAPH_INVALID_COMPOSITION indicates an invalid composition in graph operations.
 	E_GRAPH_INVALID_COMPOSITION = NewCode("E_GRAPH_INVALID_COMPOSITION", CategoryGraph)
 
-	// E_GRAPH_MISSING_PK indicates a root whose type declares no primary key.
-	// An instance whose own key is empty or absent draws E_GRAPH_INVALID_PK.
+	// E_GRAPH_MISSING_PK indicates a root whose type declares no primary key,
+	// or a types entry denoting such a type in a snapshot the import is given.
+	// An instance of a keyed type whose own key is empty or absent draws
+	// E_GRAPH_INVALID_PK.
 	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
 
 	// E_GRAPH_CARDINALITY indicates a (one) association holding more than one
@@ -454,24 +458,29 @@ var (
 	// snapshot imported under a schema that makes its type abstract.
 	E_GRAPH_ABSTRACT_TYPE = NewCode("E_GRAPH_ABSTRACT_TYPE", CategoryGraph)
 
-	// E_GRAPH_INVALID_PK indicates a primary key that is empty, has the wrong
-	// arity, holds a component the graph package's key rule refuses, has a key
-	// property that is absent or null, or disagrees with the instance's own key properties;
-	// or an association target key of the wrong arity or with such a component.
+	// E_GRAPH_INVALID_PK indicates a keyed type's primary key that is empty,
+	// has the wrong arity, has a key property that is absent or null, or
+	// disagrees with the instance's own key properties; any instance's key, a
+	// keyless part's included, that holds a component the graph package's key
+	// rule refuses; or an association target key of the wrong arity or with
+	// such a component.
 	E_GRAPH_INVALID_PK = NewCode("E_GRAPH_INVALID_PK", CategoryGraph)
 )
 
 // Snapshot persistence codes.
 var (
 	// E_SNAPSHOT_MALFORMED indicates the .ys file is not valid JSON, has the
-	// wrong top-level structure (e.g., missing yammm_snapshot header as first
-	// key), or states content a structural rule refuses: an undeclared name, a
-	// stored key its key properties contradict, a key or target key component
-	// graph.ParseKey cannot read back, a target key of the wrong arity, an
-	// undocumented reason, a record contradicting itself, records graph.Add
-	// would not derive, a duplicate with no conflict. snapshot.Marshal raises it
-	// for input that would write such a file: an indent that is not whitespace,
-	// or a property value the wire cannot carry.
+	// wrong outer shape (the four top-level keys, in order, each once and none
+	// null, with nothing after them, and no object repeating a member name or
+	// spelling a declared one in another case), or states content a structural
+	// rule refuses, such as an undeclared name, a stored key its key properties
+	// contradict, a key or target key component graph.ParseKey cannot read back,
+	// a target key of the wrong arity, an undocumented reason, a record
+	// contradicting itself, records graph.Add would not derive, or a duplicate
+	// with no conflict or another one. snapshot.Marshal raises it for input that
+	// would write such a file: an indent that is not JSON whitespace, a metadata
+	// key or value that is not valid UTF-8, or a property value the wire cannot
+	// carry; snapshot.UpdateMetadata raises it for such metadata too.
 	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED", CategorySnapshot)
 
 	// E_SNAPSHOT_UNSUPPORTED_VERSION indicates the format version is not recognized.
@@ -505,28 +514,32 @@ var (
 	// duplicate's row that is not its composition's declared target.
 	E_SNAPSHOT_TYPE_MISMATCH = NewCode("E_SNAPSHOT_TYPE_MISMATCH", CategorySnapshot)
 
-	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target or duplicate conflict
-	// references an instance that does not exist in the snapshot.
+	// E_SNAPSHOT_DANGLING_REFERENCE indicates an edge target, a duplicate's
+	// conflict or parent, or an unresolved record's source names an instance the
+	// snapshot does not hold.
 	E_SNAPSHOT_DANGLING_REFERENCE = NewCode("E_SNAPSHOT_DANGLING_REFERENCE", CategorySnapshot)
 
 	// E_SNAPSHOT_INVALID_COMPOSED indicates a composed child instance carries edges,
 	// which violates the composed children invariant (edges are only on root
-	// instances), or composed children under a name the type does not declare
-	// as a composition.
+	// instances), or composed children or a composed duplicate record under a
+	// name the parent's type does not declare as a composition.
 	E_SNAPSHOT_INVALID_COMPOSED = NewCode("E_SNAPSHOT_INVALID_COMPOSED", CategorySnapshot)
 
-	// W_SNAPSHOT_VALUE_DROPPED (Warning) indicates a write path held a value
-	// the wire cannot carry at that position and did not write it, so the
-	// document produced is well-formed and the warning names what is missing.
+	// W_SNAPSHOT_VALUE_DROPPED (Warning) indicates a write path held a value it
+	// could not write and left it out, so the document produced is well-formed
+	// and the warning names what is missing.
 	//
 	// It marks one site: a metadata update that re-marshals the document and
 	// cannot carry a created_at the input header states in a form other than
 	// RFC 3339.
 	//
-	// Two drops are DELIBERATE and are NOT marked: a duplicate record's
-	// Diagnostic, which the wire has no field for, and an instance provenance's
-	// SPAN, which the reader rebuilds as zero. A consumer cannot gate loss
-	// detection on this code alone and be right.
+	// Four drops are DELIBERATE and are NOT marked: a duplicate record's
+	// Diagnostic, which the wire has no field for, an instance provenance's
+	// SPAN, which the reader rebuilds as zero, an instance's own validated
+	// flag, which the header's attestation states for the document whole, and
+	// a snapshot's construction diagnostics, which neither the wire nor
+	// graph.RebuildSnapshot carries. A
+	// consumer cannot gate loss detection on this code alone and be right.
 	W_SNAPSHOT_VALUE_DROPPED = NewCode("W_SNAPSHOT_VALUE_DROPPED", CategorySnapshot)
 
 	// E_SNAPSHOT_INVALID_ROOT indicates an instances group, empty or not, or a
@@ -590,9 +603,10 @@ var (
 	// not match the shape snapshot.Marshal produces; byte-identical
 	// recovery via UpdateMetadata is not possible. Consumers using the
 	// primitive UpdateMetadata directly fall back to Load + Marshal;
-	// consumers using snapshot.UpdateMetadataOrReMarshal get that
-	// fallback automatically with a paired W_UPDATE_METADATA_FALLBACK
-	// warning on the returned Result.
+	// snapshot.UpdateMetadataOrReMarshal takes that fallback itself, save
+	// for newMeta that is not valid UTF-8, and pairs a fallback that
+	// succeeds with a W_UPDATE_METADATA_FALLBACK warning on the returned
+	// Result.
 	E_UPDATE_METADATA_BODY_OFFSET = NewCode("E_UPDATE_METADATA_BODY_OFFSET", CategorySnapshot)
 
 	// W_UPDATE_METADATA_FALLBACK (Warning) indicates that
@@ -600,8 +614,8 @@ var (
 	// fast path to Load + Marshal because the fast path reported an Error or
 	// Fatal issue other than a cancellation: E_SNAPSHOT_MALFORMED at Error,
 	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output carries the
-	// input's indentation and created_at, so it differs from a direct Marshal
-	// only where the input did; the warning surfaces the
+	// input's indentation and, when it parses, its created_at, so it differs
+	// from a direct Marshal only where the input did; the warning surfaces the
 	// path transition so operators can observe fallback frequency and triage
 	// persistent cases. Details include a "triggering_codes" entry listing the
 	// distinct Error and Fatal codes that caused the fallback.

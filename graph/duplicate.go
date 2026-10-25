@@ -13,7 +13,9 @@ import (
 // the existing instance (which remains in the graph). [Graph.AddOrMerge]
 // creates one only for an incoming instance carrying composed children; a merge
 // creates none. Its fields are read
-// through methods, so no caller can write through a snapshot.
+// through methods, so no caller can set one. [Snapshot.Duplicates] returns the
+// snapshot's own records, so a caller must not assign through the pointer
+// (*d = Duplicate{}): that write reaches the snapshot.
 //
 // # Composed Children Not Included
 //
@@ -21,7 +23,9 @@ import (
 // [Graph.Add] builds the whole tree before it meets the duplicate, and records
 // a childless copy of the rejected root: a duplicate installs nothing. If you need
 // to inspect composed children from duplicate data, access them from the original
-// [instance.ValidInstance] passed to [Graph.Add].
+// [instance.ValidInstance] passed to [Graph.Add], [Graph.AddOrMerge],
+// [Graph.AddComposed], [BatchAssembler.AddValid] or
+// [BatchAssembler.AddValidOrMerge].
 //
 // Duplicates are accessed via [Snapshot.Duplicates].
 type Duplicate struct {
@@ -84,7 +88,9 @@ func (d *Duplicate) Diagnostic() diag.Issue {
 	return d.diagnostic
 }
 
-// UnresolvedEdge records an association edge whose target was not found in the graph.
+// UnresolvedEdge records an association edge the graph could not resolve: one
+// whose target it holds no root for, or a required one the data left absent or
+// empty.
 //
 // Unresolved edges occur when:
 //   - The target instance was not added yet (Reason: "target_missing")
@@ -94,7 +100,9 @@ func (d *Duplicate) Diagnostic() diag.Issue {
 // For required associations ([UnresolvedEdge.Required]), unresolved edges cause
 // [Graph.Check] to report E_UNRESOLVED_REQUIRED diagnostics. Optional
 // associations may remain unresolved without error. Its fields are read through
-// methods, so no caller can write through a snapshot.
+// methods, so no caller can set one. [Snapshot.Unresolved] returns the
+// snapshot's own records, so a caller must not assign through the pointer
+// (*u = UnresolvedEdge{}): that write reaches the snapshot.
 //
 // Unresolved edges are accessed via [Snapshot.Unresolved].
 type UnresolvedEdge struct {

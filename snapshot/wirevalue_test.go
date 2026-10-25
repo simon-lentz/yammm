@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 
@@ -256,52 +257,55 @@ func wrapProps(m map[string]any) immutable.Properties { return immutable.WrapPro
 
 // TestAssertRoundTrip_Float32Property drives a float32 through the round-trip
 // criterion: the exact float64 widening compares equal under DiffSnapshots,
-// and converting the loaded value back returns the original 32 bits.
+// and converting the loaded value back returns the original 32 bits. Bits
+// 363742205 is the value whose 32-bit text rounds twice at 64 bits, which the
+// writer writes in its 64-bit form.
 func TestAssertRoundTrip_Float32Property(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	s := loadIdentitySchema(t)
 	anchorID := mustTypeIDIn(t, s, "", "Anchor")
 
-	want := float32(0.1)
-	built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
-		Types: []schema.TypeID{anchorID},
-		Instances: []graph.InstanceParts{
-			{
-				TypeID:     anchorID,
-				PrimaryKey: immutable.WrapKey([]any{"a1"}),
-				Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": want}),
+	for _, want := range []float32{0.1, math.Float32frombits(363742205)} {
+		built, result := graph.RebuildSnapshot(s, graph.SnapshotParts{
+			Types: []schema.TypeID{anchorID},
+			Instances: []graph.InstanceParts{
+				{
+					TypeID:     anchorID,
+					PrimaryKey: immutable.WrapKey([]any{"a1"}),
+					Properties: immutable.WrapProperties(map[string]any{"id": "a1", "depth": want}),
+				},
 			},
-		},
-	})
-	if result.HasErrors() {
-		t.Fatalf("assembling: %s", result)
-	}
+		})
+		if result.HasErrors() {
+			t.Fatalf("assembling: %s", result)
+		}
 
-	snapshottest.AssertRoundTrip(t, built, s)
+		snapshottest.AssertRoundTrip(t, built, s)
 
-	data, res := snapshot.Marshal(ctx, built)
-	if err := res.Err(); err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	loaded, res := snapshot.Load(ctx, data, s)
-	if err := res.Err(); err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	inst, ok := loaded.InstanceByKey(anchorID, graph.FormatKey("a1"))
-	if !ok {
-		t.Fatal("instance missing after round trip")
-	}
-	v, ok := inst.Property("depth")
-	if !ok {
-		t.Fatal("depth missing after round trip")
-	}
-	got, ok := v.Unwrap().(float64)
-	if !ok {
-		t.Fatalf("depth returned as %T, want float64", v.Unwrap())
-	}
-	if float32(got) != want {
-		t.Errorf("32-bit fidelity lost: went in %v, returned %v", want, got)
+		data, res := snapshot.Marshal(ctx, built)
+		if err := res.Err(); err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		loaded, res := snapshot.Load(ctx, data, s)
+		if err := res.Err(); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		inst, ok := loaded.InstanceByKey(anchorID, graph.FormatKey("a1"))
+		if !ok {
+			t.Fatal("instance missing after round trip")
+		}
+		v, ok := inst.Property("depth")
+		if !ok {
+			t.Fatal("depth missing after round trip")
+		}
+		got, ok := v.Unwrap().(float64)
+		if !ok {
+			t.Fatalf("depth returned as %T, want float64", v.Unwrap())
+		}
+		if float32(got) != want {
+			t.Errorf("32-bit fidelity lost: went in %v, returned %v", want, got)
+		}
 	}
 }
 
