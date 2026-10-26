@@ -899,7 +899,7 @@ embedding Vector[768]       // 768-dimensional vector
 coordinates Vector[3]       // 3D coordinates
 ```
 
-Validation accepts float **slices** (`[]float32`, `[]float64`, and named types over them) and integer elements, which coerce to `float64`. A Go array or a pointer to a slice is refused. `NaN`, `Inf`, and non-numeric elements are rejected.
+Validation accepts float **slices** (`[]float32`, `[]float64`, and named types over them) and integer elements, which coerce to `float64`. A Go array or a pointer to a non-nil slice is refused; a pointer to a nil slice holds no value. `NaN`, `Inf`, and non-numeric elements are rejected.
 
 #### List
 
@@ -1808,7 +1808,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
 - `E_GRAPH_MISSING_PK` — a root, or an imported snapshot's types entry, whose type declares no primary key
-- `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; any instance's key, a keyless part's included, with a component that does not read back as the value every writer writes (such as one of no form, a string that is not valid UTF-8, a `json.Number` that is empty or spells a number no finite `float64` holds, a number `graph.ParseKey` reads back at another rendering, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` no key property's constraint renders, as in every keyless part's key); or an association target key of the wrong arity or with such a component
+- `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; any instance's key, a keyless part's included, with a component that does not read back as the value every writer writes (such as one of no form, a string that is not valid UTF-8, a `json.Number` that is no JSON number literal or spells a number no finite `float64` holds, a number `graph.ParseKey` reads back at another rendering, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` no key property's constraint renders, as in every keyless part's key); or an association target key of the wrong arity or with such a component
 - `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add` or, for a part child, at `Graph.AddComposed`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or a `.ys` document
 - `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one
 - `E_GRAPH_ABSTRACT_TYPE` — the graph met an instance of an abstract type, or an imported snapshot's types entry names a type the importing schema makes abstract

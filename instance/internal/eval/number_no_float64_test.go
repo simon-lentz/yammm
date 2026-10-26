@@ -56,7 +56,7 @@ func TestCoerceValue_ALiteralNoFloat64HoldsReadsAlikeAtAnIntegerAndAFloat(t *tes
 
 // Every other number an Integer refuses keeps its own words: an integer
 // literal past int64 is an integer, a float a float64 holds is a float, and
-// text that spells no number is named by its Go type.
+// text that is no JSON number literal is named as such, quoted.
 func TestCheckValue_AnIntegerRefusalNamesWhatTheLiteralIs(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ lit, want string }{
@@ -64,10 +64,10 @@ func TestCheckValue_AnIntegerRefusalNamesWhatTheLiteralIs(t *testing.T) {
 		{"9223372036854775808", "expected integer, got an integer outside the int64 range: 9223372036854775808"},
 		{"1.5", "expected integer, got float 1.5"},
 		{"1e2", "expected integer, got float 100.0"},
-		{"abc", "expected integer, got json.Number"},
-		{"99999999999999999999x", "expected integer, got json.Number"},
-		{"99999999999999999999\x1b[2J", "expected integer, got json.Number"},
-		{"", "expected integer, got json.Number"},
+		{"abc", `expected integer, got a json.Number that is no JSON number literal: "abc"`},
+		{"99999999999999999999x", `expected integer, got a json.Number that is no JSON number literal: "99999999999999999999x"`},
+		{"99999999999999999999\x1b[2J", `expected integer, got a json.Number that is no JSON number literal: "99999999999999999999\x1b[2J"`},
+		{"", `expected integer, got a json.Number that is no JSON number literal: ""`},
 	} {
 		if err := eval.CheckValue(json.Number(c.lit), schema.NewIntegerConstraint()); err == nil || err.Error() != c.want {
 			t.Errorf("%q at an Integer: %v, want %q", c.lit, err, c.want)

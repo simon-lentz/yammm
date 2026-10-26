@@ -401,16 +401,13 @@ func withFloatIndicator(v any) (any, bool) {
 	return json.RawMessage(b), true
 }
 
-// readsBack reports whether the literal encoding/json writes for n is read
-// back as the number n spells. encoding/json writes a json.Number's text as it
-// stands, the literal 0 for an empty one, and fails the whole document on text
-// that is no JSON number. [Adapter.ParseObject] hands the validator the
-// literal's own text or the number it spells, and a Float, which reads every
-// number either numeric kind reads, judges both alike: a literal no finite
-// float64 holds is a number of neither kind, and the empty text spells none.
+// readsBack reports whether the literal encoding/json writes for n, a JSON
+// number literal as every json.Number in the one form is, is read back as the
+// number n spells. encoding/json writes the literal as it stands.
+// [Adapter.ParseObject] hands the validator the literal's own text or the
+// number it spells, and a Float, which reads every number either numeric kind
+// reads, judges both alike: a literal no finite float64 holds is a number of
+// neither kind.
 func readsBack(n json.Number) bool {
-	if _, err := json.Marshal(n); err != nil {
-		return false
-	}
 	return instance.CheckValue(n, schema.NewFloatConstraint()) == nil
 }

@@ -127,7 +127,7 @@ Fixed-dimension numeric vector for embeddings, coordinates, etc.
 **Syntax:** `Vector[dimensions]`
 
 - Dimensions must be a positive integer
-- Accepts a Go slice of numbers: `[]float64`, `[]float32`, an integer slice such as `[]int`, a `[]json.Number`, `[]any` (what a JSON decoder produces), or a named type over one of them. Each element is stored as a `float64`. A Go array and a pointer to a slice are refused
+- Accepts a Go slice of numbers: `[]float64`, `[]float32`, an integer slice such as `[]int`, a `[]json.Number`, `[]any` (what a JSON decoder produces), or a named type over one of them. Each element is stored as a `float64`. A Go array and a pointer to a non-nil slice are refused; a pointer to a nil slice holds no value
 - NaN, Inf, and non-numeric elements rejected
 - Cannot be a primary key
 - Cannot be used in relationship properties

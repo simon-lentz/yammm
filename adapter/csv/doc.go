@@ -193,9 +193,11 @@
 // constraint cannot render, a pointer to one read as the scalar, is written as
 // it arrived when it reads back: an
 // export returns an error rather than a diag.Result, so one malformed cell must
-// not fail the file. A string that is not valid UTF-8, a number this parser
-// does not read back as a number, and a composite value, which has no spelling
-// in a cell, are refused (under Empty Cells).
+// not fail the file. A string that is not valid UTF-8 and a number this parser
+// does not read back as a number are refused, and so is a value with no
+// spelling in a cell: one of no form ([instance.ScalarOf]), such as a composite
+// value or a json.Number that is no number literal, and a time or a UUID its
+// column does not render (under Empty Cells).
 //
 // # List Properties
 //
@@ -275,7 +277,8 @@
 //     rather than let an element or an association vanish on the way back.
 //   - A null list element, and a value its constraint cannot render: one of
 //     no form ([github.com/simon-lentz/yammm/instance.ScalarOf]), such as a
-//     map, an array, a struct, a channel or a pointer to one; a time.Time
+//     map, an array, a struct, a channel or a pointer to one, or a json.Number
+//     whose text is no JSON number literal; a time.Time
 //     outside a Timestamp or a Date, or one there whose text does not read
 //     back; and a uuid.UUID outside a UUID. The list grammar has no spelling
 //     for either: a null
@@ -284,9 +287,9 @@
 //     neither. The writer refuses both with an error naming the property or
 //     edge property, or the association and the target key component.
 //   - A string that is not valid UTF-8, and a number no column of this parser
-//     reads back as a number: a NaN, an infinity, and a json.Number whose text
-//     is no JSON number literal, is empty, or spells a number no finite float64
-//     holds, where no Integer or Float constraint converts it. A cell carries a string's bytes, which the validator refuses on
+//     reads back as a number: a NaN, an infinity, and a json.Number that spells
+//     a number no finite float64 holds, where no Integer or Float constraint
+//     converts it. A cell carries a string's bytes, which the validator refuses on
 //     the way back, and such a number would read back as text or not at all.
 //     A validated graph holds neither. The writer refuses each with an error
 //     naming the property or edge property, or the association and the target

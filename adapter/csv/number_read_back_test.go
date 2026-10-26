@@ -166,10 +166,11 @@ func writeAndReadBack(t *testing.T, s *schema.Schema, snap *graph.Snapshot) (wri
 // What the writer writes for a number literal, the parser and the validator
 // read back as that number at every position a Float stands in; a literal they
 // would not read back so is refused as the class, naming its site and the
-// fault, and nothing else is. At a String, where no numeric kind stores the
-// number in its own form first, the same literals are written and the same
-// refused. The standard library says which text is a number a float64 holds:
-// encoding/json for the literal and strconv for the float.
+// fault, and nothing else is. Text that is no number literal is refused as a
+// value no cell spells. At a String, where no numeric kind stores the number in
+// its own form first, the same literals are written and the same refused. The
+// standard library says which text is a number a float64 holds: encoding/json
+// for the literal and strconv for the float.
 func TestMarshalSnapshot_ANumberLiteralIsReadBackOrRefused(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), numberCSVSchema, "numbers.yammm")
@@ -187,6 +188,10 @@ func TestMarshalSnapshot_ANumberLiteralIsReadBackOrRefused(t *testing.T) {
 	for _, text := range texts {
 		nearest, ferr := strconv.ParseFloat(text, 64)
 		readable := json.Valid([]byte(text)) && strings.TrimSpace(text) == text && ferr == nil
+		fault := "reads back as a number in no column"
+		if !immutable.IsNumberLiteral(json.Number(text)) {
+			fault = "has no spelling in a cell"
+		}
 		for _, p := range numberPositions {
 			t.Run(fmt.Sprintf("%q at %s", text, p.name), func(t *testing.T) {
 				t.Parallel()
@@ -197,7 +202,7 @@ func TestMarshalSnapshot_ANumberLiteralIsReadBackOrRefused(t *testing.T) {
 					if readable {
 						t.Errorf("refused a number a cell can hold: %v", werr)
 					}
-					if !strings.Contains(werr.Error(), p.mentions) || !strings.Contains(werr.Error(), "reads back as a number in no column") {
+					if !strings.Contains(werr.Error(), p.mentions) || !strings.Contains(werr.Error(), fault) {
 						t.Errorf("the refusal does not name %s and the fault: %v", p.mentions, werr)
 					}
 				case werr != nil:

@@ -14,6 +14,7 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance/internal/eval"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
@@ -142,15 +143,12 @@ func checkIssue(err error, message string) *diag.IssueBuilder {
 }
 
 // isAbsent reports whether v is the absent value: an interface nil, or a
-// typed nil pointer — the shape adapter/gogen emits for an absent optional
-// scalar. A typed nil slice or map is an empty container, not an absence,
-// as RawInstance documents.
+// pointer or an interface that is nil at some depth — a typed nil pointer is
+// the shape adapter/gogen emits for an absent optional scalar. Every writer
+// writes such a value as null ([ScalarOf]). A bare nil slice or string-keyed
+// map is an empty container, not an absence.
 func isAbsent(v any) bool {
-	if v == nil {
-		return true
-	}
-	rv := reflect.ValueOf(v)
-	return rv.Kind() == reflect.Pointer && rv.IsNil()
+	return value.Absent(v)
 }
 
 // coercionIssue builds the diagnostic a failed coercion owes, classifying it the
@@ -450,10 +448,10 @@ func (v *Validator) validateEdgeTarget(
 // the shapes JSON produces, and the reflect kind's shape for a typed
 // container a Go caller sent.
 func kindOf(v any) string {
-	if v == nil {
+	if value.Absent(v) {
 		return "null"
 	}
-	switch v.(type) {
+	switch x := v.(type) {
 	case map[string]any:
 		return "object"
 	case []any:
@@ -462,8 +460,13 @@ func kindOf(v any) string {
 		return "string"
 	case bool:
 		return "boolean"
-	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, json.Number:
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return "number"
+	case json.Number:
+		if immutable.IsNumberLiteral(x) {
+			return "number"
+		}
+		return "json.Number"
 	}
 	switch reflect.TypeOf(v).Kind() {
 	case reflect.Map, reflect.Struct:

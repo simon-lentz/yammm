@@ -111,6 +111,10 @@ var cellKinds = []struct {
 	{"a json.Number no float64 holds", json.Number("1e400"), refused, nil},
 	{"a json.Number that spells no number", json.Number("abc"), refused, nil},
 	{"an empty json.Number", json.Number(""), refused, nil},
+	{"a json.Number with a leading '+'", json.Number("+5"), refused, nil},
+	{"a json.Number with leading zeros", json.Number("007"), refused, nil},
+	{"a hexadecimal json.Number", json.Number("0x1p4"), refused, nil},
+	{"a pointer to a json.Number with a leading '+'", new(json.Number("+5")), refused, nil},
 
 	// reflect.Struct, and the two values a column of their kind stores as text.
 	{"a struct", cellStruct{1}, refused, nil},

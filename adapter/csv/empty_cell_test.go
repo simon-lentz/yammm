@@ -882,19 +882,26 @@ func TestEmptyCell_BypassBuiltNullWritesEmptyText(t *testing.T) {
 	}
 }
 
-// A null list element and a composite value — a map, an array, a struct —
-// have no spelling in a cell: the list grammar would write the element as ""
-// and the composite as Go's %v of it. Each is refused as the class, naming the
+// A null list element, a nil value a pointer holds among them, and a composite
+// value — a map, an array, a struct — have no spelling in a cell: the list
+// grammar would write the element as "" and the composite as Go's %v of it. Each is refused as the class, naming the
 // property, at any position in a list.
 func TestWriters_AValueACellCannotSpellIsRefused(t *testing.T) {
 	t.Parallel()
 	s := canonicalTestSchema(t)
 	sensorID, _ := s.Type("Sensor")
+	var nilText *string
+	var nilSlice []int
 	for _, c := range []struct {
 		name, mentions string
 		samples        any
 	}{
 		{"a null list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", nil}},
+		{"a nil pointer as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", nilText}},
+		{"a pointer to a nil pointer as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", &nilText}},
+		{"a pointer to a nil slice as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", &nilSlice}},
+		{"a nil slice as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", []any(nil)}},
+		{"a nil map as a list element", "list element 1: a null list element", []any{"2026-08-19T13:00:00Z", map[string]any(nil)}},
 		{"a map value", "a map: a value no column renders, such as a map, an array, a struct, or a time or a UUID its column does not render, has no spelling", map[string]any{"at": "2026-08-19T13:00:00Z"}},
 		{"a map list element", "list element 0: a map: a value no column renders", []any{map[string]any{"at": "x"}}},
 		{"an int-keyed map", "a value of type map[int]interface {}: a value no column renders", map[int]any{1: "x"}},

@@ -203,3 +203,13 @@ func TestNormalizeValue_DepthGuard_NormalizesWithinLimit(t *testing.T) {
 		t.Errorf("value at the depth limit = %v (%T), want int64(42) normalized", current, current)
 	}
 }
+
+// TestNormalizeNumber_TextThatIsNoLiteralIsReturnedUnchanged pins the literal
+// rule: strconv reads each of these spellings, and no JSON reader does.
+func TestNormalizeNumber_TextThatIsNoLiteralIsReturnedUnchanged(t *testing.T) {
+	for _, s := range []string{"+5", "007", "-01", "1_000", "0x10", "0x1p4", ".5", "5.", "Inf", "infinity", " 5", "5 ", "0x1p5000"} {
+		if got := NormalizeNumber(json.Number(s)); got != json.Number(s) {
+			t.Errorf("NormalizeNumber(%q) = %v (%T), want the json.Number unchanged", s, got, got)
+		}
+	}
+}

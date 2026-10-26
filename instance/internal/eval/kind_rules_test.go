@@ -41,19 +41,20 @@ func TestCheckFloat_AcceptsUnsignedAboveInt64(t *testing.T) {
 }
 
 // The String, Enum, Pattern and Boolean arms of CoerceValue refuse a value of
-// the wrong kind, as every other arm does: a wrong-typed value or a typed nil
-// pointer is an error, never reported as its own stored form.
+// the wrong kind, as every other arm does: a wrong-typed value is an error,
+// never reported as its own stored form. A nil pointer, and an interface
+// holding one, holds no value, and coerces to nil at every kind.
 func TestCoerceValue_RefusesTheWrongKind(t *testing.T) {
 	t.Parallel()
 	type carrier string
 	var nilStr *string
+	var heldNil any = nilStr
 	refuse := []struct {
 		name string
 		val  any
 		c    schema.Constraint
 	}{
 		{"int at String", 42, schema.NewStringConstraint()},
-		{"typed nil at String", nilStr, schema.NewStringConstraint()},
 		{"string at Boolean", "true", schema.NewBooleanConstraint()},
 		{"int at Enum", 7, schema.NewEnumConstraint([]string{"a"})},
 		{"int at Pattern", 7, schema.NewPatternConstraint(nil)},
@@ -72,6 +73,16 @@ func TestCoerceValue_RefusesTheWrongKind(t *testing.T) {
 	}
 	if got, err := eval.CoerceValue(true, schema.NewBooleanConstraint()); err != nil || got != true {
 		t.Errorf("a bool must coerce to itself: got %#v, %v", got, err)
+	}
+	for _, c := range []schema.Constraint{schema.NewStringConstraint(), schema.NewIntegerConstraint(), schema.NewTimestampConstraint()} {
+		for _, v := range []any{nilStr, &heldNil} {
+			if got, err := eval.CoerceValue(v, c); err != nil || got != nil {
+				t.Errorf("CoerceValue(%T holding nil) at %s = %#v, %v; want nil, nil", v, c.Kind(), got, err)
+			}
+			if err := eval.CheckValue(v, c); err != nil {
+				t.Errorf("CheckValue(%T holding nil) at %s = %v; want nil", v, c.Kind(), err)
+			}
+		}
 	}
 }
 

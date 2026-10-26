@@ -26,7 +26,9 @@ func TestScalar_ReadsTheOneFormEveryWriterWrites(t *testing.T) {
 	t.Parallel()
 	text := "a"
 	ptrText := &text
-	var held any = json.Number("")
+	var held any = json.Number("5")
+	var heldText any = json.Number("+5")
+	number := json.Number("0x1p4")
 	var heldPtr any = ptrText
 	now := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	id := uuid.MustParse("12345678-1234-1234-1234-123456789abc")
@@ -47,7 +49,12 @@ func TestScalar_ReadsTheOneFormEveryWriterWrites(t *testing.T) {
 		{"a pointer to a string", ptrText, "a", true},
 		{"a pointer to a pointer to a string", &ptrText, "a", true},
 		{"a nil pointer", nilPtr, nil, true},
-		{"a pointer to an interface holding a json.Number", &held, json.Number(""), true},
+		{"a pointer to an interface holding a json.Number", &held, json.Number("5"), true},
+		{"an empty json.Number is no number literal", json.Number(""), nil, false},
+		{"a json.Number spelled with a sign '+' is no number literal", json.Number("+5"), nil, false},
+		{"a json.Number with leading zeros is no number literal", json.Number("007"), nil, false},
+		{"a pointer to a hexadecimal json.Number is no number literal", &number, nil, false},
+		{"an interface holding a json.Number that is no number literal", &heldText, nil, false},
 		{"a pointer to an interface holding a pointer to a string", &heldPtr, "a", true},
 		{"a nil unsafe.Pointer", unsafe.Pointer(nil), nil, true},
 		{"a named int", namedInt(-3), int64(-3), true},

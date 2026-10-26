@@ -2,9 +2,6 @@ package value
 
 import (
 	"encoding/json"
-	"errors"
-	"reflect"
-	"strconv"
 
 	"github.com/simon-lentz/yammm/immutable"
 )
@@ -47,102 +44,56 @@ func (k Kind) String() string {
 // value. It is used by runtime validation to stay aligned with type checker
 // expectations.
 //
-// A json.Number is classified by its spelling: an optional sign and decimal
-// digits alone are IntKind, any other text strconv.ParseFloat reads is
-// FloatKind, whole-valued or not, and the rest is UnspecifiedKind. Such an
-// integer outside the int64 range is IntKind and stays the json.Number: it is an
-// integer no int64 holds, and its nearest float64 can be a different integer.
-// A slice of any element type is UnspecifiedKind: a list's shape is the
-// constraint's to judge, elementwise.
-//
-// Pointers are dereferenced before classification, so *int and int return the
-// same Kind; a nil pointer, and a chain [Deref] does not follow, return
-// UnspecifiedKind. A named type over a basic
-// kind classifies as its base kind.
+// A predeclared type is answered by its type, and every other value by the
+// form [Scalar] reads it in: through pointers and interfaces, a named type as
+// its base value. A json.Number is classified by its spelling: an integer
+// literal is IntKind, any other JSON number literal a finite float64 holds is
+// FloatKind, whole-valued or not, and the rest is UnspecifiedKind, text that is
+// no JSON number literal included. An integer literal outside the int64 range
+// is IntKind and stays the json.Number: it is an integer no int64 holds, and
+// its nearest float64 can be a different integer. A slice of any element type
+// is UnspecifiedKind: a list's shape is the constraint's to judge, elementwise.
+// So is a value of no form, a time.Time and a uuid.UUID; a nil, a nil pointer
+// among them, is UnspecifiedKind with a nil value.
 func Classify(val any) (Kind, any) {
-	if val == nil {
+	switch v := val.(type) {
+	case nil:
+		return UnspecifiedKind, nil
+	case bool:
+		return BoolKind, v
+	case string:
+		return StringKind, v
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr:
+		return IntKind, v
+	case float32, float64:
+		return FloatKind, v
+	}
+	held, ok := Scalar(val)
+	if !ok {
 		return UnspecifiedKind, val
 	}
-
-	if rv := reflect.ValueOf(val); rv.Kind() == reflect.Pointer {
-		d, _ := Deref(rv)
-		if !d.IsValid() {
-			return UnspecifiedKind, nil
-		}
-		val = d.Interface()
-	}
-
-	switch v := val.(type) {
+	switch v := held.(type) {
+	case nil:
+		return UnspecifiedKind, nil
 	case json.Number:
 		if immutable.IsIntegerLiteral(v) {
-			n, err := v.Int64()
-			if err == nil {
+			if n, err := v.Int64(); err == nil {
 				return IntKind, n
 			}
-			if errors.Is(err, strconv.ErrRange) && integerDigits(v) {
-				return IntKind, val
-			}
+			return IntKind, v
 		}
 		if n, err := v.Float64(); err == nil {
 			return FloatKind, n
 		}
-		return UnspecifiedKind, val
+		return UnspecifiedKind, v
 	case bool:
-		return BoolKind, val
+		return BoolKind, held
 	case string:
-		return StringKind, val
-	case int, int8, int16, int32, int64:
-		return IntKind, val
-	case uint, uint8, uint16, uint32, uint64, uintptr:
-		return IntKind, val
+		return StringKind, held
+	case int64, uint64:
+		return IntKind, held
 	case float32, float64:
-		return FloatKind, val
+		return FloatKind, held
 	}
-
-	if kind, base, ok := classifyNamedBase(reflect.ValueOf(val)); ok {
-		return kind, base
-	}
-
 	return UnspecifiedKind, val
-}
-
-// classifyNamedBase classifies a named type over a predeclared base, which the
-// concrete type switch cannot match, and returns the BASE value rather than the
-// named one. A caller that classified and then extracted the named value would
-// get a Kind it cannot read — the shape adapter/gogen's emitted carriers hit.
-func classifyNamedBase(rv reflect.Value) (Kind, any, bool) {
-	switch rv.Kind() {
-	case reflect.Bool:
-		return BoolKind, rv.Bool(), true
-	case reflect.String:
-		return StringKind, rv.String(), true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return IntKind, rv.Int(), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return IntKind, rv.Uint(), true
-	case reflect.Float32, reflect.Float64:
-		return FloatKind, rv.Float(), true
-	default:
-		return UnspecifiedKind, nil, false
-	}
-}
-
-// integerDigits reports whether n is an optional sign followed by decimal
-// digits alone. strconv reports ErrRange as soon as a digit run overflows,
-// before it reads a later byte, so ErrRange does not prove an integer literal:
-// "99999999999999999999x" draws it.
-func integerDigits(n json.Number) bool {
-	s := string(n)
-	if s != "" && (s[0] == '+' || s[0] == '-') {
-		s = s[1:]
-	}
-	if s == "" {
-		return false
-	}
-	for i := range len(s) {
-		if s[i] < '0' || s[i] > '9' {
-			return false
-		}
-	}
-	return true
 }

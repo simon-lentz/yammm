@@ -61,7 +61,7 @@ func Canonical(val any, c schema.Constraint) (any, error) {
 // timestamp is stored in text that satisfies its own format.
 func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 	layout := timestampLayout(c)
-	if t, ok := val.(time.Time); ok {
+	if t, ok := GetTime(val); ok {
 		s, readsBack := TimestampText(t, c)
 		if !readsBack {
 			return val, fmt.Errorf("value: a time.Time renders as %s, which is no timestamp the layout reads back", diag.QuoteValue(s))
@@ -82,12 +82,12 @@ func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 }
 
 // TimestampText returns t in the text a Timestamp c stores, and reports
-// whether that text reads back under the rule a string at c is checked by. A
-// year outside 0 to 9999, for one, renders as text no layout reads back.
+// whether [ParseTimestamp] reads that text back. A year outside 0 to 9999, for
+// one, renders as text no layout reads back.
 func TimestampText(t time.Time, c schema.Constraint) (string, bool) {
 	s := t.Format(timestampLayout(c))
-	_, err := parseTimestamp(s, c)
-	return s, err == nil
+	_, ok := ParseTimestamp(s, c)
+	return s, ok
 }
 
 // DateText returns t in the text a Date stores, and reports whether that text
@@ -109,24 +109,29 @@ func timestampLayout(c schema.Constraint) string {
 	return time.RFC3339Nano
 }
 
-// parseTimestamp reads s under the same rule the checker accepts it by: the
-// declared layout exclusively when the constraint carries one, and RFC 3339
-// with or without fractional seconds otherwise.
-func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
+// ParseTimestamp reads s as a Timestamp c reads text: by the declared layout
+// alone when c carries one, and as RFC 3339 with or without fractional seconds
+// otherwise. The checker and the canonical form both read by it.
+func ParseTimestamp(s string, c schema.Constraint) (time.Time, bool) {
 	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
 		t, err := time.Parse(tc.Format(), s)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("value: %s does not satisfy the declared timestamp format %q", diag.QuoteValue(s), tc.Format())
-		}
-		return t, nil
+		return t, err == nil
 	}
 	// RFC3339 parses fractional seconds too, so no RFC3339Nano fallback is
 	// needed: nothing that layout accepts, this one refuses.
 	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("value: %s is not an RFC 3339 timestamp", diag.QuoteValue(s))
+	return t, err == nil
+}
+
+// parseTimestamp is [ParseTimestamp] with the refusal worded.
+func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
+	if t, ok := ParseTimestamp(s, c); ok {
+		return t, nil
 	}
-	return t, nil
+	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
+		return time.Time{}, fmt.Errorf("value: %s does not satisfy the declared timestamp format %q", diag.QuoteValue(s), tc.Format())
+	}
+	return time.Time{}, fmt.Errorf("value: %s is not an RFC 3339 timestamp", diag.QuoteValue(s))
 }
 
 // canonicalUUID renders val through [uuid.UUID.String]. Parsing the string form
@@ -134,7 +139,7 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 // [uuid.Parse] accepts onto one key. The string form is whatever [GetString]
 // reads, so a carrier the check side accepts is one this side renders.
 func canonicalUUID(val any) (any, error) {
-	if u, ok := val.(uuid.UUID); ok {
+	if u, ok := GetUUID(val); ok {
 		return u.String(), nil
 	}
 	s, ok := GetString(val)
@@ -157,7 +162,7 @@ func canonicalUUID(val any) (any, error) {
 // an identity today — the layout admits exactly one spelling. It exists so the
 // three kinds read alike, not because a second spelling is waiting for it.
 func canonicalDate(val any) (any, error) {
-	if t, ok := val.(time.Time); ok {
+	if t, ok := GetTime(val); ok {
 		s, readsBack := DateText(t)
 		if !readsBack {
 			return val, fmt.Errorf("value: a time.Time renders as %s, which is no YYYY-MM-DD date", diag.QuoteValue(s))

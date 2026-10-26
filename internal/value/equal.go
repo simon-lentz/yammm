@@ -12,11 +12,11 @@ import (
 // 1 == 1.0 and NaN == NaN); two maps — an instance among them — are equal
 // when they hold the same keys and each value is equal by this rule; two
 // lists when their elements are pairwise equal; and values of different
-// kinds, or of a kind nothing here can read, are not equal. A nil is equal
-// to nil alone.
+// kinds, or of a kind nothing here can read, are not equal. A value that holds
+// none ([Absent]) is equal to such a value alone.
 func Equal(a, b any) bool {
 	if a == nil || b == nil {
-		return a == nil && b == nil
+		return Absent(a) && Absent(b)
 	}
 	as, bs := TypeStrata(a), TypeStrata(b)
 	if as != InvalidStrata && bs != InvalidStrata {

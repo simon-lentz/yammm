@@ -15,7 +15,8 @@ import (
 // canonical lowercase form, a Date as "2006-01-02" in the value's own
 // location, and a String, Enum, Pattern or Boolean carried by a named Go type
 // as the base value. A nil constraint passes val through untouched, and so
-// does a constraint [schema.CheckConstraint] accepts a nil val. A non-nil
+// does a constraint [schema.CheckConstraint] accepts a nil val; any other value
+// that holds none, as [CheckValue] reads it, renders as nil. A non-nil
 // constraint is judged first by [schema.CheckConstraint], and one it refuses
 // is an error whatever the value, as it is for [CheckValue].
 //
@@ -49,9 +50,10 @@ func CanonicalValue(val any, c schema.Constraint) (any, error) {
 // ScalarOf returns v in the one form every writer of this module writes, read
 // through at most 64 pointers and interfaces: a string, a bool, an int64, a uint64, a
 // float32 or a float64 for a value of that kind, a named type as its base value,
-// a json.Number, a time.Time or a uuid.UUID as itself, and nil for any nil. It
-// reports false for every other value, a list and a map included, which a
-// writer walks itself, reading each element through ScalarOf. A writer writes a time.Time only at a Timestamp or a Date, and a uuid.UUID
+// a json.Number that is a JSON number literal, a time.Time or a uuid.UUID as
+// itself, and nil for a nil value but a bare slice or string-keyed map, which
+// is a list or a map. It reports false for every other value, a list and a map
+// included, which a writer walks itself, reading each element through ScalarOf. A writer writes a time.Time only at a Timestamp or a Date, and a uuid.UUID
 // only at a UUID, each of which renders it.
 func ScalarOf(v any) (any, bool) {
 	return value.Scalar(v)

@@ -1,7 +1,9 @@
 package neo4j
 
 import (
+	"encoding/json"
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -102,6 +104,64 @@ func TestHeldForm_EachValueIsHandedInItsForm(t *testing.T) {
 		got, err := heldForm(c.in, c.c)
 		if err != nil || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: heldForm = %#v, %v; want %#v", c.name, got, err, c.want)
+		}
+	}
+}
+
+// A JSON number literal is handed on as the driver's number, read as the
+// validator reads it at its constraint, so the coercion that follows writes it
+// as every other writer of this module does; a literal no driver number holds
+// is refused.
+func TestHeldForm_ANumberLiteralIsTheDriversNumber(t *testing.T) {
+	t.Parallel()
+	negZero := math.Copysign(0, -1)
+	integer, float, text := schema.NewIntegerConstraint(), schema.NewFloatConstraint(), schema.NewStringConstraint()
+	for _, c := range []struct {
+		name string
+		in   any
+		c    schema.Constraint
+		want any
+	}{
+		{"an integer literal at an Integer", json.Number("5"), integer, int64(5)},
+		{"a pointer to one", new(json.Number("-7")), integer, int64(-7)},
+		{"an integer literal at a Float", json.Number("5"), float, 5.0},
+		{"-0 at a Float", json.Number("-0"), float, negZero},
+		{"a float literal at a Float", json.Number("0.5"), float, 0.5},
+		{"a wide integer literal at a Float", json.Number("99999999999999999999"), float, 1e20},
+		{"an integer literal at a String", json.Number("5"), text, int64(5)},
+		{"an integer literal undeclared", json.Number("5"), nil, int64(5)},
+		{"-0 in a Vector", []any{json.Number("-0"), json.Number("1")}, schema.NewVectorConstraint(2), []any{negZero, 1.0}},
+		{"an integer literal in a List<Integer>", []any{json.Number("3")}, schema.NewListConstraint(integer), []any{int64(3)}},
+	} {
+		got, err := heldForm(c.in, c.c)
+		if err != nil || !reflect.DeepEqual(got, c.want) || (c.want == negZero && !math.Signbit(got.(float64))) {
+			t.Errorf("%s: heldForm = %#v, %v; want %#v", c.name, got, err, c.want)
+			continue
+		}
+		if c.c == nil {
+			continue
+		}
+		if _, err := coerceValue(c.c, got); err != nil {
+			t.Errorf("%s: the coercion refuses the handed form %#v: %v", c.name, got, err)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		in   json.Number
+		c    schema.Constraint
+	}{
+		{"a wide integer literal at an Integer", "99999999999999999999", integer},
+		{"a wide integer literal undeclared", "99999999999999999999", nil},
+		{"a literal no finite float64 holds at a Float", "1e400", float},
+		{"a literal no finite float64 holds at a String", "-1e400", text},
+	} {
+		if got, err := heldForm(c.in, c.c); !errors.Is(err, errUnheldNumber) {
+			t.Errorf("%s: heldForm = %#v, %v; want errUnheldNumber", c.name, got, err)
+		}
+	}
+	if got, err := heldForm(json.Number("0.5"), integer); err == nil {
+		if _, err := coerceValue(integer, got); err == nil {
+			t.Errorf("a float literal at an Integer reached the driver as %#v", got)
 		}
 	}
 }

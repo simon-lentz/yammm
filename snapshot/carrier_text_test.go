@@ -49,24 +49,31 @@ func TestMarshal_TextBehindACarrierIsJudgedAsTheText(t *testing.T) {
 	}
 }
 
-// encoding/json writes an empty json.Number as 0, which Load reads back as the
-// integer 0, a value the snapshot does not hold, so Marshal refuses it. A
+// A json.Number whose text is no JSON number literal is no value of the one
+// form, so Marshal refuses it: encoding/json writes an empty one as 0, which
+// Load reads back as the integer 0, and fails the document on any other. A
 // json.Number it writes, Load reads back as the literal it is.
-func TestMarshal_AnEmptyJSONNumberIsRefused(t *testing.T) {
+func TestMarshal_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
 	t.Parallel()
+	signed := json.Number("+5")
 	for name, v := range map[string]any{
-		"a property":     json.Number(""),
-		"a list element": []any{json.Number("")},
-		"a map value":    map[string]any{"x": json.Number("")},
+		"an empty property":         json.Number(""),
+		"an empty list element":     []any{json.Number("")},
+		"an empty map value":        map[string]any{"x": json.Number("")},
+		"a leading '+'":             json.Number("+5"),
+		"leading zeros":             json.Number("007"),
+		"a hexadecimal float":       json.Number("0x1p4"),
+		"an underscore":             json.Number("1_000"),
+		"a pointer to a '+' number": &signed,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			_, snap := utf8WireSnapshot(t, map[string]any{"text": v}, "t1", "ok")
 			data, res := snapshot.Marshal(t.Context(), snap)
 			if data != nil {
-				t.Errorf("Marshal wrote %d bytes for an empty json.Number", len(data))
+				t.Errorf("Marshal wrote %d bytes for a json.Number that is no literal", len(data))
 			}
-			requireUnwritable(t, res, textUnwritable(), `property "text"`, "an empty json.Number")
+			requireUnwritable(t, res, textUnwritable(), `property "text"`, "a json.Number that is no number literal")
 		})
 	}
 	s, snap := utf8WireSnapshot(t, map[string]any{"text": json.Number("1e400")}, "t1", "ok")

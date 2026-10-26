@@ -24,17 +24,21 @@
 //   - bool (false < true)
 //   - integers: int, int8-64, uint, uint8-64, uintptr
 //   - floats: float32, float64 (with special handling: -Inf < finite < +Inf < NaN)
-//   - [encoding/json.Number], as the integer it spells when it is an integer
-//     literal and as a float otherwise
+//   - [encoding/json.Number] that is a JSON number literal, as the integer it
+//     spells when it is an integer literal and as a float otherwise; one
+//     holding other text is no number and has no strata
 //   - string and *regexp.Regexp (regexp compared via String())
 //   - slices of supported types (lexicographic comparison)
 //
 // This package is the single authority on what a value IS. A predeclared type
-// is answered by a type switch; anything else falls back to its underlying
-// kind. A pointer is read through, at most 64 deep ([Deref]), to the strata and
-// value of what it points at, and a longer chain, as one that points to itself
-// is, has neither; a named scalar (type MyInt int) takes those of its base. The fallback
-// runs only when the type switch misses, so canonical input pays nothing for it.
+// is answered by a type switch; anything else is read in the one form [Scalar]
+// defines, which every writer of the module writes. A pointer or an interface
+// is read through, at most 64 deep, to the strata and value of the scalar or
+// the nil it holds, and a longer chain, as one that points to itself is, has
+// neither; a slice is a list only when it is bare, as [ListElems] reads one,
+// and a slice behind a carrier is [InvalidStrata]; a named
+// scalar (type MyInt int) takes those of its base. The fallback runs only when
+// the type switch misses, so canonical input pays nothing for it.
 //
 // The named-type rule is not a convenience. adapter/gogen emits
 // `type <Name> <base>` for every DataType and inline enum, so rejecting named
@@ -68,16 +72,17 @@
 // # json.Number Handling
 //
 // [Classify] determines what a value IS, not what it should be per schema. It
-// reads a json.Number by its spelling: an optional sign and decimal digits
-// alone are an integer, and any other text [strconv.ParseFloat] reads is a float:
-//   - json.Number("42") → IntKind (a sign and digits alone)
+// reads a json.Number by its spelling, and only a JSON number literal
+// ([github.com/simon-lentz/yammm/immutable.IsNumberLiteral]) is a number: an
+// integer literal is an integer, and any other literal is a float:
+//   - json.Number("42") → IntKind (an optional '-' and digits alone)
 //   - json.Number("3.0") → FloatKind (has a decimal point)
 //   - json.Number("1e2") → FloatKind (has an exponent), though its value is whole
 //   - json.Number("3.14") → FloatKind
 //   - json.Number("-9223372036854775809") → IntKind, kept as the json.Number:
 //     an integer no int64 holds, which an Integer check refuses
-//   - json.Number("99999999999999999999x") → UnspecifiedKind: no number, though
-//     strconv reports ErrRange for it
+//   - json.Number("+5"), ("007"), ("1_000"), ("0x1p4"), (".5") →
+//     UnspecifiedKind: no JSON number literal, though strconv reads each
 //
 // The Integer check at instance validation refuses every FloatKind value, "3.0"
 // and 3.0 included: a float is never an Integer, whole or not.
@@ -108,10 +113,10 @@
 // convert the float to integer (not vice versa) when the float is a whole number,
 // avoiding the precision loss that occurs when large integers are converted to float64.
 //
-// An integer takes the exact path whatever carries it: a json.Number spelled as
-// an integer that an int64 or a uint64 holds is compared as that integer, and a
-// json.Number carrying '.', 'e' or 'E' is compared as a float. A json.Number
-// spelled as an integer neither int64 nor uint64 holds is compared exactly, as
+// An integer takes the exact path whatever carries it: a JSON integer literal
+// that an int64 or a uint64 holds is compared as that integer, and any other
+// JSON number literal is compared as a float. An integer literal neither int64
+// nor uint64 holds is compared exactly, as
 // a rational, so it equals a float64 only when that float64 is the same integer
 // exactly (2^64 is; the float64 nearest 2^64+1 is not). The order is therefore
 // transitive across every supported value:

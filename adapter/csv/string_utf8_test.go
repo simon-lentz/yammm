@@ -200,13 +200,14 @@ func TestMarshalSnapshot_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 	}
 }
 
-// A json.Number holding a byte that is no part of a character is refused as
-// text that is not valid UTF-8, the fault it holds first.
-func TestMarshalSnapshot_ANumberHoldingAnInvalidByteIsRefusedAsText(t *testing.T) {
+// A json.Number holding a byte that is no part of a character is no number
+// literal, so it is refused as a value no cell spells, as every writer refuses
+// a value of no form.
+func TestMarshalSnapshot_ANumberHoldingAnInvalidByteIsRefusedAsNoForm(t *testing.T) {
 	t.Parallel()
 	s := loadUTF8CSVSchema(t)
 	_, err := New(WithSchema(s)).MarshalSnapshot(context.Background(), utf8Bypass(t, s, map[string]any{"text": json.Number("1\xff")}, "ok"))
-	if !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), "not valid UTF-8") {
-		t.Errorf("MarshalSnapshot = %v; want a refusal naming text that is not valid UTF-8", err)
+	if !errors.Is(err, ErrUnrepresentable) || !strings.Contains(err.Error(), "has no spelling in a cell") {
+		t.Errorf("MarshalSnapshot = %v; want a refusal naming a value no cell spells", err)
 	}
 }

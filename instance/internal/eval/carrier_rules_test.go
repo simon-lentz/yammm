@@ -22,6 +22,7 @@ type (
 	carrierFloat float64
 	carrierF32   float32
 	carrierStr   string
+	carrierUint  uint
 )
 
 func stored(t *testing.T, elems ...any) any {
@@ -256,7 +257,7 @@ func TestIntegerLiteralNoFloatHolds_IsRefusedAtAVectorElement(t *testing.T) {
 }
 
 // Only an integer literal outside int64 is named as out of range. A json.Number
-// that is no number keeps the generic message, and a decimal or exponent
+// that is no number literal is named as one, and a decimal or exponent
 // literal is a float however long its digit run, although strconv reports
 // ErrRange for the run before it reads the '.' or 'e'.
 func TestCoerceInteger_OnlyAnIntegerLiteralIsCalledOutOfRange(t *testing.T) {
@@ -265,7 +266,7 @@ func TestCoerceInteger_OnlyAnIntegerLiteralIsCalledOutOfRange(t *testing.T) {
 		n    json.Number
 		want string
 	}{
-		{"abc", "cannot coerce json.Number to int64"},
+		{"abc", `cannot coerce json.Number "abc" to int64: no JSON number literal`},
 		{"20000000000000000000e-10", "cannot coerce float 2000000000.0 to int64"},
 		{"100000000000000000000.5", "cannot coerce float 100000000000000000000.0 to int64"},
 		{"18446744073709551616e-18", "cannot coerce float 18.446744073709553 to int64"},
@@ -390,6 +391,10 @@ func TestCheckAndCoerce_NamedNumericCarriers(t *testing.T) {
 		{"float64 carrier at Float", carrierFloat(2.5), schema.NewFloatConstraint(), 2.5},
 		{"float32 carrier at Float", carrierF32(1.5), schema.NewFloatConstraint(), 1.5},
 		{"int64 carrier at Float", carrierInt(3), schema.NewFloatConstraint(), 3.0},
+		{"unsigned carrier at Integer", carrierUint(5), schema.NewIntegerConstraint(), int64(5)},
+		{"unsigned carrier at Float", carrierUint(5), schema.NewFloatConstraint(), 5.0},
+		{"pointer to a uint64 at Integer", new(uint64(5)), schema.NewIntegerConstraint(), int64(5)},
+		{"pointer to a uint64 at Float", new(uint64(5)), schema.NewFloatConstraint(), 5.0},
 		{"carriers at Vector", []any{carrierFloat(1.0), carrierInt(2), carrierF32(3.0)}, schema.NewVectorConstraint(3), []float64{1, 2, 3}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -470,8 +475,8 @@ func TestNonFiniteNumberLiteral_IsRefusedByCheckAndCoerce(t *testing.T) {
 // Each message names the fact in the form it is written: an uppercase exponent
 // after a long digit run is a float, an exponent form takes no ".0", a float32
 // keeps its 32-bit digits, a literal of exactly the bound is quoted whole, an
-// unsigned value above MaxInt64 names the bound, and a wide literal is named
-// out of range by the coercion as by the check.
+// unsigned value above MaxInt64 names the bound, whatever carries it, and a
+// wide literal is named out of range by the coercion as by the check.
 func TestIntegerMessages_NameTheFactAsWritten(t *testing.T) {
 	t.Parallel()
 	ic := schema.NewIntegerConstraint()
@@ -490,11 +495,22 @@ func TestIntegerMessages_NameTheFactAsWritten(t *testing.T) {
 	if err := eval.CheckValue(float32(0.1), ic); msg(err) != "expected integer, got float 0.1" {
 		t.Errorf("float32: %v", err)
 	}
+	if err := eval.CheckValue(carrierF32(1.1), ic); msg(err) != "expected integer, got float 1.1" {
+		t.Errorf("named float32: %v", err)
+	}
+	if err := eval.CheckValue(new(float32(1.1)), ic); msg(err) != "expected integer, got float 1.1" {
+		t.Errorf("pointer to a float32: %v", err)
+	}
+	for _, v := range []any{uint64(1 << 63), new(uint64(1 << 63)), carrierUint(1 << 63)} {
+		if err := eval.CheckValue(v, ic); msg(err) != "expected integer, got an integer outside the int64 range: 9223372036854775808" {
+			t.Errorf("%T above MaxInt64: %v", v, err)
+		}
+	}
 	n32 := json.Number("1" + strings.Repeat("0", 31))
 	if err := eval.CheckValue(n32, ic); msg(err) != "expected integer, got an integer outside the int64 range: "+string(n32) {
 		t.Errorf("32-byte literal: %v", err)
 	}
-	if _, err := eval.CoerceValue(uint64(1<<63), ic); msg(err) != "uint64 value 9223372036854775808 exceeds int64 max" {
+	if _, err := eval.CoerceValue(uint64(1<<63), ic); msg(err) != "cannot coerce integer 9223372036854775808 outside the int64 range to int64" {
 		t.Errorf("uint64: %v", err)
 	}
 	if _, err := eval.CoerceValue(json.Number("1"+strings.Repeat("0", 400)), ic); !strings.Contains(msg(err), "outside the int64 range") {

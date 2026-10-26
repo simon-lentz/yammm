@@ -35,11 +35,12 @@ import (
 //     against RFC3339 otherwise; a time.Time passes through. A string that does
 //     not parse, or any non-string non-time.Time value, is a coercion failure
 //     and returns an error. The instant is always expressed in a location the
-//     driver can send, under one rule: a named location is kept only when the
-//     host's tz database resolves it AND the resolved offset agrees with the
-//     one the value carries; time.Local, an unnamed location, an unresolvable
-//     name and a name whose offset disagrees are all re-expressed in the
-//     value's own offset. A consumer that must keep IANA names on a host
+//     driver can send, under one rule: a location named "Offset", the driver's
+//     own offset form, is sent as it is; any other named location is kept only
+//     when the host's tz database resolves it AND the resolved offset agrees
+//     with the one the value carries; time.Local, a location named "Local", an
+//     unnamed location, any other unresolvable name and a name whose offset
+//     disagrees are all re-expressed in the value's own offset. A consumer that must keep IANA names on a host
 //     without a tz database imports time/tzdata.
 //   - Date: a "2006-01-02" string, a time.Time, OR a dbtype.Date -> dbtype.Date
 //     (Neo4j DATE). A string that does not parse, or any other non-temporal
@@ -70,8 +71,11 @@ import (
 // Pattern element and a bool of a Boolean element, where Coerce passes a
 // scalar of those kinds through. The adapter write path reads every value and
 // element in its one form first ([github.com/simon-lentz/yammm/instance.ScalarOf]),
-// so a named string, a pointer and a uuid.UUID at a UUID pass there. Calling Coerce with a collection constraint returns the value
-// unchanged.
+// so a named string, a pointer and a uuid.UUID at a UUID pass there, and a JSON
+// number literal reaches it as the int64 or float64 it spells, which an Integer
+// refuses when it is a float; a literal no int64 holds outside a Float, or no
+// finite float64 holds, is refused before Coerce. Calling Coerce with a collection constraint returns the
+// value unchanged.
 //
 // A non-nil constraint is judged first by [schema.CheckConstraint]: Coerce
 // refuses what CheckConstraint refuses: what [schema.Builder.Build] refuses in a

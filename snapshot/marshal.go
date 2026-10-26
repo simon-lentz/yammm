@@ -24,9 +24,9 @@ import (
 // E_CONTEXT_CANCELLED on cancellation.
 //
 // A property value the wire cannot carry as itself — a non-finite float, a
-// string that is not valid UTF-8 (a map's key included), an empty json.Number,
-// which encoding/json writes as 0, a json.Number whose text is no JSON number
-// literal, a time.Time or a uuid.UUID its constraint
+// string that is not valid UTF-8 (a map's key included), a json.Number whose
+// text is no JSON number literal (an empty one, which encoding/json writes as
+// 0, among them), a time.Time or a uuid.UUID its constraint
 // does not render as text that reads back, or a value of no form every writer writes
 // ([github.com/simon-lentz/yammm/instance.ScalarOf]), such as a struct —
 // returns nil bytes with Error E_SNAPSHOT_MALFORMED

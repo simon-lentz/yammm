@@ -149,7 +149,7 @@ func (a *Adapter) parseVectorValue(raw string) ([]any, error) {
 // outside int64. A float literal is never an Integer, whole or not, and a
 // spelling JSON has no literal for ("+5", "007") is refused.
 func integerFromCell(raw string) (any, error) {
-	if !numberLiteral(raw) || !immutable.IsIntegerLiteral(json.Number(raw)) {
+	if n := json.Number(raw); !immutable.IsNumberLiteral(n) || !immutable.IsIntegerLiteral(n) {
 		return nil, fmt.Errorf("cannot parse %s as Integer: not a JSON integer literal", diag.QuoteValue(raw))
 	}
 	v, err := strconv.ParseInt(raw, 10, 64)
@@ -163,7 +163,7 @@ func integerFromCell(raw string) (any, error) {
 // the literal: any JSON number literal, read to its nearest float64 with the
 // sign of a zero kept, and refused when no float64 is finite.
 func floatFromCell(raw string) (float64, error) {
-	if !numberLiteral(raw) {
+	if !immutable.IsNumberLiteral(json.Number(raw)) {
 		return 0, fmt.Errorf("cannot parse %s as Float: not a JSON number literal", diag.QuoteValue(raw))
 	}
 	v, err := strconv.ParseFloat(raw, 64)
@@ -171,51 +171,6 @@ func floatFromCell(raw string) (float64, error) {
 		return 0, fmt.Errorf("cannot parse %s as Float: %w", diag.QuoteValue(raw), parseCause(err))
 	}
 	return v, nil
-}
-
-// numberLiteral reports whether s is a JSON number literal (RFC 8259, section
-// 6): -? (0 | [1-9][0-9]*) (.[0-9]+)? ([eE][+-]?[0-9]+)?, with nothing around
-// it.
-func numberLiteral(s string) bool {
-	i := 0
-	if i < len(s) && s[i] == '-' {
-		i++
-	}
-	switch {
-	case i < len(s) && s[i] == '0':
-		i++
-	case i < len(s) && s[i] >= '1' && s[i] <= '9':
-		i = digitsFrom(s, i)
-	default:
-		return false
-	}
-	if i < len(s) && s[i] == '.' {
-		j := digitsFrom(s, i+1)
-		if j == i+1 {
-			return false
-		}
-		i = j
-	}
-	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
-		i++
-		if i < len(s) && (s[i] == '+' || s[i] == '-') {
-			i++
-		}
-		j := digitsFrom(s, i)
-		if j == i {
-			return false
-		}
-		i = j
-	}
-	return i == len(s)
-}
-
-// digitsFrom returns the index past the run of ASCII digits starting at i.
-func digitsFrom(s string, i int) int {
-	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-		i++
-	}
-	return i
 }
 
 // utf8BOM is the UTF-8 byte order mark.

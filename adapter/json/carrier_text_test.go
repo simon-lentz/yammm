@@ -122,6 +122,34 @@ func TestMarshalObject_APointerIsJudgedAsTheValueItPointsTo(t *testing.T) {
 	}
 }
 
+// A json.Number whose text is no JSON number literal is a value of no form,
+// refused at the kind that would read its number too: the writer never
+// converts text strconv reads and no JSON reader does.
+func TestMarshalObject_AJSONNumberThatIsNoLiteralIsRefused(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadString(t.Context(), numberJSONSchema, "numbers.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	signed := stdjson.Number("+5")
+	for _, c := range []struct {
+		prop string
+		v    any
+	}{
+		{"n", stdjson.Number("+5")},
+		{"n", stdjson.Number("007")},
+		{"n", &signed},
+		{"f", stdjson.Number("0x1p4")},
+		{"f", stdjson.Number("1_000")},
+		{"f", stdjson.Number(".5")},
+	} {
+		data, err := New().MarshalObject(t.Context(), numberSnapshot(t, s, map[string]any{c.prop: c.v}, nil))
+		if !errors.Is(err, ErrUnrepresentable) {
+			t.Errorf("%s = %#v: wrote %s, error = %v; want one matching ErrUnrepresentable", c.prop, c.v, data, err)
+		}
+	}
+}
+
 // A refusal of a value names every class the writer refuses, so a reader of
 // the message learns what the value may have been.
 func TestMarshalObject_ARefusalNamesEveryClass(t *testing.T) {

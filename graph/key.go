@@ -153,8 +153,8 @@ func decodeKeyArray(s string) ([]any, error) {
 // unreadableComponent returns the index of the first component of k that
 // [ParseKey] cannot read back at the same rendering, or -1: one of no form every
 // writer writes ([value.Scalar]: a struct, an array, a list or a map among
-// them), a string that is not valid UTF-8, each invalid byte of which the
-// rendering writes as U+FFFD, an empty json.Number, which renders as 0, a
+// them, as a json.Number that is no JSON number literal is), a string that is
+// not valid UTF-8, each invalid byte of which the rendering writes as U+FFFD, a
 // number no finite float64 holds, or a number ParseKey reads back at another
 // rendering, as a float64 negative zero reads back as 0, whose address a
 // reload would move. A component whose rendering differs from its form's is
@@ -187,10 +187,6 @@ func unreadableComponent(typ *schema.Type, k immutable.Key) int {
 		switch u := held.(type) {
 		case string:
 			if !utf8.ValidString(u) {
-				return i
-			}
-		case json.Number:
-			if u == "" {
 				return i
 			}
 		case time.Time:

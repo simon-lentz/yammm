@@ -1,4 +1,4 @@
-package csv
+package immutable
 
 import (
 	"encoding/json"
@@ -7,10 +7,10 @@ import (
 	"testing"
 )
 
-// numberLiteral accepts exactly what encoding/json decodes as a number with
+// IsNumberLiteral accepts exactly what encoding/json decodes as a number with
 // nothing around it, over every string of up to six bytes the generator draws
 // from the bytes a number literal and its near misses hold.
-func TestNumberLiteral_AcceptsWhatTheDecoderReadsAsANumber(t *testing.T) {
+func TestIsNumberLiteral_AcceptsWhatTheDecoderReadsAsANumber(t *testing.T) {
 	t.Parallel()
 	const alphabet = "-+0123456789.eE x"
 	rng := rand.New(rand.NewPCG(8259, 6)) //nolint:gosec // a fixed seed makes the class reproducible
@@ -23,8 +23,8 @@ func TestNumberLiteral_AcceptsWhatTheDecoderReadsAsANumber(t *testing.T) {
 		s := b.String()
 		var n json.Number
 		want := json.Unmarshal([]byte(s), &n) == nil && strings.TrimSpace(s) == s
-		if got := numberLiteral(s); got != want {
-			t.Errorf("numberLiteral(%q) = %v, want %v", s, got, want)
+		if got := IsNumberLiteral(json.Number(s)); got != want {
+			t.Errorf("IsNumberLiteral(%q) = %v, want %v", s, got, want)
 		}
 		if want {
 			accepted++

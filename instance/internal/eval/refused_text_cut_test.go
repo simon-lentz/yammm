@@ -127,7 +127,7 @@ func TestCheckValue_ARefusedValueIsQuoted(t *testing.T) {
 		{"pattern", eval.CheckValue("b", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a$")})), `value "b" does not match pattern ^a$`},
 		{
 			"a literal that is no number", coerced(eval.CoerceValue(json.Number(long), schema.NewFloatConstraint())),
-			`cannot coerce json.Number "` + long[:32] + `"… (100 bytes) to float64`,
+			`cannot coerce json.Number "` + long[:32] + `"… (100 bytes) to float64: no JSON number literal`,
 		},
 		{"a long UUID", eval.CheckValue(long, schema.NewUUIDConstraint()), `invalid UUID: ` + cut},
 		{"a long enum value", eval.CheckValue(long, schema.NewEnumConstraint([]string{"a", "b"})), `value ` + cut + ` not in enum [a b]`},

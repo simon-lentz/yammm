@@ -55,8 +55,9 @@ func WithIssueLimit(limit int) Option {
 }
 
 // WithLogger provides a structured logger for validation diagnostics: a
-// debug record when a property name is normalized, and — at Debug — the
-// evaluator's per-node trace of every invariant it evaluates, one record per
+// debug record when an instance's property name is normalized (an edge
+// property or a foreign-key field name logs none), and — at Debug — the
+// evaluator's trace of every invariant it evaluates, one record per
 // s-expression plus the operation's start and end, each logged with the
 // context passed to Validate, so a request id it carries is on every record.
 // If not provided, logging is disabled. Symmetric with

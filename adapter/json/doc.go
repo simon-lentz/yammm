@@ -40,14 +40,14 @@
 // without revalidating at Error): a
 // non-finite float at any depth, which a validated Float never is; a string
 // that is not valid UTF-8, a map's key included, which encoding/json would
-// write with U+FFFD in place of each invalid byte; a json.Number whose text is
-// no number literal, is empty, or spells a number no finite float64 holds,
-// where no Integer or Float converts it; a
+// write with U+FFFD in place of each invalid byte; a json.Number that spells a
+// number no finite float64 holds, where no Integer or Float converts it; a
 // time.Time outside a Timestamp or a Date, or a uuid.UUID outside a UUID,
 // which render them, and a time whose text at its kind does not read back, as a year outside
 // 0 to 9999 does not; and a value of no form every writer of this module writes
 // ([github.com/simon-lentz/yammm/instance.ScalarOf]), such as a struct, an
-// array or a map keyed by no string. A pointer is read as the scalar it points
+// array, a map keyed by no string or a json.Number whose text is no JSON
+// number literal, an empty one among them. A pointer is read as the scalar it points
 // to and a named type as its base value; no value's own MarshalJSON or
 // MarshalText is asked. Each refusal is an error marked [ErrUnrepresentable],
 // so a caller separates it from an I/O failure without matching the message

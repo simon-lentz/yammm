@@ -17,15 +17,15 @@ func TestGetString_APointerThatPointsToItselfHoldsNoValue(t *testing.T) {
 	if s, ok := GetString(p); ok {
 		t.Errorf("GetString read %q through a pointer that points to itself", s)
 	}
-	if _, ok := underlying(p); ok {
-		t.Error("underlying found a value at the end of a pointer that points to itself")
+	if _, ok := Scalar(p); ok {
+		t.Error("Scalar found a value at the end of a pointer that points to itself")
 	}
 }
 
 // Every pointer walk of the value layer stops at the same bound: a pointer that
 // points to itself classifies as no kind, takes no strata and orders against
 // nothing, rather than hang.
-func TestDeref_EveryWalkStopsAtAPointerThatPointsToItself(t *testing.T) {
+func TestWalk_EveryWalkStopsAtAPointerThatPointsToItself(t *testing.T) {
 	t.Parallel()
 	var p selfPointer
 	p = &p
@@ -38,8 +38,8 @@ func TestDeref_EveryWalkStopsAtAPointerThatPointsToItself(t *testing.T) {
 	if _, err := Order(p, p); err == nil {
 		t.Error("Order compared two pointers that point to themselves")
 	}
-	if _, ok := Deref(reflect.ValueOf(p)); ok {
-		t.Error("Deref followed a pointer that points to itself")
+	if _, ok := walk(p); ok {
+		t.Error("walk followed a pointer that points to itself")
 	}
 	n := 1
 	chain := reflect.ValueOf(&n)
@@ -48,12 +48,12 @@ func TestDeref_EveryWalkStopsAtAPointerThatPointsToItself(t *testing.T) {
 		next.Elem().Set(chain)
 		chain = next
 	}
-	if d, ok := Deref(chain); !ok || d.Interface() != 1 {
-		t.Errorf("Deref through %d pointers = %v, %v; want 1", maxPointerDepth, d, ok)
+	if d, ok := walk(chain.Interface()); !ok || d.Interface() != 1 {
+		t.Errorf("walk through %d pointers = %v, %v; want 1", maxPointerDepth, d, ok)
 	}
 	past := reflect.New(chain.Type())
 	past.Elem().Set(chain)
-	if _, ok := Deref(past); ok {
-		t.Errorf("Deref followed %d pointers, past its bound", maxPointerDepth+1)
+	if _, ok := walk(past.Interface()); ok {
+		t.Errorf("walk followed %d pointers, past its bound", maxPointerDepth+1)
 	}
 }

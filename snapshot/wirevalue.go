@@ -183,22 +183,17 @@ func wireForm(v any) (any, bool) {
 
 // wireWritable reports whether encoding/json writes v, a value [wireForm] read
 // and wireValue returned, as the value it is: no JSON number spells a
-// non-finite float, encoding/json writes each byte of a string that is not
-// valid UTF-8 as U+FFFD, a map's key included, and an empty json.Number as 0,
-// which Load reads back as the integer 0. A time.Time or a uuid.UUID is written
-// only where its constraint rendered it as text, so one left is refused.
+// non-finite float, and encoding/json writes each byte of a string that is not
+// valid UTF-8 as U+FFFD, a map's key included. A json.Number in the form is a
+// JSON number literal, which it writes as it stands. A time.Time or a uuid.UUID
+// is written only where its constraint rendered it as text, so one left is
+// refused.
 func wireWritable(v any) bool {
 	switch t := v.(type) {
-	case nil, bool, int64, uint64:
+	case nil, bool, int64, uint64, json.Number:
 		return true
 	case string:
 		return utf8.ValidString(t)
-	case json.Number:
-		if t == "" {
-			return false
-		}
-		_, err := json.Marshal(t)
-		return err == nil
 	case wireFloat:
 		return !math.IsNaN(float64(t)) && !math.IsInf(float64(t), 0)
 	case wireFloat32:
@@ -402,6 +397,11 @@ func wireJSONNumber(n json.Number) any {
 	case float64:
 		return wireFloat(norm)
 	case int64:
+		// The integer literal -0 is the integer 0, but a Float stores the
+		// negative zero it spells.
+		if norm == 0 && n[0] == '-' {
+			return wireFloat(math.Copysign(0, -1))
+		}
 		if f, ok := exactWireInt(norm); ok {
 			return wireFloat(f)
 		}

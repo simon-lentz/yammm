@@ -207,8 +207,8 @@ func TestClassify_PointerDereferencing(t *testing.T) {
 		if kind != value.IntKind {
 			t.Errorf("expected IntKind for *int, got %v", kind)
 		}
-		if norm != 42 {
-			t.Errorf("expected 42, got %v", norm)
+		if norm != int64(42) {
+			t.Errorf("expected int64 42, got %#v", norm)
 		}
 	})
 
@@ -251,8 +251,8 @@ func TestClassify_PointerDereferencing(t *testing.T) {
 		if kind != value.IntKind {
 			t.Errorf("expected IntKind for **int, got %v", kind)
 		}
-		if norm != 42 {
-			t.Errorf("expected 42, got %v", norm)
+		if norm != int64(42) {
+			t.Errorf("expected int64 42, got %#v", norm)
 		}
 	})
 

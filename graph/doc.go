@@ -95,7 +95,7 @@
 //
 // # Type Resolution
 //
-// Two lookups, and they answer different questions:
+// Three lookups, and they answer different questions:
 //
 //   - [Graph.Add] resolves a root's type from its identity, restricted as a
 //     matter of OWNERSHIP: a graph bound to a schema holds instances of the
@@ -104,6 +104,10 @@
 //   - A composed child resolves across the WHOLE import closure. Its type comes
 //     from a relation the schema already resolved, and no ownership question
 //     arises because the child arrived inside a parent this graph does own.
+//   - [Graph.AddComposed] resolves the parent's type across the whole import
+//     closure too, and looks the parent up among the instances the graph
+//     holds: an identity outside the closure is E_GRAPH_TYPE_NOT_FOUND, and a
+//     parent the graph does not hold is E_GRAPH_PARENT_NOT_FOUND.
 //
 // A schema where an imported type composes a part type from a further import
 // therefore loads, validates and builds. Resolving the child on the root's rule
@@ -174,8 +178,10 @@
 //     at that rendering, so a reload keeps every address. A keyed
 //     instance's stored key has one component per declared primary key,
 //     and each agrees with its key property, which is present and not
-//     null. So a component of no form, a string that is not valid UTF-8, a
-//     json.Number that is empty or spells a number no finite float64 holds,
+//     null. So a component of no form (a json.Number that is no JSON number
+//     literal is one; only the empty one reaches the graph, since
+//     [immutable.WrapKey] panics on every other), a string that is not valid
+//     UTF-8, a json.Number that spells a number no finite float64 holds,
 //     a number ParseKey reads back at another rendering (such as a uint64 or
 //     a json.Number past int64 that reads back as a float64 rendered otherwise,
 //     a json.Number spelled 1.0, or a float64 negative zero), one whose
@@ -419,9 +425,9 @@
 //   - [diag.Result.HasErrors]: semantic failure (duplicate PK, type not found)
 //   - [diag.Result.OK]: success (may have warnings)
 //
-// Programmer errors panic: a nil receiver, instance or context, a nil schema
-// or snapshot at a constructor, an instance of another schema, or a key value
-// [FormatKey] cannot encode.
+// Programmer errors panic: a nil receiver at a method that adds or checks, a
+// nil instance or context, a nil schema or snapshot at a constructor, an
+// instance of another schema, or a key value [FormatKey] cannot encode.
 //
 // [Graph.Add] emits the following. The first four judge a root's type in the
 // order listed, and a type breaking two draws the first:

@@ -1753,12 +1753,13 @@ func TestOrder_IntegerOutsideInt64ComparesExactly(t *testing.T) {
 	}
 }
 
-// A literal whose digit run overflows before a byte that is no digit is no
-// integer, so it orders as no number does: strconv reports ErrRange for it
-// before it reads that byte, and a sign and digits alone make an integer.
+// A text whose digit run overflows before a byte that is no digit is no JSON
+// number literal, so it orders as no number does, though strconv reports
+// ErrRange for it before it reads that byte. A JSON integer literal is an
+// optional '-' and digits, so a leading '+' makes no number either.
 func TestOrder_AnOverflowingRunBeforeTextIsNoInteger(t *testing.T) {
 	t.Parallel()
-	for _, lit := range []string{"99999999999999999999x", "99999999999999999999 ", "-99999999999999999999e"} {
+	for _, lit := range []string{"99999999999999999999x", "99999999999999999999 ", "-99999999999999999999e", "+99999999999999999999"} {
 		if kind, _ := value.Classify(json.Number(lit)); kind != value.UnspecifiedKind {
 			t.Errorf("value.Classify(%q) = %v, want value.UnspecifiedKind", lit, kind)
 		}
@@ -1766,7 +1767,7 @@ func TestOrder_AnOverflowingRunBeforeTextIsNoInteger(t *testing.T) {
 			t.Errorf("Order(%q, 1) ordered a literal that is no number", lit)
 		}
 	}
-	for _, lit := range []string{"99999999999999999999", "+99999999999999999999", "-99999999999999999999"} {
+	for _, lit := range []string{"99999999999999999999", "-99999999999999999999"} {
 		if kind, _ := value.Classify(json.Number(lit)); kind != value.IntKind {
 			t.Errorf("value.Classify(%q) = %v, want value.IntKind", lit, kind)
 		}

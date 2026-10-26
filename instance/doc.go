@@ -68,8 +68,8 @@
 //   - [WithStrictPropertyNames]: require exact-case property names
 //   - [WithAllowUnknownFields]: allow extra properties without diagnostics
 //   - [WithIssueLimit]: cap the issues one instance stores
-//   - [WithLogger]: receive a debug record when a property name is normalized,
-//     and the evaluator's per-node Debug trace for every invariant evaluated,
+//   - [WithLogger]: receive a debug record when an instance's property name is
+//     normalized, and the evaluator's Debug trace of every invariant evaluated,
 //     each record logged with the context passed to Validate
 //
 // # Value Functions
@@ -78,9 +78,10 @@
 // does this value conform, and what is its stored form — exported for a
 // boundary this library does not own: a hand-built export, a direct-Cypher
 // parameter map, a pre-filter in front of a write the validator never sees.
-// Both accept a nil constraint, and a nil value under a constraint
-// [schema.CheckConstraint] accepts; both refuse a constraint it refuses,
-// whatever the value.
+// Both accept a nil constraint, and a value that holds none (nil behind at
+// most 64 pointers and interfaces, as [ScalarOf] reads it, but a bare nil slice
+// or string-keyed map, which is an empty list or map) under a constraint [schema.CheckConstraint] accepts; both refuse a
+// constraint it refuses, whatever the value.
 //
 // # Thread Safety
 //

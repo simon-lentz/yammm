@@ -360,7 +360,7 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		segs := make([]string, len(edges))
 		for j, e := range edges {
 			raw := e.Target().PrimaryKey().Get(i).Unwrap()
-			text, err := cellText(canonicalOrRaw(raw, pk.Constraint()))
+			text, err := cellOf(raw, pk.Constraint())
 			if err != nil {
 				return fmt.Errorf("csv adapter: association %q: target key component %d, of type %T: %w", rel.Name(), i, raw, err)
 			}
@@ -375,7 +375,7 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		segs := make([]string, len(edges))
 		for j, e := range edges {
 			if v, ok := e.Properties().Get(p.Name()); ok && !v.IsNil() {
-				text, err := cellText(canonicalOrRaw(v.Unwrap(), p.Constraint()))
+				text, err := cellOf(v.Unwrap(), p.Constraint())
 				if err != nil {
 					return fmt.Errorf("csv adapter: association %q: edge property %q, of type %T: %w", rel.Name(), p.Name(), v.Unwrap(), err)
 				}
@@ -416,7 +416,8 @@ func cellText(v any) (string, error) {
 }
 
 // scalarCell renders one value in a form [instance.ScalarOf] returns as cell
-// text; every caller reads its value through ScalarOf first. A finite float
+// text; every value reaches it from [cellOf], which reads it through ScalarOf
+// first. A finite float
 // carries a decimal point whatever constraint holds it, as the JSON and .ys
 // writers mark one: a whole float under an Integer is written 5.0, which the
 // Integer column refuses on the way back, rather than 5, which it would read
@@ -464,21 +465,20 @@ func floatCell(f float64, bitSize int) string {
 	return s
 }
 
-// canonicalOrRaw renders raw in the form its constraint stores, after reading
-// it in the one form every writer writes ([instance.ScalarOf]), and returns
-// that form when the constraint cannot render it. An export has no diagnostic
+// cellOf renders raw as cell text in the form its constraint stores, after
+// reading it in the one form every writer writes ([instance.ScalarOf]), and
+// renders that form when the constraint cannot: an export has no diagnostic
 // channel, so one malformed cell must not fail the whole file. A value of no
-// such form returns as it is, which [cellText] refuses as no cell spelling.
-func canonicalOrRaw(raw any, c schema.Constraint) any {
+// such form is [errNoCellSpelling]; every other refusal is [cellText]'s.
+func cellOf(raw any, c schema.Constraint) (string, error) {
 	held, ok := instance.ScalarOf(raw)
 	if !ok {
-		return raw
+		return "", errNoCellSpelling
 	}
-	canonical, err := instance.CanonicalValue(held, c)
-	if err != nil {
-		return held
+	if canonical, err := instance.CanonicalValue(held, c); err == nil {
+		held = canonical
 	}
-	return canonical
+	return cellText(held)
 }
 
 // errNullListElement refuses a null list element: the list grammar writes it
@@ -498,8 +498,8 @@ var errNoCellSpelling = refusal.New(ErrUnrepresentable, "a value no column rende
 var errInvalidUTF8 = refusal.New(ErrUnrepresentable, "a string that is not valid UTF-8 reads back as a value the validator refuses, so the value would not survive the round trip")
 
 // errUnreadNumber refuses a number whose cell no column of this adapter's
-// parser reads as a number: a NaN, an infinity, and a json.Number whose text
-// is no JSON number literal or spells a number no finite float64 holds. It
+// parser reads as a number: a NaN, an infinity, and a json.Number that spells a
+// number no finite float64 holds. It
 // carries [ErrUnrepresentable] and keeps its own text.
 var errUnreadNumber = refusal.New(ErrUnrepresentable, "a number whose cell this adapter reads back as a number in no column, so the value would not survive the round trip")
 
@@ -523,7 +523,7 @@ func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) (strin
 	s, ok := val.Slice()
 	if !ok {
 		raw := val.Unwrap()
-		text, err := cellText(canonicalOrRaw(raw, c))
+		text, err := cellOf(raw, c)
 		if err != nil {
 			return "", fmt.Errorf("a value of type %T: %w", raw, err)
 		}
@@ -532,7 +532,9 @@ func (a *Adapter) valueToString(val immutable.Value, c schema.Constraint) (strin
 	elem := constraintof.Element(c)
 	parts := make([]string, s.Len())
 	for i, v := range s.Iter2() {
-		if v.IsNil() {
+		// IsNil reads a nil container; the one form reads a nil behind a
+		// pointer.
+		if held, ok := instance.ScalarOf(v.Unwrap()); v.IsNil() || (ok && held == nil) {
 			return "", fmt.Errorf("list element %d: %w", i, errNullListElement)
 		}
 		text, err := a.valueToString(v, elem)

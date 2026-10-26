@@ -3,6 +3,7 @@ package neo4j
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -427,6 +428,12 @@ var errNoForm = errors.New("holds a value that is no scalar, list or string-keye
 // renders a uuid.UUID. Only a bypass-built snapshot holds one.
 var errUnrendered = errors.New("holds a time or a UUID its constraint does not render, which no writer of this module writes as itself")
 
+// errUnheldNumber refuses a JSON number literal no driver number holds: an
+// integer literal no int64 holds outside a Float position, and a literal no
+// finite float64 holds. The driver would store another number. Only a
+// bypass-built snapshot holds one.
+var errUnheldNumber = errors.New("holds a json.Number no int64 or finite float64 holds, so the server would store another number")
+
 // formProps rewrites each value of props in its one form ([heldForm]) at the
 // constraint constraintOf returns for its name, and returns the least name
 // whose value is refused, with its fault. A batch of sound rows allocates
@@ -453,7 +460,8 @@ func formProps(props map[string]any, constraintOf func(string) schema.Constraint
 // one nested past [maxFormDepth], as a cycle is, has no form ([errNoForm]). A
 // string or a map's key that is not valid UTF-8, which the driver sends as its
 // bytes, is [errInvalidText]; a time or a UUID c does not render is
-// [errUnrendered]. A uuid.UUID is returned as its text, which the driver sends.
+// [errUnrendered]. A uuid.UUID is returned as its text, which the driver sends,
+// and a json.Number as the driver's number ([driverNumber]).
 func heldForm(v any, c schema.Constraint) (any, error) {
 	f, _, err := heldFormAt(v, c, 0)
 	return f, err
@@ -536,8 +544,34 @@ func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
 			return nil, false, errUnrendered
 		}
 		return h.String(), true, nil
+	case json.Number:
+		n, err := driverNumber(h, c)
+		if err != nil {
+			return nil, false, err
+		}
+		return n, true, nil
 	}
 	return held, true, nil
+}
+
+// driverNumber reads a JSON number literal as the driver's number, as the
+// validator reads it at c: at a Float, its nearest float64, so -0 keeps its
+// sign; elsewhere an integer literal is the int64 it spells and a float literal
+// its nearest float64, which an Integer position then refuses as a float. A
+// literal no such number holds is [errUnheldNumber].
+func driverNumber(n json.Number, c schema.Constraint) (any, error) {
+	if immutable.IsIntegerLiteral(n) && !renders(c, schema.KindFloat) {
+		i, err := n.Int64()
+		if err != nil {
+			return nil, errUnheldNumber
+		}
+		return i, nil
+	}
+	f, err := n.Float64()
+	if err != nil {
+		return nil, errUnheldNumber
+	}
+	return f, nil
 }
 
 // renders reports whether c, resolved through its aliases, is of one of kinds.
