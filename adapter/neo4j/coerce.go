@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -151,7 +152,7 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 				if t, err := time.Parse(format, v); err == nil {
 					return driverZone(t), nil
 				}
-				return raw, fmt.Errorf("coerce %s: cannot parse %q against format %q", kind, v, format)
+				return raw, fmt.Errorf("coerce %s: cannot parse %s against format %q", kind, diag.QuoteValue(v), format)
 			}
 			// One layout, not two: time.Parse against RFC3339 already accepts
 			// fractional seconds, so no input can fail it and then succeed
@@ -159,7 +160,7 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 			if t, err := time.Parse(time.RFC3339, v); err == nil {
 				return driverZone(t), nil
 			}
-			return raw, fmt.Errorf("coerce %s: cannot parse %q as an RFC3339 timestamp", kind, v)
+			return raw, fmt.Errorf("coerce %s: cannot parse %s as an RFC3339 timestamp", kind, diag.QuoteValue(v))
 		default:
 			return raw, fmt.Errorf("coerce %s: cannot convert %T to a timestamp (want a string or time.Time)", kind, raw)
 		}
@@ -176,7 +177,7 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 			if t, err := time.Parse(time.DateOnly, v); err == nil {
 				return dbtype.Date(t), nil
 			}
-			return raw, fmt.Errorf("coerce %s: cannot parse %q as a YYYY-MM-DD date", kind, v)
+			return raw, fmt.Errorf("coerce %s: cannot parse %s as a YYYY-MM-DD date", kind, diag.QuoteValue(v))
 		default:
 			return raw, fmt.Errorf("coerce %s: cannot convert %T to a date (want a YYYY-MM-DD string, time.Time, or dbtype.Date)", kind, raw)
 		}
@@ -268,7 +269,7 @@ type ParamTypes map[string]schema.Constraint
 // (e.g. an enrichment MERGE built by hand).
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error) {
 	if key, err := firstRefusedType(types); err != nil {
-		return nil, fmt.Errorf("param type %q: %w", key, err)
+		return nil, fmt.Errorf("param type %s: %w", diag.QuoteValue(key), err)
 	}
 	if len(params) == 0 {
 		return params, nil
@@ -328,7 +329,7 @@ func coerceParam(key string, value any, types ParamTypes) (any, error) {
 		if constraint, ok := types[key]; ok {
 			cv, err := coerceValue(constraint, value)
 			if err != nil {
-				return nil, fmt.Errorf("param %q: %w", key, err)
+				return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(key), err)
 			}
 			return cv, nil
 		}
@@ -347,7 +348,7 @@ func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]
 		if constraint, ok := types[dotKey]; ok && v != nil {
 			cv, err := coerceValue(constraint, v)
 			if err != nil {
-				return nil, fmt.Errorf("param %q: %w", dotKey, err)
+				return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(dotKey), err)
 			}
 			out[k] = cv
 			continue

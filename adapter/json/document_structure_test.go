@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
@@ -512,30 +511,5 @@ func TestParseObject_AValueThatIsNotAnArrayIsSkippedWhole(t *testing.T) {
 		if len(parsed["B"]) != 1 {
 			t.Fatalf("%s: B holds %d instances, want 1", doc, len(parsed["B"]))
 		}
-	}
-}
-
-// TestParseObject_ManyRepeatsOnOneLineCostLinearTime pins that locating a
-// diagnostic does not rescan its line from the start. A minified document is
-// one line, and each repeat is located twice; counting from the line start put
-// 40,000 repeats at 14 s against 15 ms for the document without them.
-func TestParseObject_ManyRepeatsOnOneLineCostLinearTime(t *testing.T) {
-	const repeats = 100_000
-	var b strings.Builder
-	b.WriteString(`{"Person": [{"a": 0`)
-	for range repeats {
-		b.WriteString(`, "a": 0`)
-	}
-	b.WriteString(`}]}`)
-	start := time.Now()
-	_, result := parseForProvenance(t, location.MustNewSourceID("test://data/minified.json"), b.String())
-	elapsed := time.Since(start)
-	if got := len(allIssues(result)); got != repeats {
-		t.Fatalf("got %d issues, want %d", got, repeats)
-	}
-	// Linear work here takes well under a second even under -race; the
-	// quadratic scan takes minutes.
-	if elapsed > 20*time.Second {
-		t.Fatalf("parsing took %v", elapsed)
 	}
 }

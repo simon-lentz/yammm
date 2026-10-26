@@ -188,7 +188,7 @@ func (v *Validator) resolveEdgeObject(rel *schema.Relation, targetType *schema.T
 		issue := diag.NewIssue(
 			diag.Error,
 			ErrCaseFoldCollision,
-			fmt.Sprintf("multiple input fields %v fold to %s", c.keys, what),
+			fmt.Sprintf("multiple input fields %s fold to %s", nameList(c.keys), what),
 		).WithDetail(diag.DetailKeyRelationName, rel.Name())
 		if c.prop != nil {
 			issue.WithDetail(diag.DetailKeyPropertyName, c.prop.Name())
@@ -259,7 +259,7 @@ func (v *Validator) validateEdgeTarget(
 			issue := diag.NewIssue(
 				diag.Error,
 				ErrUnknownEdgeField,
-				fmt.Sprintf("unknown field in edge object: %q", fieldName),
+				"unknown field in edge object: "+diag.QuoteValue(fieldName),
 			).WithDetails(diag.RelationField(rel.Name(), fieldName)...)
 			if member, ok := eo.shadowed[fieldName]; ok {
 				issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").

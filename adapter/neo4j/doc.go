@@ -1,7 +1,8 @@
 // Package neo4j generates Neo4j 5 constraint and index DDL, label mappings,
-// graph shape metadata, parameterized write queries, introspection queries,
-// schema inference, and constraint/index drift diffs from yammm schemas and
-// live Neo4j databases.
+// graph shape metadata, parameterized write queries and their coerced
+// parameters, introspection queries, schema inference, and constraint/index
+// drift diffs from yammm schemas and live Neo4j databases, and it sanitizes and
+// validates Neo4j identifiers.
 //
 // # Architectural Position
 //
@@ -27,7 +28,7 @@
 //
 // [Adapter.ConstraintsForSchema] returns constraint statements as raw Cypher
 // strings. [Adapter.ConstraintsStructured] returns [Constraint] values with
-// parsed metadata (kind, label, properties, type expression):
+// parsed metadata (name, kind, label, properties, type expression, statement):
 //
 //	adapter := neo4j.New()
 //	constraints, result := adapter.ConstraintsStructured(ctx, s)
@@ -37,19 +38,27 @@
 // adapter options (see Configuration below).
 //
 // Generation is ALL-OR-NOTHING: any validation error returns (nil, result), so
-// one unemittable property withholds the whole schema's DDL. That is deliberate
-// — a partial script looks complete and silently drops the guarantees it omits —
-// but it means the diagnostic is all the user gets, so each one names what it
-// refuses and why: a property, or for a label collision or an invalid label the
-// type and the label.
+// one unemittable property withholds every statement the call would return.
+// That is deliberate — a partial script looks complete and silently drops the
+// guarantees it omits — but it means the diagnostic is all the user gets, so
+// each one names what it refuses and why: a property, or for a label collision
+// or an invalid label the type and the label.
 //
-// The one shape a valid schema can hit here is a list whose ELEMENT is itself a
+// Beside a name Neo4j refuses as an identifier (Cypher Reserved Words, below)
+// and two labels that sanitize alike ([Adapter.DetectLabelCollisions]), the one
+// shape a valid schema can hit here is a list whose ELEMENT is itself a
 // collection: List<List<T>>, List<Vector[N]>, or a list of a list-typed alias.
 // Those are legal yammm and validate normally, but Neo4j has no nested
-// collection property type, so under the default configuration
-// [ErrUnsupportedListElem] surfaces as [E_NEO4J_UNSUPPORTED_TYPE]. The
-// type-constraint pass is what judges a list's element, so under
-// [WithScalarTypeConstraints](false) no pass reports it. A model that must export to Neo4j represents the
+// collection property type, so [ErrUnsupportedListElem] surfaces as
+// [E_NEO4J_UNSUPPORTED_TYPE] under every option that decides which constraints
+// are emitted, [WithScalarTypeConstraints](false) included. Such an option
+// decides whether a property's name is checked as an identifier, since a name is
+// checked only where a returned statement writes it. No such option decides
+// whether a nested collection is refused. The pass judges such a property on every type
+// it emits constraints for, the types and part types that inherit it included.
+// It judges none on a type whose label is invalid, which is refused with
+// [E_NEO4J_INVALID_IDENTIFIER] instead, or on an abstract type, which has no
+// label. A model that must export to Neo4j represents the
 // inner collection as a part type reached by a composition instead. (A bare
 // Vector is fine — it maps to LIST<FLOAT NOT NULL>; it is only a Vector nested
 // INSIDE a list that has no expression.)
@@ -106,17 +115,20 @@
 //
 // The DSL does not reserve Cypher keywords: a property named "match" or a
 // type named "MATCH" is valid yammm and exports cleanly through the JSON
-// and CSV adapters, but can fail Neo4j export. Identifiers that appear
-// unquoted in generated Cypher — property names, primary keys, and the
-// assembled labels — are checked with [ValidateIdentifier] during constraint and
-// index generation and rejected with [ErrReservedKeyword]
-// (the check is case-insensitive). Namespaced labels usually absorb
+// and CSV adapters, but can fail Neo4j export. The names a schema writes into
+// generated DDL unquoted — property names, primary keys, and the assembled
+// labels — are checked with [ValidateIdentifier] during constraint and index
+// generation and rejected with [ErrReservedKeyword] (the check is
+// case-insensitive); a constraint or index name is built from those checked
+// parts. Namespaced labels usually absorb
 // reserved type names — the label "app__MATCH" is not a keyword — but a
 // reserved property name fails wherever a generated constraint or index
 // statement names it, and a reserved type name fails in unscoped (empty schema
 // name) label mode. No generated DDL names an edge property, so no pass checks
-// an edge property's name, and the write queries check no name but the
-// relationship type's. For export-compatibility
+// an edge property's name. The write queries write relationship types unquoted
+// too and check only an edge's ([Adapter.BatchEdgeQueries]): a composition's
+// relation name, which the composition statements write, is checked nowhere.
+// For export-compatibility
 // feedback before write time, run [Adapter.ConstraintsForSchema] AND
 // [Adapter.IndexesForSchema], or call [ValidateIdentifier] on names directly.
 // The DROP builders take the opposite path, because they take a name the
@@ -124,9 +136,12 @@
 // fails validation, reserved word included, is backtick-quoted rather than
 // rejected — see [DropConstraintStatement].
 // Under the default configuration the constraint pass already checks every
-// node property it emits a constraint for, which is all of them; under
-// [WithScalarTypeConstraints](false) or [WithRequiredOnlyTypeConstraints](true)
-// it checks fewer, and the index pass then covers properties named only by an
+// node property it emits a constraint for, which is each but an optional list
+// whose element is a collection, refused above, and reports a
+// declared property's name once, naming the type that declares it, however many
+// heirs and statements write it, as the index pass does; under
+// [WithScalarTypeConstraints](false), [WithRequiredOnlyTypeConstraints](true)
+// or [WithEdition]([Community]) it checks fewer, and the index pass then covers properties named only by an
 // @index / @@index / @vector / @fulltext / @@fulltext annotation. Note that [Adapter.ShapeForSchema]
 // validates the label only — it is not a property-name gate.
 //
@@ -274,10 +289,11 @@
 // a sibling schema name, that satisfies the rule without belonging to the
 // schema. See [OwnedLabels] for what the set covers and what it cannot see.
 //
-// Both results carry an Excluded count — the remote objects the diff holds back
-// from its drop bucket: the schema owns no label they carry, or they are of a
-// kind this configuration cannot declare ([RemoteIndex.Declarable] for an
-// index). Such an object can still stand as a drift entry's Actual.
+// Both results carry an Excluded count — the remote objects the comparison
+// neither paired nor dropped: the schema owns no label they carry, or the
+// schema could not declare them as they stand under this configuration
+// ([RemoteIndex.Declarable] states the index side's rule). One can still stand as the Actual
+// of a Drift, where it holds the name of a declaration nothing realises.
 // It is deliberately not drift; in a database shared with other applications a
 // non-zero count is the normal state. It exists so that "0 to drop" cannot be
 // read as "the database is accounted for": ownership is derived from the schema
@@ -309,8 +325,8 @@
 // Unverified is reachable when the records came from a query that does not yield
 // propertyType — a caller introspecting with its own Cypher rather than
 // [IntrospectConstraintsQuery]. A server too old to report that column is also
-// too old to hold a TYPE constraint, so such a constraint simply lands in
-// to-create there.
+// too old to hold a TYPE constraint, so such a constraint lands in to-create
+// there, or in drift where an object holding its name blocks the create.
 //
 // # Index Diffing
 //
@@ -336,9 +352,11 @@
 // its name differs too, and drift when it holds the desired index's name. A
 // schema-owned remote index that [RemoteIndex.Declarable] accepts and no
 // declaration matches is reported as a drop — the drift the index feature
-// exists to surface. An owned index it refuses is never a drop: it is counted,
-// once per name, in [IndexDiffResult.Excluded], a blocker included, unless it is a constraint's backing index that serves a
-// declaration and serves queries ([RemoteIndex.IsOnline]), which is a match. Drops are reported, never applied.
+// exists to surface. An owned index it refuses is never a drop: it is counted in [IndexDiffResult.Excluded], a
+// blocker included, unless it is a constraint's backing index that serves a
+// declaration. That row is the declaration's Actual and is not counted: a match
+// where it serves queries ([RemoteIndex.IsOnline]), drift where it is FAILED,
+// and unverified where it is POPULATING. Drops are reported, never applied.
 //
 // # Configuration
 //
@@ -397,11 +415,11 @@
 // # Thread Safety
 //
 // An [Adapter] is safe for concurrent use after construction.
-// Configuration is immutable after [New] returns. All methods use only
-// local allocations and read-only access to the frozen config. The one
-// package-level mutable value is a concurrency-safe memo of which zone names
-// the host's tz database resolves, consulted by [Coerce]; it caches a host
-// fact fixed for the process lifetime and holds no adapter state.
+// Configuration is immutable after [New] returns. Every method reads the
+// frozen config and writes only to values it allocates, save one package-level
+// value: a concurrency-safe memo of which zone names the host's tz database
+// resolves, which [Coerce] fills; it caches a host fact fixed for the process
+// lifetime and holds no adapter state.
 //
 // # Dependencies
 //

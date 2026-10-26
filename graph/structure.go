@@ -2,6 +2,7 @@ package graph
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
@@ -46,6 +47,9 @@ type structureRules struct {
 	refusedEdges   map[int]bool
 	// refusedTypes holds each identity a types entry refused as no root's type.
 	refusedTypes map[schema.TypeID]bool
+	// unresolvedTypes holds each identity the identity rule refused as one s
+	// cannot resolve.
+	unresolvedTypes map[schema.TypeID]bool
 	// refusedCompositions holds each composition slot [checkSlot] refused, by
 	// its parent's type and canonical key.
 	refusedCompositions map[oneSlot]bool
@@ -134,22 +138,30 @@ func checkTree[N structureNode[N]](r *structureRules, position string, n N) {
 }
 
 // identity refuses the zero identity and one s cannot resolve, and reports
-// whether id names a type of s. at names where id stands.
+// whether id names a type of s. at names where id stands. An identity s cannot
+// resolve is refused at the first position that carries it: one rename fixes
+// every position, so it is one break.
 func (r *structureRules) identity(id schema.TypeID, at string) bool {
 	if id.IsZero() {
 		r.refuse(diag.E_GRAPH_TYPE_NOT_FOUND, "zero type identity at "+at)
 		return false
 	}
-	if _, ok := r.s.TypeByID(id); !ok {
-		r.refuse(diag.E_GRAPH_TYPE_NOT_FOUND, fmt.Sprintf("unresolvable type identity %s at %s", id, at))
-		return false
+	if _, ok := r.s.TypeByID(id); ok {
+		return true
 	}
-	return true
+	if !r.unresolvedTypes[id] {
+		if r.unresolvedTypes == nil {
+			r.unresolvedTypes = make(map[schema.TypeID]bool)
+		}
+		r.unresolvedTypes[id] = true
+		r.refuse(diag.E_GRAPH_TYPE_NOT_FOUND, fmt.Sprintf("unresolvable type identity %s at %s", identityText(r.s, id), at))
+	}
+	return false
 }
 
 // positionAt names an instance position and the key standing there.
 func positionAt(position, key string) string {
-	return position + " position, key " + key
+	return position + " position, key " + diag.ValueText(key)
 }
 
 // typesEntry refuses a types entry that is zero, that s cannot resolve, or
@@ -227,7 +239,7 @@ func compositionOf(s *schema.Schema, inst, parent *Instance, relation string) (*
 	pt, _ := s.TypeByID(parent.typeID)
 	rel, ok := pt.Relation(relation)
 	if !ok || rel.Kind() != schema.RelationComposition {
-		return nil, fmt.Sprintf("names %q, which %s does not declare as a composition", relation, parent.typeID)
+		return nil, fmt.Sprintf("names %s, which %s does not declare as a composition", diag.QuoteValue(relation), parent.typeID)
 	}
 	if inst.typeID != rel.TargetID() {
 		return nil, fmt.Sprintf("is of type %s; the composition %q declares %s", inst.typeID, relation, rel.TargetID())
@@ -287,15 +299,16 @@ func checkSlot[N structureNode[N]](r *structureRules, t *schema.Type, parent N, 
 	parentName := schema.TagForm(r.s, parent.nodeType())
 	if !ok || rel.Kind() != schema.RelationComposition {
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
-			fmt.Sprintf("%s: %s[%s] holds composed children under %q, which its type does not declare as a composition",
-				r.op, parentName, parent.nodeKey().String(), relName)).
+			fmt.Sprintf("%s: %s[%s] holds composed children under %s, which its type does not declare as a composition",
+				r.op, parentName, diag.ValueText(parent.nodeKey().String()), diag.QuoteValue(relName))).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relName).Build())
 		return
 	}
 	if !rel.IsMany() && len(children) > 1 {
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
-			fmt.Sprintf("%s: composition %q: (one) cardinality violated, got %d children", r.op, relName, len(children))).
+			fmt.Sprintf("%s: %s[%s] composition %q: (one) cardinality violated, got %d children",
+				r.op, parentName, diag.ValueText(parent.nodeKey().String()), relName, len(children))).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relName).
 			WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
@@ -311,7 +324,7 @@ func checkSlot[N structureNode[N]](r *structureRules, t *schema.Type, parent N, 
 		}
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
 			fmt.Sprintf("%s: %s[%s] composition %q child %d is of type %s; the composition declares %s",
-				r.op, parentName, parent.nodeKey().String(), relName, i, got, want)).
+				r.op, parentName, diag.ValueText(parent.nodeKey().String()), relName, i, got, want)).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relName).
 			WithDetail(diag.DetailKeyExpected, want.String()).
@@ -347,7 +360,7 @@ func siblingKeys[N structureNode[N]](r *structureRules, parent N, rel *schema.Re
 			parentName := schema.TagForm(r.s, parent.nodeType())
 			r.c.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 				fmt.Sprintf("%s: %s[%s] composition %q holds children %d and %d at key %s",
-					r.op, parentName, parent.nodeKey().String(), rel.Name(), first, i, key)).
+					r.op, parentName, diag.ValueText(parent.nodeKey().String()), rel.Name(), first, i, diag.ValueText(key))).
 				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyPrimaryKey, key).Build())
@@ -382,7 +395,7 @@ func address[N structureNode[N]](r *structureRules, t *schema.Type, root N) {
 	case !held:
 		r.addresses[slot] = true
 	default:
-		r.refuse(diag.E_DUPLICATE_PK, fmt.Sprintf("two instances of type %s at address %s: their keys are one under this schema", id, slot.key))
+		r.refuse(diag.E_DUPLICATE_PK, fmt.Sprintf("two instances of type %s at address %s: their keys are one under this schema", id, diag.ValueText(slot.key)))
 	}
 }
 
@@ -405,7 +418,7 @@ func (r *structureRules) key(position string, t *schema.Type, id schema.TypeID, 
 	if err := checkStoredKey(t, key, props.Get, r.canon); err != nil {
 		name := schema.TagForm(r.s, id)
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-			fmt.Sprintf("%s: %s of type %s at %s: %s", r.op, position, name, key.String(), err)).
+			fmt.Sprintf("%s: %s of type %s at %s: %s", r.op, position, name, diag.ValueText(key.String()), err)).
 			WithDetail(diag.DetailKeyTypeName, name).
 			WithDetail(diag.DetailKeyPrimaryKey, key.String()).Build())
 	}
@@ -416,8 +429,8 @@ func (r *structureRules) key(position string, t *schema.Type, id schema.TypeID, 
 // refuses any other.
 func (r *structureRules) names(position string, t *schema.Type, id schema.TypeID, key immutable.Key, props immutable.Properties) {
 	for _, name := range undeclaredNames(props, func(n string) bool { _, ok := t.Property(n); return ok }) {
-		r.refuse(diag.E_UNKNOWN_FIELD, fmt.Sprintf("%s %s[%s] holds property %q, which it does not declare",
-			position, id, key.String(), name))
+		r.refuse(diag.E_UNKNOWN_FIELD, fmt.Sprintf("%s %s[%s] holds property %s, which it does not declare",
+			position, id, diag.ValueText(key.String()), diag.QuoteValue(name)))
 	}
 }
 
@@ -452,23 +465,30 @@ func (r *structureRules) association(rec associationRecord) bool {
 	}
 	before := r.c.ErrorCount()
 	sourceName := schema.TagForm(r.s, rec.source)
-	at := fmt.Sprintf("%s %s[%s] under %q", rec.position, sourceName, rec.sourceKey.String(), rec.relation)
+	at := fmt.Sprintf("%s %s[%s] under ", rec.position, sourceName, diag.ValueText(rec.sourceKey.String()))
 	rel, ok := t.Relation(rec.relation)
 	if !ok || !rel.IsAssociation() {
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
-			fmt.Sprintf("%s: %s, which its type does not declare as an association", r.op, at)).
+			fmt.Sprintf("%s: %s%s, which its type does not declare as an association", r.op, at, diag.QuoteValue(rec.relation))).
 			WithDetail(diag.DetailKeyTypeName, sourceName).
 			WithDetail(diag.DetailKeyRelationName, rec.relation).Build())
 		return true
 	}
+	// The schema declares the association, so its name is shown whole.
+	at += strconv.Quote(rec.relation)
 	for _, name := range undeclaredNames(rec.properties, func(n string) bool { _, ok := rel.Property(n); return ok }) {
-		r.refuse(diag.E_UNKNOWN_EDGE_FIELD, fmt.Sprintf("%s holds edge property %q, which the association does not declare", at, name))
+		r.refuse(diag.E_UNKNOWN_EDGE_FIELD, fmt.Sprintf("%s holds edge property %s, which the association does not declare", at, diag.QuoteValue(name)))
 	}
 	namesTarget := rec.reason == "" || rec.reason == "target_missing"
+	if !rec.target.IsZero() {
+		if _, ok := r.s.TypeByID(rec.target); !ok {
+			return true
+		}
+	}
 	if targetType, resolves := r.s.TypeByID(rel.TargetID()); resolves {
 		if !rec.target.IsZero() && rec.target != rel.TargetID() {
 			r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
-				fmt.Sprintf("%s: %s targets %s; the association declares %s", r.op, at, rec.target, rel.TargetID())).
+				fmt.Sprintf("%s: %s targets %s; the association declares %s", r.op, at, identityText(r.s, rec.target), rel.TargetID())).
 				WithDetail(diag.DetailKeyTypeName, sourceName).
 				WithDetail(diag.DetailKeyRelationName, rec.relation).
 				WithDetail(diag.DetailKeyExpected, rel.TargetID().String()).
@@ -516,7 +536,7 @@ func (r *structureRules) unresolvedReason(reason string, targetKey immutable.Key
 			fmt.Sprintf("%s: unresolved record with reason %q carries a target key or edge properties", r.op, reason)).Build())
 	default:
 		r.c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-			fmt.Sprintf("%s: unresolved record states reason %q, which is not one of target_missing, absent or empty", r.op, reason)).Build())
+			fmt.Sprintf("%s: unresolved record states reason %s, which is not one of target_missing, absent or empty", r.op, diag.QuoteValue(reason))).Build())
 	}
 }
 
@@ -583,14 +603,14 @@ func recordFacts(r *structureRules, parts SnapshotParts) {
 			switch {
 			case !requiredUnder(r.s, up.SourceType, up.Relation):
 				internal("unresolved record %d states reason %q under %q of %s[%s], which is optional, where Graph.Add records none",
-					i, up.Reason, up.Relation, up.SourceType, slot.key)
+					i, up.Reason, up.Relation, up.SourceType, diag.ValueText(slot.key))
 			case !reported[slot] && !r.unjudged(slot) && r.addresses[oneSlot{source: slot.source, key: slot.key}] && beside[slot] > 1:
 				reported[slot] = true
 				// The slot holds a record that states it holds none, so its
 				// records are no count for oneOverflow to judge.
 				r.refuseSlot(slot)
 				internal("%q of %s[%s] holds an %s record beside another record, where Graph.Add records it alone",
-					up.Relation, up.SourceType, slot.key, up.Reason)
+					up.Relation, up.SourceType, diag.ValueText(slot.key), up.Reason)
 			}
 		case "target_missing":
 			target := associationTarget(r.s, up.SourceType, up.Relation)
@@ -598,7 +618,7 @@ func recordFacts(r *structureRules, parts SnapshotParts) {
 			// a record naming it is no second break.
 			if !target.IsZero() && r.addresses[oneSlot{source: target, key: r.canon.key(target, up.TargetKey).String()}] {
 				internal("unresolved record %d names target %s[%s], which a root holds, where Graph.Add resolves an edge",
-					i, target, r.canon.key(target, up.TargetKey).String())
+					i, target, diag.ValueText(r.canon.key(target, up.TargetKey).String()))
 			}
 		}
 	}
@@ -614,7 +634,7 @@ func recordFacts(r *structureRules, parts SnapshotParts) {
 			if slot := at(ip.TypeID, ip.PrimaryKey, rel.Name()); !rel.IsOptional() && held[slot]+missing[slot] == 0 && !reported[slot] {
 				reported[slot] = true
 				internal("root %s[%s] holds no edge and no record under the required association %q, where Graph.Add records an absent one",
-					ip.TypeID, slot.key, rel.Name())
+					ip.TypeID, diag.ValueText(slot.key), rel.Name())
 			}
 		}
 	}
@@ -651,7 +671,7 @@ func (r *structureRules) oneOverflow() {
 			name := schema.TagForm(r.s, slot.source)
 			r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("%s: (one) association %q of %s[%s] holds %d records",
-					r.op, slot.relation, name, slot.key, n)).
+					r.op, slot.relation, name, diag.ValueText(slot.key), n)).
 				WithDetail(diag.DetailKeyTypeName, name).
 				WithDetail(diag.DetailKeyRelationName, slot.relation).Build())
 		}

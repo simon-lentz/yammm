@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
@@ -370,7 +371,7 @@ func (v *Validator) resolveType(typeName string) (*schema.Type, error) {
 	if !found {
 		return nil, &ValidationError{
 			Code:    ErrTypeNotFound,
-			Message: fmt.Sprintf("type %q not found", typeName),
+			Message: fmt.Sprintf("type %s not found", diag.QuoteValue(typeName)),
 		}
 	}
 	return typ, nil
@@ -379,7 +380,7 @@ func (v *Validator) resolveType(typeName string) (*schema.Type, error) {
 // compositionResolutionResult creates a diagnostic result for composition resolution errors.
 // When raws is empty, uses nil provenance.
 func compositionResolutionResult(parentType, relationName string, raws []RawInstance) diag.Result {
-	return createErrorResult(ErrCompositionNotFound, fmt.Sprintf("composition %q not found on type %q", relationName, parentType), batchProvenance(raws))
+	return createErrorResult(ErrCompositionNotFound, fmt.Sprintf("composition %s not found on type %q", diag.QuoteValue(relationName), parentType), batchProvenance(raws))
 }
 
 // batchProvenance is the provenance of a batch-wide failure — the type or
@@ -618,6 +619,26 @@ func FoldKey(key string) (string, bool) {
 	return string(b), true
 }
 
+// maxListedKeys bounds how many keys a collision message lists: an object can
+// hold any number of spellings that fold to one name.
+const maxListedKeys = 4
+
+// nameList renders input keys as %v renders a []string, each key cut as a
+// value is, since the data writes every key. Past maxListedKeys keys it lists
+// the first ones and counts the rest.
+func nameList(keys []string) string {
+	shown := keys[:min(len(keys), maxListedKeys)]
+	texts := make([]string, len(shown))
+	for i, k := range shown {
+		texts[i] = diag.ValueText(k)
+	}
+	list := "[" + strings.Join(texts, " ") + "]"
+	if rest := len(keys) - len(shown); rest > 0 {
+		list += " and " + strconv.Itoa(rest) + " more"
+	}
+	return list
+}
+
 // relationState is what the member index knows about one relation's input:
 // absent, present under key, or collided — two keys fold to its field and
 // the collision was reported once at the object, so the relation is neither
@@ -664,7 +685,7 @@ func reportRelationCollision(rel *schema.Relation, in relationInput, collector *
 	issue := diag.NewIssue(
 		diag.Error,
 		ErrCaseFoldCollision,
-		fmt.Sprintf("multiple input fields %v fold to %s field %q", in.candidates, kind, rel.FieldName()),
+		fmt.Sprintf("multiple input fields %s fold to %s field %q", nameList(in.candidates), kind, rel.FieldName()),
 	).WithDetail(diag.DetailKeyRelationName, rel.Name()).
 		WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 	withProvenance(issue, prov, base.String())
@@ -679,7 +700,7 @@ func (v *Validator) buildPropertyMapping(ctx context.Context, typ *schema.Type, 
 		issue := diag.NewIssue(
 			diag.Error,
 			ErrCaseFoldCollision,
-			fmt.Sprintf("multiple input fields %v fold to schema property %q", c.keys, c.prop),
+			fmt.Sprintf("multiple input fields %s fold to schema property %q", nameList(c.keys), c.prop),
 		).WithDetail(diag.DetailKeyPropertyName, c.prop)
 		withProvenance(issue, prov, base.String())
 		collector.Collect(issue.Build())
@@ -708,7 +729,7 @@ func (v *Validator) checkUnknownFields(typ *schema.Type, typeName string, names 
 		issue := diag.NewIssue(
 			diag.Error,
 			ErrUnknownField,
-			fmt.Sprintf("unknown field %q", inputName),
+			"unknown field "+diag.QuoteValue(inputName),
 		).WithDetails(diag.TypeField(typeName, inputName)...)
 		if shadowed, ok := v.exactMatchShadowing(typ, inputName, claims.props); ok {
 			issue.WithDetail(diag.DetailKeyReason, "case_fold_shadowed").

@@ -228,11 +228,11 @@ func Order(left, right any) (int, error) {
 // isWideInteger reports whether v is a json.Number spelled as a decimal integer
 // neither int64 nor uint64 holds. Its nearest float64 can be a different
 // integer, so [Order] compares it exactly rather than through that float. A
-// literal carrying a float indicator is a float however long its digit run:
-// strconv reports ErrRange for such a run before it reads the indicator.
+// literal holding any byte but a sign and digits is none, whatever strconv
+// reports for it ([integerDigits]).
 func isWideInteger(v any) bool {
 	n, ok := v.(json.Number)
-	if !ok || !immutable.IsIntegerLiteral(n) {
+	if !ok || !integerDigits(n) {
 		return false
 	}
 	_, err := strconv.ParseInt(string(n), 10, 64)
@@ -266,10 +266,8 @@ func compareExact(left, right any) (int, error) {
 // -1 for -Inf, 1 for +Inf, 2 for NaN; a finite number ranks 0.
 func exactOf(v any) (*big.Rat, int, error) {
 	if n, ok := v.(json.Number); ok && isWideInteger(n) {
-		r, ok := new(big.Rat).SetString(string(n))
-		if !ok {
-			return nil, 0, fmt.Errorf("value: %q is not a number", n)
-		}
+		// isWideInteger proved n a decimal integer, which SetString reads.
+		r, _ := new(big.Rat).SetString(string(n))
 		return r, 0, nil
 	}
 	if i, ok := GetInt64(v); ok {

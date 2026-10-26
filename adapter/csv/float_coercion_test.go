@@ -2,6 +2,7 @@ package csv
 
 import (
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ func TestScalarCell_RendersEveryKindItNames(t *testing.T) {
 		{math.Inf(-1), "-Inf"},
 		{true, "true"},
 		{nil, ""},
-		{uint8(3), "3"},
+		{uint64(3), "3"},
 	} {
 		if got, _, ok := scalarCell(c.in); !ok || got != c.want {
 			t.Errorf("scalarCell(%#v) = %q, %v, want %q", c.in, got, ok, c.want)
@@ -149,5 +150,43 @@ type T {
 	_, pres := New().ParseTyped(t.Context(), location.MustNewSourceID("test://t.csv"), "T", strings.NewReader(want), st)
 	if issue, ok := issueContaining(pres, `column "n"`); !ok || issue.Code() != E_CSV_COERCE {
 		t.Errorf("reading %q back drew %s, want an E_CSV_COERCE naming the column", want, pres)
+	}
+}
+
+// The parser reads a cell at 64 bits, so a float32's shortest 32-bit text is
+// rounded twice on the way back: for bits 363742205 (7.038531e-26) the float64
+// that text names rounds to the next float32. Such a value is written in its
+// 64-bit form, which reads back as itself; its neighbours keep theirs.
+func TestScalarCell_AFloat32ReadsBackAtSixtyFourBits(t *testing.T) {
+	t.Parallel()
+	twice := math.Float32frombits(363742205)
+	for _, c := range []struct {
+		v    float32
+		wide bool
+	}{
+		{twice, true},
+		{-twice, true},
+		{math.Float32frombits(363742204), false},
+		{math.Float32frombits(363742206), false},
+		{0.1, false},
+	} {
+		text, _, ok := scalarCell(c.v)
+		if !ok {
+			t.Fatalf("scalarCell(bits %d) refused", math.Float32bits(c.v))
+		}
+		back, err := floatFromCell(text)
+		if err != nil {
+			t.Fatalf("%s does not read back: %v", text, err)
+		}
+		if float32(back) != c.v {
+			t.Errorf("scalarCell(bits %d) = %s, which reads back as bits %d", math.Float32bits(c.v), text, math.Float32bits(float32(back)))
+		}
+		if strings.ContainsAny(text, "eE") {
+			t.Errorf("scalarCell(bits %d) = %s, which holds an exponent", math.Float32bits(c.v), text)
+		}
+		short := strconv.FormatFloat(float64(c.v), 'f', -1, 32)
+		if wide := text != short; wide != c.wide {
+			t.Errorf("scalarCell(bits %d) = %s; the 32-bit form is %s, wide = %v, want %v", math.Float32bits(c.v), text, short, wide, c.wide)
+		}
 	}
 }

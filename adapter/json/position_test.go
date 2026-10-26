@@ -1,6 +1,7 @@
 package json
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/simon-lentz/yammm/internal/source"
@@ -77,5 +78,70 @@ func TestPositionTable_OffsetInsideARuneReportsThatRune(t *testing.T) {
 
 	if got := table.positionAt(2); got.Column != 2 {
 		t.Errorf("second byte of the two-byte rune: got column %d, want 2", got.Column)
+	}
+}
+
+// TestPositionTable_CountsEveryByteItDecodes holds the cost measure to its
+// definition: a line's checkpoints decode the line once, and each position
+// adds the bytes it decodes past its checkpoint.
+func TestPositionTable_CountsEveryByteItDecodes(t *testing.T) {
+	table := newPositionTable([]byte(strings.Repeat("a", 1000)))
+
+	steps := []struct{ offset, counted int }{
+		{100, 100},               // no checkpoint: the walk from the line start
+		{600, 100 + 1000 + 88},   // the checkpoints, then 512 to 600
+		{700, 100 + 1000 + 276},  // the checkpoints are kept: 512 to 700
+		{1000, 100 + 1000 + 508}, // the end of input, from the checkpoint at 768
+	}
+	for _, s := range steps {
+		if got := table.positionAt(s.offset); got.Column != s.offset+1 {
+			t.Fatalf("offset %d: column %d, want %d", s.offset, got.Column, s.offset+1)
+		}
+		if table.counted != s.counted {
+			t.Errorf("after offset %d: counted %d, want %d", s.offset, table.counted, s.counted)
+		}
+	}
+}
+
+// TestParseObject_PositionsOnOneLineCostTheDocumentLinearly pins that locating
+// a diagnostic does not rescan its line from the start. A minified document is
+// one line holding a repeated member per eight bytes, so each issue's position
+// is asked for at a growing offset. The bytes the parse's own table decodes are
+// bounded per byte of the document at both sizes; counting from the line start
+// decodes the line's length per position. The table decodes the line at least
+// once to place its checkpoints, so a parse that reads positions from another
+// table, or a table that counts nothing, falls below the lower bound.
+func TestParseObject_PositionsOnOneLineCostTheDocumentLinearly(t *testing.T) {
+	t.Parallel()
+	// A position decodes at most markStride bytes past its checkpoint, and a
+	// line's checkpoints are found once: 17 bytes a byte here.
+	const perByte = 64
+	for _, repeats := range []int{2_000, 16_000} {
+		var b strings.Builder
+		b.WriteString(`{"Person": [{"a": 0`)
+		for range repeats {
+			b.WriteString(`, "a": 0`)
+		}
+		b.WriteString(`}]}`)
+		doc := b.String()
+		table := newPositionTable([]byte(doc))
+		_, result := New().parseObject(t.Context(), location.MustNewSourceID("test://data/minified.json"), []byte(doc), table)
+		decoded := table.counted
+		fresh := newPositionTable([]byte(doc))
+		issues := 0
+		for issue := range result.Issues() {
+			issues++
+			start := issue.Span().Start
+			if got := fresh.positionAt(start.Byte); got != start {
+				t.Fatalf("%d repeats: issue %d at %v, a fresh table gives %v", repeats, issues, start, got)
+			}
+		}
+		if issues != repeats {
+			t.Fatalf("%d repeats: %d issues", repeats, issues)
+		}
+		t.Logf("%d bytes, %d decoded", len(doc), decoded)
+		if decoded < len(doc) || decoded > perByte*len(doc) {
+			t.Errorf("%d repeats: the parse's positions decoded %d bytes of a %d-byte document, want at least the document and at most %d a byte", repeats, decoded, len(doc), perByte)
+		}
 	}
 }

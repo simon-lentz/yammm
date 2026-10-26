@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
@@ -190,5 +191,55 @@ func TestWriters_TheRefusalClassCoversTheDataAlone(t *testing.T) {
 		t.Fatalf("the fixture did not reach the write, so it guards nothing: %v", err)
 	} else if errors.Is(err, ErrUnrepresentable) {
 		t.Errorf("an I/O failure matched the refusal class: %v", err)
+	}
+}
+
+// A time key whose layout writes a zone abbreviation the layout cannot read
+// back is held by the graph and refused by the writer at the edge to it. The
+// refusal cuts the target key's text.
+func TestWriters_ATargetKeyTheLayoutCannotReadBackIsRefusedAndCut(t *testing.T) {
+	t.Parallel()
+	const src = `schema "lossykey"
+
+type Target {
+	at Timestamp["2006-01-02 15:04 MST"] primary
+}
+
+type Holder {
+	id String primary
+	--> LINK (_:many) Target
+}
+`
+	s, res := schema.LoadString(t.Context(), src, "lossykey.yammm")
+	if res.HasErrors() {
+		t.Fatalf("load schema: %s", res)
+	}
+	targetT, _ := s.Type("Target")
+	holderT, _ := s.Type("Holder")
+	at := time.Date(2020, 1, 2, 12, 3, 4, 5, time.FixedZone("Zone", 3600))
+	g := graph.New(s)
+	for _, inst := range []*instance.ValidInstance{
+		instance.NewValidInstance("Target", targetT.ID(), immutable.WrapKey([]any{at}),
+			immutable.WrapProperties(map[string]any{"at": at}), nil, nil, nil),
+		instance.NewValidInstance("Holder", holderT.ID(), immutable.WrapKey([]any{"h1"}),
+			immutable.WrapProperties(map[string]any{"id": "h1"}),
+			map[string]*instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+				instance.NewValidEdgeTarget(immutable.WrapKey([]any{at}), immutable.WrapProperties(nil)),
+			})}, nil, nil),
+	} {
+		if r := g.Add(context.Background(), inst); r.HasErrors() {
+			t.Fatalf("graph.Add: %s", r)
+		}
+	}
+	const (
+		whole = `["2020-01-02T12:03:04.000000005+01:00"]`
+		want  = `json adapter: edge "LINK" to ["2020-01-02T12:03:04.000000005+… (39 bytes): target key component 0 holds `
+	)
+	_, err := New().MarshalObject(context.Background(), g.Snapshot())
+	if !errors.Is(err, ErrUnrepresentable) {
+		t.Fatalf("MarshalObject: %v does not match ErrUnrepresentable", err)
+	}
+	if !strings.HasPrefix(err.Error(), want) || strings.Contains(err.Error(), whole) {
+		t.Errorf("MarshalObject = %v; want it to begin %s and not hold the whole key %s", err, want, whole)
 	}
 }

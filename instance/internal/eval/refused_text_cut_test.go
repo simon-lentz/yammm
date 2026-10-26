@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/instance/internal/eval"
@@ -106,5 +107,43 @@ func TestCoerceValue_ACutLiteralKeepsWholeCharacters(t *testing.T) {
 	}
 	if !utf8.ValidString(err.Error()) || strings.Contains(err.Error(), `\x`) {
 		t.Errorf("the message splits a character: %q", err.Error())
+	}
+}
+
+// A checker that quotes the value it refuses quotes it as strconv.Quote does,
+// and cuts a long one to its head.
+func TestCheckValue_ARefusedValueIsQuoted(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 100)
+	cut := `"` + long[:32] + `"… (100 bytes)`
+	coerced := func(_ any, err error) error { return err }
+	for _, c := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"UUID", eval.CheckValue("xyz", schema.NewUUIDConstraint()), `invalid UUID: "xyz"`},
+		{"enum", eval.CheckValue("c", schema.NewEnumConstraint([]string{"a", "b"})), `value "c" not in enum [a b]`},
+		{"pattern", eval.CheckValue("b", schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a$")})), `value "b" does not match pattern ^a$`},
+		{
+			"a literal that is no number", coerced(eval.CoerceValue(json.Number(long), schema.NewFloatConstraint())),
+			`cannot coerce json.Number "` + long[:32] + `"… (100 bytes) to float64`,
+		},
+		{"a long UUID", eval.CheckValue(long, schema.NewUUIDConstraint()), `invalid UUID: ` + cut},
+		{"a long enum value", eval.CheckValue(long, schema.NewEnumConstraint([]string{"a", "b"})), `value ` + cut + ` not in enum [a b]`},
+		{
+			"a long pattern value", eval.CheckValue(long, schema.NewPatternConstraint([]*regexp.Regexp{regexp.MustCompile("^a$")})),
+			`value ` + cut + ` does not match pattern ^a$`,
+		},
+		{"a long date", eval.CheckValue(long, schema.NewDateConstraint()), `invalid date format: ` + cut + ` (expected YYYY-MM-DD)`},
+		{"a long timestamp", eval.CheckValue(long, schema.NewTimestampConstraint()), `invalid timestamp format: ` + cut},
+		{
+			"a long timestamp under a declared format", eval.CheckValue(long, schema.NewTimestampConstraintFormatted(time.DateOnly)),
+			`invalid timestamp format: ` + cut + ` (expected 2006-01-02)`,
+		},
+	} {
+		if c.err == nil || c.err.Error() != c.want {
+			t.Errorf("%s: %v, want %q", c.name, c.err, c.want)
+		}
 	}
 }

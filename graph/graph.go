@@ -176,7 +176,7 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 
 	typ, ok := g.schema.TypeByID(typeID)
 	if !ok || !g.ownsType(typeID) {
-		msg := fmt.Sprintf("type %q not found in schema", inst.TypeName())
+		msg := fmt.Sprintf("type %s not found in schema", diag.QuoteValue(inst.TypeName()))
 		builder := diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND, msg).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName())
 		if pk := inst.PrimaryKey(); pk.Len() > 0 {
@@ -193,19 +193,19 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 
 	if !typ.HasPrimaryKey() {
 		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_MISSING_PK,
-			fmt.Sprintf("type %q has no primary key; cannot add to graph", inst.TypeName())).
+			fmt.Sprintf("type %s has no primary key; cannot add to graph", diag.QuoteValue(inst.TypeName()))).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
 
 	if typ.IsPart() {
 		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("part type %q cannot be added directly; use AddComposed", inst.TypeName())).
+			fmt.Sprintf("part type %s cannot be added directly; use AddComposed", diag.QuoteValue(inst.TypeName()))).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
 
 	if typ.IsAbstract() {
 		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_ABSTRACT_TYPE,
-			fmt.Sprintf("abstract type %q cannot be instantiated in the graph", inst.TypeName())).
+			fmt.Sprintf("abstract type %s cannot be instantiated in the graph", diag.QuoteValue(inst.TypeName()))).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).Build())
 	}
 
@@ -213,7 +213,7 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 	// a present key property is a forged address.
 	if err := checkInstanceKey(typ, inst, g.canon); err != nil {
 		return false, g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-			fmt.Sprintf("instance of type %q: %s", inst.TypeName(), err)).
+			fmt.Sprintf("instance of type %s: %s", diag.QuoteValue(inst.TypeName()), err)).
 			WithDetail(diag.DetailKeyTypeName, inst.TypeName()).
 			WithDetail(diag.DetailKeyPrimaryKey, inst.PrimaryKey().String()).Build())
 	}
@@ -264,7 +264,7 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 			// the key and properties the graph would have stored.
 			rejected := newInstance(typeName, typeID, graphInst.PrimaryKey(), graphInst.Properties(), inst.Provenance(), inst.Validated())
 			diagBuilder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
-				fmt.Sprintf("duplicate primary key %s for type %q", pkString, typeName)).
+				fmt.Sprintf("duplicate primary key %s for type %q", diag.ValueText(pkString), typeName)).
 				WithDetail(diag.DetailKeyTypeName, typeName).
 				WithDetail(diag.DetailKeyPrimaryKey, pkString)
 			if prov := inst.Provenance(); prov != nil {
@@ -421,7 +421,7 @@ func (g *Graph) AddComposed(
 	typ, ok := g.schema.TypeByID(parentType)
 	if !ok {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_TYPE_NOT_FOUND,
-			fmt.Sprintf("parent type %s not found in schema", parentType)).
+			fmt.Sprintf("parent type %s not found in schema", identityText(g.schema, parentType))).
 			WithDetail(diag.DetailKeyTypeName, g.instanceTagForm(parentType)).
 			WithDetail(diag.DetailKeyTypeSchema, parentType.SchemaPath().String()).Build())
 	}
@@ -437,7 +437,7 @@ func (g *Graph) AddComposed(
 	}
 	if parentInst == nil {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_PARENT_NOT_FOUND,
-			fmt.Sprintf("parent instance %s[%s] not found", parentName, parentKey)).
+			fmt.Sprintf("parent instance %s[%s] not found", parentName, diag.ValueText(parentKey))).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyTypeSchema, parentType.SchemaPath().String()).
 			WithDetail(diag.DetailKeyPrimaryKey, parentKey).Build())
@@ -446,17 +446,16 @@ func (g *Graph) AddComposed(
 	rel, ok := typ.Relation(relationName)
 	if !ok || rel.Kind() != schema.RelationComposition {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("relation %q on type %q is not a composition", relationName, parentName)).
+			fmt.Sprintf("relation %s on type %q is not a composition", diag.QuoteValue(relationName), parentName)).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyPrimaryKey, parentKey).
 			WithDetail(diag.DetailKeyRelationName, relationName).Build())
 	}
 
 	if child.TypeID() != rel.TargetID() {
-		got, want, ident := g.describeTypePair(child.TypeID(), rel.TargetID())
+		got, want, gotText, wantText := g.describeTypePair(child.TypeID(), rel.TargetID())
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("child type %s does not match relation target %s",
-				quoteTypeName(got, ident), quoteTypeName(want, ident))).
+			fmt.Sprintf("child type %s does not match relation target %s", gotText, wantText)).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyPrimaryKey, parentKey).
 			WithDetail(diag.DetailKeyRelationName, relationName).
@@ -477,7 +476,7 @@ func (g *Graph) AddComposed(
 	// what attaches on success.
 	if err := checkInstanceKey(childTyp, child, g.canon); err != nil {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-			fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
+			fmt.Sprintf("composed child of type %s: %s", diag.QuoteValue(child.TypeName()), err)).
 			WithDetail(diag.DetailKeyTypeName, child.TypeName()).
 			WithDetail(diag.DetailKeyRelationName, relationName).
 			WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
@@ -540,7 +539,7 @@ func (g *Graph) AddComposed(
 			childInst := rejectedChild()
 
 			issue := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
-				"duplicate composed child primary key "+childPKString).
+				"duplicate composed child primary key "+diag.ValueText(childPKString)).
 				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, relationName).
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName()).
@@ -829,25 +828,45 @@ func (g *Graph) ownsType(id schema.TypeID) bool {
 	return schema.Addressable(g.schema, id)
 }
 
-// describeTypePair renders two type identities so a reader can tell them apart.
-// Tag forms collide whenever a type has no alias to qualify with, and a message
-// reading `X does not match X` is worse than none.
-func (g *Graph) describeTypePair(got, want schema.TypeID) (gotName, wantName string, collide bool) {
+// describeTypePair renders two type identities so a reader can tell them apart:
+// the names for the details, and the texts for the message, a tag form quoted
+// and a full identity bare. Tag forms collide whenever a type has no alias to
+// qualify with, and a message reading `X does not match X` is worse than none.
+func (g *Graph) describeTypePair(got, want schema.TypeID) (gotName, wantName, gotText, wantText string) {
 	gotName, wantName = g.instanceTagForm(got), g.instanceTagForm(want)
 	if gotName == wantName {
-		return got.String(), want.String(), true
+		return got.String(), want.String(), identityText(g.schema, got), identityText(g.schema, want)
 	}
-	return gotName, wantName, false
+	return gotName, wantName, g.tagText(got, gotName), g.tagText(want, wantName)
 }
 
-// quoteTypeName renders a type name for a message. A tag form is quoted the way
-// every other name in these diagnostics is; a full identity already reads as
-// one token and quoting it only adds noise.
-func quoteTypeName(name string, isIdentity bool) string {
-	if isIdentity {
+// tagText quotes a type's tag form for a message. A type the schema does not
+// resolve is the caller's, so its tag is cut as a value is.
+func (g *Graph) tagText(id schema.TypeID, tag string) string {
+	if _, ok := g.schema.TypeByID(id); ok {
+		return strconv.Quote(tag)
+	}
+	return diag.QuoteValue(tag)
+}
+
+// identityText renders a type identity for a message: whole where s resolves
+// it. Otherwise the caller wrote it, so its name is cut as a value is, and so is
+// its schema path unless a schema of the closure carries that path.
+func identityText(s *schema.Schema, id schema.TypeID) string {
+	if _, ok := s.TypeByID(id); ok {
+		return id.String()
+	}
+	name := diag.ValueText(id.Name())
+	path := id.SchemaPath()
+	if path.IsZero() {
 		return name
 	}
-	return strconv.Quote(name)
+	for _, cs := range s.Closure() {
+		if cs.SourceID() == path {
+			return path.String() + ":" + name
+		}
+	}
+	return diag.ValueText(path.String()) + ":" + name
 }
 
 // instanceTagForm computes the canonical instance tag form for a TypeID.
@@ -918,7 +937,7 @@ func checkKey(typ *schema.Type, key immutable.Key, property func(string) (immuta
 		}
 		if !keyComponentAgrees(key.Get(i), val, pk.Constraint(), canon) {
 			return fmt.Errorf("primary key component %d disagrees with property %q (%s vs %s)",
-				i, pk.Name(), renderKeyComponent(key.Get(i)), renderKeyComponent(val))
+				i, pk.Name(), diag.ValueText(renderKeyComponent(key.Get(i))), diag.ValueText(renderKeyComponent(val)))
 		}
 		i++
 	}

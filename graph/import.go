@@ -14,9 +14,10 @@ import (
 // snap need not have been built against s, but it must hold to s under every
 // fact of the package doc's "Structural facts" but Records, whose records the
 // import derives again under s. A snapshot that breaks one is refused with
-// a nil Graph and a diagnostic naming each position, under the code
-// [Graph.Add] refuses it with; nothing is installed. A snapshot bound to s
-// already holds to them and is not walked.
+// a nil Graph and one diagnostic for each break, naming a position, under the
+// code [Graph.Add] refuses it with, save a break that reads a unit another
+// diagnostic refused; nothing is installed. A snapshot bound to s already
+// holds to them and is not walked.
 //
 // Panics if s or snap is nil (programmer error).
 func NewFromSnapshot(s *schema.Schema, snap *Snapshot, opts ...Option) (*Graph, diag.Result) {
@@ -85,7 +86,7 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 		slotRefused := r.refusedCompositions[oneSlot{source: at.source, key: at.key, relation: dup.relation}]
 		refuse := func(why string) {
 			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf("duplicate record %d, %s[%s], %s",
-				i, dup.instance.typeID, dup.instance.primaryKey.String(), why))
+				i, dup.instance.typeID, diag.ValueText(dup.instance.primaryKey.String()), why))
 		}
 		if rel, why := compositionOf(s, dup.instance, dup.parent, dup.relation); rel == nil {
 			if !slotRefused || declaresComposition(s, dup.parent.typeID, dup.relation) {
@@ -114,9 +115,13 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 			targetKey: unresolvedTargetKey(u), reason: u.reason, properties: u.properties,
 		}
 		// A target_missing record names a target, which holds to the declared
-		// target as an edge's does.
+		// target as an edge's does. The record is the target identity's own
+		// position, so the identity rule judges it here.
 		if u.reason == "target_missing" {
 			rec.target = u.targetType
+			if !rec.target.IsZero() {
+				r.identity(rec.target, positionAt("unresolved target", rec.targetKey.String()))
+			}
 		}
 		r.association(rec)
 	}

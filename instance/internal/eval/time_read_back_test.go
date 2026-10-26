@@ -24,10 +24,10 @@ func TestCheckValue_ATimeWhoseStoredTextDoesNotReadBackIsRefused(t *testing.T) {
 		c    schema.Constraint
 		want string
 	}{
-		{"past year 9999 at a Timestamp", far, schema.NewTimestampConstraint(), "invalid timestamp format: 10000-01-01T00:00:00Z"},
-		{"before year 0 at a Timestamp", before, schema.NewTimestampConstraint(), "invalid timestamp format: -0001-01-01T00:00:00Z"},
-		{"past year 9999 at a Date", far, schema.NewDateConstraint(), "invalid date format: 10000-01-01 (expected YYYY-MM-DD)"},
-		{"an unnamed zone under an abbreviation layout", unnamed, abbreviated, "invalid timestamp format: 2024-01-02 03:04:05 +0300 (expected 2006-01-02 15:04:05 MST)"},
+		{"past year 9999 at a Timestamp", far, schema.NewTimestampConstraint(), `invalid timestamp format: "10000-01-01T00:00:00Z"`},
+		{"before year 0 at a Timestamp", before, schema.NewTimestampConstraint(), `invalid timestamp format: "-0001-01-01T00:00:00Z"`},
+		{"past year 9999 at a Date", far, schema.NewDateConstraint(), `invalid date format: "10000-01-01" (expected YYYY-MM-DD)`},
+		{"an unnamed zone under an abbreviation layout", unnamed, abbreviated, `invalid timestamp format: "2024-01-02 03:04:05 +0300" (expected 2006-01-02 15:04:05 MST)`},
 	} {
 		err := eval.CheckValue(c.val, c.c)
 		var checkErr *eval.CheckError

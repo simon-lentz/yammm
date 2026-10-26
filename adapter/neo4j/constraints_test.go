@@ -267,9 +267,10 @@ func TestConstraintsForType_CommunityNodeKeyKeepsPrimaryKeyNotNull(t *testing.T)
 	a := New(WithNodeKeyConstraints(true), WithEdition(Community))
 
 	collector := diag.NewCollector(0)
+	names := a.newPropertyNameCheck(collector)
 	var unfiltered []Constraint
 	for typ, label := range a.emittableTypes(ctx, s, collector) {
-		unfiltered = append(unfiltered, a.constraintsForType(ctx, typ, label, collector)...)
+		unfiltered = append(unfiltered, a.constraintsForType(ctx, typ, label, names, collector)...)
 	}
 	if unfiltered == nil {
 		t.Fatal("no constraints emitted for basic.yammm")

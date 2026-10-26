@@ -87,6 +87,15 @@ func WithLabelPrefix(prefix string) Option {
 // adapter has no version input with which to decide for itself. Under
 // [WithEdition]([Community]) none is emitted, as no kind but UNIQUE is.
 //
+// It decides emission, and with it whether an optional property's name is
+// checked as an identifier: off, no statement writes it. A required property's
+// name is written and checked by its NOT NULL statement, or by the NODE KEY
+// statement for a primary key under [WithNodeKeyConstraints](true), under either
+// setting, on an edition that declares that kind. A
+// list whose element is itself a collection is refused with
+// [E_NEO4J_UNSUPPORTED_TYPE] under either setting, since no setting gives Neo4j
+// a type that holds it.
+//
 // When enabled alongside WithRequiredOnlyTypeConstraints(true), only required
 // properties receive type constraints. See WithRequiredOnlyTypeConstraints
 // for rationale.
@@ -99,17 +108,17 @@ func WithScalarTypeConstraints(enabled bool) Option {
 // WithRequiredOnlyTypeConstraints restricts scalar and list type constraints
 // to required properties only. Optional properties are skipped.
 //
-// This reduces constraint volume significantly. For book_catalog (~83 properties,
-// ~24 required), this cuts TYPE constraints from ~83 to ~24 -- a 3.5x reduction.
+// It cuts the TYPE constraints a schema emits to one per required property.
 //
 // Rationale: optional properties are often absent from nodes entirely, and
-// Neo4j's IS :: TYPE constraint passes for absent properties (it only fires
-// when the property exists). The primary value of type constraints is catching
+// Neo4j documents that a property type constraint does not apply to a node
+// that lacks the property. The primary value of type constraints is catching
 // writes that supply a present-but-wrong-typed value, which is most dangerous
 // for required properties that are always present.
 //
-// Has no effect if WithScalarTypeConstraints(false) is set.
-// Default: false (type constraints for all properties).
+// An optional property's name, which no statement then writes, is not checked
+// as an identifier. Has no effect if WithScalarTypeConstraints(false)
+// is set. Default: false (type constraints for all properties).
 func WithRequiredOnlyTypeConstraints(enabled bool) Option {
 	return func(c *adapterConfig) {
 		c.requiredOnlyTypeConstraints = enabled
@@ -157,6 +166,9 @@ func WithNamedConstraints(enabled bool) Option {
 // own, so under Community it degrades to its UNIQUE half instead of vanishing,
 // and [W_NEO4J_NODE_KEY_UNSUPPORTED] reports that it did. See
 // [WithNodeKeyConstraints].
+//
+// A property name that only an omitted constraint would write is not checked
+// as an identifier.
 //
 // Community edition supports: UNIQUE constraints only.
 // Enterprise edition supports: UNIQUE, NOT NULL, NODE KEY, PROPERTY_TYPE.

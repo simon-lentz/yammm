@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -119,7 +120,7 @@ func checkTopLevelKeys(data []byte) error {
 		return fmt.Errorf("expected JSON object: %w", err)
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("expected JSON object, got %v", tok)
+		return fmt.Errorf("expected JSON object, got %s", diag.ValueText(fmt.Sprint(tok)))
 	}
 
 	seen := 0
@@ -130,14 +131,14 @@ func checkTopLevelKeys(data []byte) error {
 		}
 		key, ok := tok.(string)
 		if !ok {
-			return fmt.Errorf("expected a top-level key, got %v", tok)
+			return fmt.Errorf("expected a top-level key, got %s", diag.ValueText(fmt.Sprint(tok)))
 		}
 		if seen == len(topLevelKeys) {
-			return fmt.Errorf("document carries a fifth top-level key %q; the format has exactly %d",
-				key, len(topLevelKeys))
+			return fmt.Errorf("document carries a fifth top-level key %s; the format has exactly %d",
+				diag.QuoteValue(key), len(topLevelKeys))
 		}
 		if key != topLevelKeys[seen] {
-			return fmt.Errorf("top-level key %d is %q, expected %q", seen, key, topLevelKeys[seen])
+			return fmt.Errorf("top-level key %d is %s, expected %q", seen, diag.QuoteValue(key), topLevelKeys[seen])
 		}
 		if err := skipValue(dec, key); err != nil {
 			return err
@@ -360,9 +361,9 @@ func invalidMetadata(m map[string]string) error {
 	for _, k := range slices.Sorted(maps.Keys(m)) {
 		switch {
 		case !utf8.ValidString(k):
-			return fmt.Errorf("metadata key %q is not valid UTF-8", k)
+			return fmt.Errorf("metadata key %s is not valid UTF-8", diag.QuoteValue(k))
 		case !utf8.ValidString(m[k]):
-			return fmt.Errorf("metadata value of %q is not valid UTF-8", k)
+			return fmt.Errorf("metadata value of %s is not valid UTF-8", diag.QuoteValue(k))
 		}
 	}
 	return nil
@@ -524,7 +525,7 @@ func checkMemberNames(data []byte) error {
 				if escaped || !utf8.Valid(name) {
 					var decoded string
 					if err := json.Unmarshal(data[i:end+1], &decoded); err != nil {
-						return fmt.Errorf("member name %s does not decode: %w", data[i:end+1], err)
+						return fmt.Errorf("member name %s does not decode: %w", diag.ValueText(string(data[i:end+1])), err)
 					}
 					name = []byte(decoded)
 				}
@@ -534,7 +535,7 @@ func checkMemberNames(data []byte) error {
 				}
 				next, declared := top.shape.member(string(name))
 				if declared != "" {
-					return fmt.Errorf("an object holds the member %q, which encoding/json reads as the member %q; every member is spelled as the format declares it", name, declared)
+					return fmt.Errorf("an object holds the member %s, which encoding/json reads as the member %q; every member is spelled as the format declares it", diag.QuoteValue(string(name)), declared)
 				}
 				top.next = next
 				names = append(names, name)
@@ -547,5 +548,5 @@ func checkMemberNames(data []byte) error {
 }
 
 func repeatedMemberError(name []byte) error {
-	return fmt.Errorf("an object repeats the member %q; every member name occurs once in its object", name)
+	return fmt.Errorf("an object repeats the member %s; every member name occurs once in its object", diag.QuoteValue(string(name)))
 }

@@ -932,7 +932,7 @@ Validation accepts JSON arrays where each element passes the element type's cons
 - List types cannot be used as primary keys (see [Primary Key Types](#primary-key-types)).
 - List types cannot be used in relationship (edge) properties.
 
-**Export portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE`, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. Model the inner collection as a `part type` reached by a composition if the model must export to Neo4j.
+**Export portability.** A list whose *element* is itself a collection — `List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias — is valid yammm and validates normally, but has no equivalent in Neo4j, which has no nested collection property type. `yammm neo4j constraints` rejects such a property with `E_NEO4J_UNSUPPORTED_TYPE` under every flag, `--scalar-types=false` included, and because constraint generation is all-or-nothing it emits **nothing for the whole schema**, not just for that property. `yammm neo4j indexes` does not make the check, and prints the schema's index statements. `yammm neo4j constraints` judges a property on each concrete type and part type that declares or inherits it. The one exception follows from that: it does not report a property declared on an abstract type that no such type extends. Model the inner collection as a `part type` reached by a composition if the model must export to Neo4j.
 
 **Narrowing:**
 
@@ -1797,7 +1797,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_COMPOSITION_DEPTH_EXCEEDED` — composed nesting exceeds the depth limit (32), the same bound the snapshot writer and reader enforce; a validated instance is always one a snapshot can carry
 - `E_DUPLICATE_COMPOSED_PK` — a composition slot cannot hold this child: two children of one `(many)` slot share a primary key, or a `(one)` slot is given several. Listed here as well as under Graph: the validator raises it over the children it validates together, and graph assembly raises it again over children validated separately. `graph.RebuildSnapshot` and the import raise it over the parts and snapshots they are given, and `snapshot.Load` and `snapshot.Verify` raise it for two children of a keyed `(many)` slot at one canonical key and for a `(one)` slot a document holds several children in; `snapshot.Info` reads without a schema and makes no such claim
 - `E_INVALID_TYPE_TAG` — a type tag that is not a type name by the grammar: a JSON document's top-level key, or a CSV type-column value
-- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field, edge property or `_target_` foreign-key field after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `NAME`, input `Name` and `name`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
+- `E_CASE_FOLD_COLLISION` — multiple input fields map to the same schema property, relation field, edge property or `_target_` foreign-key field after case-folding. Property name matching is case-insensitive by default (see `WithStrictPropertyNames` in [API.md](API.md)). When two or more input fields fold to one schema property and none of them matches it exactly (schema `name`, input `Name` and `NAME`), the collision is reported and neither field is mapped. An input name that matches a schema property exactly is claimed first and never collides
 
 **Graph** — graph construction errors:
 
@@ -1807,11 +1807,11 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_GRAPH_TYPE_NOT_FOUND` — type not found in graph operations
 - `E_GRAPH_PARENT_NOT_FOUND` — parent node not found
 - `E_GRAPH_INVALID_COMPOSITION` — invalid composition
-- `E_GRAPH_MISSING_PK` — a root whose type declares no primary key
+- `E_GRAPH_MISSING_PK` — a root, or an imported snapshot's types entry, whose type declares no primary key
 - `E_GRAPH_INVALID_PK` — a keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with the instance's own key properties; any instance's key, a keyless part's included, with a component that does not read back as the value every writer writes (such as one of no form, a string that is not valid UTF-8, a `json.Number` that is empty or spells a number no finite `float64` holds, a number `graph.ParseKey` reads back at another rendering, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` no key property's constraint renders, as in every keyless part's key); or an association target key of the wrong arity or with such a component
-- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or a `.ys` document
-- `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target other than the declared one
-- `E_GRAPH_ABSTRACT_TYPE` — an instance of an abstract type reached the graph
+- `E_GRAPH_CARDINALITY` — a (one) association holds more than one record: several targets at `Graph.Add` or, for a part child, at `Graph.AddComposed`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or a `.ys` document
+- `E_GRAPH_UNKNOWN_RELATION` — instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one
+- `E_GRAPH_ABSTRACT_TYPE` — the graph met an instance of an abstract type, or an imported snapshot's types entry names a type the importing schema makes abstract
 
 **Snapshot** — persistence errors:
 

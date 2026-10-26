@@ -62,3 +62,37 @@ func TestDecode_UnresolvedDuplicateRowDoesNotNameRowZero(t *testing.T) {
 		}
 	}
 }
+
+// TestDecode_ARepeatedUnknownRowIsUnknownOnce pins that a repeated types row
+// is judged once: the repeat is malformed, and the identity no schema declares
+// draws one E_SNAPSHOT_UNKNOWN_TYPE, not one per row.
+func TestDecode_ARepeatedUnknownRowIsUnknownOnce(t *testing.T) {
+	t.Parallel()
+	s, data := attWireFixture(t)
+	const row = `{"schema":"attwire","name":"Thing"}`
+	gone := `{"schema":"attwire","name":"Gone"}`
+	edited := strings.Replace(string(data), row, row+","+gone+","+gone, 1)
+	if edited == string(data) {
+		t.Fatalf("fixture carries no %s row: %s", row, data)
+	}
+
+	for _, read := range []struct {
+		name string
+		res  diag.Result
+	}{
+		{"Load", func() diag.Result {
+			_, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
+			return res
+		}()},
+		{"Verify", snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))},
+	} {
+		counts := map[diag.Code]int{}
+		for iss := range read.res.Issues() {
+			counts[iss.Code()]++
+		}
+		if counts[diag.E_SNAPSHOT_MALFORMED] != 1 || counts[diag.E_SNAPSHOT_UNKNOWN_TYPE] != 1 {
+			t.Errorf("%s: a repeated unknown row drew %v, want one E_SNAPSHOT_MALFORMED and one E_SNAPSHOT_UNKNOWN_TYPE:\n%s",
+				read.name, counts, read.res.String())
+		}
+	}
+}

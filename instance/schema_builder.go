@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -85,7 +86,7 @@ func BuilderFor(s *schema.Schema, typeName string) (*SchemaBuilder, error) {
 	}
 	typ, found := s.ResolveTypeName(typeName)
 	if !found {
-		return nil, fmt.Errorf("instance.BuilderFor: type %q not found", typeName)
+		return nil, fmt.Errorf("instance.BuilderFor: type %s not found", diag.QuoteValue(typeName))
 	}
 	if typ.IsAbstract() {
 		return nil, fmt.Errorf("instance.BuilderFor: cannot build abstract type %q", typeName)

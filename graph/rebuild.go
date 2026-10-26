@@ -69,8 +69,9 @@ type EdgeParts struct {
 // instance and, for a composed-child duplicate, the parent slot it was
 // rejected from, named by ParentType, ParentKey and Relation. No field states
 // the conflict: RebuildSnapshot derives it from the position, as [Graph.Add]
-// records it — the root at the instance's own type and key, or the occupant of
-// the parent's slot at its key, or a (one) slot's sole occupant.
+// records a root duplicate and [Graph.AddComposed] a composed one — the root at
+// the instance's own type and key, or the occupant of the parent's slot at its
+// key, or a (one) slot's sole occupant.
 type DuplicateParts struct {
 	Instance   InstanceParts
 	ParentType schema.TypeID
@@ -188,13 +189,13 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		if source == nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("RebuildSnapshot: edge source %s[%s] not found in instance index",
-					ep.SourceType, ep.SourceKey.String())).Build())
+					ep.SourceType, diag.ValueText(ep.SourceKey.String()))).Build())
 			continue
 		}
 		if target == nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("RebuildSnapshot: edge target %s[%s] not found in instance index",
-					targetType, ep.TargetKey.String())).Build())
+					targetType, diag.ValueText(ep.TargetKey.String()))).Build())
 			continue
 		}
 
@@ -212,7 +213,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		if len(dp.Instance.Composed) > 0 {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("RebuildSnapshot: duplicate record %d, %s[%s], has composed children",
-					i, dp.Instance.TypeID, dupInst.PrimaryKey().String())).Build())
+					i, dp.Instance.TypeID, diag.ValueText(dupInst.PrimaryKey().String()))).Build())
 			continue
 		}
 		var parent *Instance
@@ -220,7 +221,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 			if parent = root(dp.ParentType, dp.ParentKey.String()); parent == nil {
 				collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 					fmt.Sprintf("RebuildSnapshot: duplicate record %d names parent %s[%s], which is not a root",
-						i, dp.ParentType, dp.ParentKey.String())).Build())
+						i, dp.ParentType, diag.ValueText(dp.ParentKey.String()))).Build())
 				continue
 			}
 		}
@@ -228,7 +229,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		if conflict == nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("RebuildSnapshot: duplicate record %d, %s[%s], %s",
-					i, dp.Instance.TypeID, dupInst.PrimaryKey().String(), why)).Build())
+					i, dp.Instance.TypeID, diag.ValueText(dupInst.PrimaryKey().String()), why)).Build())
 			continue
 		}
 		duplicates = append(duplicates, newDuplicate(dupInst, conflict, parent, dp.Relation, diag.Issue{}))
@@ -245,7 +246,7 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		if source == nil {
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 				fmt.Sprintf("RebuildSnapshot: unresolved source %s[%s] not found in instance index",
-					up.SourceType, up.SourceKey.String())).Build())
+					up.SourceType, diag.ValueText(up.SourceKey.String()))).Build())
 			continue
 		}
 
@@ -324,7 +325,7 @@ func validateParts(r *structureRules, parts SnapshotParts) {
 			// a parent it names is a field no rule reads.
 			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf(
 				"duplicate record %d is a root duplicate, and names the parent %s[%s], which only a composed one has",
-				i, dp.ParentType, dp.ParentKey.String()))
+				i, identityText(r.s, dp.ParentType), diag.ValueText(dp.ParentKey.String())))
 		}
 		checkTree(r, "duplicate instance", dp.Instance)
 	}

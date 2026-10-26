@@ -49,6 +49,14 @@ type plan struct {
 	columns   []column
 	spellings []spelling // in header order
 	claimMemo map[string]instance.Claims
+	emptyMemo map[emptyOf]any
+}
+
+// emptyOf names what an empty cell of a property holds, as a key component
+// or as a property: it depends on the property alone, so a plan reads it once.
+type emptyOf struct {
+	prop *schema.Property
+	key  bool
 }
 
 // spelling is one field spelling of the dotted columns: its columns, the plain
@@ -66,17 +74,16 @@ type spelling struct {
 
 // suffixMember is what one suffix names in its spelling's association.
 type suffixMember struct {
-	member  edgeMember
-	exact   bool
-	decides bool             // the column's segments decide the group's target count
-	key     *schema.Property // memberKey
-	eprop   *schema.Property // memberProperty
+	member edgeMember
+	exact  bool
+	key    *schema.Property // memberKey
+	eprop  *schema.Property // memberProperty
 }
 
 // planColumns reads each header column against schemaType, once per header. A
 // nil schemaType keeps every cell as its string.
 func (a *Adapter) planColumns(columns []string, schemaType *schema.Type) *plan {
-	p := &plan{typ: schemaType, columns: make([]column, len(columns)), claimMemo: make(map[string]instance.Claims)}
+	p := &plan{typ: schemaType, columns: make([]column, len(columns)), claimMemo: make(map[string]instance.Claims), emptyMemo: make(map[emptyOf]any)}
 	for i, name := range columns {
 		p.columns[i] = column{name: name, kind: columnString}
 	}
@@ -193,49 +200,4 @@ func (a *Adapter) planSuffixes(p *plan, sp *spelling) {
 			}
 		}
 	}
-	markDeciding(sp.members)
-}
-
-// markDeciding marks the columns whose segments decide a group's target count:
-// for each member, the one spelling no other can shadow or collide with — its
-// exact spelling, or its one folded spelling where none is exact. A shadowed or colliding
-// spelling claims nothing where the other is written, so it counts as a column
-// naming no member. A key component out of reach has no known spelling, so
-// every such column decides.
-func markDeciding(members []suffixMember) {
-	type spellings struct{ exact, folded int }
-	byMember := make(map[*schema.Property]*spellings)
-	for _, m := range members {
-		if p := m.property(); p != nil {
-			if byMember[p] == nil {
-				byMember[p] = &spellings{}
-			}
-			if m.exact {
-				byMember[p].exact++
-			} else {
-				byMember[p].folded++
-			}
-		}
-	}
-	for j := range members {
-		m := &members[j]
-		switch p := m.property(); {
-		case m.member == memberOpenKey:
-			m.decides = true
-		case p != nil:
-			n := byMember[p]
-			m.decides = m.exact || n.exact == 0 && n.folded == 1
-		}
-	}
-}
-
-// property is the key component or edge property the member names, or nil.
-func (m suffixMember) property() *schema.Property {
-	switch m.member {
-	case memberKey:
-		return m.key
-	case memberProperty:
-		return m.eprop
-	}
-	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
@@ -98,7 +99,7 @@ func ParseKey(s string) ([]any, error) {
 		case json.Number:
 			// NormalizeNumber hands back the raw number when no finite Go value
 			// represents it. Reporting it keeps the documented component set exact.
-			return nil, fmt.Errorf("graph.ParseKey: component %d is not a representable number: %v", i, norm)
+			return nil, fmt.Errorf("graph.ParseKey: component %d is not a representable number: %v", i, diag.ValueText(fmt.Sprint(norm)))
 		}
 		out[i] = norm
 	}
@@ -138,13 +139,13 @@ func decodeKeyArray(s string) ([]any, error) {
 	dec.UseNumber()
 	var out []any
 	if err := dec.Decode(&out); err != nil {
-		return nil, fmt.Errorf("graph: parsing key %q: %w", s, err)
+		return nil, fmt.Errorf("graph: parsing key %s: %w", diag.QuoteValue(s), err)
 	}
 	if out == nil {
-		return nil, fmt.Errorf("graph: parsing key %q: want a JSON array", s)
+		return nil, fmt.Errorf("graph: parsing key %s: want a JSON array", diag.QuoteValue(s))
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("graph: parsing key %q: trailing content after the array", s)
+		return nil, fmt.Errorf("graph: parsing key %s: trailing content after the array", diag.QuoteValue(s))
 	}
 	return out, nil
 }

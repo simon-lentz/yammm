@@ -1752,3 +1752,23 @@ func TestOrder_IntegerOutsideInt64ComparesExactly(t *testing.T) {
 		t.Error("Equal reports an integer below MinInt64 equal to MinInt64")
 	}
 }
+
+// A literal whose digit run overflows before a byte that is no digit is no
+// integer, so it orders as no number does: strconv reports ErrRange for it
+// before it reads that byte, and a sign and digits alone make an integer.
+func TestOrder_AnOverflowingRunBeforeTextIsNoInteger(t *testing.T) {
+	t.Parallel()
+	for _, lit := range []string{"99999999999999999999x", "99999999999999999999 ", "-99999999999999999999e"} {
+		if kind, _ := value.Classify(json.Number(lit)); kind != value.UnspecifiedKind {
+			t.Errorf("value.Classify(%q) = %v, want value.UnspecifiedKind", lit, kind)
+		}
+		if _, err := value.Order(json.Number(lit), int64(1)); err == nil {
+			t.Errorf("Order(%q, 1) ordered a literal that is no number", lit)
+		}
+	}
+	for _, lit := range []string{"99999999999999999999", "+99999999999999999999", "-99999999999999999999"} {
+		if kind, _ := value.Classify(json.Number(lit)); kind != value.IntKind {
+			t.Errorf("value.Classify(%q) = %v, want value.IntKind", lit, kind)
+		}
+	}
+}

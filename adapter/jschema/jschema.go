@@ -32,7 +32,9 @@ func WithSchemaID(uri string) Option {
 
 // Marshal renders a loaded, resolved schema (and its import closure) as a
 // single self-contained JSON Schema draft 2020-12 document describing the
-// instance-data JSON object form the yammm instance layer accepts. Output is
+// instance-data JSON object form the yammm instance layer reads; it does not
+// reproduce that layer's validation, as the package documentation's Fidelity
+// Caveats state. Output is
 // deterministic — byte-identical across runs and machines — and validated
 // before return: the bytes must parse as JSON and every "$ref" must resolve
 // to an entry of the "$defs" object those bytes hold; a failure there is a

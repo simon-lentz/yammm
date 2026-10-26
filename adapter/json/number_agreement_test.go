@@ -224,7 +224,7 @@ type T {
 
 // The JSON and .ys writers mark a float in a property value by the Go type it
 // holds, and the CSV writer every one a cell can spell: a float32 at its 32-bit
-// width, a named float, a float under a String, a Timestamp, a Date, a UUID and
+// width, or at 64 bits where its 32-bit text reads back as another float32, a named float, a float under a String, a Timestamp, a Date, a UUID and
 // a List<Timestamp> element, a float standing where a Vector or a List belongs,
 // a float nested in a list or a string-keyed map that stands where a scalar
 // belongs, and a list standing at a Float or nested as a Vector element. A
@@ -245,6 +245,7 @@ func TestWriters_MarkEveryHeldFloat(t *testing.T) {
 	}{
 		{"n", float32(0.1), `"n":0.1}`, ",0.1,"},
 		{"n", float32(7), `"n":7.0`, ",7.0,"},
+		{"n", math.Float32frombits(363742205), `"n":7.038530691851209e-26}`, ",0.00000000000000000000000007038530691851209,"},
 		{"n", celsius(6), `"n":6.0`, ",6.0,"},
 		{"s", float64(6), `"s":6.0`, ",6.0"},
 		{"ts", float64(6), `"ts":6.0`, ",6.0"},

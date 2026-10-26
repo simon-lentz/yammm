@@ -66,10 +66,16 @@
 // No failure is lost: the parser returns the reader's first error from every
 // later read, so a failure met while the byte order mark is looked for, or one
 // [encoding/csv] reads past behind a record it refuses, still stops the parse.
+// A parse that ends with no later read, at a header it refuses, a header that
+// lacks the type column or a cancellation, reports the failure its reader had
+// returned as that same Fatal, beside the header's Errors or the cancellation's
+// Fatal.
 //
 // # Cancellation
 //
-// Every entry point observes its context at each unit of work it has. Both parse
+// Every entry point observes its context at each record or instance it
+// handles; a parse reads the byte order mark and the header before its first
+// check. Both parse
 // methods check before each record is read and stop with a Fatal
 // E_CONTEXT_CANCELLED carrying the span of the last record the reader returned
 // without an error, or none before the first, keeping the records read before
@@ -299,26 +305,34 @@
 // The writer emits each association as its dotted column group, and the
 // parser assembles the group back into the _target_-keyed objects the
 // instance validator accepts — identical to the JSON adapter path. The target
-// count is decided by the columns that can claim a member: the exact spelling
-// of a key component or an edge property, or its one folded spelling where
-// none is exact. Where two of them disagree the group writes nothing and claims
-// nothing, and the row draws [diag.E_ADAPTER_PARSE] naming the relation. Any
-// other column — one naming no member, or a shadowed or colliding spelling —
-// is zipped where its count agrees, taken whole as written where there is one
-// target, and otherwise left out with its own [diag.E_ADAPTER_PARSE]. Without
-// [WithSchema] no key spelling is known, so every key column decides.
+// count is decided row by row, by the filled columns that claim a member on
+// that row. The claim is [instance.ClaimEdgeKeys]'s over the group read as one
+// target: a key for each filled cell, and for each empty cell that holds its
+// member's empty value (under Empty Cells). So an exact spelling decides
+// wherever it is filled, and, unless names are strict, a folded one where that
+// target holds no exact spelling of its member and no other folded one is
+// filled. Where two deciding columns disagree the group writes nothing and
+// claims nothing, and the row draws [diag.E_ADAPTER_PARSE] naming the relation.
+// Any other filled column — one naming no member, or a spelling shadowed or
+// colliding on that row — is zipped where its count agrees, taken whole as
+// written where there is one target, and otherwise left out with its own
+// [diag.E_ADAPTER_PARSE]. Without [WithSchema] no key spelling is known, so
+// every filled key column decides.
 //
 // [WithSchema] gives the parser each association's target type. A non-empty
 // key component keeps its text either way: every kind a primary key may take
 // (String, UUID, Date, Timestamp) reads as the text it was written as. A Date
 // or Timestamp component that does not parse draws E_CSV_COERCE with the
-// option and the validator's error without it. Beside that error, what the
-// option decides is an EMPTY segment, under Empty Cells above, and which key
-// columns decide the target count, in the paragraph before.
+// option and the validator's error without it. Within a component, what else
+// the option decides is an EMPTY segment, under Empty Cells above; across a
+// group, it decides which filled columns claim a member, as the paragraph
+// above states.
 //
 // During snapshot serialization ([Adapter.MarshalSnapshot], [Adapter.WriteSnapshot]),
 // edge columns are populated from the snapshot's edge index via [graph.Snapshot]
-// edge lookup. An association whose target type does not resolve is refused:
+// edge lookup. An association that holds an unresolved record and no edge
+// writes the empty group an absent association writes, and the writer returns
+// no error for it. An association whose target type does not resolve is refused:
 // the writer will not emit columns its own parser cannot name.
 //
 // Every constructor of a snapshot holds its associations to what
@@ -352,10 +366,10 @@
 // No diagnostic names a record ordinal. A record's line comes from the reader,
 // so a quoted newline moves it as the file reads, which an ordinal cannot see.
 // A record the reader refuses is located from the parse error instead, at the
-// start of the line the fault is on; a reader error that is not a parse error
-// carries no position, unless the header could not be read at all, which is
-// reported at line 1. A header refusal and a missing type column carry the
-// header's own line: blank lines before the header are skipped.
+// start of the line the fault is on; a reader failure carries no position,
+// unless the header's own read returns it, which is reported at line 1. A
+// header refusal and a missing type column carry the header's own line: blank
+// lines before the header are skipped.
 //
 // A span's column is always 1. [encoding/csv] counts columns in BYTES and
 // [location.Position] counts them in runes, and this package parses an

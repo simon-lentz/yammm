@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -380,5 +381,36 @@ func TestCanonical_ListRefusesAnArray(t *testing.T) {
 	lc := schema.NewListConstraint(schema.NewTimestampConstraint())
 	if got, err := value.Canonical([1]string{"2026-08-19T12:00:00+00:00"}, lc); err == nil {
 		t.Errorf("Canonical([1]string) = %#v, want an error: an array is not a list", got)
+	}
+}
+
+// A time.Time whose text no layout reads back is refused with that text cut to
+// its head: a year past 9999 with nanoseconds and a half-hour zone runs 36 bytes.
+func TestCanonical_AnUnreadTimeIsCutToItsHead(t *testing.T) {
+	t.Parallel()
+	_, err := value.Canonical(time.Date(10000, 1, 1, 0, 0, 0, 123456789, time.FixedZone("", 5*3600+1800)), schema.NewTimestampConstraint())
+	want := `value: a time.Time renders as "10000-01-01T00:00:00.123456789+0"… (36 bytes), which is no timestamp the layout reads back`
+	if err == nil || err.Error() != want {
+		t.Errorf("err = %v, want %s", err, want)
+	}
+}
+
+// A string no kind reads is refused with that string cut to its head.
+func TestCanonical_ARefusedLongStringIsCut(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 100)
+	cut := `"` + long[:32] + `"… (100 bytes)`
+	for _, c := range []struct {
+		c    schema.Constraint
+		want string
+	}{
+		{schema.NewTimestampConstraint(), "value: " + cut + " is not an RFC 3339 timestamp"},
+		{schema.NewTimestampConstraintFormatted(time.DateOnly), "value: " + cut + ` does not satisfy the declared timestamp format "2006-01-02"`},
+		{schema.NewUUIDConstraint(), "value: " + cut + " is not a UUID"},
+		{schema.NewDateConstraint(), "value: " + cut + " is not a YYYY-MM-DD date"},
+	} {
+		if _, err := value.Canonical(long, c.c); err == nil || err.Error() != c.want {
+			t.Errorf("at %s: err = %v, want %s", c.c.Kind(), err, c.want)
+		}
 	}
 }

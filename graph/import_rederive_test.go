@@ -398,3 +398,62 @@ part type `+part+` {
 		t.Errorf("want the identity refusal alone, got: %s", res)
 	}
 }
+
+// An edge or a target_missing record whose target type the importing schema
+// drops is one identity refusal: the association rule leaves an identity that
+// does not resolve to the identity rule, which judges the edge's target through
+// the instance that carries it and the record's target where it is named.
+func TestNewFromSnapshot_ATargetTypeTheSchemaDropsIsTheIdentityRulesAlone(t *testing.T) {
+	t.Parallel()
+	load := func(target string) *schema.Schema {
+		s, res := schema.LoadString(t.Context(), `schema "links"
+
+type Source {
+	id String primary
+	--> TO (many) `+target+`
+}
+
+type `+target+` {
+	tid String primary
+}
+`, "links.yammm")
+		if res.HasErrors() {
+			t.Fatalf("load schema: %s", res)
+		}
+		return s
+	}
+	s := load("Target")
+	v := instance.NewValidator(s)
+	for _, c := range []struct {
+		name  string
+		held  bool
+		where string
+	}{
+		{"an edge", true, "at types entry"},
+		{"a target_missing record", false, "at unresolved target position"},
+	} {
+		g := graph.New(s)
+		if c.held {
+			target, res := v.ValidateOne(t.Context(), "Target", instance.RawInstance{Properties: map[string]any{"tid": "t1"}})
+			if res.HasErrors() {
+				t.Fatalf("validate target: %s", res)
+			}
+			mustOK(t, g.Add(t.Context(), target))
+		}
+		source, res := v.ValidateOne(t.Context(), "Source", instance.RawInstance{Properties: map[string]any{
+			"id": "s1", "to": []any{map[string]any{"_target_tid": "t1"}},
+		}})
+		if res.HasErrors() {
+			t.Fatalf("validate source: %s", res)
+		}
+		mustOK(t, g.Add(t.Context(), source))
+
+		_, res = graph.NewFromSnapshot(load("Other"), g.Snapshot())
+		if !res.HasCode(diag.E_GRAPH_TYPE_NOT_FOUND) || res.HasCode(diag.E_GRAPH_UNKNOWN_RELATION) {
+			t.Errorf("%s: want the identity refusal alone, got: %s", c.name, res)
+		}
+		if !strings.Contains(res.String(), c.where) {
+			t.Errorf("%s: no refusal stands %s: %s", c.name, c.where, res)
+		}
+	}
+}

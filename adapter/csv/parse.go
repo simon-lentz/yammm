@@ -32,9 +32,9 @@ func (a *Adapter) ParseTyped(
 	if a.configRefused(collector) {
 		return nil, collector.Result()
 	}
-	reader := a.newReader(r)
+	reader, kept := a.newReader(r)
 
-	columns, _, ok := a.readHeader(reader, source, collector)
+	columns, _, ok := a.readHeader(reader, kept, source, typeName, collector)
 	if !ok {
 		return nil, collector.Result()
 	}
@@ -47,6 +47,7 @@ func (a *Adapter) ParseTyped(
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 				fmt.Sprintf("csv parse cancelled after %d records", len(results))).
 				WithSpan(lastSpan).Build())
+			a.reportKeptFailure(kept, source, typeName, len(results), collector)
 			break
 		}
 
@@ -90,10 +91,26 @@ func (a *Adapter) configRefused(collector *diag.Collector) bool {
 // newReader returns the reader both entry points parse through. LazyQuotes
 // stays off, so a malformed quoted field is a diagnostic and not a value the
 // file never stated.
-func (a *Adapter) newReader(r io.Reader) *csv.Reader {
-	reader := csv.NewReader(stripBOM(r))
+//
+// The [stickyReader] beside it keeps the failure r returned. A parse that ends
+// with no further Read hands it to [Adapter.reportKeptFailure].
+func (a *Adapter) newReader(r io.Reader) (*csv.Reader, *stickyReader) {
+	stripped, kept := stripBOM(r)
+	reader := csv.NewReader(stripped)
 	reader.Comma = a.config.delimiter
-	return reader
+	return reader, kept
+}
+
+// reportKeptFailure reports the failure the reader has returned, as
+// [Adapter.reportReadError] reports one a Read hands the parse. Its callers end
+// the parse for another reason, a refused header, a missing type column or a
+// cancellation, so no later
+// Read would return it: [encoding/csv] holds back an error that came beside a
+// complete line, and drops one that met a quote fault.
+func (a *Adapter) reportKeptFailure(kept *stickyReader, source location.SourceID, typeName string, records int, collector *diag.Collector) {
+	if err := kept.failure(); err != nil {
+		a.reportReadError(err, source, typeName, records, collector)
+	}
 }
 
 // reportReadError reports a record's read error and whether the parse stops.
@@ -170,8 +187,9 @@ func parseErrorSpan(source location.SourceID, err error) location.Span {
 // The typeResolver function looks up a [*schema.Type] by name for coercion.
 // It may return nil for unknown types, in which case values are kept as strings.
 // A value that is not a type name by the grammar draws E_INVALID_TYPE_TAG and
-// its row is skipped. Requires [WithTypeColumn] to be set; without it the
-// result carries an Error [E_CSV_CONFIG] and no record is read. Faults and
+// its row is skipped. Requires [WithTypeColumn] to name the type column: with
+// no name, or with a name holding a CR LF, which no header can hold, the
+// result carries an Error [E_CSV_CONFIG] and no byte is read. Faults and
 // provenance are as [Adapter.ParseTyped].
 func (a *Adapter) ParseWithTypeColumn(
 	ctx context.Context,
@@ -189,9 +207,9 @@ func (a *Adapter) ParseWithTypeColumn(
 		return nil, collector.Result()
 	}
 
-	reader := a.newReader(r)
+	reader, kept := a.newReader(r)
 
-	columns, header, ok := a.readHeader(reader, source, collector)
+	columns, header, ok := a.readHeader(reader, kept, source, "", collector)
 	if !ok {
 		return nil, collector.Result()
 	}
@@ -206,8 +224,9 @@ func (a *Adapter) ParseWithTypeColumn(
 	}
 	if typeColIdx == -1 {
 		collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE,
-			fmt.Sprintf("type column %q not found in header", a.config.typeColumn)).
+			fmt.Sprintf("type column %s not found in header", diag.QuoteValue(a.config.typeColumn))).
 			WithSpan(header).Build())
+		a.reportKeptFailure(kept, source, "", 0, collector)
 		return nil, collector.Result()
 	}
 
@@ -228,6 +247,7 @@ func (a *Adapter) ParseWithTypeColumn(
 			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED,
 				fmt.Sprintf("csv parse cancelled after %d records", parsed)).
 				WithSpan(lastSpan).Build())
+			a.reportKeptFailure(kept, source, "", parsed, collector)
 			break
 		}
 
@@ -248,7 +268,7 @@ func (a *Adapter) ParseWithTypeColumn(
 		typeName := record[typeColIdx]
 		if err := typetag.Validate(typeName); err != nil {
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_TYPE_TAG,
-				fmt.Sprintf("invalid type name %q in type column %q: %s", typeName, a.config.typeColumn, err)).
+				fmt.Sprintf("invalid type name %s in type column %s: %s", diag.QuoteValue(typeName), diag.QuoteValue(a.config.typeColumn), err)).
 				WithSpan(lastSpan).
 				WithDetail(diag.DetailKeyGot, typeName).
 				WithDetail(diag.DetailKeyDetail, err.Error()).Build())
@@ -291,19 +311,21 @@ func typeColumnError(name string) string {
 	case name == "":
 		return "csv adapter: ParseWithTypeColumn requires WithTypeColumn to be set"
 	case strings.Contains(name, "\r\n"):
-		return fmt.Sprintf("csv adapter: type column %q holds a CR LF, which encoding/csv reads back as LF, so no header holds it", name)
+		return fmt.Sprintf("csv adapter: type column %s holds a CR LF, which encoding/csv reads back as LF, so no header holds it", diag.QuoteValue(name))
 	}
 	return ""
 }
 
 // readHeader reads the header row and its line, refusing a column named twice
 // or not at all. The reader fixes FieldsPerRecord from this row, so a later
-// record of another length comes back with [csv.ErrFieldCount].
-func (a *Adapter) readHeader(reader *csv.Reader, source location.SourceID, collector *diag.Collector) ([]string, location.Span, bool) {
+// record of another length comes back with [csv.ErrFieldCount]. A refusal of
+// the input ends the parse, so it reports the failure kept holds.
+func (a *Adapter) readHeader(reader *csv.Reader, kept *stickyReader, source location.SourceID, typeName string, collector *diag.Collector) ([]string, location.Span, bool) {
 	header, err := reader.Read()
 	if err != nil {
 		severity, code := diag.Error, diag.E_ADAPTER_PARSE
-		if readFailure(err) {
+		failed := readFailure(err)
+		if failed {
 			severity, code = diag.Fatal, diag.E_ADAPTER_IO
 		}
 		span := parseErrorSpan(source, err)
@@ -313,6 +335,9 @@ func (a *Adapter) readHeader(reader *csv.Reader, source location.SourceID, colle
 		collector.Collect(diag.NewIssue(severity, code,
 			fmt.Sprintf("csv parse: reading header: %s", err)).
 			WithSpan(span).Build())
+		if !failed {
+			a.reportKeptFailure(kept, source, typeName, 0, collector)
+		}
 		return nil, location.Span{}, false
 	}
 
@@ -330,12 +355,13 @@ func (a *Adapter) readHeader(reader *csv.Reader, source location.SourceID, colle
 			ok = false
 		case seen[name] == 2:
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_ADAPTER_PARSE,
-				fmt.Sprintf("header names column %q more than once", name)).
+				fmt.Sprintf("header names column %s more than once", diag.QuoteValue(name))).
 				WithSpan(span).Build())
 			ok = false
 		}
 	}
 	if !ok {
+		a.reportKeptFailure(kept, source, typeName, 0, collector)
 		return nil, location.Span{}, false
 	}
 	return header, span, true
@@ -407,7 +433,7 @@ func (a *Adapter) recordToProps(
 			// Two values for one key, as a repeated JSON member. The group is
 			// kept where the key claims an association, whose only valid form
 			// it is, and the plain value everywhere else.
-			report(fmt.Sprintf("column %[1]q and the dotted columns %[1]s.* both write the key %[1]q", sp.field))
+			report(fmt.Sprintf("column %[1]s and the dotted columns %[2]s.* both write the key %[1]s", diag.QuoteValue(sp.field), diag.ValueText(sp.field)))
 			if !claimsAssociation(claims, &p.spellings[s]) {
 				continue
 			}
@@ -434,7 +460,7 @@ func (a *Adapter) recordToProps(
 			continue // the group wrote the key, or holds it beside an empty cell
 		}
 		if prop := claims.Property(col.name); prop != nil {
-			a.writeProperty(props, col.name, prop, val, span, typeName, collector)
+			a.writeProperty(p, props, col.name, prop, val, span, typeName, collector)
 			continue
 		}
 		if val != "" {
@@ -536,9 +562,9 @@ func claimsAssociation(claims instance.Claims, sp *spelling) bool {
 
 // groupShape is what one row's cells make of an association's group: each
 // position's segments, one per target, and the target count. The count is the
-// deciding columns' (see [markDeciding]), and clash is set where two of them
-// disagree. Any other column is zipped where its count agrees, taken whole as
-// written where there is one target, and otherwise left out, in stray.
+// deciding columns' (see [Adapter.decidingColumns]), and clash is set where two
+// of them disagree. Any other column is zipped where its count agrees, taken
+// whole as written where there is one target, and otherwise left out, in stray.
 type groupShape struct {
 	segs  [][]string
 	n     int
@@ -546,7 +572,7 @@ type groupShape struct {
 	stray []strayColumn
 }
 
-// strayColumn is a column naming no member whose segment count is not the
+// strayColumn is a column deciding nothing whose segment count is not the
 // group's target count.
 type strayColumn struct {
 	col, count int
@@ -556,28 +582,29 @@ type strayColumn struct {
 // order, so a disagreement names one pair on every run.
 func (a *Adapter) shapeOf(p *plan, sp *spelling, record []string) groupShape {
 	g := groupShape{n: -1, segs: make([][]string, len(sp.cols))}
+	decides := a.decidingColumns(p, sp, record)
 	first := ""
 	for j, i := range sp.cols {
 		if record[i] == "" {
 			continue
 		}
 		g.segs[j] = splitListElems(record[i], a.config.listSep)
-		if !sp.members[j].decides {
+		if !decides[j] {
 			continue
 		}
 		switch n := len(g.segs[j]); {
 		case g.n == -1:
 			g.n, first = n, p.columns[i].name
 		case n != g.n && g.clash == "":
-			g.clash = fmt.Sprintf("association %q columns disagree on target count: %q holds %d, %q holds %d",
-				sp.field, first, g.n, p.columns[i].name, n)
+			g.clash = fmt.Sprintf("association %s columns disagree on target count: %s holds %d, %s holds %d",
+				diag.QuoteValue(sp.field), diag.QuoteValue(first), g.n, diag.QuoteValue(p.columns[i].name), n)
 		}
 	}
 	if g.n == -1 {
 		g.n = 1 // no deciding column holds text: one target carries it
 	}
 	for j, i := range sp.cols {
-		if sp.members[j].decides || g.segs[j] == nil || len(g.segs[j]) == g.n {
+		if decides[j] || g.segs[j] == nil || len(g.segs[j]) == g.n {
 			continue
 		}
 		if g.n == 1 {
@@ -595,17 +622,44 @@ func (a *Adapter) shapeOf(p *plan, sp *spelling, record []string) groupShape {
 	return g
 }
 
+// decidingColumns marks the columns whose filled cells decide the group's
+// target count on this row: each that claims its member in the object the row's
+// cells make as one target, and each key column whose target is out of reach.
+// That object is the lone target's where the count is one, so a column taken
+// whole never claims a member.
+func (a *Adapter) decidingColumns(p *plan, sp *spelling, record []string) []bool {
+	mask := make([]byte, len(sp.cols))
+	for j, i := range sp.cols {
+		mask[j] = flag(a.holdsKey(p, sp.members[j], record[i]))
+	}
+	claims := a.edgeClaims(p, sp, mask)
+	decides := make([]bool, len(sp.cols))
+	for j, i := range sp.cols {
+		suffix := p.columns[i].suffix
+		decides[j] = sp.members[j].member == memberOpenKey ||
+			claims.Key(suffix) != nil || claims.Property(suffix) != nil
+	}
+	return decides
+}
+
+// holdsKey reports whether an edge object holds a suffix's key before an empty
+// folded suffix is placed: its text is filled, or it spells exactly a member
+// whose empty value it then holds.
+func (a *Adapter) holdsKey(p *plan, m suffixMember, text string) bool {
+	return text != "" || m.exact && a.memberEmpty(p, m) != nil
+}
+
 // writeProperty writes a claimed column's cell: its property's empty value,
 // or the cell coerced, or its text where it does not coerce.
-func (a *Adapter) writeProperty(props map[string]any, name string, prop *schema.Property, val string, span location.Span, typeName string, collector *diag.Collector) {
+func (a *Adapter) writeProperty(p *plan, props map[string]any, name string, prop *schema.Property, val string, span location.Span, typeName string, collector *diag.Collector) {
 	if val == "" {
-		props[name] = a.emptyCell(prop)
+		props[name] = a.emptyValue(p, emptyOf{prop: prop})
 		return
 	}
 	coerced, err := a.coerceStringValue(val, prop.Constraint())
 	if err != nil {
 		collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-			fmt.Sprintf("column %q: %s", name, err)).
+			fmt.Sprintf("column %s: %s", diag.QuoteValue(name), err)).
 			WithSpan(span).
 			WithDetail(diag.DetailKeyTypeName, typeName).Build())
 		props[name] = val
@@ -648,8 +702,8 @@ func (a *Adapter) assembleEdgeGroup(
 	report func(string),
 ) any {
 	for _, st := range g.stray {
-		report(fmt.Sprintf("association %q column %q holds %d segments for %d targets and is left out",
-			sp.field, p.columns[st.col].name, st.count, g.n))
+		report(fmt.Sprintf("association %s column %s holds %d segments for %d targets and is left out",
+			diag.QuoteValue(sp.field), diag.QuoteValue(p.columns[st.col].name), st.count, g.n))
 	}
 	targets := make([]any, g.n)
 	for t := range g.n {
@@ -667,7 +721,7 @@ func (a *Adapter) assembleEdgeGroup(
 func (a *Adapter) edgeTarget(p *plan, sp *spelling, g groupShape, t int, span location.Span, typeName string, collector *diag.Collector) map[string]any {
 	mask := make([]byte, len(sp.cols))
 	for j := range sp.cols {
-		mask[j] = flag(g.segs[j][t] != "" || sp.members[j].exact && a.memberEmpty(sp.members[j]) != nil)
+		mask[j] = flag(a.holdsKey(p, sp.members[j], g.segs[j][t]))
 	}
 	claims := a.edgeClaims(p, sp, mask)
 
@@ -686,7 +740,7 @@ func (a *Adapter) edgeTarget(p *plan, sp *spelling, g groupShape, t int, span lo
 				obj[suffix] = seg // no member, or shadowed or colliding: the validator rules
 			}
 		case seg == "":
-			if v := a.memberEmpty(member); v != nil {
+			if v := a.memberEmpty(p, member); v != nil {
 				obj[suffix] = v
 			}
 		default:
@@ -697,7 +751,7 @@ func (a *Adapter) edgeTarget(p *plan, sp *spelling, g groupShape, t int, span lo
 			coerced, err := a.coerceStringValue(seg, constraint.Constraint())
 			if err != nil {
 				collector.Collect(diag.NewIssue(diag.Error, E_CSV_COERCE,
-					fmt.Sprintf("column %q.%s: %s", sp.field, suffix, err)).
+					fmt.Sprintf("column %s.%s: %s", diag.QuoteValue(sp.field), diag.ValueText(suffix), err)).
 					WithSpan(span).
 					WithDetail(diag.DetailKeyTypeName, typeName).Build())
 				obj[suffix] = seg
@@ -746,7 +800,7 @@ func (a *Adapter) emptyFoldedSuffixes(p *plan, sp *spelling, mask []byte, keys [
 	var order []string
 	for j, i := range sp.cols {
 		m := sp.members[j]
-		if mask[j] != 0 || m.exact || a.memberEmpty(m) == nil {
+		if mask[j] != 0 || m.exact || a.memberEmpty(p, m) == nil {
 			continue
 		}
 		name := m.name()
@@ -778,14 +832,29 @@ func (m suffixMember) name() string {
 // memberEmpty is what an empty segment holds for a member, or nil where it is
 // absent: a key component's kind decides, and an edge property follows
 // [Adapter.emptyCell], since an edge property is never null.
-func (a *Adapter) memberEmpty(m suffixMember) any {
+func (a *Adapter) memberEmpty(p *plan, m suffixMember) any {
 	switch m.member {
 	case memberKey:
-		if v, err := a.coerceStringValue("", m.key.Constraint()); err == nil {
-			return v
-		}
+		return a.emptyValue(p, emptyOf{prop: m.key, key: true})
 	case memberProperty:
-		return a.emptyCell(m.eprop)
+		return a.emptyValue(p, emptyOf{prop: m.eprop})
 	}
 	return nil
+}
+
+// emptyValue is what an empty cell of e holds, read once per plan: a refused
+// empty cell builds its refusal only to discard it. The value is shared by every
+// row, which is safe because each is a string, nil or an empty slice.
+func (a *Adapter) emptyValue(p *plan, e emptyOf) any {
+	if v, ok := p.emptyMemo[e]; ok {
+		return v
+	}
+	var v any
+	if !e.key {
+		v = a.emptyCell(e.prop)
+	} else if coerced, err := a.coerceStringValue("", e.prop.Constraint()); err == nil {
+		v = coerced
+	}
+	p.emptyMemo[e] = v
+	return v
 }

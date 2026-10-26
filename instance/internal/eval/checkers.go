@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -47,7 +48,7 @@ func constraintFail(format string, args ...any) *CheckError {
 // carriers [value.GetString] reads; want names what the kind accepts. A string
 // value is valid UTF-8, so a string that is not is refused as a value that is
 // no string is: a type mismatch, before any rule of the kind reads its bytes.
-// The message quotes the string's head ([quotedText]), so the diagnostic is
+// The message quotes the string by [diag.QuoteValue], so the diagnostic is
 // valid UTF-8 itself and its length does not follow the string's.
 func textOf(val any, want string) (string, *CheckError) {
 	s, ok := value.GetString(val)
@@ -55,7 +56,7 @@ func textOf(val any, want string) (string, *CheckError) {
 		return "", typeMismatch("expected %s, got %T", want, val)
 	}
 	if !utf8.ValidString(s) {
-		return "", typeMismatch("expected %s, got a string that is not valid UTF-8: %s", want, quotedText(s))
+		return "", typeMismatch("expected %s, got a string that is not valid UTF-8: %s", want, diag.QuoteValue(s))
 	}
 	return s, nil
 }
@@ -89,50 +90,6 @@ func floatText(val, norm any) string {
 		b = append(b, '.', '0')
 	}
 	return string(b)
-}
-
-// maxValueText bounds how much of a refused value's text a diagnostic repeats:
-// a number literal or a string can run to megabytes, and the message is
-// written once per value.
-const maxValueText = 32
-
-// headOf returns s whole when it is no longer than maxValueText bytes, and
-// otherwise its longest prefix of whole characters within that bound, with
-// true. A byte that is no part of a character counts as one character.
-func headOf(s string) (head string, cut bool) {
-	if len(s) <= maxValueText {
-		return s, false
-	}
-	end := 0
-	for {
-		_, size := utf8.DecodeRuneInString(s[end:])
-		if end+size > maxValueText {
-			return s[:end], true
-		}
-		end += size
-	}
-}
-
-// numberText renders a number literal for a diagnostic, cut to its head with
-// its length beside it when it is longer.
-func numberText(n json.Number) string {
-	head, cut := headOf(string(n))
-	if !cut {
-		return head
-	}
-	return fmt.Sprintf("%s… (%d characters)", head, len(n))
-}
-
-// quotedText renders a refused string for a diagnostic as [numberText] renders
-// a literal, quoted so that a byte that is no part of a character is spelled
-// as an escape. The length is in bytes: such a string has no count of
-// characters.
-func quotedText(s string) string {
-	head, cut := headOf(s)
-	if !cut {
-		return strconv.Quote(head)
-	}
-	return fmt.Sprintf("%s… (%d bytes)", strconv.Quote(head), len(s))
 }
 
 // CheckValue validates that val conforms to the given constraint, by the one
@@ -269,7 +226,7 @@ func CoerceValue(val any, c schema.Constraint) (any, error) {
 // value passes.
 func invalidText(val any) error {
 	if s, ok := value.GetString(val); ok && !utf8.ValidString(s) {
-		return fmt.Errorf("cannot coerce a string that is not valid UTF-8: %s", quotedText(s))
+		return fmt.Errorf("cannot coerce a string that is not valid UTF-8: %s", diag.QuoteValue(s))
 	}
 	return nil
 }
@@ -291,7 +248,7 @@ func coerceInteger(val any) (any, error) {
 		// An integer literal no int64 holds: its nearest float64 can be a
 		// different integer, so it is refused rather than rounded.
 		if n, ok := norm.(json.Number); ok {
-			return nil, fmt.Errorf("cannot coerce integer %s outside the int64 range to int64", numberText(n))
+			return nil, fmt.Errorf("cannot coerce integer %s outside the int64 range to int64", diag.ValueText(string(n)))
 		}
 		if u, ok := value.GetUint64(norm); ok {
 			return nil, fmt.Errorf("uint64 value %d exceeds int64 max", u)
@@ -300,7 +257,7 @@ func coerceInteger(val any) (any, error) {
 		return nil, fmt.Errorf("cannot coerce float %s to int64", floatText(val, norm))
 	}
 	if n, ok := noFloat64Holds(val); ok {
-		return nil, fmt.Errorf("cannot coerce %s to int64: no finite float64 holds it", numberText(n))
+		return nil, fmt.Errorf("cannot coerce %s to int64: no finite float64 holds it", diag.ValueText(string(n)))
 	}
 	return nil, fmt.Errorf("cannot coerce %T to int64", val)
 }
@@ -314,9 +271,9 @@ func coerceFloat(val any) (any, error) {
 		f, err := n.Float64()
 		switch {
 		case errors.Is(err, strconv.ErrRange):
-			return nil, fmt.Errorf("cannot coerce %s to float64: no finite float64 holds it", numberText(n))
+			return nil, fmt.Errorf("cannot coerce %s to float64: no finite float64 holds it", diag.ValueText(string(n)))
 		case err != nil:
-			return nil, fmt.Errorf("cannot coerce json.Number %q to float64", numberText(n))
+			return nil, fmt.Errorf("cannot coerce json.Number %s to float64", diag.QuoteValue(string(n)))
 		case !value.IsFinite(f):
 			return nil, errors.New("cannot coerce non-finite float (NaN or Inf)")
 		}
@@ -430,7 +387,7 @@ func checkInteger(val any, c schema.Constraint) error {
 		i, ok = value.GetInt64(norm)
 		if !ok {
 			if n, isNumber := norm.(json.Number); isNumber {
-				return typeMismatch("expected integer, got an integer outside the int64 range: %s", numberText(n))
+				return typeMismatch("expected integer, got an integer outside the int64 range: %s", diag.ValueText(string(n)))
 			}
 			return typeMismatch("cannot convert %T to int64", val)
 		}
@@ -438,7 +395,7 @@ func checkInteger(val any, c schema.Constraint) error {
 		return typeMismatch("expected integer, got float %s", floatText(val, norm))
 	default:
 		if n, ok := noFloat64Holds(val); ok {
-			return typeMismatch("expected integer, got a number no float64 holds: %s", numberText(n))
+			return typeMismatch("expected integer, got a number no float64 holds: %s", diag.ValueText(string(n)))
 		}
 		return typeMismatch("expected integer, got %T", val)
 	}
@@ -470,7 +427,7 @@ func checkFloat(val any, c schema.Constraint) error {
 		case err == nil:
 			f = fv
 		case errors.Is(err, strconv.ErrRange):
-			return typeMismatch("expected float, got a number no float64 holds: %s", numberText(n))
+			return typeMismatch("expected float, got a number no float64 holds: %s", diag.ValueText(string(n)))
 		default:
 			return typeMismatch("expected float, got %T", val)
 		}
@@ -541,7 +498,7 @@ func checkTimestamp(val any, c schema.Constraint) error {
 	tc, ok := c.(schema.TimestampConstraint)
 	if ok && tc.Format() != "" {
 		if _, err := time.Parse(tc.Format(), s); err != nil {
-			return constraintFail("invalid timestamp format: %s (expected %s)", s, tc.Format())
+			return constraintFail("invalid timestamp format: %s (expected %s)", diag.QuoteValue(s), tc.Format())
 		}
 		return nil
 	}
@@ -549,7 +506,7 @@ func checkTimestamp(val any, c schema.Constraint) error {
 	// RFC 3339 parses fractional seconds too, so no RFC3339Nano fallback is
 	// needed: nothing that layout accepts, this one refuses.
 	if _, err := time.Parse(time.RFC3339, s); err != nil {
-		return constraintFail("invalid timestamp format: %s", s)
+		return constraintFail("invalid timestamp format: %s", diag.QuoteValue(s))
 	}
 	return nil
 }
@@ -576,7 +533,7 @@ func checkDate(val any) error {
 		return refused
 	}
 	if _, err := time.Parse(time.DateOnly, s); err != nil {
-		return constraintFail("invalid date format: %s (expected YYYY-MM-DD)", s)
+		return constraintFail("invalid date format: %s (expected YYYY-MM-DD)", diag.QuoteValue(s))
 	}
 	return nil
 }
@@ -594,7 +551,7 @@ func checkUUID(val any) error {
 		return refused
 	}
 	if _, err := uuid.Parse(s); err != nil {
-		return constraintFail("invalid UUID: %s", s)
+		return constraintFail("invalid UUID: %s", diag.QuoteValue(s))
 	}
 	return nil
 }
@@ -615,7 +572,7 @@ func checkEnum(val any, c schema.Constraint) error {
 	if slices.Contains(allowed, s) {
 		return nil
 	}
-	return constraintFail("value %q not in enum %v", s, allowed)
+	return constraintFail("value %s not in enum %v", diag.QuoteValue(s), allowed)
 }
 
 // checkPattern validates that val matches all constraint patterns.
@@ -634,7 +591,7 @@ func checkPattern(val any, c schema.Constraint) error {
 	patterns := pc.Patterns()
 	for i, pattern := range compiled {
 		if !pattern.MatchString(s) {
-			return constraintFail("value %q does not match pattern %s", s, patterns[i])
+			return constraintFail("value %s does not match pattern %s", diag.QuoteValue(s), patterns[i])
 		}
 	}
 	return nil

@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -164,7 +166,7 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 	schemaType, ok := lookupType(s, inst.TypeID())
 	if !ok {
 		return nil, fmt.Errorf("json adapter: instance %s: type %s does not resolve, so its relations' field names are unknowable; no constructor builds such a snapshot, so an invariant is broken",
-			inst.PrimaryKey(), inst.TypeID())
+			diag.ValueText(inst.PrimaryKey().String()), inst.TypeID())
 	}
 
 	// 1. Add properties. encoding/json sorts an object's keys, so the order
@@ -173,7 +175,7 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 		v, ok := unwrapValue(val, constraintof.Property(schemaType, name))
 		if !ok {
 			return nil, refusal.New(ErrUnrepresentable, "json adapter: instance %s: property %q holds %s",
-				inst.PrimaryKey(), name, unwritable)
+				diag.ValueText(inst.PrimaryKey().String()), name, unwritable)
 		}
 		obj[name] = v
 	}
@@ -265,7 +267,7 @@ func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (ma
 		v, ok := canonicalOrRaw(key.Get(i).Unwrap(), pk.Constraint())
 		if !ok {
 			return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q to %s: target key component %d holds %s",
-				e.Relation(), e.Target().PrimaryKey(), i, unwritable)
+				e.Relation(), diag.ValueText(e.Target().PrimaryKey().String()), i, unwritable)
 		}
 		out["_target_"+pk.Name()] = v
 	}
@@ -277,7 +279,7 @@ func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (ma
 		v, ok := unwrapValue(val, c)
 		if !ok {
 			return nil, refusal.New(ErrUnrepresentable, "json adapter: edge %q to %s: edge property %q holds %s",
-				e.Relation(), e.Target().PrimaryKey(), name, unwritable)
+				e.Relation(), diag.ValueText(e.Target().PrimaryKey().String()), name, unwritable)
 		}
 		out[name] = v
 	}
@@ -355,7 +357,8 @@ func canonicalOrRaw(raw any, c schema.Constraint) (any, bool) {
 //
 // The digits come from encoding/json itself, so this cannot drift from the
 // encoder that writes every other number in the document. A float32 keeps its
-// 32-bit shortest form. v is a value in the one form [instance.ScalarOf] reads;
+// 32-bit shortest form unless that form, read at 64 bits as the parser reads
+// it, rounds to another float32; it is then written in its 64-bit form. v is a value in the one form [instance.ScalarOf] reads;
 // every other one passes through. A non-finite float reports false, JSON having
 // no number for it, and so do a json.Number [readsBack] refuses, a string that
 // is not valid UTF-8, each invalid byte of which encoding/json writes as
@@ -366,7 +369,11 @@ func withFloatIndicator(v any) (any, bool) {
 	var err error
 	switch rv.Kind() {
 	case reflect.Float32:
-		b, err = json.Marshal(float32(rv.Float()))
+		f := float32(rv.Float())
+		b, err = json.Marshal(f)
+		if back, perr := strconv.ParseFloat(string(b), 64); err == nil && perr == nil && float32(back) != f {
+			b, err = json.Marshal(rv.Float())
+		}
 	case reflect.Float64:
 		b, err = json.Marshal(rv.Float())
 	case reflect.String:

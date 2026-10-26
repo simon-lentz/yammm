@@ -2,6 +2,8 @@ package diag
 
 import (
 	"fmt"
+	"strconv"
+	"unicode/utf8"
 
 	"github.com/simon-lentz/yammm/location"
 )
@@ -152,7 +154,7 @@ func (b *IssueBuilder) WithRelated(related ...location.RelatedInfo) *IssueBuilde
 //
 // Multiple calls to WithDetail append to the existing details list.
 func (b *IssueBuilder) WithDetail(key, value string) *IssueBuilder {
-	b.issue.details = append(b.issue.details, Detail{Key: key, Value: value})
+	b.issue.details = append(b.issue.details, Detail{Key: key, Value: detailText(value)})
 	return b
 }
 
@@ -167,9 +169,25 @@ func (b *IssueBuilder) WithDetail(key, value string) *IssueBuilder {
 // Ordering note: Details are compared lexicographically during issue sorting
 // (by key, then value). For deterministic output, add details in a consistent
 // order.
+//
+// A detail value is held as given when it is valid UTF-8, and otherwise as the
+// quoted Go string [strconv.Quote] returns, so every detail value of a built
+// issue is valid UTF-8 whatever the data held; a key is held as given.
+// [IssueBuilder.WithDetail] holds its value to the same rule.
 func (b *IssueBuilder) WithDetails(details ...Detail) *IssueBuilder {
-	b.issue.details = append(b.issue.details, details...)
+	for _, d := range details {
+		b.issue.details = append(b.issue.details, Detail{Key: d.Key, Value: detailText(d.Value)})
+	}
 	return b
+}
+
+// detailText returns value as a detail holds it. A detail can carry text the
+// data writes, which no schema rule has judged.
+func detailText(value string) string {
+	if utf8.ValidString(value) {
+		return value
+	}
+	return strconv.Quote(value)
 }
 
 // WithExpectedGot is a convenience for type mismatch issues.

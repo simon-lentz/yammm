@@ -459,6 +459,22 @@ func TestParseTyped_ATargetCountDisagreementNamesTheSameColumnsEveryRun(t *testi
 	}
 }
 
+// A column that decides no target count and holds another count of segments
+// is left out, and the refusal cuts the column name the header wrote.
+func TestParseTyped_AStrayColumnsLongNameIsCut(t *testing.T) {
+	t.Parallel()
+	s := loadTestSchema(t, "edge_properties.yammm")
+	st, _ := s.Type("Order")
+	column := "carries." + strings.Repeat("z", 40)
+	input := "order_id,carries._target_item_id," + column + "\no1,a|b,x|y|z\n"
+	const want = `association "carries" column "carries.zzzzzzzzzzzzzzzzzzzzzzzz"… (48 bytes) holds 3 segments for 2 targets and is left out`
+	_, result := New().ParseTyped(t.Context(), location.MustNewSourceID("test://o.csv"), "Order", strings.NewReader(input), st)
+	issue, ok := issueContaining(result, "is left out")
+	if !ok || issue.Message() != want {
+		t.Fatalf("diagnostic %q, want %q: %s", issue.Message(), want, result)
+	}
+}
+
 var _ io.Reader = (*failingReader)(nil)
 
 // The type column may stand anywhere in the header; the columns either side of

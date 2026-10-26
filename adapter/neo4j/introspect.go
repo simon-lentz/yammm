@@ -67,10 +67,11 @@ type RemoteIndex struct {
 	// them: a backing index holds its constraint's name against every CREATE
 	// INDEX in the database, and already serves the (label, properties, kind) it
 	// covers, so both are conditions under which the server silently no-ops a
-	// declared index. It is this field that keeps them out of matches and drops —
+	// declared index. It is this field that keeps them out of pairing and drops —
 	// a backing index is created and dropped with its constraint and is never
 	// independently declarable, so reporting one as an undeclared orphan advises
-	// dropping the index behind a primary key.
+	// dropping the index behind a primary key. One that serves a declaration is
+	// still that declaration's Actual.
 	//
 	// A consumer filtering rows itself must test this field rather than assume
 	// the query excluded them.
@@ -145,9 +146,15 @@ func (ri RemoteIndex) indexConfig() (map[string]any, bool) {
 // Neo4j 5.9. On 5.8 the statement yields exactly id, name, type, entityType,
 // labelsOrTypes, properties, ownedIndex, options and createStatement; a
 // projection listing propertyType fails outright there, while YIELD * simply
-// returns no such key and [ConstraintDiffResult.Unverified] represents the
-// resulting gap. Trading that for a hard failure on every 5.0-5.8 server is a
-// bad exchange.
+// returns no such key. Trading that for a hard failure on every 5.0-5.8 server
+// is a bad exchange. The diff reports a TYPE record with no propertyType that
+// pairs with a desired TYPE constraint by its definition in
+// [ConstraintDiffResult.Unverified]. One that holds the name of a desired
+// constraint no record realises is a Drift, and one no desired constraint pairs
+// with is a Drop when it is owned and declarable and is counted in Excluded
+// otherwise. A desired TYPE constraint with no record is a Create, or a Drift
+// where another constraint holds its name, or an index the caller passes as
+// alsoBlocking.
 //
 // [IntrospectIndexesQuery] is explicit for the opposite reason: every column it
 // names has been present across the supported range, so it can state its
@@ -157,12 +164,13 @@ func IntrospectConstraintsQuery() string {
 }
 
 // IntrospectIndexesQuery returns the Cypher query for fetching every index the
-// diff must consider. Filters out only LOOKUP indexes, which are built in and
-// cannot be declared or dropped.
+// diff must consider. Filters out only LOOKUP indexes, which no schema
+// declares.
 //
-// Constraint-backing indexes are deliberately INCLUDED. They are never matched
-// or dropped — [RemoteIndex.Declarable] rejects them on
-// [RemoteIndex.OwningConstraint] — but they block: a server silently no-ops a
+// Constraint-backing indexes are deliberately INCLUDED. They are never paired by
+// name or dropped — [RemoteIndex.Declarable] rejects them on
+// [RemoteIndex.OwningConstraint] — and one that serves a declaration is that
+// declaration's Actual; and they block: a server silently no-ops a
 // CREATE INDEX whose name they hold, and also one whose (label, properties,
 // kind) they already serve. Excluding them here would put both blocks outside
 // what the diff can observe, and a blocked declaration reports as a Create the

@@ -3,11 +3,14 @@ package csv
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -45,13 +48,13 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 	case schema.KindBoolean:
 		v, err := strconv.ParseBool(raw)
 		if err != nil {
-			return nil, fmt.Errorf("cannot parse %q as Boolean: %w", raw, err)
+			return nil, fmt.Errorf("cannot parse %s as Boolean: %w", diag.QuoteValue(raw), parseCause(err))
 		}
 		return v, nil
 
 	case schema.KindDate:
 		if _, err := time.Parse("2006-01-02", raw); err != nil {
-			return nil, fmt.Errorf("cannot parse %q as Date (expected YYYY-MM-DD): %w", raw, err)
+			return nil, fmt.Errorf("cannot parse %s as Date (expected YYYY-MM-DD): %w", diag.QuoteValue(raw), parseCause(err))
 		}
 		return raw, nil
 
@@ -60,14 +63,14 @@ func (a *Adapter) coerceStringValue(raw string, c schema.Constraint) (any, error
 		// only accepted form; RFC 3339 applies to the default layout alone.
 		if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
 			if _, err := time.Parse(tc.Format(), raw); err != nil {
-				return nil, fmt.Errorf("cannot parse %q as Timestamp (expected layout %s): %w", raw, tc.Format(), err)
+				return nil, fmt.Errorf("cannot parse %s as Timestamp (expected layout %s): %w", diag.QuoteValue(raw), tc.Format(), parseCause(err))
 			}
 			return raw, nil
 		}
 		// RFC3339 reads a fractional second too: time.Parse accepts one after
 		// the seconds field whether or not the layout carries it.
 		if _, err := time.Parse(time.RFC3339, raw); err != nil {
-			return nil, fmt.Errorf("cannot parse %q as Timestamp (expected RFC 3339): %w", raw, err)
+			return nil, fmt.Errorf("cannot parse %s as Timestamp (expected RFC 3339): %w", diag.QuoteValue(raw), parseCause(err))
 		}
 		return raw, nil
 
@@ -147,11 +150,11 @@ func (a *Adapter) parseVectorValue(raw string) ([]any, error) {
 // spelling JSON has no literal for ("+5", "007") is refused.
 func integerFromCell(raw string) (any, error) {
 	if !numberLiteral(raw) || !immutable.IsIntegerLiteral(json.Number(raw)) {
-		return nil, fmt.Errorf("cannot parse %q as Integer: not a JSON integer literal", raw)
+		return nil, fmt.Errorf("cannot parse %s as Integer: not a JSON integer literal", diag.QuoteValue(raw))
 	}
 	v, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("cannot parse %q as Integer: %w", raw, err)
+		return nil, fmt.Errorf("cannot parse %s as Integer: %w", diag.QuoteValue(raw), parseCause(err))
 	}
 	return v, nil
 }
@@ -161,11 +164,11 @@ func integerFromCell(raw string) (any, error) {
 // sign of a zero kept, and refused when no float64 is finite.
 func floatFromCell(raw string) (float64, error) {
 	if !numberLiteral(raw) {
-		return 0, fmt.Errorf("cannot parse %q as Float: not a JSON number literal", raw)
+		return 0, fmt.Errorf("cannot parse %s as Float: not a JSON number literal", diag.QuoteValue(raw))
 	}
 	v, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
-		return 0, fmt.Errorf("cannot parse %q as Float: %w", raw, err)
+		return 0, fmt.Errorf("cannot parse %s as Float: %w", diag.QuoteValue(raw), parseCause(err))
 	}
 	return v, nil
 }
@@ -219,8 +222,8 @@ func digitsFrom(s string, i int) int {
 var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 
 // stripBOM returns a reader that skips a leading UTF-8 BOM and returns r's
-// first error from every Read after it: see [stickyReader].
-func stripBOM(r io.Reader) io.Reader {
+// first error from every Read after it, and the [stickyReader] that keeps it.
+func stripBOM(r io.Reader) (io.Reader, *stickyReader) {
 	sticky := &stickyReader{r: r}
 	head := make([]byte, len(utf8BOM))
 	n, err := io.ReadFull(sticky, head) // on an error, sticky returns it from the Read past head
@@ -228,7 +231,7 @@ func stripBOM(r io.Reader) io.Reader {
 	if err == nil && bytes.Equal(head, utf8BOM) {
 		head = head[:0]
 	}
-	return io.MultiReader(bytes.NewReader(head), sticky)
+	return io.MultiReader(bytes.NewReader(head), sticky), sticky
 }
 
 // stickyReader returns the first error its reader returns from every later
@@ -247,4 +250,33 @@ func (s *stickyReader) Read(p []byte) (int, error) {
 	n, err := s.r.Read(p)
 	s.err = err
 	return n, err //nolint:wrapcheck // an io.Reader passes io.EOF through as it is: callers compare it by identity
+}
+
+// failure returns the error r returned, where [readFailure] holds of it.
+func (s *stickyReader) failure() error {
+	if s.err == nil || !readFailure(s.err) {
+		return nil
+	}
+	return s.err
+}
+
+// parseCause returns what a parse of a cell failed on without the cell's text:
+// strconv and time repeat the whole text they were given, and the message
+// beside the cause already shows its head. A number's cause is its sentinel,
+// [strconv.ErrSyntax] or [strconv.ErrRange]. Of time's messages only extra
+// text repeats the cell, so its text is cut as the cell is.
+func parseCause(err error) error {
+	if ne, ok := errors.AsType[*strconv.NumError](err); ok {
+		return ne.Err
+	}
+	if pe, ok := errors.AsType[*time.ParseError](err); ok {
+		if strings.HasPrefix(pe.Message, ": extra text: ") {
+			return errors.New("extra text: " + diag.QuoteValue(pe.ValueElem))
+		}
+		if pe.Message != "" {
+			return errors.New(strings.TrimPrefix(pe.Message, ": "))
+		}
+		return fmt.Errorf("%s does not match %q", diag.QuoteValue(pe.ValueElem), pe.LayoutElem)
+	}
+	return err
 }

@@ -60,11 +60,13 @@ func TestCoerceValue_ALiteralNoFloat64HoldsReadsAlikeAtAnIntegerAndAFloat(t *tes
 func TestCheckValue_AnIntegerRefusalNamesWhatTheLiteralIs(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ lit, want string }{
-		{strings.Repeat("9", 400), "expected integer, got an integer outside the int64 range: 99999999999999999999999999999999… (400 characters)"},
+		{strings.Repeat("9", 400), "expected integer, got an integer outside the int64 range: 99999999999999999999999999999999… (400 bytes)"},
 		{"9223372036854775808", "expected integer, got an integer outside the int64 range: 9223372036854775808"},
 		{"1.5", "expected integer, got float 1.5"},
 		{"1e2", "expected integer, got float 100.0"},
 		{"abc", "expected integer, got json.Number"},
+		{"99999999999999999999x", "expected integer, got json.Number"},
+		{"99999999999999999999\x1b[2J", "expected integer, got json.Number"},
 		{"", "expected integer, got json.Number"},
 	} {
 		if err := eval.CheckValue(json.Number(c.lit), schema.NewIntegerConstraint()); err == nil || err.Error() != c.want {

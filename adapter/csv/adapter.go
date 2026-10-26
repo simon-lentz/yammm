@@ -60,8 +60,10 @@ func WithDelimiter(r rune) Option {
 }
 
 // WithTypeColumn sets the column name used for type discrimination
-// in [Adapter.ParseWithTypeColumn]. Required for that method; ignored
-// by [Adapter.ParseTyped].
+// in [Adapter.ParseWithTypeColumn]. That method needs a name: with none, or
+// with one holding a CR LF, which [encoding/csv] reads back as LF so that no
+// header holds it, its result carries an Error [E_CSV_CONFIG] and no byte is
+// read. [Adapter.ParseTyped] and the writers do not read the option.
 func WithTypeColumn(name string) Option {
 	return func(c *adapterConfig) {
 		c.typeColumn = name

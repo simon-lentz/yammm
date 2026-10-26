@@ -382,7 +382,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 		}
 		if d.Conflict() == nil {
 			return diagWire{}, fmt.Errorf("duplicate %s[%s] carries no conflict instance",
-				d.Instance().TypeID(), d.Instance().PrimaryKey())
+				d.Instance().TypeID(), diag.ValueText(d.Instance().PrimaryKey().String()))
 		}
 		conflictRow, err := tt.rowRef(d.Conflict().TypeID(), "duplicate conflict type")
 		if err != nil {
@@ -401,7 +401,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 		if d.Relation() != "" {
 			if d.Parent() == nil {
 				return diagWire{}, fmt.Errorf("duplicate %s[%s] carries relation %q with no parent",
-					d.Instance().TypeID(), d.Instance().PrimaryKey(), d.Relation())
+					d.Instance().TypeID(), diag.ValueText(d.Instance().PrimaryKey().String()), d.Relation())
 			}
 			parentRow, err := tt.rowRef(d.Parent().TypeID(), "duplicate parent type")
 			if err != nil {
@@ -443,7 +443,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 			key, err := parseTargetKey(u.TargetKey())
 			if err != nil {
 				return diagWire{}, fmt.Errorf("unresolved record %s[%s].%s: %w",
-					tt.ref(sourceID), u.Source().PrimaryKey(), u.Relation(), err)
+					tt.ref(sourceID), diag.ValueText(u.Source().PrimaryKey().String()), u.Relation(), err)
 			}
 			uw.TargetKey = key
 			var rel *schema.Relation
@@ -765,7 +765,7 @@ func parseTargetKey(keyStr string) ([]any, error) {
 	}
 	values, err := graph.ParseKey(keyStr)
 	if err != nil {
-		return nil, fmt.Errorf("target key %s: graph.ParseKey: %w", keyStr, err)
+		return nil, fmt.Errorf("target key %s: graph.ParseKey: %w", diag.ValueText(keyStr), err)
 	}
 	return values, nil
 }

@@ -42,12 +42,16 @@ type IndexDiffResult struct {
 	// verified.
 	Unverified []IndexUnverified
 
-	// Excluded counts the remote indexes the diff holds back from its drop
-	// bucket, which can still stand as a drift or unverified entry's Actual: the
-	// schema owns no label they carry, or they are of a shape it cannot declare (TEXT, POINT, a
-	// multi-label FULLTEXT, a relationship index, a constraint's backing
-	// index). See [ConstraintDiffResult.Excluded], which carries the same
-	// meaning and the same reason for existing.
+	// Excluded counts the remote indexes the comparison neither paired nor
+	// dropped: the schema owns no label they carry, or [RemoteIndex.Declarable]
+	// refuses them (a kind the DSL cannot declare, more than one label, a
+	// relationship index, a constraint's backing index). A backing index that
+	// serves a declaration is that declaration's Actual, in Match, Drift or
+	// Unverified, and is not counted.
+	// A counted row that blocks a declaration's CREATE is also the Actual of
+	// that Drift: blocking is not being compared. See
+	// [ConstraintDiffResult.Excluded], which carries the same meaning and the
+	// same reason for existing.
 	Excluded int
 }
 
@@ -75,7 +79,10 @@ type IndexDrift struct {
 }
 
 // DiffIndexes performs a semantic diff between desired schema indexes and
-// actual database indexes, classifying each into one of five categories.
+// actual database indexes. Each desired index is a Match, a Drift, a Create or
+// Unverified; an owned remote index that no declaration takes and the schema
+// could declare ([RemoteIndex.Declarable]) is a Drop; and every other remote
+// row is counted in Excluded.
 //
 // Only indexes on labels the schema owns are matched, created or dropped — see
 // [Adapter.OwnedLabels], which the caller builds once and passes in — and any
@@ -94,8 +101,9 @@ type IndexDrift struct {
 // A schema-owned remote index that [RemoteIndex.Declarable] accepts and no
 // declaration matches is reported as a Drop — the drift the index feature
 // exists to surface; an owned index it refuses is counted in Excluded instead,
-// unless it is a constraint's backing index that serves a declaration and
-// serves queries, which is a match. Drops are reported, never applied.
+// unless it is a constraint's backing index that serves a declaration, which is
+// that declaration's Actual: a match where it serves queries, drift where it is
+// FAILED and unverified where it is POPULATING. Drops are reported, never applied.
 //
 // Index and constraint names share ONE namespace. A constraint backed by an
 // index appears in SHOW INDEXES under the constraint's name and is seen here
@@ -123,9 +131,13 @@ func (a *Adapter) DiffIndexes(
 	//   - A (label, properties, kind) already served by an existing index is not
 	//     created again under a second name, which is how a constraint's backing
 	//     index absorbs a declared @@index over a primary key.
+	//
+	// byDefinition holds each definition's first row by its position in actual,
+	// which is what tells one row from another: a name does not, since a
+	// caller's rows may share one or have none.
 	byName := make(map[string]RemoteIndex, len(actual))
-	byDefinition := make(map[string]RemoteIndex, len(actual))
-	for _, ri := range actual {
+	byDefinition := make(map[string]int, len(actual))
+	for i, ri := range actual {
 		if ri.Name != "" {
 			if _, taken := byName[ri.Name]; !taken {
 				byName[ri.Name] = ri
@@ -153,7 +165,7 @@ func (a *Adapter) DiffIndexes(
 			[]string{firstLabel(ri.LabelsOrTypes), strings.ToUpper(ri.Type)}, ri.Properties...,
 		)...)
 		if _, taken := byDefinition[def]; !taken {
-			byDefinition[def] = ri
+			byDefinition[def] = i
 		}
 	}
 	// A constraint with no backing index — NOT NULL and TYPE — appears in no
@@ -178,20 +190,16 @@ func (a *Adapter) DiffIndexes(
 
 	// Excluded counts remote rows the comparison never reached, and whether it
 	// reached a BACKING index is not knowable here: one that serves a
-	// declaration becomes an IndexMatch below, and counting it now reported the
-	// same row twice — once as excluded and once as matched. Owned
-	// non-declarable rows are therefore held back and counted at the end, by
-	// what the comparison did with them.
+	// declaration becomes that declaration's Actual below, and counting it now
+	// would report the same row twice. Every row pairing does not take is therefore
+	// held back, by position, and counted at the end by what the comparison did
+	// with it.
 	var ownedRemotes []scoped[RemoteIndex]
-	heldBack := make(map[string]struct{})
-	for _, ri := range actual {
+	heldBack := make(map[int]struct{})
+	for i, ri := range actual {
 		label, isOwned := owned.ownedLabel(ri.LabelsOrTypes)
-		if !isOwned {
-			result.Excluded++
-			continue
-		}
-		if !ri.Declarable() {
-			heldBack[ri.Name] = struct{}{}
+		if !isOwned || !ri.Declarable() {
+			heldBack[i] = struct{}{}
 			continue
 		}
 		ownedRemotes = append(ownedRemotes, scopedObject(ri, label))
@@ -289,16 +297,18 @@ func (a *Adapter) DiffIndexes(
 		// The state check is the same one every paired index goes through: an
 		// index that exists but does not serve queries is not in sync however
 		// exactly it fits the declaration, and a backing index is no exception.
-		if served, ok := byDefinition[key]; ok && served.OwningConstraint != "" {
+		// In either state the row was compared, so it is no longer held back.
+		if at, ok := byDefinition[key]; ok && actual[at].OwningConstraint != "" {
+			served := actual[at]
+			delete(heldBack, at)
 			if reason, actionable := indexStateProblem(served); reason != "" {
 				result.append(actionable, d, served, reason)
 				continue
 			}
-			delete(heldBack, served.Name)
 			result.Match = append(result.Match, IndexMatch{Desired: d, Actual: served})
 			continue
 		}
-		if blocker, blocked := indexCreateBlocker(d, key, byName, byDefinition); blocked {
+		if blocker, blocked := indexCreateBlocker(d, key, byName, byDefinition, actual); blocked {
 			// Not deleted from heldBack: blocking a create is not being
 			// compared. The row is still one the diff can neither match nor
 			// drop, which is what Excluded counts.
@@ -434,7 +444,8 @@ func DeclarableIndexType(remoteType string) bool {
 }
 
 // Declarable reports whether a remote index is one a schema could have
-// declared, and therefore one [Adapter.DiffIndexes] owns.
+// declared, and therefore one [Adapter.DiffIndexes] can pair or drop when the
+// schema owns its label.
 //
 // Four rules, all of which must hold.
 //
@@ -460,7 +471,8 @@ func DeclarableIndexType(remoteType string) bool {
 // with its constraint, so reporting one as an undeclared orphan advises
 // dropping the index behind a primary key. [IntrospectIndexesQuery] yields
 // those rows deliberately — they are blockers the diff must see — so this check
-// is the only thing keeping them out of matches and drops.
+// keeps them out of pairing and drops. One that serves a declaration is still
+// that declaration's Actual, which [Adapter.DiffIndexes] finds by definition.
 //
 // The entity type must be NODE or unreported. An unreported one is treated as
 // NODE: the field is absent only where a server or fixture does not report it,
@@ -593,13 +605,13 @@ func describeLabels(labels []string) string {
 // A definition served by a constraint's BACKING index does not reach here: the
 // caller treats that as satisfying the declaration, because no action could
 // clear it. The caller passes the desired index's identity key, which it has
-// already computed for that test.
-func indexCreateBlocker(d Index, key string, byName, byDefinition map[string]RemoteIndex) (RemoteIndex, bool) {
+// already computed for that test, and the rows byDefinition's positions index.
+func indexCreateBlocker(d Index, key string, byName map[string]RemoteIndex, byDefinition map[string]int, actual []RemoteIndex) (RemoteIndex, bool) {
 	if blocker, taken := byName[d.Name]; taken && d.Name != "" {
 		return blocker, true
 	}
-	if blocker, served := byDefinition[key]; served {
-		return blocker, true
+	if at, served := byDefinition[key]; served {
+		return actual[at], true
 	}
 	return RemoteIndex{}, false
 }

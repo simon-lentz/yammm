@@ -68,13 +68,16 @@
 // # json.Number Handling
 //
 // [Classify] determines what a value IS, not what it should be per schema. It
-// reads a json.Number by its spelling ([immutable.IsIntegerLiteral]):
-//   - json.Number("42") → IntKind (no '.', 'e' or 'E')
+// reads a json.Number by its spelling: an optional sign and decimal digits
+// alone are an integer, and any other text [strconv.ParseFloat] reads is a float:
+//   - json.Number("42") → IntKind (a sign and digits alone)
 //   - json.Number("3.0") → FloatKind (has a decimal point)
 //   - json.Number("1e2") → FloatKind (has an exponent), though its value is whole
 //   - json.Number("3.14") → FloatKind
 //   - json.Number("-9223372036854775809") → IntKind, kept as the json.Number:
 //     an integer no int64 holds, which an Integer check refuses
+//   - json.Number("99999999999999999999x") → UnspecifiedKind: no number, though
+//     strconv reports ErrRange for it
 //
 // The Integer check at instance validation refuses every FloatKind value, "3.0"
 // and 3.0 included: a float is never an Integer, whole or not.
@@ -135,10 +138,12 @@
 //
 // # Dependencies
 //
-//	internal/value  ──imports──▶  immutable, schema, github.com/google/uuid
+//	internal/value  ──imports──▶  diag, immutable, schema, github.com/google/uuid
 //
 // Comparison and kind detection depend on stdlib and immutable; [Canonical] is what
 // reaches schema, because a canonical form is defined by a constraint, and it
-// and [Scalar] reach github.com/google/uuid, whose UUID each reads as itself. The edge is one-directional: schema does not import
+// and [Scalar] reach github.com/google/uuid, whose UUID each reads as itself.
+// [Canonical] reaches diag for [diag.QuoteValue], the rule a message that
+// repeats a value follows. The edge is one-directional: schema does not import
 // this package, and adding that edge would create a cycle.
 package value

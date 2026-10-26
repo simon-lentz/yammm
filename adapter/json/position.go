@@ -25,6 +25,11 @@ type positionTable struct {
 	// marks holds, per 0-based line longer than markStride, the checkpoints
 	// marksFor records; a line is decomposed once, on its first long lookup.
 	marks map[int][]columnMark
+
+	// counted is the bytes positionAt and marksFor have decoded, the measure
+	// of what the positions cost: [TestParseObject_PositionsOnOneLineCostTheDocumentLinearly]
+	// bounds it.
+	counted int
 }
 
 // columnMark is a rune start on a line and that rune's column.
@@ -84,6 +89,7 @@ func (t *positionTable) positionAt(byteOffset int) location.Position {
 	}
 	for i < byteOffset {
 		_, size := utf8.DecodeRune(t.content[i:])
+		t.counted += size
 		next := i + size
 		if next > byteOffset {
 			break // byteOffset lies inside this rune, which is its column
@@ -117,6 +123,7 @@ func (t *positionTable) marksFor(line int) []columnMark {
 		_, size := utf8.DecodeRune(t.content[i:])
 		i += size
 	}
+	t.counted += end - start
 	if t.marks == nil {
 		t.marks = make(map[int][]columnMark)
 	}

@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -82,6 +83,25 @@ func TestNewFromSnapshot_RefusesATypeTheImportingSchemaDoesNotDeclare(t *testing
 	requireRefused(t, without, src.Snapshot(), diag.E_GRAPH_TYPE_NOT_FOUND, "at types entry")
 }
 
+// The types entry and each root carry the one identity the importing schema
+// drops, which is one break.
+func TestNewFromSnapshot_RefusesATypeTheImportingSchemaDoesNotDeclareOnce(t *testing.T) {
+	t.Parallel()
+	with := loadEntry(t, "schema \"entry\"\n\ntype Company {\n\tid String primary\n}\n\ntype Person {\n\tid String primary\n}\n")
+	without := loadEntry(t, "schema \"entry\"\n\ntype Person {\n\tid String primary\n}\n")
+
+	src := graph.New(with)
+	for _, key := range []string{"c1", "c2"} {
+		if r := src.Add(t.Context(), rootInstance(t, with, "Company", key)); !r.OK() {
+			t.Fatalf("add: %s", r)
+		}
+	}
+	_, res := graph.NewFromSnapshot(without, src.Snapshot())
+	if n := res.Len(); n != 1 || !res.HasCode(diag.E_GRAPH_TYPE_NOT_FOUND) {
+		t.Errorf("want one E_GRAPH_TYPE_NOT_FOUND, got %d issues: %s", n, res)
+	}
+}
+
 func TestNewFromSnapshot_RefusesARootTheImportingSchemaMakesAbstract(t *testing.T) {
 	t.Parallel()
 	concrete := loadEntry(t, "schema \"entry\"\n\ntype Company {\n\tid String primary\n}\n")
@@ -124,6 +144,37 @@ func TestNewFromSnapshot_RefusesAnUnresolvedRecordUnderAnAssociationTheImporting
 	requireRefused(t, without, snap, diag.E_GRAPH_UNKNOWN_RELATION, `under "WORKS_AT", which its type does not declare as an association`)
 }
 
+// A name the schema declares is shown whole, however long: only a name the
+// data writes is cut.
+func TestNewFromSnapshot_NamesADeclaredAssociationWhole(t *testing.T) {
+	t.Parallel()
+	long := "WORKS_AT_" + strings.Repeat("A", 31)
+	const tmpl = "schema \"entry\"\n\ntype Company {\n%s}\n\ntype Person {\n\tid String primary\n\t--> %s (one) Company\n}\n"
+	two := loadEntry(t, fmt.Sprintf(tmpl, "\ta String primary\n\tb String primary\n", long))
+	one := loadEntry(t, fmt.Sprintf(tmpl, "\tid String primary\n", long))
+
+	personID := typeIDOf(t, two, "Person")
+	snap, res := graph.RebuildSnapshot(two, graph.SnapshotParts{
+		Types: []schema.TypeID{personID},
+		Instances: []graph.InstanceParts{{
+			TypeID:     personID,
+			PrimaryKey: immutable.WrapKey([]any{"p1"}),
+			Properties: immutable.WrapProperties(map[string]any{"id": "p1"}),
+		}},
+		Unresolved: []graph.UnresolvedParts{{
+			SourceType: personID,
+			SourceKey:  immutable.WrapKey([]any{"p1"}),
+			Relation:   long,
+			TargetKey:  immutable.WrapKey([]any{"x", "y"}),
+			Reason:     "target_missing",
+		}},
+	})
+	if res.HasErrors() {
+		t.Fatalf("RebuildSnapshot: %s", res)
+	}
+	requireRefused(t, one, snap, diag.E_GRAPH_INVALID_PK, `under "`+long+`" carries a 2-part target key; the target declares 1`)
+}
+
 func TestNewFromSnapshot_RefusesTwoChildrenInASlotTheImportingSchemaMakesOne(t *testing.T) {
 	t.Parallel()
 	const tmpl = "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> LINES (%s) Line\n}\n\npart type Line {\n\tsku String\n}\n"
@@ -149,7 +200,7 @@ func TestNewFromSnapshot_RefusesTwoChildrenInASlotTheImportingSchemaMakesOne(t *
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
-	requireRefused(t, one, snap, diag.E_DUPLICATE_COMPOSED_PK, "(one) cardinality violated")
+	requireRefused(t, one, snap, diag.E_DUPLICATE_COMPOSED_PK, `Order[["o1"]] composition "LINES": (one) cardinality violated, got 2 children`)
 }
 
 // Two keys the snapshot's schema holds apart can be one address under the

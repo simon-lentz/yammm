@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -105,6 +106,15 @@ func TestBuilderFor_UnknownType(t *testing.T) {
 	assert.Nil(t, b)
 	assert.Contains(t, err.Error(), `"Ghost"`)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestBuilderFor_ALongUnknownTypeIsCut(t *testing.T) {
+	s := personSchema(t)
+	long := strings.Repeat("G", 100)
+	b, err := instance.BuilderFor(s, long)
+	require.Error(t, err)
+	assert.Nil(t, b)
+	assert.Equal(t, `instance.BuilderFor: type "`+long[:32]+`"… (100 bytes) not found`, err.Error())
 }
 
 func TestBuilderFor_AbstractType(t *testing.T) {

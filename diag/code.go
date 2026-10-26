@@ -384,8 +384,9 @@ var (
 
 	// E_CASE_FOLD_COLLISION indicates multiple input fields collide after case-folding.
 	// This occurs when non-strict mode is enabled and two or more field names fold
-	// to one schema property that none of them matches exactly (schema "NAME",
-	// input "Name" and "name"). An exact match is claimed first and never collides.
+	// to one member that none of them matches exactly: a property (schema "name",
+	// input "Name" and "NAME"), a relation's field, an edge property or a
+	// foreign-key field. An exact match is claimed first and never collides.
 	E_CASE_FOLD_COLLISION = NewCode("E_CASE_FOLD_COLLISION", CategoryInstance)
 )
 
@@ -614,7 +615,8 @@ var (
 	// fast path to Load + Marshal because the fast path reported an Error or
 	// Fatal issue other than a cancellation: E_SNAPSHOT_MALFORMED at Error,
 	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output carries the
-	// input's indentation and, when it parses, its created_at, so it differs
+	// input's indentation and, when it parses and the caller sets no non-zero
+	// time through snapshot.WithUpdateCreatedAt, its created_at, so it differs
 	// from a direct Marshal only where the input did; the warning surfaces the
 	// path transition so operators can observe fallback frequency and triage
 	// persistent cases. Details include a "triggering_codes" entry listing the

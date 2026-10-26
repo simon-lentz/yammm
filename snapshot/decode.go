@@ -45,6 +45,10 @@ type streamDecoder struct {
 	// canonicalizer memoizes per schema, left per-call one layer down.
 	keyPositions [][]wireKeyPosition
 
+	// closureNames is the import closure's schema names, built once on first
+	// use by closureHolds.
+	closureNames map[string]struct{}
+
 	// loadCfg holds deserialization options (e.g., skip integrity check).
 	loadCfg loadConfig
 
@@ -121,7 +125,7 @@ func (sd *streamDecoder) decodeHeader() error {
 		return fmt.Errorf("expected JSON object: %w", err)
 	}
 	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
-		return fmt.Errorf("expected JSON object, got %v", tok)
+		return fmt.Errorf("expected JSON object, got %s", diag.ValueText(fmt.Sprint(tok)))
 	}
 
 	// First key must be "yammm_snapshot".
@@ -135,7 +139,7 @@ func (sd *streamDecoder) decodeHeader() error {
 		// collected E_SNAPSHOT_MALFORMED, so collecting here too reported one
 		// malformation twice — and this was the only arm in decodeHeader that
 		// did both.
-		return fmt.Errorf("yammm_snapshot must be the first key in the top-level object; got %q", firstKey)
+		return fmt.Errorf("yammm_snapshot must be the first key in the top-level object; got %s", diag.QuoteValue(firstKey))
 	}
 
 	// Decode header.
@@ -161,7 +165,7 @@ func (sd *streamDecoder) decodeHeader() error {
 	}
 	for _, f := range sd.header.Features {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNSUPPORTED_FEATURE,
-			fmt.Sprintf("unrecognized feature %q", f)).
+			"unrecognized feature "+diag.QuoteValue(f)).
 			WithDetail(diag.DetailKeyFeature, f).
 			Build())
 	}
@@ -187,7 +191,7 @@ func (sd *streamDecoder) decodeHeader() error {
 		expectedHash := schema.StructuralHash(sd.schema)
 		if expectedHash != sd.header.SchemaHash {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INCOMPATIBLE_SCHEMA,
-				fmt.Sprintf("schema structural hash mismatch for %q", sd.header.SchemaName)).
+				"schema structural hash mismatch for "+diag.QuoteValue(sd.header.SchemaName)).
 				WithDetail(diag.DetailKeyExpectedHash, expectedHash).
 				WithDetail(diag.DetailKeyActualHash, sd.header.SchemaHash).
 				WithDetail(diag.DetailKeySchemaName, sd.header.SchemaName).
@@ -215,7 +219,7 @@ func (sd *streamDecoder) decodeHeader() error {
 		// Skip non-types keys.
 		var skip json.RawMessage
 		if err := dec.Decode(&skip); err != nil {
-			return fmt.Errorf("failed to skip key %q: %w", key, err)
+			return fmt.Errorf("failed to skip key %s: %w", diag.QuoteValue(key), err)
 		}
 	}
 
@@ -442,7 +446,7 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 		if first, dup := seenRows[row]; dup {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("instances entries %d and %d both reference types-table row %d (%s)",
-					first, gi, row, sd.refAt(row))).Build())
+					first, gi, row, sd.refText(row))).Build())
 			continue
 		}
 		seenRows[row] = gi
@@ -481,7 +485,7 @@ func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
 	if !schema.Addressable(sd.schema, sd.tableIDs[row]) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_UNNAMEABLE_TYPE,
 			fmt.Sprintf("%s denotes %s, which this schema reaches only through an intermediate import and cannot name",
-				position, sd.refAt(row))).
+				position, sd.refText(row))).
 			WithHint("import the schema that declares it directly, then read the document again").
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			WithDetail(diag.DetailKeyTypeSchema, sd.tableIDs[row].SchemaPath().String()).
@@ -501,7 +505,7 @@ func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
 		return true
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_ROOT,
-		fmt.Sprintf("%s denotes %s, which %s", position, sd.refAt(row), rule)).
+		fmt.Sprintf("%s denotes %s, which %s", position, sd.refText(row), rule)).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 		Build())
 	return false
@@ -525,12 +529,12 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 	if depth == 0 && inst.Type != nil && *inst.Type != row {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 			fmt.Sprintf("root instance %s declares type row %d (%s) inside the section entry of row %d (%s)",
-				formatWireKey(inst.Key), *inst.Type, sd.refAt(*inst.Type), row, sd.refAt(row))).Build())
+				diag.ValueText(formatWireKey(inst.Key)), *inst.Type, sd.refText(*inst.Type), row, sd.refText(row))).Build())
 	}
 
 	if depth > 0 && len(inst.Edges) > 0 {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_COMPOSED,
-			fmt.Sprintf("composed child %s has edges (composed children must not carry edges)", sd.refAt(row))).
+			fmt.Sprintf("composed child %s has edges (composed children must not carry edges)", sd.refText(row))).
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			Build())
 	}
@@ -586,7 +590,7 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 			// the type's slice while its index keeps only the last, so InstancesOf
 			// reported two and every edge on that key bound to one.
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
-				fmt.Sprintf("duplicate primary key %s for type %q", keyStr, sd.refAt(row))).
+				fmt.Sprintf("duplicate primary key %s for type %s", diag.ValueText(keyStr), sd.refQuoted(row))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 				WithDetail(diag.DetailKeyPrimaryKey, keyStr).
 				Build())
@@ -619,7 +623,7 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 			// The writer emits a row at every non-root position, so an absent
 			// one is malformed rather than a value to recover from context.
 			childRow, ok := sd.requireRow(child.Type, func() string {
-				return fmt.Sprintf("composed child under %s.%s", sd.refAt(row), relName)
+				return fmt.Sprintf("composed child under %s.%s", sd.refText(row), diag.ValueText(relName))
 			})
 			if !ok {
 				continue
@@ -660,7 +664,7 @@ func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own in
 			start := sd.mark()
 			sd.checkDeclaredEdgeProperties(row, inst.Key, relName, e.Properties)
 			targetRow, _ := sd.requireRow(e.TargetType, func() string {
-				return fmt.Sprintf("edge %d under %s.%s", ei, sd.refAt(row), relName)
+				return fmt.Sprintf("edge %d under %s.%s", ei, sd.refText(row), diag.ValueText(relName))
 			})
 			rel := sd.checkAssociation(fmt.Sprintf("edge %d", ei), row, inst.Key, relName, e.TargetType, e.TargetKey, "", true)
 			if sd.refusedSince(start) {
@@ -727,8 +731,8 @@ func (sd *streamDecoder) checkEdgeListName(row int, key []any, relation string) 
 		return
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
-		fmt.Sprintf("the empty edge list of %s[%s] under %q, which the type does not declare as an association",
-			sd.refAt(row), formatWireKey(key), relation)).
+		fmt.Sprintf("the empty edge list of %s[%s] under %s, which the type does not declare as an association",
+			sd.refText(row), diag.ValueText(formatWireKey(key)), diag.QuoteValue(relation))).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 		WithDetail(diag.DetailKeyRelationName, relation).
 		Build())
@@ -754,8 +758,8 @@ func (sd *streamDecoder) checkComposedSlot(row int, relation string, occupants i
 	rel, ok := t.Relation(relation)
 	if !ok || rel.Kind() != schema.RelationComposition {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_COMPOSED,
-			fmt.Sprintf("%s holds composed children under %q, which the type does not declare as a composition",
-				sd.refAt(row), relation)).
+			fmt.Sprintf("%s holds composed children under %s, which the type does not declare as a composition",
+				sd.refText(row), diag.QuoteValue(relation))).
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			WithDetail(diag.DetailKeyRelationName, relation).
 			Build())
@@ -764,7 +768,7 @@ func (sd *streamDecoder) checkComposedSlot(row int, relation string, occupants i
 	if occupants > 1 && !rel.IsMany() {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 			fmt.Sprintf("composition %q under %s: (one) cardinality violated, got %d children",
-				relation, sd.refAt(row), occupants)).
+				relation, sd.refText(row), occupants)).
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			WithDetail(diag.DetailKeyRelationName, relation).
 			WithDetail(diag.DetailKeyJSONField, rel.FieldName()).Build())
@@ -795,7 +799,7 @@ func (sd *streamDecoder) checkSiblingKeys(row int, parentKey, relation string, t
 		if first, dup := seen[key]; dup {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 				fmt.Sprintf("composition %q under %s[%s] holds children %d and %d at key %s",
-					relation, sd.refAt(row), parentKey, first, i, key)).
+					relation, sd.refText(row), diag.ValueText(parentKey), first, i, diag.ValueText(key))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 				WithDetail(diag.DetailKeyRelationName, relation).
 				WithDetail(diag.DetailKeyPrimaryKey, key).
@@ -821,7 +825,7 @@ func (sd *streamDecoder) checkComposedChildType(parentRow int, relation string, 
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 		fmt.Sprintf("composed child %s under %s.%s is typed %s, which the composition declares as %s",
-			formatWireKey(key), sd.refAt(parentRow), relation, sd.refAt(childRow), sd.identRef(want))).
+			diag.ValueText(formatWireKey(key)), sd.refText(parentRow), relation, sd.refText(childRow), sd.identRef(want))).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(parentRow)).
 		WithDetail(diag.DetailKeyRelationName, relation).
 		WithDetail(diag.DetailKeyExpected, sd.identRef(want)).
@@ -842,7 +846,7 @@ func (sd *streamDecoder) checkComposedChildType(parentRow int, relation string, 
 func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 	if i := unreadableWireComponent(inst.Key); i >= 0 {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("instance of %s stores key %s, whose component %d is not a scalar graph.ParseKey reads back", sd.refAt(row), formatWireKey(inst.Key), i)).
+			fmt.Sprintf("instance of %s stores key %s, whose component %d is not a scalar graph.ParseKey reads back", sd.refText(row), diag.ValueText(formatWireKey(inst.Key)), i)).
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			WithDetail(diag.DetailKeyPrimaryKey, formatWireKey(inst.Key)).
 			Build())
@@ -873,7 +877,7 @@ func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 			}
 			if !wireComponentAgrees(inst.Key[i], prop, canonicalizingConstraint(positions, i)) {
 				reason = fmt.Sprintf("component %d disagrees with property %q, which holds %s",
-					i, pk.Name(), formatWireKey([]any{prop}))
+					i, pk.Name(), diag.ValueText(formatWireKey([]any{prop})))
 				break
 			}
 			i++
@@ -883,7 +887,7 @@ func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 		return true
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-		fmt.Sprintf("instance of %s stores key %s, which %s", sd.refAt(row), formatWireKey(inst.Key), reason)).
+		fmt.Sprintf("instance of %s stores key %s, which %s", sd.refText(row), diag.ValueText(formatWireKey(inst.Key)), reason)).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 		WithDetail(diag.DetailKeyPrimaryKey, formatWireKey(inst.Key)).
 		Build())
@@ -1011,7 +1015,7 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instW
 	_, res := sd.revalidator.ValidateOne(ctx, sd.tableTags[row], instance.RawInstance{Properties: props})
 	// MergeRetag keeps the validator's order, so a capped collector evicts by
 	// when a finding was raised, not by how its message sorts.
-	sev, typeRef := sd.loadCfg.revalidateSeverity, sd.refAt(row)
+	sev, typeText := sd.loadCfg.revalidateSeverity, sd.refText(row)
 	sd.collector.MergeRetag(res,
 		func(s diag.Severity, code diag.Code) (diag.Severity, bool) {
 			if code == diag.E_CONTEXT_CANCELLED {
@@ -1026,7 +1030,7 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instW
 			if reportsTheRun(issue.Code()) {
 				return issue
 			}
-			return retagIssue(issue, sev, typeRef, keyStr)
+			return retagIssue(issue, sev, typeText, keyStr)
 		})
 }
 
@@ -1120,6 +1124,15 @@ func (sd *streamDecoder) wireTypeRef(row *int) string {
 	return sd.refAt(r)
 }
 
+// wireTypeText is wireTypeRef for a message, a row rendered as refText renders it.
+func (sd *streamDecoder) wireTypeText(row *int) string {
+	r, ok := sd.rowAt(row)
+	if !ok {
+		return "no types-table row"
+	}
+	return sd.refText(r)
+}
+
 // identRef renders a schema identity in the document's own form, so an
 // expected-versus-got pair reads in one vocabulary.
 //
@@ -1146,12 +1159,13 @@ func (sd *streamDecoder) identRef(id schema.TypeID) string {
 }
 
 // retagIssue rebuilds a validator issue at the revalidation severity,
-// prefixed with the loaded instance it came from. diag.Issue is immutable
+// prefixed with the loaded instance it came from, typeText as refText renders
+// it. diag.Issue is immutable
 // after Build, so a rebuild is the only way to move the severity; details,
 // hint, span, path and related locations all travel.
-func retagIssue(issue diag.Issue, sev diag.Severity, typeRef, keyStr string) diag.Issue {
+func retagIssue(issue diag.Issue, sev diag.Severity, typeText, keyStr string) diag.Issue {
 	b := diag.NewIssue(sev, issue.Code(),
-		fmt.Sprintf("revalidation of %s[%s]: %s", typeRef, keyStr, issue.Message())).
+		fmt.Sprintf("revalidation of %s[%s]: %s", typeText, diag.ValueText(keyStr), issue.Message())).
 		WithDetails(issue.Details()...).
 		WithRelated(issue.Related()...)
 	if issue.HasSpan() {
@@ -1179,7 +1193,7 @@ func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
 		return
 	}
 	sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_PATH_FALLBACK,
-		fmt.Sprintf("provenance path %q could not be parsed, falling back to root path", inst.Provenance.Path)).
+		fmt.Sprintf("provenance path %s could not be parsed, falling back to root path", diag.QuoteValue(inst.Provenance.Path))).
 		WithDetail(diag.DetailKeyOriginalPath, inst.Provenance.Path).
 		WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 		Build())
@@ -1201,8 +1215,8 @@ func (sd *streamDecoder) checkDeclaredProperties(row int, key []any, props map[s
 	}
 	for _, name := range undeclaredWireNames(props, func(n string) bool { _, ok := t.Property(n); return ok }) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("instance %s[%s] holds property %q, which its type does not declare",
-				sd.refAt(row), formatWireKey(key), name)).
+			fmt.Sprintf("instance %s[%s] holds property %s, which its type does not declare",
+				sd.refText(row), diag.ValueText(formatWireKey(key)), diag.QuoteValue(name))).
 			WithDetails(diag.TypeProp(sd.refAt(row), name)...).
 			Build())
 	}
@@ -1226,8 +1240,8 @@ func (sd *streamDecoder) checkDeclaredEdgeProperties(row int, key []any, relatio
 	}
 	for _, name := range undeclaredWireNames(props, func(n string) bool { _, ok := rel.Property(n); return ok }) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("edge %q of %s[%s] holds edge property %q, which the association does not declare",
-				relation, sd.refAt(row), formatWireKey(key), name)).
+			fmt.Sprintf("edge %q of %s[%s] holds edge property %s, which the association does not declare",
+				relation, sd.refText(row), diag.ValueText(formatWireKey(key)), diag.QuoteValue(name))).
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(row)).
 			WithDetail(diag.DetailKeyRelationName, relation).
 			WithDetail(diag.DetailKeyPropertyName, name).
@@ -1291,7 +1305,7 @@ func (sd *streamDecoder) checkValueConformance(inst instWire, row int) {
 		if _, err := value.Canonical(raw, prop.Constraint()); err != nil {
 			sd.collector.Collect(diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_NONCONFORMING,
 				fmt.Sprintf("property %q of %s does not conform to its %s constraint: %s",
-					name, formatWireKey(inst.Key), prop.Constraint().Kind(), err)).
+					name, diag.ValueText(formatWireKey(inst.Key)), prop.Constraint().Kind(), err)).
 				WithDetails(diag.TypeProp(sd.refAt(row), name)...).
 				Build())
 		}
@@ -1314,15 +1328,15 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		// "never binds to row 0", and the diagnostics below broke that promise
 		// by rendering the sentinel: a record naming no type reported the type
 		// in row 0, pointing debugging at something unrelated.
-		dupRef := "(no types-table row)"
+		dupRef, dupText := "(no types-table row)", "(no types-table row)"
 		if rowOK {
-			dupRef = sd.refAt(row)
+			dupRef, dupText = sd.refAt(row), sd.refText(row)
 		}
 
 		if rowOK && dup.Instance.Type != nil && *dup.Instance.Type != row {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 				fmt.Sprintf("duplicate instance %s[%s] declares type row %d (%s) but its record states row %d (%s)",
-					sd.refAt(row), keyStr, *dup.Instance.Type, sd.refAt(*dup.Instance.Type), row, sd.refAt(row))).Build())
+					sd.refText(row), diag.ValueText(keyStr), *dup.Instance.Type, sd.refText(*dup.Instance.Type), row, sd.refText(row))).Build())
 		}
 
 		// Marshal rewrites the record's key from the instance it carries, so a
@@ -1341,7 +1355,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if stated != carried {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states key %s but its instance carries %s",
-					di, keyStr, instKey)).Build())
+					di, diag.ValueText(keyStr), diag.ValueText(instKey))).Build())
 		}
 
 		// keyed reports that the instance's stored key is one a conflict can be
@@ -1361,7 +1375,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 		if len(dup.Instance.Composed) > 0 {
 			b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_COMPOSED_ON_DUPLICATE,
-				fmt.Sprintf("duplicate instance %s[%s] must not have composed children", dupRef, keyStr)).
+				fmt.Sprintf("duplicate instance %s[%s] must not have composed children", dupText, diag.ValueText(keyStr))).
 				WithDetail(diag.DetailKeyPrimaryKey, keyStr)
 			if rowOK {
 				b = b.WithDetail(diag.DetailKeyTypeName, dupRef)
@@ -1370,7 +1384,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		}
 		if len(dup.Instance.Edges) > 0 {
 			b := diag.NewIssue(diag.Error, diag.E_SNAPSHOT_EDGES_ON_DUPLICATE,
-				fmt.Sprintf("duplicate instance %s[%s] must not have edges", dupRef, keyStr)).
+				fmt.Sprintf("duplicate instance %s[%s] must not have edges", dupText, diag.ValueText(keyStr))).
 				WithDetail(diag.DetailKeyPrimaryKey, keyStr)
 			if rowOK {
 				b = b.WithDetail(diag.DetailKeyTypeName, dupRef)
@@ -1380,7 +1394,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 		if dup.Conflict == nil {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("duplicate record %d (%s[%s]) carries no conflict block", di, dupRef, keyStr)).Build())
+				fmt.Sprintf("duplicate record %d (%s[%s]) carries no conflict block", di, dupText, diag.ValueText(keyStr))).Build())
 			continue
 		}
 		conflictRow, conflictOK := sd.requireRow(dup.Conflict.Type, func() string {
@@ -1405,7 +1419,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			if !idx.rootExists(conflictRow, conflictKey) {
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 					fmt.Sprintf("duplicate conflict %s[%s] references non-existent instance",
-						sd.refAt(conflictRow), conflictKey)).
+						sd.refText(conflictRow), diag.ValueText(conflictKey))).
 					WithDetail(diag.DetailKeyTypeName, sd.refAt(conflictRow)).
 					WithDetail(diag.DetailKeyPrimaryKey, conflictKey).
 					Build())
@@ -1416,14 +1430,14 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			if rowOK && (conflictRow != row || conflictKey != carried) {
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("duplicate record %d states conflict %s[%s]; a root duplicate's conflict is the root at its own type and key, %s[%s]",
-						di, sd.refAt(conflictRow), conflictKey, dupRef, carried)).Build())
+						di, sd.refText(conflictRow), diag.ValueText(conflictKey), dupText, diag.ValueText(carried))).Build())
 			}
 			continue
 		}
 
 		if dup.ParentType == nil {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("duplicate record %d carries relation %q with no parent coordinates", di, dup.Relation)).Build())
+				fmt.Sprintf("duplicate record %d carries relation %s with no parent coordinates", di, diag.QuoteValue(dup.Relation))).Build())
 			continue
 		}
 		parentRow, ok := sd.requireRow(dup.ParentType, func() string {
@@ -1436,7 +1450,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if !idx.rootExists(parentRow, parentKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("duplicate parent %s[%s] does not resolve to a root instance",
-					sd.refAt(parentRow), parentKey)).
+					sd.refText(parentRow), diag.ValueText(parentKey))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(parentRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, parentKey).
 				Build())
@@ -1461,14 +1475,14 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if rel != nil && rel.IsMany() && len(dup.Conflict.Key) == 0 && len(dup.Instance.Key) > 0 {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states no conflict key; under the (many) composition %q its conflict is the child at its own key, %s",
-					di, slot.relation, carried)).Build())
+					di, slot.relation, diag.ValueText(carried))).Build())
 			continue
 		}
 		occupant, found := sd.conflictInSlot(idx, slot, conflictRow, dup.Conflict.Key, conflictKey)
 		if !found {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("duplicate conflict %s[%s] under %s[%s].%s references non-existent instance",
-					sd.refAt(conflictRow), conflictKey, sd.refAt(parentRow), parentKey, dup.Relation)).
+					sd.refText(conflictRow), diag.ValueText(conflictKey), sd.refText(parentRow), diag.ValueText(parentKey), diag.ValueText(dup.Relation))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(conflictRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, conflictKey).
 				Build())
@@ -1479,7 +1493,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		if rowOK && rel != nil && rel.IsMany() && occupant.key != carried {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states conflict %s[%s]; under the (many) composition %q its conflict is the child at its own key, %s",
-					di, sd.refAt(occupant.row), occupant.key, slot.relation, carried)).Build())
+					di, sd.refText(occupant.row), diag.ValueText(occupant.key), slot.relation, diag.ValueText(carried))).Build())
 		}
 	}
 
@@ -1523,7 +1537,7 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 		if !refused && !sd.refusedSince(start) && !idx.rootExists(sourceRow, sourceKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("unresolved edge source %s[%s] references non-existent instance",
-					sd.refAt(sourceRow), sourceKey)).
+					sd.refText(sourceRow), diag.ValueText(sourceKey))).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(sourceRow)).
 				WithDetail(diag.DetailKeyPrimaryKey, sourceKey).
 				Build())
@@ -1593,7 +1607,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 			case rel.IsOptional():
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("unresolved record %d states reason %q under %q of %s[%s], which is optional, where graph.Add records none",
-						ui, u.Reason, u.Relation, sd.refAt(rec.slot.parentRow), rec.slot.parentKey)).Build())
+						ui, u.Reason, u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey))).Build())
 			case !reported[rec.slot] && beside[rec.slot] > 1 && idx.held(rec.slot.parentRow, rec.slot.parentKey):
 				reported[rec.slot] = true
 				// The slot holds a record that states it holds none, so its
@@ -1601,7 +1615,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				idx.refuseSlot(rec.slot)
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("%q of %s[%s] holds an %s record beside another record, where graph.Add records it alone",
-						u.Relation, sd.refAt(rec.slot.parentRow), rec.slot.parentKey, u.Reason)).Build())
+						u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey), u.Reason)).Build())
 			}
 		case "target_missing":
 			targetRow, ok := sd.rowAt(u.TargetType)
@@ -1611,7 +1625,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				if key := sd.canonicalWireKey(targetRow, u.TargetKey); idx.exists[targetRow][key] {
 					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 						fmt.Sprintf("unresolved record %d names target %s[%s], which a root holds, where graph.Add resolves an edge",
-							ui, sd.refAt(targetRow), key)).Build())
+							ui, sd.refText(targetRow), diag.ValueText(key))).Build())
 				}
 			}
 		}
@@ -1643,7 +1657,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				if slot := (slotCoord{parentRow: row, parentKey: key, relation: relation}); held[slot]+missing[slot] == 0 {
 					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 						fmt.Sprintf("root %s[%s] holds no edge and no record under the required association %q, where graph.Add records an absent one",
-							sd.refAt(row), key, relation)).Build())
+							sd.refText(row), diag.ValueText(key), relation)).Build())
 				}
 			}
 		}
@@ -1663,8 +1677,8 @@ var unresolvedReasons = map[string]bool{"target_missing": true, "absent": true, 
 func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) bool {
 	if !unresolvedReasons[u.Reason] {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-			fmt.Sprintf("unresolved record %d states reason %q, which is not one of target_missing, absent or empty",
-				ui, u.Reason)).Build())
+			fmt.Sprintf("unresolved record %d states reason %s, which is not one of target_missing, absent or empty",
+				ui, diag.QuoteValue(u.Reason))).Build())
 		return false
 	}
 	if u.Reason == "target_missing" {
@@ -1673,7 +1687,7 @@ func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) bool {
 	if len(u.TargetKey) > 0 {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("unresolved record %d states reason %q but carries a target key %s",
-				ui, u.Reason, formatWireKey(u.TargetKey))).Build())
+				ui, u.Reason, diag.ValueText(formatWireKey(u.TargetKey)))).Build())
 	}
 	if len(u.Properties) > 0 {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
@@ -1697,7 +1711,7 @@ func (sd *streamDecoder) warnUnresolvedRequired(sourceRow int, u unresolvedWire)
 	}
 	sd.collector.Collect(diag.NewIssue(sd.loadCfg.revalidateSeverity, diag.W_SNAPSHOT_UNRESOLVED_REQUIRED,
 		fmt.Sprintf("required association %q of %s[%s] is unresolved (%s)",
-			u.Relation, sd.refAt(sourceRow), formatWireKey(u.SourceKey), u.Reason)).
+			u.Relation, sd.refText(sourceRow), diag.ValueText(formatWireKey(u.SourceKey)), diag.ValueText(u.Reason))).
 		WithDetail(diag.DetailKeyRelationName, u.Relation).
 		Build())
 }
@@ -1732,11 +1746,13 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 	targetRow *int, targetKey []any, reason string, documented bool,
 ) *schema.Relation {
 	namesTarget := documented && reason != "absent" && reason != "empty"
+	// The document's name is cut until the schema declares the association.
+	relationText := diag.QuoteValue(relation)
 	scalarKey := func() {
 		if i := unreadableWireComponent(targetKey); namesTarget && i >= 0 {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-				fmt.Sprintf("%s of %s under %q carries target key %s, whose component %d is not a scalar graph.ParseKey reads back",
-					what, formatWireKey(sourceKey), relation, formatWireKey(targetKey), i)).
+				fmt.Sprintf("%s of %s under %s carries target key %s, whose component %d is not a scalar graph.ParseKey reads back",
+					what, diag.ValueText(formatWireKey(sourceKey)), relationText, diag.ValueText(formatWireKey(targetKey)), i)).
 				WithDetail(diag.DetailKeyRelationName, relation).
 				Build())
 		}
@@ -1751,20 +1767,22 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 		return nil
 	}
 	source := sd.refAt(sourceRow)
-	at := fmt.Sprintf("%s of %s[%s] under %q", what, source, formatWireKey(sourceKey), relation)
+	at := fmt.Sprintf("%s of %s[%s] under ", what, sd.refText(sourceRow), diag.ValueText(formatWireKey(sourceKey)))
 	rel, ok := t.Relation(relation)
 	if !ok || !rel.IsAssociation() {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
-			at+", which the type does not declare as an association").
+			at+relationText+", which the type does not declare as an association").
 			WithDetail(diag.DetailKeyTypeName, source).
 			WithDetail(diag.DetailKeyRelationName, relation).
 			Build())
 		return nil
 	}
+	relationText = strconv.Quote(relation)
+	at += relationText
 	if !sd.wireTypeMatches(targetRow, rel.TargetID()) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 			fmt.Sprintf("%s targets %s, which the association declares as %s",
-				at, sd.wireTypeRef(targetRow), sd.identRef(rel.TargetID()))).
+				at, sd.wireTypeText(targetRow), sd.identRef(rel.TargetID()))).
 			WithDetail(diag.DetailKeyTypeName, source).
 			WithDetail(diag.DetailKeyRelationName, relation).
 			WithDetail(diag.DetailKeyExpected, sd.identRef(rel.TargetID())).
@@ -1796,7 +1814,7 @@ func (sd *streamDecoder) checkOnes(idx *docIndex) {
 		if n, slot := idx.ones[at], at.slot; n > 1 && !idx.refusedSlots[slot] {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("(one) association %q of %s[%s] holds %d records",
-					slot.relation, sd.refAt(slot.parentRow), slot.parentKey, n)).
+					slot.relation, sd.refText(slot.parentRow), diag.ValueText(slot.parentKey), n)).
 				WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.parentRow)).
 				WithDetail(diag.DetailKeyRelationName, slot.relation).
 				Build())
@@ -1822,8 +1840,8 @@ func (sd *streamDecoder) checkDuplicateSlot(di, row int, rowOK bool, slot slotCo
 	rel, ok := pt.Relation(slot.relation)
 	if !ok || rel.Kind() != schema.RelationComposition {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INVALID_COMPOSED,
-			fmt.Sprintf("duplicate record %d names %q, which %s does not declare as a composition",
-				di, slot.relation, sd.refAt(slot.parentRow))).
+			fmt.Sprintf("duplicate record %d names %s, which %s does not declare as a composition",
+				di, diag.QuoteValue(slot.relation), sd.refText(slot.parentRow))).
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.parentRow)).
 			WithDetail(diag.DetailKeyRelationName, slot.relation).
 			Build())
@@ -1832,7 +1850,7 @@ func (sd *streamDecoder) checkDuplicateSlot(di, row int, rowOK bool, slot slotCo
 	if rowOK && row < len(sd.tableIDs) && sd.tableIDs[row] != rel.TargetID() {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 			fmt.Sprintf("duplicate record %d is typed %s, which the composition %q declares as %s",
-				di, sd.refAt(row), slot.relation, sd.identRef(rel.TargetID()))).Build())
+				di, sd.refText(row), slot.relation, sd.identRef(rel.TargetID()))).Build())
 		return nil, false
 	}
 	if target, ok := sd.schema.TypeByID(rel.TargetID()); ok && rel.IsMany() && !target.HasPrimaryKey() {
@@ -1877,7 +1895,7 @@ func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 		targetRef := sd.refAt(ref.targetRow)
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 			fmt.Sprintf("edge in %s[%s] references %s[%s] which does not exist",
-				sourceRef, ref.sourceKey, targetRef, ref.targetKey)).
+				sd.refText(ref.sourceRow), diag.ValueText(ref.sourceKey), sd.refText(ref.targetRow), diag.ValueText(ref.targetKey))).
 			WithDetail(diag.DetailKeyTypeName, sourceRef).
 			WithDetail(diag.DetailKeyPrimaryKey, ref.sourceKey).
 			WithDetail(diag.DetailKeyTargetType, targetRef).

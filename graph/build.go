@@ -74,7 +74,7 @@ func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, 
 	// undeclared one arrives only from a bypass-built instance.
 	for _, name := range undeclaredNames(inst.Properties(), func(n string) bool { _, ok := typ.Property(n); return ok }) {
 		b.c.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_FIELD,
-			fmt.Sprintf("type %q declares no property %q", typeName, name)).
+			fmt.Sprintf("type %q declares no property %s", typeName, diag.QuoteValue(name))).
 			WithDetail(diag.DetailKeyTypeName, typeName).
 			WithDetail(diag.DetailKeyPropertyName, name).Build())
 	}
@@ -85,7 +85,7 @@ func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, 
 		rel, ok := typ.Relation(relationName)
 		if !ok {
 			b.c.Collect(undeclaredRelation(typeName, relationName,
-				fmt.Sprintf("type %q declares no composition %q", typeName, relationName)))
+				fmt.Sprintf("type %q declares no composition %s", typeName, diag.QuoteValue(relationName))))
 			continue
 		}
 		if rel.Kind() != schema.RelationComposition {
@@ -179,7 +179,7 @@ func (b *instanceBuilder) checkEdgeRelation(
 	rel, ok := typ.Relation(relationName)
 	if !ok {
 		b.c.Collect(undeclaredRelation(typeName, relationName,
-			fmt.Sprintf("type %q declares no association %q", typeName, relationName)))
+			fmt.Sprintf("type %q declares no association %s", typeName, diag.QuoteValue(relationName))))
 		return nil, false
 	}
 	if rel.Kind() != schema.RelationAssociation {
@@ -212,7 +212,7 @@ func (b *instanceBuilder) checkEdgeProperties(typeName string, rel *schema.Relat
 	for target := range edgeData.TargetsIter() {
 		for _, name := range undeclaredNames(target.Properties(), func(n string) bool { _, ok := rel.Property(n); return ok }) {
 			b.c.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_EDGE_FIELD,
-				fmt.Sprintf("association %q on type %q declares no edge property %q", rel.Name(), typeName, name)).
+				fmt.Sprintf("association %q on type %q declares no edge property %s", rel.Name(), typeName, diag.QuoteValue(name))).
 				WithDetail(diag.DetailKeyTypeName, typeName).
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyPropertyName, name).Build())
@@ -296,10 +296,9 @@ func (b *instanceBuilder) child(
 	seen map[string]int,
 ) {
 	if child.TypeID() != rel.TargetID() {
-		got, want, ident := b.g.describeTypePair(child.TypeID(), rel.TargetID())
+		got, want, gotText, wantText := b.g.describeTypePair(child.TypeID(), rel.TargetID())
 		b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
-			fmt.Sprintf("child type %s does not match relation target %s",
-				quoteTypeName(got, ident), quoteTypeName(want, ident))).
+			fmt.Sprintf("child type %s does not match relation target %s", gotText, wantText)).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relationName).
 			WithDetail(diag.DetailKeyExpected, want).
@@ -321,7 +320,7 @@ func (b *instanceBuilder) child(
 	key := b.g.canon.key(child.TypeID(), child.PrimaryKey())
 	if err := checkInstanceKey(childTyp, child, b.g.canon); err != nil {
 		b.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
-			fmt.Sprintf("composed child of type %q: %s", child.TypeName(), err)).
+			fmt.Sprintf("composed child of type %s: %s", diag.QuoteValue(child.TypeName()), err)).
 			WithDetail(diag.DetailKeyTypeName, child.TypeName()).
 			WithDetail(diag.DetailKeyRelationName, relationName).
 			WithDetail(diag.DetailKeyPrimaryKey, child.PrimaryKey().String()).Build())
@@ -390,7 +389,7 @@ func (g *Graph) siblingDuplicateIssue(
 ) diag.Issue {
 	return diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 		fmt.Sprintf("duplicate composed child primary key %s at indices %d and %d",
-			keyStr, firstIndex, index)).
+			diag.ValueText(keyStr), firstIndex, index)).
 		WithDetail(diag.DetailKeyTypeName, parentName).
 		WithDetail(diag.DetailKeyRelationName, relationName).
 		WithDetail(diag.DetailKeyJSONField, rel.FieldName()).

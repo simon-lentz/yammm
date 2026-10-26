@@ -157,7 +157,7 @@ matrix List<List<Float>>
 embeddings List<Vector[768]>[_, 10]
 ```
 
-**Neo4j export caveat.** The last two — a list whose *element* is itself a collection — are valid yammm but have no Neo4j equivalent, and constraint generation is all-or-nothing, so one such property makes `yammm neo4j constraints` emit **nothing for the entire schema** (`E_NEO4J_UNSUPPORTED_TYPE`). If the model must export to Neo4j, represent the inner collection as a `part type` reached by a composition. A bare `Vector[N]` is fine; only a `Vector` nested inside a `List` is not.
+**Neo4j export caveat.** The last two — a list whose *element* is itself a collection — are valid yammm but have no Neo4j equivalent, and constraint generation is all-or-nothing. One such property on a type that gets a label makes `yammm neo4j constraints` exit 1 with `E_NEO4J_UNSUPPORTED_TYPE` and emit **nothing for the entire schema**. A concrete type and a part type get a label. An abstract type that no such type extends gets none, and a property on it is not judged. No flag turns the check off: `--scalar-types=false` drops every `IS :: <TYPE>` constraint from the output and still refuses the schema. `yammm neo4j indexes` does not make the check, and prints the schema's index statements. If the model must export to Neo4j, represent the inner collection as a `part type` reached by a composition. A bare `Vector[N]` is fine; only a `Vector` nested inside a `List` is not.
 
 ---
 

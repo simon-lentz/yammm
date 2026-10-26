@@ -4,6 +4,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/simon-lentz/yammm/diag"
 )
 
 // buildErrorKind classifies a single shape-level failure accumulated on a
@@ -48,10 +50,10 @@ func (e *buildError) Error() string {
 	switch e.kind {
 	case kindUnknownProperty:
 		b.WriteString("unknown property ")
-		b.WriteString(strconv.Quote(e.target))
+		b.WriteString(diag.QuoteValue(e.target))
 	case kindUnknownRelation:
 		b.WriteString("unknown relation ")
-		b.WriteString(strconv.Quote(e.target))
+		b.WriteString(diag.QuoteValue(e.target))
 	case kindEdgeShape:
 		b.WriteString("relation ")
 		b.WriteString(strconv.Quote(e.target))
@@ -71,7 +73,7 @@ func (e *buildError) Error() string {
 		b.WriteString("build error")
 		if e.target != "" {
 			b.WriteString(" (")
-			b.WriteString(e.target)
+			b.WriteString(diag.ValueText(e.target))
 			b.WriteString(")")
 		}
 		if e.detail != "" {

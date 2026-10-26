@@ -47,12 +47,11 @@ func (k Kind) String() string {
 // value. It is used by runtime validation to stay aligned with type checker
 // expectations.
 //
-// A json.Number is classified by its spelling, the rule
-// [immutable.IsIntegerLiteral] states: a decimal integer literal is IntKind,
-// and any other text strconv.ParseFloat reads is FloatKind, whole-valued or
-// not; the rest is UnspecifiedKind. An integer literal outside the int64 range
-// is IntKind and stays the json.Number: it is an integer no int64 holds, and
-// its nearest float64 can be a different integer.
+// A json.Number is classified by its spelling: an optional sign and decimal
+// digits alone are IntKind, any other text strconv.ParseFloat reads is
+// FloatKind, whole-valued or not, and the rest is UnspecifiedKind. Such an
+// integer outside the int64 range is IntKind and stays the json.Number: it is an
+// integer no int64 holds, and its nearest float64 can be a different integer.
 // A slice of any element type is UnspecifiedKind: a list's shape is the
 // constraint's to judge, elementwise.
 //
@@ -80,7 +79,7 @@ func Classify(val any) (Kind, any) {
 			if err == nil {
 				return IntKind, n
 			}
-			if errors.Is(err, strconv.ErrRange) {
+			if errors.Is(err, strconv.ErrRange) && integerDigits(v) {
 				return IntKind, val
 			}
 		}
@@ -126,4 +125,24 @@ func classifyNamedBase(rv reflect.Value) (Kind, any, bool) {
 	default:
 		return UnspecifiedKind, nil, false
 	}
+}
+
+// integerDigits reports whether n is an optional sign followed by decimal
+// digits alone. strconv reports ErrRange as soon as a digit run overflows,
+// before it reads a later byte, so ErrRange does not prove an integer literal:
+// "99999999999999999999x" draws it.
+func integerDigits(n json.Number) bool {
+	s := string(n)
+	if s != "" && (s[0] == '+' || s[0] == '-') {
+		s = s[1:]
+	}
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }

@@ -40,6 +40,13 @@ var byteOrderMark = []byte("\uFEFF")
 // the types read so far beside a Fatal E_CONTEXT_CANCELLED, which carries no
 // span.
 func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, data []byte) (map[string][]instance.RawInstance, diag.Result) {
+	return a.parseObject(ctx, source, data, newPositionTable(data))
+}
+
+// parseObject is [Adapter.ParseObject] locating every diagnostic through
+// positions, a table over data, so what the parse's own positions cost can be
+// read from the table after it returns.
+func (a *Adapter) parseObject(ctx context.Context, source location.SourceID, data []byte, positions *positionTable) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 	result := make(map[string][]instance.RawInstance)
 
@@ -57,7 +64,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 	pc := &parseContext{
 		source:    source,
 		src:       trimmed,
-		positions: newPositionTable(data),
+		positions: positions,
 		bomLen:    len(data) - len(trimmed),
 	}
 	pc.buf = jsonc.ToJSON(trimmed)
@@ -122,7 +129,7 @@ func (a *Adapter) ParseObject(ctx context.Context, source location.SourceID, dat
 		// last value, which drops a whole batch silently, and the instances of
 		// both arrays are what the document states.
 		if _, repeated := seen[typeName]; repeated {
-			collector.Collect(pc.parseError(keySpan, fmt.Sprintf("repeated type key %q", typeName),
+			collector.Collect(pc.parseError(keySpan, "repeated type key "+diag.QuoteValue(typeName),
 				"a type name is a key of the root object once"))
 		}
 		seen[typeName] = struct{}{}
@@ -323,7 +330,7 @@ func parseArray(dec *json.Decoder, pc *parseContext, typeName string, collector 
 		// diagnostic already names.
 		for _, r := range pc.repeatedMembers(elemStart, int(dec.InputOffset())) {
 			first := pc.spanAt(r.first).Start
-			collector.Collect(pc.parseError(pc.spanAt(r.at), fmt.Sprintf("repeated member %q", r.name),
+			collector.Collect(pc.parseError(pc.spanAt(r.at), "repeated member "+diag.QuoteValue(r.name),
 				fmt.Sprintf("first at %d:%d; a member name is used once per object", first.Line, first.Column)))
 		}
 
@@ -487,7 +494,7 @@ func (pc *parseContext) parseError(span location.Span, msg, detail string) diag.
 
 // typeTagError creates an E_INVALID_TYPE_TAG issue for type name validation errors.
 func typeTagError(span location.Span, typeName string, err error) diag.Issue {
-	msg := fmt.Sprintf("invalid type name %q: %s", typeName, err.Error())
+	msg := fmt.Sprintf("invalid type name %s: %s", diag.QuoteValue(typeName), err.Error())
 	return diag.NewIssue(diag.Error, diag.E_INVALID_TYPE_TAG, msg).
 		WithSpan(span).
 		WithDetail(diag.DetailKeyGot, typeName).

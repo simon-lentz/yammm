@@ -232,6 +232,33 @@ func TestRebuildSnapshot_RefusesAnUnresolvableTypesEntry(t *testing.T) {
 	}
 }
 
+// An identity the schema cannot resolve is one break however many positions
+// carry it: one rename fixes them all, so the first position draws the refusal.
+func TestRebuildSnapshot_RefusesAnUnresolvableIdentityOnce(t *testing.T) {
+	t.Parallel()
+	s, ghost := unresolvableFixture(t)
+	root := func(key string) graph.InstanceParts {
+		return graph.InstanceParts{
+			TypeID: ghost, PrimaryKey: immutable.WrapKey([]any{key}),
+			Properties: immutable.WrapProperties(map[string]any{"gid": key}),
+		}
+	}
+
+	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
+		Types:     []schema.TypeID{ghost},
+		Instances: []graph.InstanceParts{root("g1"), root("g2")},
+		Edges: []graph.EdgeParts{{
+			Relation: "WORKS_AT", SourceType: ghost, SourceKey: immutable.WrapKey([]any{"g1"}),
+			TargetKey:  immutable.WrapKey([]any{"c1"}),
+			Properties: immutable.WrapProperties(nil),
+		}},
+	})
+	requireIdentityRefusal(t, res, "unresolvable type identity "+ghost.String()+" at types entry 0")
+	if n := len(slicesOf(res)); n != 1 {
+		t.Errorf("want the one refusal, got %d: %s", n, res)
+	}
+}
+
 func slicesOf(result diag.Result) []diag.Issue {
 	var out []diag.Issue
 	for issue := range result.Issues() {

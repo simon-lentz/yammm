@@ -477,7 +477,7 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 				continue
 			}
 			if rel := association(res, f); rel != nil {
-				if _, clash, _, _ := o.shape(rel, header, row, groupCols[f]); clash {
+				if _, clash, _, _ := o.shape(ctx, rel, header, row, groupCols[f]); clash {
 					o.count("clash")
 					csvOnly = append(csvOnly, "E_ADAPTER_PARSE")
 					dropped[f], changed = true, true
@@ -593,24 +593,22 @@ func (o oracle) plainValue(res map[string]bool, name, cell string, csvOnly *[]st
 }
 
 // shape is the group's target count and each column's segments; clash reports
-// two member columns disagreeing on the count.
-func (o oracle) shape(rel *schema.Relation, header, row []string, cols []int) (int, bool, map[int][]string, map[int]bool) {
+// two deciding columns disagreeing on the count.
+func (o oracle) shape(ctx context.Context, rel *schema.Relation, header, row []string, cols []int) (int, bool, map[int][]string, map[int]bool) {
 	n := -1
 	clash := false
 	segs := map[int][]string{}
 	deciding := map[int]bool{}
-	// A column decides the count where no other spelling of its member can: its
-	// exact spelling, or its one folded spelling where none is exact. Without
-	// WithSchema no key spelling is known, so every key column decides.
-	exact, folded := map[*schema.Property]int{}, map[*schema.Property]int{}
+	// A filled column decides where the validator reads it as a member of the
+	// one target the row's cells would make; an open key column always decides.
+	var keys []string
 	for _, i := range cols {
 		_, suffix, _ := strings.Cut(header[i], ".")
-		if m := o.edgeMember(rel, suffix); m.member() != nil && m.exact {
-			exact[m.member()]++
-		} else if m.member() != nil {
-			folded[m.member()]++
+		if m := o.edgeMember(rel, suffix); row[i] != "" || m.exact && o.emptyEdge(m) != "" {
+			keys = append(keys, suffix)
 		}
 	}
+	res := o.resolvedEdgeKeys(ctx, rel, keys)
 	for _, i := range cols {
 		if row[i] == "" {
 			continue
@@ -618,7 +616,7 @@ func (o oracle) shape(rel *schema.Relation, header, row []string, cols []int) (i
 		_, suffix, _ := strings.Cut(header[i], ".")
 		segs[i] = strings.Split(row[i], "|")
 		m := o.edgeMember(rel, suffix)
-		deciding[i] = m.openKey || m.member() != nil && (m.exact || exact[m.member()] == 0 && folded[m.member()] == 1)
+		deciding[i] = m.openKey || res[suffix] && m.member() != nil
 		if !deciding[i] {
 			continue
 		}
@@ -636,7 +634,7 @@ func (o oracle) shape(rel *schema.Relation, header, row []string, cols []int) (i
 
 func (o oracle) edgeGroup(ctx context.Context, rel *schema.Relation, header, row []string, cols []int) (string, []string) {
 	var csvOnly []string
-	n, _, segs, deciding := o.shape(rel, header, row, cols)
+	n, _, segs, deciding := o.shape(ctx, rel, header, row, cols)
 	seg := func(i, t int) (string, bool) {
 		s, ok := segs[i]
 		if !ok {

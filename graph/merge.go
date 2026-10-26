@@ -197,7 +197,7 @@ func (g *Graph) planMerge(typ *schema.Type, held *Instance, staged []stagedEdge)
 		if h := g.bySource[slot]; n+h.targets() > 1 {
 			refused = append(refused, diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("association %q on type %q is (one), and %s[%s] already holds a target the duplicate does not name",
-					slot.relation, held.TypeName(), held.TypeName(), held.PrimaryKey().String())).
+					slot.relation, held.TypeName(), held.TypeName(), diag.ValueText(held.PrimaryKey().String()))).
 				WithDetail(diag.DetailKeyTypeName, held.TypeName()).
 				WithDetail(diag.DetailKeyPrimaryKey, held.PrimaryKey().String()).
 				WithDetail(diag.DetailKeyRelationName, slot.relation).Build())

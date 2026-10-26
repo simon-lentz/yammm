@@ -70,9 +70,9 @@ parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, reader, typeResolve
 
 ```
 
-Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, lists and vectors); a number cell must be a JSON number literal, and an Integer cell an integer one. Dates and timestamps are checked against their layout and kept as text, as the JSON adapter keeps them. Coercion failures produce `E_CSV_COERCE` diagnostics. A fault in the file's structure — a header the parser cannot use, a record the reader refuses, an edge group whose columns disagree — produces `E_ADAPTER_PARSE`, the code the JSON adapter reports a malformed document under; a setting the adapter cannot use produces `E_CSV_CONFIG`, before any byte is read; and a reader that fails produces a Fatal `E_ADAPTER_IO`, on which the CLI exits 3.
+Type coercion: CSV values are strings. The adapter coerces them to the schema's expected types (integers, floats, booleans, lists and vectors); a number cell must be a JSON number literal, and an Integer cell an integer one. Dates and timestamps are checked against their layout and kept as text, as the JSON adapter keeps them. Coercion failures produce `E_CSV_COERCE` diagnostics. A fault in the file's structure — a header the parser cannot use, a record the reader refuses, an edge group whose columns disagree — produces `E_ADAPTER_PARSE`, the code the JSON adapter reports a malformed document under; a setting the adapter cannot use produces `E_CSV_CONFIG`, before any byte is read; and a failure the reader returns produces a Fatal `E_ADAPTER_IO`, on which the CLI exits 3. The failure is reported also when the parse ends for another reason at the read that returned it, as at a header the parser refuses.
 
-Column names resolve as the validator resolves JSON keys: exact first, then case-insensitively (ASCII), with each key kept as the header spells it; pass `csvAdapter.WithStrictPropertyNames(true)` when the validator is strict (`instance.RecommendedOptions()` is). A name the schema does not declare reaches the validator, which reports it. A header that repeats a name or leaves a column unnamed is refused. A malformed record is reported and skipped; a reader that fails stops the parse with a Fatal diagnostic.
+Column names resolve as the validator resolves JSON keys: exact first, then case-insensitively (ASCII), with each key kept as the header spells it; pass `csvAdapter.WithStrictPropertyNames(true)` when the validator is strict (`instance.RecommendedOptions()` is). A name the schema does not declare reaches the validator in each row whose cell is not empty, which reports it unless `instance.WithAllowUnknownFields` is set. A header that repeats a name or leaves a column unnamed is refused. A malformed record is reported and skipped; a failure the reader returns stops the parse with a Fatal diagnostic, and the instances read before it are returned.
 
 BOM stripping: UTF-8 BOM bytes at the start of input are automatically stripped.
 
@@ -127,24 +127,24 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 ```
 
-Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds the whole schema's DDL rather than emitting a partial script that looks complete. The one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so it reports `E_NEO4J_UNSUPPORTED_TYPE`. Model the inner collection as a `part type` reached by a composition. A bare `Vector` is fine; it maps to `LIST<FLOAT NOT NULL>`.
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike, the one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` under every option, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A bare `Vector` is fine; it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Index Generation
 
 ```go
 // Generate index Cypher from @index / @@index / @vector / @fulltext / @@fulltext annotations
 statements, result := adapter.IndexesForSchema(ctx, s)
-// statements is []string of CREATE INDEX / CREATE VECTOR INDEX IF NOT EXISTS ...
+// statements is []string of CREATE [VECTOR|FULLTEXT] INDEX ... IF NOT EXISTS ...
 
 // Structured index objects
 indexes, result := adapter.IndexesStructured(ctx, s)
-// Each Index has: Name, Kind (IndexRange|IndexVector), Label, Properties,
+// Each Index has: Name, Kind (IndexRange|IndexVector|IndexFulltext), Label, Properties,
 // VectorDimensions, VectorSimilarity, Statement
 ```
 
 Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. An index annotation naming a property the type does not have reports `E_NEO4J_UNKNOWN_PROPERTY`, and one naming a property whose type cannot carry the index reports `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+.
 
-`DiffIndexes` returns an `*IndexDiffResult` with **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). `DiffConstraints` has the same five sets, its `Unverified` covering a TYPE constraint whose enforced type the server did not report (Neo4j < 5.9). A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant, and a schema-owned remote index with no declaration reports as a drop. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
+`DiffIndexes` returns an `*IndexDiffResult` with **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). `DiffConstraints` has the same five sets, its `Unverified` covering a TYPE constraint whose remote record carries no `propertyType`, so its enforced type was not compared. A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant, and a schema-owned remote index with no declaration reports as a drop when the schema could have declared it, and is counted in `Excluded` otherwise. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
 
 ### Graph Shape Introspection
 
@@ -194,10 +194,13 @@ result := adapter.DetectLabelCollisions(ctx, s)
 ```
 
 **Cypher reserved words:** the DSL does not reserve them. A property named
-`match` is valid yammm (and fine for JSON/CSV export) but is rejected at
-Neo4j constraint/shape generation with `ErrReservedKeyword`, because
-property names appear unquoted in generated Cypher; the check is
-case-insensitive. Namespaced labels usually absorb reserved type names
+`match` is valid yammm (and fine for JSON/CSV export) but is rejected with
+`ErrReservedKeyword` wherever a generated constraint or index statement
+writes it, because property names appear unquoted in generated Cypher; the
+check is case-insensitive. Under `WithEdition(Community)`,
+`WithScalarTypeConstraints(false)` or `WithRequiredOnlyTypeConstraints(true)`
+fewer statements write a name, so fewer are checked, and `ShapeForSchema`
+checks labels only. Namespaced labels usually absorb reserved type names
 (`inventory__MATCH` is fine). Check early with
 `ValidateIdentifier(name, context)` or by running `ConstraintsForSchema`
 before write time.
@@ -228,11 +231,15 @@ Ownership is set membership, not a prefix test on the remote object's label:
 two sanitized free-form names and is not invertible, so any rule that tries to
 read a schema back out of a label can be satisfied by a sibling schema's labels.
 
-`Excluded` counts the remote objects that entered **no** set, because the
-comparison had nothing to say about them — the schema owns no label they carry,
-or they are of a kind this configuration cannot declare (a relationship
+`Excluded` counts the remote objects the comparison neither paired nor
+dropped — the schema owns no label they carry, or they are of a kind this
+configuration cannot declare: on the constraint side a relationship
 constraint, a node constraint kind the DSL cannot express, and under
-`WithEdition(Community)` a NOT NULL or TYPE constraint). It is not drift; in a
+`WithEdition(Community)` every kind but UNIQUE; on the index side every row
+`RemoteIndex.Declarable` refuses. A counted object that holds the name of a
+declaration nothing realises is also the `Actual` of that declaration's drift. A
+constraint's backing index that serves a declared index is that declaration's
+`Actual` and is not counted. The count is not drift; in a
 shared database a non-zero count is normal. It exists so "0 to drop" is not read
 as "the database is accounted for": ownership is derived from the schema in hand,
 so objects left behind by a type since deleted or renamed sit on a label no

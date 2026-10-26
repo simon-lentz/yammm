@@ -193,3 +193,50 @@ type Person {
 	is := mustIssue(t, res, instance.ErrTypeMismatch)
 	yammmtest.Diff(t, []string{"string"}, detailValues(is, "expected"))
 }
+
+// A collision lists its first input keys and counts the rest: an object can
+// hold every case spelling of a name, and the message stays one line however
+// many it holds.
+func TestCaseFoldCollision_ListsItsFirstKeysAndCountsTheRest(t *testing.T) {
+	v := instance.NewValidator(loadSrc(t, personCompany))
+	spellings := func(name string) map[string]any {
+		props := map[string]any{}
+		for mask := range 1 << len(name) {
+			b := []byte(name)
+			for i := range b {
+				if mask&(1<<i) != 0 {
+					b[i] -= 'a' - 'A'
+				}
+			}
+			if s := string(b); s != name {
+				props[s] = "x"
+			}
+		}
+		return props
+	}
+	props := spellings("name")
+	props["id"] = "p"
+	title := spellings("title")
+	title["_target_id"] = "c"
+	title["note"] = "n"
+	props["works_at"] = title
+	_, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
+	var got []string
+	for issue := range res.Issues() {
+		if issue.Code() == instance.ErrCaseFoldCollision {
+			got = append(got, issue.Message())
+		}
+	}
+	want := []string{
+		`multiple input fields [NAME NAMe NAmE NAme] and 11 more fold to schema property "name"`,
+		`multiple input fields [TITLE TITLe TITlE TITle] and 27 more fold to edge property "title"`,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("collisions = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("collision %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
 	"github.com/simon-lentz/yammm/adapter/internal/refusal"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -140,7 +140,7 @@ func refuseComposedChildren(snap *graph.Snapshot) error {
 				children = strconv.Itoa(n) + " " + children
 			}
 			return refusal.New(ErrUnrepresentable, "csv adapter: type %q instance %s: composition %q holds %s, which a CSV row has no column for, so the export would drop it",
-				typeName, inst.PrimaryKey(), rels[0], children)
+				typeName, diag.ValueText(inst.PrimaryKey().String()), rels[0], children)
 		}
 	}
 	return nil
@@ -186,7 +186,7 @@ func (a *Adapter) writeSnapshotTypeTo(
 			// Flushed as the cancellation branch is, so a refused export still
 			// parses as far as it goes.
 			writer.Flush()
-			return fmt.Errorf("instance %s: %w", inst.PrimaryKey(), err)
+			return fmt.Errorf("instance %s: %w", diag.ValueText(inst.PrimaryKey().String()), err)
 		}
 		if err := writeRecord(writer, w, row); err != nil {
 			return err
@@ -415,12 +415,13 @@ func cellText(v any) (string, error) {
 	return text, nil
 }
 
-// scalarCell renders one scalar value as cell text. A finite float carries a
-// decimal point whatever constraint holds it, as the JSON and .ys writers mark
-// one: a whole float under an Integer is written 5.0, which the Integer column
-// refuses on the way back, rather than 5, which it would read as the integer
-// the snapshot never held. A cell carries no type, so a String column reads
-// the same float back as the text 5.0. unjudged reports a number whose text
+// scalarCell renders one value in a form [instance.ScalarOf] returns as cell
+// text; every caller reads its value through ScalarOf first. A finite float
+// carries a decimal point whatever constraint holds it, as the JSON and .ys
+// writers mark one: a whole float under an Integer is written 5.0, which the
+// Integer column refuses on the way back, rather than 5, which it would read
+// as the integer the snapshot never held. A cell carries no type, so a String
+// column reads the same float back as the text 5.0. unjudged reports a number whose text
 // may be none the parser reads: a float, which can be a NaN or an infinity,
 // and a json.Number, whose text is its cell; an integer's digits always read.
 // ok is false for a value no cell spells: a map, an array, a struct or another
@@ -429,28 +430,34 @@ func scalarCell(v any) (text string, unjudged, ok bool) {
 	if v == nil {
 		return "", false, true
 	}
-	switch rv := reflect.ValueOf(v); rv.Kind() {
-	case reflect.String:
-		_, unjudged = v.(json.Number)
-		return rv.String(), unjudged, true
-	case reflect.Bool:
-		return strconv.FormatBool(rv.Bool()), false, true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return strconv.FormatInt(rv.Int(), 10), false, true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return strconv.FormatUint(rv.Uint(), 10), false, true
-	case reflect.Float32:
-		return floatCell(rv.Float(), 32), true, true
-	case reflect.Float64:
-		return floatCell(rv.Float(), 64), true, true
+	switch x := v.(type) {
+	case json.Number:
+		return string(x), true, true
+	case string:
+		return x, false, true
+	case bool:
+		return strconv.FormatBool(x), false, true
+	case int64:
+		return strconv.FormatInt(x, 10), false, true
+	case uint64:
+		return strconv.FormatUint(x, 10), false, true
+	case float32:
+		return floatCell(float64(x), 32), true, true
+	case float64:
+		return floatCell(x, 64), true, true
 	}
 	return "", false, false
 }
 
 // floatCell writes f in plain decimal notation at bitSize, with ".0" appended
-// to a finite whole value so the cell reads as a float.
+// to a finite whole value so the cell reads as a float. The parser reads a
+// cell at 64 bits, so a float32 whose 32-bit text rounds back to another
+// float32 there is written in its 64-bit form, which reads back as itself.
 func floatCell(f float64, bitSize int) string {
 	s := strconv.FormatFloat(f, 'f', -1, bitSize)
+	if back, err := strconv.ParseFloat(s, 64); bitSize == 32 && err == nil && float32(back) != float32(f) {
+		s = strconv.FormatFloat(f, 'f', -1, 64)
+	}
 	if !math.IsNaN(f) && !math.IsInf(f, 0) && !strings.Contains(s, ".") {
 		s += ".0"
 	}

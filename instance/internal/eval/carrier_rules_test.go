@@ -236,7 +236,7 @@ func TestIntegerLiteralNoFloatHolds_IsRefusedAtAVectorElement(t *testing.T) {
 		if !errors.As(err, &ce) {
 			t.Fatalf("CheckValue(%T) err = %v, want a *CheckError", elem, err)
 		}
-		const want = "vector element [0]: expected float, got a number no float64 holds: 10000000000000000000000000000000… (401 characters)"
+		const want = "vector element [0]: expected float, got a number no float64 holds: 10000000000000000000000000000000… (401 bytes)"
 		if ce.Kind != eval.KindTypeMismatch || ce.Msg != want {
 			t.Errorf("CheckValue(%T): kind=%v msg=%q; want KindTypeMismatch %q", elem, ce.Kind, ce.Msg, want)
 		}
@@ -286,7 +286,7 @@ func TestIntegerLiteralOutsideInt64_MessageIsBounded(t *testing.T) {
 	t.Parallel()
 	n := json.Number("9" + strings.Repeat("0", 100000))
 	err := eval.CheckValue(n, schema.NewIntegerConstraint())
-	const want = "expected integer, got an integer outside the int64 range: 90000000000000000000000000000000… (100001 characters)"
+	const want = "expected integer, got an integer outside the int64 range: 90000000000000000000000000000000… (100001 bytes)"
 	if err == nil || err.Error() != want {
 		t.Errorf("CheckValue = %v, want %q", err, want)
 	}

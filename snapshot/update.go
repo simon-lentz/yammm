@@ -400,7 +400,7 @@ func UpdateMetadataOrReMarshal(
 				// primitive preserves the header's bytes whatever they say;
 				// this path cannot, so it reports what it could not carry.
 				fallbackWarnings = append(fallbackWarnings, diag.NewIssue(diag.Warning, diag.W_SNAPSHOT_VALUE_DROPPED,
-					fmt.Sprintf("input header states created_at %q, which is not RFC 3339; the re-marshalled document carries none", hdr.CreatedAt)).
+					fmt.Sprintf("input header states created_at %s, which is not RFC 3339; the re-marshalled document carries none", diag.QuoteValue(hdr.CreatedAt))).
 					Build())
 			}
 		}

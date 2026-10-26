@@ -151,6 +151,7 @@ var cellKinds = []struct {
 	{"a list of strings", []any{"a", "b"}, "a|b", nil},
 	{"a []string holding the separator", []string{"a|b", `c\d`}, `a\|b|c\\d`, nil},
 	{"a list of mixed scalars", []any{1, "x", true, 2.5}, "1|x|true|2.5", map[string]string{"Vector": "1.0|x|true|2.5"}},
+	{"a list holding a uintptr", []any{uintptr(7), "x"}, "7|x", map[string]string{"Vector": "7.0|x"}},
 	{"a []byte", []byte("ab"), "97|98", map[string]string{"Vector": "97.0|98.0"}},
 	{"a []float64", []float64{1, 2.5}, "1.0|2.5", nil},
 	{"a nested list", []any{[]any{1, 2}, []any{3}}, `1\|2|3`, nil},

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -63,7 +64,7 @@ func canonicalTimestamp(val any, c schema.Constraint) (any, error) {
 	if t, ok := val.(time.Time); ok {
 		s, readsBack := TimestampText(t, c)
 		if !readsBack {
-			return val, fmt.Errorf("value: a time.Time renders as %q, which is no timestamp the layout reads back", s)
+			return val, fmt.Errorf("value: a time.Time renders as %s, which is no timestamp the layout reads back", diag.QuoteValue(s))
 		}
 		return s, nil
 	}
@@ -115,7 +116,7 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 	if tc, ok := c.(schema.TimestampConstraint); ok && tc.Format() != "" {
 		t, err := time.Parse(tc.Format(), s)
 		if err != nil {
-			return time.Time{}, fmt.Errorf("value: %q does not satisfy the declared timestamp format %q", s, tc.Format())
+			return time.Time{}, fmt.Errorf("value: %s does not satisfy the declared timestamp format %q", diag.QuoteValue(s), tc.Format())
 		}
 		return t, nil
 	}
@@ -123,7 +124,7 @@ func parseTimestamp(s string, c schema.Constraint) (time.Time, error) {
 	// needed: nothing that layout accepts, this one refuses.
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("value: %q is not an RFC 3339 timestamp", s)
+		return time.Time{}, fmt.Errorf("value: %s is not an RFC 3339 timestamp", diag.QuoteValue(s))
 	}
 	return t, nil
 }
@@ -142,7 +143,7 @@ func canonicalUUID(val any) (any, error) {
 	}
 	u, err := uuid.Parse(s)
 	if err != nil {
-		return val, fmt.Errorf("value: %q is not a UUID", s)
+		return val, fmt.Errorf("value: %s is not a UUID", diag.QuoteValue(s))
 	}
 	return u.String(), nil
 }
@@ -159,7 +160,7 @@ func canonicalDate(val any) (any, error) {
 	if t, ok := val.(time.Time); ok {
 		s, readsBack := DateText(t)
 		if !readsBack {
-			return val, fmt.Errorf("value: a time.Time renders as %q, which is no YYYY-MM-DD date", s)
+			return val, fmt.Errorf("value: a time.Time renders as %s, which is no YYYY-MM-DD date", diag.QuoteValue(s))
 		}
 		return s, nil
 	}
@@ -169,7 +170,7 @@ func canonicalDate(val any) (any, error) {
 	}
 	t, err := time.Parse(time.DateOnly, s)
 	if err != nil {
-		return val, fmt.Errorf("value: %q is not a YYYY-MM-DD date", s)
+		return val, fmt.Errorf("value: %s is not a YYYY-MM-DD date", diag.QuoteValue(s))
 	}
 	return t.Format(time.DateOnly), nil
 }

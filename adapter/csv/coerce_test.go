@@ -75,7 +75,7 @@ func TestStripBOM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			r := stripBOM(bytes.NewReader(tt.input))
+			r, _ := stripBOM(bytes.NewReader(tt.input))
 			data, err := io.ReadAll(r)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, string(data))
