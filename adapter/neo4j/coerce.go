@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
+	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
@@ -51,15 +52,21 @@ import (
 //     derives its day number by a division that truncates toward zero, so a
 //     pre-1970 instant carrying a clock would land a day late.
 //   - Every other (non-transforming) kind is already driver-native and passes
-//     through unchanged.
+//     through unchanged, save a map and a value at a List whose element is a
+//     collection, each refused below.
+//
+// A map is refused under every constraint, whatever its key and element types:
+// Neo4j stores no map as a property value. The map is judged by its Go type
+// alone, as every value Coerce reads is.
 //
 // The four transforming kinds above are strict: they error on a value they can
 // neither pass through as already-native nor repair, rather than handing a
 // wrong-typed value to the driver. This matches the list path ([coerceSlice]),
 // which must build a homogeneous typed slice and errors on a wrong-typed element.
-// The non-transforming kinds stay lenient — a correct value of those kinds is
-// already driver-native, so there is nothing to repair or reject, and instance
-// validation is their type authority. On the validated node path a transforming
+// The non-transforming kinds stay lenient, save a List whose element is a
+// collection, a type Neo4j cannot store, where a value that holds one is
+// refused: a correct value of any other is already driver-native, so there is
+// nothing to repair or reject, and instance validation is its type authority. On the validated node path a transforming
 // kind only ever receives the types its strict set accepts (Float: float64;
 // Integer: int64; Timestamp and Date: the string the validator stores), so
 // strictness fires only on a value no validator refused at Error: a hand-built
@@ -77,7 +84,10 @@ import (
 // number literal reaches it as the int64 or float64 it spells, which an Integer
 // refuses when it is a float; a literal no int64 holds outside a Float, or no
 // finite float64 holds, is refused before Coerce. Calling Coerce with a
-// collection constraint returns a value that holds one unchanged.
+// collection constraint returns a value that holds one unchanged, save a map,
+// refused above, and a value at a List whose element is a List or a Vector: Neo4j has no nested collection
+// property type, so a value there that holds one, an empty list included, is an
+// error wrapping [ErrUnsupportedListElem].
 //
 // A non-nil constraint is judged first by [schema.CheckConstraint]: Coerce
 // refuses what CheckConstraint refuses: what [schema.Builder.Build] refuses in a
@@ -98,7 +108,8 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 			return raw, fmt.Errorf("coerce: %w", err)
 		}
 	}
-	return coerceScalar(constraint, raw)
+	cv, err := coerceScalar(constraint, raw)
+	return cv, refusal.Mark(ErrUnrepresentable, err)
 }
 
 // coerceScalar is [Coerce] with the constraint already judged: every internal
@@ -115,6 +126,14 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 	}
 	resolved := schema.ResolveAlias(constraint)
 	kind := resolved.Kind()
+	// A property type Neo4j cannot store is refused first, whatever the value.
+	if err := nestedCollection(resolved); err != nil {
+		return raw, err
+	}
+	if reflect.ValueOf(raw).Kind() == reflect.Map {
+		// Neo4j stores no map as a property value, so no constraint admits one.
+		return raw, fmt.Errorf("coerce %s: cannot store %T, a map, as a property value", kind, raw)
+	}
 	//exhaustive:enforce
 	switch kind {
 	case schema.KindFloat:
@@ -198,9 +217,13 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 		return n, nil
 	case schema.KindString, schema.KindBoolean,
 		schema.KindUUID, schema.KindEnum, schema.KindPattern,
-		schema.KindVector, schema.KindList, schema.KindAlias:
-		// Driver-native scalars; collection kinds are coerced elementwise by
-		// the property paths ([coerceSlice]), not at this scalar boundary.
+		schema.KindVector, schema.KindAlias:
+		// Driver-native scalars; a Vector is coerced elementwise by the property
+		// paths ([coerceSlice]), not at this scalar boundary.
+		return raw, nil
+	case schema.KindList:
+		// Coerced elementwise by the property paths too; a nested collection is
+		// refused above, in [coerceSlice]'s words, whatever Go type carries it.
 		return raw, nil
 	default:
 		return raw, fmt.Errorf("coerce: unhandled schema.ConstraintKind %v", kind)
@@ -217,7 +240,10 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 // loaded or built schema's, or one [CoerceParams] checked.
 //
 // Shape note: a non-[]any value under a List or Vector constraint passes through
-// the scalar rule unchanged (it treats collection kinds as scalar-passthrough). This
+// the scalar rule unchanged (it treats collection kinds as scalar-passthrough),
+// save a map, which the scalar rule refuses under every constraint, and a value
+// under a List whose element is a collection, which it refuses whatever carries
+// the value. This
 // is deliberate — an already-typed collection value, such as an in-memory Vector
 // carried as []float64, must survive untouched rather than be rejected — and it
 // means the inverse shape mismatch (a genuine scalar mistakenly declared under a
@@ -235,10 +261,14 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 	if constraint == nil {
 		return raw, nil
 	}
+	var cv any
+	var err error
 	if slice, ok := raw.([]any); ok {
-		return coerceSlice(slice, constraint)
+		cv, err = coerceSlice(slice, constraint)
+	} else {
+		cv, err = coerceScalar(constraint, raw)
 	}
-	return coerceScalar(constraint, raw)
+	return cv, refusal.Mark(ErrUnrepresentable, err)
 }
 
 // holdsNone reports whether raw holds no value, as every writer of this module
@@ -277,15 +307,16 @@ type ParamTypes map[string]schema.Constraint
 // nested param map or a row, is returned as nil, as [Coerce] returns it, since
 // the driver packs a nil slice as an empty list. Any other value under a key
 // absent from types passes through as given, save a nested map or rows, which
-// are walked under any key. params is never mutated, and for a non-empty params the returned top-level map is a
+// are walked. params is never mutated, and for a non-empty params the returned top-level map is a
 // new one, so mutating its top-level keys cannot affect the input
 // (values that pass through uncoerced may still share backing storage). When no constraint in types is refused, an empty params
 // map is returned as-is — there is nothing to copy. Walks one level of nested
 // map[string]any and of rows using the "outer.inner" convention: a
 // []map[string]any, or a []any whose elements are each a map[string]any or an
 // untyped nil, at least one a map. Rows are returned as a []any, so a nil row
-// reaches the driver as null. A row's fields are typed at "outer.inner", and a
-// non-nil constraint at a rows param's own key is an error.
+// reaches the driver as null. A field or a row's field is typed at
+// "outer.inner", and a non-nil constraint at a nested map's or a rows param's
+// own key is an error.
 //
 // Keys are processed in sorted order, and the rows of a nested []map[string]any
 // in order, so when several values fail coercion the returned error names the
@@ -297,9 +328,11 @@ type ParamTypes map[string]schema.Constraint
 // key. Of several refused keys the error names the first in sorted order. The
 // map returned with that error is nil, for an empty or a nil params too.
 //
-// Scalar values take [Coerce]'s rule; []any list values are element-coerced
-// against the List element type (a List<Float> of int64s reaches the driver as
-// []float64, a List<Date> of strings as []dbtype.Date) — the rule the adapter
+// Scalar values take [Coerce]'s rule, a nested collection's refusal included;
+// []any list values are element-coerced against the List element type, and
+// refused under a List whose element is a collection (a List<Float> of int64s
+// reaches the driver as []float64, a List<Date> of strings as []dbtype.Date) —
+// the rule the adapter
 // write path applies once it has read each element in its one form, so a
 // direct-Cypher boundary cannot silently skip list coercion.
 //
@@ -345,8 +378,9 @@ func firstRefusedType(types ParamTypes) (string, error) {
 
 // coerceParam coerces a single top-level (key, value) pair. A value that holds
 // none is nil, and nested maps and rows ([isRows]) are walked one level via the
-// "outer.inner" convention; any other value is coerced against its declared
-// constraint via [coerceValue], or returned as given under an undeclared key.
+// "outer.inner" convention, or refused under a non-nil constraint at their own
+// key; any other value is coerced against its declared constraint via
+// [coerceValue], or returned as given under an undeclared key.
 func coerceParam(key string, value any, types ParamTypes) (any, error) {
 	if holdsNone(value) {
 		//nolint:nilnil // a value that holds none coerces to nil with no error: it is a valid absent value, not a failure
@@ -354,6 +388,11 @@ func coerceParam(key string, value any, types ParamTypes) (any, error) {
 	}
 	switch v := value.(type) {
 	case map[string]any:
+		// A nested map's fields are typed at "key.field", so a constraint at key
+		// would judge nothing: it is refused, as at a rows param's key.
+		if types[key] != nil {
+			return nil, fmt.Errorf("param %s: a nested map takes no constraint at its own key; declare each field as \"<key>.<field>\"", diag.QuoteValue(key))
+		}
 		return coerceNested(key, v, types)
 	case []map[string]any:
 		return coerceRows(key, v, types)

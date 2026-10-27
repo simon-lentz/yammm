@@ -61,7 +61,7 @@
 //	                                github.com/yuin/goldmark/util,
 //	                                golang.org/x/net/html
 //	adapter/neo4j     ──imports──▶  schema, graph, instance, immutable, diag, location,
-//	                                adapter/internal/constraintof,
+//	                                adapter/internal/constraintof, adapter/internal/refusal,
 //	                                github.com/google/uuid,
 //	                                github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 //
@@ -79,9 +79,10 @@
 // against (internal/source, internal/parse).
 //
 // The adapter layer's own internal packages — adapter/internal/typetag for a
-// type tag's syntax and adapter/internal/refusal for a refusal's class, which
-// the JSON and CSV adapters share, and adapter/internal/constraintof for the
-// constraint a value renders through, which the Neo4j writer reads too — are
+// type tag's syntax, which the JSON and CSV adapters share,
+// adapter/internal/refusal for a refusal's class, which the Neo4j writer marks
+// through too, and adapter/internal/constraintof for the constraint a value
+// renders through, which the Neo4j writer reads too — are
 // not an exception to this rule: they are the adapters', not the core's.
 //
 // # Subpackages

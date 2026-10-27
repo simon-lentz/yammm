@@ -1,0 +1,216 @@
+{
+  "name": "\"nested_collection\"",
+  "span": {
+    "s": 0,
+    "e": 26
+  },
+  "datatypes": [
+    {
+      "name": "Codes",
+      "constraint": {
+        "kind": "List",
+        "elem": {
+          "kind": "String",
+          "span": {
+            "s": 46,
+            "e": 52
+          }
+        },
+        "span": {
+          "s": 41,
+          "e": 53
+        }
+      },
+      "span": {
+        "s": 28,
+        "e": 53
+      }
+    }
+  ],
+  "types": [
+    {
+      "name": "Grid",
+      "name_span": {
+        "s": 60,
+        "e": 64
+      },
+      "props": [
+        {
+          "name": "id",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 82,
+              "e": 88
+            }
+          },
+          "primary": true,
+          "span": {
+            "s": 71,
+            "e": 96
+          }
+        },
+        {
+          "name": "matrix",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Integer",
+                "span": {
+                  "s": 122,
+                  "e": 129
+                }
+              },
+              "span": {
+                "s": 117,
+                "e": 130
+              }
+            },
+            "span": {
+              "s": 112,
+              "e": 131
+            }
+          },
+          "span": {
+            "s": 101,
+            "e": 131
+          }
+        },
+        {
+          "name": "embeddings",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Vector",
+              "args": [
+                "3"
+              ],
+              "span": {
+                "s": 152,
+                "e": 161
+              }
+            },
+            "span": {
+              "s": 147,
+              "e": 162
+            }
+          },
+          "span": {
+            "s": 136,
+            "e": 162
+          }
+        },
+        {
+          "name": "codes",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "Alias",
+              "args": [
+                "Codes"
+              ],
+              "span": {
+                "s": 183,
+                "e": 188
+              }
+            },
+            "span": {
+              "s": 178,
+              "e": 189
+            }
+          },
+          "span": {
+            "s": 167,
+            "e": 189
+          }
+        }
+      ],
+      "rels": [
+        {
+          "kind": "comp",
+          "name": "CELLS",
+          "name_span": {
+            "s": 199,
+            "e": 204
+          },
+          "target": {
+            "name": "Cell",
+            "span": {
+              "s": 214,
+              "e": 218
+            }
+          },
+          "optional": true,
+          "many": true,
+          "span": {
+            "s": 195,
+            "e": 218
+          }
+        }
+      ],
+      "span": {
+        "s": 55,
+        "e": 220
+      }
+    },
+    {
+      "name": "Cell",
+      "name_span": {
+        "s": 232,
+        "e": 236
+      },
+      "part": true,
+      "props": [
+        {
+          "name": "label",
+          "constraint": {
+            "kind": "String",
+            "span": {
+              "s": 250,
+              "e": 256
+            }
+          },
+          "required": true,
+          "span": {
+            "s": 243,
+            "e": 265
+          }
+        },
+        {
+          "name": "matrix",
+          "constraint": {
+            "kind": "List",
+            "elem": {
+              "kind": "List",
+              "elem": {
+                "kind": "Integer",
+                "span": {
+                  "s": 287,
+                  "e": 294
+                }
+              },
+              "span": {
+                "s": 282,
+                "e": 295
+              }
+            },
+            "span": {
+              "s": 277,
+              "e": 296
+            }
+          },
+          "span": {
+            "s": 270,
+            "e": 296
+          }
+        }
+      ],
+      "span": {
+        "s": 222,
+        "e": 298
+      }
+    }
+  ]
+}

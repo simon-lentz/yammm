@@ -269,10 +269,13 @@ linters:
               desc: "testify is frozen for new code — use the stdlib plus internal/yammmtest (cmp + goldens); grandfathered files are enumerated in linters.exclusions.rules and that list only shrinks"
     wrapcheck:
       # adapter/internal/refusal.New CONSTRUCTS an error, as errors.New and
-      # fmt.Errorf do, so returning its result is not an unwrapped pass-through
-      # of a foreign error. The entry appends to the linter's default list.
+      # fmt.Errorf do, and refusal.Mark marks one the adapter's own code
+      # returned, keeping its text, so returning either result is not an
+      # unwrapped pass-through of a foreign error. The entries append to the
+      # linter's default list.
       extra-ignore-sigs:
         - refusal.New(
+        - refusal.Mark(
     testifylint:
       disable:
         # The DSL contract pins exact float results (parsed literals,

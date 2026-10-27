@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 	"strings"
 
@@ -86,9 +85,9 @@ func initHelpAndCompletion(root *cobra.Command) {
 // does not know, no return path leaves a diagnostic unwritten, and under
 // --format json the failure is inside the one document.
 //
-// Every error it returns is a [cli.ExitError]: one the command did not classify
-// takes [cli.ExitForError]'s code here, so [run] can tell a command's failure
-// from one cobra raised before any command ran.
+// Every error it returns carries an exit code: one the command did not classify
+// is a runtime failure here ([cli.Runtime]), so [run] can tell a command's
+// failure from one cobra raised before any command ran.
 func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		formatStr, _ := cmd.Flags().GetString("format")
@@ -100,11 +99,7 @@ func withDiagnostics(run func(*cobra.Command, []string, *cli.DiagnosticSink) err
 		// The terminal test reads the process stream while the writer is
 		// cobra's, as it was when every render built its own renderer.
 		sink := cli.NewDiagnosticSink(cmd.ErrOrStderr(), format, noColor, cli.IsTTY(os.Stderr.Fd()))
-		err = run(cmd, args, sink)
-		if _, ok := errors.AsType[*cli.ExitError](err); err != nil && !ok {
-			err = &cli.ExitError{Code: cli.ExitForError(err), Err: err}
-		}
-		return sink.Close(err)
+		return sink.Close(cli.Runtime(run(cmd, args, sink)))
 	}
 }
 

@@ -76,9 +76,5 @@ func runSnapshotVerify(cmd *cobra.Command, args []string, sink *cli.DiagnosticSi
 	// Verify.
 	sink.Add(snapshot.Verify(cmd.Context(), data, s, opts...))
 
-	exitCode := cli.ExitForResult(sink.Result())
-	if exitCode != cli.ExitOK {
-		return &cli.ExitError{Code: exitCode}
-	}
-	return nil
+	return cli.Exit(cli.ExitForResult(sink.Result()))
 }

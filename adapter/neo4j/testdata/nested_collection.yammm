@@ -1,0 +1,17 @@
+schema "nested_collection"
+
+type Codes = List<String>
+
+type Grid {
+    id         String primary
+    matrix     List<List<Integer>>
+    embeddings List<Vector[3]>
+    codes      List<Codes>
+
+    *-> CELLS (_:many) Cell
+}
+
+part type Cell {
+    label  String required
+    matrix List<List<Integer>>
+}

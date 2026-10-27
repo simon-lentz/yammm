@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/adapter/internal/constraintof"
+	"github.com/simon-lentz/yammm/adapter/internal/refusal"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
@@ -345,7 +346,8 @@ func (a *Adapter) BatchEdgeQueries(
 					}
 					relProps, err := coerceRelProps(held, rel)
 					if err != nil {
-						return nil, fmt.Errorf("relation %q: %w", sig.relType, err)
+						// coerceRelProps names the relation and the property itself.
+						return nil, err
 					}
 					row["rel_props"] = relProps
 				} else {
@@ -387,8 +389,9 @@ func (a *Adapter) BatchEdgeQueries(
 // output map is independent of key order (maps are unordered); only error
 // selection is affected.
 //
-// Every value is first read in its one form, declared or not, and a value
-// [heldForm] refuses is an error too.
+// A value that holds one at a List whose element is a collection is refused
+// first ([nestedCollection]). Every other value is then read in its one form,
+// declared or not, and a value [heldForm] refuses is an error too.
 func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[string]any, error) {
 	raw := props.Clone()
 	for _, key := range slices.Sorted(maps.Keys(raw)) {
@@ -397,6 +400,11 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 			continue
 		}
 		c := constraintof.Property(schemaType, key)
+		// A property type Neo4j cannot store is refused before its value is read,
+		// as coerceScalar refuses it, so no element's own fault takes its place.
+		if err := nestedCollection(c); err != nil && !holdsNone(val) {
+			return nil, fmt.Errorf("property %q: %w", key, refusal.Mark(ErrUnrepresentable, err))
+		}
 		val, err := heldForm(val, c)
 		if err != nil {
 			return nil, fmt.Errorf("property %q: %w", key, err)
@@ -416,23 +424,23 @@ func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[s
 // snapshot does, and two strings that differ in invalid bytes alone would be
 // stored as one. A validated string is valid UTF-8, so only a bypass-built
 // snapshot holds such a string.
-var errInvalidText = errors.New("holds a string that is not valid UTF-8, which the server would store with U+FFFD in place of each invalid sequence")
+var errInvalidText = refusal.New(ErrUnrepresentable, "holds a string that is not valid UTF-8, which the server would store with U+FFFD in place of each invalid sequence")
 
 // errNoForm refuses a value that is no scalar, list or string-keyed map: the
 // one form every writer of this module writes ([instance.ScalarOf]). Only a
 // bypass-built snapshot holds one.
-var errNoForm = errors.New("holds a value that is no scalar, list or string-keyed map, which no writer of this module writes as itself")
+var errNoForm = refusal.New(ErrUnrepresentable, "holds a value that is no scalar, list or string-keyed map, which no writer of this module writes as itself")
 
 // errUnrendered refuses a time.Time or a uuid.UUID at a position whose
 // constraint does not render it: a Timestamp or Date renders a time, a UUID
 // renders a uuid.UUID. Only a bypass-built snapshot holds one.
-var errUnrendered = errors.New("holds a time or a UUID its constraint does not render, which no writer of this module writes as itself")
+var errUnrendered = refusal.New(ErrUnrepresentable, "holds a time or a UUID its constraint does not render, which no writer of this module writes as itself")
 
 // errUnheldNumber refuses a JSON number literal no driver number holds: an
 // integer literal no int64 holds outside a Float position, and a literal no
 // finite float64 holds. The driver would store another number. Only a
 // bypass-built snapshot holds one.
-var errUnheldNumber = errors.New("holds a json.Number no int64 or finite float64 holds, so the server would store another number")
+var errUnheldNumber = refusal.New(ErrUnrepresentable, "holds a json.Number no int64 or finite float64 holds, so the server would store another number")
 
 // formProps rewrites each value of props in its one form ([heldForm]) at the
 // constraint constraintOf returns for its name, and returns the least name
@@ -585,6 +593,21 @@ func renders(c schema.Constraint, kinds ...schema.ConstraintKind) bool {
 	return c != nil && slices.Contains(kinds, schema.ResolveAlias(c).Kind())
 }
 
+// nestedCollection returns the refusal [neo4jListElementType] gives c's element
+// when c is a List whose element is itself a collection, and nil for any other
+// constraint. The write path refuses a value at such a constraint by it, so a
+// property the DDL refuses never reaches the driver.
+func nestedCollection(c schema.Constraint) error {
+	// A Vector's element is a Float, so only a List can nest; constraintof.Element
+	// would allocate a FloatConstraint for every Vector value.
+	l, ok := schema.ResolveAlias(c).(schema.ListConstraint)
+	if !ok {
+		return nil
+	}
+	_, err := neo4jListElementType(l.Element())
+	return err
+}
+
 // coerceSlice converts a []any to a concrete typed slice using the constraint's
 // element kind, so a List<T> or Vector property reaches the driver as the
 // homogeneous Go slice Neo4j requires ([]string, []float64, []dbtype.Date, ...).
@@ -607,8 +630,9 @@ func renders(c schema.Constraint, kinds ...schema.ConstraintKind) bool {
 // element's type); it guards the direct-Cypher path, where the param map is
 // hand-built. A []any value under a scalar (non-List, non-Vector) constraint is a
 // shape mismatch — a scalar property cannot hold a list — and is an error too. A
-// nested-collection element kind (a List or Vector element, e.g. List<Vector>) has
-// no concrete driver slice type at this level and returns the []any unchanged. The
+// nested-collection element kind (a List or Vector element, e.g. List<Vector>) is
+// refused with [ErrUnsupportedListElem], an empty list included: Neo4j has no
+// nested collection property type, and the DDL refuses the property so. The
 // element switch is exhaustiveness-guarded, so a newly-added ConstraintKind fails
 // the lint here rather than silently passing a []any to the driver.
 func coerceSlice(raw []any, c schema.Constraint) (any, error) {
@@ -693,11 +717,12 @@ func coerceSlice(raw []any, c schema.Constraint) (any, error) {
 		}
 		return out, nil
 	case schema.KindVector, schema.KindList, schema.KindAlias:
-		// A nested-collection element (List<Vector>, List<List<…>>) has no concrete
-		// driver slice type at this level, so the []any passes through unchanged.
+		// Neo4j has no nested collection property type (List<Vector>,
+		// List<List<…>>), so the list is refused, an empty one included.
 		// KindAlias is unreachable here: elem is alias-resolved above, and a judged
 		// constraint's DataType reference holds a resolved constraint.
-		return raw, nil
+		_, err := neo4jListElementType(elem)
+		return nil, err
 	default:
 		// Unreachable: schema.Constraint is sealed, so elem.Kind() is always one of
 		// the cases above. The //exhaustive:enforce directive fails the lint if a
@@ -806,7 +831,7 @@ func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 		}
 		cv, err := coerceValue(p.Constraint(), v)
 		if err != nil {
-			return nil, fmt.Errorf("relation %q property %q: %w", rel.Name(), k, err)
+			return nil, fmt.Errorf("relation %q: property %q: %w", rel.Name(), k, err)
 		}
 		props[k] = cv
 	}
@@ -893,13 +918,13 @@ func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]a
 		return nil, errors.Join(append(keyListErrs(missing, nilKeys), coerceErrs...)...)
 	}
 	if len(missing) > 0 && len(nilKeys) > 0 {
-		return nil, fmt.Errorf("missing required primary key(s): %v; nil primary key(s): %v", missing, nilKeys)
+		return nil, refusal.New(ErrUnrepresentable, "missing required primary key(s): %v; nil primary key(s): %v", missing, nilKeys)
 	}
 	if len(missing) > 0 {
-		return nil, fmt.Errorf("missing required primary key(s): %v", missing)
+		return nil, refusal.New(ErrUnrepresentable, "missing required primary key(s): %v", missing)
 	}
 	if len(nilKeys) > 0 {
-		return nil, fmt.Errorf("nil primary key(s): %v", nilKeys)
+		return nil, refusal.New(ErrUnrepresentable, "nil primary key(s): %v", nilKeys)
 	}
 	return result, nil
 }

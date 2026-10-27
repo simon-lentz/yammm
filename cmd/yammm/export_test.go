@@ -117,3 +117,34 @@ func TestExport_LabelFlagsApplyOnlyToCypher(t *testing.T) {
 		})
 	}
 }
+
+// Neo4j has no nested collection property type, so a value of one is a refusal
+// of the data: `--to cypher` exits 1 and writes no statement, as `neo4j
+// constraints` refuses the property. A document that holds no such value exports.
+func TestExport_CypherRefusesANestedCollectionValue(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "grid.yammm")
+	require.NoError(t, os.WriteFile(schemaPath,
+		[]byte("schema \"grid\"\n\ntype Grid {\n\tid String primary\n\tmatrix List<List<Integer>>\n}\n"), 0o600))
+	for name, tc := range map[string]struct {
+		data string
+		want int
+	}{
+		"a list of lists":        {`{"Grid":[{"id":"g1","matrix":[[1,2],[3]]}]}`, cli.ExitValidation},
+		"an empty list of lists": {`{"Grid":[{"id":"g1","matrix":[]}]}`, cli.ExitValidation},
+		"no value":               {`{"Grid":[{"id":"g1"}]}`, cli.ExitOK},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dataPath := filepath.Join(t.TempDir(), "data.json")
+			require.NoError(t, os.WriteFile(dataPath, []byte(tc.data), 0o600))
+			code, out, errOut := executeCmdOutput(t, "export", "--to", "cypher", schemaPath, dataPath)
+			require.Equal(t, tc.want, code, "stderr:\n%s", errOut)
+			if tc.want != cli.ExitOK {
+				assert.Empty(t, out, "a refused export writes no statement")
+			}
+		})
+	}
+}

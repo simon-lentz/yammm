@@ -163,7 +163,6 @@ func TestBatchQueries_AStringThatIsNotValidUTF8IsNeverSent(t *testing.T) {
 		{"a UUID property", "nodes", `property "uid"`, utf8Holder{props: map[string]any{"uid": bad}}},
 		{"a List<String> element", "nodes", `property "tags"`, utf8Holder{props: map[string]any{"tags": []any{"ok", bad}}}},
 		{"a List<String> element in a []string", "nodes", `property "tags"`, utf8Holder{props: map[string]any{"tags": []string{"ok", bad}}}},
-		{"a nested list's element", "nodes", `property "nested"`, utf8Holder{props: map[string]any{"nested": []any{[]any{"ok"}, []any{bad}}}}},
 		{"a map's value", "nodes", `property "text"`, utf8Holder{props: map[string]any{"text": map[string]any{"x": bad}}}},
 		{"a map's key", "nodes", `property "text"`, utf8Holder{props: map[string]any{"text": map[string]any{bad: "x"}}}},
 		{"a key of a map keyed by a named string", "nodes", `property "text"`, utf8Holder{props: map[string]any{"text": map[neo4jText]int{neo4jText(bad): 1}}}},
@@ -352,7 +351,7 @@ func TestBatchQueries_ValidTextIsSentAsHeld(t *testing.T) {
 	t.Parallel()
 	for _, text := range []string{"a�b", "é✓", "", "\x00"} {
 		a, shape, snap := utf8Neo4jSnapshot(t, utf8Holder{
-			props: map[string]any{"text": text, "tags": []any{"ok", text}, "nested": []any{[]any{text}}},
+			props: map[string]any{"text": text, "tags": []any{"ok", text}},
 			label: text,
 			note:  map[string]any{"body": text, "marks": []any{text}},
 		})
@@ -369,7 +368,7 @@ func TestBatchQueries_ValidTextIsSentAsHeld(t *testing.T) {
 		for _, q := range nodes {
 			for _, row := range q.Params["rows"].([]map[string]any) {
 				props, _ := row["props"].(map[string]any)
-				for _, name := range []string{"text", "tags", "nested", "body", "marks"} {
+				for _, name := range []string{"text", "tags", "body", "marks"} {
 					if v, ok := props[name]; ok {
 						sent[name] = v
 					}
@@ -384,7 +383,7 @@ func TestBatchQueries_ValidTextIsSentAsHeld(t *testing.T) {
 			}
 		}
 		want := map[string]any{
-			"text": text, "tags": []string{"ok", text}, "nested": []any{[]any{text}},
+			"text": text, "tags": []string{"ok", text},
 			"body": text, "marks": []string{text}, "label": text,
 		}
 		if !reflect.DeepEqual(sent, want) {
@@ -420,9 +419,8 @@ func TestExtractKeyProps_AKeyThatIsNotValidUTF8IsRefused(t *testing.T) {
 func TestBatchQueries_ANilInsideAValueIsSent(t *testing.T) {
 	t.Parallel()
 	a, shape, snap := utf8Neo4jSnapshot(t, utf8Holder{props: map[string]any{
-		"text":   map[string]any{"x": nil},
-		"nested": []any{[]any{"ok"}, nil},
-		"tags":   [2]any{"ok", nil},
+		"text": map[string]any{"x": nil},
+		"tags": [2]any{"ok", nil},
 	}})
 	if _, err := a.BatchNodeQueries(t.Context(), snap, shape); err != nil && strings.Contains(err.Error(), "not valid UTF-8") {
 		t.Errorf("a nil inside a value was refused as text: %v", err)

@@ -7,10 +7,12 @@
 // adapter exports. A refusal carries that sentinel as its class and the site's
 // own text as its message, and marking never changes the text. That text, or
 // the wraps the writer adds around it, names what was refused: an instance, a
-// property, a column, an edge or the setting.
+// property, a column, an edge or the setting. [New] builds a refusal from its
+// text; [Mark] marks an error another call returned, which keeps every class
+// that error already carries.
 //
 // The sentinels stay in the adapter packages, where a caller imports them. This
-// package holds the one implementation both adapters mark through, so the two
+// package holds the one implementation the data adapters mark through, so they
 // cannot drift.
 //
 // This is an internal package; its API may change without notice.

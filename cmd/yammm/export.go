@@ -26,8 +26,10 @@ func newExportCmd() *cobra.Command {
 
 The --to cypher format produces parameterized Cypher statements intended for
 inspection and integration into application code or migration tooling.
-The output contains UNWIND/MERGE patterns with parameter placeholders ($key_id,
-$props, $rows) and is not directly executable in Neo4j Browser or cypher-shell.`,
+The output contains UNWIND/MERGE patterns over one parameter placeholder, $rows,
+whose rows carry the keys and properties each statement reads (a node merge's as
+row.key_<name> and row.props), and is not directly executable in Neo4j Browser or
+cypher-shell.`,
 		Args: cobra.ExactArgs(2),
 		RunE: withDiagnostics(runExport),
 	}
@@ -99,7 +101,7 @@ func runExport(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) erro
 	// The data file's own read failure rides this result for a streamed format,
 	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
+		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}
 
 	return writeExport(cmd, sink, g.Snapshot(), s, target, outputPath, outputDir)
@@ -223,7 +225,8 @@ func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.A
 // the data, a value the format cannot represent, exits 1 as any other refusal
 // of the input does, and anything else is a failure outside the input, 3.
 func writerFailure(what string, err error) error {
-	if errors.Is(err, adapterjson.ErrUnrepresentable) || errors.Is(err, csv.ErrUnrepresentable) {
+	if errors.Is(err, adapterjson.ErrUnrepresentable) || errors.Is(err, csv.ErrUnrepresentable) ||
+		errors.Is(err, adaptern4j.ErrUnrepresentable) {
 		return cli.Validationf("%s: %v", what, err)
 	}
 	return cli.Runtimef("%s: %v", what, err)
@@ -248,18 +251,18 @@ func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.
 	shapes, result := adapter.ShapeForSchema(cmd.Context(), s)
 	sink.Add(result)
 	if result.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(result)}
+		return cli.Exit(cli.ExitForResult(result))
 	}
 	sink.Flush()
 
 	nodeQueries, err := adapter.BatchNodeQueries(cmd.Context(), snapshot, shapes)
 	if err != nil {
-		return cli.Runtimef("generate node queries: %v", err)
+		return writerFailure("generate node queries", err)
 	}
 
 	edgeQueries, err := adapter.BatchEdgeQueries(cmd.Context(), snapshot, shapes)
 	if err != nil {
-		return cli.Runtimef("generate edge queries: %v", err)
+		return writerFailure("generate edge queries", err)
 	}
 
 	// Rendered whole before anything is written: the queries are already in
@@ -306,7 +309,7 @@ func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.
 	sink.Add(snapResult)
 	sink.Flush()
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
+		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}
 
 	return writeExport(cmd, sink, snap, s, target, outputPath, outputDir)

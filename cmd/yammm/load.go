@@ -54,10 +54,7 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 		return err
 	}
 
-	if exitCode := cli.ExitForResult(sink.Result()); exitCode != cli.ExitOK {
-		return &cli.ExitError{Code: exitCode}
-	}
-	return nil
+	return cli.Exit(cli.ExitForResult(sink.Result()))
 }
 
 // bindSchemaSource points the sink at a loaded schema, so every diagnostic the
@@ -97,7 +94,7 @@ func reportSchemaLoad(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, 
 	bindSchemaSource(sink, s, explicitRoot, absSchemaPath)
 	sink.Add(result)
 	if result.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(result)}
+		return cli.Exit(cli.ExitForResult(result))
 	}
 	return nil
 }

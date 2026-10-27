@@ -376,11 +376,14 @@ yammm neo4j diff --uri bolt://localhost:7687 schema.yammm
 yammm export --to cypher schema.yammm data.json --output load.cypher
 ```
 
-The `--to cypher` output is parameterized — `UNWIND`/`MERGE` with `$key_id`,
-`$props` and `$rows` placeholders — so it is written for inspection and for
+The `--to cypher` output is parameterized — `UNWIND`/`MERGE` over one `$rows`
+placeholder, whose rows carry the keys and properties each statement reads (a
+node merge's as `row.key_<name>` and `row.props`) — so it is written for inspection and for
 integration into application or migration code. It is **not** directly
 executable in `cypher-shell` or Neo4j Browser; running it there fails on the
-unbound parameters.
+unbound parameters. Data holding a value of a property Neo4j cannot store, a
+list whose element is itself a collection, is refused at exit 1 with no
+statement written, as `neo4j constraints` refuses the property.
 
 ---
 

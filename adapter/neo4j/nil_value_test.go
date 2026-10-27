@@ -211,6 +211,35 @@ func TestCoerceParams_ReadsTheRowsItReturnsAsRows(t *testing.T) {
 	}
 }
 
+// A nested map's fields are typed at "<key>.<field>", so a constraint at the
+// map's own key would judge nothing and is refused, as at a rows param's key. An
+// empty map is refused too; a nil map holds no value and is nil.
+func TestCoerceParams_ANestedMapTakesNoConstraintAtItsOwnKey(t *testing.T) {
+	t.Parallel()
+	for name, c := range map[string]schema.Constraint{
+		"String":     schema.NewStringConstraint(),
+		"List<List>": schema.NewListConstraint(schema.NewListConstraint(schema.NewIntegerConstraint())),
+	} {
+		types := ParamTypes{"p": c, "p.x": schema.NewFloatConstraint()}
+		for shape, m := range map[string]map[string]any{"a map": {"x": 1}, "an empty map": {}} {
+			out, err := CoerceParams(map[string]any{"p": m}, types)
+			if err == nil || err.Error() != `param "p": a nested map takes no constraint at its own key; declare each field as "<key>.<field>"` {
+				t.Errorf("%s under %s = %#v, %v; want the constraint at the map's key refused", shape, name, out, err)
+			}
+		}
+		out, err := CoerceParams(map[string]any{"p": map[string]any(nil)}, types)
+		if err != nil || out["p"] != nil {
+			t.Errorf("a nil map under %s = %#v, %v; want nil", name, out["p"], err)
+		}
+	}
+	for name, types := range map[string]ParamTypes{"absent": {"p.x": schema.NewFloatConstraint()}, "nil": {"p": nil, "p.x": schema.NewFloatConstraint()}} {
+		out, err := CoerceParams(map[string]any{"p": map[string]any{"x": 1}}, types)
+		if m, ok := out["p"].(map[string]any); err != nil || !ok || m["x"] != 1.0 {
+			t.Errorf("a nested map, constraint %s = %#v, %v; want its field coerced", name, out["p"], err)
+		}
+	}
+}
+
 // A row's fields are typed at "rows.<field>", so a constraint at the rows key
 // itself is refused, as a second pass would refuse rows that hold no map.
 func TestCoerceParams_ARowsParamTakesNoConstraintAtItsOwnKey(t *testing.T) {

@@ -63,3 +63,27 @@ func TestCoerceParams_JudgingALoadedSchemasTypesAllocatesNothing(t *testing.T) {
 		}
 	}
 }
+
+// Coerce passes a typed collection a Vector or a scalar List holds at no cost
+// beyond reading its form: only a List can nest, so a Vector is never judged for
+// it, and judging a List's element allocates nothing.
+func TestCoerce_ATypedCollectionCostsOnlyItsForm(t *testing.T) {
+	raceskip.Skip(t)
+	for name, tc := range map[string]struct {
+		c   schema.Constraint
+		raw any
+	}{
+		"Vector[3]":    {schema.NewVectorConstraint(3), []float64{1, 2, 3}},
+		"List<Float>":  {schema.NewListConstraint(schema.NewFloatConstraint()), []float64{1, 2, 3}},
+		"List<String>": {schema.NewListConstraint(schema.NewStringConstraint()), []string{"a"}},
+	} {
+		form := testing.AllocsPerRun(100, func() { _ = holdsNone(tc.raw) })
+		if allocs := testing.AllocsPerRun(100, func() {
+			if _, err := Coerce(tc.c, tc.raw); err != nil {
+				t.Fatal(err)
+			}
+		}); allocs != form {
+			t.Errorf("Coerce allocates %v per call at %s; want %v, the cost of reading its form", allocs, name, form)
+		}
+	}
+}

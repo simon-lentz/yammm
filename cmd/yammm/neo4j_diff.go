@@ -75,7 +75,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	desired, constraintResult := adapter.ConstraintsStructured(cmd.Context(), s)
 	if constraintResult.HasErrors() {
 		sink.Add(constraintResult)
-		return &cli.ExitError{Code: cli.ExitForResult(constraintResult)}
+		return cli.Exit(cli.ExitForResult(constraintResult))
 	}
 
 	// Generate desired indexes (skipped in constraints-only mode so index-annotation
@@ -85,7 +85,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 		di, indexResult := adapter.IndexesStructured(cmd.Context(), s)
 		if indexResult.HasErrors() {
 			sink.Add(indexResult)
-			return &cli.ExitError{Code: cli.ExitForResult(indexResult)}
+			return cli.Exit(cli.ExitForResult(indexResult))
 		}
 		desiredIndexes = di
 	}
@@ -139,10 +139,7 @@ func runNeo4jDiff(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) e
 	}
 
 	constraintDrift := len(diff.Drift) > 0 || len(diff.Create) > 0 || len(diff.Drop) > 0
-	if code := neo4jDiffExit(constraintDrift, len(diff.Unverified) > 0, indexes); code != cli.ExitOK {
-		return &cli.ExitError{Code: code}
-	}
-	return nil
+	return cli.Exit(neo4jDiffExit(constraintDrift, len(diff.Unverified) > 0, indexes))
 }
 
 // indexesUnreadable reports a degraded index read as the diagnostic it is.

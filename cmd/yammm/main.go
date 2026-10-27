@@ -2,7 +2,6 @@
 package main
 
 import (
-	"errors"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -37,16 +36,12 @@ func run() int {
 }
 
 // execute runs cmd and classifies what it returns. Every error a command
-// returns is a [cli.ExitError] ([withDiagnostics]), so any other error is
+// returns carries an exit code ([withDiagnostics]), so any other error is
 // cobra's own — an unknown command or flag, a wrong operand count — and is a
 // usage error.
 func execute(cmd *cobra.Command) error {
 	initHelpAndCompletion(cmd)
-	err := cmd.Execute()
-	if _, ok := errors.AsType[*cli.ExitError](err); err != nil && !ok {
-		return &cli.ExitError{Code: cli.ExitUsage, Err: err}
-	}
-	return err
+	return cli.Usage(cmd.Execute())
 }
 
 // jsonRequested reports whether args ask for --format json. It parses that

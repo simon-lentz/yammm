@@ -51,9 +51,5 @@ func runCheck(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error
 		return err
 	}
 
-	exitCode := cli.ExitForResult(sink.Result())
-	if exitCode != cli.ExitOK {
-		return &cli.ExitError{Code: exitCode}
-	}
-	return nil
+	return cli.Exit(cli.ExitForResult(sink.Result()))
 }

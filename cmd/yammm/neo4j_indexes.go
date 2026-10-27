@@ -57,7 +57,7 @@ func runNeo4jIndexes(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	sink.Add(indexResult)
 	sink.Flush()
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
+		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}
 
 	// Print each statement

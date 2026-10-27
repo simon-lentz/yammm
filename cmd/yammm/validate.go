@@ -33,9 +33,5 @@ func runValidate(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) er
 	bindSchemaSource(sink, s, moduleRoot, absPath)
 	sink.Add(result)
 
-	exitCode := cli.ExitForResult(result)
-	if exitCode != cli.ExitOK {
-		return &cli.ExitError{Code: exitCode}
-	}
-	return nil
+	return cli.Exit(cli.ExitForResult(result))
 }

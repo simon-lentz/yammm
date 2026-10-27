@@ -74,7 +74,7 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 	header, headerRes := snapshot.HeaderOnly(ctx, data)
 	sink.Add(headerRes)
 	if headerRes.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(headerRes)}
+		return cli.Exit(cli.ExitForResult(headerRes))
 	}
 
 	// Build the new metadata map from the existing header.Metadata, apply
@@ -95,7 +95,7 @@ func runSnapshotUpdateMetadata(cmd *cobra.Command, args []string, sink *cli.Diag
 	out, updateRes := snapshot.UpdateMetadata(ctx, data, newMeta)
 	sink.Add(updateRes)
 	if updateRes.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(updateRes)}
+		return cli.Exit(cli.ExitForResult(updateRes))
 	}
 
 	if err := cli.WriteFile(path, out); err != nil {

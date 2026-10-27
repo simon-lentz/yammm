@@ -104,13 +104,13 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		}
 		sink.Add(loadResult)
 		if loadResult.HasErrors() {
-			return &cli.ExitError{Code: cli.ExitForResult(loadResult)}
+			return cli.Exit(cli.ExitForResult(loadResult))
 		}
 		var importResult diag.Result
 		g, importResult = graph.NewFromSnapshot(s, snap)
 		sink.Add(importResult)
 		if importResult.HasErrors() {
-			return &cli.ExitError{Code: cli.ExitForResult(importResult)}
+			return cli.Exit(cli.ExitForResult(importResult))
 		}
 		imported = header
 	}
@@ -123,7 +123,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	// The data file's own read failure rides this result for a streamed format,
 	// so the exit rule decides: an I/O failure outranks a validation one.
 	if sink.Result().HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(sink.Result())}
+		return cli.Exit(cli.ExitForResult(sink.Result()))
 	}
 
 	// Create snapshot and marshal.
@@ -150,7 +150,7 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	data, marshalResult := snapshot.Marshal(cmd.Context(), snap, opts...)
 	sink.Add(marshalResult)
 	if marshalResult.Err() != nil {
-		return &cli.ExitError{Code: cli.ExitForResult(marshalResult)}
+		return cli.Exit(cli.ExitForResult(marshalResult))
 	}
 
 	// One primitive whether or not --into names the same file, so the write is

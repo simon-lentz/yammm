@@ -80,7 +80,7 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 	if syntaxErr, ok := errors.AsType[*format.SyntaxError](err); ok {
 		if result, ok := syntaxResult(path, content, syntaxErr.Issue); ok {
 			sink.Add(result)
-			return &cli.ExitError{Code: cli.ExitForResult(result)}
+			return cli.Exit(cli.ExitForResult(result))
 		}
 	}
 	if err != nil {
@@ -95,7 +95,7 @@ func fmtPath(cmd *cobra.Command, sink *cli.DiagnosticSink, path string, write, c
 		// gofmt -l: the path alone, nothing else — so the failure carries the
 		// code and no message.
 		fmt.Fprintln(cmd.OutOrStdout(), path)
-		return &cli.ExitError{Code: cli.ExitValidation}
+		return cli.Exit(cli.ExitValidation)
 
 	case write:
 		if formatted == string(content) {

@@ -103,7 +103,7 @@ func (s *DiagnosticSink) Close(err error) error {
 	if s.format == FormatJSON {
 		if failure, ok := FailureResult(err); ok {
 			s.results = append(s.results, failure)
-			err = &ExitError{Code: ExitForError(err)}
+			err = Exit(ExitForError(err))
 		}
 		// Under FormatJSON nothing is flushed before Close, and the one
 		// document is written even when no result was added.

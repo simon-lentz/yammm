@@ -63,7 +63,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 		header, result := snapshot.HeaderOnlyRead(cmd.Context(), f)
 		sink.Add(result)
 		if result.HasErrors() {
-			return &cli.ExitError{Code: cli.ExitForResult(result)}
+			return cli.Exit(cli.ExitForResult(result))
 		}
 
 		sink.Flush()
@@ -89,7 +89,7 @@ func runSnapshotInfo(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 	info, result := snapshot.Info(cmd.Context(), data)
 	sink.Add(result)
 	if result.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(result)}
+		return cli.Exit(cli.ExitForResult(result))
 	}
 
 	sink.Flush()
@@ -369,7 +369,7 @@ func runSnapshotInfoDir(cmd *cobra.Command, sink *cli.DiagnosticSink, dirPath st
 	entries, result := snapshot.ScanDirSlice(cmd.Context(), host)
 	sink.Add(result)
 	if result.HasErrors() {
-		return &cli.ExitError{Code: cli.ExitForResult(result)}
+		return cli.Exit(cli.ExitForResult(result))
 	}
 
 	sink.Flush()
@@ -403,10 +403,7 @@ func dirEntriesExit(entries []snapshot.ScanEntry) error {
 	for _, entry := range entries {
 		results = append(results, entry.Result)
 	}
-	if code := cli.ExitForResult(cli.MergeResults(results...)); code != cli.ExitOK {
-		return &cli.ExitError{Code: code}
-	}
-	return nil
+	return cli.Exit(cli.ExitForResult(cli.MergeResults(results...)))
 }
 
 func scanEntryToDTO(entry snapshot.ScanEntry) dirEntryDTO {

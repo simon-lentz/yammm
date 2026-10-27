@@ -61,7 +61,12 @@
 // label. A model that must export to Neo4j represents the
 // inner collection as a part type reached by a composition instead. (A bare
 // Vector is fine — it maps to LIST<FLOAT NOT NULL>; it is only a Vector nested
-// INSIDE a list that has no expression.)
+// INSIDE a list that has no expression.) The write path refuses a value of
+// such a property by its type, before any element is read, with
+// [ErrUnsupportedListElem]: [Adapter.BatchNodeQueries],
+// [Coerce] and [CoerceParams] return an error for a value that holds one, an
+// empty list included, and read a value that holds none as nil, which
+// BatchNodeQueries writes as null.
 //
 // # Index Generation
 //
@@ -69,7 +74,7 @@
 // derived from a schema's @index, @@index, @vector, @fulltext, and @@fulltext
 // annotations.
 // [Adapter.IndexesStructured] returns [Index] values with parsed metadata
-// (kind, label, properties, vector configuration):
+// (name, kind, label, properties, vector configuration and the statement):
 //
 //	indexes, result := adapter.IndexesStructured(ctx, s)
 //
@@ -113,8 +118,10 @@
 //
 // # Cypher Reserved Words
 //
-// The DSL does not reserve Cypher keywords: a property named "match" or a
-// type named "MATCH" is valid yammm and exports cleanly through the JSON
+// The DSL reserves no Cypher keyword as one. Of the six spellings its own
+// grammar refuses as a property name, four are Cypher keywords too ("as", "in",
+// "true" and "false"). A property named "match" or a type named "MATCH" is
+// valid yammm and exports cleanly through the JSON
 // and CSV adapters, but can fail Neo4j export. The names a schema writes into
 // generated DDL unquoted — property names, primary keys, and the assembled
 // labels — are checked with [ValidateIdentifier] during constraint and index
@@ -134,7 +141,8 @@
 // The DROP builders take the opposite path, because they take a name the
 // database already holds rather than one this package generated: a name that
 // fails validation, reserved word included, is backtick-quoted rather than
-// rejected — see [DropConstraintStatement].
+// rejected, save a blank one, which is refused with [ErrEmptyIdentifier] — see
+// [DropConstraintStatement].
 // Under the default configuration the constraint pass already checks every
 // node property it emits a constraint for, which is each but an optional list
 // whose element is a collection, refused above, and reports a
@@ -168,6 +176,23 @@
 // label, as two SCHEMA names that sanitize alike do, or a type name holding the
 // separator beside a schema name that ends in what precedes it;
 // [Adapter.ShapeForSchema] refuses that closure.
+//
+// A value Neo4j would not store as the snapshot holds it is refused with an
+// error marked [ErrUnrepresentable], as the JSON and CSV adapters mark theirs:
+// one its constraint's coercion refuses, a nested collection's, a map, a string
+// that is not valid UTF-8, a value of no form, a time or a UUID its constraint does
+// not render, a number no driver number holds, or a primary key that is absent
+// or holds no value. A property the schema does not declare has no constraint,
+// so its value is judged by its one form alone, as [Coerce] passes a value at a
+// nil constraint. Of these values a validated snapshot holds only a nested
+// collection's, which the validator accepts; any other is held only by a
+// snapshot whose values no validator refused at Error. [Coerce], [CoerceParams]
+// and [CoerceRelProps] mark their refusals of a value so too. No other error
+// carries the class: a caller's own, such as a constraint
+// [schema.CheckConstraint] refuses, a constraint at a nested map's or a rows
+// param's own key, a [GraphShape] the adapter did not build for the snapshot's
+// schema or a relationship type that is no valid identifier, and a cancelled
+// context.
 //
 // # Composition Ownership
 //
@@ -287,7 +312,8 @@
 // separator around two sanitized free-form names and is not invertible, so for
 // any rule that reads a schema back out of a label there is a configuration, or
 // a sibling schema name, that satisfies the rule without belonging to the
-// schema. See [OwnedLabels] for what the set covers and what it cannot see.
+// schema. See [Adapter.OwnedLabels] for what the set covers and what it cannot
+// see.
 //
 // Both results carry an Excluded count — the remote objects the comparison
 // neither paired nor dropped: the schema owns no label they carry, or the
@@ -424,7 +450,7 @@
 // # Dependencies
 //
 //	adapter/neo4j  ──imports──▶  schema, graph, instance, immutable, diag, location,
-//	                             adapter/internal/constraintof,
+//	                             adapter/internal/constraintof, adapter/internal/refusal,
 //	                             github.com/google/uuid,
 //	                             github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype
 package neo4j

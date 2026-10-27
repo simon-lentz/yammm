@@ -112,6 +112,7 @@ adapter/neo4j/testdata/labelcollide/entry.yammm
 adapter/neo4j/testdata/labelcollide/geo_regions.yammm
 adapter/neo4j/testdata/list_properties.yammm
 adapter/neo4j/testdata/multiple_types.yammm
+adapter/neo4j/testdata/nested_collection.yammm
 adapter/neo4j/testdata/nested_list_optional.yammm
 adapter/neo4j/testdata/part_types.yammm
 adapter/neo4j/testdata/temporal_pk.yammm
