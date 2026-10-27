@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"maps"
 	"reflect"
 	"slices"
@@ -142,11 +143,10 @@ func checkIssue(err error, message string) *diag.IssueBuilder {
 	return diag.NewIssue(diag.Error, code, message+": "+err.Error())
 }
 
-// isAbsent reports whether v is the absent value: an interface nil, or a
-// pointer or an interface that is nil at some depth — a typed nil pointer is
-// the shape adapter/gogen emits for an absent optional scalar. Every writer
-// writes such a value as null ([ScalarOf]). A bare nil slice or string-keyed
-// map is an empty container, not an absence.
+// isAbsent reports whether v is the absent value: a value that holds none
+// ([value.Absent]), bare or at some depth — a typed nil pointer is the shape
+// adapter/gogen emits for an absent optional scalar, and a nil slice for an
+// absent optional list. Every writer writes such a value as null ([ScalarOf]).
 func isAbsent(v any) bool {
 	return value.Absent(v)
 }
@@ -445,16 +445,17 @@ func (v *Validator) validateEdgeTarget(
 }
 
 // kindOf returns a human-readable shape name for a value: the JSON shape for
-// the shapes JSON produces, and the reflect kind's shape for a typed
-// container a Go caller sent.
+// the shapes JSON produces and for the containers [toMapOfAny] and
+// [toSliceOfAny] read, the reflect kind's shape for a typed container a Go
+// caller sent, and the type's name for any other struct.
 func kindOf(v any) string {
 	if value.Absent(v) {
 		return "null"
 	}
 	switch x := v.(type) {
-	case map[string]any:
+	case map[string]any, immutable.Map[string], immutable.Properties:
 		return "object"
-	case []any:
+	case []any, immutable.Slice:
 		return "array"
 	case string:
 		return "string"
@@ -469,8 +470,11 @@ func kindOf(v any) string {
 		return "json.Number"
 	}
 	switch reflect.TypeOf(v).Kind() {
-	case reflect.Map, reflect.Struct:
-		return "object"
+	case reflect.Map:
+		// A map keyed by no string is no object: toMapOfAny refuses it.
+		if reflect.TypeOf(v).Key().Kind() == reflect.String {
+			return "object"
+		}
 	case reflect.Slice:
 		return "array"
 	case reflect.String:
@@ -481,9 +485,8 @@ func kindOf(v any) string {
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
 		reflect.Float32, reflect.Float64:
 		return "number"
-	default:
-		return reflect.TypeOf(v).String()
 	}
+	return reflect.TypeOf(v).String()
 }
 
 // expectedShapeForRelation returns the expected JSON shape description for a relation.
@@ -495,34 +498,28 @@ func expectedShapeForRelation(rel *schema.Relation) string {
 	return "object"
 }
 
-// toSliceOfAny converts val to []any if it's a slice.
-// Handles both []any and typed slices using reflection.
+// toSliceOfAny reads val as an array as every list position reads one
+// ([value.ListElems]): a []any, an [immutable.Slice] or a typed slice. A value
+// that holds none is no array: it is the null [kindOf] names.
 func toSliceOfAny(val any) ([]any, bool) {
-	if val == nil {
-		return nil, false
-	}
-	if slice, ok := val.([]any); ok {
-		return slice, true
-	}
-	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice {
-		return nil, false
-	}
-	result := make([]any, rv.Len())
-	for i := range rv.Len() {
-		result[i] = rv.Index(i).Interface()
-	}
-	return result, true
+	return value.ListElems(val)
 }
 
-// toMapOfAny converts val to map[string]any if it's a string-keyed map.
-// Handles both map[string]any and typed maps using reflection.
+// toMapOfAny converts val to map[string]any if it's a string-keyed map: a
+// map[string]any, an [immutable.Map] or [immutable.Properties] with each entry
+// unwrapped, or a typed map. A value that
+// holds none, a nil map included, is no object: it is the null [kindOf] names.
 func toMapOfAny(val any) (map[string]any, bool) {
-	if val == nil {
+	if value.Absent(val) {
 		return nil, false
 	}
-	if m, ok := val.(map[string]any); ok {
+	switch m := val.(type) {
+	case map[string]any:
 		return m, true
+	case immutable.Map[string]:
+		return unwrapEntries(m.Len(), m.Range()), true
+	case immutable.Properties:
+		return unwrapEntries(m.Len(), m.Range()), true
 	}
 	rv := reflect.ValueOf(val)
 	if rv.Kind() != reflect.Map {
@@ -536,4 +533,15 @@ func toMapOfAny(val any) (map[string]any, bool) {
 		result[key.String()] = rv.MapIndex(key).Interface()
 	}
 	return result, true
+}
+
+// unwrapEntries copies an immutable map's entries, each unwrapped as
+// [immutable.Value.Unwrap] holds it: one level, as [value.ListElems] reads a
+// list, so a field no reader reads is never walked.
+func unwrapEntries(n int, entries iter.Seq2[string, immutable.Value]) map[string]any {
+	out := make(map[string]any, n)
+	for k, v := range entries {
+		out[k] = v.Unwrap()
+	}
+	return out
 }

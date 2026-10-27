@@ -414,3 +414,23 @@ func TestCanonical_ARefusedLongStringIsCut(t *testing.T) {
 		}
 	}
 }
+
+// A value that holds none passes Canonical untouched at every kind, a nil
+// slice at a List included: it stays the nil it was and never becomes an
+// empty list, which a writer would write as [] where the nil writes null.
+func TestCanonical_AValueThatHoldsNonePassesThrough(t *testing.T) {
+	t.Parallel()
+	var nilText *string
+	for _, c := range []schema.Constraint{
+		schema.NewListConstraint(schema.NewTimestampConstraint()),
+		schema.NewListConstraint(schema.NewUUIDConstraint()),
+		schema.NewTimestampConstraint(),
+	} {
+		for _, v := range []any{[]any(nil), []string(nil), map[string]any(nil), nilText} {
+			out, err := value.Canonical(v, c)
+			if err != nil || !reflect.DeepEqual(out, v) || reflect.TypeOf(out) != reflect.TypeOf(v) {
+				t.Errorf("Canonical(%#v, %s) = %#v, %v; want it unchanged", v, c, out, err)
+			}
+		}
+	}
+}

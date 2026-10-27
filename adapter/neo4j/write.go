@@ -486,6 +486,9 @@ func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
 		}
 		return x, false, nil
 	case []any:
+		if t == nil {
+			return nil, true, nil
+		}
 		elem := constraintof.Element(c)
 		out := t
 		for i, e := range t {
@@ -505,6 +508,9 @@ func heldFormAt(x any, c schema.Constraint, depth int) (any, bool, error) {
 		}
 		return out, true, nil
 	case map[string]any:
+		if t == nil {
+			return nil, true, nil
+		}
 		var out map[string]any
 		for k, e := range t {
 			if !utf8.ValidString(k) {
@@ -750,10 +756,10 @@ func widenInt64(v any) (int64, bool) {
 // [Coerce] rule the adapter's own write path applies to edge properties once it
 // has read each value in its one form
 // ([github.com/simon-lentz/yammm/instance.ScalarOf]), which CoerceRelProps does
-// not do. props
-// is never mutated and the result shares no top-level storage with it; a nil
-// rel, or one with no declared properties, returns a copy with every value
-// unchanged, and a nil map returns nil. Keys are processed in sorted order, so
+// not do. A value that holds none is returned as nil, as Coerce returns it,
+// declared or not. props is never mutated and the result shares no top-level
+// storage with it; a nil rel, or one with no declared properties, returns a
+// copy with every other value unchanged, and a nil map returns nil. Keys are processed in sorted order, so
 // when several fail the error names the lexicographically-first failing
 // property on every run.
 //
@@ -766,9 +772,9 @@ func CoerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 
 // coerceRelProps coerces a relationship property map against the relation's
 // declared property constraints, so typed edge properties (e.g. a Timestamp or
-// Float on an association) reach the driver as native types. Each non-nil
-// value of a property rel declares routes through [coerceValue], the same
-// chokepoint the node path uses.
+// Float on an association) reach the driver as native types. A value that holds
+// none becomes nil, declared or not, and each other value of a property rel
+// declares routes through [coerceValue], the same chokepoint the node path uses.
 //
 // Edge properties are scalar by language rule: List and Vector types on a
 // relationship are rejected at schema-load (diag.E_LIST_ON_EDGE /
@@ -778,19 +784,24 @@ func CoerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 // against the scalar constraint. The arm is shared rather than special-casing
 // a scalar-only path, so this stays correct if that rule ever changes.
 //
-// Properties not declared on rel pass through unchanged; a nil relation, or one
-// with no declared properties, returns props untouched. Properties are processed
+// Any other property not declared on rel passes through unchanged, for a nil
+// relation or one with no declared properties too. Properties are processed
 // in sorted key order, so a coercion error names the lexicographically-first
 // failing property on every run (matching [CoerceParams] and [propsToParamMap]).
 // Mutates and returns props; [CoerceRelProps] is the copying entry point.
 func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error) {
-	if rel == nil || !rel.HasProperties() {
-		return props, nil
-	}
+	declares := rel != nil && rel.HasProperties()
 	for _, k := range slices.Sorted(maps.Keys(props)) {
 		v := props[k]
+		if holdsNone(v) {
+			props[k] = nil
+			continue
+		}
+		if !declares {
+			continue
+		}
 		p, ok := rel.Property(k)
-		if !ok || v == nil {
+		if !ok {
 			continue
 		}
 		cv, err := coerceValue(p.Constraint(), v)
@@ -843,7 +854,7 @@ func coerceKey(shape *NodeShape, name string, raw any) (any, error) {
 
 // extractKeyProps extracts the shape's primary key properties from immutable
 // properties, coercing each against its declared constraint. All keys must be
-// present and non-nil.
+// present and hold a value: a nil pointer to a string is a nil key.
 func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]any, error) {
 	keyNames := shape.PrimaryKeys
 	if len(keyNames) == 0 {
@@ -862,7 +873,7 @@ func extractKeyProps(props immutable.Properties, shape *NodeShape) (map[string]a
 			continue
 		}
 		unwrapped := val.Unwrap()
-		if unwrapped == nil {
+		if holdsNone(unwrapped) {
 			nilKeys = append(nilKeys, name)
 			continue
 		}

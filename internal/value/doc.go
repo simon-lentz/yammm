@@ -36,8 +36,9 @@
 // is read through, at most 64 deep, to the strata and value of the scalar or
 // the nil it holds, and a longer chain, as one that points to itself is, has
 // neither; a slice is a list only when it is bare, as [ListElems] reads one,
-// and a slice behind a carrier is [InvalidStrata]; a named
-// scalar (type MyInt int) takes those of its base. The fallback runs only when
+// and a non-nil slice behind a carrier is [InvalidStrata], where a nil one
+// holds none and is [NilStrata]; a named scalar (type MyInt int) takes those
+// of its base. The fallback runs only when
 // the type switch misses, so canonical input pays nothing for it.
 //
 // The named-type rule is not a convenience. adapter/gogen emits
@@ -45,10 +46,12 @@
 // types meant this library's own generator produced values its own validator
 // and evaluator refused.
 //
-// An [immutable.Slice] is a slice for every purpose here. It is the shape
-// Value.Unwrap returns for a List- or Vector-typed property, and it is a struct,
-// so neither a type switch over predeclared types nor a reflect.Slice test
-// names it; [TypeStrata] and [Order] both carry an explicit case.
+// A non-nil [immutable.Slice] is a slice for every purpose here, and a nil one,
+// like every nil [immutable] container ([immutable.IsNilContainer]), holds no
+// value. It is the shape Value.Unwrap returns for a List- or Vector-typed
+// property, and it is a struct, so neither a type switch over predeclared types
+// nor a reflect.Slice test names it; [TypeStrata] and [Order] both carry an
+// explicit case.
 //
 // All slices are supported structurally, but their elements must be supported
 // types. Maps and other structs are unsupported: callers normalize to supported

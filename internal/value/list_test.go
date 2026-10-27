@@ -35,6 +35,8 @@ func TestListElems(t *testing.T) {
 		{"immutable.Slice", wrapped, []any{int64(1), "a", immutable.Wrap([]any{int64(2)}).Unwrap()}, true},
 		{"empty", []any{}, []any{}, true},
 		{"nil", nil, nil, false},
+		{"a nil slice holds no value", []any(nil), nil, false},
+		{"a nil typed slice holds no value", []string(nil), nil, false},
 		{"string", "abc", nil, false},
 		{"map", map[string]any{"a": 1}, nil, false},
 		{"scalar", int64(7), nil, false},

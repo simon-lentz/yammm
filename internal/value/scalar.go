@@ -15,10 +15,10 @@ import (
 // float32 or float64 for a value of that kind, a named type as its base value;
 // a json.Number that is a JSON number literal ([immutable.IsNumberLiteral]), a
 // time.Time or a uuid.UUID as itself; nil for a value that holds none
-// ([Absent]). It reports false for every other value: a json.Number holding
-// other text, a struct, an array, a map, a slice, a channel, a function, a
-// complex number, and a chain of more than [maxPointerDepth] pointers and
-// interfaces.
+// ([Absent]), a nil slice or map included. It reports false for every other
+// value: a json.Number holding other text, a struct, an array, a map, a slice,
+// a channel, a function, a complex number, and a chain of more than
+// [maxPointerDepth] pointers and interfaces.
 //
 // A list or a map reaches a writer wrapped, as an immutable.Slice or Map,
 // which the writer walks; one behind a pointer is no list, as [ListElems]
@@ -92,31 +92,16 @@ func NumberLiteral(v any) (json.Number, bool) {
 }
 
 // Absent reports whether v holds no value, as [Scalar] reads it and every
-// writer writes it: nil, a pointer or an interface that is nil at some depth,
-// or a nil map, slice, channel, function or unsafe pointer. A bare slice or
-// string-keyed map is a value even when nil, an empty list or map to the
-// validator, and [ListElems] reads a nil slice as an empty list.
+// writer writes it: nil, or a pointer, an interface, a map, a slice, a channel,
+// a function or an unsafe pointer that is nil, bare or at some depth. A nil
+// slice or map is no empty list or map: encoding/json writes it as null, and a
+// nil [immutable] container ([immutable.IsNilContainer]) holds no value either.
 func Absent(v any) bool {
-	if v == nil {
+	if v == nil || immutable.IsNilContainer(v) {
 		return true
-	}
-	if container(reflect.ValueOf(v)) {
-		return false
 	}
 	rv, ok := walk(v)
 	return ok && isNil(rv)
-}
-
-// container reports whether rv is a slice or a string-keyed map, which the
-// validator reads as a list or a map, nil or not.
-func container(rv reflect.Value) bool {
-	switch rv.Kind() {
-	case reflect.Slice:
-		return true
-	case reflect.Map:
-		return rv.Type().Key().Kind() == reflect.String
-	}
-	return false
 }
 
 // isNil reports whether rv, a value [walk] reached, holds no value.
@@ -162,8 +147,8 @@ func form(v any) (any, bool) {
 	case string, bool, int64, uint64, float64, float32, json.Number, time.Time, uuid.UUID:
 		return x, true
 	}
-	if container(reflect.ValueOf(v)) {
-		return nil, false
+	if immutable.IsNilContainer(v) {
+		return nil, true
 	}
 	rv, ok := walk(v)
 	if !ok {

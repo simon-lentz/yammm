@@ -173,7 +173,7 @@ A type's write-once properties come from its `@writeOnce` annotations (`Immutabl
 
 ### Parameter Coercion (Direct-Cypher Path)
 
-Values passing through `BatchNodeQueries` are read in their one form (`instance.ScalarOf`) and then coerced to driver-native types automatically. Consumers hand-building Cypher parameters use the coercion step directly; it does not read the form, so it judges a pointer or a named type as the value it is, not as the scalar it holds:
+Values passing through `BatchNodeQueries` are read in their one form (`instance.ScalarOf`) and then coerced to driver-native types automatically. Consumers hand-building Cypher parameters use the coercion step directly; it does not read the form, so it judges a pointer or a named type as the value it is, not as the scalar it holds. A value that holds none, such as a nil pointer, slice or map, it returns as nil, which the driver writes as null:
 
 ```go
 v, err := neo4jAdapter.Coerce(constraint, raw)   // one value against one constraint
@@ -182,7 +182,7 @@ params, err := neo4jAdapter.CoerceParams(params, types)  // whole parameter map
 relProps, err := neo4jAdapter.CoerceRelProps(props, rel)  // one edge's property map, returned as a copy
 ```
 
-This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints; a float at an Integer is an error, whole or not. `CoerceRelProps` reaches the `rel_props` map inside a `$rows` row of a hand-built relationship MERGE, one nesting level below what `CoerceParams` walks. A `time.Time` is sent in a location the driver can encode: `time.Local` and any zone name the host cannot resolve become an offset; a resolvable IANA name is kept when its offset agrees with the value's, and becomes an offset otherwise.
+This repairs JSON round-trip artifacts (whole-number floats decoded as `int64`, `Date`/`Timestamp` strings) so values satisfy Neo4j `IS ::` type constraints; a float at an Integer is an error, whole or not. `CoerceRelProps` reaches the `rel_props` map inside a `$rows` row of a hand-built relationship MERGE, one nesting level below what `CoerceParams` walks. `CoerceParams` returns the rows of a `[]map[string]any` param as a `[]any`, so a nil row reaches the driver as null, and walks a `[]any` of maps and nils, at least one a map, as rows too; a row's fields are typed at `rows.<field>`, and a non-nil constraint at the rows key itself is an error. A `time.Time` is sent in a location the driver can encode: `time.Local` and any zone name the host cannot resolve become an offset; a resolvable IANA name is kept when its offset agrees with the value's, and becomes an offset otherwise.
 
 ### Label Management
 

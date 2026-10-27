@@ -79,8 +79,8 @@
 // boundary this library does not own: a hand-built export, a direct-Cypher
 // parameter map, a pre-filter in front of a write the validator never sees.
 // Both accept a nil constraint, and a value that holds none (nil behind at
-// most 64 pointers and interfaces, as [ScalarOf] reads it, but a bare nil slice
-// or string-keyed map, which is an empty list or map) under a constraint [schema.CheckConstraint] accepts; both refuse a
+// most 64 pointers and interfaces, as [ScalarOf] reads it, a nil slice or map
+// included) under a constraint [schema.CheckConstraint] accepts; both refuse a
 // constraint it refuses, whatever the value.
 //
 // # Thread Safety

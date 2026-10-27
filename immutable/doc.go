@@ -10,8 +10,9 @@
 //
 //   - Zero-cost reads for primitives: Accessing a string or number incurs no
 //     allocation. The underlying value is returned directly via type-safe accessors.
-//   - Recursive wrapping for nested structures: Maps and slices are recursively
-//     wrapped at construction time, not access time. This is a one-time cost.
+//   - Recursive wrapping for nested structures: String-keyed maps and slices are
+//     recursively wrapped at construction time, not access time. This is a
+//     one-time cost. A map keyed by no string is stored as it is.
 //   - Type-safe API: Generic types where appropriate ([Map]), specialized types
 //     where semantics matter ([Key], [Properties]).
 //   - Iterator-first access: Collections expose [iter.Seq] and [iter.Seq2] iterators
@@ -71,12 +72,14 @@
 //	wrapped := immutable.WrapMap(data)
 //	// data must not be used after this point
 //
-// String-keyed maps and slices are copied into immutable containers on every
-// path, so a mutation of the caller's map or slice header after Wrap does not
-// reach the wrapped value. What Wrap stores as-is is a map with a non-string
-// key, and that is what [WithClone] reaches: with true, such a map and
-// everything inside it is deep-cloned first, and the caller can retain and
-// mutate the original:
+// Wrap copies each string-keyed map and slice it walks into an immutable
+// container, so a mutation of the caller's map or slice header after Wrap does
+// not reach the wrapped value. It walks into no struct, pointer, array or map
+// with a non-string key: it stores each as it is, with what it holds. [WithClone]
+// reaches only such a map: with true, the map is deep-cloned first, each map and
+// slice inside it at every depth, and the caller can retain and mutate the
+// original. A struct, a pointer or an array inside it is copied as it is, so
+// what a pointer refers to stays shared:
 //
 //	data := map[string]any{"by_id": map[int]any{1: "value"}}
 //	wrapped := immutable.WrapMap(data, immutable.WithClone(true))
@@ -105,19 +108,23 @@
 // Value ever holds a Value; a [Map], [Slice], [Properties] or [Key] is already
 // immutable and is stored as itself. What reads such a value — [Value.IsNil], a
 // Clone, a [Key]'s canonical string — reads the content rather than an empty
-// struct, at every depth: a container reached through a map stored as given is
-// read through too. An adopted [Value] is taken as it is, so [WithClone] does
-// not reach it: a map the earlier constructor stored as-is is still shared with
-// its original. A pointer to a wrapper is a pointer, and is stored as it is.
+// struct. A [Map], [Slice], [Properties] or [Key] reached through a map stored
+// as given is read through too, at every depth. A [Value] there is not adopted:
+// a Clone returns it as it is, and a [Key]'s canonical string renders it as an
+// empty object. An adopted [Value] is taken as it is, so [WithClone] does not
+// reach it: a map the earlier constructor stored as-is is still shared with its
+// original. A pointer to a wrapper is a pointer, and a struct that embeds one is
+// a struct: each is stored as it is.
 //
 // # Cyclic values
 //
 // A map or slice that refers to itself is refused with a panic, which a caller
 // can recover from; a cycle closed through a pointer or a struct field is stored
-// as given and never walked. A map with non-string keys is stored as it is; the
-// default wrap does not walk it, so a cycle inside one is refused only when
-// something does: [WithClone] and [WrapKey] at construction, or a Clone
-// afterwards. The walk counts its depth and, past the point where real data
+// as given and never walked, save by a [Key]'s canonical string: encoding/json
+// renders it, so [WrapKey] panics on one. A map with non-string keys is stored
+// as it is; the default wrap does not walk it, so a cycle inside one is refused
+// only when something does: [WithClone] and [WrapKey] at construction, or a
+// Clone afterwards. The walk counts its depth and, past the point where real data
 // stops nesting, records the maps and slices on its path — the shape
 // encoding/json uses, so an ordinary value pays a counter and nothing more.
 // Without it such a value exhausts the stack, and a fatal runtime error is not
@@ -133,7 +140,8 @@
 //
 // A nil string-keyed map or a nil slice is still wrapped as a [Map] or [Slice],
 // so [Value.Map] or [Value.Slice] reports true, which tells a nil-typed value
-// from literal nil:
+// from literal nil, and [IsNilContainer] tells a nil container from an empty
+// one:
 //
 //	var m map[string]any // nil map
 //	v := immutable.Wrap(m)
@@ -161,13 +169,13 @@
 //
 // | Operation | Cost | Notes |
 // | --------- | ---- | ----- |
-// | Wrap(primitive) | O(1), no allocation | Primitives stored directly |
+// | Wrap(primitive) | O(1), one allocation | Primitives stored directly; the allocation holds the options |
 // | Wrap(map) | O(n) | Iterates map once to wrap values |
 // | Wrap(slice) | O(n) | Iterates slice once to wrap elements |
 // | Wrap(any, WithClone(true)) | O(n) deep | Clones non-string-keyed maps recursively, a wrapper inside one to its content; other structs and pointers stored as-is |
 // | Get(key) / Get(i) | O(1) | Map/slice lookup |
 // | Keys() / Iter() | O(1) start | Iterator creation is cheap |
-// | Clone() | O(n) deep | Full recursive clone for escape hatch |
+// | Clone() | O(n) deep | Copies every container, and every map stored as given with each map and slice inside it; any other value, a Value inside such a map included, is returned as stored |
 //
 // # Escape Hatch
 //

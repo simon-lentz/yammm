@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/trace"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -915,7 +916,7 @@ func readableKey(typ *schema.Type, key immutable.Key) error {
 
 // checkKey rejects an empty key, a key whose arity disagrees with the type's
 // declared primary keys, a component [unreadableComponent] refuses, a key
-// property that is absent or null, and a component that disagrees with its key property. A key states what the
+// property that is absent or holds none ([value.Absent]), and a component that disagrees with its key property. A key states what the
 // instance's own properties state, so a key property the instance does not
 // hold leaves the key unstated. Every constructor of a snapshot shares it, so
 // a key one refuses the others refuse.
@@ -932,7 +933,7 @@ func checkKey(typ *schema.Type, key immutable.Key, property func(string) (immuta
 	i := 0
 	for pk := range typ.PrimaryKeys() {
 		val, ok := property(pk.Name())
-		if !ok || val.IsNil() {
+		if !ok || value.Absent(val.Unwrap()) {
 			return fmt.Errorf("primary key property %q is absent or null", pk.Name())
 		}
 		if !keyComponentAgrees(key.Get(i), val, pk.Constraint(), canon) {

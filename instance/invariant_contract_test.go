@@ -260,7 +260,7 @@ func TestInvariantContract_AcceptRows(t *testing.T) {
 		// + concatenates lists and strings, as SPEC defines it; pinned through a
 		// list-only builtin, which is where the static type is judged
 		{`([1] + [2]) -> First == 1`, nil},
-		{`(tags + ["x"]) -> Len == 3`, setTags()},
+		{`(tags + ["x"]) -> Len == 3`, setTags([]any{}...)},
 		{`(tags + ["x"]) -> Last == "x"`, nil},
 		{`("a" + "b") -> Len == 2`, nil},
 		// the receiver kinds, honoured by both layers

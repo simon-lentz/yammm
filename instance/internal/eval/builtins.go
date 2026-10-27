@@ -1053,9 +1053,10 @@ func builtinCoalesce(_ context.Context, _ builtinEvaluator, lhs any, args []any,
 	return nil, nil //nolint:nilnil // all values were nil
 }
 
-// asSlice converts a value to []any for iteration.
+// asSlice converts a value to []any for iteration. A value that holds none
+// ([value.Absent]), a nil slice included, iterates as no element.
 func asSlice(funcName string, val any) ([]any, error) {
-	if val == nil {
+	if value.Absent(val) {
 		return []any{}, nil
 	}
 	elems, ok := value.ListElems(val)

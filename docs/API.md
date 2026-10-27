@@ -520,8 +520,8 @@ The validator's per-value rules, exported for a caller that admits or renders sc
 // to every property value: Go kind and form, bounds, enum membership, pattern,
 // list length and element rule and a Vector's dimension, with an alias resolved
 // to its DataType. A nil constraint is valid, and so is a value that holds none
-// (nil behind at most 64 pointers and interfaces, as ScalarOf reads it, but a
-// bare nil slice or string-keyed map, which is an empty list or map) under a constraint schema.CheckConstraint accepts —
+// (nil behind at most 64 pointers and interfaces, as ScalarOf reads it, a nil
+// slice or map included) under a constraint schema.CheckConstraint accepts —
 // presence is the caller's rule, as it is the validator's. A non-nil constraint is judged first by
 // schema.CheckConstraint, and one it refuses is an error whatever the value.
 func CheckValue(val any, c schema.Constraint) error
@@ -543,14 +543,14 @@ func CanonicalValue(val any, c schema.Constraint) (any, error)
 // through at most 64 pointers and interfaces: a string, a bool, an int64, a uint64, a
 // float32 or a float64 for a value of that kind, a named type as its base value,
 // a json.Number that is a JSON number literal, a time.Time or a uuid.UUID as
-// itself, and nil for a nil value but a bare slice or string-keyed map, which
-// is a list or a map. It reports false for every other value, a list and a map
-// included, which a writer walks itself, reading each element through ScalarOf. A writer writes a time.Time only at a Timestamp or a Date, and a uuid.UUID
+// itself, and nil for a value that holds none, a nil slice or map included. It
+// reports false for every other value, a list and a map included, which a writer
+// walks itself, reading each element through ScalarOf. A writer writes a time.Time only at a Timestamp or a Date, and a uuid.UUID
 // only at a UUID, each of which renders it.
 func ScalarOf(v any) (any, bool)
 ```
 
-`CheckValue`'s error is the checker's message and is meant for reading, not matching, with two exceptions: a constraint `schema.CheckConstraint` refuses returns that refusal, and a panic inside a check or a coercion is recovered into an `*InternalError` that matches `errors.Is(err, instance.ErrInternalFailure)`, exactly as it does inside the validator. Both functions judge a constraint as `adapter/neo4j.Coerce` does, so a hand-built constraint `schema.Builder.Build` would refuse, or a DataType reference that resolves to no constraint or to another reference alone, is an error with no value checked. `CanonicalValue` is the rule `adapter/json` and `adapter/csv` render through, and `ScalarOf` the form `adapter/json`, `adapter/csv` and `adapter/neo4j` read every value in first; each is the approved facade over its rule for the adapter layer. `CheckValue`, `CanonicalValue` and the validator read every value in that form too, so a value is judged as the value a writer writes: a pointer to a `json.Number` is a number, which every kind that reads text refuses; a pointer to an interface holding a string, a time or a UUID is that string, time or UUID; and a nil value holds no value, whatever carries it — a pointer or an interface that is nil, a pointer to a nil slice or map, a nil map keyed by no string, a nil channel, function or `unsafe.Pointer` — so the validator reads it as an absent property, while a bare nil slice or string-keyed map is an empty list or map. A `json.Number` whose text is no JSON number literal (`immutable.IsNumberLiteral`), such as `+5`, `007`, `1_000`, `0x1p4` or `.5`, is no value of any kind: an `Integer` or a `Float` refuses it as one (*`expected integer, got a json.Number that is no JSON number literal: "+5"`*), and every writer refuses it as a value of no form.
+`CheckValue`'s error is the checker's message and is meant for reading, not matching, with two exceptions: a constraint `schema.CheckConstraint` refuses returns that refusal, and a panic inside a check or a coercion is recovered into an `*InternalError` that matches `errors.Is(err, instance.ErrInternalFailure)`, exactly as it does inside the validator. Both functions judge a constraint as `adapter/neo4j.Coerce` does, so a hand-built constraint `schema.Builder.Build` would refuse, or a DataType reference that resolves to no constraint or to another reference alone, is an error with no value checked. `CanonicalValue` is the rule `adapter/json` and `adapter/csv` render through, and `ScalarOf` the form `adapter/json`, `adapter/csv` and `adapter/neo4j` read every value in first; each is the approved facade over its rule for the adapter layer. `CheckValue`, `CanonicalValue` and the validator read every value in that form too, so a value is judged as the value a writer writes: a pointer to a `json.Number` is a number, which every kind that reads text refuses; a pointer to an interface holding a string, a time or a UUID is that string, time or UUID; and a nil value holds no value, whatever carries it — a pointer or an interface that is nil, a slice or map that is nil, bare or behind a pointer, a nil `immutable` container (`immutable.IsNilContainer`), a nil channel, function or `unsafe.Pointer` — so the validator reads it as an absent property. A nil slice or map is no empty list or map: pass a non-nil empty slice, such as `[]any{}`, for an empty list. A `json.Number` whose text is no JSON number literal (`immutable.IsNumberLiteral`), such as `+5`, `007`, `1_000`, `0x1p4` or `.5`, is no value of any kind: an `Integer` or a `Float` refuses it as one (*`expected integer, got a json.Number that is no JSON number literal: "+5"`*), and every writer refuses it as a value of no form.
 
 ## Graph Construction
 
@@ -1430,7 +1430,7 @@ Every generated relationship statement ends with `RETURN count(*) AS matched_row
 
 ### Property Coercion
 
-The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The write surface first reads every value in its one form (`instance.ScalarOf`), refusing a value of no form, a string that is not valid UTF-8 and a time or UUID its constraint does not render; it hands a JSON number literal on as the number the validator reads at its constraint (an `int64` for an integer literal, a `float64` at a `Float` and for a float literal), refusing one no such number holds; and then it coerces the value. The coercion step is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply its rules; it does not read the form, so it judges a pointer or a named type as the value it is, not as the scalar it holds:
+The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The write surface first reads every value in its one form (`instance.ScalarOf`), refusing a value of no form, a string that is not valid UTF-8 and a time or UUID its constraint does not render; it hands a JSON number literal on as the number the validator reads at its constraint (an `int64` for an integer literal, a `float64` at a `Float` and for a float literal), refusing one no such number holds; and then it coerces the value. The coercion step is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply its rules; it reads no value's form save to ask whether it holds none, so it judges a pointer or a named type that holds a value as the value it is, not as the scalar it holds:
 
 ```go
 // Coerce a single SCALAR value to the driver-native type the constraint requires
@@ -1450,9 +1450,14 @@ func Coerce(constraint schema.Constraint, raw any) (any, error)
 type ParamTypes map[string]schema.Constraint
 
 // CoerceParams coerces every value in a parameter map against its declared
-// constraint, walking one level of nested map[string]any and []map[string]any.
+// constraint, walking one level of nested map[string]any and of rows (a
+// []map[string]any, or a []any of map[string]any values and untyped nils, at
+// least one a map), which it
+// returns as a []any so a nil row reaches the driver as null.
 // Scalars take Coerce's rule; []any lists are element-coerced against the
-// List element type. A non-nil constraint in types that schema.CheckConstraint refuses
+// List element type. A value that holds none, a param, a field or a row, is
+// returned as nil, declared or not. A row's fields are typed at "outer.inner",
+// and a non-nil constraint at a rows param's own key is an error. A non-nil constraint in types that schema.CheckConstraint refuses
 // is an error before any value is coerced, and of several the error names the
 // first key in sorted order. Returns the first error, naming the offending key.
 func CoerceParams(params map[string]any, types ParamTypes) (map[string]any, error)
@@ -1465,8 +1470,9 @@ func ParamTypesForType(t *schema.Type, prefix string) ParamTypes
 // CoerceRelProps returns a copy of an edge's property map with each property the
 // relation declares coerced to its driver-native type, through the coercion rule
 // the adapter's own write path applies once it has read each value in its one
-// form. The input is never mutated; a nil relation
-// returns an unchanged copy. Edge properties are scalar by language rule. Keys are
+// form. A value that holds none is returned as nil, declared or not. The input
+// is never mutated; a nil relation returns a copy with every other value
+// unchanged. Edge properties are scalar by language rule. Keys are
 // processed in sorted order, so the error names the first failing property on
 // every run. For the rel_props map inside a $rows row of a hand-built relationship
 // MERGE, which sits one level below what CoerceParams walks.
@@ -1478,7 +1484,7 @@ Coercion rules: `Float` ← an `int`, `int8`…`int64`, `uint`, `uint8`…`uint6
 
 **Zone handling, for `Timestamp`.** The driver sends an instant either as an offset or as a time-zone identifier the server must resolve, so `Coerce` expresses every instant in a location the driver can send. Two rules, in order: `time.Local` is always re-expressed in its offset — a value built by `time.Now` carries the host's location, whose name is `"Local"` on a host with no `TZ` set and which no server resolves; and any other location is kept only when the host's tz database resolves its name (an IANA name such as `Europe/Berlin`, or a legacy name such as `EST`), otherwise it too is re-expressed in its offset. A value parsed from text lands wherever `time.Parse` put it: a `Z` suffix yields `time.UTC`, which is kept as-is; an offset matching the host's local offset at that instant yields `time.Local`, which the first rule re-expresses; any other offset yields an unnamed zone, which the second rule re-expresses in its offset: the driver selects the offset encoding by zone name, so an unnamed zone is not yet that form. The coerced value depends on the text alone and not on where the process runs. The instant never moves. A consumer binary that must keep IANA names on a host without a tz database imports `time/tzdata`.
 
-The four transforming kinds (`Float`, `Integer`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a float or non-integer under `Integer`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient as a scalar: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A nil value passes through, with two exceptions. A constraint `schema.CheckConstraint` refuses is an error whatever the value, a nil included. `CoerceParams` refuses a nil element of a `List` or `Vector` value whose elements are scalars; a `List` whose elements are lists or vectors passes through whole, with no element coerced and a nil at any depth kept. An unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
+The four transforming kinds (`Float`, `Integer`, `Timestamp`, `Date`) are **strict** — scalar and list element alike: a value they can neither pass through as already-driver-native nor repair (a non-numeric under `Float`; a float or non-integer under `Integer`; a non-temporal or unparseable value under `Timestamp` / `Date`) returns an error rather than reaching the driver wrong-typed. The other scalar kinds are lenient as a scalar: a correct value of those is already driver-native, so there is nothing to repair or reject, and instance validation is the type authority. A value that holds none, which `instance.ScalarOf` reads as nil, such as a nil pointer, slice or map, is returned as nil at each level the coercion reads — the value `Coerce` is handed, a param, a field of a nested param map, a row, and a relation property — and the driver writes it as null. A constraint `schema.CheckConstraint` refuses is an error whatever the value, a nil included. `CoerceParams` and `CoerceRelProps` coerce a `[]any` they read under a declared `List` or `Vector` whose elements are scalars element by element, and refuse a nil element there. Every other value below those levels is kept as given, a nil included, and the driver packs a nil slice kept so as an empty list. An unhandled kind also returns an error (a new `schema.ConstraintKind` is caught at build time by an exhaustiveness lint).
 
 The rendering counterpart — the string form the library stores for a `Timestamp`, `Date` or `UUID` — is `instance.CanonicalValue`, under [Value Functions](#value-functions).
 

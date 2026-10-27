@@ -559,6 +559,13 @@ func TestValidateCompositions_OneCardinality(t *testing.T) {
 
 	// An empty array on an optional (one) slot stays legal — the cardinality
 	// check must not swallow the empty case the arm above it handles.
-	_, result = validator.ValidateOne(t.Context(), "Person", person())
+	_, result = validator.ValidateOne(t.Context(), "Person", person([]any{}...))
 	require.True(t, result.OK(), result.String())
+
+	// A nil slice is no empty array: it holds no value, so it is the null a
+	// composition refuses, as encoding/json writes it.
+	_, nullResult := validator.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "1", "home": nil}})
+	_, result = validator.ValidateOne(t.Context(), "Person", person())
+	require.False(t, result.OK())
+	assert.Equal(t, nullResult.String(), result.String(), "a nil slice must draw what an explicit null draws")
 }

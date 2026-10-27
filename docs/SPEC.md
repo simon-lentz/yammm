@@ -899,7 +899,7 @@ embedding Vector[768]       // 768-dimensional vector
 coordinates Vector[3]       // 3D coordinates
 ```
 
-Validation accepts float **slices** (`[]float32`, `[]float64`, and named types over them) and integer elements, which coerce to `float64`. A Go array or a pointer to a non-nil slice is refused; a pointer to a nil slice holds no value. `NaN`, `Inf`, and non-numeric elements are rejected.
+Validation accepts float **slices** (`[]float32`, `[]float64`, and named types over them) and integer elements, which coerce to `float64`. A Go array or a pointer to a non-nil slice is refused; a nil slice, bare or behind a pointer, holds no value. `NaN`, `Inf`, and non-numeric elements are rejected.
 
 #### List
 

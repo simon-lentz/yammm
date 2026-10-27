@@ -19,6 +19,9 @@ func Equal(a, b any) bool {
 		return Absent(a) && Absent(b)
 	}
 	as, bs := TypeStrata(a), TypeStrata(b)
+	if as == NilStrata || bs == NilStrata {
+		return as == bs
+	}
 	if as != InvalidStrata && bs != InvalidStrata {
 		if as == SliceStrata && bs == SliceStrata {
 			an, aAt := sliceAccessor(a)

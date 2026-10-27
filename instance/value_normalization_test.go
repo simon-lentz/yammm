@@ -46,8 +46,8 @@ func TestNormalization_PointerAgreesBetweenOperatorAndChecker(t *testing.T) {
 }
 
 // == nil and -> IsNil answer the same question about a List property. An
-// absent property and an explicit null are nil; a present empty list is not,
-// because an empty list is a list.
+// absent property, an explicit null and a nil slice are nil; a present empty
+// list is not, because an empty list is a list.
 func TestNormalization_NilIdiomsAgreeOnAList(t *testing.T) {
 	var typedNil []any
 	for _, tc := range []struct {
@@ -57,7 +57,7 @@ func TestNormalization_NilIdiomsAgreeOnAList(t *testing.T) {
 	}{
 		{"absent", map[string]any{}, true},
 		{"explicit null", map[string]any{"tags": nil}, true},
-		{"typed nil slice", map[string]any{"tags": typedNil}, false},
+		{"typed nil slice", map[string]any{"tags": typedNil}, true},
 		{"empty slice", map[string]any{"tags": []any{}}, false},
 		{"populated", map[string]any{"tags": []any{"a"}}, false},
 	} {

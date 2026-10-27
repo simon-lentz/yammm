@@ -3,12 +3,14 @@ package neo4j
 import (
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v6/neo4j/dbtype"
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -74,15 +76,18 @@ import (
 // so a named string, a pointer and a uuid.UUID at a UUID pass there, and a JSON
 // number literal reaches it as the int64 or float64 it spells, which an Integer
 // refuses when it is a float; a literal no int64 holds outside a Float, or no
-// finite float64 holds, is refused before Coerce. Calling Coerce with a collection constraint returns the
-// value unchanged.
+// finite float64 holds, is refused before Coerce. Calling Coerce with a
+// collection constraint returns a value that holds one unchanged.
 //
 // A non-nil constraint is judged first by [schema.CheckConstraint]: Coerce
 // refuses what CheckConstraint refuses: what [schema.Builder.Build] refuses in a
 // hand-built constraint, and a DataType reference that resolves to no
 // constraint or to another reference alone, returning the value unchanged
-// with an error, whatever the value. A nil value, or a nil constraint ("no type
-// to coerce against"), passes through unchanged. The default arm is unreachable in
+// with an error, whatever the value. A value that holds none, which
+// [github.com/simon-lentz/yammm/instance.ScalarOf] reads as nil, such as a nil
+// pointer, slice or map, is returned as nil, which the driver writes as null, and a nil
+// constraint ("no type to coerce against") passes any other value through
+// unchanged. The default arm is unreachable in
 // practice — schema.Constraint is sealed, so every value carries one of the
 // kinds above — but a kind added to the enum after this switch was written
 // surfaces as a lint failure via the //exhaustive:enforce directive, rather
@@ -99,8 +104,8 @@ func Coerce(constraint schema.Constraint, raw any) (any, error) {
 // coerceScalar is [Coerce] with the constraint already judged: every internal
 // path reaches it with a constraint a loaded or judged schema holds.
 func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
-	if raw == nil {
-		//nolint:nilnil // a nil value coerces to nil with no error: nil is a valid absent property, not a failure
+	if holdsNone(raw) {
+		//nolint:nilnil // a value that holds none coerces to nil with no error: it is an absent property, not a failure
 		return nil, nil
 	}
 	if constraint == nil {
@@ -222,6 +227,10 @@ func coerceScalar(constraint schema.Constraint, raw any) (any, error) {
 // Routing both the adapter write path ([propsToParamMap], [coerceRelProps]) and
 // the direct-Cypher param path ([CoerceParams]) through this function keeps
 // list-element coercion from being silently skipped on any one path.
+//
+// A value that holds none reaches it as nil: every caller reads the value's one
+// form ([heldForm]) or asks [holdsNone] first, and the scalar rule returns nil
+// as nil.
 func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 	if constraint == nil {
 		return raw, nil
@@ -230,6 +239,25 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 		return coerceSlice(slice, constraint)
 	}
 	return coerceScalar(constraint, raw)
+}
+
+// holdsNone reports whether raw holds no value, as every writer of this module
+// writes it: null. The driver packs a nil slice as an empty list, so a nil slice
+// must reach it as nil.
+func holdsNone(raw any) bool {
+	switch reflect.ValueOf(raw).Kind() {
+	case reflect.Invalid:
+		return true
+	case reflect.Bool, reflect.String, reflect.Array,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		// A value of one of these kinds holds itself. ScalarOf would box the form
+		// it reads, once for each of the three checks a param passes.
+		return false
+	}
+	held, ok := instance.ScalarOf(raw)
+	return ok && held == nil
 }
 
 // ParamTypes maps a Cypher parameter name to the schema constraint its value
@@ -245,12 +273,19 @@ func coerceValue(constraint schema.Constraint, raw any) (any, error) {
 type ParamTypes map[string]schema.Constraint
 
 // CoerceParams returns a new map with each value coerced against the constraint
-// declared for its key in types. Keys absent from types pass through. params
-// is never mutated, and for a non-empty params the returned top-level map is a
+// declared for its key in types. A value that holds none, a param, a field of a
+// nested param map or a row, is returned as nil, as [Coerce] returns it, since
+// the driver packs a nil slice as an empty list. Any other value under a key
+// absent from types passes through as given, save a nested map or rows, which
+// are walked under any key. params is never mutated, and for a non-empty params the returned top-level map is a
 // new one, so mutating its top-level keys cannot affect the input
 // (values that pass through uncoerced may still share backing storage). When no constraint in types is refused, an empty params
 // map is returned as-is — there is nothing to copy. Walks one level of nested
-// map[string]any and []map[string]any using the "outer.inner" convention.
+// map[string]any and of rows using the "outer.inner" convention: a
+// []map[string]any, or a []any whose elements are each a map[string]any or an
+// untyped nil, at least one a map. Rows are returned as a []any, so a nil row
+// reaches the driver as null. A row's fields are typed at "outer.inner", and a
+// non-nil constraint at a rows param's own key is an error.
 //
 // Keys are processed in sorted order, and the rows of a nested []map[string]any
 // in order, so when several values fail coercion the returned error names the
@@ -308,48 +343,91 @@ func firstRefusedType(types ParamTypes) (string, error) {
 	return first, firstErr
 }
 
-// coerceParam coerces a single top-level (key, value) pair. Nested maps and
-// row slices are walked one level via the "outer.inner" convention; every other
-// value — scalar or []any list — is coerced against its declared constraint via
-// [coerceValue].
+// coerceParam coerces a single top-level (key, value) pair. A value that holds
+// none is nil, and nested maps and rows ([isRows]) are walked one level via the
+// "outer.inner" convention; any other value is coerced against its declared
+// constraint via [coerceValue], or returned as given under an undeclared key.
 func coerceParam(key string, value any, types ParamTypes) (any, error) {
-	switch v := value.(type) {
-	case nil:
-		//nolint:nilnil // a nil param value coerces to nil with no error: nil is a valid absent value, not a failure
+	if holdsNone(value) {
+		//nolint:nilnil // a value that holds none coerces to nil with no error: it is a valid absent value, not a failure
 		return nil, nil
+	}
+	switch v := value.(type) {
 	case map[string]any:
 		return coerceNested(key, v, types)
 	case []map[string]any:
-		out := make([]map[string]any, len(v))
-		for i, row := range v {
-			cr, err := coerceNested(key, row, types)
-			if err != nil {
-				return nil, err
-			}
-			out[i] = cr
+		return coerceRows(key, v, types)
+	case []any:
+		// The rows CoerceParams returns are a []any, so a second pass reads them as
+		// rows too. Rows that are empty or all nil hold no map, and read as a list.
+		if isRows(v) {
+			return coerceRows(key, v, types)
 		}
-		return out, nil
-	default:
-		if constraint, ok := types[key]; ok {
-			cv, err := coerceValue(constraint, value)
-			if err != nil {
-				return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(key), err)
-			}
-			return cv, nil
-		}
-		return value, nil
 	}
+	if constraint, ok := types[key]; ok {
+		cv, err := coerceValue(constraint, value)
+		if err != nil {
+			return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(key), err)
+		}
+		return cv, nil
+	}
+	return value, nil
+}
+
+// coerceRows walks each row of a rows param. The driver packs a nil map in a
+// []map[string]any as an empty one, so the rows return as a []any, where a row
+// that holds none is nil.
+func coerceRows[E any](key string, rows []E, types ParamTypes) ([]any, error) {
+	// A second pass reads rows that hold no map as a list, which a constraint at
+	// key would judge, so a constraint there is refused on every pass.
+	if types[key] != nil {
+		return nil, fmt.Errorf("param %s: rows take no constraint at their own key; declare each row field as \"<key>.<field>\"", diag.QuoteValue(key))
+	}
+	out := make([]any, len(rows))
+	for i, row := range rows {
+		m, ok := any(row).(map[string]any)
+		if !ok || m == nil {
+			continue
+		}
+		cr, err := coerceNested(key, m, types)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = cr
+	}
+	return out, nil
+}
+
+// isRows reports whether v holds rows in the shape [coerceRows] returns them:
+// each element a map[string]any or an untyped nil, at least one of them a map.
+// Any other []any is a list, nil elements alone included.
+func isRows(v []any) bool {
+	rows := false
+	for _, e := range v {
+		switch e.(type) {
+		case map[string]any:
+			rows = true
+		case nil:
+		default:
+			return false
+		}
+	}
+	return rows
 }
 
 // coerceNested walks one level of a nested param map, coercing each field whose
-// "outer.inner" key is declared in types. Fields absent from types, and nil
-// values, pass through unchanged.
+// "outer.inner" key is declared in types. A field that holds no value is nil,
+// and any other field absent from types passes through unchanged.
 func coerceNested(outer string, m map[string]any, types ParamTypes) (map[string]any, error) {
 	out := make(map[string]any, len(m))
 	for _, k := range slices.Sorted(maps.Keys(m)) {
 		v := m[k]
 		dotKey := outer + "." + k
-		if constraint, ok := types[dotKey]; ok && v != nil {
+		if holdsNone(v) {
+			out[k] = nil
+			continue
+		}
+		if constraint, ok := types[dotKey]; ok {
 			cv, err := coerceValue(constraint, v)
 			if err != nil {
 				return nil, fmt.Errorf("param %s: %w", diag.QuoteValue(dotKey), err)

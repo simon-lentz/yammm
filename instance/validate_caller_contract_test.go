@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func codes(res diag.Result) []string {
 
 // A typed nil pointer — the shape adapter/gogen emits for an absent optional
 // scalar — is the absent value at every null-rule site, exactly as an
-// interface nil is. A typed nil slice or map stays an empty container.
+// interface nil is, and so is a nil slice or map.
 func TestTypedNilPointer_IsAbsent(t *testing.T) {
 	t.Parallel()
 	s := loadT(t, `schema "p"
@@ -77,17 +78,28 @@ type T {
 			t.Errorf("want E_MISSING_REQUIRED alone, got %v", codes(res))
 		}
 	})
-	t.Run("typed nil slice is an empty list", func(t *testing.T) {
+	t.Run("optional nil slice is dropped", func(t *testing.T) {
 		t.Parallel()
-		var nilTags []any
-		vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "tags": nilTags}})
-		if res.Err() != nil {
-			t.Fatalf("refused: %v", res.Err())
+		for _, nilTags := range []any{[]any(nil), []string(nil)} {
+			vi, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "tags": nilTags}})
+			if res.Err() != nil {
+				t.Fatalf("%T: refused: %v", nilTags, res.Err())
+			}
+			if _, ok := vi.Property("tags"); ok {
+				t.Errorf("%T: a nil slice was stored", nilTags)
+			}
 		}
-		tv, ok := vi.Property("tags")
-		sl, isList := tv.Slice()
-		if !ok || !isList || sl.Len() != 0 {
-			t.Errorf("a typed nil slice must be stored as an empty list: stored=%v list=%v", ok, isList)
+	})
+	t.Run("edge value nil map and nil slice are the null an explicit null is", func(t *testing.T) {
+		t.Parallel()
+		_, oneControl := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": nil}})
+		_, one := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "at": map[string]any(nil)}})
+		_, manyControl := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": nil}})
+		_, many := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "lines": []any(nil)}})
+		for name, pair := range map[string][2]diag.Result{"a nil map at a (one) association": {oneControl, one}, "a nil slice at a (many) composition": {manyControl, many}} {
+			if !slices.Equal(codes(pair[0]), codes(pair[1])) || !pair[1].HasCode(diag.E_EDGE_SHAPE_MISMATCH) {
+				t.Errorf("%s drew %v, an explicit null %v; want the same E_EDGE_SHAPE_MISMATCH", name, codes(pair[1]), codes(pair[0]))
+			}
 		}
 	})
 	t.Run("edge value pointer is the null an explicit null is", func(t *testing.T) {

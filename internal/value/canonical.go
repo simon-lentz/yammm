@@ -20,7 +20,8 @@ import (
 // and re-rendered, so one value reaches one spelling whichever way a caller
 // wrote it. A List canonicalizes at its element, so a List over one of those
 // three kinds is rebuilt as a fresh []any. Every other kind, an unresolved
-// alias and a nil value pass through untouched.
+// alias and a value that holds none ([Absent]) pass through untouched, so a nil
+// slice at a List stays nil and never becomes an empty list.
 //
 // The returned value is always usable: on error it is val unchanged, so a
 // caller that heals what it can and passes through what it cannot may ignore
@@ -30,7 +31,7 @@ import (
 // cannot express. A schema declaring such a layout draws
 // [github.com/simon-lentz/yammm/diag.W_TIMESTAMP_LOSSY_FORMAT] at load.
 func Canonical(val any, c schema.Constraint) (any, error) {
-	if val == nil || c == nil {
+	if c == nil || Absent(val) {
 		return val, nil
 	}
 	resolved := schema.ResolveAlias(c)
@@ -222,9 +223,10 @@ func Canonicalizes(c schema.Constraint) bool {
 	}
 }
 
-// ListElems reads val as a list: a []any as it is, an [immutable.Slice] as
-// its unwrapped elements, and any other slice elementwise. Anything else —
-// nil and a fixed-size array included — is not a list: no decoder in the
+// ListElems reads val as a list: a non-nil []any as it is, an [immutable.Slice] as
+// its unwrapped elements, and any other non-nil slice elementwise. Anything
+// else — a value that holds none ([Absent]), a nil slice included, and a
+// fixed-size array — is not a list: no decoder in the
 // module produces an array for a list position, and an array is how a scalar
 // carrier is spelled (uuid.UUID is [16]byte). This is the one reader every
 // list position in the module goes through, so the check, coerce, canonical
@@ -232,8 +234,11 @@ func Canonicalizes(c schema.Constraint) bool {
 func ListElems(val any) ([]any, bool) {
 	switch v := val.(type) {
 	case []any:
-		return v, true
+		return v, v != nil
 	case immutable.Slice:
+		if immutable.IsNilContainer(val) {
+			return nil, false
+		}
 		elems := make([]any, v.Len())
 		for i, e := range v.Iter2() {
 			elems[i] = e.Unwrap()
@@ -241,7 +246,7 @@ func ListElems(val any) ([]any, bool) {
 		return elems, true
 	}
 	rv := reflect.ValueOf(val)
-	if rv.Kind() != reflect.Slice {
+	if rv.Kind() != reflect.Slice || rv.IsNil() {
 		return nil, false
 	}
 	elems := make([]any, rv.Len())

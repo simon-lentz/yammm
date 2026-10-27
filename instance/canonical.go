@@ -51,9 +51,9 @@ func CanonicalValue(val any, c schema.Constraint) (any, error) {
 // through at most 64 pointers and interfaces: a string, a bool, an int64, a uint64, a
 // float32 or a float64 for a value of that kind, a named type as its base value,
 // a json.Number that is a JSON number literal, a time.Time or a uuid.UUID as
-// itself, and nil for a nil value but a bare slice or string-keyed map, which
-// is a list or a map. It reports false for every other value, a list and a map
-// included, which a writer walks itself, reading each element through ScalarOf. A writer writes a time.Time only at a Timestamp or a Date, and a uuid.UUID
+// itself, and nil for a value that holds none, a nil slice or map included. It
+// reports false for every other value, a list and a map included, which a writer
+// walks itself, reading each element through ScalarOf. A writer writes a time.Time only at a Timestamp or a Date, and a uuid.UUID
 // only at a UUID, each of which renders it.
 func ScalarOf(v any) (any, bool) {
 	return value.Scalar(v)

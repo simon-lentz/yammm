@@ -23,10 +23,11 @@ const (
 // TypeStrata returns the strata for a value's type — its ordering category.
 //
 // Returns InvalidStrata for types with no category: maps, channels, functions
-// and unsafe pointers that hold a value, structs other than [immutable.Slice],
-// a non-nil slice behind a pointer or an interface, and a json.Number that is
-// no JSON number literal. Through pointers and interfaces a value that holds
-// none ([Absent]) is NilStrata and a scalar takes the strata of the form
+// and unsafe pointers that hold a value, structs other than an [immutable.Slice]
+// and a nil [immutable] container, a non-nil slice behind a pointer or an
+// interface, and a json.Number that is no JSON number literal. A value that
+// holds none ([Absent]), bare or through pointers and interfaces, a nil
+// container included, is NilStrata, and a scalar takes the strata of the form
 // [Scalar] reads it in, so the categories agree with [Order] and with the
 // extraction functions.
 func TypeStrata(a any) int {
@@ -50,6 +51,9 @@ func TypeStrata(a any) int {
 	case string:
 		return StringStrata
 	case *regexp.Regexp:
+		if x == nil {
+			return NilStrata
+		}
 		return StringStrata
 	case json.Number:
 		// Numeric here because Classify says numeric; a lexical number that
@@ -62,6 +66,9 @@ func TypeStrata(a any) int {
 	case immutable.Slice:
 		// A List- or Vector-typed property carries this out of the
 		// evaluator's scope; it is a struct, so no reflect kind names it.
+		if immutable.IsNilContainer(a) {
+			return NilStrata
+		}
 		return SliceStrata
 	}
 	return strataOfKind(a)
@@ -69,14 +76,17 @@ func TypeStrata(a any) int {
 
 // strataOfKind reports the strata of a value the predeclared type switch
 // cannot answer by what [walk] reaches: nil for a value [Absent] reads as none,
-// a scalar by the form [Scalar] reads it in, a bare slice as a list, and any
-// other value as none.
+// a scalar by the form [Scalar] reads it in, a bare non-nil slice as a list, and
+// any other value as none.
 func strataOfKind(a any) int {
+	if immutable.IsNilContainer(a) {
+		return NilStrata
+	}
 	rv, ok := walk(a)
 	if !ok {
 		return InvalidStrata
 	}
-	if isNil(rv) && !container(reflect.ValueOf(a)) {
+	if isNil(rv) {
 		return NilStrata
 	}
 	switch rv.Type() {

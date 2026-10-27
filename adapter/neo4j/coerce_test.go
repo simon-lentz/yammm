@@ -193,7 +193,7 @@ func TestCoerceParams_NestedRowsAndError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	row := out["rows"].([]map[string]any)[0]
+	row := out["rows"].([]any)[0].(map[string]any)
 	if _, ok := row["unit_price"].(float64); !ok {
 		t.Fatalf("unit_price not coerced to float64: %T", row["unit_price"])
 	}
@@ -315,9 +315,9 @@ func TestParamTypesForType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, isFloat := out["rows"].([]map[string]any)[0]["score"].(float64); !isFloat {
+	if _, isFloat := out["rows"].([]any)[0].(map[string]any)["score"].(float64); !isFloat {
 		t.Fatalf("end-to-end: rows[0].score not coerced to float64: %T",
-			out["rows"].([]map[string]any)[0]["score"])
+			out["rows"].([]any)[0].(map[string]any)["score"])
 	}
 }
 
@@ -347,7 +347,7 @@ func TestCoerceParams_ListElementCoercion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	row := out["rows"].([]map[string]any)[0]
+	row := out["rows"].([]any)[0].(map[string]any)
 
 	if _, ok := row["ratios"].([]float64); !ok {
 		t.Errorf("List<Float> param not element-coerced: ratios is %T, want []float64", row["ratios"])

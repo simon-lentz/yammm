@@ -1,6 +1,9 @@
 package immutable
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 // TestWrap_AdoptsAValuesContent holds Wrap to one rule for its own Value: the
 // content is contributed, so no Value ever holds a Value and an accessor reads
@@ -97,7 +100,100 @@ func TestValue_IsNil_ThroughAWrapper(t *testing.T) {
 			if got := Wrap(row.value).IsNil(); got != row.want {
 				t.Errorf("Wrap(%s).IsNil() = %v; want %v", row.name, got, row.want)
 			}
+			if got := IsNilContainer(row.value); got != row.want {
+				t.Errorf("IsNilContainer(%s) = %v; want %v", row.name, got, row.want)
+			}
 		})
+	}
+}
+
+// embedsKey is a named type of this package that embeds a container, so its
+// package path is the container's.
+type embedsKey struct {
+	Key
+	Name string
+}
+
+// noContainers are values IsNilContainer reads as no container: a Go nil, a nil
+// Go map or slice, a pointer to a nil container and a struct that embeds one.
+func noContainers() map[string]any {
+	nilSlice := WrapSlice(nil)
+	return map[string]any{
+		"literal nil":                         nil,
+		"a nil Go map":                        map[string]any(nil),
+		"a nil Go slice":                      []any(nil),
+		"a pointer to a nil Slice":            &nilSlice,
+		"a nil pointer to a Map":              (*Map[string])(nil),
+		"a Value that holds nothing":          Wrap(nil),
+		"a struct embedding a nil Slice":      struct{ Slice }{},
+		"a struct embedding a nil Map[int]":   struct{ Map[int] }{},
+		"a struct embedding a nil Properties": struct{ Properties }{},
+		"a struct embedding a nil Key":        struct{ Key }{},
+		"a named struct embedding a nil Key":  embedsKey{},
+	}
+}
+
+// TestIsNilContainer_OnlyAContainerIsOne holds IsNilContainer to this package's
+// containers, a Map of any key type included.
+func TestIsNilContainer_OnlyAContainerIsOne(t *testing.T) {
+	t.Parallel()
+	for name, v := range noContainers() {
+		if IsNilContainer(v) {
+			t.Errorf("IsNilContainer(%s) = true; want false", name)
+		}
+	}
+	type label string
+	for name, v := range map[string]any{
+		"a zero Map[int]":                  Map[int]{},
+		"a zero Map of a defined key type": Map[label]{},
+	} {
+		if !IsNilContainer(v) {
+			t.Errorf("IsNilContainer(%s) = false; want true", name)
+		}
+	}
+}
+
+// TestIsNilContainer_AllocatesNothing holds the question every value reader
+// asks of every value to no allocation, whichever way it is answered.
+func TestIsNilContainer_AllocatesNothing(t *testing.T) {
+	values := noContainers()
+	values["a nil Slice"] = WrapSlice(nil)
+	values["a Map[int]"] = WrapMap(map[int]any{1: "a"})
+	for name, v := range values {
+		if n := testing.AllocsPerRun(10, func() { _ = IsNilContainer(v) }); n != 0 {
+			t.Errorf("IsNilContainer(%s) allocates %v times a call, want 0", name, n)
+		}
+	}
+}
+
+// TestWrap_AStructEmbeddingAContainerIsStoredAsItself holds every reader that
+// asks whether a value is a container to the value's type. A struct that embeds
+// one has its methods by promotion, and is stored, read and cloned as a struct.
+func TestWrap_AStructEmbeddingAContainerIsStoredAsItself(t *testing.T) {
+	t.Parallel()
+	for name, given := range map[string]any{
+		"a Slice":      struct{ Slice }{WrapSlice([]any{int64(1)})},
+		"a nil Slice":  struct{ Slice }{},
+		"a Map[int]":   struct{ Map[int] }{WrapMap(map[int]any{1: "a"})},
+		"a Properties": struct{ Properties }{WrapProperties(map[string]any{"a": int64(1)})},
+		"a nil Key":    struct{ Key }{},
+	} {
+		v := Wrap(given)
+		if v.IsNil() {
+			t.Errorf("%s: IsNil reports true for a struct", name)
+		}
+		if got := v.Unwrap(); !reflect.DeepEqual(got, given) {
+			t.Errorf("%s: Unwrap returns %#v, want the struct", name, got)
+		}
+		if got := v.Clone(); !reflect.DeepEqual(got, given) {
+			t.Errorf("%s: Clone returns %#v, want the struct", name, got)
+		}
+		if got := Wrap(given, WithClone(true)).Unwrap(); !reflect.DeepEqual(got, given) {
+			t.Errorf("%s: a cloning Wrap stores %#v, want the struct", name, got)
+		}
+		if got := Wrap(map[int]any{1: given}).Clone(); !reflect.DeepEqual(got, map[int]any{1: given}) {
+			t.Errorf("%s: in a map stored as given it clones to %#v, want the struct", name, got)
+		}
 	}
 }
 

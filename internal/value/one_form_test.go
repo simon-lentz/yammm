@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/internal/value"
 )
@@ -182,8 +183,7 @@ func carriers(name string, v any) map[string]any {
 }
 
 // A map, a channel, a function or an unsafe pointer that holds a value has no
-// strata whatever carries it, and neither has a bare nil string-keyed map,
-// which the validator reads as an empty map; none equals a nil pointer.
+// strata whatever carries it, and none equals a nil pointer.
 func TestTypeStrata_AMapChannelFunctionOrUnsafePointerHasNone(t *testing.T) {
 	t.Parallel()
 	var nilInt *int
@@ -193,12 +193,8 @@ func TestTypeStrata_AMapChannelFunctionOrUnsafePointerHasNone(t *testing.T) {
 		"a channel":         make(chan int),
 		"a function":        func() {},
 		"an unsafe pointer": unsafe.Pointer(&n),
-		"a nil map":         map[string]int(nil),
 	} {
 		for carrier, c := range carriers(name, v) {
-			if name == "a nil map" && carrier != name {
-				continue
-			}
 			if s := value.TypeStrata(c); s != value.InvalidStrata {
 				t.Errorf("TypeStrata(%s) = %d, want InvalidStrata", carrier, s)
 			}
@@ -211,8 +207,8 @@ func TestTypeStrata_AMapChannelFunctionOrUnsafePointerHasNone(t *testing.T) {
 
 // A nil value is nil whatever carries it, as Scalar reads it and every writer
 // writes it: a nil pointer, map, slice, channel, function or unsafe pointer,
-// bare or behind a pointer or an interface. A bare nil slice or string-keyed
-// map is the exception, since the validator reads it as an empty list or map.
+// bare or behind a pointer or an interface, a bare nil slice or string-keyed
+// map included.
 func TestTypeStrata_ANilValueIsNilThroughEveryCarrier(t *testing.T) {
 	t.Parallel()
 	var nilInt *int
@@ -226,9 +222,6 @@ func TestTypeStrata_ANilValueIsNilThroughEveryCarrier(t *testing.T) {
 		"a nil map keyed by no string": map[int]int(nil),
 	} {
 		for carrier, c := range carriers(name, v) {
-			if (name == "a nil map" || name == "a nil slice") && carrier == name {
-				continue
-			}
 			if s := value.TypeStrata(c); s != value.NilStrata {
 				t.Errorf("TypeStrata(%s) = %d, want NilStrata", carrier, s)
 			}
@@ -245,15 +238,16 @@ func TestTypeStrata_ANilValueIsNilThroughEveryCarrier(t *testing.T) {
 	}
 }
 
-// A bare slice is a list, and a bare nil slice the empty list, as ListElems
-// reads them; a slice behind a pointer or an interface is no list, as Scalar
-// and ListElems read it, so it has no strata and equals nothing.
+// A bare non-nil slice is a list, as ListElems reads it, and a nil slice is
+// none, so it is not the empty list; a slice behind a pointer or an interface
+// is no list, as Scalar and ListElems read it, so it has no strata and equals
+// nothing.
 func TestTypeStrata_ASliceIsAListOnlyBare(t *testing.T) {
 	t.Parallel()
 	one := []any{int64(1)}
 	for name, c := range map[string]struct{ v, want any }{
-		"a slice":     {one, []any{int64(1)}},
-		"a nil slice": {[]any(nil), []any{}},
+		"a slice":        {one, []any{int64(1)}},
+		"an empty slice": {[]any{}, []any{}},
 	} {
 		if s := value.TypeStrata(c.v); s != value.SliceStrata {
 			t.Errorf("TypeStrata(%s) = %d, want SliceStrata", name, s)
@@ -266,6 +260,17 @@ func TestTypeStrata_ASliceIsAListOnlyBare(t *testing.T) {
 		}
 		if cmp, err := value.Order(c.v, c.want); err != nil || cmp != 0 {
 			t.Errorf("Order(%s, %#v) = %d, %v; want 0", name, c.want, cmp, err)
+		}
+	}
+	for _, nilSlice := range []any{[]any(nil), []string(nil)} {
+		if _, isList := value.ListElems(nilSlice); isList {
+			t.Errorf("ListElems(%#v) reads a list", nilSlice)
+		}
+		if value.Equal(nilSlice, []any{}) || value.Equal([]any{}, nilSlice) {
+			t.Errorf("Equal(%#v, the empty list) = true", nilSlice)
+		}
+		if cmp, err := value.Order(nilSlice, []any{}); err != nil || cmp >= 0 {
+			t.Errorf("Order(%#v, the empty list) = %d, %v; want below it, as nil is", nilSlice, cmp, err)
 		}
 	}
 	for carrier, c := range carriers("a slice", one) {
@@ -299,6 +304,100 @@ func TestUnreadNumber_NamesOnlyTextThatIsNoLiteral(t *testing.T) {
 	for _, v := range []any{signed, &signed} {
 		if n, ok := value.UnreadNumber(v); !ok || n != signed {
 			t.Errorf("UnreadNumber(%#v) = %q, %v; want +5, true", v, n, ok)
+		}
+	}
+}
+
+// An immutable container that holds nil, as immutable stores a nil slice or
+// map, holds no value to every reader here, as the nil it stores does.
+func TestReaders_AnImmutableContainerHoldingNilHoldsNone(t *testing.T) {
+	t.Parallel()
+	for name, v := range map[string]any{
+		"a wrapped nil slice": immutable.Wrap([]any(nil)).Unwrap(),
+		"a wrapped nil map":   immutable.Wrap(map[string]any(nil)).Unwrap(),
+		"a nil Properties":    immutable.WrapProperties(nil),
+		"a nil Key":           immutable.WrapKey(nil),
+		"a nil int-keyed Map": immutable.WrapMap(map[int]any(nil)),
+	} {
+		if !value.Absent(v) {
+			t.Errorf("Absent(%s) = false", name)
+		}
+		if got, ok := value.Scalar(v); !ok || got != nil {
+			t.Errorf("Scalar(%s) = %v, %v; want nil, true", name, got, ok)
+		}
+		if s := value.TypeStrata(v); s != value.NilStrata {
+			t.Errorf("TypeStrata(%s) = %d, want NilStrata", name, s)
+		}
+		if _, isList := value.ListElems(v); isList {
+			t.Errorf("ListElems(%s) reads a list", name)
+		}
+		if !value.Equal(v, nil) || !value.Equal(nil, v) {
+			t.Errorf("Equal(%s, nil) = false", name)
+		}
+	}
+	for name, pair := range map[string][2]any{
+		"a wrapped nil slice and a wrapped empty one": {immutable.Wrap([]any(nil)).Unwrap(), immutable.Wrap([]any{}).Unwrap()},
+		"a wrapped nil map and a wrapped empty one":   {immutable.Wrap(map[string]any(nil)).Unwrap(), immutable.Wrap(map[string]any{}).Unwrap()},
+		"a nil Properties and an empty map":           {immutable.WrapProperties(nil), map[string]any{}},
+	} {
+		if value.Equal(pair[0], pair[1]) || value.Equal(pair[1], pair[0]) {
+			t.Errorf("Equal(%s) = true", name)
+		}
+	}
+}
+
+// Map is a generic type of the immutable container's name in another package.
+// It embeds the container, so reflect names its instances as it names the
+// container's, Map[string].
+type Map[K comparable] struct {
+	immutable.Map[K]
+	Name string
+}
+
+// A struct that embeds an immutable container holding nil is a struct, read as
+// every other struct is: it holds a value, and no reader reads it as a list.
+func TestReaders_AStructEmbeddingANilContainerHoldsAValue(t *testing.T) {
+	t.Parallel()
+	structStrata := value.TypeStrata(struct{ A int }{})
+	for name, v := range map[string]any{
+		"a struct embedding a nil Slice":      struct{ immutable.Slice }{},
+		"a struct embedding a nil Map[int]":   struct{ immutable.Map[int] }{},
+		"a struct embedding a nil Properties": struct{ immutable.Properties }{},
+		"another package's Map":               Map[string]{},
+	} {
+		if value.Absent(v) {
+			t.Errorf("Absent(%s) = true", name)
+		}
+		if got, ok := value.Scalar(v); ok {
+			t.Errorf("Scalar(%s) = %v, true; want no scalar", name, got)
+		}
+		if s := value.TypeStrata(v); s != structStrata {
+			t.Errorf("TypeStrata(%s) = %d, want %d, as any struct", name, s, structStrata)
+		}
+		if _, isList := value.ListElems(v); isList {
+			t.Errorf("ListElems(%s) reads a list", name)
+		}
+		if value.Equal(v, nil) || value.Equal(nil, v) {
+			t.Errorf("Equal(%s, nil) = true", name)
+		}
+	}
+}
+
+// Equal holds a value that holds none apart from every value that holds one,
+// so it stays transitive: a nil map equals nil, and neither equals an empty map.
+func TestEqual_ANilMapIsNoEmptyMap(t *testing.T) {
+	t.Parallel()
+	for name, nilMap := range map[string]any{
+		"a nil map[string]any": map[string]any(nil),
+		"a nil map[string]int": map[string]int(nil),
+	} {
+		if !value.Equal(nilMap, nil) || !value.Equal(nil, nilMap) {
+			t.Errorf("Equal(%s, nil) = false", name)
+		}
+		for _, empty := range []any{map[string]any{}, immutable.Wrap(map[string]any{}).Unwrap()} {
+			if value.Equal(nilMap, empty) || value.Equal(empty, nilMap) {
+				t.Errorf("Equal(%s, %#v) = true", name, empty)
+			}
 		}
 	}
 }

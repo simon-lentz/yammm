@@ -1112,29 +1112,29 @@ func TestCompareUint64Float64(t *testing.T) {
 // TestOrder_StringComparableEdgeCases tests edge cases in toStringComparable
 // through the Order function (toStringComparable is unexported).
 func TestOrder_StringComparableEdgeCases(t *testing.T) {
-	// Test nil regexp - should return error
-	t.Run("nil regexp vs string returns error", func(t *testing.T) {
-		var nilRegexp *regexp.Regexp = nil
-		_, err := value.Order(nilRegexp, "test")
-		if err == nil {
-			t.Error("expected error for nil regexp comparison")
-		}
-	})
-
-	t.Run("string vs nil regexp returns error", func(t *testing.T) {
-		var nilRegexp *regexp.Regexp = nil
-		_, err := value.Order("test", nilRegexp)
-		if err == nil {
-			t.Error("expected error for nil regexp comparison")
-		}
-	})
-
-	t.Run("nil regexp vs nil regexp returns error", func(t *testing.T) {
-		var nilRegexp1 *regexp.Regexp = nil
-		var nilRegexp2 *regexp.Regexp = nil
-		_, err := value.Order(nilRegexp1, nilRegexp2)
-		if err == nil {
-			t.Error("expected error for nil regexp comparison")
+	// A nil regexp holds no value, as any nil pointer: it orders as nil, before
+	// a string, and equals every other value that holds none.
+	var nilRegexp *regexp.Regexp
+	for name, tc := range map[string]struct {
+		left, right any
+		want        int
+	}{
+		"nil regexp vs string":     {nilRegexp, "test", -1},
+		"string vs nil regexp":     {"test", nilRegexp, 1},
+		"nil regexp vs nil regexp": {nilRegexp, nilRegexp, 0},
+		"nil regexp vs nil":        {nilRegexp, nil, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got, err := value.Order(tc.left, tc.right); err != nil || got != tc.want {
+				t.Errorf("Order = %d, %v; want %d", got, err, tc.want)
+			}
+		})
+	}
+	t.Run("a nil regexp equals every value that holds none", func(t *testing.T) {
+		for _, other := range []any{nil, nilRegexp, (*int)(nil), []any(nil)} {
+			if !value.Equal(nilRegexp, other) || !value.Equal(other, nilRegexp) {
+				t.Errorf("Equal(nil regexp, %#v) = false; want true both ways", other)
+			}
 		}
 	})
 

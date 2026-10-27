@@ -9,9 +9,9 @@ import (
 
 // The three readers of a list position read every list shape alike, through
 // value.ListElems: asSlice keeps the builtins' nil-is-empty rule in front of
-// it, toSlice refuses nil, and both read an immutable.Slice and a typed slice
-// — and neither reads a fixed-size array, which is how a scalar carrier is
-// spelled (uuid.UUID is [16]byte).
+// it for every value that holds none, toSlice refuses one, and both read an
+// immutable.Slice and a typed slice — and neither reads a fixed-size array,
+// which is how a scalar carrier is spelled (uuid.UUID is [16]byte).
 func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 	t.Parallel()
 	s := immutable.Wrap([]any{int64(1), "a"}).Unwrap()
@@ -38,11 +38,13 @@ func TestListReaders_AgreeOnEveryShape(t *testing.T) {
 			}
 		})
 	}
-	if got, err := asSlice("T", nil); err != nil || len(got) != 0 {
-		t.Errorf("asSlice(nil) = %#v, %v; want an empty list", got, err)
-	}
-	if _, ok := toSlice(nil); ok {
-		t.Error("toSlice(nil) = ok, want not a list")
+	for _, none := range []any{nil, []any(nil), []string(nil), immutable.Wrap([]any(nil)).Unwrap()} {
+		if got, err := asSlice("T", none); err != nil || got == nil || len(got) != 0 {
+			t.Errorf("asSlice(%#v) = %#v, %v; want an empty list", none, got, err)
+		}
+		if _, ok := toSlice(none); ok {
+			t.Errorf("toSlice(%#v) = ok, want not a list", none)
+		}
 	}
 }
 

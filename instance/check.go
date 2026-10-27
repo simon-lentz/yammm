@@ -12,8 +12,8 @@ import (
 // pattern, list length and element rule and a Vector's dimension, with an
 // alias resolved to its DataType. A nil
 // constraint is valid, and so is a value that holds none (nil behind at most
-// 64 pointers and interfaces, as [ScalarOf] reads it, but a bare nil slice or
-// string-keyed map, which is an empty list or map) under a constraint [schema.CheckConstraint] accepts — presence is the
+// 64 pointers and interfaces, as [ScalarOf] reads it, a nil slice or map
+// included) under a constraint [schema.CheckConstraint] accepts — presence is the
 // caller's rule, as it is the validator's. A non-nil constraint is judged first by
 // [schema.CheckConstraint], and one it refuses is an error whatever the value.
 //
