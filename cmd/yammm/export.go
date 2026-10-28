@@ -28,8 +28,8 @@ The --to cypher format produces parameterized Cypher statements intended for
 inspection and integration into application code or migration tooling.
 The output contains UNWIND/MERGE patterns over one parameter placeholder, $rows,
 whose rows carry the keys and properties each statement reads (a node merge's as
-row.key_<name> and row.props), and is not directly executable in Neo4j Browser or
-cypher-shell.`,
+row.key_<name> and row.props, and row.update_props for a type with @writeOnce
+properties), and is not directly executable in Neo4j Browser or cypher-shell.`,
 		Args: cobra.ExactArgs(2),
 		RunE: withDiagnostics(runExport),
 	}

@@ -152,9 +152,9 @@ func TestIndexDropStatement(t *testing.T) {
 	}
 }
 
-// Every name the emitters generate must interpolate bare, or a routine DROP
-// would carry quoting nothing needs. The index half of this assertion already
-// exists beside indexName; this is the constraint half.
+// Every name the emitters generate must be a valid identifier, since a CREATE
+// statement writes it unquoted. The index half of this assertion already exists
+// beside indexName; this is the constraint half.
 func TestConstraintName_IsAValidIdentifier(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []ConstraintKind{ConstraintUnique, ConstraintNotNull, ConstraintType, ConstraintNodeKey} {

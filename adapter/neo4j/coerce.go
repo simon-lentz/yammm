@@ -63,10 +63,11 @@ import (
 // neither pass through as already-native nor repair, rather than handing a
 // wrong-typed value to the driver. This matches the list path ([coerceSlice]),
 // which must build a homogeneous typed slice and errors on a wrong-typed element.
-// The non-transforming kinds stay lenient, save a List whose element is a
-// collection, a type Neo4j cannot store, where a value that holds one is
-// refused: a correct value of any other is already driver-native, so there is
-// nothing to repair or reject, and instance validation is its type authority. On the validated node path a transforming
+// The non-transforming kinds stay lenient, save a map, refused above, and a
+// List whose element is a collection, a type Neo4j cannot store, where a value
+// that holds one is refused: a correct value of any other is already
+// driver-native, so there is nothing to repair or reject, and instance
+// validation is its type authority. On the validated node path a transforming
 // kind only ever receives the types its strict set accepts (Float: float64;
 // Integer: int64; Timestamp and Date: the string the validator stores), so
 // strictness fires only on a value no validator refused at Error: a hand-built
@@ -78,9 +79,10 @@ import (
 // It operates on scalar values — a List/collection value is element-coerced by
 // [CoerceParams], which also requires a Go string of a String, UUID, Enum or
 // Pattern element and a bool of a Boolean element, where Coerce passes a
-// scalar of those kinds through. The adapter write path reads every value and
-// element in its one form first ([github.com/simon-lentz/yammm/instance.ScalarOf]),
-// so a named string, a pointer and a uuid.UUID at a UUID pass there, and a JSON
+// scalar of those kinds through. The adapter write path refuses a value that
+// holds one at a List whose element is a collection by its type first, and reads
+// every other value and element in its one form before Coerce
+// ([github.com/simon-lentz/yammm/instance.ScalarOf]), so a named string, a pointer and a uuid.UUID at a UUID pass there, and a JSON
 // number literal reaches it as the int64 or float64 it spells, which an Integer
 // refuses when it is a float; a literal no int64 holds outside a Float, or no
 // finite float64 holds, is refused before Coerce. Calling Coerce with a

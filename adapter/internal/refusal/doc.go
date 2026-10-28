@@ -7,7 +7,8 @@
 // adapter exports. A refusal carries that sentinel as its class and the site's
 // own text as its message, and marking never changes the text. That text, or
 // the wraps the writer adds around it, names what was refused: an instance, a
-// property, a column, an edge or the setting. [New] builds a refusal from its
+// property, a param, a primary key, a column, an edge or the setting. A call
+// handed one bare value, with no name for it, names nothing. [New] builds a refusal from its
 // text; [Mark] marks an error another call returned, which keeps every class
 // that error already carries.
 //

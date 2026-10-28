@@ -127,7 +127,7 @@ constraints, result := adapter.ConstraintsStructured(ctx, s)
 // Each Constraint has: Name, Kind, Label, Properties, TypeExpr, Statement
 ```
 
-Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike, the one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` under every option, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries`, `Coerce` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null; `yammm export --to cypher` exits 1 over data holding one. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A bare `Vector` is fine; it maps to `LIST<FLOAT NOT NULL>`.
+Generation is **all-or-nothing**: any validation error returns `(nil, result)`, so one unemittable property withholds every constraint of the schema rather than emitting a partial script that looks complete. Beside a name Neo4j refuses as an identifier (Cypher reserved words, below) and two labels that sanitize alike, the one shape a *valid* schema can hit is a list whose element is itself a collection (`List<List<T>>`, `List<Vector[N]>`, or a list of a list-typed alias) — legal yammm, but Neo4j has no nested collection property type, so `ConstraintsForSchema` and `ConstraintsStructured` report `E_NEO4J_UNSUPPORTED_TYPE` under every option, `WithScalarTypeConstraints(false)` included. `IndexesForSchema` and `ShapeForSchema` do not make that check. The write path does: `BatchNodeQueries`, `Coerce` and `CoerceParams` refuse a value of such a property with an error wrapping `ErrUnsupportedListElem`, an empty list included, and read a value that holds none as nil, which `BatchNodeQueries` writes as null. `CoerceParams` refuses a nested param map (a `map[string]any`) or a rows value under such a key as it does under any constraint: a constraint at a nested map's or a rows param's own key is the caller's error, which wraps no class. `yammm export --to cypher` exits 1 over data holding one. The property is judged on each concrete type and part type with a valid label that declares or inherits it, so one declared on an abstract type that no such type extends is not reported. Model the inner collection as a `part type` reached by a composition. A bare `Vector` is fine; it maps to `LIST<FLOAT NOT NULL>`.
 
 ### Index Generation
 
@@ -173,7 +173,7 @@ A type's write-once properties come from its `@writeOnce` annotations (`Immutabl
 
 ### Parameter Coercion (Direct-Cypher Path)
 
-Values passing through `BatchNodeQueries` are read in their one form (`instance.ScalarOf`) and then coerced to driver-native types automatically. Consumers hand-building Cypher parameters use the coercion step directly; it does not read the form, so it judges a pointer or a named type as the value it is, not as the scalar it holds. A value that holds none, such as a nil pointer, slice or map, it returns as nil, which the driver writes as null:
+Values passing through `BatchNodeQueries` are read in their one form (`instance.ScalarOf`) and then coerced to driver-native types automatically, save a value that holds one at a list whose element is a collection, which is refused by its type before its form is read. Consumers hand-building Cypher parameters use the coercion step directly; it does not read the form, so it judges a pointer or a named type as the value it is, not as the scalar it holds. A value that holds none, such as a nil pointer, slice or map, it returns as nil, which the driver writes as null:
 
 ```go
 v, err := neo4jAdapter.Coerce(constraint, raw)   // one value against one constraint
@@ -193,7 +193,9 @@ label := adapter.Label(ctx, "inventory", "Product")  // "inventory__Product"
 result := adapter.DetectLabelCollisions(ctx, s)
 ```
 
-**Cypher reserved words:** the DSL does not reserve them. A property named
+**Cypher reserved words:** the DSL reserves none as one; of the six spellings
+its grammar refuses as a property name, four are Cypher keywords too (`as`,
+`in`, `true` and `false`). A property named
 `match` is valid yammm (and fine for JSON/CSV export) but is rejected with
 `ErrReservedKeyword` wherever a generated constraint or index statement
 writes it, because property names appear unquoted in generated Cypher; the

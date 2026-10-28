@@ -1448,7 +1448,7 @@ Every generated relationship statement ends with `RETURN count(*) AS matched_row
 
 ### Property Coercion
 
-The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The write surface first reads every value in its one form (`instance.ScalarOf`), refusing a value of no form, a string that is not valid UTF-8 and a time or UUID its constraint does not render; it hands a JSON number literal on as the number the validator reads at its constraint (an `int64` for an integer literal, a `float64` at a `Float` and for a float literal), refusing one no such number holds; and then it coerces the value. The coercion step is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply its rules; it reads no value's form save to ask whether it holds none, so it judges a pointer or a named type that holds a value as the value it is, not as the scalar it holds:
+The write surface (`Adapter.BatchNodeQueries` / `Adapter.BatchEdgeQueries`) coerces schema-typed property values to the driver-native types Neo4j TYPE constraints require — repairing the JSON round-trip where a whole-number `Float` decodes as `int64`, and `Date` / `Timestamp` values travel as strings. The write surface first refuses a value that holds one at a list whose element is a collection, by the property's type, with an error wrapping `ErrUnsupportedListElem`. It reads every other value in its one form (`instance.ScalarOf`), refusing a value of no form, a string that is not valid UTF-8 and a time or UUID its constraint does not render; it hands a JSON number literal on as the number the validator reads at its constraint (an `int64` for an integer literal, a `float64` at a `Float` and for a float literal), refusing one no such number holds; and then it coerces the value. The coercion step is exported so consumers writing **direct Cypher** (parameterized `MERGE` / `SET` built by hand, bypassing the `Adapter` write path) can apply its rules; it reads no value's form save to ask whether it holds none, so it judges a pointer or a named type that holds a value as the value it is, not as the scalar it holds:
 
 ```go
 // Coerce a single SCALAR value to the driver-native type the constraint requires
@@ -1611,12 +1611,13 @@ The introspection types are:
 | `Constraint.DropStatement()` | The same, from a generated constraint's `Name` |
 | `Index.DropStatement()` | The same, from a generated index's `Name` |
 
-The DROP builders take a name the database already holds — from introspection or a diff result — rather than one this package generated, so they quote instead of reject. A name that would pass `ValidateIdentifier` interpolates bare; any other non-empty name, a reserved word included, is backtick-quoted with embedded backticks doubled. Rejecting a reserved word would make the object undroppable, which is the opposite of the point. An empty or all-space name is an error wrapping `ErrEmptyIdentifier`, and `Constraint.DropStatement` returns it under `WithNamedConstraints(false)`, which leaves every `Name` empty.
+The DROP builders take a name the database already holds — from introspection or a diff result — rather than one this package generated, so they quote instead of reject. Every non-empty name, a valid identifier and a reserved word included, is backtick-quoted with embedded backticks doubled, so no name can alter the statement's shape. Rejecting a reserved word would make the object undroppable, which is the opposite of the point. An empty or all-space name is an error wrapping `ErrEmptyIdentifier`, and `Constraint.DropStatement` returns it under `WithNamedConstraints(false)`, which leaves every `Name` empty.
 
 The caller owns the verb. Index and constraint names share one namespace, so the object blocking a desired constraint may be an index: `ConstraintDrift.Actual` with an empty `Type` and a non-empty `Name` is that case, and it needs `DropIndexStatement`. These functions build statements; they never execute one.
 
-Cypher reserved words are not reserved by the DSL: a property named `match` or a
-type named `MATCH` is valid yammm and exports cleanly through the JSON and CSV
+The DSL reserves no Cypher keyword as one; of the six spellings its grammar
+refuses as a property name, four are Cypher keywords too (`as`, `in`, `true` and
+`false`). A property named `match` or a type named `MATCH` is valid yammm and exports cleanly through the JSON and CSV
 adapters, but identifiers that appear unquoted in generated Cypher (property
 names, primary keys, assembled labels) are validated during constraint and index
 generation and rejected with `ErrReservedKeyword` — the check is

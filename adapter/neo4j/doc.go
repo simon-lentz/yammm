@@ -66,7 +66,10 @@
 // [ErrUnsupportedListElem]: [Adapter.BatchNodeQueries],
 // [Coerce] and [CoerceParams] return an error for a value that holds one, an
 // empty list included, and read a value that holds none as nil, which
-// BatchNodeQueries writes as null.
+// BatchNodeQueries writes as null. CoerceParams refuses a nested param map (a
+// map[string]any) or a rows value under such a key as it does under any
+// constraint: a constraint at a nested map's or a rows param's own key is the
+// caller's error, which carries no class.
 //
 // # Index Generation
 //

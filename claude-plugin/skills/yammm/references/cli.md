@@ -378,7 +378,8 @@ yammm export --to cypher schema.yammm data.json --output load.cypher
 
 The `--to cypher` output is parameterized — `UNWIND`/`MERGE` over one `$rows`
 placeholder, whose rows carry the keys and properties each statement reads (a
-node merge's as `row.key_<name>` and `row.props`) — so it is written for inspection and for
+node merge's as `row.key_<name>` and `row.props`, and `row.update_props` for a type
+with `@writeOnce` properties) — so it is written for inspection and for
 integration into application or migration code. It is **not** directly
 executable in `cypher-shell` or Neo4j Browser; running it there fails on the
 unbound parameters. Data holding a value of a property Neo4j cannot store, a
