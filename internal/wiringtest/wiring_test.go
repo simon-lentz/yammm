@@ -2496,8 +2496,14 @@ func TestRunnerBuild_IgnoresTheCallersGoEnvironment(t *testing.T) {
 		t.Fatalf("go env printed %q, want three values", out)
 	}
 	home := t.TempDir()
-	for _, dir := range []string{filepath.Join(home, "Library", "Application Support", "go"), filepath.Join(home, "go")} {
-		if err := os.MkdirAll(dir, 0o750); err != nil {
+	configDirs := []string{filepath.Join(home, "Library", "Application Support", "go"), filepath.Join(home, "go")}
+	for _, dir := range configDirs {
+		// The go command's telemetry child outlives it and holds its counter
+		// files open, which on Windows fails the TempDir's removal.
+		if err := os.MkdirAll(filepath.Join(dir, "telemetry"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "telemetry", "mode"), []byte("off\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "env"), []byte("GOAMD64=v3\nGOEXPERIMENT=nodwarf5\n"), 0o600); err != nil {
@@ -2513,6 +2519,14 @@ func TestRunnerBuild_IgnoresTheCallersGoEnvironment(t *testing.T) {
 		t.Setenv(k, v)
 	}
 	got := runnerBuild(t)
+	for _, dir := range configDirs {
+		switch _, err := os.Stat(filepath.Join(dir, "telemetry", "local")); {
+		case err == nil:
+			t.Errorf("the go command wrote telemetry under the caller's config directory %s", dir)
+		case !errors.Is(err, fs.ErrNotExist):
+			t.Fatal(err)
+		}
+	}
 	if got.GOOS != want.GOOS || got.GOARCH != want.GOARCH || got.CgoEnabled != want.CgoEnabled ||
 		!slices.Equal(got.ToolTags, want.ToolTags) || !slices.Equal(got.ReleaseTags, want.ReleaseTags) {
 		t.Errorf("runnerBuild under the caller's environment = %s/%s cgo %v %q %q, want %s/%s cgo %v %q %q",
