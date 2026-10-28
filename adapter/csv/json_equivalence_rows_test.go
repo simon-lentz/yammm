@@ -27,9 +27,10 @@ func errorCodes(res diag.Result) []string {
 
 // Each row holds the invariant the column-mapping rule states: the object a
 // row makes is the object the JSON adapter makes from the equivalent document,
-// and the validator answers the two alike. csvErrors is the parse's own
-// Error codes beyond the JSON document's: E_CSV_COERCE for text that does not
-// coerce, which JSON has no counterpart for.
+// each refused cell standing as its text, and the validator answers the two
+// alike, less the issue the document draws at a refused cell. csvErrors is the
+// parse's own Error codes beyond the JSON document's: E_CSV_COERCE for text
+// that does not coerce, which JSON has no counterpart for.
 func TestColumnMapping_EachNamedMemberParsesAsTheJSONEquivalent(t *testing.T) {
 	t.Parallel()
 	const (
@@ -163,7 +164,7 @@ type Person { id String primary
 			if len(raws) != 1 {
 				t.Fatalf("csv parse: %d instances, %s", len(raws), pres)
 			}
-			if !reflect.DeepEqual(raws[0].Properties, fromJSON.Properties) {
+			if !reflect.DeepEqual(unrefused(raws[0].Properties), fromJSON.Properties) {
 				t.Errorf("properties differ\ncsv:  %#v\njson: %#v", raws[0].Properties, fromJSON.Properties)
 			}
 			wantCodes := slices.Sorted(slices.Values(append(errorCodes(jres), c.csvErrors...)))
@@ -175,9 +176,8 @@ type Person { id String primary
 				modes = [][]instance.Option{strict, append(slices.Clone(strict), allow...)}
 			}
 			for i, opts := range modes {
-				a, b := verdict(t, s, raws[0], opts...), verdict(t, s, fromJSON, opts...)
-				if !slices.Equal(a, b) {
-					t.Errorf("mode %d: the validator answers the two differently\ncsv:  %q\njson: %q", i, a, b)
+				if why := judgedAlike(t, s, raws[0], fromJSON, opts...); why != "" {
+					t.Errorf("mode %d: %s", i, why)
 				}
 			}
 		})

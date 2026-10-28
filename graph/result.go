@@ -248,7 +248,9 @@ func (r *Snapshot) EdgesFrom(inst *Instance) []*Edge {
 //
 // This includes errors and warnings from [Graph.Add], [Graph.AddOrMerge] and
 // [Graph.AddComposed] calls, and a [BatchAssembler]'s validator results, its
-// validation failures among them, and nil-instance refusals.
+// validation failures among them, and nil-instance refusals. A record
+// refused for an [instance.Refused] value adds none: its producer's result
+// holds its issue.
 // [Graph.Check] results are returned separately per-call and are not accumulated
 // here, making Check idempotent: multiple calls have no effect on snapshot diagnostics.
 //

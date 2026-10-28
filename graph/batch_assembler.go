@@ -36,7 +36,9 @@ var ErrAssemblerFinalized = errors.New("graph: BatchAssembler.Add called after F
 // check before snapshot) so consumers cannot get the sequence wrong.
 // A record that fails validation or the add is surfaced as a contextual
 // error tagged with its type and the call's attempt ordinal, or, for a nil
-// instance, "nil-instance" and the ordinal; Finalize's error is tagged
+// instance, "nil-instance" and the ordinal; a record whose one fault is an
+// [instance.Refused] value, as an error that matches
+// [instance.ErrRefusedValue] under the same tag. Finalize's error is tagged
 // "batch_finalize".
 //
 // # Thread safety
@@ -266,7 +268,10 @@ func newBatchAssembler(ctx context.Context, s *schema.Schema, g *Graph) *BatchAs
 //
 // Returns an error annotated with typeName and the current call index
 // if validation or add fails; the returned error's cause is a
-// [*diag.ContextualError] suitable for errors.As extraction.
+// [*diag.ContextualError] suitable for errors.As extraction. A raw instance
+// whose one fault is an [instance.Refused] value returns one that matches
+// [instance.ErrRefusedValue] instead, and adds no diagnostic: its producer
+// reported the value.
 //
 // Returns [ErrAssemblerFinalized] (matchable via errors.Is) when called
 // after [BatchAssembler.Finalize].
@@ -310,10 +315,16 @@ func (ba *BatchAssembler) addSerial(typeName string, raw instance.RawInstance, a
 
 	valid, vRes := ba.validator.ValidateOne(ba.ctx, typeName, raw)
 	// A caller that discards per-record errors reads a validation failure
-	// from Snapshot.Diagnostics(), as it reads a Graph.Add refusal.
+	// from Snapshot.Diagnostics(), as it reads a Graph.Add refusal; a refused
+	// value's issue is in its producer's result alone.
 	ba.graph.collector.Merge(vRes)
 	if vRes.HasErrors() {
 		return ba.wrapAddError(typeName, attemptN, vRes)
+	}
+	// The raw instance holds an [instance.Refused] value, which its producer
+	// reported: no issue is owed here, and nothing reaches the graph.
+	if valid == nil {
+		return fmt.Errorf("%s (attempt #%d): %w", typeName, attemptN, instance.ErrRefusedValue)
 	}
 	addRes := ba.graph.Add(ba.ctx, valid)
 	if addRes.HasErrors() {
@@ -373,12 +384,14 @@ func (ba *BatchAssembler) addValid(valid *instance.ValidInstance, merge bool) (b
 			method = "AddValidOrMerge"
 		}
 		issue := diag.NewIssue(diag.Error, diag.E_INTERNAL,
-			method+" received a nil instance; ValidateForComposition returns nil for a child that failed validation").Build()
+			method+" received a nil instance; a validator returns nil for an instance that failed validation or holds a refused value").Build()
 		collector := diag.NewCollector(0)
 		collector.Collect(issue)
-		// Every other Add rejection reaches Snapshot.Diagnostics(); this one
-		// has to as well, or a caller that discards per-record errors — the
-		// pattern docs/API.md accommodates — has no record of the loss at all.
+		// Every other Add rejection but a refused value's reaches
+		// Snapshot.Diagnostics(); this one has to as well, or a caller that
+		// discards per-record errors — the pattern docs/API.md accommodates —
+		// has no record of the loss at all. The assembler cannot tell a nil a
+		// refused value left from any other.
 		ba.graph.collector.Collect(issue)
 		return false, ba.wrapNilInstanceError(attemptN, collector.Result())
 	}
@@ -438,7 +451,9 @@ func (ba *BatchAssembler) wrapAddError(typeName string, attemptN int64, res diag
 //
 // The error reports Check alone. A record that failed its own Add reported
 // that failure from Add; its diagnostics reach res.Snapshot.Diagnostics(),
-// which a caller that discards per-record errors must read to see them.
+// which a caller that discards per-record errors must read to see them. A
+// record refused for an [instance.Refused] value adds none: its issue is in
+// the result of the parser that wrote the value.
 //
 // The [FinalizeResult] struct makes the "Snapshot is always non-nil"
 // contract explicit in the type system. Callers check err alone for

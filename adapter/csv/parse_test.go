@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
@@ -72,9 +73,9 @@ func TestParseTyped_CoercionError(t *testing.T) {
 	input := "id,name,count\ne1,Alice,abc\n"
 	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), st)
 
-	// Should still return a result (with the raw string as fallback).
+	// The row is still produced; the cell is refused with its text.
 	require.Len(t, results, 1)
-	assert.Equal(t, "abc", results[0].Properties["count"]) // raw fallback
+	assert.Equal(t, instance.Refused{Value: "abc"}, results[0].Properties["count"])
 
 	// Should have a diagnostic.
 	assert.False(t, result.OK())

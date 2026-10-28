@@ -151,3 +151,11 @@ func TestInternalError_Is(t *testing.T) {
 			"all InternalError should match ErrInternalFailure")
 	})
 }
+
+// ErrInternalFailure's text names its package.
+func TestErrInternalFailure_TextNamesThePackage(t *testing.T) {
+	t.Parallel()
+	if got, want := ErrInternalFailure.Error(), "instance: internal validation failure"; got != want {
+		t.Errorf("%q, want %q", got, want)
+	}
+}

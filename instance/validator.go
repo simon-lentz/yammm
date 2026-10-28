@@ -50,10 +50,14 @@ func NewValidator(s *schema.Schema, opts ...Option) *Validator {
 // Validate validates a batch of raw instances of the given type.
 //
 // Returns:
-//   - valids: one entry per input instance; non-nil for successes, nil for failures
+//   - valids: one entry per input instance when the batch ran, non-nil for
+//     successes and nil for failures; a nil slice when it did not
 //   - result: merged diagnostics for the entire batch (OK when all instances pass)
 //
-// A diagnostic about one element of raws carries one
+// An instance that holds a [Refused] value where the validator reads one (see
+// [RawInstance].Properties) fails and draws no issue for it, since its
+// producer reported it: its entry is nil, and the result can hold no
+// error for it. A diagnostic about one element of raws carries one
 // [diag.DetailKeyInstanceIndex] detail naming it; one about typeName itself —
 // a name that does not resolve, or an abstract or part type named by an empty
 // batch — carries none. The batch result carries each instance's truncation
@@ -121,6 +125,10 @@ func (v *Validator) Validate(ctx context.Context, typeName string, raws []RawIns
 //   - valid: the validated instance, or nil on failure
 //   - result: diagnostics for this instance (OK on success, may contain warnings)
 //
+// An instance that holds a [Refused] value where the validator reads one is
+// nil with a result that holds no error for it, as [Validator.Validate] states;
+// [ErrRefusedValue] names that case.
+//
 // Panics if the receiver is nil or if ctx is nil.
 func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawInstance) (*ValidInstance, diag.Result) {
 	if v == nil {
@@ -162,11 +170,15 @@ func (v *Validator) ValidateOne(ctx context.Context, typeName string, raw RawIns
 // the same misconfiguration a full one does.
 //
 // Returns:
-//   - valids: one entry per input instance; non-nil for successes, nil for failures
+//   - valids: one entry per input instance when the batch ran, non-nil for
+//     successes and nil for failures; a nil slice when it did not
 //   - result: merged diagnostics for the batch (OK when all instances pass)
 //
-// Every diagnostic carries one [diag.DetailKeyInstanceIndex] detail naming
-// the element of raws it belongs to.
+// A child that holds a [Refused] value where the validator reads one is nil
+// with no issue for it, as [Validator.Validate] states. A diagnostic about one
+// element of raws carries one [diag.DetailKeyInstanceIndex] detail naming it;
+// one about the batch (an unresolved name, or a cancellation met before the
+// batch starts) carries none.
 //
 // Panics if the receiver is nil or if ctx is nil.
 func (v *Validator) ValidateForComposition(ctx context.Context, parentType, relationName string, raws []RawInstance) ([]*ValidInstance, diag.Result) {
@@ -453,15 +465,31 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 	// reported one defect per round trip.
 	beforeProperties := collector.ErrorCount()
 
+	// refused holds that a member value is a Refused or a pass met a refused
+	// child: the instance fails as a member error fails it, with no issue of
+	// its own, since the value's producer reported it.
+	refused := false
+	collided := claims.collidedProperties()
+
 	// Validate each property and build the validated properties map
 	validatedProps := make(map[string]any)
 	for prop := range typ.AllProperties() {
 		inputName, hasInput := propMapping[prop.Name()]
 
+		// A collided property's one issue is the collision the member index
+		// reported, as a collided relation's is.
+		if !hasInput && collided[prop.Name()] {
+			continue
+		}
+
 		// Get the raw value
 		var rawValue any
 		if hasInput {
 			rawValue = raw.Properties[inputName]
+		}
+		if isRefused(rawValue) {
+			refused = true
+			continue
 		}
 
 		// Check required properties
@@ -531,7 +559,7 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 	if cancelled(ctx, collector, prov, base) {
 		return nil, collector.Result()
 	}
-	if collector.ErrorCount() > beforeProperties {
+	if refused || collector.ErrorCount() > beforeProperties {
 		return nil, collector.Result()
 	}
 
@@ -539,20 +567,20 @@ func (v *Validator) validateProperties(ctx context.Context, typ *schema.Type, ty
 	pkComponents := v.extractPrimaryKey(typ, validatedProps)
 
 	beforeEdges := collector.ErrorCount()
-	edges := v.validateEdges(ctx, typ, relInputs, collector, prov, base)
+	edges, refused := v.validateEdges(ctx, typ, relInputs, collector, prov, base)
 	if cancelled(ctx, collector, prov, base) {
 		return nil, collector.Result()
 	}
-	if collector.ErrorCount() > beforeEdges {
+	if refused || collector.ErrorCount() > beforeEdges {
 		return nil, collector.Result()
 	}
 
 	beforeCompositions := collector.ErrorCount()
-	composed := v.validateCompositions(ctx, typ, relInputs, collector, prov, base, depth)
+	composed, refused := v.validateCompositions(ctx, typ, relInputs, collector, prov, base, depth)
 	if cancelled(ctx, collector, prov, base) {
 		return nil, collector.Result()
 	}
-	if collector.ErrorCount() > beforeCompositions {
+	if refused || collector.ErrorCount() > beforeCompositions {
 		return nil, collector.Result()
 	}
 

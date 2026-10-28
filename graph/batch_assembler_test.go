@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -256,6 +257,48 @@ func TestBatchAssembler_AddValidationFailure_ReachesSnapshotDiagnostics(t *testi
 	want := ce.Result.CodeCounts(diag.Error)
 	if len(want) == 0 || !maps.Equal(got, want) {
 		t.Errorf("Snapshot.Diagnostics() error codes = %v, want the Add error's %v", got, want)
+	}
+}
+
+// A raw instance holding a Refused value is refused with an error that
+// matches instance.ErrRefusedValue, adds nothing, and adds no diagnostic: its
+// producer reported the value.
+func TestBatchAssembler_ARefusedValueIsRefusedWithNoDiagnostic(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	ba := graph.NewBatchAssembler(t.Context(), s)
+
+	err := ba.Add("Person", instance.RawInstance{Properties: map[string]any{"id": "p1", "name": instance.Refused{Value: 7}}})
+	if !errors.Is(err, instance.ErrRefusedValue) {
+		t.Fatalf("Add = %v, want instance.ErrRefusedValue", err)
+	}
+	if want := "Person (attempt #1)"; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Add = %q, want it tagged %q", err, want)
+	}
+	if got := ba.Count(); got != 0 {
+		t.Errorf("Count() = %d, want 0", got)
+	}
+	res, err := ba.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("Finalize over an empty graph: %v", err)
+	}
+	if d := res.Snapshot.Diagnostics(); d.Len() != 0 {
+		t.Errorf("Snapshot.Diagnostics() = %s, want none", d)
+	}
+}
+
+// A validator answers a refused value with a nil instance and no error, so the
+// nil a caller passes on to AddValid names that cause beside a failed one.
+func TestBatchAssembler_AddValidOfANilNamesARefusedValue(t *testing.T) {
+	s := batchAssemblerTestSchema(t)
+	valid, vRes := instance.NewValidator(s).ValidateOne(t.Context(), "Person",
+		instance.RawInstance{Properties: map[string]any{"id": "p1", "name": instance.Refused{Value: 7}}})
+	if valid != nil || !vRes.OK() {
+		t.Fatalf("ValidateOne = %v, %s; want nil and no issue", valid, vRes)
+	}
+	ba := graph.NewBatchAssembler(t.Context(), s)
+	ce, ok := errors.AsType[*diag.ContextualError](ba.AddValid(valid))
+	if !ok || !strings.Contains(ce.Result.String(), "holds a refused value") {
+		t.Errorf("AddValid(nil) = %v; want the message to name a refused value", ce)
 	}
 }
 

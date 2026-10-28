@@ -192,9 +192,9 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_SNAPSHOT_UNSUPPORTED_VERSION` | Format version not recognized |
 | `E_SNAPSHOT_UNSUPPORTED_FEATURE` | Unrecognized feature flag in header |
 | `E_SNAPSHOT_INCOMPATIBLE_SCHEMA` | Schema structural hash mismatch |
-| `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema |
+| `E_SNAPSHOT_UNKNOWN_TYPE` | Type in `.ys` file not in schema, or a snapshot type `Marshal` cannot name from the entry schema's import closure |
 | `E_SNAPSHOT_TYPE_MISMATCH` | A type row that contradicts its position: a root's that is not its group's, a duplicate instance's that is not its record's, a composed child's or association record's target row that is not the relation's declared target, or a composed duplicate's row that is not its composition's declared target |
-| `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict or parent, or an unresolved record's source names no instance |
+| `E_SNAPSHOT_DANGLING_REFERENCE` | An edge target, a duplicate's conflict or parent, or an unresolved record's source names no instance; none for an address a refused unit states |
 | `E_SNAPSHOT_INVALID_COMPOSED` | Composed child carries edges, or composed children or a composed duplicate record stand under a name the parent's type does not declare as a composition |
 | `E_SNAPSHOT_INVALID_ROOT` | An instances group, empty or not, or a root duplicate record names a type that cannot be a root: abstract, part, or no primary key |
 | `E_SNAPSHOT_UNNAMEABLE_TYPE` | An instances group or a root duplicate record names a type the entry schema reaches only through an intermediate import, so it has no name form |

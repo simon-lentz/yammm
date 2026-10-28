@@ -77,16 +77,18 @@ const (
 	sbO1         = `{"key":["o1"],"properties":{"id":"o1"},"composed":{`
 	sbClients    = `"CLIENTS":[{"target_type":1,"target_key":["c1"],"properties":{}},{"target_type":1,"target_key":["c2"],"properties":{}}]`
 	sbEmployer   = `"EMPLOYER":[{"target_type":1,"target_key":["c1"],"properties":{"since":1999}}]`
-	sbKnows      = `"KNOWS":[{"target_type":4,"target_key":["p2"],"properties":{"note":"n"}}]`
-	sbMentor     = `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}}]`
-	sbOuterBox   = `"BOX":[{"key":null,"type":0,"properties":{"n":1},"composed"`
-	sbLastOrder  = `,"provenance":null}]},{"type":4,"items":[`
-	sbInnerBox   = `{"key":null,"type":0,"properties":{"n":2},"provenance":null}`
-	sbLines      = `"LINES":[{"key":null,"type":2,"properties":{"note":"a"},"provenance":null},{"key":null,"type":2,"properties":{"note":"b"},"provenance":null}],`
-	sbSeal       = `"SEAL":[{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null}]`
-	sbTagT1      = `{"key":["t1"],"type":6,"properties":{"code":"t1"},"provenance":null}`
-	sbTagT2      = `{"key":["t2"],"type":6,"properties":{"code":"t2"},"provenance":null}`
-	sbTags       = `"TAGS":[` + sbTagT1 + `,` + sbTagT2 + `]`
+	// sbEmployerTwice breaks the (one) association EMPLOYER of p1.
+	sbEmployerTwice = `"EMPLOYER":[{"target_type":1,"target_key":["c1"],"properties":{"since":1999}},{"target_type":1,"target_key":["c2"],"properties":{"since":1999}}]`
+	sbKnows         = `"KNOWS":[{"target_type":4,"target_key":["p2"],"properties":{"note":"n"}}]`
+	sbMentor        = `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}}]`
+	sbOuterBox      = `"BOX":[{"key":null,"type":0,"properties":{"n":1},"composed"`
+	sbLastOrder     = `,"provenance":null}]},{"type":4,"items":[`
+	sbInnerBox      = `{"key":null,"type":0,"properties":{"n":2},"provenance":null}`
+	sbLines         = `"LINES":[{"key":null,"type":2,"properties":{"note":"a"},"provenance":null},{"key":null,"type":2,"properties":{"note":"b"},"provenance":null}],`
+	sbSeal          = `"SEAL":[{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null}]`
+	sbTagT1         = `{"key":["t1"],"type":6,"properties":{"code":"t1"},"provenance":null}`
+	sbTagT2         = `{"key":["t2"],"type":6,"properties":{"code":"t2"},"provenance":null}`
+	sbTags          = `"TAGS":[` + sbTagT1 + `,` + sbTagT2 + `]`
 
 	sbDupInstance = `"instance":{"key":["c1"],"properties":{"id":"c1"},"provenance":null}`
 	sbRootDup     = `{"type":1,"key":["c1"],` + sbDupInstance + `,"conflict":{"type":1,"key":["c1"]}}`
@@ -1086,24 +1088,204 @@ func TestRead_ACappedReadKeepsTheSameIssues(t *testing.T) {
 	}
 }
 
-// The reader reports a reference to a refused root's address, and to a root of
-// a group whose row it could not read, beside the refusal itself: the stated
-// address holds no root. These pin the counts.
-func TestRead_ARefusedRootsReferencesStillDangle(t *testing.T) {
+// A reference to an address a refused unit states is judged no further: a root
+// whose stored key is not its property's states its property's address, a
+// group entry the reader refused states each of its roots' addresses, and a
+// composed child states its property's key in its slot. The refusal is the
+// break's one issue. A reference no refused unit states still dangles.
+func TestRead_AReferenceARefusedUnitStatesIsJudgedNoFurther(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
+	const (
+		sbC1              = `{"key":["c1"],"properties":{"id":"c1"},"provenance":null}`
+		sbC3              = `{"key":["c3"],"properties":{"id":"c3"},"provenance":null}`
+		sbCX              = `{"key":["cx"],"properties":{"id":"c2"},"provenance":null}`
+		sbPX              = `{"key":["px"],"properties":{"id":"p2"},"provenance":null}`
+		sbRootDupConflict = `"conflict":{"type":1,"key":["c1"]}`
+	)
+	sbNullOrder := [2]string{`{"type":3,"items":[` + sbO1, `{"type":null,"items":[` + sbO1}
+	sbRepeatOrder := [2]string{`{"type":3,"items":[` + sbO1, `{"type":3,"items":[]},{"type":3,"items":[` + sbO1}
+	sbOrderOX := [2]string{sbO1, `{"key":["ox"],"properties":{"id":"o1"},"composed":{`}
+	sbTagNoKey := [2]string{sbTagConflict, `"conflict":{"type":6,"key":[]}`}
+	const (
+		sbSealS1 = `{"key":["s1"],"type":5,"properties":{"code":"s1"},"provenance":null}`
+		sbSealS3 = `{"key":["s3"],"type":5,"properties":{"code":"s3"},"provenance":null}`
+	)
 	for name, c := range map[string]struct {
-		from, to string
-		want     int
+		edits [][2]string
+		want  int
 	}{
-		"a referenced root whose key is not its property's": {sbC2, `{"key":["cx"],"properties":{"id":"c2"},"provenance":null}`, 2},
-		"a group with no row whose root a record names":     {`{"type":3,"items":[` + sbO1, `{"type":null,"items":[` + sbO1, 4},
+		"an edge to a root whose key is not its property's":                   {[][2]string{{sbC2, sbCX}}, 1},
+		"records whose source's key is not its property's":                    {[][2]string{{sbP2, `{"key":["px"],"properties":{"id":"p2"},"provenance":null}`}}, 1},
+		"duplicates under a root in a group with no row":                      {[][2]string{{`{"type":3,"items":[` + sbO1, `{"type":null,"items":[` + sbO1}}, 1},
+		"an edge to a root in a group that repeats a row":                     {[][2]string{{sbC1 + `,` + sbC2 + `]}`, sbC1 + `]},{"type":1,"items":[` + sbC2 + `]}`}}, 1},
+		"a conflict naming a child whose key is not its property":             {[][2]string{{sbSeal, strings.Replace(sbSeal, `"key":["s1"]`, `"key":["sx"]`, 1)}}, 1},
+		"an edge to the key property of a root in a group that repeats a row": {[][2]string{{sbC1 + `,` + sbC2 + `]}`, sbC1 + `]},{"type":1,"items":[` + sbCX + `]}`}}, 1},
+		"an edge to the key property of a root in a group with no row":        {[][2]string{{sbC1 + `,` + sbC2 + `]}`, sbC1 + `]},{"type":null,"items":[` + sbCX + `]}`}}, 1},
+		"a root duplicate's conflict a refused unit states, not its own key": {[][2]string{
+			{sbC2, sbCX}, {sbRootDupConflict, `"conflict":{"type":1,"key":["c2"]}`},
+		}, 2},
+		"a root duplicate of a refused root whose conflict is its own key": {[][2]string{
+			{sbC2, sbCX}, {sbRootDup, `{"type":1,"key":["c2"],"instance":{"key":["c2"],"properties":{"id":"c2"},"provenance":null},"conflict":{"type":1,"key":["c2"]}}`},
+		}, 1},
+		"a composed duplicate naming no composition under a stated parent": {[][2]string{sbNullOrder, {`"relation":"SEAL"`, `"relation":"NOPE"`}}, 2},
+		"a record under a stated source naming a target a root holds": {[][2]string{
+			{sbP2, sbPX}, {`"target_key":["p8"]`, `"target_key":["p1"]`},
+		}, 2},
+		"an absent record under an optional association of a stated source": {[][2]string{
+			{sbP2, sbPX}, {`"target_key":["p9"],"required":false,"reason":"target_missing"}`, `"target_key":null,"required":false,"reason":"absent"}`},
+		}, 2},
+		"a refused child under a refused parent": {[][2]string{
+			{sbO1, `{"key":["ox"],"properties":{"id":"o1"},"composed":{`},
+			{sbSeal, strings.Replace(sbSeal, `"key":["s1"]`, `"key":["sx"]`, 1)},
+		}, 2},
+		"an edge to a null key beside a refused root with no key property": {[][2]string{
+			{sbC2, `{"key":["cx"],"properties":{},"provenance":null}`},
+			{sbClients, strings.Replace(sbClients, `"target_key":["c2"]`, `"target_key":[null]`, 1)},
+		}, 2},
+		"an edge to another address beside a group with no row": {[][2]string{
+			sbNullOrder, {sbClients, strings.Replace(sbClients, `"target_key":["c2"]`, `"target_key":["c9"]`, 1)},
+		}, 2},
+		"every root of a group with no row":        {[][2]string{{`{"type":1,"items":[` + sbC1, `{"type":null,"items":[` + sbC1}}, 1},
+		"every root of a group that repeats a row": {[][2]string{{`{"type":1,"items":[` + sbC1 + `,` + sbC2 + `]}`, `{"type":1,"items":[` + sbC3 + `]},{"type":1,"items":[` + sbC1 + `,` + sbC2 + `]}`}}, 1},
+		"a conflict naming another child beside a stated one": {[][2]string{
+			{sbSeal, strings.Replace(sbSeal, `"key":["s1"]`, `"key":["sx"]`, 1)},
+			{sbSealConflict, `"conflict":{"type":5,"key":["s9"]}`},
+		}, 2},
+		"a keyed duplicate with no conflict key under a parent in a group that repeats a row": {[][2]string{sbRepeatOrder, sbTagNoKey}, 2},
+		"a keyed duplicate with no conflict key under a parent in a group with no row":        {[][2]string{sbNullOrder, sbTagNoKey}, 2},
+		"a keyed duplicate with no conflict key under a stated parent":                        {[][2]string{sbOrderOX, sbTagNoKey}, 2},
+		"a keyed duplicate with no conflict key under a refused parent's stored key": {[][2]string{
+			sbOrderOX, sbTagNoKey, {`"parent_key":["o1"],"relation":"TAGS"}`, `"parent_key":["ox"],"relation":"TAGS"}`},
+		}, 2},
+		"a duplicate under a refused parent's slot that its own composition does not name": {[][2]string{
+			sbOrderOX, {`"SEAL":[{"key":["s1"]`, `"NOPE":[{"key":["s1"]`}, {`"relation":"SEAL"}`, `"relation":"NOPE"}`},
+		}, 2},
+		"a duplicate under a refused parent's stored key in a slot its composition does not name": {[][2]string{
+			sbOrderOX,
+			{`"SEAL":[{"key":["s1"]`, `"NOPE":[{"key":["s1"]`},
+			{`"parent_key":["o1"],"relation":"SEAL"}`, `"parent_key":["ox"],"relation":"NOPE"}`},
+		}, 2},
+		"a duplicate under the sound root at a refused root's stated address keeps its dangling conflict": {[][2]string{
+			{sbLastOrder, `,"provenance":null},{"key":["ox"],"properties":{"id":"o1"},"composed":{"SEAL":[` + sbSealS1 + `,` + sbSealS3 + `]},"provenance":null}]},{"type":4,"items":[`},
+			{sbSealConflict, `"conflict":{"type":5,"key":["s9"]}`},
+		}, 3},
+		"a duplicate under the sound root at a refused root's stated address keeps its slot's name": {[][2]string{
+			{sbLastOrder, `,"provenance":null},{"key":["ox"],"properties":{"id":"o1"},"composed":{"NOPE":[` + sbSealS1 + `]},"provenance":null}]},{"type":4,"items":[`},
+			{`"relation":"SEAL"}`, `"relation":"NOPE"}`},
+		}, 3},
+		"a duplicate under a sound root at an address a refused root shares keeps its slot's name": {[][2]string{
+			{sbLastOrder, `,"provenance":null},{"key":["o1"],"properties":{"id":"o6"},"composed":{"NOPE":[` + sbSealS1 + `]},"provenance":null}]},{"type":4,"items":[`},
+			{`"relation":"SEAL"}`, `"relation":"NOPE"}`},
+		}, 3},
+		"a duplicate under two sound roots at a refused root's stated address keeps its slot's name": {[][2]string{
+			{sbLastOrder, `,"provenance":null},{"key":["o1"],"properties":{"id":"o1"},"provenance":null},{"key":["ox"],"properties":{"id":"o1"},"composed":{"NOPE":[` + sbSealS1 + `]},"provenance":null}]},{"type":4,"items":[`},
+			{`"relation":"SEAL"}`, `"relation":"NOPE"}`},
+		}, 4},
+		"a (one) association of the sound root at a refused root's stated address keeps its count": {[][2]string{
+			{sbP2, sbP2 + `,{"key":["px"],"properties":{"id":"p1"},"composed":{"EMPLOYER":[` + sbInnerBox + `]},"provenance":null}`},
+			{sbEmployer, sbEmployerTwice},
+		}, 3},
+		"a (one) association of a sound root at an address a refused root shares keeps its count": {[][2]string{
+			{sbP2, sbP2 + `,{"key":["p1"],"properties":{"id":"pz"},"composed":{"EMPLOYER":[` + sbInnerBox + `]},"provenance":null}`},
+			{sbEmployer, sbEmployerTwice},
+		}, 3},
+		"an edge to an address no refused unit states": {[][2]string{
+			{sbC2, sbCX},
+			{sbClients, strings.Replace(sbClients, `"target_key":["c2"]`, `"target_key":["c9"]`, 1)},
+		}, 2},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			res := snapshot.Verify(t.Context(), []byte(editOnce(t, doc, c.from, c.to)), s, snapshot.WithIssueLimit(0))
+			edited := doc
+			for _, e := range c.edits {
+				edited = editOnce(t, edited, e[0], e[1])
+			}
+			res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
 			if n := sbFailures(res); n != c.want {
 				t.Errorf("%d issues, want %d:\n%s", n, c.want, res)
+			}
+		})
+	}
+}
+
+// A composed slot and an association may share a name: the walk's refusal of
+// the slot leaves the association's (one) count judged.
+func TestRead_ARefusedSlotLeavesTheAssociationOfItsNameCounted(t *testing.T) {
+	t.Parallel()
+	s, doc := singleBreakDoc(t)
+	edited := editOnce(t, doc, sbEmployer, sbEmployerTwice)
+	edited = editOnce(t, edited, sbP1, `{"key":["p1"],"properties":{"age":30,"id":"p1"},"composed":{"EMPLOYER":[`+sbInnerBox+`]},"edges":{`)
+	res := snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))
+	if n := sbFailures(res); n != 2 {
+		t.Errorf("%d issues, want 2 (the slot, the count):\n%s", n, res)
+	}
+	if !res.HasCode(diag.E_GRAPH_CARDINALITY) {
+		t.Errorf("no %s:\n%s", diag.E_GRAPH_CARDINALITY, res)
+	}
+}
+
+// A refused unit states its addresses by their canonical keys, so a reference
+// that spells the same instant another way is judged no further too.
+func TestRead_ARefusedUnitStatesItsCanonicalAddress(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadString(t.Context(), `schema "ts"
+
+type Ev {
+	at Timestamp primary
+}
+
+type Watcher {
+	id String primary
+	--> SEES (_:many) Ev
+}
+`, "ts.yammm")
+	if res.HasErrors() {
+		t.Fatalf("schema: %s", res)
+	}
+	v := instance.NewValidator(s)
+	g := graph.New(s)
+	for _, raw := range []struct {
+		typ   string
+		props map[string]any
+	}{
+		{"Ev", map[string]any{"at": "2020-01-01T00:00:00Z"}},
+		{"Ev", map[string]any{"at": "2021-01-01T00:00:00Z"}},
+		{"Watcher", map[string]any{"id": "w1", "SEES": []any{
+			map[string]any{"_target_at": "2020-01-01T00:00:00Z"},
+			map[string]any{"_target_at": "2021-01-01T00:00:00Z"},
+		}}},
+	} {
+		vi, res := v.ValidateOne(t.Context(), raw.typ, instance.RawInstance{Properties: raw.props})
+		if res.HasErrors() {
+			t.Fatalf("validate %s: %s", raw.typ, res)
+		}
+		if res := g.Add(t.Context(), vi); res.HasErrors() {
+			t.Fatalf("add %s: %s", raw.typ, res)
+		}
+	}
+	data, res := snapshot.Marshal(t.Context(), g.Snapshot())
+	if res.HasErrors() {
+		t.Fatalf("marshal: %s", res)
+	}
+	doc := sbIntegrity.ReplaceAllString(string(data), `"integrity_hash":""`)
+	const (
+		ev20 = `{"key":["2020-01-01T00:00:00Z"],"properties":{"at":"2020-01-01T00:00:00Z"},"provenance":null}`
+		ev21 = `{"key":["2021-01-01T00:00:00Z"],"properties":{"at":"2021-01-01T00:00:00Z"},"provenance":null}`
+		// A refused group's root with no key property states its stored key alone.
+		ev20b = `{"key":["2020-01-01T00:00:00+00:00"],"properties":{},"provenance":null}`
+	)
+	group := fmt.Sprintf(`{"type":%d,"items":[`, tableRow(t, doc, "Ev"))
+	for name, edit := range map[string][2]string{
+		"a root whose property spells its key another way": {ev20, `{"key":["1999-01-01T00:00:00Z"],"properties":{"at":"2020-01-01T00:00:00+00:00"},"provenance":null}`},
+		"a root of a group that repeats a row":             {group + ev20 + `,` + ev21 + `]}`, group + ev21 + `]},` + group + ev20b + `]}`},
+		"a root of a group with no row":                    {group + ev20 + `,` + ev21 + `]}`, group + ev21 + `]},{"type":null,"items":[` + ev20b + `]}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			res := snapshot.Verify(t.Context(), []byte(editOnce(t, doc, edit[0], edit[1])), s, snapshot.WithIssueLimit(0))
+			if n := sbFailures(res); n != 1 {
+				t.Errorf("%d issues, want 1:\n%s", n, res)
 			}
 		})
 	}

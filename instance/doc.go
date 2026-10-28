@@ -61,6 +61,15 @@
 // composition scenarios where composed children are validated separately
 // from their parent.
 //
+// A refused value draws its producer's issue alone. A parser that cannot read
+// an input as its member's type reports that and writes a [Refused] in the value's place: the
+// validator reports nothing for it and refuses the instance, which fails as a
+// member error fails it, so no pass after the one that met it runs. A
+// [Validator.ValidateOne] result then holds no error for that member, and
+// [ErrRefusedValue] names the case for a caller that must return an error. A
+// case-fold collision is its member's one issue too: a collided required
+// property, foreign-key field or required edge property is not also missing.
+//
 // # Validator Options
 //
 // [NewValidator] accepts [Option] values to configure behavior:

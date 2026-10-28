@@ -74,8 +74,14 @@ var (
 var (
 	// ErrInternalFailure is the parent sentinel for all internal failures.
 	// Use errors.Is(err, ErrInternalFailure) to detect any internal error.
-	ErrInternalFailure = errors.New("internal validation failure")
+	ErrInternalFailure = errors.New("instance: internal validation failure")
 )
+
+// ErrRefusedValue reports an instance the validator refused because it holds
+// a [Refused] value. The value's producer reported that issue, so the
+// validator's result holds none for it. A caller that must return an error for
+// such an instance returns this one.
+var ErrRefusedValue = errors.New("instance: the instance holds a refused value")
 
 // InternalErrorKind classifies internal errors for programmatic handling.
 type InternalErrorKind int

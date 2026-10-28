@@ -150,7 +150,7 @@ func cutLast(s, sep string) (head, last string, found bool) {
 func validatedNumber(t *testing.T, v *instance.Validator, raw instance.RawInstance, prop string) (any, bool) {
 	t.Helper()
 	vi, res := v.ValidateOne(t.Context(), "P", raw)
-	if !res.OK() {
+	if !res.OK() || vi == nil {
 		return nil, false
 	}
 	if prop == "AT" {

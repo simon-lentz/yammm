@@ -105,7 +105,7 @@ func WithStrictPropertyNames(strict bool) Option {
 // and is otherwise absent, and an empty column naming no key of the target is
 // skipped. Without it every empty foreign-key segment is absent. A non-empty
 // segment keeps its text either way, except that with it a Date or Timestamp
-// key that does not parse draws E_CSV_COERCE. s must be the schema that owns the
+// key that does not parse draws E_CSV_COERCE and is an [instance.Refused]. s must be the schema that owns the
 // [*schema.Type] the parse methods are given: a target is resolved in s by the
 // association's identity, and another schema's type of that name is another type.
 func WithSchema(s *schema.Schema) Option {

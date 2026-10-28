@@ -299,9 +299,12 @@ func UpdateMetadata(
 // Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], every warning the Load
 // and Marshal legs produced, and, unless the caller passed a non-zero
 // [WithUpdateCreatedAt], one further Warning if the input stated a created_at
-// this path could not parse. When its Load or its Marshal fails, the result is
-// the refusal and that leg's issues, with no W_UPDATE_METADATA_FALLBACK.
-// Its details include the distinct Error and Fatal codes that triggered it via
+// this path could not parse. When its Load fails, the result is Load's alone:
+// Load judges the whole document the fast path refused, so each break draws
+// one issue. A cancelled Load may not have reached the break, so it keeps
+// the refusal beside its own result. When its Marshal fails, the result is
+// the refusal and Marshal's issues. Neither carries a W_UPDATE_METADATA_FALLBACK. The warning's details
+// include the distinct Error and Fatal codes that triggered it via
 // a comma-joined "triggering_codes" entry so consumers can log or surface
 // the transition without inspecting the error chain. Callers who want
 // to treat the warning as an error check HasWarnings() or iterate
@@ -365,10 +368,15 @@ func UpdateMetadataOrReMarshal(
 	triggeringCodes := distinctTriggeringCodes(res)
 
 	// Fall back to Load + Marshal.
+	// Load judges the whole document the fast path refused, so its result
+	// alone reports each break once. A cancelled Load may not have reached
+	// the break, so the refusal stands beside its result.
 	loaded, loadRes := Load(ctx, data, s)
 	if loadRes.HasErrors() {
-		merged := mergeResults(res, loadRes)
-		return nil, merged
+		if hasCancellation(loadRes) {
+			return nil, mergeResults(res, loadRes)
+		}
+		return nil, loadRes
 	}
 
 	var fallbackWarnings []diag.Issue

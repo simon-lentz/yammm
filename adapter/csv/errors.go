@@ -12,9 +12,10 @@ import (
 // both data parsers; a reader that fails draws [diag.E_ADAPTER_IO], the adapter
 // category's I/O code.
 var (
-	// E_CSV_COERCE indicates a cell whose text does not coerce to the type its
-	// member declares. The cell keeps its text and the row is still produced,
-	// so a consumer counting this code counts data to clean.
+	// E_CSV_COERCE indicates a cell, or a relation group's target segment, whose
+	// text does not coerce to the type its member declares. The row is still
+	// produced with that text held as an [instance.Refused], which the validator
+	// reports nothing more for, so a consumer counting this code counts data to clean.
 	E_CSV_COERCE = diag.NewCode("E_CSV_COERCE", diag.CategoryAdapter)
 
 	// E_CSV_CONFIG indicates the adapter was built with a setting this parse

@@ -98,6 +98,18 @@ type keyCollision struct {
 	keys []string
 }
 
+// collidedProperties returns the name of each property a collision claims.
+func (oc objectClaims) collidedProperties() map[string]bool {
+	if len(oc.propCollisions) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(oc.propCollisions))
+	for _, c := range oc.propCollisions {
+		out[c.prop] = true
+	}
+	return out
+}
+
 func claimObject(t *schema.Type, names []string, strict bool) objectClaims {
 	oc := objectClaims{
 		props:     make(map[string]string, len(names)),

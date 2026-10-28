@@ -176,6 +176,8 @@ type RawInstance struct {
 }
 ```
 
+A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place, as the CSV adapter does for each cell that draws `E_CSV_COERCE`. At a property, a foreign-key field or an edge property, the validator reports nothing for a `Refused` and refuses the instance: `ValidateOne` returns nil with no error for it, and `graph.BatchAssembler.Add` returns an error matching `instance.ErrRefusedValue`. Anywhere else a `Refused` is a value of no form and draws the issue any such value draws (`E_TYPE_MISMATCH` as a list element, for one). One break draws one issue.
+
 ### Build RawInstances with SchemaBuilder
 
 `instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, and cardinality mismatches surface from `Build()` with the offending call site's file:line. Errors on nil schema, unknown type, or abstract type. The builder covers properties and property-less association edges; instances carrying edge properties or composed children are constructed from raw data instead.
@@ -215,8 +217,12 @@ import "github.com/simon-lentz/yammm/graph"
 
 g := graph.New(s)
 
-// Add validated instances
+// Add validated instances: Validate's result was checked, so a nil entry
+// held a refused value its producer reported
 for _, inst := range validInstances {
+    if inst == nil {
+        continue
+    }
     result := g.Add(ctx, inst)
     if result.HasErrors() {
         // handle duplicate PK, type not found, etc.
@@ -224,7 +230,8 @@ for _, inst := range validInstances {
 }
 
 // Add composed children to an existing parent
-result := g.AddComposed(ctx, "Order", "order-123", "ITEMS", childInstance)
+orderType, _ := s.Type("Order")
+result := g.AddComposed(ctx, orderType.ID(), graph.FormatKey("order-123"), "ITEMS", childInstance)
 ```
 
 ### Check Graph Completeness
@@ -318,6 +325,9 @@ info, result := snapshot.Info(ctx, data)
 ```go
 header, res := snapshot.HeaderOnly(ctx, data)   // read existing metadata
 newMeta := maps.Clone(header.Metadata)          // replace-not-merge contract
+if newMeta == nil {                             // a document that states no metadata
+    newMeta = map[string]string{}
+}
 newMeta["pipeline_completed"] = "true"
 updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 ```
@@ -372,6 +382,9 @@ for typeName, raws := range parsed {
         return result.Err()
     }
     for _, inst := range valids {
+        if inst == nil {
+            continue // its producer refused a value and reported it
+        }
         g.Add(ctx, inst)
     }
 }

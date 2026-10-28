@@ -4,7 +4,7 @@
 //
 //	Schema → Instance Validation → Graph
 //
-// It handles, among the structural facts listed below:
+// Among what it handles:
 //   - Primary key uniqueness (duplicate detection, or a merge under
 //     [Graph.AddOrMerge])
 //   - The key rule (which components a key may hold) and root type eligibility
@@ -505,7 +505,9 @@
 // [Snapshot.Diagnostics] returns the cumulative issues from [Graph.Add],
 // [Graph.AddOrMerge] and [Graph.AddComposed] calls, and a [BatchAssembler]'s
 // validator results, its validation failures among them, and nil-instance
-// refusals. These are construction-time
+// refusals. [BatchAssembler.Add] adds none for a record whose one fault is an
+// [instance.Refused] value, since its producer's result holds its issue; the
+// nil a validator returns for one still draws AddValid's E_INTERNAL. These are construction-time
 // diagnostics that accumulate as instances are added to the graph.
 //
 // [Graph.Check] operates differently: it returns a fresh [diag.Result] per

@@ -103,6 +103,9 @@ func main() {
     if !result.OK() {
         log.Fatal("validation failed:", result)
     }
+    if person == nil {
+        log.Fatal("refused: its producer reported the value") // an instance.Refused
+    }
 
     // Add to graph
     result = g.Add(ctx, person)
@@ -229,8 +232,8 @@ Internal                 : internal/* (no compatibility guarantees)
 Diagnostic-producing operations return `(T, diag.Result)`:
 
 - `result.HasFatal()`: Unrecoverable condition (I/O failure, context cancellation)
-- `result.HasErrors()`: Semantic failure (structured issues)
-- `result.OK()`: Success (may have warnings)
+- `result.HasErrors()`: An Error or a Fatal: a semantic failure (structured issues), or the condition above
+- `result.OK()`: Success (may have warnings). A validator's nil instance beside it held an `instance.Refused` value, which its producer reported
 
 Pure adapter transformations (JSON/CSV serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/csv`'s `WriteSnapshot`, which returns the `error` alone, and `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 

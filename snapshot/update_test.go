@@ -10,8 +10,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -727,4 +729,67 @@ func TestUpdateMetadataOrReMarshal_FallbackRecoversNonMarshalShape(t *testing.T)
 	if !bytes.Equal(out, want) {
 		t.Errorf("fallback output diverges from the Load + Marshal floor\n got:  %s\n want: %s", out, want)
 	}
+}
+
+// When the fallback's Load fails too, the result is Load's alone: Load judges
+// the whole document the fast path refused, so a repeated types row draws one
+// issue, where the fast path's refusal stood beside Load's.
+// Where the fast path and Load refuse a document for different breaks, a
+// failed Load leg returns Load's refusal and not the fast path's.
+func TestUpdateMetadataOrReMarshal_AFailedLoadLegReturnsLoadsRefusal(t *testing.T) {
+	ctx := context.Background()
+	s := testSchema(t)
+	bad := []byte(strings.Replace(string(makeSnapshotBytes(ctx, t)), `},"types":`, `} ,"types":`, 1))
+	_, fast := snapshot.UpdateMetadata(ctx, bad, map[string]string{"k": "v"})
+	require.True(t, fast.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET), fast.String())
+	_, res := snapshot.UpdateMetadataOrReMarshal(ctx, bad, map[string]string{"k": "v"}, s)
+	assert.True(t, res.HasCode(diag.E_SNAPSHOT_INTEGRITY_MISMATCH), res.String())
+	assert.False(t, res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET), res.String())
+}
+
+// cancelAfter reports no error for its first n Err calls and Canceled after.
+type cancelAfter struct {
+	context.Context //nolint:containedctx // the type is a context: it overrides Err alone
+	n               int64
+	calls           atomic.Int64
+}
+
+func (c *cancelAfter) Err() error {
+	if c.calls.Add(1) > c.n {
+		return context.Canceled
+	}
+	return nil
+}
+
+// A fallback cancelled in either leg judged the document no further, so the
+// fast path's refusal stands beside the cancellation.
+func TestUpdateMetadataOrReMarshal_ACancelledFallbackKeepsTheRefusal(t *testing.T) {
+	s := testSchema(t)
+	data := rehashDocument(t, []byte(strings.Replace(string(makeSnapshotBytes(context.Background(), t)), `},"types":`, `} ,"types":`, 1)))
+	for n := int64(1); ; n++ {
+		require.Less(t, n, int64(64), "the fallback never completed")
+		out, res := snapshot.UpdateMetadataOrReMarshal(&cancelAfter{Context: context.Background(), n: n}, data, map[string]string{"k": "v"}, s)
+		if out != nil {
+			break
+		}
+		assert.True(t, res.HasCode(diag.E_CONTEXT_CANCELLED) && res.HasCode(diag.E_UPDATE_METADATA_BODY_OFFSET),
+			"cancelled after %d Err calls: %s", n, res)
+	}
+}
+
+func TestUpdateMetadataOrReMarshal_AFailedLoadLegReportsEachBreakOnce(t *testing.T) {
+	ctx := context.Background()
+	s := testSchema(t)
+	data := makeSnapshotBytes(ctx, t)
+	start := bytes.Index(data, []byte(`"types":[`)) + len(`"types":[`)
+	end := start + bytes.IndexByte(data[start:], '}') + 1
+	row := slices.Clone(data[start:end])
+	bad := slices.Concat(data[:end], []byte(","), row, data[end:])
+
+	out, res := snapshot.UpdateMetadataOrReMarshal(ctx, bad, map[string]string{"k": "v"}, s)
+	_, loadRes := snapshot.Load(ctx, bad, s)
+	assert.Nil(t, out)
+	require.True(t, loadRes.HasErrors(), "the edited document must fail Load")
+	assert.Equal(t, loadRes.String(), res.String())
+	assert.Equal(t, 1, strings.Count(res.String(), "carry one identity"), res.String())
 }

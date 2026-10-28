@@ -304,9 +304,9 @@ type edgeRef struct {
 // together, and is allocated at the first such record.
 //
 // A unit a check refused feeds none of them: an edge or an unresolved record
-// feeds no reference and no (one) count, and a slot in refusedSlots or a
-// record in refusedRecords is read by no later check. One break then draws
-// one issue.
+// feeds no reference and no (one) count, and a slot in refusedSlots or
+// unheldSlots, an association in refusedOnes or a record in refusedRecords is
+// read by no later check. One break then draws one issue.
 type docIndex struct {
 	// exists holds each address a root stands at, true where a root whose
 	// stored key checkStoredKey accepts holds it.
@@ -327,9 +327,15 @@ type docIndex struct {
 	// both: a refused edge is held, and no record beside another.
 	edges      map[slotCoord]int
 	soundEdges map[slotCoord]int
-	// refusedSlots holds each composition slot and each association of a root
-	// that a check refused whole.
+	// refusedSlots holds each composition slot the walk refused of a root that
+	// holds its address.
 	refusedSlots map[slotCoord]bool
+	// unheldSlots holds the same of a root whose key a check refused, at both
+	// its addresses; [docIndex.slotRefused] reads it.
+	unheldSlots map[slotCoord]bool
+	// refusedOnes holds each association checkRecordFacts refused whole, apart
+	// from refusedSlots: a composition and an association may share a name.
+	refusedOnes map[slotCoord]bool
 	// refusedRecords holds the index of each unresolved record a check refused.
 	refusedRecords map[int]bool
 	// shared holds each address two roots stand at, their keys sound or not,
@@ -341,6 +347,21 @@ type docIndex struct {
 	// address, relation left empty, in document order. Only a revalidating read
 	// fills it.
 	lost map[slotCoord][]int
+	// stated holds each address a refused unit states, relation left empty:
+	// the address a root's key properties name where checkStoredKey refused
+	// its stored key, and both addresses of each root in a group entry the
+	// walk refused for repeating a row, its stored key's and its key
+	// properties'. statedChildren holds the same for a root's
+	// direct composed child, by slot. A reference there that no root or child
+	// resolves draws no issue: the refusal is the break's one issue. A
+	// schema-less read names no key property, so it states stored keys alone.
+	stated         map[slotCoord]bool
+	statedChildren map[slotCoord]map[slotChild]bool
+	// unrowed holds each root of a group entry whose types row the walk
+	// refused. Its row is unknown, so both its addresses are stated at every
+	// row; unrowedAt holds each row's canonical keys, built on first use.
+	unrowed   []instWire
+	unrowedAt map[int]map[string]bool
 }
 
 // rootExists reports whether a root stands at the address, its key sound or
@@ -350,11 +371,18 @@ func (idx *docIndex) rootExists(row int, key string) bool {
 	return ok
 }
 
-func (idx *docIndex) refuseSlot(slot slotCoord) {
-	if idx.refusedSlots == nil {
-		idx.refusedSlots = make(map[slotCoord]bool)
+func markSlot(set *map[slotCoord]bool, slot slotCoord) {
+	if *set == nil {
+		*set = make(map[slotCoord]bool)
 	}
-	idx.refusedSlots[slot] = true
+	(*set)[slot] = true
+}
+
+// slotRefused reports whether a duplicate parented at slot meets a refusal of
+// the slot the walk made: the holder's, or, where no root whose key is sound
+// stands at the address, a refused-key root's.
+func (idx *docIndex) slotRefused(slot slotCoord) bool {
+	return idx.refusedSlots[slot] || idx.unheldSlots[slot] && !idx.exists[slot.parentRow][slot.parentKey]
 }
 
 // unjudged reports whether two roots stand at the address.
@@ -365,6 +393,49 @@ func (idx *docIndex) unjudged(row int, key string) bool {
 // held reports whether a root whose key is sound holds the address alone.
 func (idx *docIndex) held(row int, key string) bool {
 	return idx.exists[row][key] && !idx.unjudged(row, key)
+}
+
+func (idx *docIndex) state(row int, key string) {
+	if idx.stated == nil {
+		idx.stated = make(map[slotCoord]bool)
+	}
+	idx.stated[slotCoord{parentRow: row, parentKey: key}] = true
+}
+
+func (idx *docIndex) stateChild(slot slotCoord, child slotChild) {
+	if idx.statedChildren == nil {
+		idx.statedChildren = make(map[slotCoord]map[slotChild]bool)
+	}
+	if idx.statedChildren[slot] == nil {
+		idx.statedChildren[slot] = make(map[slotChild]bool)
+	}
+	idx.statedChildren[slot][child] = true
+}
+
+// refusedAddress reports whether a refused unit states the root address, so a
+// reference there that resolves to no root is judged no further.
+func (sd *streamDecoder) refusedAddress(idx *docIndex, row int, key string) bool {
+	if idx.stated[slotCoord{parentRow: row, parentKey: key}] {
+		return true
+	}
+	if len(idx.unrowed) == 0 {
+		return false
+	}
+	at, ok := idx.unrowedAt[row]
+	if !ok {
+		at = make(map[string]bool, len(idx.unrowed))
+		for _, inst := range idx.unrowed {
+			at[sd.canonicalWireKey(row, inst.Key)] = true
+			if stated, ok := sd.statedKey(row, inst); ok {
+				at[stated] = true
+			}
+		}
+		if idx.unrowedAt == nil {
+			idx.unrowedAt = make(map[int]map[string]bool)
+		}
+		idx.unrowedAt[row] = at
+	}
+	return at[key]
 }
 
 func (idx *docIndex) refuseRecord(ui int) {
@@ -441,12 +512,19 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 		}
 		row, ok := sd.requireRow(g.Type, func() string { return fmt.Sprintf("instances entry %d", gi) })
 		if !ok {
+			idx.unrowed = append(idx.unrowed, g.Items...)
 			continue
 		}
 		if first, dup := seenRows[row]; dup {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("instances entries %d and %d both reference types-table row %d (%s)",
 					first, gi, row, sd.refText(row))).Build())
+			for _, item := range g.Items {
+				idx.state(row, sd.canonicalWireKey(row, item.Key))
+				if stated, ok := sd.statedKey(row, item); ok {
+					idx.state(row, stated)
+				}
+			}
 			continue
 		}
 		seenRows[row] = gi
@@ -548,6 +626,18 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 	// rebuilt instance will carry — so two roots that spell one instant two
 	// ways are one address here, as they are in the graph.
 	keyStr := sd.canonicalWireKey(row, inst.Key)
+	statedAt := ""
+	if !keyed {
+		if stated, ok := sd.statedKey(row, inst); ok && stated != keyStr {
+			switch {
+			case depth == 0:
+				idx.state(row, stated)
+				statedAt = stated
+			case slot != nil:
+				idx.stateChild(*slot, slotChild{row: row, key: stated})
+			}
+		}
+	}
 	// addressed reports that this root holds its address. One that does not
 	// feeds no slot there: they are the holder's.
 	//
@@ -612,10 +702,16 @@ func (sd *streamDecoder) walkInstance(row int, inst instWire, depth int, slot *s
 		target, judged := sd.checkComposedSlot(row, relName, len(children))
 		slotRefused := sd.refusedSince(start)
 		var childSlot *slotCoord
-		if addressed {
+		switch {
+		case addressed:
 			childSlot = &slotCoord{parentRow: row, parentKey: keyStr, relation: relName}
 			if slotRefused {
-				idx.refuseSlot(*childSlot)
+				markSlot(&idx.refusedSlots, *childSlot)
+			}
+		case slotRefused && depth == 0 && !keyed:
+			markSlot(&idx.unheldSlots, slotCoord{parentRow: row, parentKey: keyStr, relation: relName})
+			if statedAt != "" {
+				markSlot(&idx.unheldSlots, slotCoord{parentRow: row, parentKey: statedAt, relation: relName})
 			}
 		}
 		keyOK := make([]bool, len(children))
@@ -892,6 +988,30 @@ func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 		WithDetail(diag.DetailKeyPrimaryKey, formatWireKey(inst.Key)).
 		Build())
 	return false
+}
+
+// statedKey returns the canonical address inst's key properties name, or false
+// where its type declares no key or a key property is absent or unreadable.
+func (sd *streamDecoder) statedKey(row int, inst instWire) (string, bool) {
+	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+		return "", false
+	}
+	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
+	if !ok || !t.HasPrimaryKey() {
+		return "", false
+	}
+	var key []any
+	for pk := range t.PrimaryKeys() {
+		prop := inst.Properties[pk.Name()]
+		if prop == nil {
+			return "", false
+		}
+		key = append(key, prop)
+	}
+	if unreadableWireComponent(key) >= 0 {
+		return "", false
+	}
+	return sd.canonicalWireKey(row, key), true
 }
 
 // unreadableWireComponent returns the index of the first component of a
@@ -1416,7 +1536,9 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			if !eligible || !keyed {
 				continue
 			}
-			if !idx.rootExists(conflictRow, conflictKey) {
+			// A conflict a refused unit states is judged no further for its
+			// existence alone: its type and key are still the record's own.
+			if !idx.rootExists(conflictRow, conflictKey) && !sd.refusedAddress(idx, conflictRow, conflictKey) {
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 					fmt.Sprintf("duplicate conflict %s[%s] references non-existent instance",
 						sd.refText(conflictRow), diag.ValueText(conflictKey))).
@@ -1447,38 +1569,51 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 			continue
 		}
 		parentKey := sd.canonicalWireKey(parentRow, dup.ParentKey)
-		if !idx.rootExists(parentRow, parentKey) {
-			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
-				fmt.Sprintf("duplicate parent %s[%s] does not resolve to a root instance",
-					sd.refText(parentRow), diag.ValueText(parentKey))).
-				WithDetail(diag.DetailKeyTypeName, sd.refAt(parentRow)).
-				WithDetail(diag.DetailKeyPrimaryKey, parentKey).
-				Build())
-			continue
-		}
 		slot := slotCoord{parentRow: parentRow, parentKey: parentKey, relation: dup.Relation}
+		// A parent a refused unit states draws no issue for its existence; the
+		// checks below that read the record and its parent's type still run.
+		statedParent := false
+		if !idx.rootExists(parentRow, parentKey) {
+			if !sd.refusedAddress(idx, parentRow, parentKey) {
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
+					fmt.Sprintf("duplicate parent %s[%s] does not resolve to a root instance",
+						sd.refText(parentRow), diag.ValueText(parentKey))).
+					WithDetail(diag.DetailKeyTypeName, sd.refAt(parentRow)).
+					WithDetail(diag.DetailKeyPrimaryKey, parentKey).
+					Build())
+				continue
+			}
+			statedParent = true
+		}
 		// A slot the walk refused for its name is the walk's one issue; one it
 		// refused for its children still judges the record's own position, but
 		// holds no occupants the record's conflict is resolved against.
-		if idx.refusedSlots[slot] && !sd.declaresComposition(parentRow, dup.Relation) {
+		slotRefused := idx.slotRefused(slot)
+		if slotRefused && !sd.declaresComposition(parentRow, dup.Relation) {
 			continue
 		}
 		rel, ok := sd.checkDuplicateSlot(di, row, rowOK, slot)
-		// A parent whose key the walk refused, or an address two roots share,
-		// holds no slot the record's conflict is resolved in.
-		if !ok || idx.refusedSlots[slot] || !keyed || !idx.held(parentRow, parentKey) {
+		if !ok {
 			continue
 		}
 		// A keyed (many) slot holds its conflict at a key, so a record with a key
 		// of its own states one, whatever the slot holds. By length: an empty
 		// JSON array decodes non-nil.
-		if rel != nil && rel.IsMany() && len(dup.Conflict.Key) == 0 && len(dup.Instance.Key) > 0 {
+		if keyed && rel != nil && rel.IsMany() && len(dup.Conflict.Key) == 0 && len(dup.Instance.Key) > 0 {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states no conflict key; under the (many) composition %q its conflict is the child at its own key, %s",
 					di, slot.relation, diag.ValueText(carried))).Build())
 			continue
 		}
+		// A stated parent, a parent whose key the walk refused, or an address
+		// two roots share holds no slot the record's conflict is resolved in.
+		if statedParent || slotRefused || !keyed || !idx.held(parentRow, parentKey) {
+			continue
+		}
 		occupant, found := sd.conflictInSlot(idx, slot, conflictRow, dup.Conflict.Key, conflictKey)
+		if !found && idx.statedChildren[slot][slotChild{row: conflictRow, key: conflictKey}] {
+			continue
+		}
 		if !found {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("duplicate conflict %s[%s] under %s[%s].%s references non-existent instance",
@@ -1512,7 +1647,8 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 
 // checkRecord holds unresolved record ui to every fact the record shows by
 // itself and reports whether it refused it, with the association the record is
-// under and its place there. It reads idx and writes nothing to it.
+// under and its place there. It writes to idx only the memo
+// [streamDecoder.refusedAddress] keeps.
 func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (slotCoord, *schema.Relation, bool) {
 	start := sd.mark()
 	documented := sd.checkUnresolvedReason(ui, u)
@@ -1533,8 +1669,10 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 		rel = sd.checkAssociation(fmt.Sprintf("unresolved record %d", ui), sourceRow, u.SourceKey,
 			u.Relation, u.TargetType, u.TargetKey, u.Reason, documented)
 		// A record a check refused names no reference to resolve, as a refused
-		// edge names none.
-		if !refused && !sd.refusedSince(start) && !idx.rootExists(sourceRow, sourceKey) {
+		// edge names none. A source a refused unit states draws no issue for
+		// its existence, and the record's own facts are still judged.
+		if !refused && !sd.refusedSince(start) && !idx.rootExists(sourceRow, sourceKey) &&
+			!sd.refusedAddress(idx, sourceRow, sourceKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("unresolved edge source %s[%s] references non-existent instance",
 					sd.refText(sourceRow), diag.ValueText(sourceKey))).
@@ -1612,7 +1750,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				reported[rec.slot] = true
 				// The slot holds a record that states it holds none, so its
 				// records are no count for checkOnes to judge.
-				idx.refuseSlot(rec.slot)
+				markSlot(&idx.refusedOnes, rec.slot)
 				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 					fmt.Sprintf("%q of %s[%s] holds an %s record beside another record, where graph.Add records it alone",
 						u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey), u.Reason)).Build())
@@ -1811,7 +1949,7 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 // association checkRecordFacts refused is not judged again.
 func (sd *streamDecoder) checkOnes(idx *docIndex) {
 	for _, at := range idx.order {
-		if n, slot := idx.ones[at], at.slot; n > 1 && !idx.refusedSlots[slot] {
+		if n, slot := idx.ones[at], at.slot; n > 1 && !idx.refusedOnes[slot] {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("(one) association %q of %s[%s] holds %d records",
 					slot.relation, sd.refText(slot.parentRow), diag.ValueText(slot.parentKey), n)).
@@ -1885,10 +2023,11 @@ func (sd *streamDecoder) conflictInSlot(idx *docIndex, slot slotCoord, conflictR
 	return slotChild{}, false
 }
 
-// validateEdgeRefs checks that all edge target references resolve.
+// validateEdgeRefs checks that all edge target references resolve. A target a
+// refused unit states is that unit's break.
 func (sd *streamDecoder) validateEdgeRefs(idx *docIndex) {
 	for _, ref := range idx.refs {
-		if idx.rootExists(ref.targetRow, ref.targetKey) {
+		if idx.rootExists(ref.targetRow, ref.targetKey) || sd.refusedAddress(idx, ref.targetRow, ref.targetKey) {
 			continue
 		}
 		sourceRef := sd.refAt(ref.sourceRow)

@@ -144,13 +144,13 @@ func checkEquivalence(t *testing.T, o oracle, csvText string, docs, csvOnly []st
 		why = append(why, fmt.Sprintf("parse Error codes %q, want %q\n  csv: %s", got, want, pres))
 	}
 	for k, fromJSON := range byType["Person"] {
-		if !reflect.DeepEqual(raws[k].Properties, fromJSON.Properties) {
+		if !reflect.DeepEqual(unrefused(raws[k].Properties), fromJSON.Properties) {
 			why = append(why, fmt.Sprintf("row %d: properties differ\n  csv:  %#v\n  json: %#v", k, raws[k].Properties, fromJSON.Properties))
 		}
 		for _, allow := range []bool{false, true} {
 			vo := []instance.Option{instance.WithStrictPropertyNames(o.strict), instance.WithAllowUnknownFields(allow)}
-			if a, b := verdict(t, o.s, raws[k], vo...), verdict(t, o.s, fromJSON, vo...); !slices.Equal(a, b) {
-				why = append(why, fmt.Sprintf("row %d, allow=%v: verdicts differ\n  csv:  %q\n  json: %q", k, allow, a, b))
+			if differ := judgedAlike(t, o.s, raws[k], fromJSON, vo...); differ != "" {
+				why = append(why, fmt.Sprintf("row %d, allow=%v: %s", k, allow, differ))
 			}
 		}
 	}

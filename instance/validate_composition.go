@@ -3,6 +3,7 @@ package instance
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -50,7 +51,7 @@ func pkPathFromInstance(basePath path.Builder, child *ValidInstance, childType *
 
 // validateCompositions validates all composition relations for an instance
 // at the given composed depth. Returns a map of relation name -> composed
-// children as immutable.Value.
+// children as immutable.Value, and whether a child holds a [Refused] value.
 func (v *Validator) validateCompositions(
 	ctx context.Context,
 	typ *schema.Type,
@@ -59,12 +60,13 @@ func (v *Validator) validateCompositions(
 	prov *location.Provenance,
 	base path.Builder,
 	depth int,
-) map[string]immutable.Value {
+) (map[string]immutable.Value, bool) {
 	var composed map[string]immutable.Value
+	refused := false
 
 	for rel := range typ.AllCompositions() {
 		if err := ctx.Err(); err != nil {
-			return composed
+			return composed, refused
 		}
 
 		in := rels[rel]
@@ -86,7 +88,8 @@ func (v *Validator) validateCompositions(
 			continue
 		}
 
-		composedValue := v.validateComposition(ctx, rel, in.value, collector, prov, base.Key(in.key), depth)
+		composedValue, childRefused := v.validateComposition(ctx, rel, in.value, collector, prov, base.Key(in.key), depth)
+		refused = refused || childRefused
 		if !composedValue.IsNil() {
 			if composed == nil {
 				composed = make(map[string]immutable.Value)
@@ -94,11 +97,12 @@ func (v *Validator) validateCompositions(
 			composed[rel.Name()] = composedValue
 		}
 	}
-	return composed
+	return composed, refused
 }
 
 // validateComposition validates a present composition value at relPath, the
-// input key's location, whose children sit at depth+1.
+// input key's location, whose children sit at depth+1, and reports whether a
+// child holds a [Refused] value.
 func (v *Validator) validateComposition(
 	ctx context.Context,
 	rel *schema.Relation,
@@ -107,12 +111,12 @@ func (v *Validator) validateComposition(
 	prov *location.Provenance,
 	relPath path.Builder,
 	depth int,
-) immutable.Value {
+) (immutable.Value, bool) {
 	// An explicit null is a shape error whatever the optionality.
 	if isAbsent(rawValue) {
 		collector.Collect(shapeMismatch(rel, fmt.Sprintf("composition %q: null is not a valid composition value", rel.Name()),
 			"array", "null", prov, relPath))
-		return immutable.Value{}
+		return immutable.Value{}, false
 	}
 
 	// Compositions always expect an array (accept typed slices via reflection)
@@ -120,7 +124,7 @@ func (v *Validator) validateComposition(
 	if !ok {
 		collector.Collect(shapeMismatch(rel, fmt.Sprintf("composition %q: expected array, got %s", rel.Name(), kindOf(rawValue)),
 			"array", kindOf(rawValue), prov, relPath))
-		return immutable.Value{}
+		return immutable.Value{}, false
 	}
 
 	// Empty array is valid for optional, error for required
@@ -135,9 +139,9 @@ func (v *Validator) validateComposition(
 				WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 			withProvenance(issue, prov, relPath.String())
 			collector.Collect(issue.Build())
-			return immutable.Value{}
+			return immutable.Value{}, false
 		}
-		return immutable.Wrap([]*ValidInstance{})
+		return immutable.Wrap([]*ValidInstance{}), false
 	}
 
 	// A composition always arrives as an array, so its multiplicity is not
@@ -154,7 +158,7 @@ func (v *Validator) validateComposition(
 			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		withProvenance(issue, prov, relPath.String())
 		collector.Collect(issue.Build())
-		return immutable.Value{}
+		return immutable.Value{}, false
 	}
 
 	childDepth := depth + 1
@@ -168,7 +172,7 @@ func (v *Validator) validateComposition(
 			WithDetail(diag.DetailKeyJSONField, rel.FieldName())
 		withProvenance(issue, prov, relPath.String())
 		collector.Collect(issue.Build())
-		return immutable.Value{}
+		return immutable.Value{}, false
 	}
 
 	// Build raw instances for the children, each remembering its position in
@@ -219,7 +223,7 @@ func (v *Validator) validateComposition(
 			seenPKs := make(map[string]int) // pk string -> first occurrence's input index
 			for i, child := range validChildren {
 				if child == nil {
-					continue // failed validation; diagnostics already collected
+					continue // failed validation, or holds a Refused value: nothing to compare
 				}
 				pkStr := child.PrimaryKey().String()
 				if firstIdx, exists := seenPKs[pkStr]; exists {
@@ -240,10 +244,14 @@ func (v *Validator) validateComposition(
 	}
 
 	if collector.HasErrors() {
-		return immutable.Value{}
+		return immutable.Value{}, false
+	}
+	// A child the validator refused with no error holds a Refused value.
+	if slices.Contains(validChildren, nil) {
+		return immutable.Value{}, true
 	}
 
-	return immutable.Wrap(validChildren)
+	return immutable.Wrap(validChildren), false
 }
 
 // hasDetailKey reports whether issue already carries a detail under key.

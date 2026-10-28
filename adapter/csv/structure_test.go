@@ -494,9 +494,9 @@ func TestParseWithTypeColumn_TheTypeColumnNeedNotBeFirst(t *testing.T) {
 	}
 }
 
-// An edge value that does not coerce is reported and kept as its text, as a
-// property value is, so the validator can name it too.
-func TestParseTyped_AnEdgeValueThatDoesNotCoerceKeepsItsText(t *testing.T) {
+// An edge value that does not coerce is reported and refused with its text, as
+// a property value is, so the validator reports nothing more for it.
+func TestParseTyped_AnEdgeValueThatDoesNotCoerceIsRefused(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "edge_properties.yammm")
 	st, _ := s.Type("Order")
@@ -506,7 +506,7 @@ func TestParseTyped_AnEdgeValueThatDoesNotCoerceKeepsItsText(t *testing.T) {
 		t.Fatalf("no coercion diagnostic: %s", result)
 	}
 	targets, _ := raws[0].Properties["carries"].([]any)
-	if len(targets) != 1 || !mapEqual(targets[0], map[string]any{"_target_item_id": "a", "quantity": "many"}) {
+	if len(targets) != 1 || !mapEqual(targets[0], map[string]any{"_target_item_id": "a", "quantity": instance.Refused{Value: "many"}}) {
 		t.Errorf("carries = %#v", raws[0].Properties["carries"])
 	}
 }

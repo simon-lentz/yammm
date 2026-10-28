@@ -20,9 +20,11 @@
 //
 // Four codes divide the faults this package's own checks find, by what the
 // caller must do about it, and two more, which the JSON adapter reports as
-// well, close the paragraph. A cell whose text does not coerce to the type its member
-// declares draws [E_CSV_COERCE]: the data needs cleaning, the cell keeps its
-// text and the row is still produced. A setting the adapter cannot use draws
+// well, close the paragraph. A cell, or a relation group's target segment (a
+// key component's under [WithSchema] alone), whose text does not coerce to the
+// type its member declares draws [E_CSV_COERCE]: the data needs cleaning, and
+// the row is still produced with that text held as an [instance.Refused], so
+// the validator reports nothing more for it and refuses the row. A setting the adapter cannot use draws
 // [E_CSV_CONFIG] — a list separator the parser could not find again, a
 // delimiter [encoding/csv] refuses, [Adapter.ParseWithTypeColumn] with no
 // [WithTypeColumn] or with a name holding a CR LF, which no header can hold —
@@ -104,7 +106,9 @@
 // The parser owns the CSV — its quoting, its records, its header and the
 // coercion of each cell — and the validator owns every name, as it does for
 // the JSON adapter. So a row parses as the JSON object that holds the same keys
-// and values does, and the validator answers the two alike.
+// and values does, a refused cell as an [instance.Refused] holding its text,
+// and the validator answers the two alike, less the issue the object draws at
+// a refused cell.
 //
 // A row's object holds one key per name its cells write: a filled plain
 // column, a dotted field whose group holds a filled cell and was not dropped
@@ -182,9 +186,12 @@
 //   - Vector properties: split by the list separator, each element read as a
 //     Float
 //
-// Date and Timestamp values remain as strings in [instance.RawInstance],
-// matching the JSON adapter's behavior. Temporal coercion to driver types
-// happens downstream in write adapters.
+// A Date or Timestamp value that parses remains a string in
+// [instance.RawInstance], matching the JSON adapter's behavior. One that does
+// not is an [instance.Refused] at a property, an edge property and, under
+// [WithSchema], a key component; without the option a key component keeps its
+// text for the validator to judge. Temporal coercion to driver types happens
+// downstream in write adapters.
 //
 // The write side renders Timestamp, Date and UUID through their constraint, so
 // a cell carries the text the validator stores — including foreign-key columns,
@@ -246,7 +253,8 @@
 // [WithTypeColumn] can take — parses every row. A value in such a column is
 // still reported, by the validator, for a plain column and a dotted one alike.
 //
-// An edge group is absent only when every cell in it is empty. Inside a present
+// An edge group is absent when every cell in it is empty or a count clash
+// dropped it (under Foreign Keys). Inside a present
 // group an empty cell stands for an empty segment on every target. An empty
 // foreign-key segment is the key's empty value where [WithSchema] supplies the
 // target's keys and the key's kind has one (a String or a UUID); otherwise it
@@ -290,7 +298,8 @@
 //     reads back as a number: a NaN, an infinity, and a json.Number that spells
 //     a number no finite float64 holds, where no Integer or Float constraint
 //     converts it. A cell carries a string's bytes, which the validator refuses on
-//     the way back, and such a number would read back as text or not at all.
+//     the way back, or the parser under a Date or Timestamp, and such a number
+//     would read back as text or not at all.
 //     A validated graph holds neither. The writer refuses each with an error
 //     naming the property or edge property, or the association and the target
 //     key component, a list element included.
@@ -323,10 +332,11 @@
 // every filled key column decides.
 //
 // [WithSchema] gives the parser each association's target type. A non-empty
-// key component keeps its text either way: every kind a primary key may take
-// (String, UUID, Date, Timestamp) reads as the text it was written as. A Date
-// or Timestamp component that does not parse draws E_CSV_COERCE with the
-// option and the validator's error without it. Within a component, what else
+// key component that the option does not refuse keeps its text: every kind a
+// primary key may take (String, UUID, Date, Timestamp) reads as the text it was
+// written as. A Date or Timestamp component that does not parse draws
+// E_CSV_COERCE with the option, its text held as an [instance.Refused], and the
+// validator's error without it. Within a component, what else
 // the option decides is an EMPTY segment, under Empty Cells above; across a
 // group, it decides which filled columns claim a member, as the paragraph
 // above states.
@@ -340,7 +350,7 @@
 //
 // Every constructor of a snapshot holds its associations to what
 // [graph.Graph.Add] builds: each edge is under an association its type
-// declares, at the declared target, and a (one) association holds one. So every
+// declares, at the declared target, and a (one) association holds one at most. So every
 // edge has its column group, and its key reads back as the declared target's.
 //
 // # Compositions

@@ -650,7 +650,8 @@ func (a *Adapter) holdsKey(p *plan, m suffixMember, text string) bool {
 }
 
 // writeProperty writes a claimed column's cell: its property's empty value,
-// or the cell coerced, or its text where it does not coerce.
+// or the cell coerced, or its text as an [instance.Refused] where it does not
+// coerce, so the validator reports nothing more for it.
 func (a *Adapter) writeProperty(p *plan, props map[string]any, name string, prop *schema.Property, val string, span location.Span, typeName string, collector *diag.Collector) {
 	if val == "" {
 		props[name] = a.emptyValue(p, emptyOf{prop: prop})
@@ -662,7 +663,7 @@ func (a *Adapter) writeProperty(p *plan, props map[string]any, name string, prop
 			fmt.Sprintf("column %s: %s", diag.QuoteValue(name), err)).
 			WithSpan(span).
 			WithDetail(diag.DetailKeyTypeName, typeName).Build())
-		props[name] = val
+		props[name] = instance.Refused{Value: val}
 		return
 	}
 	props[name] = coerced
@@ -754,7 +755,7 @@ func (a *Adapter) edgeTarget(p *plan, sp *spelling, g groupShape, t int, span lo
 					fmt.Sprintf("column %s.%s: %s", diag.QuoteValue(sp.field), diag.ValueText(suffix), err)).
 					WithSpan(span).
 					WithDetail(diag.DetailKeyTypeName, typeName).Build())
-				obj[suffix] = seg
+				obj[suffix] = instance.Refused{Value: seg}
 				continue
 			}
 			obj[suffix] = coerced
