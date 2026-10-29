@@ -428,7 +428,11 @@ func (v *Validator) validateComposedInstance(ctx context.Context, typeName strin
 }
 
 // instantiationRefusal refuses an abstract type, and a part type unless
-// allowPartType holds, reporting whether it refused.
+// allowPartType holds, reporting whether it refused. It needs no key check:
+// completion refuses a concrete type with no primary key, declared or inherited
+// ([diag.E_NO_PRIMARY_KEY], unless an error about its key's type or a supertype
+// already refuses it), so with allowPartType false, a type it passes under a
+// resolved name can hold a root.
 func instantiationRefusal(typ *schema.Type, typeName string, allowPartType bool, prov *location.Provenance) (diag.Result, bool) {
 	switch {
 	case typ.IsAbstract():

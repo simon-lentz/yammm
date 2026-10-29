@@ -330,7 +330,8 @@ func (g *generator) emitAssociation(rel *schema.Relation, fields map[string]stri
 
 // emitGraph writes the Graph aggregate: one slice field per concrete type the
 // entry schema can name, keyed by its [schema.AddressableTag], which no two such
-// types share.
+// types share. It needs no key check, since [schema.Load] and [schema.Builder]
+// refuse a concrete type with no primary key, so every field's type can hold a root.
 func (g *generator) emitGraph() error {
 	g.buf.WriteString("type Graph struct {\n")
 	for _, t := range g.closureTypes() {
