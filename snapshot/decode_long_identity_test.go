@@ -173,8 +173,8 @@ func TestLoad_ANameTheDocumentWritesIsCut(t *testing.T) {
 		{
 			name:       "required record stating an undocumented reason",
 			unresolved: fmt.Sprintf(`{"source_type":1,"source_key":["p1"],"relation":"EMPLOYER","target_type":0,"target_key":null,"required":true,"reason":%q}`, lidReason),
-			code:       diag.W_SNAPSHOT_UNRESOLVED_REQUIRED,
-			want:       `required association "EMPLOYER" of lid#Person[["p1"]] is unresolved (` + lidCut(lidReason) + `)`,
+			code:       diag.E_SNAPSHOT_MALFORMED,
+			want:       `unresolved record 0 states reason "` + lidReason[:32] + `"… (40 bytes), which is not one of target_missing, absent or empty`,
 		},
 	}
 	for _, tt := range tests {

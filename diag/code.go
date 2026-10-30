@@ -643,7 +643,8 @@ var (
 
 	// W_SNAPSHOT_UNRESOLVED_REQUIRED indicates a loaded document carries an
 	// unresolved record for an association the schema declares required, which
-	// is read from the schema, never from the record. Reported only when the
+	// is read from the schema, never from the record. A record a structural
+	// check refused draws that check's issue instead. Reported only when the
 	// caller passes snapshot.WithRevalidation, at that option's severity —
 	// the walk that finds the record runs on every Load and Verify, but a
 	// document holding the record is well-formed, so without the option the

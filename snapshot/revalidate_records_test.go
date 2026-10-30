@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -22,6 +23,116 @@ func revalidationFindings(res diag.Result, prefix string) []string {
 		}
 	}
 	return out
+}
+
+// The warning belongs to a record no check refused, so a refused record's break
+// is one issue under the option too. A refused root is not a refused record: a
+// sound record stays reported, at that root and under its other associations.
+func TestLoad_ARefusedRecordDrawsNoRequiredWarning(t *testing.T) {
+	t.Parallel()
+	s, doc := singleBreakDoc(t)
+	withKey := strings.Replace(sbAbsent, `"target_key":null`, `"target_key":["c1"]`, 1)
+	two := sbLost("p2", "EMPLOYER", 1, `["c8"]`, `{"since":8888}`) + `,` + sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`)
+	for name, c := range map[string]struct {
+		edit       func(string) string
+		wantClient int
+		wantEmploy int
+	}{
+		"a refused record, beside a sound one at its root": {
+			edit:       func(d string) string { return strings.Replace(d, sbAbsent, withKey, 1) },
+			wantClient: 1,
+		},
+		"two sound records at a root their count refuses": {
+			edit:       func(d string) string { return strings.Replace(d, sbAbsent, two, 1) },
+			wantClient: 1, wantEmploy: 2,
+		},
+		"two sound records at a root whose stored key is refused": {
+			edit: func(d string) string {
+				return strings.Replace(d, sbP2, strings.Replace(sbP2, `"key":["p2"]`, `"key":["px"]`, 1), 1)
+			},
+			wantClient: 1, wantEmploy: 1,
+		},
+		"two sound records in a document whose walk accepts no root": {
+			edit: func(d string) string {
+				return regexp.MustCompile(`"key":\[[^\]]*\],"properties":\{`).ReplaceAllString(d, `$0"ghost":1,`)
+			},
+			wantClient: 1, wantEmploy: 1,
+		},
+	} {
+		for _, sev := range []diag.Severity{diag.Warning, diag.Error} {
+			t.Run(name+"/"+sev.String(), func(t *testing.T) {
+				t.Parallel()
+				_, res := snapshot.Load(t.Context(), []byte(c.edit(doc)), s,
+					snapshot.WithIssueLimit(0), snapshot.WithRevalidation(sev))
+				client, employ := 0, 0
+				for issue := range res.Issues() {
+					if issue.Code() != diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
+						continue
+					}
+					switch {
+					case strings.Contains(issue.Message(), `"CLIENTS"`):
+						client++
+					case strings.Contains(issue.Message(), `"EMPLOYER"`):
+						employ++
+					}
+				}
+				if client != c.wantClient || employ != c.wantEmploy {
+					t.Errorf("%d warnings under CLIENTS and %d under EMPLOYER, want %d and %d:\n%s", client, employ, c.wantClient, c.wantEmploy, res)
+				}
+			})
+		}
+	}
+}
+
+// The warnings precede every root's findings, so a capped read of warnings and
+// findings alike keeps the warnings.
+func TestLoad_RequiredWarningsPrecedeARootsFindings(t *testing.T) {
+	t.Parallel()
+	s, doc := singleBreakDoc(t)
+	bad := strings.Replace(doc, sbP2, strings.Replace(sbP2, `"id":"p2"`, `"age":999,"id":"p2"`, 1), 1)
+	if bad == doc {
+		t.Fatal("the edit did not apply")
+	}
+	_, res := snapshot.Load(t.Context(), []byte(bad), s, snapshot.WithIssueLimit(2), snapshot.WithRevalidation(diag.Warning))
+	warned := 0
+	for issue := range res.Issues() {
+		if issue.Code() == diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
+			warned++
+		}
+	}
+	if warned != 2 {
+		t.Errorf("%d warnings kept under a cap of 2, want 2:\n%s", warned, res)
+	}
+	_, whole := snapshot.Load(t.Context(), []byte(bad), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Warning))
+	if !whole.HasCode(diag.E_CONSTRAINT_FAIL) {
+		t.Errorf("no finding for the value the cap dropped:\n%s", whole)
+	}
+}
+
+// The warning names its relation in a detail and cuts a source key the document
+// wrote at any length.
+func TestLoad_RequiredWarningCutsASourceKeyAndNamesItsRelation(t *testing.T) {
+	t.Parallel()
+	s, doc := singleBreakDoc(t)
+	long := strings.Repeat("k", 80)
+	_, res := snapshot.Load(t.Context(), []byte(strings.ReplaceAll(doc, `"p2"`, `"`+long+`"`)), s, snapshot.WithIssueLimit(0), snapshot.WithRevalidation(diag.Warning))
+	relations := map[string]bool{}
+	for issue := range res.Issues() {
+		if issue.Code() != diag.W_SNAPSHOT_UNRESOLVED_REQUIRED {
+			continue
+		}
+		if strings.Contains(issue.Message(), long) {
+			t.Errorf("the warning repeats the key whole: %s", issue.Message())
+		}
+		for _, d := range issue.Details() {
+			if d.Key == diag.DetailKeyRelationName {
+				relations[d.Value] = true
+			}
+		}
+	}
+	if !relations["EMPLOYER"] || !relations["CLIENTS"] {
+		t.Errorf("the warnings' relation details are %v, want EMPLOYER and CLIENTS:\n%s", relations, res)
+	}
 }
 
 // A target_missing record is an edge whose target the graph does not hold, so

@@ -193,8 +193,9 @@ func WithValueConformance(report bool) LoadOption {
 // the validator does not judge whether a target exists; no duplicate record's
 // instance is run. It judges values — bounds,
 // enums, patterns, invariants — which the structural checks every read runs
-// leave alone, and reports an unresolved record under a required association
-// as [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED].
+// leave alone, and reports each unresolved record no check refused under a
+// required association as
+// [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED].
 // [WithIssueLimit] bounds what a systematic defect stores (default 100), and
 // the counts stay exact past it.
 func WithRevalidation(severity diag.Severity) LoadOption {

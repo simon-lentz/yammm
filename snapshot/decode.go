@@ -1106,9 +1106,9 @@ func wireComponentAgrees(component, property any, c schema.Constraint) bool {
 
 // revalidate reports WithRevalidation's findings after every structural check,
 // so a capped collector keeps each structural issue over a finding no more
-// severe than it: each unresolved record under a required association, then
-// what [streamDecoder.revalidateRoot] finds in each root the walk accepted
-// whole.
+// severe than it: each unresolved record no check refused under a required
+// association, then what [streamDecoder.revalidateRoot] finds in each root the
+// walk accepted whole.
 // It runs no root a later check refused a unit of: an association in
 // [docIndex.refusedRoots], a record at its address, or a record whose source
 // row resolves to none and could stand there. Nor does it run a root at an
@@ -1118,8 +1118,9 @@ func (sd *streamDecoder) revalidate(ctx context.Context, unresolved []unresolved
 	if !sd.loadCfg.revalidate {
 		return nil
 	}
-	for _, u := range unresolved {
-		if row, ok := sd.rowAt(u.SourceType); ok {
+	for ui, u := range unresolved {
+		// A record whose source row resolves to none is a refused one.
+		if row, _ := sd.rowAt(u.SourceType); !idx.refusedRecords[ui] {
 			sd.warnUnresolvedRequired(row, u)
 		}
 	}
@@ -1945,7 +1946,7 @@ func (sd *streamDecoder) warnUnresolvedRequired(sourceRow int, u unresolvedWire)
 	}
 	sd.collector.Collect(diag.NewIssue(sd.loadCfg.revalidateSeverity, diag.W_SNAPSHOT_UNRESOLVED_REQUIRED,
 		fmt.Sprintf("required association %q of %s[%s] is unresolved (%s)",
-			u.Relation, sd.refText(sourceRow), diag.ValueText(formatWireKey(u.SourceKey)), diag.ValueText(u.Reason))).
+			u.Relation, sd.refText(sourceRow), diag.ValueText(formatWireKey(u.SourceKey)), u.Reason)).
 		WithDetail(diag.DetailKeyRelationName, u.Relation).
 		Build())
 }

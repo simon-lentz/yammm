@@ -1836,7 +1836,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Load` + `Marshal`
 - `W_SNAPSHOT_VALUE_NONCONFORMING` (Warning) — under `WithValueConformance`, a stored `Timestamp`, `Date` or `UUID` does not conform to its declared constraint
 - `W_SNAPSHOT_VALUE_DROPPED` (Warning) — a write path held a value it could not write at that position and left it out. The document is well-formed; the warning names what is missing from it
-- `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record for a required association
+- `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it
 
 **Adapter** — format-specific errors. `E_ADAPTER_PARSE` and `E_ADAPTER_IO` are declared in `diag`, so they are always in `diag.AllCodes()`; every other code below is registered by its adapter package, so it appears there only once that package is linked:

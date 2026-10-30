@@ -191,7 +191,7 @@ func sbError(code diag.Code, phrase string) sbWant {
 
 // sbRow is one edited document. Info reports the wants when schemaless is set:
 // the fact needs no schema. required counts the
-// unresolved records under a required association, each of which
+// unresolved records no check refused under a required association, each of which
 // WithRevalidation reports as W_SNAPSHOT_UNRESOLVED_REQUIRED by its own rule;
 // zero means the fixture's two. rebuild, where positive, is the number of
 // issues graph.RebuildSnapshot reports for the document's parts.
@@ -547,11 +547,11 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "absent record with a target key", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"target_key":null`, `"target_key":["c1"]`, 1)),
-			want: malformed("but carries a target key"), schemaless: true, rebuild: 1,
+			want: malformed("but carries a target key"), schemaless: true, rebuild: 1, required: 1,
 		},
 		{
 			name: "absent record with edge properties", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"reason":"absent"`, `"reason":"absent","properties":{"since":1}`, 1)),
-			want: malformed("but carries edge properties"), schemaless: true, rebuild: 1,
+			want: malformed("but carries edge properties"), schemaless: true, rebuild: 1, required: 1,
 		},
 		{
 			name: "record with no source row", edits: edit(sbKnowsLost, strings.Replace(sbKnowsLost, `"source_type":4`, `"source_type":null`, 1)),
@@ -627,15 +627,15 @@ func sbRows() []sbRow {
 		{name: "record edge property within its bounds", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":3000}`))},
 		{
 			name: "record edge property outside its bounds beside an undeclared one", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"ghost":1,"since":9999}`)),
-			want: malformed(`holds edge property "ghost"`), rebuild: 1,
+			want: malformed(`holds edge property "ghost"`), rebuild: 1, required: 1,
 		},
 		{
 			name: "record of another arity with an edge property outside its bounds", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c9","x"]`, `{"since":9999}`)),
-			want: malformed("carries a 2-part target key"), rebuild: 1,
+			want: malformed("carries a 2-part target key"), rebuild: 1, required: 1,
 		},
 		{
 			name: "record with no target key and an edge property outside its bounds", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `[]`, `{"since":9999}`)),
-			want: malformed("carries a 0-part target key"), rebuild: 1,
+			want: malformed("carries a 0-part target key"), rebuild: 1, required: 1,
 		},
 		{
 			name: "record under an undeclared relation with an edge property", edits: edit(sbUnresolved, sbUnresolved+sbLost("p2", "NOPE", 1, `["c9"]`, `{"since":9999}`)+`,`),
@@ -651,7 +651,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "record with an undocumented reason and an edge property outside its bounds", edits: edit(sbAbsent, strings.Replace(sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`), "target_missing", "bogus", 1)),
-			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1,
+			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1, required: 1,
 		},
 		{
 			name: "record outside its bounds beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+sbLost("p1", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`)+`,`),
@@ -676,7 +676,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "empty record twice under a (many) association", edits: edit(sbEmpty, sbEmpty+`,`+sbEmpty),
-			want: malformed("holds an empty record beside another record"), required: 3, rebuild: 1,
+			want: malformed("holds an empty record beside another record"), required: 1, rebuild: 1,
 		},
 		{
 			name: "target_missing record naming a root", edits: edit(sbMentorLost, strings.Replace(sbMentorLost, `["p9"]`, `["p1"]`, 1)),
@@ -697,8 +697,24 @@ func sbRows() []sbRow {
 			want: malformed("carries a 2-part target key"), rebuild: 1,
 		},
 		{
+			name: "required record whose source names no root beside the fixture's", edits: edit(sbAbsent, sbAbsent+`,`+sbRecord("p77", "EMPLOYER", "absent")),
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `p77`), rebuild: 1,
+		},
+		{
+			name: "absent record with no target row under a required association", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"target_type":1`, `"target_type":null`, 1)),
+			want: malformed("target carries no types-table row"), required: 1,
+		},
+		{
+			name: "required record of another target type", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 4, `["c9"]`, `{}`)),
+			want: one(diag.E_SNAPSHOT_TYPE_MISMATCH, `EMPLOYER`), required: 1,
+		},
+		{
+			name: "required record naming a non-scalar target key", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `[["c9"]]`, `{}`)),
+			want: malformed("target key"), required: 1,
+		},
+		{
 			name: "absent record with a non-scalar target key", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"target_key":null`, `"target_key":[[1]]`, 1)),
-			want: malformed("but carries a target key"), schemaless: true, rebuild: 1,
+			want: malformed("but carries a target key"), schemaless: true, rebuild: 1, required: 1,
 		},
 		{
 			name: "record under an undeclared relation with a non-scalar target key", edits: edit(sbMentorLost, strings.Replace(strings.Replace(sbMentorLost, "MENTOR", "NOPE", 1), `["p9"]`, `[["p9"]]`, 1)),
@@ -745,15 +761,15 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "absent record beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+sbRecord("p1", "EMPLOYER", "absent")+`,`),
-			want: malformed("holds an absent record beside another record"), required: 3, rebuild: 1,
+			want: malformed("holds an absent record beside another record"), rebuild: 1,
 		},
 		{
 			name: "absent record twice under a (one) association", edits: edit(sbAbsent, sbAbsent+`,`+sbAbsent),
-			want: malformed("holds an absent record beside another record"), required: 3, rebuild: 1,
+			want: malformed("holds an absent record beside another record"), required: 1, rebuild: 1,
 		},
 		{
 			name: "absent record twice beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+sbRecord("p1", "EMPLOYER", "absent")+`,`+sbRecord("p1", "EMPLOYER", "absent")+`,`),
-			want: malformed("holds an absent record beside another record"), required: 4, rebuild: 1,
+			want: malformed("holds an absent record beside another record"), rebuild: 1,
 		},
 
 		// Two breaks in one association: the record fact refuses the absent or
@@ -766,7 +782,7 @@ func sbRows() []sbRow {
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
-			}, required: 3, rebuild: 2,
+			}, rebuild: 2,
 		},
 		{
 			name: "empty record beside an edge and a target_missing record under a (one) association", edits: edit(sbUnresolved,
@@ -774,7 +790,7 @@ func sbRows() []sbRow {
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an empty record beside another record"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
-			}, required: 4, rebuild: 2,
+			}, required: 3, rebuild: 2,
 		},
 		{
 			name: "absent record twice beside two edges under a (one) association", edits: [][2]string{
@@ -784,7 +800,7 @@ func sbRows() []sbRow {
 			want: []sbWant{
 				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
-			}, required: 4, rebuild: 2,
+			}, rebuild: 2,
 		},
 
 		// A record a fact refuses is no (one) count and no record beside an
@@ -816,11 +832,11 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "target_missing record naming a root beside an edge under a required (one) association", edits: edit(sbUnresolved, sbUnresolved+sbLost("p1", "EMPLOYER", 1, `["c2"]`, `{"since":1999}`)+`,`),
-			want: malformed("which a root holds"), required: 3, rebuild: 1,
+			want: malformed("which a root holds"), rebuild: 1,
 		},
 		{
 			name: "absent record beside a target_missing record naming a root", edits: edit(sbAbsent, sbAbsent+`,`+sbLost("p2", "EMPLOYER", 1, `["c1"]`, `{"since":1999}`)),
-			want: malformed("which a root holds"), required: 3, rebuild: 1,
+			want: malformed("which a root holds"), rebuild: 1,
 		},
 		{
 			name: "refused absent record beside an absent record and two edges under a (one) association", edits: [][2]string{
@@ -831,7 +847,7 @@ func sbRows() []sbRow {
 				sbError(diag.E_SNAPSHOT_MALFORMED, "but carries a target key"),
 				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
 				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
-			}, required: 4, rebuild: 3,
+			}, rebuild: 3,
 		},
 		{
 			name: "two roots at one address each with a (one) edge", edits: edit(sbP2, sbP2+`,`+p3+`,`+p3),
@@ -839,7 +855,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "record with an undocumented reason and no target key", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"absent"`, `"bogus"`, 1)),
-			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1,
+			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1, required: 1,
 		},
 		{
 			name: "(many) sibling whose key is its neighbour's and not its property's", edits: edit(sbTagT2, `{"key":["t1"],"type":6,"properties":{"code":"t2"},"provenance":null}`),
@@ -872,7 +888,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "record with an undocumented reason beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+`{"source_type":4,"source_key":["p1"],"relation":"EMPLOYER","target_type":1,"target_key":["c9"],"required":true,"reason":"bogus"},`),
-			want: malformed(`states reason "bogus"`), schemaless: true, required: 3, rebuild: 1,
+			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1,
 		},
 
 		// Two breaks, each reported once.
@@ -941,7 +957,7 @@ func sbModes() []sbMode {
 
 // sbCheck fails unless res holds exactly the wanted issues, and under
 // revalidation beside them one W_SNAPSHOT_UNRESOLVED_REQUIRED per required
-// record at the option's severity.
+// record no check refused, at the option's severity.
 func sbCheck(t *testing.T, res diag.Result, want []sbWant, mode sbMode, required int) {
 	t.Helper()
 	var got []diag.Issue
