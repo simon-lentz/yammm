@@ -121,8 +121,11 @@
 //
 // A root instance's type must satisfy four members, and every entry point that
 // installs or asserts a root applies the same four: [Graph.Add],
-// [Graph.AddOrMerge], [RebuildSnapshot], [NewFromSnapshot] and the snapshot
-// reader. A type is
+// [Graph.AddOrMerge], [RebuildSnapshot], [NewFromSnapshot] for a snapshot of
+// another schema, and the snapshot reader. [BatchAssembler]'s add methods
+// apply them in the code [Graph.Add] and [Graph.AddOrMerge] run, and
+// [NewBatchAssemblerFromSnapshot] through [NewFromSnapshot]; a snapshot of the
+// importing schema was held to them where it was built. A type is
 // ineligible when it
 //
 //   - is abstract, because an abstract type has no instances;
@@ -426,8 +429,11 @@
 //   - [diag.Result.OK]: success (may have warnings)
 //
 // Programmer errors panic: a nil receiver at a method that adds or checks, a
-// nil instance or context, a nil schema or snapshot at a constructor, an
-// instance of another schema, or a key value [FormatKey] cannot encode.
+// nil instance at [Graph.Add], [Graph.AddOrMerge] or [Graph.AddComposed], a nil
+// context, a nil schema or snapshot at a constructor, an instance of another
+// schema, or a key value [FormatKey] cannot encode. [BatchAssembler.AddValid]
+// and [BatchAssembler.AddValidOrMerge] report a nil instance as Error
+// E_INTERNAL instead, since a validator returns nil for a refused instance.
 //
 // [Graph.Add] emits the following. The first four judge a root's type in the
 // order listed, and a type breaking two draws the first:
@@ -442,7 +448,7 @@
 //     child's, a keyless part's included — holds a component the Keys fact
 //     refuses; a keyed type's key is empty, has the wrong arity, has a key
 //     property that is absent or null, or disagrees with its own key
-//     property; or an association target key has the wrong arity or a
+//     property; or a root's association target key has the wrong arity or a
 //     component the Keys fact refuses
 //   - E_GRAPH_CARDINALITY: a (one) association carries several targets
 //   - E_GRAPH_UNKNOWN_RELATION: edge data or composed children arrived under a
@@ -450,7 +456,7 @@
 //   - E_UNKNOWN_FIELD, E_UNKNOWN_EDGE_FIELD: a property or edge property name
 //     the type or association does not declare
 //   - E_DUPLICATE_COMPOSED_PK: a (one) composition carries several children,
-//     or two children of one (many) slot share a primary key
+//     or two children of one keyed (many) slot share a primary key
 //   - E_DUPLICATE_PK: the primary key already exists for this type
 //   - E_CONTEXT_CANCELLED: the context was cancelled
 //
@@ -537,9 +543,9 @@
 //     targetKey, reason, required, edge properties)
 //
 // Every arm of each tuple is compared, so records that differ in an arm sort
-// apart. The provenance arm compares a source name and a span start, and a
-// loaded provenance carries no span, so two loaded duplicates that differ only
-// in their provenance's path tie.
+// apart, save the provenance arm: it compares a source name and a span start,
+// and a loaded provenance carries no span, so two loaded duplicates that differ
+// only in their provenance's path tie.
 //
 // Sorting is established when the Snapshot is constructed — by [Graph.Snapshot]
 // and by [RebuildSnapshot] alike, which reach it through one place — and is

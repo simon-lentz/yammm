@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -24,6 +25,7 @@ type Employee {
 	--> WORKS_AT (one) Company
 	--> KNOWS (_:many) Company
 	--> AUDITS (one:many) Company
+	--> ADVISES (_:one) Company
 }
 
 type Order {
@@ -201,6 +203,143 @@ func TestRebuildSnapshot_ReportsAStandingAloneBreakOncePerSlot(t *testing.T) {
 	if n != 1 {
 		t.Errorf("the slot's break was reported %d times, want once: %s", n, res)
 	}
+}
+
+// An absent or empty record beside another record is one break, and a (one)
+// association whose other records still number more than one is a second: the
+// fact refuses the record alone, so the records beside it are counted.
+func TestRebuildSnapshot_ARecordBesideAnOverflowIsTwoBreaks(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name     string
+		reasons  []string
+		edges    int
+		lost     bool
+		overflow string
+	}{
+		{name: "an absent record beside two edges", reasons: []string{"absent"}, edges: 2, overflow: "holds 2 records"},
+		{name: "an empty record beside an edge and a target_missing record", reasons: []string{"empty"}, edges: 1, lost: true, overflow: "holds 2 records"},
+		{name: "two absent records beside two edges", reasons: []string{"absent", "absent"}, edges: 2, overflow: "holds 2 records"},
+		{name: "two absent records beside an edge", reasons: []string{"absent", "absent"}, edges: 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			s, parts := recordFactsParts(t)
+			compID := mustTypeID(t, s, "Company")
+			c2 := immutable.WrapKey([]any{"c2"})
+			parts.Instances = append(parts.Instances, graph.InstanceParts{
+				TypeID: compID, PrimaryKey: c2, Properties: immutable.WrapProperties(map[string]any{"id": "c2"}),
+			})
+			if c.edges == 2 {
+				worksAt := parts.Edges[0]
+				worksAt.TargetKey = c2
+				parts.Edges = append(parts.Edges, worksAt)
+			}
+			if c.lost {
+				parts.Unresolved = append(parts.Unresolved, record(parts, "WORKS_AT", "target_missing", "c9"))
+			}
+			for _, reason := range c.reasons {
+				parts.Unresolved = append(parts.Unresolved, record(parts, "WORKS_AT", reason, ""))
+			}
+			snap, res := graph.RebuildSnapshot(s, parts)
+			if snap != nil {
+				t.Error("a snapshot Add could not make was built")
+			}
+			beside, overflow := 0, 0
+			for issue := range res.Issues() {
+				switch {
+				case issue.Severity() == diag.Fatal && issue.Code() == diag.E_INTERNAL && strings.Contains(issue.Message(), "beside another record"):
+					beside++
+				case issue.Code() == diag.E_GRAPH_CARDINALITY && c.overflow != "" && strings.Contains(issue.Message(), c.overflow):
+					overflow++
+				default:
+					t.Errorf("an issue no break draws: %v", issue)
+				}
+			}
+			want := 0
+			if c.overflow != "" {
+				want = 1
+			}
+			if beside != 1 || overflow != want {
+				t.Errorf("%d record breaks and %d overflows, want 1 and %d: %s", beside, overflow, want, res)
+			}
+		})
+	}
+}
+
+// A record a fact refuses is no (one) count and no record beside an absent
+// one, so it draws its own issue alone, and the records beside it are judged
+// without it.
+func TestRebuildSnapshot_ARecordAFactRefusesIsNoCount(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name   string
+		mutate func(p *graph.SnapshotParts, c2 immutable.Key)
+		want   []string
+	}{
+		{"an absent record under an optional association beside an edge", func(p *graph.SnapshotParts, _ immutable.Key) {
+			p.Edges = append(p.Edges, advises(*p, p.Instances[0].PrimaryKey))
+			p.Unresolved = append(p.Unresolved, record(*p, "ADVISES", "absent", ""))
+		}, []string{"which is optional"}},
+		{"an absent record under an optional association beside two edges", func(p *graph.SnapshotParts, c2 immutable.Key) {
+			p.Edges = append(p.Edges, advises(*p, p.Instances[0].PrimaryKey), advises(*p, c2))
+			p.Unresolved = append(p.Unresolved, record(*p, "ADVISES", "absent", ""))
+		}, []string{"which is optional", `(one) association "ADVISES" of Employee[["e1"]] holds 2 records`}},
+		{"two absent records under an optional association", func(p *graph.SnapshotParts, _ immutable.Key) {
+			p.Unresolved = append(p.Unresolved, record(*p, "ADVISES", "absent", ""), record(*p, "ADVISES", "absent", ""))
+		}, []string{"which is optional", "which is optional"}},
+		{"a target_missing record naming a root beside an edge", func(p *graph.SnapshotParts, _ immutable.Key) {
+			p.Unresolved = append(p.Unresolved, record(*p, "WORKS_AT", "target_missing", "c2"))
+		}, []string{"which a root holds"}},
+		{"an absent record beside a target_missing record naming a root", func(p *graph.SnapshotParts, _ immutable.Key) {
+			dropEdge(p, "WORKS_AT")
+			p.Unresolved = append(p.Unresolved, record(*p, "WORKS_AT", "absent", ""), record(*p, "WORKS_AT", "target_missing", "c2"))
+		}, []string{"which a root holds"}},
+		{"a refused absent record beside an absent record and two edges", func(p *graph.SnapshotParts, c2 immutable.Key) {
+			worksAt := p.Edges[0]
+			worksAt.TargetKey = c2
+			p.Edges = append(p.Edges, worksAt)
+			p.Unresolved = append(p.Unresolved, record(*p, "WORKS_AT", "absent", "c1"), record(*p, "WORKS_AT", "absent", ""))
+		}, []string{"carries a target key or edge properties", "beside another record", `(one) association "WORKS_AT" of Employee[["e1"]] holds 2 records`}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			s, parts := recordFactsParts(t)
+			c2 := immutable.WrapKey([]any{"c2"})
+			parts.Instances = append(parts.Instances, graph.InstanceParts{
+				TypeID: mustTypeID(t, s, "Company"), PrimaryKey: c2, Properties: immutable.WrapProperties(map[string]any{"id": "c2"}),
+			})
+			c.mutate(&parts, c2)
+			snap, res := graph.RebuildSnapshot(s, parts)
+			if snap != nil {
+				t.Error("a snapshot Add could not make was built")
+			}
+			matched := make([]bool, len(c.want))
+			n := 0
+			for issue := range res.Issues() {
+				n++
+				found := false
+				for i, phrase := range c.want {
+					if !matched[i] && strings.Contains(issue.Message(), phrase) {
+						matched[i], found = true, true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("an issue no break draws: %v", issue)
+				}
+			}
+			if n != len(c.want) {
+				t.Errorf("%d issues, want %d naming %q: %s", n, len(c.want), c.want, res)
+			}
+		})
+	}
+}
+
+// advises is an ADVISES edge from the parts' Employee to the Company at target.
+func advises(parts graph.SnapshotParts, target immutable.Key) graph.EdgeParts {
+	emp := parts.Instances[1]
+	return graph.EdgeParts{Relation: "ADVISES", SourceType: emp.TypeID, SourceKey: emp.PrimaryKey, TargetKey: target}
 }
 
 // A composed duplicate is judged against its parent's slot, so each way the

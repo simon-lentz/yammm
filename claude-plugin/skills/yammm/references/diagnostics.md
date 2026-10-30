@@ -178,10 +178,10 @@ The all-or-nothing contract is unchanged: any error still yields a nil schema.
 | `E_GRAPH_TYPE_NOT_FOUND` | Type not found in graph operations |
 | `E_GRAPH_PARENT_NOT_FOUND` | Parent node not found for composed child |
 | `E_GRAPH_INVALID_COMPOSITION` | Invalid composition in graph operations |
-| `E_GRAPH_MISSING_PK` | A root whose type declares no primary key |
-| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: several targets at `Graph.Add`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records in a snapshot or `.ys` document (v0.15+) |
+| `E_GRAPH_MISSING_PK` | A root, or an imported snapshot's types entry, whose type declares no primary key |
+| `E_GRAPH_CARDINALITY` | A `(one)` association holds more than one record: several targets at `Graph.Add` or `Graph.AddOrMerge` or, for a part child, at `Graph.AddComposed`, a merge at `Graph.AddOrMerge` that would add a second target, several edges and unresolved records no check refused, in a snapshot or `.ys` document (v0.15+) |
 | `E_GRAPH_UNKNOWN_RELATION` | Instance data or an association record under a relation name the type does not declare in that slot, or an association record naming a target type the schema resolves, other than the declared one (v0.15+) |
-| `E_GRAPH_ABSTRACT_TYPE` | Instance of an abstract type rejected by the graph (v0.15+) |
+| `E_GRAPH_ABSTRACT_TYPE` | Instance of an abstract type rejected by the graph, or an imported snapshot's types entry naming a type the importing schema makes abstract (v0.15+) |
 | `E_GRAPH_INVALID_PK` | A keyed type's primary key empty, of the wrong arity, with a key property absent or null, or disagreeing with its own key properties; any instance's key, a keyless part's included, with a component that does not read back as the value every writer writes (such as one of no form, a string that is not valid UTF-8, a `json.Number` that is no JSON number literal or spells a number no finite `float64` holds, a number `graph.ParseKey` reads back at another rendering, one whose rendering differs from its own value's, or a `time.Time` or `uuid.UUID` no key property's constraint renders, as in every keyless part's key); or an association target key of the wrong arity or with such a component (v0.15+) |
 
 ### Snapshot

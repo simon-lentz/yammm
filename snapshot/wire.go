@@ -185,7 +185,8 @@ func skipValue(dec *json.Decoder, key string) error {
 }
 
 // MinReadableVersion is the lowest .ys wire-format version this package
-// accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead).
+// accepts on read paths (Load, Verify, Info, HeaderOnly, HeaderOnlyRead) and
+// at UpdateMetadata, which decodes the header it rewrites.
 // The accept range is the closed interval [MinReadableVersion, currentVersion].
 // A document outside the range draws an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION]. The package doc's Wire Format

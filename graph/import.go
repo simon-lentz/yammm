@@ -56,10 +56,12 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 		}
 	}
 	for _, e := range snap.edges {
-		r.association(associationRecord{
+		if !r.association(associationRecord{
 			position: "edge from", source: e.source.typeID, sourceKey: e.source.primaryKey, relation: e.relation,
 			target: e.target.typeID, targetKey: e.target.primaryKey, properties: e.properties,
-		})
+		}) {
+			r.countRecord(e.source.typeID, e.source.primaryKey, e.relation)
+		}
 	}
 	for i, dup := range snap.duplicates {
 		checkTree(r, "duplicate instance", dup.instance)
@@ -123,7 +125,9 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 				r.identity(rec.target, positionAt("unresolved target", rec.targetKey.String()))
 			}
 		}
-		r.association(rec)
+		if !r.association(rec) {
+			r.countRecord(rec.source, rec.sourceKey, rec.relation)
+		}
 	}
 	r.oneOverflow()
 	return c.Result()

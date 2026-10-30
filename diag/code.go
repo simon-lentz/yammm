@@ -442,9 +442,11 @@ var (
 	E_GRAPH_MISSING_PK = NewCode("E_GRAPH_MISSING_PK", CategoryGraph)
 
 	// E_GRAPH_CARDINALITY indicates a (one) association holding more than one
-	// record: several targets at graph.Graph.Add, a merge at
+	// record: several targets at graph.Graph.Add or graph.Graph.AddOrMerge or,
+	// for a part child, at graph.Graph.AddComposed, a merge at
 	// graph.Graph.AddOrMerge that would add a second target, or several edges
-	// and unresolved records together in a snapshot or a .ys document.
+	// and unresolved records no check refused, together in a snapshot or a .ys
+	// document.
 	E_GRAPH_CARDINALITY = NewCode("E_GRAPH_CARDINALITY", CategoryGraph)
 
 	// E_GRAPH_UNKNOWN_RELATION indicates instance data or an association

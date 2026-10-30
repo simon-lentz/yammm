@@ -41,8 +41,8 @@
 // the validator refuses for its values rather than its structure, such as a
 // property outside its constraint, a required property absent, or an
 // invariant violation. [WithRevalidation] is the option that reports them —
-// the real validator, run at load time over each root whose type the
-// structural checks accept and whose own tree the structural walk accepts —
+// the real validator, run at load time over each root the structural checks
+// left whole, as the option's doc defines it —
 // and [WithValueConformance] the narrower
 // canonical-form check.
 // Duplicates and unresolved records ride the document as data
@@ -116,7 +116,8 @@
 // the header fields plus the types array. It decodes the header and the types
 // table alone, and still scans the whole document to check its top-level
 // shape and the member names of every object;
-// [HeaderOnlyRead] reads the header and the types table alone. Either suits dispatch-style
+// [HeaderOnlyRead] reads the members up to the types table and that table,
+// and no further. Either suits dispatch-style
 // workloads that scan many .ys files to classify state or compare schema
 // hashes. When counts, diagnostics, or verified integrity are required, use
 // [Info] instead.
@@ -225,7 +226,7 @@
 //   - [WithIssueLimit]: maximum issues stored (default 100; 0 for unlimited); the walk completes unless the context is cancelled
 //   - [WithIntegrityCheck]: with false, skip SHA-256 integrity verification (useful for debugging)
 //   - [WithValueConformance]: report stored Timestamp/Date/UUID values that do not conform to their constraints (Warning)
-//   - [WithRevalidation]: run each root whose type the structural checks accept and whose own tree the walk accepts, with its composed children, edges and the target_missing records the checks accept, back through the real validator, reported at the given severity
+//   - [WithRevalidation]: run each root the structural checks left whole, with its composed children, edges and target_missing records, back through the real validator, reported at the given severity
 //
 // # Scan Options
 //

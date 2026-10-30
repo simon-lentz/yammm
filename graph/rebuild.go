@@ -313,6 +313,8 @@ func validateParts(r *structureRules, parts SnapshotParts) {
 				r.refusedEdges = make(map[int]bool)
 			}
 			r.refusedEdges[i] = true
+		} else {
+			r.countRecord(ep.SourceType, ep.SourceKey, ep.Relation)
 		}
 	}
 
@@ -338,14 +340,17 @@ func validateParts(r *structureRules, parts SnapshotParts) {
 			position: "unresolved record of", source: up.SourceType, sourceKey: up.SourceKey, relation: up.Relation,
 			targetKey: up.TargetKey, reason: up.Reason, properties: up.Properties, refused: r.c.ErrorCount() > before,
 		}) {
-			if r.refusedRecords == nil {
-				r.refusedRecords = make(map[int]bool)
-			}
-			r.refusedRecords[i] = true
+			r.refuseRecord(i)
 		}
 	}
-	// The record facts first: a slot they refuse is none oneOverflow judges.
+	// The record facts refuse records too, so an unresolved record is counted
+	// only after them: a record any rule refused is no count oneOverflow judges.
 	recordFacts(r, parts)
+	for i, up := range parts.Unresolved {
+		if !r.refusedRecords[i] {
+			r.countRecord(up.SourceType, up.SourceKey, up.Relation)
+		}
+	}
 	r.oneOverflow()
 }
 

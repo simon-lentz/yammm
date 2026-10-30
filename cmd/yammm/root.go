@@ -56,8 +56,8 @@ Data commands (check, load, export, snapshot save) also accept:
 // initHelpAndCompletion adds cobra's help and completion commands to root and
 // makes each refuse what it cannot answer: cobra's help exits 0 for a topic no
 // command answers, printing the usage or the nearest command's help, and its
-// completion parent prints help and exits 0. [execute]
-// calls it once the caller has set root's streams, since each shell command
+// completion parent prints help and exits 0. A shell command that cannot
+// write its script is a runtime failure. [execute] calls it once the caller has set root's streams, since each shell command
 // binds its output when it is created.
 func initHelpAndCompletion(root *cobra.Command) {
 	root.InitDefaultHelpCmd()
@@ -75,6 +75,12 @@ func initHelpAndCompletion(root *cobra.Command) {
 			}
 		case "completion":
 			c.RunE = requireSubcommand
+			// A shell's script fails only as its write fails, which is no
+			// usage error.
+			for _, shell := range c.Commands() {
+				write := shell.RunE
+				shell.RunE = func(c *cobra.Command, args []string) error { return cli.Runtime(write(c, args)) }
+			}
 		}
 	}
 }

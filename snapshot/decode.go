@@ -56,12 +56,12 @@ type streamDecoder struct {
 	schema *schema.Schema
 
 	// revalidator is non-nil only when WithRevalidation was passed and a
-	// schema is present; walkInstances then runs each root the structural
-	// pass refused nothing in back through it.
+	// schema is present; [streamDecoder.revalidate] then runs each root the
+	// structural checks left whole back through it.
 	revalidator *instance.Validator
 
-	// cancelReported is set once a revalidated row has reported the context's
-	// cancellation, so the walk's own poll does not report it a second time.
+	// cancelReported is set once a revalidated root has reported the context's
+	// cancellation, so revalidate's own poll does not report it a second time.
 	cancelReported bool
 
 	// bodyOffset is the byte offset of the body suffix UpdateMetadata
@@ -305,8 +305,9 @@ type edgeRef struct {
 //
 // A unit a check refused feeds none of them: an edge or an unresolved record
 // feeds no reference and no (one) count, and a slot in refusedSlots or
-// unheldSlots, an association in refusedOnes or a record in refusedRecords is
-// read by no later check. One break then draws one issue.
+// unheldSlots or a record in refusedRecords is read by no later check. One
+// break then draws one issue. The record facts refuse records too, so an
+// unresolved record waits in pending until [docIndex.countPending] counts it.
 type docIndex struct {
 	// exists holds each address a root stands at, true where a root whose
 	// stored key checkStoredKey accepts holds it.
@@ -317,6 +318,12 @@ type docIndex struct {
 	// key is sound, and order holds each such association in the order met.
 	ones  map[oneCoord]int
 	order []oneCoord
+	// pending holds each unresolved record checkRecord accepted under a (one)
+	// association of a root that holds its address.
+	pending []pendingOne
+	// revalidate holds each root the walk accepted whole, in document order,
+	// for [streamDecoder.revalidate]. Only a revalidating read fills it.
+	revalidate []rootAt
 	// soundRoots counts the roots whose keys are sound at each address,
 	// relation left empty.
 	soundRoots map[slotCoord]int
@@ -333,20 +340,17 @@ type docIndex struct {
 	// unheldSlots holds the same of a root whose key a check refused, at both
 	// its addresses; [docIndex.slotRefused] reads it.
 	unheldSlots map[slotCoord]bool
-	// refusedOnes holds each association checkRecordFacts refused whole, apart
-	// from refusedSlots: a composition and an association may share a name.
-	refusedOnes map[slotCoord]bool
 	// refusedRecords holds the index of each unresolved record a check refused.
 	refusedRecords map[int]bool
+	// refusedRoots holds each address, relation left empty, whose holder a
+	// check refused an association of: a required one it holds nothing under,
+	// or a (one) one that holds more than one record.
+	refusedRoots map[slotCoord]bool
 	// shared holds each address two roots stand at, their keys sound or not,
 	// relation left empty. An unresolved record there names the address, not a
 	// root: it counts toward no (one) association, stands beside no other
 	// record, and a duplicate parented there resolves no conflict.
 	shared map[slotCoord]bool
-	// lost holds the index of each target_missing record by its source root's
-	// address, relation left empty, in document order. Only a revalidating read
-	// fills it.
-	lost map[slotCoord][]int
 	// stated holds each address a refused unit states, relation left empty:
 	// the address a root's key properties name where checkStoredKey refused
 	// its stored key, and both addresses of each root in a group entry the
@@ -464,6 +468,27 @@ func (idx *docIndex) countOne(at oneCoord) {
 	idx.ones[at]++
 }
 
+// rootAt is the root item of the types-table row row.
+type rootAt struct {
+	row  int
+	item *instWire
+}
+
+// pendingOne is unresolved record ui under the (one) association at.
+type pendingOne struct {
+	ui int
+	at oneCoord
+}
+
+// countPending counts each pending record no check refused.
+func (idx *docIndex) countPending() {
+	for _, p := range idx.pending {
+		if !idx.refusedRecords[p.ui] {
+			idx.countOne(p.at)
+		}
+	}
+}
+
 // mark is the collector's Error and Fatal count at a point of the walk.
 type mark int
 
@@ -483,31 +508,18 @@ func sortedNames[V any](m map[string]V, buf []string) []string {
 	return buf
 }
 
-// walkInstances runs the one structural pass over the instances section.
-// Verify and Load share it; nothing downstream re-validates.
-func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGroupWire, unresolved []unresolvedWire) (*docIndex, error) {
+// walkInstances runs the one structural pass over the instances section, and
+// queues each root it accepted whole for revalidation.
+func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGroupWire) (*docIndex, error) {
 	idx := &docIndex{
 		exists: make(map[int]map[string]bool, len(groups)),
 		slots:  make(map[slotCoord][]slotChild),
-	}
-	if sd.revalidator != nil {
-		for ui, u := range unresolved {
-			if row, ok := sd.rowAt(u.SourceType); ok && u.Reason == "target_missing" {
-				if idx.lost == nil {
-					idx.lost = make(map[slotCoord][]int)
-				}
-				source := slotCoord{parentRow: row, parentKey: sd.canonicalWireKey(row, u.SourceKey)}
-				idx.lost[source] = append(idx.lost[source], ui)
-			}
-		}
 	}
 
 	seenRows := make(map[int]int, len(groups))
 	for gi, g := range groups {
 		if err := ctx.Err(); err != nil {
-			if !sd.cancelReported {
-				sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
-			}
+			sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
 			return nil, fmt.Errorf("context cancelled: %w", err)
 		}
 		row, ok := sd.requireRow(g.Type, func() string { return fmt.Sprintf("instances entry %d", gi) })
@@ -532,14 +544,14 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 		if idx.exists[row] == nil {
 			idx.exists[row] = make(map[string]bool, len(g.Items))
 		}
-		for _, item := range g.Items {
+		for ii := range g.Items {
 			start := sd.mark()
-			sd.walkInstance(row, item, 0, nil, idx)
+			sd.walkInstance(row, g.Items[ii], 0, nil, idx)
 			// Revalidation judges the values of a root the structural pass
 			// accepted whole. A refused one already refuses the document, and the
 			// validator would report its break again under another code.
-			if eligible && !sd.refusedSince(start) {
-				sd.revalidateRoot(ctx, row, item, unresolved, idx)
+			if sd.revalidator != nil && eligible && !sd.refusedSince(start) {
+				idx.revalidate = append(idx.revalidate, rootAt{row: row, item: &g.Items[ii]})
 			}
 		}
 	}
@@ -1092,16 +1104,71 @@ func wireComponentAgrees(component, property any, c schema.Constraint) bool {
 	return immutable.WrapKey([]any{x}).String() == immutable.WrapKey([]any{y}).String()
 }
 
+// revalidate reports WithRevalidation's findings after every structural check,
+// so a capped collector keeps each structural issue over a finding no more
+// severe than it: each unresolved record under a required association, then
+// what [streamDecoder.revalidateRoot] finds in each root the walk accepted
+// whole.
+// It runs no root a later check refused a unit of: an association in
+// [docIndex.refusedRoots], a record at its address, or a record whose source
+// row resolves to none and could stand there. Nor does it run a root at an
+// address another root stands at: a record there names the address and not a
+// root, so which records are the root's is not known.
+func (sd *streamDecoder) revalidate(ctx context.Context, unresolved []unresolvedWire, idx *docIndex) error {
+	if !sd.loadCfg.revalidate {
+		return nil
+	}
+	for _, u := range unresolved {
+		if row, ok := sd.rowAt(u.SourceType); ok {
+			sd.warnUnresolvedRequired(row, u)
+		}
+	}
+	if len(idx.revalidate) == 0 {
+		return nil
+	}
+	refused := maps.Clone(idx.refusedRoots)
+	lost := make(map[slotCoord][]int)
+	var unrowed []unresolvedWire
+	for ui, u := range unresolved {
+		row, ok := sd.rowAt(u.SourceType)
+		if !ok {
+			unrowed = append(unrowed, u)
+			continue
+		}
+		source := slotCoord{parentRow: row, parentKey: sd.canonicalWireKey(row, u.SourceKey)}
+		switch {
+		case idx.refusedRecords[ui]:
+			markSlot(&refused, source)
+		case u.Reason == "target_missing":
+			lost[source] = append(lost[source], ui)
+		}
+	}
+	for _, r := range idx.revalidate {
+		if err := ctx.Err(); err != nil {
+			if !sd.cancelReported {
+				sd.collector.Collect(diag.NewIssue(diag.Fatal, diag.E_CONTEXT_CANCELLED, err.Error()).Build())
+			}
+			return fmt.Errorf("context cancelled: %w", err)
+		}
+		key := sd.canonicalWireKey(r.row, r.item.Key)
+		if address := (slotCoord{parentRow: r.row, parentKey: key}); !refused[address] && !idx.unjudged(r.row, key) &&
+			!sd.mayName(unrowed, address) {
+			sd.revalidateRoot(ctx, r.row, *r.item, unresolved, lost[address])
+		}
+	}
+	return nil
+}
+
 // revalidateRoot reconstructs one root's raw form — properties, edges as
 // _target_-keyed objects, composed children as nested arrays — and runs it
 // through the real validator, reporting each finding at the option's
 // severity. The reconstruction inverts what the writer did to the
 // validator's output, so clean data reports nothing. The caller passes only a
-// root the structural pass refused nothing in. The root's target_missing
-// records are edges to the validator, which judged them before graph.Add
-// found no target, so each one checkRecord refuses nothing in joins the
+// root the structural checks left whole, and lost, the indexes of the
+// target_missing records at its address. Those are edges to the validator,
+// which judged them before graph.Add found no target, so each one joins the
 // root's edges.
-func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instWire, unresolved []unresolvedWire, idx *docIndex) {
+func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instWire, unresolved []unresolvedWire, lost []int) {
 	if sd.revalidator == nil {
 		return
 	}
@@ -1113,22 +1180,15 @@ func (sd *streamDecoder) revalidateRoot(ctx context.Context, row int, inst instW
 		return
 	}
 	keyStr := formatWireKey(inst.Key)
-	if lost := idx.lost[slotCoord{parentRow: row, parentKey: sd.canonicalWireKey(row, inst.Key)}]; len(lost) > 0 {
+	if len(lost) > 0 {
 		// A copy: the document's own edges are materialized after this pass.
 		edges := make(map[string][]edgeWire, len(inst.Edges)+len(lost))
 		maps.Copy(edges, inst.Edges)
-		// validateDiagnostics reports each record where it stands; here the
-		// checks only say whether the record is one the validator can be given.
-		reported := sd.collector
-		sd.collector = diag.NewCollector(1)
 		for _, ui := range lost {
 			u := unresolved[ui]
-			if _, _, refused := sd.checkRecord(ui, u, idx); !refused {
-				edges[u.Relation] = slices.Concat(edges[u.Relation],
-					[]edgeWire{{TargetType: u.TargetType, TargetKey: u.TargetKey, Properties: u.Properties}})
-			}
+			edges[u.Relation] = slices.Concat(edges[u.Relation],
+				[]edgeWire{{TargetType: u.TargetType, TargetKey: u.TargetKey, Properties: u.Properties}})
 		}
-		sd.collector = reported
 		inst.Edges = edges
 	}
 	props := sd.rebuildRawProperties(t, inst)
@@ -1165,11 +1225,10 @@ func reportsTheRun(code diag.Code) bool {
 // input shape for one instance: edges become _target_<pk>-keyed objects with
 // edge properties beside ((one) an object, (many) an array), composed
 // children become nested arrays of the same form, keyed by the relation's
-// JSON field name. It reads a tree the structural pass refused nothing in,
-// whose edges revalidateRoot has joined the root's sound target_missing records
-// to, so every relation is one t declares, at its declared target and arity.
-// Of two records under a (one) association, which checkOnes refuses after the
-// walk, the validator reads the first, an edge before an unresolved record.
+// JSON field name. It reads a tree the structural checks left whole,
+// whose edges revalidateRoot has joined the root's target_missing records to,
+// so every relation is one t declares, at its declared target and arity, and a
+// (one) association holds at most one record.
 func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, inst instWire) map[string]any {
 	// The validator judges the document's own text: a number stays the
 	// decoder's json.Number, which the checkers read exactly, so a wide integer
@@ -1640,7 +1699,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		case rel != nil && !rel.IsMany() && idx.held(slot.parentRow, slot.parentKey):
 			// A record of a root whose key a check refused, or of an address two
 			// roots share, counts toward no (one) association.
-			idx.countOne(oneCoord{slot: slot})
+			idx.pending = append(idx.pending, pendingOne{ui: ui, at: oneCoord{slot: slot}})
 		}
 	}
 }
@@ -1657,21 +1716,16 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 	})
 	var slot slotCoord
 	var rel *schema.Relation
-	refused := false
 	if ok {
 		sd.checkDeclaredEdgeProperties(sourceRow, u.SourceKey, u.Relation, u.Properties)
 		sourceKey := sd.canonicalWireKey(sourceRow, u.SourceKey)
 		slot = slotCoord{parentRow: sourceRow, parentKey: sourceKey, relation: u.Relation}
-		// The option's own report is no refusal of the record, at any severity.
-		refused = sd.refusedSince(start)
-		sd.warnUnresolvedRequired(sourceRow, u)
-		start = sd.mark()
 		rel = sd.checkAssociation(fmt.Sprintf("unresolved record %d", ui), sourceRow, u.SourceKey,
 			u.Relation, u.TargetType, u.TargetKey, u.Reason, documented)
 		// A record a check refused names no reference to resolve, as a refused
 		// edge names none. A source a refused unit states draws no issue for
 		// its existence, and the record's own facts are still judged.
-		if !refused && !sd.refusedSince(start) && !idx.rootExists(sourceRow, sourceKey) &&
+		if !sd.refusedSince(start) && !idx.rootExists(sourceRow, sourceKey) &&
 			!sd.refusedAddress(idx, sourceRow, sourceKey) {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_DANGLING_REFERENCE,
 				fmt.Sprintf("unresolved edge source %s[%s] references non-existent instance",
@@ -1682,7 +1736,7 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 		}
 	}
 	sd.requireRow(u.TargetType, func() string { return fmt.Sprintf("unresolved record %d target", ui) })
-	return slot, rel, refused || sd.refusedSince(start)
+	return slot, rel, sd.refusedSince(start)
 }
 
 // checkRecordFacts holds the unresolved records to the facts graph.Add derives
@@ -1690,17 +1744,60 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 // under each required association of its type; an absent or empty record stands
 // alone, once, and only under a required association; and a target_missing
 // record names a target no root holds. Every record counts as held where it
-// stands, a refused one too, and no refused record is judged again. A
-// schema-less read makes no claim.
+// stands, a refused one too, and no refused record is judged again. Each fact
+// refuses the records it reports, so no (one) count holds them; the records
+// beside them stay in it. A schema-less read makes no claim.
 func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 	if sd.schema == nil {
 		return
 	}
+	// rel is nil where the record's source row resolves and declares no such
+	// association: the record is held there and judged by no fact.
 	type record struct {
 		slot slotCoord
+		rel  *schema.Relation
 		ok   bool
 	}
 	records := make([]record, len(diags.Unresolved))
+	for ui, u := range diags.Unresolved {
+		row, ok := sd.rowAt(u.SourceType)
+		if !ok {
+			continue
+		}
+		records[ui] = record{slot: slotCoord{parentRow: row, parentKey: sd.canonicalWireKey(row, u.SourceKey), relation: u.Relation}, ok: true}
+		if rel, ok := sd.associationAt(row, u.Relation); ok {
+			records[ui].rel = rel
+		}
+	}
+	// The facts that judge one record run first, so a record they refuse is
+	// neither in the (one) count nor another record beside an absent one.
+	for ui, u := range diags.Unresolved {
+		rec := records[ui]
+		if rec.rel == nil || idx.refusedRecords[ui] {
+			continue
+		}
+		switch u.Reason {
+		case "absent", "empty":
+			if rec.rel.IsOptional() {
+				idx.refuseRecord(ui)
+				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+					fmt.Sprintf("unresolved record %d states reason %q under %q of %s[%s], which is optional, where graph.Add records none",
+						ui, u.Reason, u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey))).Build())
+			}
+		case "target_missing":
+			targetRow, ok := sd.rowAt(u.TargetType)
+			if ok && targetRow < len(sd.tableIDs) && sd.tableIDs[targetRow] == rec.rel.TargetID() {
+				// A root whose key a check refused is one graph.Add holds not, so a
+				// record naming it is no second break.
+				if key := sd.canonicalWireKey(targetRow, u.TargetKey); idx.exists[targetRow][key] {
+					idx.refuseRecord(ui)
+					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+						fmt.Sprintf("unresolved record %d names target %s[%s], which a root holds, where graph.Add resolves an edge",
+							ui, sd.refText(targetRow), diag.ValueText(key))).Build())
+				}
+			}
+		}
+	}
 	// held and missing count every record where it stands, for the required
 	// association fact; beside counts the records no check refused, for the
 	// fact that an absent or empty record stands alone.
@@ -1714,12 +1811,10 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 	}
 	missing := make(map[slotCoord]int)
 	for ui, u := range diags.Unresolved {
-		row, ok := sd.rowAt(u.SourceType)
-		if !ok {
+		if !records[ui].ok {
 			continue
 		}
-		slot := slotCoord{parentRow: row, parentKey: sd.canonicalWireKey(row, u.SourceKey), relation: u.Relation}
-		records[ui] = record{slot: slot, ok: true}
+		slot := records[ui].slot
 		if u.Reason == "absent" || u.Reason == "empty" {
 			missing[slot]++
 		} else {
@@ -1732,40 +1827,29 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 	reported := make(map[slotCoord]bool)
 	for ui, u := range diags.Unresolved {
 		rec := records[ui]
-		if !rec.ok || idx.refusedRecords[ui] {
+		if rec.rel == nil || idx.refusedRecords[ui] || (u.Reason != "absent" && u.Reason != "empty") {
 			continue
 		}
-		rel, ok := sd.associationAt(rec.slot.parentRow, u.Relation)
-		if !ok {
+		if beside[rec.slot] < 2 || !idx.held(rec.slot.parentRow, rec.slot.parentKey) {
 			continue
 		}
-		switch u.Reason {
-		case "absent", "empty":
-			switch {
-			case rel.IsOptional():
-				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-					fmt.Sprintf("unresolved record %d states reason %q under %q of %s[%s], which is optional, where graph.Add records none",
-						ui, u.Reason, u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey))).Build())
-			case !reported[rec.slot] && beside[rec.slot] > 1 && idx.held(rec.slot.parentRow, rec.slot.parentKey):
-				reported[rec.slot] = true
-				// The slot holds a record that states it holds none, so its
-				// records are no count for checkOnes to judge.
-				markSlot(&idx.refusedOnes, rec.slot)
-				sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-					fmt.Sprintf("%q of %s[%s] holds an %s record beside another record, where graph.Add records it alone",
-						u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey), u.Reason)).Build())
-			}
-		case "target_missing":
-			targetRow, ok := sd.rowAt(u.TargetType)
-			if ok && targetRow < len(sd.tableIDs) && sd.tableIDs[targetRow] == rel.TargetID() {
-				// A root whose key a check refused is one graph.Add holds not, so a
-				// record naming it is no second break.
-				if key := sd.canonicalWireKey(targetRow, u.TargetKey); idx.exists[targetRow][key] {
-					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
-						fmt.Sprintf("unresolved record %d names target %s[%s], which a root holds, where graph.Add resolves an edge",
-							ui, sd.refText(targetRow), diag.ValueText(key))).Build())
-				}
-			}
+		// Every absent and empty record of the slot is the one break, reported
+		// once.
+		idx.refuseRecord(ui)
+		if !reported[rec.slot] {
+			reported[rec.slot] = true
+			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
+				fmt.Sprintf("%q of %s[%s] holds an %s record beside another record, where graph.Add records it alone",
+					u.Relation, sd.refText(rec.slot.parentRow), diag.ValueText(rec.slot.parentKey), u.Reason)).Build())
+		}
+	}
+	// A record whose source row resolves to none could name any root at its
+	// key, so no root there draws the required association's fact for it: the
+	// row's refusal is the break's one issue.
+	var unrowed []unresolvedWire
+	for ui, u := range diags.Unresolved {
+		if !records[ui].ok {
+			unrowed = append(unrowed, u)
 		}
 	}
 	for _, row := range slices.Sorted(maps.Keys(idx.exists)) {
@@ -1792,7 +1876,9 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 				continue
 			}
 			for _, relation := range required {
-				if slot := (slotCoord{parentRow: row, parentKey: key, relation: relation}); held[slot]+missing[slot] == 0 {
+				if slot := (slotCoord{parentRow: row, parentKey: key, relation: relation}); held[slot]+missing[slot] == 0 &&
+					!sd.mayName(unrowed, slot) {
+					markSlot(&idx.refusedRoots, slotCoord{parentRow: row, parentKey: key})
 					sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 						fmt.Sprintf("root %s[%s] holds no edge and no record under the required association %q, where graph.Add records an absent one",
 							sd.refText(row), diag.ValueText(key), relation)).Build())
@@ -1800,6 +1886,19 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 			}
 		}
 	}
+}
+
+// mayName reports whether one of records, whose source rows resolve to none,
+// could stand at slot: its source key is slot's address in the canonical form
+// of slot's row, under slot's relation, or under any where slot leaves it empty.
+func (sd *streamDecoder) mayName(records []unresolvedWire, slot slotCoord) bool {
+	for _, u := range records {
+		if (slot.relation == "" || u.Relation == slot.relation) &&
+			sd.canonicalWireKey(slot.parentRow, u.SourceKey) == slot.parentKey {
+			return true
+		}
+	}
+	return false
 }
 
 // unresolvedReasons is the closed set graph.UnresolvedEdge documents. The
@@ -1840,9 +1939,6 @@ func (sd *streamDecoder) checkUnresolvedReason(ui int, u unresolvedWire) bool {
 // from the schema, never from the record's own field. Without the option the
 // record is well-formed data (Snapshot.Unresolved), so no reader pays for it.
 func (sd *streamDecoder) warnUnresolvedRequired(sourceRow int, u unresolvedWire) {
-	if !sd.loadCfg.revalidate {
-		return
-	}
 	rel, ok := sd.associationAt(sourceRow, u.Relation)
 	if !ok || rel.IsOptional() {
 		return
@@ -1945,11 +2041,11 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 }
 
 // checkOnes refuses each (one) association holding more than one record,
-// edges and unresolved records together: graph.Add stages at most one. An
-// association checkRecordFacts refused is not judged again.
+// edges and unresolved records together: graph.Add stages at most one.
 func (sd *streamDecoder) checkOnes(idx *docIndex) {
 	for _, at := range idx.order {
-		if n, slot := idx.ones[at], at.slot; n > 1 && !idx.refusedOnes[slot] {
+		if n, slot := idx.ones[at], at.slot; n > 1 {
+			markSlot(&idx.refusedRoots, slotCoord{parentRow: slot.parentRow, parentKey: slot.parentKey})
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_CARDINALITY,
 				fmt.Sprintf("(one) association %q of %s[%s] holds %d records",
 					slot.relation, sd.refText(slot.parentRow), diag.ValueText(slot.parentKey), n)).
@@ -2054,11 +2150,9 @@ func (sd *streamDecoder) runPipeline(ctx context.Context) ([]instanceGroupWire, 
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, diagWire{}, false
 	}
-	if err := sd.validateBody(ctx, groups, diags); err != nil {
+	if _, err := sd.validateBody(ctx, groups, diags); err != nil {
 		return nil, diagWire{}, false
 	}
-	sd.verifyIntegrity()
-
 	if sd.collector.HasErrors() {
 		return nil, diagWire{}, false
 	}
@@ -2066,19 +2160,23 @@ func (sd *streamDecoder) runPipeline(ctx context.Context) ([]instanceGroupWire, 
 }
 
 // validateBody runs every structural check the format defines over a decoded
-// body. Load, Verify and Info share it: the rules are one definition and only
-// the gating policy differs, so a surface that summarises a document cannot
-// report it clean while a surface that loads one refuses it.
-func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGroupWire, diags diagWire) error {
-	idx, err := sd.walkInstances(ctx, groups, diags.Unresolved)
+// body, the integrity hash last, then the revalidation the options ask for,
+// and returns [streamDecoder.verifyIntegrity]'s status. Load, Verify and Info
+// share it: the rules are one definition and only the gating policy differs,
+// so a surface that summarises a document cannot report it clean while a
+// surface that loads one refuses it.
+func (sd *streamDecoder) validateBody(ctx context.Context, groups []instanceGroupWire, diags diagWire) (string, error) {
+	idx, err := sd.walkInstances(ctx, groups)
 	if err != nil {
-		return err
+		return "", err
 	}
 	sd.validateDiagnostics(diags, idx)
 	sd.checkRecordFacts(diags, idx)
+	idx.countPending()
 	sd.checkOnes(idx)
 	sd.validateEdgeRefs(idx)
-	return nil
+	integrity := sd.verifyIntegrity()
+	return integrity, sd.revalidate(ctx, diags.Unresolved, idx)
 }
 
 // loadDocument materializes a validated document. It runs after the

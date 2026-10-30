@@ -36,7 +36,8 @@ func run() int {
 }
 
 // execute runs cmd and classifies what it returns. Every error a command
-// returns carries an exit code ([withDiagnostics]), so any other error is
+// returns carries an exit code ([withDiagnostics], [initHelpAndCompletion]),
+// so any other error is
 // cobra's own — an unknown command or flag, a wrong operand count — and is a
 // usage error.
 func execute(cmd *cobra.Command) error {

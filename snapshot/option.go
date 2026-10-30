@@ -182,15 +182,19 @@ func WithValueConformance(report bool) LoadOption {
 
 // WithRevalidation makes [Load] and [Verify] run root instances, their
 // composed children, edges, target_missing records and invariants included,
-// back through the real
-// validator ([github.com/simon-lentz/yammm/instance.Validator]) and report each
-// finding at the given severity; at Error a document that fails refuses to
-// load. A root is run only when the structural checks accepted its type and
-// raised no Error as they walked its tree, and no duplicate record's instance
-// is run. It judges values — bounds, enums, patterns, invariants — which the
-// structural checks every read runs leave alone, and reports an unresolved
-// record under a required association as
-// [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED].
+// back through the real validator
+// ([github.com/simon-lentz/yammm/instance.Validator]) and report each finding
+// at the given severity, after every structural issue; at Error a document
+// that fails refuses to load. A root is run only when the structural checks
+// left it whole: no check refused its type, a unit of its tree, one of its
+// unresolved records, or one of its required or (one) associations, no record
+// whose types-table row the reader refused could be its, and no other root
+// stands at its address. An edge that names no root does not stop it, since
+// the validator does not judge whether a target exists; no duplicate record's
+// instance is run. It judges values — bounds,
+// enums, patterns, invariants — which the structural checks every read runs
+// leave alone, and reports an unresolved record under a required association
+// as [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_UNRESOLVED_REQUIRED].
 // [WithIssueLimit] bounds what a systematic defect stores (default 100), and
 // the counts stay exact past it.
 func WithRevalidation(severity diag.Severity) LoadOption {

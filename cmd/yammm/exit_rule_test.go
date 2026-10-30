@@ -259,6 +259,34 @@ func TestExitCodes_HelpAndCompletionRefuseWhatTheyCannotAnswer(t *testing.T) {
 	}
 }
 
+// refusingWriter refuses every write.
+type refusingWriter struct{}
+
+func (refusingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+// A completion script that cannot be written is a failure outside the
+// invocation, as any command's output failure is: it exits 3, not 2.
+func TestExitCodes_ACompletionScriptThatCannotBeWrittenExitsRuntime(t *testing.T) {
+	t.Parallel()
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		t.Run(shell, func(t *testing.T) {
+			t.Parallel()
+			var stderr bytes.Buffer
+			root := newRootCmd("test")
+			root.SetOut(refusingWriter{})
+			root.SetErr(&stderr)
+			root.SetArgs([]string{"completion", shell})
+			err := execute(root)
+			if code := cli.ExitForError(err); code != cli.ExitRuntime {
+				t.Errorf("exit %d, want %d: %v", code, cli.ExitRuntime, err)
+			}
+			if !strings.Contains(fmt.Sprint(err), "disk full") {
+				t.Errorf("the failure %q does not name the write's error", fmt.Sprint(err))
+			}
+		})
+	}
+}
+
 // TestWriterFailure_ARefusalOfTheDataExitsValidation pins export's writer rule:
 // a value the format cannot represent is a refusal of the input (1), wrapped
 // or not, and any other writer failure is outside the input (3).

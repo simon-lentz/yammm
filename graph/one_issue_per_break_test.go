@@ -42,12 +42,52 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"code": "t1"}),
 		}
 	}
+	foreign := mustTypeID(t, loadAs(t, "schema \"other\"\n\ntype Employee {\n\tid String primary\n}\n"), "Employee")
+	// An edge or a record whose source type does not resolve could stand under
+	// any root at its key, so the root's required association it names is not
+	// empty.
+	unsourced := func(p *graph.SnapshotParts, source schema.TypeID) {
+		dropEdge(p, "WORKS_AT")
+		p.Unresolved = append(p.Unresolved, graph.UnresolvedParts{
+			SourceType: source, SourceKey: immutable.WrapKey([]any{"e1"}), Relation: "WORKS_AT",
+			TargetKey: immutable.WrapKey([]any{"c9"}), Reason: "target_missing",
+		})
+	}
 	for _, c := range []struct {
 		name   string
 		mutate func(s *schema.Schema, p *graph.SnapshotParts)
 		want   int
 		phrase string
 	}{
+		{"a required association's one record, whose source identity is zero", func(_ *schema.Schema, p *graph.SnapshotParts) {
+			unsourced(p, schema.TypeID{})
+		}, 1, "zero type identity at unresolved source"},
+		{"a required association's one record, whose source identity another schema declares", func(_ *schema.Schema, p *graph.SnapshotParts) {
+			unsourced(p, foreign)
+		}, 1, "unresolvable type identity"},
+		{"a required association's one edge, whose source identity is zero", func(_ *schema.Schema, p *graph.SnapshotParts) {
+			for i := range p.Edges {
+				if p.Edges[i].Relation == "WORKS_AT" {
+					p.Edges[i].SourceType = schema.TypeID{}
+				}
+			}
+		}, 1, "zero type identity at edge source"},
+		{"a required association's one edge, whose source identity another schema declares", func(_ *schema.Schema, p *graph.SnapshotParts) {
+			for i := range p.Edges {
+				if p.Edges[i].Relation == "WORKS_AT" {
+					p.Edges[i].SourceType = foreign
+				}
+			}
+		}, 1, "unresolvable type identity"},
+		// Such a record stands under no other relation and at no other key.
+		{"a record whose source identity is zero, at another key than a required association's root", func(_ *schema.Schema, p *graph.SnapshotParts) {
+			unsourced(p, schema.TypeID{})
+			p.Unresolved[len(p.Unresolved)-1].SourceKey = immutable.WrapKey([]any{"e9"})
+		}, 2, `under the required association "WORKS_AT"`},
+		{"a record whose source identity is zero, under another relation than a required association's", func(_ *schema.Schema, p *graph.SnapshotParts) {
+			unsourced(p, schema.TypeID{})
+			p.Unresolved[len(p.Unresolved)-1].Relation = "KNOWS"
+		}, 2, `under the required association "WORKS_AT"`},
 		{"an absent record under an undeclared relation", func(_ *schema.Schema, p *graph.SnapshotParts) {
 			p.Unresolved = append(p.Unresolved, record(*p, "NOPE", "absent", ""))
 		}, 1, `under "NOPE", which its type does not declare as an association`},
@@ -199,6 +239,16 @@ func TestNewFromSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 			typeName: "Person",
 			raws: []map[string]any{{"id": "p2"}, {"id": "p3"}, {"id": "p1", "LINK": []any{
 				map[string]any{"_target_id": "p2", "note": "n"}, map[string]any{"_target_id": "p3"},
+			}}},
+			code: diag.E_UNKNOWN_EDGE_FIELD, phrase: `holds edge property "note"`,
+		},
+		{
+			name:     "a target_missing record holding a property the importing schema lacks, beside an edge under what it declares (one)",
+			built:    "schema \"entry\"\n\ntype Person {\n\tid String primary\n\t--> LINK (_:many) Person {\n\t\tnote String\n\t}\n}\n",
+			bound:    "schema \"entry\"\n\ntype Person {\n\tid String primary\n\t--> LINK (_:one) Person\n}\n",
+			typeName: "Person",
+			raws: []map[string]any{{"id": "p2"}, {"id": "p1", "LINK": []any{
+				map[string]any{"_target_id": "p9", "note": "n"}, map[string]any{"_target_id": "p2"},
 			}}},
 			code: diag.E_UNKNOWN_EDGE_FIELD, phrase: `holds edge property "note"`,
 		},

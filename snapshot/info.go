@@ -151,7 +151,8 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, sd.collector.Result()
 	}
-	if err := sd.validateBody(ctx, groups, diags); err != nil {
+	integrityStatus, err := sd.validateBody(ctx, groups, diags)
+	if err != nil {
 		return nil, sd.collector.Result()
 	}
 	counts, totalEdges := sd.countInstances(groups)
@@ -161,9 +162,6 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 	for _, c := range counts {
 		totalInstances += c
 	}
-
-	// Verify integrity hash.
-	integrityStatus := sd.verifyIntegrity()
 
 	info := &SnapshotInfo{
 		Version:             sd.header.Version,
@@ -352,7 +350,7 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // I/O should apply their own per-read deadline wrapping if finer-grained
 // cancellation is required.
 //
-// Cost: proportional to the size of the header and the types table
+// Cost: proportional to the size of the members up to the types table and that table
 // (typically < 1 KiB), not the underlying file size. The returned [HeaderInfo.FileSize] is not
 // populated (zero value) in the reader variant — a size is not knowable
 // from an io.Reader. Consumers that need one use the []byte form via

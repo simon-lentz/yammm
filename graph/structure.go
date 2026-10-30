@@ -17,8 +17,7 @@ import (
 // One break draws one issue: a unit a rule refused feeds no later rule. A
 // record a rule refused feeds no (one) count and no record fact, an instance
 // whose key a rule refused is no second holder of an address or of a sibling's
-// key, and the records at a slot or an address in refused are no count for a
-// later rule.
+// key, and the records at an address in refused are no count for a later rule.
 type structureRules struct {
 	s     *schema.Schema
 	canon *canonicalizer
@@ -37,8 +36,7 @@ type structureRules struct {
 	// addresses holds each root's canonical address, relation left empty, and
 	// whether a root whose key the key rule accepts holds it.
 	addresses map[oneSlot]bool
-	// refused holds each association of a source that a record fact refused
-	// whole, and, relation left empty, each address two roots stand at: the
+	// refused holds each address two roots stand at, relation left empty: the
 	// parts do not say which root a record there is the record of.
 	refused map[oneSlot]bool
 	// refusedRecords holds the index of each unresolved record a rule refused,
@@ -73,16 +71,16 @@ func (r *structureRules) refuse(code diag.Code, msg string) {
 }
 
 // unjudged reports whether the records at slot are no count a rule may judge:
-// a record fact refused the slot, or two roots hold its address.
+// two roots stand at its address.
 func (r *structureRules) unjudged(slot oneSlot) bool {
-	return r.refused[slot] || r.refused[oneSlot{source: slot.source, key: slot.key}]
+	return r.refused[oneSlot{source: slot.source, key: slot.key}]
 }
 
-func (r *structureRules) refuseSlot(slot oneSlot) {
+func (r *structureRules) refuseAddress(address oneSlot) {
 	if r.refused == nil {
 		r.refused = make(map[oneSlot]bool)
 	}
-	r.refused[slot] = true
+	r.refused[address] = true
 }
 
 // structureNode is one instance as the rules read it: an [InstanceParts]
@@ -389,7 +387,7 @@ func address[N structureNode[N]](r *structureRules, t *schema.Type, root N) {
 	}
 	// The parts do not say which of two roots at one address a record there is
 	// the record of, so no rule judges the records at it.
-	r.refuseSlot(slot)
+	r.refuseAddress(slot)
 	switch {
 	case !sound:
 	case !held:
@@ -457,7 +455,8 @@ type associationRecord struct {
 // refused it. A record whose source or target identity does not resolve is the
 // identity rule's to report. A record that names no target, by a reason that
 // is not "target_missing", owes no target key: [structureRules.unresolvedReason]
-// judges what it carries. A refused record is no record of a (one) association.
+// judges what it carries. A record it reports refused is none
+// [structureRules.countRecord] counts.
 func (r *structureRules) association(rec associationRecord) bool {
 	t, ok := r.s.TypeByID(rec.source)
 	if !ok {
@@ -508,17 +507,7 @@ func (r *structureRules) association(rec associationRecord) bool {
 			}
 		}
 	}
-	if rec.refused || r.c.ErrorCount() > before {
-		return true
-	}
-	// A record counts toward a (one) association only where a root whose key
-	// the key rule accepts holds its source's address; one addressing no root
-	// is the materialization's Fatal E_INTERNAL, which RebuildSnapshot reports.
-	key := r.canon.key(rec.source, rec.sourceKey).String()
-	if !rel.IsMany() && r.addresses[oneSlot{source: rec.source, key: key}] {
-		r.countOne(oneSlot{source: rec.source, key: key, relation: rec.relation})
-	}
-	return false
+	return rec.refused || r.c.ErrorCount() > before
 }
 
 // unresolvedReason refuses a reason outside the three [UnresolvedEdge]
@@ -560,13 +549,41 @@ func associationTarget(s *schema.Schema, source schema.TypeID, relation string) 
 // once, and only under a required association; and a target_missing record
 // names a target no root holds, since Add resolves one that is present.
 // Each break is a caller's, so it is Fatal E_INTERNAL. Every record counts as
-// held where it stands, and a record a rule refused is not judged again.
+// held where it stands, and a record a rule refused is not judged again. Each
+// fact refuses the records it reports, so no (one) count holds them; the
+// records beside them stay in it. An edge or a record whose source type s
+// cannot resolve could stand under any root at its key, so no root there draws
+// the required association's fact for it.
 func recordFacts(r *structureRules, parts SnapshotParts) {
 	at := func(id schema.TypeID, k immutable.Key, relation string) oneSlot {
 		return oneSlot{source: id, key: r.canon.key(id, k).String(), relation: relation}
 	}
 	internal := func(format string, args ...any) {
 		r.c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, r.op+": "+fmt.Sprintf(format, args...)).Build())
+	}
+	// The facts that judge one record run first, so a record they refuse is
+	// neither in the (one) count nor another record beside an absent one.
+	for i, up := range parts.Unresolved {
+		if r.refusedRecords[i] {
+			continue
+		}
+		switch up.Reason {
+		case "absent", "empty":
+			if !requiredUnder(r.s, up.SourceType, up.Relation) {
+				r.refuseRecord(i)
+				internal("unresolved record %d states reason %q under %q of %s[%s], which is optional, where Graph.Add records none",
+					i, up.Reason, up.Relation, up.SourceType, diag.ValueText(r.canon.key(up.SourceType, up.SourceKey).String()))
+			}
+		case "target_missing":
+			target := associationTarget(r.s, up.SourceType, up.Relation)
+			// A root whose key the key rule refused is one Graph.Add holds not, so
+			// a record naming it is no second break.
+			if !target.IsZero() && r.addresses[oneSlot{source: target, key: r.canon.key(target, up.TargetKey).String()}] {
+				r.refuseRecord(i)
+				internal("unresolved record %d names target %s[%s], which a root holds, where Graph.Add resolves an edge",
+					i, target, diag.ValueText(r.canon.key(target, up.TargetKey).String()))
+			}
+		}
 	}
 	// held and missing count every record where it stands, for the required
 	// association fact; beside counts the records no rule refused, for the
@@ -592,34 +609,45 @@ func recordFacts(r *structureRules, parts SnapshotParts) {
 			beside[slot]++
 		}
 	}
+	type untypedRecord struct {
+		relation string
+		key      immutable.Key
+	}
+	var untyped []untypedRecord
+	for _, ep := range parts.Edges {
+		if _, ok := r.s.TypeByID(ep.SourceType); !ok {
+			untyped = append(untyped, untypedRecord{relation: ep.Relation, key: ep.SourceKey})
+		}
+	}
+	for _, up := range parts.Unresolved {
+		if _, ok := r.s.TypeByID(up.SourceType); !ok {
+			untyped = append(untyped, untypedRecord{relation: up.Relation, key: up.SourceKey})
+		}
+	}
+	mayName := func(slot oneSlot) bool {
+		for _, u := range untyped {
+			if u.relation == slot.relation && r.canon.key(slot.source, u.key).String() == slot.key {
+				return true
+			}
+		}
+		return false
+	}
 	reported := make(map[oneSlot]bool)
 	for i, up := range parts.Unresolved {
-		if r.refusedRecords[i] {
+		if r.refusedRecords[i] || (up.Reason != "absent" && up.Reason != "empty") {
 			continue
 		}
 		slot := at(up.SourceType, up.SourceKey, up.Relation)
-		switch up.Reason {
-		case "absent", "empty":
-			switch {
-			case !requiredUnder(r.s, up.SourceType, up.Relation):
-				internal("unresolved record %d states reason %q under %q of %s[%s], which is optional, where Graph.Add records none",
-					i, up.Reason, up.Relation, up.SourceType, diag.ValueText(slot.key))
-			case !reported[slot] && !r.unjudged(slot) && r.addresses[oneSlot{source: slot.source, key: slot.key}] && beside[slot] > 1:
-				reported[slot] = true
-				// The slot holds a record that states it holds none, so its
-				// records are no count for oneOverflow to judge.
-				r.refuseSlot(slot)
-				internal("%q of %s[%s] holds an %s record beside another record, where Graph.Add records it alone",
-					up.Relation, up.SourceType, diag.ValueText(slot.key), up.Reason)
-			}
-		case "target_missing":
-			target := associationTarget(r.s, up.SourceType, up.Relation)
-			// A root whose key the key rule refused is one Graph.Add holds not, so
-			// a record naming it is no second break.
-			if !target.IsZero() && r.addresses[oneSlot{source: target, key: r.canon.key(target, up.TargetKey).String()}] {
-				internal("unresolved record %d names target %s[%s], which a root holds, where Graph.Add resolves an edge",
-					i, target, diag.ValueText(r.canon.key(target, up.TargetKey).String()))
-			}
+		if r.unjudged(slot) || !r.addresses[oneSlot{source: slot.source, key: slot.key}] || beside[slot] < 2 {
+			continue
+		}
+		// Every absent and empty record of the slot is the one break, reported
+		// once.
+		r.refuseRecord(i)
+		if !reported[slot] {
+			reported[slot] = true
+			internal("%q of %s[%s] holds an %s record beside another record, where Graph.Add records it alone",
+				up.Relation, up.SourceType, diag.ValueText(slot.key), up.Reason)
 		}
 	}
 	for _, ip := range parts.Instances {
@@ -631,7 +659,8 @@ func recordFacts(r *structureRules, parts SnapshotParts) {
 		}
 		for rel := range t.AllAssociations() {
 			// Two roots at one address are one slot, met twice here.
-			if slot := at(ip.TypeID, ip.PrimaryKey, rel.Name()); !rel.IsOptional() && held[slot]+missing[slot] == 0 && !reported[slot] {
+			if slot := at(ip.TypeID, ip.PrimaryKey, rel.Name()); !rel.IsOptional() && held[slot]+missing[slot] == 0 && !reported[slot] &&
+				!mayName(slot) {
 				reported[slot] = true
 				internal("root %s[%s] holds no edge and no record under the required association %q, where Graph.Add records an absent one",
 					ip.TypeID, diag.ValueText(slot.key), rel.Name())
@@ -660,6 +689,31 @@ func (r *structureRules) countOne(slot oneSlot) {
 		r.order = append(r.order, slot)
 	}
 	r.ones[slot]++
+}
+
+// countRecord counts a record no rule refused toward its (one) association: a
+// (one) association of a root whose key the key rule accepts holds its
+// source's address. A record addressing no root is the materialization's Fatal
+// E_INTERNAL, which [RebuildSnapshot] reports.
+func (r *structureRules) countRecord(source schema.TypeID, sourceKey immutable.Key, relation string) {
+	t, ok := r.s.TypeByID(source)
+	if !ok {
+		return
+	}
+	if rel, ok := t.Relation(relation); !ok || !rel.IsAssociation() || rel.IsMany() {
+		return
+	}
+	key := r.canon.key(source, sourceKey).String()
+	if r.addresses[oneSlot{source: source, key: key}] {
+		r.countOne(oneSlot{source: source, key: key, relation: relation})
+	}
+}
+
+func (r *structureRules) refuseRecord(i int) {
+	if r.refusedRecords == nil {
+		r.refusedRecords = make(map[int]bool)
+	}
+	r.refusedRecords[i] = true
 }
 
 // oneOverflow refuses each (one) association holding more than one record,

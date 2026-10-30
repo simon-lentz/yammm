@@ -14,7 +14,7 @@ import (
 // Load follows the library's standard diagnostic pattern: it returns
 // (T, diag.Result) where Result carries structured issues with stable codes.
 // On success, the Result is OK (or contains only warnings). On failure,
-// the Result has Error-severity issues and the snapshot is nil.
+// the Result has an Error or a Fatal issue and the snapshot is nil.
 //
 // The schema parameter must be the same schema (or a compatible schema)
 // used when the data was originally validated. Load verifies compatibility
@@ -22,12 +22,13 @@ import (
 //
 // Load does not re-validate instance data by default: whether a value
 // satisfies its constraint, and whether an invariant holds, is the writer's
-// claim (see the package's Validity Contract). [WithRevalidation] runs root
-// instances, with their composed children, edges and target_missing records,
-// back through the real validator;
+// claim (see the package's Validity Contract). [WithRevalidation] runs each
+// root the structural checks left whole, with its composed children, edges and
+// target_missing records, back through the real validator;
 // [WithValueConformance] is the narrower canonical-form check. Whatever the
 // options say, Load refuses a document that breaks the .ys format or a fact of
-// the graph package doc's "Structural facts".
+// the graph package doc's "Structural facts", save that
+// [WithIntegrityCheck](false) skips the integrity hash.
 //
 // A dynamic numeric value materializes as an int64 or a float64, save the two
 // cases this paragraph ends on: the wire carries no width, so a float32

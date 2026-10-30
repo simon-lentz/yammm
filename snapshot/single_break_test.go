@@ -236,6 +236,12 @@ func sbRecord(source, relation, reason string) string {
 		source, relation, target, reason)
 }
 
+// sbOptional is an absent record of the root at source under the optional
+// association MENTOR.
+func sbOptional(source string) string {
+	return strings.Replace(sbRecord(source, "MENTOR", "absent"), `"required":true`, `"required":false`, 1)
+}
+
 // sbRows lists one row per issue-collecting site of the structural pass, then
 // the documents in which two rules once claimed one break.
 func sbRows() []sbRow {
@@ -552,6 +558,30 @@ func sbRows() []sbRow {
 			want: malformed("unresolved record 2 source carries no types-table row"), schemaless: true,
 		},
 		{
+			name: "absent record with no source row, under a required association", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"source_type":4`, `"source_type":null`, 1)),
+			want: malformed("source carries no types-table row"), schemaless: true, required: 1,
+		},
+		{
+			name: "record with no source row under one association, beside a root holding nothing under another", edits: [][2]string{
+				{sbKnowsLost, strings.Replace(sbKnowsLost, `"source_type":4`, `"source_type":null`, 1)},
+				{sbAbsent + `,`, ``},
+			},
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, "source carries no types-table row"),
+				sbError(diag.E_SNAPSHOT_MALFORMED, `holds no edge and no record under the required association "EMPLOYER"`),
+			}, required: 1,
+		},
+		{
+			name: "record with no source row at one key, beside another root holding nothing under its association", edits: [][2]string{
+				{sbAbsent, strings.Replace(sbAbsent, `"source_type":4`, `"source_type":null`, 1)},
+				{sbEmployer + `,`, ``},
+			},
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, "source carries no types-table row"),
+				sbError(diag.E_SNAPSHOT_MALFORMED, `p1"]] holds no edge and no record under the required association "EMPLOYER"`),
+			}, required: 1,
+		},
+		{
 			name: "record with an undeclared edge property", edits: edit(sbKnowsLost, strings.Replace(sbKnowsLost, `{"note":"m"}`, `{"ghost":1,"note":"m"}`, 1)),
 			want: malformed(`holds edge property "ghost"`), rebuild: 1,
 		},
@@ -636,10 +666,7 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "two records outside their bounds under a (one) association", edits: edit(sbAbsent, sbLost("p2", "EMPLOYER", 1, `["c8"]`, `{"since":8888}`)+`,`+sbLost("p2", "EMPLOYER", 1, `["c9"]`, `{"since":9999}`)),
-			want: []sbWant{
-				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER"`),
-				{code: diag.E_CONSTRAINT_FAIL, phrase: "integer 8888 exceeds", onlyReval: true},
-			}, required: 3, rebuild: 1,
+			want: []sbWant{sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER"`)}, required: 3, rebuild: 1,
 		},
 
 		// The records together.
@@ -723,6 +750,88 @@ func sbRows() []sbRow {
 		{
 			name: "absent record twice under a (one) association", edits: edit(sbAbsent, sbAbsent+`,`+sbAbsent),
 			want: malformed("holds an absent record beside another record"), required: 3, rebuild: 1,
+		},
+		{
+			name: "absent record twice beside an edge under a (one) association", edits: edit(sbUnresolved, sbUnresolved+sbRecord("p1", "EMPLOYER", "absent")+`,`+sbRecord("p1", "EMPLOYER", "absent")+`,`),
+			want: malformed("holds an absent record beside another record"), required: 4, rebuild: 1,
+		},
+
+		// Two breaks in one association: the record fact refuses the absent or
+		// empty records alone, so the records beside them still overflow.
+		{
+			name: "absent record beside two edges under a (one) association", edits: [][2]string{
+				{sbEmployer, sbEmployerTwice},
+				{sbUnresolved, sbUnresolved + sbRecord("p1", "EMPLOYER", "absent") + `,`},
+			},
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
+				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
+			}, required: 3, rebuild: 2,
+		},
+		{
+			name: "empty record beside an edge and a target_missing record under a (one) association", edits: edit(sbUnresolved,
+				sbUnresolved+sbLost("p1", "EMPLOYER", 1, `["c9"]`, `{"since":1999}`)+`,`+sbRecord("p1", "EMPLOYER", "empty")+`,`),
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an empty record beside another record"),
+				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
+			}, required: 4, rebuild: 2,
+		},
+		{
+			name: "absent record twice beside two edges under a (one) association", edits: [][2]string{
+				{sbEmployer, sbEmployerTwice},
+				{sbUnresolved, sbUnresolved + sbRecord("p1", "EMPLOYER", "absent") + `,` + sbRecord("p1", "EMPLOYER", "absent") + `,`},
+			},
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
+				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
+			}, required: 4, rebuild: 2,
+		},
+
+		// A record a fact refuses is no (one) count and no record beside an
+		// absent one.
+		{
+			name: "absent record under an optional (one) association beside an edge", edits: edit(sbUnresolved, sbUnresolved+sbOptional("p1")+`,`),
+			want: malformed("which is optional"), rebuild: 1,
+		},
+		{
+			name: "absent record under an optional (one) association beside two edges", edits: [][2]string{
+				{sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}},{"target_type":4,"target_key":["p1"],"properties":{}}]`},
+				{sbUnresolved, sbUnresolved + sbOptional("p1") + `,`},
+			},
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, "which is optional"),
+				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "MENTOR" of sb#Person[["p1"]] holds 2 records`),
+			}, rebuild: 2,
+		},
+		{
+			name: "absent record twice under an optional (one) association", edits: edit(sbMentorLost, sbOptional("p2")+`,`+sbOptional("p2")),
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, "which is optional"),
+				sbError(diag.E_SNAPSHOT_MALFORMED, "which is optional"),
+			}, rebuild: 2,
+		},
+		{
+			name: "target_missing record naming a root beside an edge under an optional (one) association", edits: edit(sbUnresolved, sbUnresolved+sbLost("p1", "MENTOR", 4, `["p2"]`, `{}`)+`,`),
+			want: malformed("which a root holds"), rebuild: 1,
+		},
+		{
+			name: "target_missing record naming a root beside an edge under a required (one) association", edits: edit(sbUnresolved, sbUnresolved+sbLost("p1", "EMPLOYER", 1, `["c2"]`, `{"since":1999}`)+`,`),
+			want: malformed("which a root holds"), required: 3, rebuild: 1,
+		},
+		{
+			name: "absent record beside a target_missing record naming a root", edits: edit(sbAbsent, sbAbsent+`,`+sbLost("p2", "EMPLOYER", 1, `["c1"]`, `{"since":1999}`)),
+			want: malformed("which a root holds"), required: 3, rebuild: 1,
+		},
+		{
+			name: "refused absent record beside an absent record and two edges under a (one) association", edits: [][2]string{
+				{sbEmployer, sbEmployerTwice},
+				{sbUnresolved, sbUnresolved + strings.Replace(sbRecord("p1", "EMPLOYER", "absent"), `"target_key":null`, `"target_key":["c1"]`, 1) + `,` + sbRecord("p1", "EMPLOYER", "absent") + `,`},
+			},
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, "but carries a target key"),
+				sbError(diag.E_SNAPSHOT_MALFORMED, "holds an absent record beside another record"),
+				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER" of sb#Person[["p1"]] holds 2 records`),
+			}, required: 4, rebuild: 3,
 		},
 		{
 			name: "two roots at one address each with a (one) edge", edits: edit(sbP2, sbP2+`,`+p3+`,`+p3),
