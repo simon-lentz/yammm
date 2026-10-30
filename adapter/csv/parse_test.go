@@ -224,8 +224,8 @@ func TestParseTyped_CancellationKeepsTheRecordsItRead(t *testing.T) {
 	assert.Equal(t, "e1", got[0].Properties["id"])
 }
 
-// A cancelled parse is Fatal, not Error. graph/doc.go and docs/VERSIONING.md
-// both state that HasFatal covers cancellation, so a caller testing it to mean
+// A cancelled parse is Fatal, not Error. graph/doc.go states that HasFatal
+// covers cancellation, so a caller testing it to mean
 // "the run did not finish" must not read false for an abandoned parse. These
 // were the module's only two E_CONTEXT_CANCELLED emissions below Fatal.
 func TestParseTyped_CancellationIsFatal(t *testing.T) {

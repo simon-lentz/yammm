@@ -16,17 +16,33 @@ jobs:
   # about three times its slowest measured run.
   test:
     uses: ./.github/workflows/yammm_test.yml
+  # The VSIX publishes at package.json's version and the assets are stamped with
+  # the tag, so a tag package.json does not carry ships neither. The test
+  # workflow holds the other version sites equal to package.json.
+  version:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check the version is the tag's
+        run: |
+          VERSION="v$(jq -r .version lsp/editors/vscode/package.json)"
+          if [ "${GITHUB_REF_TYPE}" != tag ] || [ "${GITHUB_REF_NAME}" != "${VERSION}" ]; then
+            echo "::error::package.json's version is ${VERSION}, and this run is ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}: a release ships only from the tag package.json carries"
+            exit 1
+          fi
   # The VS Code extension bundles yammm-lsp, so it is published by this run,
   # from the tag and after the same tests, beside the assets. A publish cut
   # short is finished by re-running this run's failed jobs: the publish step
   # skips each target already at the version.
   publish:
-    needs: test
+    needs: [test, version]
     uses: ./.github/workflows/publish_vscode.yml
     secrets:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
   release:
-    needs: test
+    needs: [test, version]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

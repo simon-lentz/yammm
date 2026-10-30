@@ -190,7 +190,7 @@ func skipValue(dec *json.Decoder, key string) error {
 // The accept range is the closed interval [MinReadableVersion, currentVersion].
 // A document outside the range draws an Error-severity
 // [diag.E_SNAPSHOT_UNSUPPORTED_VERSION]. The package doc's Wire Format
-// Versions section and docs/VERSIONING.md carry the full policy.
+// Versions section and docs/API.md's Versioning Policy carry the full policy.
 //
 // It is DERIVED from currentVersion, not written as a second literal: this
 // package reads only the version it writes, and two independent literals let

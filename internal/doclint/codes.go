@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"go/parser"
 	"go/token"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -35,10 +34,6 @@ type CodeRules struct {
 	// Placeholders holds names that stand for a code that does not exist by
 	// design, such as the name an example passes to diag.NewCode.
 	Placeholders []string
-	// Removed maps a slash-separated path from the root to the names of codes
-	// that no longer exist and that file may cite, such as a change record
-	// naming the codes a release removed or renamed.
-	Removed map[string][]string
 }
 
 // AssertCitedCodesExist reports every diagnostic code name cited under root
@@ -54,9 +49,9 @@ type CodeRules struct {
 // script's lines that open on "#", a heredoc's included. A Go string literal is not read, and neither is
 // a path under a testdata directory: both hold fixtures, not claims.
 //
-// An exclusion that matches no file the gate reads, a placeholder that is
-// registered or cited nowhere, and a removed name that is registered or not
-// cited in its file are reported too, so none can outlive what it names.
+// An exclusion that matches no file the gate reads and a placeholder that is
+// registered or cited nowhere are reported too, so neither can outlive what it
+// names.
 func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 	t.Helper()
 	var n CodeCitations
@@ -72,22 +67,12 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 		return n
 	}
 	registry := newCodeSet(rules.Codes)
-	placeholders := make(map[string]bool, len(rules.Placeholders))
-	for _, p := range rules.Placeholders {
+	placeholderNames := sortedUnique(rules.Placeholders)
+	placeholders := make(map[string]bool, len(placeholderNames))
+	for _, p := range placeholderNames {
 		placeholders[p] = false
 		if registry.has(p) {
 			t.Errorf("placeholder %s is a registered code; cite it as one", p)
-		}
-	}
-	removedCited := make(map[string]map[string]bool, len(rules.Removed))
-	for _, rel := range slices.Sorted(maps.Keys(rules.Removed)) {
-		names := rules.Removed[rel]
-		removedCited[rel] = make(map[string]bool, len(names))
-		for _, name := range names {
-			removedCited[rel][name] = false
-			if registry.has(name) {
-				t.Errorf("removed name %s in %s is a registered code; cite it as one", name, rel)
-			}
 		}
 	}
 	excluded := make(map[string]bool)
@@ -133,33 +118,28 @@ func AssertCitedCodesExist(t TB, root string, rules CodeRules) CodeCitations {
 			if placeholder {
 				placeholders[c.name] = true
 			}
-			_, removed := removedCited[rel][c.name]
-			if removed {
-				removedCited[rel][c.name] = true
-			}
-			if !placeholder && !removed && !registry.has(c.name) {
+			if !placeholder && !registry.has(c.name) {
 				t.Errorf("%s:%d: cites the diagnostic code %s, which %s", rel, c.line, c.name, registry.miss(c.name))
 			}
 		}
 	}
-	for _, p := range rules.Exclude {
+	for _, p := range sortedUnique(rules.Exclude) {
 		if !excluded[p] {
 			t.Errorf("exclusion %q matches no tracked Go, Markdown or shell file", p)
 		}
 	}
-	for _, p := range rules.Placeholders {
+	for _, p := range placeholderNames {
 		if !placeholders[p] {
 			t.Errorf("placeholder %s is cited nowhere", p)
 		}
 	}
-	for _, rel := range slices.Sorted(maps.Keys(removedCited)) {
-		for _, name := range rules.Removed[rel] {
-			if !removedCited[rel][name] {
-				t.Errorf("removed name %s is not cited in %s", name, rel)
-			}
-		}
-	}
 	return n
+}
+
+// sortedUnique returns names sorted and each once, so a rule the caller lists
+// twice draws one report.
+func sortedUnique(names []string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(names)))
 }
 
 // matchingPatterns returns every pattern that matches rel, so an exclusion

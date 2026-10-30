@@ -12,7 +12,7 @@ import (
 )
 
 // TestDocumentedInvocationsExist points the invocation gate at every tracked
-// Markdown file but the change record: each `yammm …` example names a command
+// Markdown file: each `yammm …` example names a command
 // the CLI has and flags that command defines, so a flag legal only on another
 // command is reported. The table is read from newRootCmd's tree as execute
 // builds it, cobra's help and completion commands included, with the help and
@@ -22,8 +22,6 @@ func TestDocumentedInvocationsExist(t *testing.T) {
 	n := doclint.AssertInvocationsExist(t, "../..", doclint.CommandRules{
 		Program:  "yammm",
 		Commands: executedCommandTable(),
-		// A change record states the surface of the release it describes.
-		Exclude: []string{"docs/VERSIONING.md"},
 	})
 	// The floor sits just under the count at the tree that set it, so a walk
 	// that stops reaching the Markdown fails instead of passing over nothing.

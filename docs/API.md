@@ -1,6 +1,6 @@
 # YAMMM Go Library API Reference
 
-This document is the API reference for the YAMMM Go library. It covers schema loading, instance validation, graph construction, snapshot persistence, adapters, and diagnostics.
+This document is the API reference for the YAMMM Go library, and it states the library's versioning policy.
 
 The YAMMM language itself — grammar, types, expressions, constraints, and diagnostic codes — is specified in [SPEC.md](SPEC.md).
 
@@ -821,7 +821,7 @@ The format includes:
 - A **version** field for format evolution (current value: `4`, the only readable version; see [Wire Format Versions](#wire-format-versions))
 - A **schema structural hash** for compatibility verification (see [Schema Identity](#schema-identity))
 - An **integrity hash** (SHA-256 over the whole document, header included) for corruption detection
-- A **features array** for forward compatibility
+- A **features array**, which this version writes empty and refuses any entry of
 
 ### Functions
 
@@ -873,7 +873,7 @@ if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 | ------ | ----------- |
 | `WithIssueLimit` | Maximum issues `Load` and `Verify` store (default 100, matching `schema.Load`; 0 for unlimited). The walk completes unless the context is cancelled, so a completed walk's `DroppedCount` is exact |
 | `WithIntegrityCheck` | Whether the integrity hash is verified (default `true`); `false` skips it for debugging hand-edited files |
-| `WithValueConformance` | With `true`, report a stored `Timestamp`/`Date`/`UUID` value that does not conform to its constraint (`W_SNAPSHOT_VALUE_NONCONFORMING`, Warning); not re-validation |
+| `WithValueConformance` | With `true`, report a root's or a composed child's stored `Timestamp`/`Date`/`UUID` value that does not conform to its constraint (`W_SNAPSHOT_VALUE_NONCONFORMING`, Warning); not re-validation |
 | `WithRevalidation` | Run each root the structural checks left whole (no check refused its type, its tree, its unresolved records, or its required and `(one)` associations, no record whose types-table row the reader refused could be its, and no other root stands at its address; an edge that names no root does not stop it) — composed children, edges, `target_missing` records and invariants included — back through `instance.Validator`, reporting each finding about the data at the given severity (a cancellation or an `E_INTERNAL` keeps its own); `Error` refuses the load. An unresolved record no check refused, under an association the schema declares required, draws `W_SNAPSHOT_UNRESOLVED_REQUIRED` |
 
 ### Snapshot Info
@@ -1114,7 +1114,7 @@ func WithUpdateCreatedAt(t time.Time) UpdateOption
 
 **Speedup.** On a 14.7 MB `.ys` input the fast path is several times faster than the equivalent `Load + Marshal` round trip. **The enforced lower bound is 3×**: `TestUpdateMetadataRatioFloor` in the `snapshot` package measures both paths over a median of five samples and fails below that ratio. This document states the floor rather than an absolute timing, because the measured ratio varies with hardware and falls as `UpdateMetadata` gains header checks before the body splice.
 
-**Preserve-vs-override.** By default `UpdateMetadata` preserves the existing `created_at` byte-for-byte from the input header. Pass `WithUpdateCreatedAt(t)` to override; there is no other way to change `created_at` via the metadata-rewrite path. A **zero** `time.Time` preserves rather than overriding, matching what `Marshal` does with a zero `WithCreatedAt` — so a caller that parsed a timestamp and lost it cannot stamp `0001-01-01T00:00:00Z` over a good value. Do not read `created_at` and hand it back to preserve it: preservation is the default, and re-formatting rewrites a foreign header's fractional seconds and offset for no gain. Read the value with `CreatedAtTime()` and leave the option alone. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `HeaderOnly`, copy it, apply their changes, and pass the result.
+**Preserve-vs-override.** By default `UpdateMetadata` keeps the existing `created_at`, byte for byte when it is RFC 3339 text. Pass `WithUpdateCreatedAt(t)` to override; there is no other way to change `created_at` via the metadata-rewrite path. A **zero** `time.Time` preserves rather than overriding, matching what `Marshal` does with a zero `WithCreatedAt` — so a caller that parsed a timestamp and lost it cannot stamp `0001-01-01T00:00:00Z` over a good value. Do not read `created_at` and hand it back to preserve it: preservation is the default, and re-formatting rewrites a foreign header's fractional seconds and offset for no gain. Read the value with `CreatedAtTime()` and leave the option alone. `metadata` itself is replaced entirely — there is no merge. Callers retrieve the current metadata via `HeaderOnly`, copy it, apply their changes, and pass the result.
 
 **Failure modes.** The primitive returns structured diagnostics with stable codes:
 
@@ -1137,7 +1137,7 @@ v4 keys each table row as `{schema, name}` — the declaring schema's **name**, 
 
 `snapshot.MinReadableVersion` (exported constant, value `4`) names the lowest version this package accepts on read paths. The `currentVersion` (unexported, value `4`) is the version emitted on every write, and `MinReadableVersion` is **derived from it** rather than written as a second literal — this package reads only the version it writes, so widening the accept range is a deliberate change rather than a bump that forgets its other half. The accept range on read is the closed interval `[MinReadableVersion, currentVersion]`; documents outside the range surface Error-severity `E_SNAPSHOT_UNSUPPORTED_VERSION` with the observed version and the supported version named in the message. **v1, v2 and v3 documents are no longer read** — v4 is the only readable version, and a v3 document is refused rather than migrated. An older reader rejects a v4 document the same way, so an operator running an older binary sees a structured diagnostic rather than a misread types section.
 
-See [`docs/VERSIONING.md`](VERSIONING.md) for the full pre-1.0 / post-1.0 wire-format policy.
+See the [Versioning Policy](#versioning-policy) for the full pre-1.0 / post-1.0 wire-format policy.
 
 ## Diagnostics
 
@@ -1906,26 +1906,26 @@ doc, err := markdown.Marshal(s, markdown.WithClassDiagram(false)) // no class di
 doc, err := markdown.Marshal(s, markdown.WithClassMembers(false)) // diagram without member lines
 ```
 
-`Marshal` requires a completed schema (always true for one returned by `schema.Load*` or `schema.Builder.Build`). Source backing is optional: on a Builder-built schema, invariant sections degrade to their message line instead of a source fence — nothing else needs source content.
+`Marshal` requires a completed schema (always true for one returned by `schema.Load*` or `schema.Builder.Build`). Source backing is optional: on a Builder-built schema, an invariant section degrades to its message line and its doc comment, if it has one, instead of a source fence — nothing else needs source content.
 
 ### The Emitted Document
 
 One document per invocation, covering the entry schema plus its whole import closure:
 
 - **Title + schema doc** — `# Schema <Name>`, then the schema's doc-comment as its author wrote it.
-- **Class diagram** — a `## Class Diagram` heading, then one Mermaid `classDiagram` fence over the entire closure. Classes carry each type's **own** members as `name KindLabel` pairs (named DataTypes show their name; constraint detail stays out of the diagram) — `WithClassMembers(false)` drops the member lines and keeps the classes, stereotypes and edges; abstract and part types carry `<<Abstract>>` / `<<Part>>` stereotypes; edges are `Parent <|-- Child` for inheritance and DSL-labeled `Owner --> Target : NAME (mult)` / `Owner *-- Child : NAME (mult)` for each type's own associations and compositions — inherited structure is conveyed by the inheritance edges, not redrawn. A class id is the display sanitized to ASCII letters, digits and underscores, with every `direction` in it written `direc_tion` — Mermaid reads a line ending in `direction` before a line starting with a direction keyword as one direction statement — and two displays that sanitize to one id stay two classes, the later suffixed `_2`, `_3`, …. A class whose id differs from its display emits the form `class common_Region["common.Region"]`; Mermaid namespaces are deliberately not used (some Markdown renderers do not support them in class diagrams). **The labelled form needs Mermaid 10.1.0 or later** — the first release whose class-diagram grammar has the `classLabel` production; Mermaid 9 fails it with a lexical error. An imported type is always labelled, and an entry-schema type only when its name holds `direction`, so an import-free schema without such a name renders on Mermaid 9. When the emitter has written a labelled class it says so in the document: one sentence under the `## Class Diagram` heading, before the fence — *This diagram uses Mermaid's labelled class form and needs Mermaid 10.1.0 or later.* A document with no labelled class — an import-free one whose type names hold no `direction` — carries no such sentence.
+- **Class diagram** — a `## Class Diagram` heading, then one Mermaid `classDiagram` fence over the entire closure. Classes carry each type's **own** members as `name KindLabel` pairs (named DataTypes show their name; constraint detail stays out of the diagram) — `WithClassMembers(false)` drops the member lines and keeps the classes, stereotypes and edges; an abstract type carries `<<Abstract>>` and a part type that is not abstract `<<Part>>`; edges are `Parent <|-- Child` for inheritance and DSL-labeled `Owner --> Target : NAME (mult)` / `Owner *-- Child : NAME (mult)` for each type's own associations and compositions — inherited structure is conveyed by the inheritance edges, not redrawn. A class id is the display sanitized to ASCII letters, digits and underscores, with every `direction` in it written `direc_tion` — Mermaid reads a line ending in `direction` before a line starting with a direction keyword as one direction statement — and two displays that sanitize to one id stay two classes, the later suffixed `_2`, `_3`, …. A class whose id differs from its display emits the form `class common_Region["common.Region"]`; Mermaid namespaces are deliberately not used (some Markdown renderers do not support them in class diagrams). **The labelled form needs Mermaid 10.1.0 or later**, the oldest release the `mermaid` test below runs; Mermaid 9 fails it with a lexical error. An imported type is always labelled, and an entry-schema type only when its id differs from its name, so an import-free schema in which no id differs renders on Mermaid 9. When the emitter has written a labelled class it says so in the document: one sentence under the `## Class Diagram` heading, before the fence — *This diagram uses Mermaid's labelled class form and needs Mermaid 10.1.0 or later.* A document with no labelled class carries no such sentence.
 - **Type sections** — a `## Types` heading, then one `### <TypeName>` per type in declaration order: a badge line (`*Abstract type*` / `*Part type*` / `Extends: [Parent](#parent)`), the doc-comment, then a **flattened property table** (Property | Type | Modifiers | Description) over the full inheritance chain — the Type column renders each constraint's DSL form (`String[1, 100]`, `List<FipsCode>`), and inherited rows carry `from <Owner>` in Modifiers. Associations and compositions follow as DSL-notation bullets with linked targets, an inherited relation carrying the same provenance as a ` — from <Owner>` marker; a relation's doc-comment nests as an indented block under its bullet, and its edge properties as a sub-table. A bullet is `-` and three spaces, so what nests under it starts at column 4, a tab stop, and a doc comment there reads as it does at column 0, a tab in it included.
 - **Invariants** — the failure message as a bullet, written as a quoted Go string literal and escaped for Markdown (an inherited invariant carrying the ` — from <Owner>` marker), the doc-comment beneath, then the declaration source in a `yammm` fence extracted via the invariant's span, laid out as written: each continuation line loses as much of the white space up to the declaration's column as it starts with, and keeps the rest, a CR LF or a lone CR is a line end, and the comments the span starts with, the doc comment first, are stripped whatever they hold, since the doc renders separately.
-- **Data Types** — a Name | Definition | Description table per schema.
+- **Data Types** — a Name | Definition | Description table for each schema that declares a data type.
 - **Imported schemas** — one `## Schema <Name> (imported as <alias>)` section per import in closure order (transitive imports, which have no entry alias, head as plain `## Schema <Name>`), the schema's doc-comment beneath the heading when it has one, then its type sections and data types.
 
 **A type is named the way the entry schema names it** — in its heading, every link to it, the `from <Owner>` markers and the diagram: the bare name for a type the entry declares, the entry's own tag `<alias>.<TypeName>` for one it imports directly (the tag `schema.AddressableTag` returns, which is how a data file names it), and `<TypeName> (<schemaName>)` for one it reaches only through another import, which has no tag. **Every heading takes the anchor GitHub gives it**: its slug — the text lowercased, every character but letters and other alphabetic characters, marks, decimal digits, connector punctuation and hyphens removed, spaces made hyphens — suffixed `-1`, `-2`, … when an earlier heading took it. The generator reads the emitted document with a CommonMark parser, renders it to HTML, applies GitHub's tag filter and builds the tree an HTML5 parser builds, and allocates over every heading element of that tree, as GitHub anchors every `h1` to `h6` element it renders — the Markdown headings, doc-comment headings included, and each heading a doc comment writes as raw HTML, anchored by the slug of its text content — so each link lands on the heading it names: two headings that slug alike each keep a working link, and a type named `Types` links to its own heading rather than the `## Types` section.
 
-**Doc-comment text is written as the Markdown its author wrote**: a link, table or heading inside it is the author's own, in a description cell too. The text is the schema's documentation, whose continuation lines lost the indentation they all share, byte for byte, when the parser read the comment (see [Comments](SPEC.md#comments)) or `schema.Builder` took the string, so layout that indents every continuation line alike makes no indented code block; lines indented by different bytes, such as a tab on one and spaces on another, share none and keep theirs. Its line ends are written as LF, since CommonMark ends a line at a CR LF or a lone CR. A block a doc comment leaves open — a fenced code block, or an HTML block a blank line does not end — is closed at the end of that comment's block with the line a CommonMark parser reads as its end, a raw-text element such as `<textarea>` with `</pre>`, which ends its block and which GitHub's tag filter leaves alone. Raw HTML a doc comment leaves open for an HTML parser — a comment, a CDATA section, a tag, a quoted attribute value, a `noscript` element's text — is closed after it by one line that reads as nothing from a closed state, which a description cell takes on the cell's line after a space (`<!-- -->`, `<![CDATA[ ]]>`, `<wbr x='"'>` or `</noscript>`), kept only when an HTML5 parser then reads an element written after the comment; a Markdown heading inside the comment that its own open HTML takes is no heading, as on GitHub. An element a doc comment leaves open, such as a `<div>`, is the author's. The generator's own fences are sized past any backtick run in their body. **Every other text the schema supplies renders literally under GitHub-flavored Markdown**; GitHub's emoji filter runs after it, and outside code it can still read a `:shortcode:`, as it did in a heading when measured. A code cell — a property's name and Type, a data type's name and Definition — shows its text byte for byte: a code span with each pipe escaped, or, for text holding a backtick, a backslash before a pipe or a line break, a `<code>` element whose Markdown-significant characters are entities. A description cell holds the doc comment's Markdown on one line: a line break inside a code span folds to the space Markdown reads it as, one inside raw HTML or an HTML block to a space an HTML parser reads as white space, except in a `<pre>` or `<listing>` element's text, where it is a `<br>` (the break right after the start tag, which an HTML parser drops, folds to nothing), and any other to `<br>` in place of the backslash that makes it a hard break, and a pipe after an even run of backslashes gains one, so the row keeps its cells and the pipe renders as in the doc comment. A schema name and an invariant message are escaped for Markdown, and a control character in a schema name is written as its Go escape (`\n`). GitHub reads a `www.` host, a URL and an email address as a link even through a backslash escape or an entity code, so an empty HTML comment (`<!---->`), which a browser does not show, splits each colon, each `@` and each dot after `www` in a schema name, an invariant message and a `<code>` cell. A Mermaid class label writes every character but an ASCII letter or digit, a dot, and an underscore between two ASCII letters or digits as an entity code (`#32;` for a space), which Mermaid decodes when it renders — Mermaid 11 reads a label as Markdown, and Mermaid's render rewrites the sequences it uses as entity placeholders. An edge label and a member line hold schema identifiers and the generator's words: each writes a double quote as `#quot;`, and the number sign, colon, semicolon, percent sign, `<`, `>` and `&` as `#35;`, `#58;`, `#59;`, `#37;`, `#60;`, `#62;` and `#38;`, so the multiplicity `one:many` labels an edge `one#58;many`.
+**Doc-comment text is written as the Markdown its author wrote**: a link, table or heading inside it is the author's own, in a description cell too. The text is the schema's documentation, whose continuation lines lost the indentation they all share, byte for byte, when the parser read the comment (see [Comments](SPEC.md#comments)) or `schema.Builder` took the string, so layout that indents every continuation line alike makes no indented code block; lines indented by different bytes, such as a tab on one and spaces on another, share none and keep theirs. Its line ends are written as LF, since CommonMark ends a line at a CR LF or a lone CR. A block a doc comment leaves open — a fenced code block, or an HTML block a blank line does not end — is closed at the end of that comment's block with the line a CommonMark parser reads as its end, a raw-text element such as `<textarea>` with `</pre>`, which ends its block and which GitHub's tag filter leaves alone. Raw HTML a doc comment leaves open for an HTML parser — a comment, a CDATA section, a tag, a quoted attribute value, a `noscript` element's text — is closed after it by one line that reads as nothing from a closed state, which a description cell takes on the cell's line after a space (`<!-- -->`, `<![CDATA[ ]]>`, `<wbr x='"'>` or `</noscript>`), kept only when an HTML5 parser then reads an element written after the comment; a Markdown heading inside the comment that its own open HTML takes is no heading, as on GitHub. An element a doc comment leaves open, such as a `<div>`, is the author's. The generator's own fences are sized past any backtick run in their body. **Every other text the schema supplies renders literally under GitHub-flavored Markdown**; GitHub's emoji filter runs after it, and outside code it can still read a `:shortcode:`, as it did in a heading when measured. A code cell — a property's name and Type, a data type's name and Definition — shows its text byte for byte: a code span with each pipe escaped, or, for text holding a backtick, a backslash before a pipe or a line break, a `<code>` element whose Markdown-significant characters are entities. A description cell holds the doc comment's Markdown on one line: a line break inside a code span folds to the space Markdown reads it as, one inside raw HTML or an HTML block to a space an HTML parser reads as white space, except in a `<pre>` or `<listing>` element's text, where it is a `<br>` (the break right after the start tag, which an HTML parser drops, folds to nothing), and any other to `<br>` in place of the backslash that makes it a hard break, and a pipe after an even run of backslashes gains one, so the row keeps its cells and the pipe renders as in the doc comment. A schema name, an invariant message, a type's import tag and a type reference are escaped for Markdown, and a control character in a schema name is written as its Go escape (`\n`). GitHub reads a `www.` host, a URL and an email address as a link even through a backslash escape or an entity code, so an empty HTML comment (`<!---->`), which a browser does not show, splits each colon, each `@` and each dot after `www` in text escaped this way and in a `<code>` cell. A Mermaid class label writes every character but an ASCII letter or digit, a dot, and an underscore between two ASCII letters or digits as an entity code (`#32;` for a space), which Mermaid decodes when it renders — Mermaid 11 reads a label as Markdown, and Mermaid's render rewrites the sequences it uses as entity placeholders. An edge label and a member line hold schema identifiers and the generator's words: each writes a double quote as `#quot;`, and the number sign, colon, semicolon, percent sign, `<`, `>` and `&` as `#35;`, `#58;`, `#59;`, `#37;`, `#60;`, `#62;` and `#38;`, so the multiplicity `one:many` labels an edge `one#58;many`.
 
 ### Validation
 
-Output is deterministic (byte-identical across runs and checkouts), so generated documents can be committed and drift-checked by regenerate-and-diff; the document is a versioned surface, whose tiers `docs/VERSIONING.md` states. Before returning, `Marshal` reads the document with a CommonMark parser (`github.com/yuin/goldmark`, with GitHub's extensions) and checks the structure it wrote: no block is left open at the end, every heading it wrote is a top-level heading of its level that reads as the text it meant and holds the anchor the document's heading elements allocate it, outside doc comments the links read are exactly the internal links it wrote, each to such a heading, with no other link, autolink or image, every table it wrote reads with its columns and rows, and the class diagram reads as a fenced code block each of whose lines is a form the emitter writes, a subset of Mermaid's class-diagram grammar and stricter than it, read with each entity code replaced as Mermaid's render replaces it — a failure is a generator bug returned as an error, never emitted output. No schema is refused for its names or its doc-comment text: the escapes above keep every schema-supplied text in a form the check accepts, and doc-comment text is not checked. A test behind the `mermaid` build tag hands every golden's diagram to Mermaid 10.1.0, 11.17.2 and 12.0.0 and requires each to parse the classes, labels and relations the schema states. It reads what Mermaid's parser holds, not the SVG Mermaid 11 renders a label's Markdown into; the class label's escape covers that by writing no character Markdown reads.
+Output is deterministic (byte-identical across runs and checkouts), so generated documents can be committed and drift-checked by regenerate-and-diff; the document is a versioned surface, whose tiers the [Versioning Policy](#versioning-policy) states. Before returning, `Marshal` reads the document with a CommonMark parser (`github.com/yuin/goldmark`, with GitHub's extensions) and checks the structure it wrote: no block is left open at the end, every heading it wrote is a top-level heading of its level that reads as the text it meant and holds the anchor the document's heading elements allocate it, outside doc comments the links read are exactly the internal links it wrote, each to such a heading, with no other link, autolink or image, every table it wrote reads with its columns and rows, and the class diagram reads as a fenced code block each of whose lines is a form the emitter writes, a subset of Mermaid's class-diagram grammar and stricter than it, read with each entity code replaced as Mermaid's render replaces it — a failure is a generator bug returned as an error, never emitted output. No schema is refused for its names or its doc-comment text: the escapes above keep every schema-supplied text in a form the check accepts, and doc-comment text is not checked. A test behind the `mermaid` build tag hands every golden's diagram to Mermaid 10.1.0, 11.17.2 and 12.0.0 and requires each to parse the classes, labels and relations the schema states. It reads what Mermaid's parser holds, not the SVG Mermaid 11 renders a label's Markdown into; the class label's escape covers that by writing no character Markdown reads.
 
 ### CLI
 
@@ -1999,3 +1999,129 @@ Three consequences follow. A comma inside a string literal is not a value separa
 `WrapLongLines` and `AlignColumns` lex the text you give them. A caller that enters at one of these phases has no record to inherit.
 
 Output is deterministic and idempotent. The formatter is used by the LSP server for `textDocument/formatting` and by the CLI for the `yammm fmt` command.
+
+## Versioning Policy
+
+This section states yammm's versioning commitments, so consumers and contributors have one reference for what a release bump may change. From the release after `v0.21.1`, a release states its moves in a GitHub release note written once at the tag. `docs/VERSIONING.md` at `v0.21.1` holds the notes of the releases from `v0.3.0` on, `v0.3.1` aside.
+
+### Scope
+
+yammm's versioning covers four surfaces that evolve on related but distinct cadences:
+
+1. **Go API surface** — exported types, functions, methods, constants, variables, struct fields, options, and their documented behavior under the `github.com/simon-lentz/yammm` module.
+2. **`.ys` wire format** — the on-disk shape of snapshots produced by `snapshot.Marshal` and the metadata updates (`snapshot.UpdateMetadata`, `snapshot.UpdateMetadataOrReMarshal`) and consumed by every read path of the `snapshot` package (`snapshot.Load`, `snapshot.Verify`, `snapshot.Info`, `snapshot.HeaderOnly`, `snapshot.HeaderOnlyRead`, the `ScanDir` family and the metadata updates). The wire format carries its own `version` field in the header (currently `4`, first tagged by v0.19.0; `3` from v0.12.0 through v0.18.0).
+3. **Generated Go output (`adapter/gogen`)** — the shape of the Go source `gogen.Marshal` emits for a given schema and options. A committed surface since v0.6.0: a downstream consumer byte-pins committed generated packages against it. Its tier rules are in "Generated-output surface" below.
+4. **Emitted Markdown (`adapter/markdown`)** — the shape of the reference document `markdown.Marshal` emits for a given schema and options. A versioned surface from the release after `v0.21.1`: a downstream consumer commits a generated document and drift-checks it in CI. Its tier rules are in "Emitted-Markdown surface" below.
+
+The surfaces share a semver tag but have independent version-bump triggers, documented below.
+
+#### Excluded from the v1.0 Go-API compatibility promise
+
+Two packages are **outside** surface 1 for the purpose of the v1.0 promise, and stay changeable at a minor version after the 1.0 tag:
+
+- **`lsp/`** — the language-server implementation and its options. It is consumed through the `yammm-lsp` binary and the VS Code extension, both of which ship in lockstep with the library tag, so its Go API has no independent consumer to stabilize for.
+- **`format/`** — the formatter entry points, consumed through the `yammm` CLI and the LSP on the same footing. Both ship in lockstep with the library tag, which is the whole ground for the exclusion: it does not depend on whether some other Go consumer exists.
+
+A formatter output change is still a behavior change, and an LSP protocol change is still governed by LSP's own versioning. The exclusion drops surface 1's promise for these packages' Go symbols and their documented behavior, and this policy sets no tier for either change.
+
+### Pre-1.0 policy (current)
+
+yammm is currently pre-1.0. Under Go module semver conventions, `0.X.Y` releases are understood to be unstable — backward-incompatible changes are permitted at minor-version bumps — but yammm's own policy is narrower than that. The following rules apply:
+
+#### Minor releases (`v0.X.0 → v0.X+1.0`)
+
+- **Additive API changes** — new exported symbols, new option types, new methods on existing types, new struct fields added at the end of a struct (subject to the type's own versioning contract, if any). Such a change can still break a consumer that builds the struct positionally, compares a struct the new field makes non-comparable, or implements an interface that gains the method, and a new `String` or `MarshalJSON` method changes how the type prints or encodes.
+- **Subtractive and breaking API changes** — removal of exported symbols, and breaking changes to an exported symbol's signature, name, or type (e.g. changing a method's return type, renaming an exported function, or collapsing two carrier types into one), provided (a) a grep across the known consumer set returns **either** zero external Go references **or** external references confined to a consumer that pins an older yammm release and whose migration is tracked as a downstream backlog item — in which case the semver pin carries the coordination, so tagging the breaking release cannot break that consumer's build and the migration lands on the consumer's own schedule; (b) the change is explicitly documented in the release notes; and (c) the release-notes entry enumerates every removed, renamed, or signature-changed symbol for downstream auditing.
+- **Behavior tightenings** — changes where the only observable difference is that a previously-erroring call becomes a no-op for input that was already semantically equivalent to the stored state, or similar correctness-preserving narrowings (e.g., `Registry.Register` becoming idempotent for exact-`SourceID` + exact-`StructuralHash` re-registration in v0.3.0). Documented in the release notes with the specific contract change.
+- **Wire-format additions** — new optional header or instance fields added under the `omitempty` convention, provided the new field's absence in an older reader does not cause silent data loss. A v0.X reader consuming a v0.X+1-produced document skips the unknown field; a v0.X+1 reader consuming a v0.X-produced document reads missing fields as their zero value. A new `features` entry and a new top-level key are not additions: every older read path refuses the first with `E_SNAPSHOT_UNSUPPORTED_FEATURE`, and each that reads the whole document refuses the second with `E_SNAPSHOT_MALFORMED`.
+
+#### Wire-format-incompatible changes
+
+Any wire-format change whose absence in an older reader would cause **silent data loss** is required to:
+
+1. **Increment the header's `version` field** (e.g., `1` → `2`).
+2. **Rely on yammm's existing unknown-version-rejection semantics** — older readers refuse the new version rather than partial-parsing a document they do not fully understand, with Error-severity `E_SNAPSHOT_UNSUPPORTED_VERSION` when the document keeps the old shape.
+3. **Document the bump and the asymmetric-reader semantics** in the release notes: which older versions accept the new file (if any — typically none), which newer versions accept the older file (none since v0.12.0: this package reads only the version it writes).
+
+The canonical example is v0.3.0's `UnresolvedEdge.Properties` addition: the new wire field could not be `omitempty`-safe alone because a pre-v0.3.0 reader would silently drop edge properties on cross-batch unresolved edges. The v1 → v2 bump forced pre-v0.3.0 readers to reject cleanly; v0.3.0's readers accepted both v1 and v2 files (v1 files had no Properties to drop, so the read was lossless).
+
+Wire-format version bumps are permitted at minor-version bumps during pre-1.0 (they are the yammm-native signal for "this format has diverged"); they are not deferred to major bumps under pre-1.0.
+
+#### Patch releases (`v0.X.Y → v0.X.Y+1`)
+
+- Bug fixes that preserve the public API and wire format.
+- Documentation-only changes.
+- Internal refactors, test improvements, and dependency updates.
+- **Additive API changes** — new exported symbols whose addition leaves every existing signature and documented behavior unchanged. A new struct field added at the end of an existing struct also qualifies, provided the field keeps a comparable struct comparable and no consumer is licensed to construct the type positionally — the type is documented as constructed by this library and returned to the caller, or the measurement finds no positional composite literal of it in this module or in the known consumer set. The minor clause's broader form still governs a struct a consumer is expected to build.
+
+Patch releases never introduce breaking changes: no removed or renamed exported symbols, no signature changes, no tightenings of documented behavior, and no wire-format changes. Anything in those categories requires at least a minor release.
+
+### Generated-output surface (`adapter/gogen`)
+
+For an unchanged schema under an unchanged load name, unchanged `Marshal` options, an unchanged module root, an unchanged yammm version and an unchanged Go release, generated output is byte-identical (all walks and name assignments are deterministic).
+
+The module root is an input because a file load's entry key in `SerializedEntry` and `SerializedSources` moves with it, and so does every key a chain of relative imports resolves from it. The entry keys by its path relative to the root. An imported source keys by the text that imports it: a relative path (`./deep/d`, `../common/c`) resolved against its importer's key, so it moves with that key, and a module-style path (`common/c`) resolved against the root, which does not move. A `LoadString` source, which has no root, keys by its base name in NFC. The root is the one the caller supplied, the directory of the nearest ancestor holding a `yammm.mod` marker, the synthetic root under `WithSyntheticRoot`, or the entry file's own directory — so committing a marker above a schema changes those keys for an otherwise unchanged generation. A generator that passes the root explicitly sees no change. Across versions, changes to the output classify as:
+
+#### Breaking (major post-1.0; pre-1.0 minor under the standard subtractive rules)
+
+- Renaming or removing the package clause or any emitted exported identifier derived from an unchanged schema, such as struct names, field names, named DataType/enum types and their value constants, `EDGE_` struct names, `Graph` fields, or the `SerializedSources` / `SerializedEntry` / `SchemaHash` declarations.
+- Changing the type-mapping table (e.g. `Integer` → anything other than `int64`), the pointer-optionality rules, the json-tag shape, or the flat `_target_` fields of `EDGE_` structs.
+- Changing the `SerializedSources` / `SerializedEntry` re-load semantics (the documented recipe: `LoadSourcesWithEntry` under `WithSyntheticRoot`) or the meaning of `SchemaHash` (`schema.StructuralHash`).
+
+#### Additive / behavioral (minor or patch, release-noted)
+
+- New emitted declarations, whatever their reason. A new declaration reserves its name, so one that a schema entity already holds moves that entity's identifier, and the Breaking tier's first bullet governs that move.
+- Identifier derivation for new inputs — existing identifiers for existing inputs must not change, so an addition to the default initialisms set, which renames identifiers that hold the word, is Breaking.
+- Byte-level changes that rename no identifier and change no semantics (comment text inside the generated file, formatting). Consumers that byte-pin via drift gates will see these and regenerate; the release notes must call them out.
+
+#### Explicitly uncommitted
+
+- Doc-comment prose inside generated files.
+- Declaration order beyond "deterministic for a given yammm version".
+
+The golden corpus under `adapter/gogen/testdata/` is this contract's executable form: a golden may change only in a release whose notes account for the change under the tiers above.
+
+### Emitted-Markdown surface (`adapter/markdown`)
+
+For an unchanged schema, unchanged `Marshal` options and an unchanged yammm version, the emitted document is byte-identical. No path, module root or source identity reaches the document. Three inputs of the build reach it besides the schema and the options: the Unicode tables of the Go release that builds the generator decide how a character a later Unicode version added is escaped and slugged, and the goldmark and `golang.org/x/net/html` releases the build selects — `go.mod` names each minimum, and a consumer's module graph can select later ones — read doc comments and headings for anchors and for the blocks a doc comment leaves open. Across versions, changes to the output classify as:
+
+#### Breaking (major post-1.0; pre-1.0 minor under the standard subtractive rules)
+
+- Changing the text of a heading an unchanged schema produces, or the anchor that heading takes: the title, a schema heading, the fixed section headings, and a type's display name (its bare name, the entry schema's `alias.Name` tag, or `Name (schema)`). A link into the document targets an anchor, so an anchor that moves breaks the link.
+- Removing a section, a table or a table column an unchanged schema produces, or changing a table's columns or their order.
+- Changing the rule a Type or Definition cell renders a constraint by: the constraint's DSL form, byte for byte.
+
+#### Additive / behavioral (minor or patch, release-noted)
+
+- New sections, rows, bullets or diagram elements for a schema feature the document did not render before, and new options whose default leaves the output unchanged.
+- Corrections: a byte change that makes the document state the schema as written where it stated something else — an escape added so text renders literally, a reference resolved to the type it names — and that moves no heading's text or anchor. A correction that moves one is Breaking under the first rule above. Consumers that byte-pin will see these and regenerate; the release notes must call them out.
+- Byte-level changes that move no heading, anchor, column or cell rule (layout inside the diagram, whitespace between blocks). Release-noted on the same terms.
+
+#### Explicitly uncommitted
+
+- Doc-comment text, which the document carries as Markdown the author wrote. A link, heading or table inside it is the author's, and a heading inside it takes an anchor as any heading does.
+- The sentences the generator writes (badge wording, the Mermaid renderer-floor sentence).
+- Mermaid class ids, and the order of the diagram's lines beyond "deterministic for a given yammm version".
+
+The golden corpus under `adapter/markdown/testdata/` is this contract's executable form: a golden may change only in a release whose notes account for the change under the tiers above.
+
+### Post-1.0 policy (future)
+
+After the `v1.0.0` release, yammm commits to the stricter semver contract that consumers expect from a stable library:
+
+#### Major releases (`vN.X.Y → vN+1.0.0`)
+
+- Removes an exported symbol.
+- Changes an exported symbol's signature (parameter types, return types, method set).
+- Tightens an exported contract in any way that changes observable behavior (errors become silent, nil returns become non-nil, success paths change their side-effect shape).
+- Bumps the `.ys` wire format version.
+- Introduces a new required field, new required option, or any other change that forces consumers to update call sites.
+
+#### Minor releases (`vN.X.Y → vN.X+1.0`)
+
+- New exported symbols (types, functions, methods, constants, variables).
+- New options that default to pre-existing behavior when omitted.
+- New wire-format fields with `omitempty` semantics that do not trigger silent data loss on older readers.
+- Documentation, test, and internal-refactor improvements that preserve the public API surface.
+
+#### Patch releases follow pre-1.0 patch-release rules verbatim

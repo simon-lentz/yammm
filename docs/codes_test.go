@@ -27,23 +27,6 @@ func TestModuleCitesRegisteredCodes(t *testing.T) {
 			// Trigger queries are what a user might type, not claims about yammm.
 			"claude-plugin/skills/*/evals/*.md",
 		},
-		// The change record names the codes releases removed or renamed. Every
-		// other name it cites, in its policy sections and in Unreleased among
-		// them, must be registered.
-		Removed: map[string][]string{
-			"docs/VERSIONING.md": {
-				"E_INVALID_RELATION",
-				"E_LIMIT_REACHED",
-				"E_MISSING_PRIMARY_KEY",
-				"E_MISSING_TYPE_TAG",
-				"E_RELATION_NORMALIZATION_COLLISION",
-				"E_SCHEMA_TYPE_NOT_FOUND",
-				"E_SNAPSHOT_PATH_FALLBACK",
-				"E_SNAPSHOT_TYPEID_MISMATCH",
-				"E_TYPE_COLLISION",
-				"E_UNKNOWN_BUILTIN",
-			},
-		},
 		// NewCode's example registers a code, so it names one diag does not hold.
 		Placeholders: []string{"E_MY_ERROR"},
 	})
@@ -60,5 +43,5 @@ func TestModuleCitesRegisteredCodes(t *testing.T) {
 
 const (
 	commentCitationFloor  = 655
-	markdownCitationFloor = 925
+	markdownCitationFloor = 520
 )

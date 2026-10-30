@@ -236,9 +236,6 @@ func TestParse_ARefusedSettingIsReportedBeforeAnyRead(t *testing.T) {
 	st, _ := s.Type("Entity")
 	id := location.MustNewSourceID("test://data/settings.csv")
 
-	// Every documented text is pinned whole: docs/VERSIONING.md quotes the
-	// delimiter's, and the type-column text lives in one literal now that the
-	// sentinel that carried it is gone.
 	for _, c := range []struct {
 		name    string
 		opt     Option

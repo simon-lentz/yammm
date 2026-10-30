@@ -423,7 +423,7 @@ Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemN
 
 - **[Go Reference](https://pkg.go.dev/github.com/simon-lentz/yammm)**: API documentation on pkg.go.dev
 - **[Language Specification](docs/SPEC.md)**: DSL reference — grammar, types, expressions, constraints, and diagnostic codes
-- **[Library API Reference](docs/API.md)**: Go library reference — loading, validation, graph construction, adapters, and formatting
+- **[Library API Reference](docs/API.md)**: Go library reference and versioning policy
 
 ## License
 

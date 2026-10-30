@@ -21,8 +21,9 @@ type updateConfig struct {
 }
 
 // WithUpdateCreatedAt overrides the created_at header field in the
-// resulting document. If not provided, the existing created_at (if any)
-// is preserved byte-for-byte from the input header.
+// resulting document, and a zero time overrides nothing. If not provided, the existing created_at (if any)
+// is kept, byte for byte when it is RFC 3339, except that the fallback path of
+// [UpdateMetadataOrReMarshal] drops, with a Warning, a value it cannot parse.
 func WithUpdateCreatedAt(t time.Time) UpdateOption {
 	return func(c *updateConfig) {
 		c.createdAtSet = true

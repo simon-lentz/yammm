@@ -90,9 +90,7 @@ func BenchmarkTokenStreamSynthetic(b *testing.B) {
 	}
 }
 
-// BenchmarkLexOnlyCorpus is BenchmarkLexOnlySynthetic over the tracked
-// corpus, so the corpus figure in docs/VERSIONING.md is derivable the same
-// way the synthetic one is: the removed work is exactly this benchmark.
+// BenchmarkLexOnlyCorpus is BenchmarkLexOnlySynthetic over the tracked corpus.
 func BenchmarkLexOnlyCorpus(b *testing.B) {
 	corpus := benchCorpus(b)
 	b.ReportAllocs()

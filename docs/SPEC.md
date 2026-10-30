@@ -1834,7 +1834,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_SNAPSHOT_IO` — a directory- or file-level I/O failure during `ScanDir` / `ScanDirSlice`, or a failing reader under `HeaderOnlyRead`
 - `E_UPDATE_METADATA_BODY_OFFSET` — `UpdateMetadata` could not resolve the byte range of the body it reuses
 - `W_UPDATE_METADATA_FALLBACK` (Warning) — `UpdateMetadataOrReMarshal` fell back from the fast path to `Load` + `Marshal`
-- `W_SNAPSHOT_VALUE_NONCONFORMING` (Warning) — under `WithValueConformance`, a stored `Timestamp`, `Date` or `UUID` does not conform to its declared constraint
+- `W_SNAPSHOT_VALUE_NONCONFORMING` (Warning) — under `WithValueConformance`, a root's or a composed child's stored `Timestamp`, `Date` or `UUID` does not conform to its declared constraint
 - `W_SNAPSHOT_VALUE_DROPPED` (Warning) — a write path held a value it could not write at that position and left it out. The document is well-formed; the warning names what is missing from it
 - `W_SNAPSHOT_UNRESOLVED_REQUIRED` — under `WithRevalidation`, a loaded document carries an unresolved record, one no structural check refused, for a required association
 - `W_SNAPSHOT_PATH_EXTENSION` (Warning) — a snapshot was written to a path that does not end in `.ys`. The write succeeded; a reader that discovers snapshots by extension will not find it

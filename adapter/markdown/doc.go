@@ -2,9 +2,9 @@
 // Mermaid class diagram, from a yammm schema. Call [Marshal] with a loaded,
 // resolved schema; it returns one deterministic, self-contained document
 // covering the schema and its whole import closure — a canonical,
-// regenerable documentation artifact that renders anywhere GitHub-flavored
-// Markdown does (GitHub file views and READMEs, editor previews, static
-// site generators).
+// regenerable documentation artifact in GitHub-flavored Markdown. Its internal
+// links follow GitHub's anchors, and its diagram is a Mermaid fence, which a
+// renderer without Mermaid shows as code.
 //
 // # Schema-In, Bytes-Out
 //
@@ -12,8 +12,8 @@
 // markdown has no instance-data path: it never parses, validates, or
 // serializes instances, and it imports neither instance nor graph. It maps
 // a completed schema to one Markdown document, nothing more, and returns a
-// plain error rather than the [github.com/simon-lentz/yammm/diag.Result]
-// the rest of the library threads through, because its only failures are
+// plain error rather than a [github.com/simon-lentz/yammm/diag.Result],
+// because its only failures are
 // generator-internal (see Error Conditions), not data diagnostics with
 // source locations.
 //
@@ -79,8 +79,9 @@
 // every class, stereotype and edge.
 //
 // The diagram draws each type's OWN members and relation edges only;
-// inheritance edges (Parent <|-- Child) convey the rest. Abstract and part
-// types carry <<Abstract>> / <<Part>> stereotype annotations. Edge labels
+// inheritance edges (Parent <|-- Child) convey the rest. An abstract type
+// carries an <<Abstract>> stereotype annotation, and a part type that is not
+// abstract a <<Part>> one. Edge labels
 // reuse the DSL vocabulary — NAME plus parenthesized multiplicity (one,
 // many, one:many, _) — rather than Mermaid cardinality notation, so the
 // whole document speaks one vocabulary. Mermaid namespaces are deliberately
@@ -92,8 +93,8 @@
 // one id stay two classes: the later takes the id suffixed _2, _3, and so on.
 // A class whose id differs from its display takes the display as its label.
 // That labelled form needs Mermaid 10.1.0 or later. An imported type always
-// takes it, and an entry type only when its name holds "direction", so an
-// import-free schema without such a name renders on Mermaid 9. When the
+// takes it, and an entry type only when its id differs from its name, so an
+// import-free schema in which no id differs renders on Mermaid 9. When the
 // diagram holds a labelled class the document says so in one sentence under
 // the "## Class Diagram" heading, before the fence.
 //
@@ -124,17 +125,18 @@
 // a lone CR is a line end, and the comments the span starts with, the doc
 // comment first, are stripped whatever they hold, since the doc renders apart. When no
 // source text is available — a Builder-built schema, or a span without
-// byte offsets — the fence is omitted and the message stands alone:
+// byte offsets — the fence is omitted and the message stands with its doc
+// comment, if it has one:
 // degrading one fence beats rejecting the schema, so [Marshal] does NOT
 // require a source-backed schema.
 //
 // # Output Guarantees
 //
-// Output is deterministic — byte-identical across runs, machines, and
-// checkouts (no absolute paths, all walks ordered) — so generated
+// Output is deterministic — byte-identical across runs and checkouts for one
+// build of the generator (no absolute paths, all walks ordered) — so generated
 // documents can be committed and drift-checked in CI by regenerating and
-// diffing. The document is a versioned surface; docs/VERSIONING.md states
-// its tiers.
+// diffing. The document is a versioned surface; docs/API.md's Versioning
+// Policy states its tiers.
 //
 // Before returning, [Marshal] reads the document with a CommonMark parser, with
 // GitHub's extensions, and verifies the structure it wrote. No block is left
@@ -172,7 +174,7 @@
 // takes its closer on the cell's line, after a space. A Markdown heading
 // inside the comment that its own open HTML takes is no heading, as on GitHub.
 // An element the comment leaves open, such as a <div>, is the author's, and
-// the generator's text after it sits inside it.
+// an HTML parser can place the generator's text after it inside it.
 //
 // Every other text the schema supplies renders literally under GitHub-flavored
 // Markdown. GitHub's emoji filter runs after it, and outside code it can still
@@ -189,12 +191,13 @@
 // Any other folds to <br> in place of the backslash that makes it a hard
 // break. A pipe after an even run of backslashes gains one, so the row keeps
 // its cells and the pipe renders as the doc comment's does. A
-// schema name and an invariant message are escaped for Markdown, and a control
+// schema name, an invariant message, a type's import tag and a type reference
+// are escaped for Markdown, and a control
 // character in a schema name is written as its Go escape (\n). GitHub reads a
 // www host, a URL and an email address as a link even through an escape, so an
 // empty HTML comment, which a browser does not show, splits each colon, each
-// at sign and each dot after "www" in a schema name, an invariant message and
-// a <code> cell.
+// at sign and each dot after "www" in text escaped this way and in a <code>
+// cell.
 //
 // A Mermaid class label writes every character but an ASCII letter or digit,
 // a dot, and an underscore between two ASCII letters or digits as an entity

@@ -130,7 +130,7 @@ type compNode struct {
 }
 
 // reverseNode recognizes the reverse clause the language removed in
-// v0.15.0, so the parser reports the removal at the clause's own span
+// v0.15.0, so the parser reports the removal at the clause's name
 // instead of a bare syntax error.
 type reverseNode struct {
 	Pos    lexer.Position

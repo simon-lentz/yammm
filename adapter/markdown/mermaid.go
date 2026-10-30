@@ -12,8 +12,9 @@ import (
 // emitClassDiagram writes the "## Class Diagram" section: one Mermaid
 // classDiagram fence covering the entire import closure. The diagram keeps
 // constraint detail out — class members carry only the property name and
-// its kind label; the per-type tables own the detail. Abstract and part
-// types carry the <<Abstract>> / <<Part>> stereotype annotations. Edge
+// its kind label; the per-type tables own the detail. An abstract type
+// carries the <<Abstract>> stereotype annotation, and a part type that is not
+// abstract the <<Part>> one. Edge
 // labels reuse the DSL relation vocabulary (NAME plus parenthesized
 // multiplicity) rather than Mermaid cardinality notation, so the whole
 // document speaks one vocabulary. Qualified display names are invalid as
@@ -46,8 +47,8 @@ func (g *generator) emitClassDiagram(h outlineEntry) {
 // mermaidFloorSentence states the renderer floor the labelled class form
 // needs. The emitter is the only party that knows it wrote one, so the
 // emitter says so, in the document, before the fence. Mermaid 10.1.0 is the
-// first release whose class-diagram grammar carries the classLabel
-// production; 9.x fails the form with a lexical error.
+// oldest release the mermaid build tag's test runs; 9.x fails the form with a
+// lexical error.
 const mermaidFloorSentence = "This diagram uses Mermaid's labelled class form and needs Mermaid 10.1.0 or later."
 
 // writeClass writes one class declaration. Members are the type's own

@@ -3578,7 +3578,8 @@ const publishWorkflow = "./.github/workflows/publish_vscode.yml"
 // ship without the test workflow: no job calls it, the publish workflow is not
 // called, a job that is conditional or needs no job that calls it, a job that
 // calls another workflow among them, and a publish workflow that runs on any
-// event but a call, or cannot be called.
+// event but a call, or cannot be called. It also reports each way a tag
+// package.json does not carry can ship, by [versionFindings].
 func releaseFindings(release, publish workflow) []string {
 	var findings []string
 	var callers []string
@@ -3618,6 +3619,7 @@ func releaseFindings(release, publish workflow) []string {
 			findings = append(findings, fmt.Sprintf("job %s passes the publish workflow no VSCE_PAT, so it cannot publish", name))
 		}
 	}
+	findings = append(findings, versionFindings(release, callers)...)
 	findings = append(findings, publishFindings(publish)...)
 	for _, event := range slices.Sorted(maps.Keys(publish.On)) {
 		if event != "workflow_call" {
@@ -3630,29 +3632,120 @@ func releaseFindings(release, publish workflow) []string {
 	return findings
 }
 
-// publishFindings reports a publish workflow that can publish a package whose
-// version is not the tag's: no build step refuses a run that is not a tag
-// equal to "v" plus package.json's version, or the bundled server is stamped
-// with something other than the tag's name. It reads the steps' text.
-func publishFindings(publish workflow) []string {
-	var checked, stamped bool
-	for _, s := range publish.Jobs["build"].Steps {
-		if strings.Contains(s.Run, `"${GITHUB_REF_TYPE}" != tag`) && strings.Contains(s.Run, `"${GITHUB_REF_NAME}" != "${VERSION}"`) &&
-			strings.Contains(s.Run, "jq -r .version lsp/editors/vscode/package.json") && strings.Contains(s.Run, "exit 1") {
-			checked = true
-		}
-		if strings.Contains(s.Run, "-X main.version=${GITHUB_REF_NAME}") {
-			stamped = true
-		}
-	}
+// versionJob is the release's job that refuses a tag package.json does not carry.
+const versionJob = "version"
+
+// versionCheckRun is the whole text of versionJob's check. A part of it proves
+// nothing: exit 0 in place of exit 1, or && in place of ||, leaves every other
+// word in place and refuses no tag.
+const versionCheckRun = `VERSION="v$(jq -r .version lsp/editors/vscode/package.json)"
+if [ "${GITHUB_REF_TYPE}" != tag ] || [ "${GITHUB_REF_NAME}" != "${VERSION}" ]; then
+  echo "::error::package.json's version is ${VERSION}, and this run is ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}: a release ships only from the tag package.json carries"
+  exit 1
+fi`
+
+// versionFindings reports a release that can ship at a tag package.json does
+// not carry. It holds [versionJob] to one form, a checkout and then
+// [versionCheckRun], on one Linux runner with nothing that changes the shell,
+// the directory or the outcome, and it reports a job other than the test
+// callers that does not need the check.
+func versionFindings(release workflow, callers []string) []string {
 	var findings []string
-	if !checked {
-		findings = append(findings, publishWorkflow+"'s build job has no step that refuses a run whose tag is not package.json's version")
+	if len(release.Env) > 0 {
+		findings = append(findings, "the release workflow sets env, which reaches "+versionJob+"'s check")
 	}
-	if !stamped {
-		findings = append(findings, publishWorkflow+"'s build job does not stamp the server with the tag's name")
+	if release.Defaults != (runDefaults{}) {
+		findings = append(findings, "the release workflow sets defaults, which reach "+versionJob+"'s check")
+	}
+	check := release.Jobs[versionJob]
+	for _, k := range jobKeys(check) {
+		// releaseFindings reports a condition on any job.
+		if !slices.Contains([]string{"needs", "runs-on", "timeout-minutes", "steps", "if"}, k) {
+			findings = append(findings, fmt.Sprintf("job %s sets %s, which can let a run past its check", versionJob, k))
+		}
+	}
+	if !slices.Equal(check.RunsOn, []string{"ubuntu-24.04"}) {
+		findings = append(findings, fmt.Sprintf("job %s runs on %q, want ubuntu-24.04", versionJob, []string(check.RunsOn)))
+	}
+	if !isVersionCheck(check.Steps) {
+		findings = append(findings, fmt.Sprintf("job %s is not a checkout and the step that refuses a run whose tag is not package.json's version", versionJob))
+	}
+	for _, name := range slices.Sorted(maps.Keys(release.Jobs)) {
+		if name != versionJob && !slices.Contains(callers, name) && !slices.Contains(release.Jobs[name].Needs, versionJob) {
+			findings = append(findings, fmt.Sprintf("job %s does not need %s, so it can ship at a tag package.json does not carry", name, versionJob))
+		}
 	}
 	return findings
+}
+
+// isVersionCheck reports whether steps are a bare checkout and then a step that
+// sets nothing but its name and [versionCheckRun].
+func isVersionCheck(steps []step) bool {
+	return len(steps) == 2 &&
+		strings.HasPrefix(steps[0].Uses, "actions/checkout@") && len(stepKeyFindings("", steps[0], "uses")) == 0 &&
+		strings.TrimSpace(steps[1].Run) == versionCheckRun && len(stepKeyFindings("", steps[1], "name", "run")) == 0
+}
+
+// publishFindings reports a publish workflow whose bundled server is stamped
+// with something other than the tag's name, or stamped only conditionally. It
+// reads the steps' text.
+func publishFindings(publish workflow) []string {
+	for _, s := range publish.Jobs["build"].Steps {
+		if s.If == "" && strings.Contains(s.Run, "-X main.version=${GITHUB_REF_NAME}") {
+			return nil
+		}
+	}
+	return []string{publishWorkflow + "'s build job does not stamp the server with the tag's name"}
+}
+
+// publishCallers reports each job outside the release workflow that calls the
+// publish workflow. The publish workflow holds no check of its own: the release
+// workflow's version job is what keeps a branch from publishing.
+func publishCallers(workflows map[string]workflow) []string {
+	var findings []string
+	for _, file := range slices.Sorted(maps.Keys(workflows)) {
+		for _, name := range slices.Sorted(maps.Keys(workflows[file].Jobs)) {
+			if file != "release.yml" && strings.Contains(workflows[file].Jobs[name].Uses, path.Base(publishWorkflow)) {
+				findings = append(findings, fmt.Sprintf("%s: job %s calls %s, which only the release workflow may call", file, name, publishWorkflow))
+			}
+		}
+	}
+	return findings
+}
+
+// Nothing but the release workflow, and its version job, reaches a publish.
+func TestWorkflows_OnlyTheReleaseCallsThePublish(t *testing.T) {
+	t.Parallel()
+	for _, f := range publishCallers(trackedWorkflows(t, repoRoot)) {
+		t.Error(f)
+	}
+}
+
+func TestPublishCallers_RefusesEveryOtherCaller(t *testing.T) {
+	t.Parallel()
+	calling := workflow{Jobs: map[string]job{"rogue": {Uses: publishWorkflow}}}
+	for _, tt := range []struct {
+		name      string
+		workflows map[string]workflow
+		want      []string
+	}{
+		{"the release", map[string]workflow{"release.yml": calling}, nil},
+		{"no caller", map[string]workflow{"ci.yaml": {Jobs: map[string]job{"check": {Uses: testWorkflow}}}}, nil},
+		{"another workflow", map[string]workflow{"ci.yaml": calling}, []string{"ci.yaml: job rogue calls " + publishWorkflow + ", which only the release workflow may call"}},
+		{"a pinned spelling", map[string]workflow{"hotfix.yml": {Jobs: map[string]job{"rogue": {Uses: "simon-lentz/yammm/.github/workflows/publish_vscode.yml@main"}}}}, []string{"hotfix.yml: job rogue calls " + publishWorkflow + ", which only the release workflow may call"}},
+		{"in file then job order", map[string]workflow{"b.yml": calling, "a.yml": {Jobs: map[string]job{"y": {Uses: publishWorkflow}, "x": {Uses: publishWorkflow}}}}, []string{
+			"a.yml: job x calls " + publishWorkflow + ", which only the release workflow may call",
+			"a.yml: job y calls " + publishWorkflow + ", which only the release workflow may call",
+			"b.yml: job rogue calls " + publishWorkflow + ", which only the release workflow may call",
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := publishCallers(tt.workflows); !slices.Equal(got, tt.want) {
+				t.Errorf("findings %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 // The release builds no asset and publishes no extension before every job of
@@ -3683,14 +3776,26 @@ func TestReleaseFindings_RefusesEachWayToShipBeforeTheTests(t *testing.T) {
 			release.Jobs[name] = j
 		}
 	}
+	editCheck := func(change func(s *step)) func(release, publish *workflow) {
+		return edit(versionJob, func(j *job) {
+			j.Steps = slices.Clone(j.Steps)
+			for i := range j.Steps {
+				if strings.Contains(j.Steps[i].Run, "GITHUB_REF_TYPE") {
+					change(&j.Steps[i])
+				}
+			}
+		})
+	}
 	for _, tt := range []struct {
 		name   string
 		change func(release, publish *workflow)
 		want   []string // a part of each finding, in order
 	}{
 		{"the repository's workflows", func(_, _ *workflow) {}, nil},
-		{"a publish that needs nothing", edit("publish", func(j *job) { j.Needs = nil }), []string{`job publish needs [], none of which calls the test workflow`}},
-		{"assets that need nothing", edit("release", func(j *job) { j.Needs = nil }), []string{`job release needs [], none of which calls the test workflow`}},
+		{"a publish that needs nothing", edit("publish", func(j *job) { j.Needs = nil }), []string{`job publish needs [], none of which calls the test workflow`, "job publish does not need version"}},
+		{"assets that need nothing", edit("release", func(j *job) { j.Needs = nil }), []string{`job release needs [], none of which calls the test workflow`, "job release does not need version"}},
+		{"a publish that needs only the tests", edit("publish", func(j *job) { j.Needs = stringList{"test"} }), []string{"job publish does not need version"}},
+		{"assets that need only the tests", edit("release", func(j *job) { j.Needs = stringList{"test"} }), []string{"job release does not need version"}},
 		{"a conditional publish", edit("publish", func(j *job) { j.If = "always()" }), []string{`job publish runs only if "always()"`}},
 		{"no publish", func(release, _ *workflow) { delete(release.Jobs, "publish") }, []string{"no job calls " + publishWorkflow}},
 		{"no test call", func(release, _ *workflow) { delete(release.Jobs, "test") }, []string{"no job calls " + testWorkflow}},
@@ -3698,11 +3803,42 @@ func TestReleaseFindings_RefusesEachWayToShipBeforeTheTests(t *testing.T) {
 		{"a publish at every tag push", func(_, publish *workflow) { publish.On["push"] = &trigger{} }, []string{publishWorkflow + " runs on push"}},
 		{"a publish with no secret", edit("publish", func(j *job) { j.Secrets = nil }), []string{"job publish passes the publish workflow no VSCE_PAT"}},
 		{"a publish that inherits the secrets", edit("publish", func(j *job) { j.Secrets = "inherit" }), nil},
-		{"no version check", func(_, publish *workflow) {
+		{"no version check", func(release, _ *workflow) { delete(release.Jobs, versionJob) }, []string{`job version runs on []`, "job version is not a checkout"}},
+		{"a version check of another tag", editCheck(func(s *step) { s.Run = strings.ReplaceAll(s.Run, "GITHUB_REF_NAME", "GITHUB_SHA") }), []string{"job version is not a checkout"}},
+		{"a version check that passes every tag", editCheck(func(s *step) { s.Run = strings.ReplaceAll(s.Run, "||", "&&") }), []string{"job version is not a checkout"}},
+		{"a version check that exits 0", editCheck(func(s *step) { s.Run = strings.ReplaceAll(s.Run, "exit 1", "exit 0") }), []string{"job version is not a checkout"}},
+		{"a version check after an exit", editCheck(func(s *step) { s.Run = "exit 0\n" + s.Run }), []string{"job version is not a checkout"}},
+		{"a conditional version check", editCheck(func(s *step) { s.If = "false" }), []string{"job version is not a checkout"}},
+		{"a version step that may fail", editCheck(func(s *step) { s.ContinueOnError = true }), []string{"job version is not a checkout"}},
+		{"a version step under another shell", editCheck(func(s *step) { s.Shell = "true {0}" }), []string{"job version is not a checkout"}},
+		{"a version step in another directory", editCheck(func(s *step) { s.WorkDir = "lsp/editors/vscode" }), []string{"job version is not a checkout"}},
+		{"a version step with its own env", editCheck(func(s *step) { s.Env = map[string]string{"VERSION": "v0"} }), []string{"job version is not a checkout"}},
+		{"a version job with no checkout", edit(versionJob, func(j *job) { j.Steps = slices.Clone(j.Steps)[1:] }), []string{"job version is not a checkout"}},
+		{"a version job that checks out nothing", edit(versionJob, func(j *job) {
+			j.Steps = slices.Clone(j.Steps)
+			j.Steps[0] = step{Uses: "actions/setup-go@v7"}
+		}), []string{"job version is not a checkout"}},
+		{"a version job that checks out another ref", edit(versionJob, func(j *job) {
+			j.Steps = slices.Clone(j.Steps)
+			j.Steps[0].With = map[string]any{"ref": "main"}
+		}), []string{"job version is not a checkout"}},
+		{"a version job with another step", edit(versionJob, func(j *job) { j.Steps = append(slices.Clone(j.Steps), step{Run: "exit 0"}) }), []string{"job version is not a checkout"}},
+		{"a version job that may fail", edit(versionJob, func(j *job) { j.ContinueOnError = true }), []string{"job version sets continue-on-error"}},
+		{"a version job in a container", edit(versionJob, func(j *job) { j.keys = append(slices.Clone(j.keys), "container") }), []string{"job version sets container"}},
+		{"a version job on another runner", edit(versionJob, func(j *job) { j.RunsOn = runnerLabels{"windows-2025"} }), []string{`job version runs on ["windows-2025"], want ubuntu-24.04`}},
+		{"a conditional version job", edit(versionJob, func(j *job) { j.If = "false" }), []string{`job version runs only if "false"`}},
+		{"a release that sets env", func(release, _ *workflow) { release.Env = map[string]string{"VERSION": "v0"} }, []string{"the release workflow sets env"}},
+		{"a release that sets defaults", func(release, _ *workflow) { release.Defaults.Run.Shell = "true {0}" }, []string{"the release workflow sets defaults"}},
+		{"a conditional stamp", func(_, publish *workflow) {
 			j := publish.Jobs["build"]
-			j.Steps = slices.DeleteFunc(slices.Clone(j.Steps), func(s step) bool { return strings.Contains(s.Run, "GITHUB_REF_TYPE") })
+			j.Steps = slices.Clone(j.Steps)
+			for i := range j.Steps {
+				if strings.Contains(j.Steps[i].Run, "main.version") {
+					j.Steps[i].If = "false"
+				}
+			}
 			publish.Jobs["build"] = j
-		}, []string{"has no step that refuses a run whose tag is not package.json's version"}},
+		}, []string{"does not stamp the server with the tag's name"}},
 		{"another stamp", func(_, publish *workflow) {
 			j := publish.Jobs["build"]
 			j.Steps = slices.Clone(j.Steps)

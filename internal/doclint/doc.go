@@ -74,10 +74,9 @@
 //
 // [AssertInvocationsExist] reads every invocation of a command-line program
 // written in a tracked Markdown file, testdata included, against the program's
-// commands and flags, which the caller passes as data. A file matching one of
-// the caller's exclusions is not read. Outside a git work tree the gate walks
-// the filesystem instead, skipping node_modules and dot-directories, and reads
-// every Markdown file it reaches that no exclusion matches. A table entry the
+// commands and flags, which the caller passes as data. Outside a git work tree
+// the gate walks the filesystem instead, skipping node_modules and
+// dot-directories, and reads every Markdown file it reaches. A table entry the
 // gate could never read back from an invocation, such as a flag name holding
 // "=" or a space, is refused before any file is read. A renamed flag or
 // command leaves its old spelling in every example that uses it, and a flag

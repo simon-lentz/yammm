@@ -8,8 +8,8 @@
 // duplicate's Diagnostic is not persisted.
 //
 // The format includes a schema structural hash for compatibility verification, an
-// integrity hash for corruption detection, and a features array for forward
-// compatibility.
+// integrity hash for corruption detection, and a features array, which this
+// version writes empty and refuses any entry of.
 //
 // # Validity Contract
 //
@@ -18,9 +18,8 @@
 // [github.com/simon-lentz/yammm/instance.ValidInstance.Validated] bit. The
 // exported bypass constructors assert a caller's claim and leave it false.
 //
-// The .ys header carries the writing library's attestation: whether every
-// root and composed child was validator-built, and whether every Required
-// association resolved. The integrity hash is an unkeyed SHA-256 of the
+// The .ys header carries the writing library's attestation of values and
+// associations, whose rules [graph.Attestation] states. The integrity hash is an unkeyed SHA-256 of the
 // document: it detects corruption and an edit nobody rehashed, and anyone can
 // recompute it, so it stops no deliberate one. [graph.RebuildSnapshot] is exported,
 // so any process can assemble and sign a document whose header claims what
@@ -65,13 +64,13 @@
 //	// Validate without loading
 //	result := snapshot.Verify(ctx, data, s)
 //
-//	// Read metadata only
+//	// Read summary metadata and statistics, without the schema
 //	info, result := snapshot.Info(ctx, data)
 //
-//	// Read header only (dispatch-style workloads)
+//	// Read the header and the types table (dispatch-style workloads)
 //	header, result := snapshot.HeaderOnly(ctx, data)
 //
-//	// Read header only from an io.Reader (no pre-materialized bytes)
+//	// Read the header and the types table from an io.Reader (no pre-materialized bytes)
 //	header, result := snapshot.HeaderOnlyRead(ctx, file)
 //
 //	// Compare the header's schema hash against a loaded schema
@@ -80,7 +79,7 @@
 //	// Write .ys bytes atomically to disk (tmp+fsync+rename)
 //	if err := snapshot.WriteFile(path, data); err != nil { /* ... */ }
 //
-//	// Iterate the .ys files of a directory that ScanDir admits (header-only, lazy)
+//	// Iterate the .ys files of a directory that ScanDir admits (header and types table, lazy)
 //	for entry, err := range snapshot.ScanDir(ctx, dir) {
 //	    if err != nil { /* dir-level or ctx-cancel failure */ }
 //	    if entry.Result.HasErrors() { /* per-file failure */ }
@@ -107,17 +106,18 @@
 // CI pipelines and pre-flight checks.
 //
 // [Info] reads summary metadata and statistics from a .ys file without loading
-// the schema or materializing instance objects. Returns a [SnapshotInfo] with
-// schema name, hash, instance counts per type, totals, and integrity status.
+// the schema or materializing instance objects. Returns a [SnapshotInfo], which
+// holds the schema name, hash, instance counts per type, totals, and integrity
+// status among its fields.
 // Cost scales with file size (the instance body is scanned to populate counts).
 //
 // [HeaderOnly] reads header metadata from a .ys file without decoding the
 // instance body or verifying the integrity hash. Returns a [HeaderInfo] with
-// the header fields plus the types array. It decodes the header and the types
+// the header fields, the types array and the file size. It decodes the header and the types
 // table alone, and still scans the whole document to check its top-level
 // shape and the member names of every object;
-// [HeaderOnlyRead] reads the members up to the types table and that table,
-// and no further. Either suits dispatch-style
+// [HeaderOnlyRead] decodes the members up to the types table and that table,
+// and no further, though its decoder's buffer can read past them. Either suits dispatch-style
 // workloads that scan many .ys files to classify state or compare schema
 // hashes. When counts, diagnostics, or verified integrity are required, use
 // [Info] instead.
@@ -200,8 +200,8 @@
 //
 // [WithUpdateCreatedAt] overrides the created_at header field on
 // [UpdateMetadata] and [UpdateMetadataOrReMarshal]; by default each keeps the
-// existing value byte-for-byte, except that the fallback path drops, with a
-// Warning, a value it cannot parse.
+// existing value, byte for byte when it is RFC 3339, except that the fallback
+// path drops, with a Warning, a value it cannot parse.
 //
 // # Marshal Options
 //
@@ -225,7 +225,7 @@
 //
 //   - [WithIssueLimit]: maximum issues stored (default 100; 0 for unlimited); the walk completes unless the context is cancelled
 //   - [WithIntegrityCheck]: with false, skip SHA-256 integrity verification (useful for debugging)
-//   - [WithValueConformance]: report stored Timestamp/Date/UUID values that do not conform to their constraints (Warning)
+//   - [WithValueConformance]: report a root's or a composed child's stored Timestamp/Date/UUID values that do not conform to their constraints (Warning)
 //   - [WithRevalidation]: run each root the structural checks left whole, with its composed children, edges and target_missing records, back through the real validator, reported at the given severity
 //
 // # Scan Options
@@ -287,12 +287,13 @@
 // the supported range named in the message. A v3 document is refused,
 // not migrated; an older reader rejects a v4 document the same way, so
 // an operator running an older binary sees a structured diagnostic
-// rather than a misread types section. See docs/VERSIONING.md for the
-// full pre-1.0 / post-1.0 wire-format policy.
+// rather than a misread types section. See docs/API.md's Versioning Policy
+// for the full pre-1.0 / post-1.0 wire-format policy.
 //
 // # Thread Safety
 //
-// All functions are stateless and safe for concurrent use.
+// All package functions are stateless and safe for concurrent use. A
+// [ScanCandidate] belongs to the filter call it is passed to.
 //
 // # Dependencies
 //

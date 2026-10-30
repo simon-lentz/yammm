@@ -48,15 +48,6 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      # The VSIX publishes at package.json's version, which must be the tag's,
-      # as the release assets are stamped with the tag.
-      - name: Check the version is the tag's
-        run: |
-          VERSION="v$(jq -r .version lsp/editors/vscode/package.json)"
-          if [ "${GITHUB_REF_TYPE}" != tag ] || [ "${GITHUB_REF_NAME}" != "${VERSION}" ]; then
-            echo "::error::package.json's version is ${VERSION}, and this run is ${GITHUB_REF_TYPE} ${GITHUB_REF_NAME}: the extension is published from its release tag alone"
-            exit 1
-          fi
       - name: Build LSP binary
         env:
           GOOS: ${{ matrix.goos }}

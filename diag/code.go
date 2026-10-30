@@ -186,7 +186,8 @@ var (
 	E_INVARIANT_CONFLICT = NewCode("E_INVARIANT_CONFLICT", CategorySchema)
 
 	// E_REVERSE_CLAUSE_REMOVED indicates a schema still carries the
-	// reverse clause ("/ name (mult)") the language removed in v0.15.0.
+	// reverse clause ("/ name", with an optional multiplicity) the language
+	// removed in v0.15.0.
 	E_REVERSE_CLAUSE_REMOVED = NewCode("E_REVERSE_CLAUSE_REMOVED", CategorySchema)
 
 	// E_INVALID_NAME indicates a name the schema refuses: its format, a
@@ -632,8 +633,9 @@ var (
 	// snapshot.WithRevalidation was given.
 	W_UPDATE_METADATA_FALLBACK = NewCode("W_UPDATE_METADATA_FALLBACK", CategorySnapshot)
 
-	// W_SNAPSHOT_VALUE_NONCONFORMING indicates that a stored property value
-	// does not conform to the schema constraint its property declares.
+	// W_SNAPSHOT_VALUE_NONCONFORMING indicates that a root's or a composed
+	// child's stored property value does not conform to the schema constraint
+	// its property declares.
 	// Reported only when the caller passes snapshot.WithValueConformance, and
 	// only for the kinds that have a canonical stored form — Timestamp, Date
 	// and UUID. It is not re-validation: bounds, enums, patterns and

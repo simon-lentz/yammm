@@ -337,6 +337,10 @@ func TestRelation_ReverseClauseIsRejected(t *testing.T) {
 					if got := src[iss.Span().Start.Byte:iss.Span().End.Byte]; got != "back" {
 						t.Errorf("diagnostic span covers %q, want the backref name", got)
 					}
+					const wantMessage = `the reverse clause was removed in v0.15.0; delete the "/", the name "back" and any multiplicity after it`
+					if got := iss.Message(); got != wantMessage {
+						t.Errorf("message = %q, want %q", got, wantMessage)
+					}
 				}
 			}
 			if removed != tc.wantRemoved {

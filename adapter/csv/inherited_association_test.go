@@ -85,9 +85,8 @@ func TestInheritedAssociation_IsParsed(t *testing.T) {
 	}
 }
 
-// The identity claim docs/VERSIONING.md makes for v0.15.0 — "a CSV round trip
-// through the validator is now the identity for association-bearing types" —
-// was false for a subtype until this fix. It holds now.
+// A CSV round trip through the validator is the identity for
+// association-bearing types, a subtype included.
 func TestInheritedAssociation_RoundTripIsTheIdentity(t *testing.T) {
 	snap, a := inheritedSnapshot(t)
 	ctx := context.Background()

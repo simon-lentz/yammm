@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"testing"
 )
 
@@ -34,7 +33,9 @@ var versionSites = []struct {
 // Every in-tree version site agrees. The lockstep policy requires one version
 // across the tag, both binaries, the Claude plugin and the VS Code extension,
 // and until this test nothing enforced any of it — package-lock.json sat at
-// 0.10.0 through two releases because no gate compared it to anything.
+// 0.10.0 through two releases because no gate compared it to anything. The
+// release workflow's version job holds package.json to the tag, so a tag that
+// bumped none of them ships nothing.
 func TestVersionLockstep_EveryInTreeSiteAgrees(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
@@ -65,35 +66,7 @@ func TestVersionLockstep_EveryInTreeSiteAgrees(t *testing.T) {
 
 	if len(seen) != 1 {
 		t.Errorf("version sites disagree: %v", seen)
-		return
 	}
-
-	// Agreement alone holds for a release that bumped none of them, so the
-	// versioning record's newest section is what they must actually carry.
-	want := newestDocumentedVersion(t, root)
-	for got := range seen {
-		if got != want {
-			t.Errorf("version sites all carry %q, but docs/VERSIONING.md's newest section is %q", got, want)
-		}
-	}
-}
-
-var versionHeading = regexp.MustCompile(`(?m)^## v(\d+\.\d+\.\d+) under this policy`)
-
-// newestDocumentedVersion reads the last version heading in the versioning
-// record — the sections are appended in release order — which is the release
-// this tree is preparing or has just shipped.
-func newestDocumentedVersion(t *testing.T, root string) string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(root, "docs", "VERSIONING.md"))
-	if err != nil {
-		t.Fatalf("read docs/VERSIONING.md: %v", err)
-	}
-	all := versionHeading.FindAllSubmatch(raw, -1)
-	if len(all) == 0 {
-		t.Fatal("docs/VERSIONING.md carries no version heading; the lockstep guard has nothing to compare against")
-	}
-	return string(all[len(all)-1][1])
 }
 
 func lookupString(doc map[string]any, key []string) (string, error) {

@@ -159,8 +159,8 @@ func WithIssueLimit(limit int) LoadOption {
 	}
 }
 
-// WithValueConformance selects whether [Load] and [Verify] report a stored
-// value that does not conform to its schema constraint, as a Warning carrying
+// WithValueConformance selects whether [Load] and [Verify] report a root's or a
+// composed child's stored value that does not conform to its schema constraint, as a Warning carrying
 // [github.com/simon-lentz/yammm/diag.W_SNAPSHOT_VALUE_NONCONFORMING]. Off by
 // default, so nothing changes and the walk costs nothing when nobody asks.
 //

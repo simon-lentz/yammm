@@ -21,11 +21,9 @@ func detailValue(iss diag.Issue, key string) (string, bool) {
 	return "", false
 }
 
-// TestVersionConstants_Pinned catches any future accidental bump of
-// currentVersion or MinReadableVersion that is not paired with a
-// corresponding enumeration in docs/VERSIONING.md. The documented values at
-// v0.12.0 are currentVersion == 3 (the types-table bump) and
-// MinReadableVersion == 3 (v3 is the only readable version).
+// TestVersionConstants_Pinned catches any accidental bump of currentVersion or
+// MinReadableVersion. docs/API.md's Wire Format Versions section states the
+// documented values.
 func TestVersionConstants_Pinned(t *testing.T) {
 	require.Equal(t, 4, currentVersion, "currentVersion is 4 since the types table was keyed by schema name")
 	require.Equal(t, currentVersion, MinReadableVersion,

@@ -184,8 +184,7 @@ func TestDanglingQualifiedReference_NeverEntersTheRegistry(t *testing.T) {
 func assertRejected(t *testing.T, s *schema.Schema, result diag.Result) {
 	t.Helper()
 	if s != nil {
-		t.Error("a dangling qualified reference sealed into a schema — the " +
-			"defense-in-depth claim in docs/VERSIONING.md is false")
+		t.Error("a dangling qualified reference sealed into a schema")
 	}
 	if !result.HasErrors() {
 		t.Fatal("no diagnostic reported")

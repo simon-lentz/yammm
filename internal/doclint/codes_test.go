@@ -147,84 +147,6 @@ func TestAssertCitedCodesExist_ReadsShellComments(t *testing.T) {
 	}
 }
 
-// A removed name is allowed in the file that records it and nowhere else, and
-// one the file stops citing, or a code that is registered, is reported.
-func TestAssertCitedCodesExist_AllowsARemovedNameInItsFileOnly(t *testing.T) {
-	t.Parallel()
-	rules := codeRules()
-	rules.Removed = map[string][]string{
-		"README.md": {"E_DOC_GONE", "E_VANISHED", "E_UNCITED_GONE", "E_KNOWN"},
-	}
-	r, _ := runCodeGate(t, rules)
-	for _, silent := range []string{"README.md:3: cites the diagnostic code E_DOC_GONE", "removed name E_DOC_GONE is not cited"} {
-		if r.reports(silent) {
-			t.Errorf("reported %q for a removed name its file cites: %v", silent, r.msgs)
-		}
-	}
-	for _, want := range []string{
-		"cited/cited.go:4: cites the diagnostic code E_VANISHED,",
-		"removed name E_VANISHED is not cited in README.md",
-		"removed name E_UNCITED_GONE is not cited in README.md",
-		"removed name E_KNOWN in README.md is a registered code",
-	} {
-		if !r.reports(want) {
-			t.Errorf("no report %q; got %v", want, r.msgs)
-		}
-	}
-}
-
-// The reports of registered removed names come in the order of their files'
-// paths, run after run, as the gate's other reports that name a path do.
-func TestAssertCitedCodesExist_ReportsRegisteredRemovedNamesInPathOrder(t *testing.T) {
-	t.Parallel()
-	rules := codeRules()
-	paths := []string{"a.md", "b.md", "c.md", "d.md", "e.md", "f.md"}
-	rules.Removed = map[string][]string{}
-	for _, p := range paths {
-		rules.Removed[p] = []string{"E_KNOWN"}
-	}
-	root := materialize(t, "codefixture")
-	for range 20 {
-		r := &recorder{}
-		doclint.AssertCitedCodesExist(r, root, rules)
-		var got []string
-		for _, m := range r.msgs {
-			if before, _, ok := strings.Cut(m, " is a registered code"); ok {
-				got = append(got, strings.TrimPrefix(before, "removed name E_KNOWN in "))
-			}
-		}
-		if !slices.Equal(got, paths) {
-			t.Fatalf("registered removed names reported for %q, want %q", got, paths)
-		}
-	}
-}
-
-// A name that is both a placeholder and a removed name of a file is cited by
-// that file when the file cites it, and the gate does not call it uncited there.
-func TestAssertCitedCodesExist_MarksAPlaceholderThatIsAlsoARemovedName(t *testing.T) {
-	t.Parallel()
-	rules := codeRules()
-	rules.Removed = map[string][]string{"README.md": {"E_DOC_GONE", "E_EXAMPLE_CODE"}}
-	root := materialize(t, "codefixture")
-	readme, err := os.ReadFile(filepath.Join(root, "README.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(readme), "E_EXAMPLE_CODE") {
-		if err := os.WriteFile(filepath.Join(root, "README.md"), append(readme, "\nE_EXAMPLE_CODE\n"...), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	r := &recorder{}
-	doclint.AssertCitedCodesExist(r, root, rules)
-	if r.reports("removed name E_EXAMPLE_CODE is not cited in README.md") {
-		t.Errorf("a removed name its file cites, which is also a placeholder, was reported uncited: %v", r.msgs)
-	}
-	if r.reports("placeholder E_EXAMPLE_CODE is cited nowhere") {
-		t.Errorf("the placeholder its file cites was reported uncited: %v", r.msgs)
-	}
-}
-
 func TestAssertCitedCodesExist_ReportsStaleRules(t *testing.T) {
 	t.Parallel()
 	rules := codeRules()
@@ -239,6 +161,54 @@ func TestAssertCitedCodesExist_ReportsStaleRules(t *testing.T) {
 		if !r.reports(want) {
 			t.Errorf("no report %q; got %v", want, r.msgs)
 		}
+	}
+}
+
+// A rule listed twice is one rule, so a stale one draws one report.
+func TestAssertCitedCodesExist_ReportsADuplicatedRuleOnce(t *testing.T) {
+	t.Parallel()
+	rules := codeRules()
+	rules.Exclude = append(rules.Exclude, "gone/*.md", "gone/*.md")
+	rules.Placeholders = append(rules.Placeholders, "E_UNCITED", "E_KNOWN", "E_UNCITED", "E_KNOWN")
+	r, _ := runCodeGate(t, rules)
+	for _, want := range []string{
+		`exclusion "gone/*.md" matches no tracked`,
+		"placeholder E_UNCITED is cited nowhere",
+		"placeholder E_KNOWN is a registered code",
+	} {
+		reported := 0
+		for _, m := range r.msgs {
+			if strings.Contains(m, want) {
+				reported++
+			}
+		}
+		if reported != 1 {
+			t.Errorf("reported %q %d times, want once: %v", want, reported, r.msgs)
+		}
+	}
+}
+
+// Stale rules are reported in sorted order, whatever order the caller lists them in.
+func TestAssertCitedCodesExist_ReportsStaleRulesInOrder(t *testing.T) {
+	t.Parallel()
+	rules := codeRules()
+	rules.Exclude = append(rules.Exclude, "z/*.md", "a/*.md")
+	rules.Placeholders = append(rules.Placeholders, "E_UNCITED_Z", "E_UNCITED_A")
+	r, _ := runCodeGate(t, rules)
+	var got []string
+	for _, m := range r.msgs {
+		if strings.Contains(m, " matches no tracked ") || strings.Contains(m, " is cited nowhere") {
+			got = append(got, m)
+		}
+	}
+	want := []string{
+		`exclusion "a/*.md" matches no tracked Go, Markdown or shell file`,
+		`exclusion "z/*.md" matches no tracked Go, Markdown or shell file`,
+		"placeholder E_UNCITED_A is cited nowhere",
+		"placeholder E_UNCITED_Z is cited nowhere",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("stale rules reported as %q, want %q", got, want)
 	}
 }
 

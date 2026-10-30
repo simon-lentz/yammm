@@ -412,16 +412,16 @@ func (b *builder) addComposition(nt *TypeDecl, c *compNode) {
 	nt.Relations = append(nt.Relations, rel)
 }
 
-// rejectReverse names the removed reverse clause at its own span. The
-// grammar keeps the recognizer for exactly this diagnostic: without it, a
+// rejectReverse names the removed reverse clause at the span of the clause's
+// name. The grammar keeps the recognizer for exactly this diagnostic: without it, a
 // schema carrying the clause draws a bare unexpected-token error.
 func (b *builder) rejectReverse(rev *reverseNode) {
 	if rev == nil {
 		return
 	}
 	b.reportf(diag.E_REVERSE_CLAUSE_REMOVED, b.spanOf(rev.Name.Pos, rev.Name.EndPos),
-		"the reverse clause was removed in v0.15.0; delete %q and its multiplicity (see docs/VERSIONING.md)",
-		"/ "+rev.Name.value())
+		"the reverse clause was removed in v0.15.0; delete the \"/\", the name %q and any multiplicity after it",
+		rev.Name.value())
 }
 
 func (b *builder) edgeProp(p *relPropNode) *Property {
