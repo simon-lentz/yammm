@@ -1,11 +1,15 @@
 package graph
 
 import (
+	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/internal/value"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -18,6 +22,8 @@ import (
 // record a rule refused feeds no (one) count and no record fact, an instance
 // whose key a rule refused is no second holder of an address or of a sibling's
 // key, and the records at an address in refused are no count for a later rule.
+// A reference to an address a refused root states is that root's break, so it
+// draws no issue of its own.
 type structureRules struct {
 	s     *schema.Schema
 	canon *canonicalizer
@@ -34,8 +40,12 @@ type structureRules struct {
 	ones  map[oneSlot]int
 	order []oneSlot
 	// addresses holds each root's canonical address, relation left empty, and
-	// whether a root whose key the key rule accepts holds it.
+	// whether a sound root holds it: one of a type that can hold a root, whose key
+	// the key rule accepts.
 	addresses map[oneSlot]bool
+	// stated holds each address the key properties of a root state where the key
+	// rule refused its stored key, relation left empty.
+	stated map[oneSlot]bool
 	// refused holds each address two roots stand at, relation left empty: the
 	// parts do not say which root a record there is the record of.
 	refused map[oneSlot]bool
@@ -43,14 +53,18 @@ type structureRules struct {
 	// and refusedEdges each edge's.
 	refusedRecords map[int]bool
 	refusedEdges   map[int]bool
-	// refusedTypes holds each identity a types entry refused as no root's type.
+	// refusedTypes holds each identity refused as no root's type: a root of one
+	// holds no address, so it owes no required association and is in no count.
 	refusedTypes map[schema.TypeID]bool
 	// unresolvedTypes holds each identity the identity rule refused as one s
 	// cannot resolve.
 	unresolvedTypes map[schema.TypeID]bool
-	// refusedCompositions holds each composition slot [checkSlot] refused, by
-	// its parent's type and canonical key.
+	// refusedCompositions holds each composition slot [checkSlot] refused of a
+	// root that holds its address, by its parent's type and canonical key.
+	// unheldCompositions holds the same of a root whose key the key rule refused,
+	// at both its addresses; [structureRules.slotRefused] reads both.
 	refusedCompositions map[oneSlot]bool
+	unheldCompositions  map[oneSlot]bool
 }
 
 // oneSlot addresses one source instance's (one) association.
@@ -111,28 +125,48 @@ var (
 	_ structureNode[*Instance]     = (*Instance)(nil)
 )
 
+// checkRoot applies [checkTree] to a root and addresses it.
+func checkRoot[N structureNode[N]](r *structureRules, root N) {
+	refusedSlots := checkTree(r, "instance", root)
+	if t, ok := r.s.TypeByID(root.nodeType()); ok {
+		address(r, t, root, refusedSlots)
+	}
+}
+
 // checkTree applies every per-instance rule to n and to each composed child at
 // every depth: identity, then — for an identity that resolves — each slot, the
-// stored key and the declared names.
-func checkTree[N structureNode[N]](r *structureRules, position string, n N) {
+// stored key and the declared names. It returns the names of n's own slots
+// [checkSlot] refused.
+func checkTree[N structureNode[N]](r *structureRules, position string, n N) []string {
 	id := n.nodeType()
+	// In a fixed order: the identity rule names the first position it meets.
+	composed := n.nodeComposed()
+	var names []string
+	if len(composed) > 0 {
+		names = slices.Sorted(maps.Keys(composed))
+	}
 	if !r.identity(id, positionAt(position, n.nodeKey().String())) {
-		for _, children := range n.nodeComposed() {
-			for _, child := range children {
+		for _, relName := range names {
+			for _, child := range composed[relName] {
 				checkTree(r, "composed child", child)
 			}
 		}
-		return
+		return nil
 	}
 	t, _ := r.s.TypeByID(id)
-	for relName, children := range n.nodeComposed() {
-		checkSlot(r, t, n, relName, children)
+	var refusedSlots []string
+	for _, relName := range names {
+		children := composed[relName]
+		if checkSlot(r, t, n, relName, children) {
+			refusedSlots = append(refusedSlots, relName)
+		}
 		for _, child := range children {
 			checkTree(r, "composed child", child)
 		}
 	}
 	r.key(position, t, id, n.nodeKey(), n.nodeProperties())
 	r.names(position, t, id, n.nodeKey(), n.nodeProperties())
+	return refusedSlots
 }
 
 // identity refuses the zero identity and one s cannot resolve, and reports
@@ -162,20 +196,25 @@ func positionAt(position, key string) string {
 	return position + " position, key " + diag.ValueText(key)
 }
 
-// typesEntry refuses a types entry that is zero, that s cannot resolve, or
-// that cannot hold a root instance, whether or not the snapshot holds one:
+// typesEntry refuses a types entry that is zero or that s cannot resolve, and a
+// type that cannot hold a root instance where no other position refused it,
+// whether or not the snapshot holds one:
 // adapter/json and adapter/csv key their output by a denoted type's name.
 func (r *structureRules) typesEntry(i int, id schema.TypeID) {
 	if !r.identity(id, fmt.Sprintf("types entry %d", i)) {
 		return
 	}
-	if code, rule := rootIneligibility(r.s, id); rule != "" {
+	if code, rule := rootIneligibility(r.s, id); rule != "" && !r.refusedTypes[id] {
 		r.refuse(code, fmt.Sprintf("types entry %d denotes %s, which %s", i, id, rule))
-		if r.refusedTypes == nil {
-			r.refusedTypes = make(map[schema.TypeID]bool)
-		}
-		r.refusedTypes[id] = true
+		r.refuseType(id)
 	}
+}
+
+func (r *structureRules) refuseType(id schema.TypeID) {
+	if r.refusedTypes == nil {
+		r.refusedTypes = make(map[schema.TypeID]bool)
+	}
+	r.refusedTypes[id] = true
 }
 
 // rootType refuses n root instances of a type that cannot hold one, unless a
@@ -186,61 +225,117 @@ func (r *structureRules) rootType(id schema.TypeID, n int) {
 	}
 	if code, rule := rootIneligibility(r.s, id); rule != "" {
 		r.refuse(code, fmt.Sprintf("%d root instance(s) of type %s, which %s", n, id, rule))
+		r.refuseType(id)
 	}
 }
 
-// derivedConflict returns the instance a duplicate of inst collided with, as
-// [Graph.Add] and [Graph.AddComposed] record it, or nil and the reason no
-// instance at its position is one: the root at inst's own type and key for a
-// root duplicate, and for a composed duplicate of parent under relation the
-// sole occupant of a (one) slot, or the child of a keyed (many) slot at inst's
-// key. Keys compare in canonical form under s, so it judges an imported
-// snapshot's records under the importing schema. root is read only for a root
-// duplicate, and a composed duplicate's parent type must resolve under s.
-func derivedConflict(s *schema.Schema, canon *canonicalizer, root func(schema.TypeID, string) *Instance,
-	inst, parent *Instance, relation string,
-) (*Instance, string) {
-	if relation == "" {
-		if c := root(inst.typeID, inst.primaryKey.String()); c != nil {
-			return c, ""
-		}
-		return nil, "is a root duplicate, and no root is at its own type and key"
-	}
-	rel, why := compositionOf(s, inst, parent, relation)
-	if rel == nil {
-		return nil, why
-	}
-	occupants := parent.composed[relation]
+// slotIndex holds the children of each keyed (many) slot a duplicate names, by
+// canonical key. Each slot is read once, however many duplicates name it.
+type slotIndex[N structureNode[N]] struct {
+	canon  *canonicalizer
+	slots  map[oneSlot]map[string]N
+	stated map[oneSlot]map[string]bool
+}
+
+func newSlotIndex[N structureNode[N]](canon *canonicalizer) *slotIndex[N] {
+	return &slotIndex[N]{canon: canon, slots: make(map[oneSlot]map[string]N), stated: make(map[oneSlot]map[string]bool)}
+}
+
+// composedConflict returns the instance a composed duplicate of inst collided
+// with in the slot of parent at at under rel, as [Graph.AddComposed] records it,
+// or the zero value and the reason no child there is one: the sole occupant of a
+// (one) slot, or the child of a keyed (many) slot at inst's key. Keys compare in
+// the canonicalizer's form, so it judges an imported snapshot's records under the
+// importing schema. rel is not a keyless (many) composition, which holds no
+// conflict.
+func (x *slotIndex[N]) composedConflict(at oneSlot, rel *schema.Relation, inst, parent N) (N, string) {
+	var none N
+	occupants := parent.nodeComposed()[rel.Name()]
 	if !rel.IsMany() {
 		if len(occupants) == 1 {
 			return occupants[0], ""
 		}
-		return nil, fmt.Sprintf("is under the (one) composition %q, which holds %d children", relation, len(occupants))
+		return none, fmt.Sprintf("is under the (one) composition %q, which holds %d children", rel.Name(), len(occupants))
 	}
-	if target, _ := s.TypeByID(rel.TargetID()); !target.HasPrimaryKey() {
-		return nil, fmt.Sprintf("is under the keyless (many) composition %q, where no child conflicts", relation)
-	}
-	want := canon.key(rel.TargetID(), inst.primaryKey).String()
-	for _, o := range occupants {
-		if canon.key(rel.TargetID(), o.primaryKey).String() == want {
-			return o, ""
+	slot := oneSlot{source: at.source, key: at.key, relation: rel.Name()}
+	children, indexed := x.slots[slot]
+	if !indexed {
+		children = make(map[string]N, len(occupants))
+		for _, o := range occupants {
+			children[x.canon.key(rel.TargetID(), o.nodeKey()).String()] = o
 		}
+		x.slots[slot] = children
 	}
-	return nil, fmt.Sprintf("holds no child of the composition %q at its key", relation)
+	if o, ok := children[x.canon.key(rel.TargetID(), inst.nodeKey()).String()]; ok {
+		return o, ""
+	}
+	return none, fmt.Sprintf("holds no child of the composition %q at its key", rel.Name())
 }
 
-// compositionOf returns the composition a composed duplicate of inst under
-// parent's relation sits in, or nil and the reason no composition there holds
-// one: relation is a composition parent's type declares, whose target is
-// inst's type. parent's type must resolve under s.
-func compositionOf(s *schema.Schema, inst, parent *Instance, relation string) (*schema.Relation, string) {
-	pt, _ := s.TypeByID(parent.typeID)
+// composedDuplicate holds composed duplicate record i to the position
+// [Graph.AddComposed] records one at, and resolves its conflict where a root at
+// at holds the slot alone. A slot [checkSlot] refused for its name is that
+// rule's one issue; one it refused for its children still judges the record's
+// own position, but holds no occupants the conflict is resolved against. Neither
+// does a duplicate whose key the key rule refuses, a parent that holds no
+// address, or an address two roots stand at. A child whose key properties state
+// the duplicate's key is the refusal's break. Both types resolve under r.s, and
+// parent is read only where a root holds at.
+func composedDuplicate[N structureNode[N]](r *structureRules, x *slotIndex[N], i int, inst N, at oneSlot, relation string, parent N) {
+	refuse := func(why string) {
+		r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf("duplicate record %d, %s[%s], %s",
+			i, inst.nodeType(), diag.ValueText(r.canon.key(inst.nodeType(), inst.nodeKey()).String()), why))
+	}
+	slotRefused := r.slotRefused(at, relation)
+	rel, why := compositionOf(r.s, inst.nodeType(), at.source, relation)
+	if rel == nil {
+		if !slotRefused || declaresComposition(r.s, at.source, relation) {
+			refuse(why)
+		}
+		return
+	}
+	target, _ := r.s.TypeByID(rel.TargetID())
+	if rel.IsMany() && !target.HasPrimaryKey() {
+		refuse(fmt.Sprintf("is under the keyless (many) composition %q, where no child conflicts", relation))
+		return
+	}
+	if slotRefused || checkStoredKey(target, inst.nodeKey(), inst.nodeProperties().Get, r.canon) != nil || !r.addresses[at] || r.refused[at] {
+		return
+	}
+	if _, why := x.composedConflict(at, rel, inst, parent); why != "" && !x.childStates(r, at, rel, target, inst, parent) {
+		refuse(why)
+	}
+}
+
+// childStates reports whether the key properties of a child in the slot of parent
+// at at under rel state inst's key. target is rel's target type.
+func (x *slotIndex[N]) childStates(r *structureRules, at oneSlot, rel *schema.Relation, target *schema.Type, inst, parent N) bool {
+	slot := oneSlot{source: at.source, key: at.key, relation: rel.Name()}
+	stated, indexed := x.stated[slot]
+	if !indexed {
+		stated = make(map[string]bool)
+		for _, child := range parent.nodeComposed()[rel.Name()] {
+			if key, ok := r.statedKey(target, rel.TargetID(), child.nodeProperties()); ok {
+				stated[key] = true
+			}
+		}
+		x.stated[slot] = stated
+	}
+	return stated[r.canon.key(rel.TargetID(), inst.nodeKey()).String()]
+}
+
+// compositionOf returns the composition a composed duplicate of type inst under
+// a parent of type parent sits in, or nil and the reason no composition there
+// holds one: relation is a composition parent declares, whose target is inst.
+// parent must resolve under s.
+func compositionOf(s *schema.Schema, inst, parent schema.TypeID, relation string) (*schema.Relation, string) {
+	pt, _ := s.TypeByID(parent)
 	rel, ok := pt.Relation(relation)
 	if !ok || rel.Kind() != schema.RelationComposition {
-		return nil, fmt.Sprintf("names %s, which %s does not declare as a composition", diag.QuoteValue(relation), parent.typeID)
+		return nil, fmt.Sprintf("names %s, which %s does not declare as a composition", diag.QuoteValue(relation), parent)
 	}
-	if inst.typeID != rel.TargetID() {
-		return nil, fmt.Sprintf("is of type %s; the composition %q declares %s", inst.typeID, relation, rel.TargetID())
+	if inst != rel.TargetID() {
+		return nil, fmt.Sprintf("is of type %s; the composition %q declares %s", inst, relation, rel.TargetID())
 	}
 	return rel, ""
 }
@@ -283,27 +378,23 @@ func rootIneligibility(s *schema.Schema, id schema.TypeID) (diag.Code, string) {
 // applies when it attaches a child: the slot is a composition t declares, a
 // (one) slot holds one child, and each child is an instance of the declared
 // target, matched by identity as Add matches it. A child whose own identity
-// does not resolve is the identity rule's to report.
-func checkSlot[N structureNode[N]](r *structureRules, t *schema.Type, parent N, relName string, children []N) {
+// does not resolve is the identity rule's to report. It reports whether it
+// refused the slot itself: its name, or the children its multiplicity or a
+// sibling's key leaves no duplicate's conflict to resolve against.
+func checkSlot[N structureNode[N]](r *structureRules, t *schema.Type, parent N, relName string, children []N) bool {
 	rel, ok := t.Relation(relName)
-	if ok && rel.Kind() == schema.RelationComposition && (rel.IsMany() || len(children) <= 1) && allOfType(children, rel.TargetID()) {
-		siblingKeys(r, parent, rel, children)
-		return
-	}
-	if r.refusedCompositions == nil {
-		r.refusedCompositions = make(map[oneSlot]bool)
-	}
-	r.refusedCompositions[oneSlot{source: parent.nodeType(), key: r.canon.key(parent.nodeType(), parent.nodeKey()).String(), relation: relName}] = true
-	parentName := schema.TagForm(r.s, parent.nodeType())
 	if !ok || rel.Kind() != schema.RelationComposition {
+		parentName := schema.TagForm(r.s, parent.nodeType())
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_UNKNOWN_RELATION,
 			fmt.Sprintf("%s: %s[%s] holds composed children under %s, which its type does not declare as a composition",
 				r.op, parentName, diag.ValueText(parent.nodeKey().String()), diag.QuoteValue(relName))).
 			WithDetail(diag.DetailKeyTypeName, parentName).
 			WithDetail(diag.DetailKeyRelationName, relName).Build())
-		return
+		return true
 	}
-	if !rel.IsMany() && len(children) > 1 {
+	refused := !rel.IsMany() && len(children) > 1
+	if refused {
+		parentName := schema.TagForm(r.s, parent.nodeType())
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 			fmt.Sprintf("%s: %s[%s] composition %q: (one) cardinality violated, got %d children",
 				r.op, parentName, diag.ValueText(parent.nodeKey().String()), relName, len(children))).
@@ -320,6 +411,7 @@ func checkSlot[N structureNode[N]](r *structureRules, t *schema.Type, parent N, 
 		if _, resolves := r.s.TypeByID(got); !resolves {
 			continue
 		}
+		parentName := schema.TagForm(r.s, parent.nodeType())
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
 			fmt.Sprintf("%s: %s[%s] composition %q child %d is of type %s; the composition declares %s",
 				r.op, parentName, diag.ValueText(parent.nodeKey().String()), relName, i, got, want)).
@@ -328,24 +420,30 @@ func checkSlot[N structureNode[N]](r *structureRules, t *schema.Type, parent N, 
 			WithDetail(diag.DetailKeyExpected, want.String()).
 			WithDetail(diag.DetailKeyGot, got.String()).Build())
 	}
+	return siblingKeys(r, parent, rel, children) || refused
 }
 
 // siblingKeys refuses two children of one (many) slot at one canonical key,
-// as [Graph.Add] refuses them. A keyless part has no key to repeat, and a child
-// whose stored key the key rule refuses has none to compare.
-func siblingKeys[N structureNode[N]](r *structureRules, parent N, rel *schema.Relation, children []N) {
+// as [Graph.Add] refuses them, and reports whether it refused any. A keyless part
+// has no key to repeat, and a child of another type, or whose stored key the key
+// rule refuses, has none to compare.
+func siblingKeys[N structureNode[N]](r *structureRules, parent N, rel *schema.Relation, children []N) bool {
 	if !rel.IsMany() || len(children) < 2 {
-		return
+		return false
 	}
 	target, ok := r.s.TypeByID(rel.TargetID())
 	if !ok || !target.HasPrimaryKey() {
-		return
+		return false
 	}
 	sound := func(child N) bool {
 		return checkKey(target, child.nodeKey(), child.nodeProperties().Get, r.canon) == nil
 	}
+	refused := false
 	seen := make(map[string]int, len(children))
 	for i, child := range children {
+		if child.nodeType() != rel.TargetID() {
+			continue
+		}
 		key := r.canon.key(rel.TargetID(), child.nodeKey()).String()
 		if first, dup := seen[key]; dup {
 			if !sound(child) {
@@ -362,27 +460,53 @@ func siblingKeys[N structureNode[N]](r *structureRules, parent N, rel *schema.Re
 				WithDetail(diag.DetailKeyTypeName, parentName).
 				WithDetail(diag.DetailKeyRelationName, rel.Name()).
 				WithDetail(diag.DetailKeyPrimaryKey, key).Build())
+			refused = true
 			continue
 		}
 		seen[key] = i
 	}
+	return refused
 }
 
 // address refuses a second root at one canonical key of its type t: an index
 // holds one instance per address, so the second would be dropped or shadowed.
-// Every root stands at its address, but only a root whose stored key the key
-// rule accepts holds it, whichever comes first: a refused one is no duplicate.
-// No rule judges the records at an address two roots stand at.
-func address[N structureNode[N]](r *structureRules, t *schema.Type, root N) {
+// Every root stands at its address, but only a root of a type that can hold one,
+// whose stored key the key rule accepts, holds it, whichever comes first: a
+// refused one is no duplicate, and owns no slot there. It states the address its key properties name, and
+// refusedSlots, the root's slots [checkSlot] refused, are unheld at both. No rule
+// judges the records at an address two roots stand at.
+func address[N structureNode[N]](r *structureRules, t *schema.Type, root N, refusedSlots []string) {
 	id, key := root.nodeType(), root.nodeKey()
 	if r.addresses == nil {
 		r.addresses = make(map[oneSlot]bool)
 	}
 	slot := oneSlot{source: id, key: r.canon.key(id, key).String()}
-	sound := checkKey(t, key, root.nodeProperties().Get, r.canon) == nil
+	sound := !r.refusedTypes[id] && checkKey(t, key, root.nodeProperties().Get, r.canon) == nil
+	markSlots := func(set *map[oneSlot]bool, at oneSlot) {
+		for _, relName := range refusedSlots {
+			if *set == nil {
+				*set = make(map[oneSlot]bool)
+			}
+			(*set)[oneSlot{source: at.source, key: at.key, relation: relName}] = true
+		}
+	}
+	if !sound {
+		markSlots(&r.unheldCompositions, slot)
+		if stated, ok := r.statedKey(t, id, root.nodeProperties()); ok {
+			if r.stated == nil {
+				r.stated = make(map[oneSlot]bool)
+			}
+			at := oneSlot{source: id, key: stated}
+			r.stated[at] = true
+			markSlots(&r.unheldCompositions, at)
+		}
+	}
 	held, present := r.addresses[slot]
 	if !present {
 		r.addresses[slot] = sound
+		if sound {
+			markSlots(&r.refusedCompositions, slot)
+		}
 		return
 	}
 	// The parts do not say which of two roots at one address a record there is
@@ -392,19 +516,56 @@ func address[N structureNode[N]](r *structureRules, t *schema.Type, root N) {
 	case !sound:
 	case !held:
 		r.addresses[slot] = true
+		markSlots(&r.refusedCompositions, slot)
 	default:
+		// Whichever root comes first, a slot either refused is refused.
+		markSlots(&r.refusedCompositions, slot)
 		r.refuse(diag.E_DUPLICATE_PK, fmt.Sprintf("two instances of type %s at address %s: their keys are one under this schema", id, diag.ValueText(slot.key)))
 	}
 }
 
-// allOfType reports whether every child is an instance of want.
-func allOfType[N structureNode[N]](children []N, want schema.TypeID) bool {
-	for _, child := range children {
-		if child.nodeType() != want {
-			return false
-		}
+// statedKey returns the canonical key the key properties of an instance of t
+// state, or false where one is absent, null or no scalar [ParseKey] reads back.
+func (r *structureRules) statedKey(t *schema.Type, id schema.TypeID, props immutable.Properties) (string, bool) {
+	if !t.HasPrimaryKey() {
+		return "", false
 	}
-	return true
+	var components []any
+	for pk := range t.PrimaryKeys() {
+		val, ok := props.Get(pk.Name())
+		if !ok || value.Absent(val.Unwrap()) {
+			return "", false
+		}
+		// [immutable.WrapKey] panics on a value it cannot marshal, as a NaN is.
+		if _, ok := value.Scalar(val.Unwrap()); !ok {
+			return "", false
+		}
+		if _, err := json.Marshal(val.Unwrap()); err != nil {
+			return "", false
+		}
+		components = append(components, val.Unwrap())
+	}
+	key := immutable.WrapKey(components)
+	if unreadableComponent(t, key) >= 0 {
+		return "", false
+	}
+	return r.canon.key(id, key).String(), true
+}
+
+// resolves reports whether a reference to key of id is judged no further: a root
+// stands there, its key sound or not, or a refused root states it.
+func (r *structureRules) resolves(id schema.TypeID, key immutable.Key) bool {
+	at := oneSlot{source: id, key: r.canon.key(id, key).String()}
+	_, stands := r.addresses[at]
+	return stands || r.stated[at]
+}
+
+// slotRefused reports whether a duplicate parented at at meets a refusal of its
+// slot under relation: the holder's, or, where no sound root stands at the
+// address, a refused root's.
+func (r *structureRules) slotRefused(at oneSlot, relation string) bool {
+	slot := oneSlot{source: at.source, key: at.key, relation: relation}
+	return r.refusedCompositions[slot] || r.unheldCompositions[slot] && !r.addresses[at]
 }
 
 // key holds an instance's stored key to [checkStoredKey], the rule [Graph.Add]
@@ -433,13 +594,14 @@ func (r *structureRules) names(position string, t *schema.Type, id schema.TypeID
 }
 
 // associationRecord is one record under an association as the rules read it:
-// a resolved edge, whose reason is "", or an unresolved record.
+// a resolved edge, or an unresolved record, which alone holds a reason.
 type associationRecord struct {
 	// position names the record kind in every message.
-	position  string
-	source    schema.TypeID
-	sourceKey immutable.Key
-	relation  string
+	position   string
+	unresolved bool
+	source     schema.TypeID
+	sourceKey  immutable.Key
+	relation   string
 	// target is the type of the instance an imported edge points at, and zero
 	// where the record's target is the association's own.
 	target     schema.TypeID
@@ -478,7 +640,7 @@ func (r *structureRules) association(rec associationRecord) bool {
 	for _, name := range undeclaredNames(rec.properties, func(n string) bool { _, ok := rel.Property(n); return ok }) {
 		r.refuse(diag.E_UNKNOWN_EDGE_FIELD, fmt.Sprintf("%s holds edge property %s, which the association does not declare", at, diag.QuoteValue(name)))
 	}
-	namesTarget := rec.reason == "" || rec.reason == "target_missing"
+	namesTarget := !rec.unresolved || rec.reason == "target_missing"
 	if !rec.target.IsZero() {
 		if _, ok := r.s.TypeByID(rec.target); !ok {
 			return true
@@ -624,13 +786,21 @@ func recordFacts(r *structureRules, parts SnapshotParts) {
 			untyped = append(untyped, untypedRecord{relation: up.Relation, key: up.SourceKey})
 		}
 	}
+	// Each type and relation reads the records once, however many roots ask.
+	names := make(map[oneSlot]map[string]bool)
 	mayName := func(slot oneSlot) bool {
-		for _, u := range untyped {
-			if u.relation == slot.relation && r.canon.key(slot.source, u.key).String() == slot.key {
-				return true
+		at := oneSlot{source: slot.source, relation: slot.relation}
+		keys, read := names[at]
+		if !read {
+			keys = make(map[string]bool)
+			for _, u := range untyped {
+				if u.relation == slot.relation {
+					keys[r.canon.key(slot.source, u.key).String()] = true
+				}
 			}
+			names[at] = keys
 		}
-		return false
+		return keys[slot.key]
 	}
 	reported := make(map[oneSlot]bool)
 	for i, up := range parts.Unresolved {
@@ -692,9 +862,7 @@ func (r *structureRules) countOne(slot oneSlot) {
 }
 
 // countRecord counts a record no rule refused toward its (one) association: a
-// (one) association of a root whose key the key rule accepts holds its
-// source's address. A record addressing no root is the materialization's Fatal
-// E_INTERNAL, which [RebuildSnapshot] reports.
+// (one) association of a sound root holds its source's address.
 func (r *structureRules) countRecord(source schema.TypeID, sourceKey immutable.Key, relation string) {
 	t, ok := r.s.TypeByID(source)
 	if !ok {

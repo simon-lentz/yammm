@@ -28,13 +28,10 @@
 //
 // [Load] refuses a document whose structure no caller of [graph.Graph.Add]
 // could have built: one that breaks a fact of the graph package doc's
-// "Structural facts" — type identity, root and denoted types, composition
-// slots, keys and their key properties, declared names, association shapes,
-// the unresolved records graph.Graph.Add derives, and each duplicate's derived
-// conflict — or holds two roots whose stored keys the key rule both accepts
-// at one address ([diag.E_DUPLICATE_PK]). No option excuses them, and
-// [Verify] and [Info] run the same checks; a schema-less read judges none
-// that needs a schema.
+// "Structural facts", or holds two roots of a type that can hold one, whose
+// stored keys the key rule both accepts at one address ([diag.E_DUPLICATE_PK]).
+// No option excuses them, and [Verify] and [Info] run the same checks; a
+// schema-less read judges none that needs a schema.
 //
 // What a .ys can still hold is data a validated graph would not: an instance
 // the validator refuses for its values rather than its structure, such as a

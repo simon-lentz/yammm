@@ -287,9 +287,11 @@ func UpdateMetadata(
 // E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another), it transparently falls
 // back to [Load] + [Marshal] using s for the Load, unless ctx was cancelled or
 // newMeta holds a key or value that is not valid UTF-8 (both below). The
-// fallback carries the input's indentation and, when it parses, its created_at
-// across — the created_at byte-for-byte, as the fast path keeps it — so the
-// result differs from a direct Marshal only where the input document did.
+// fallback carries the indent that follows a line feed directly after an opening
+// brace at the input's first byte, and any other input comes back compact. It also carries, when it
+// parses, the input's created_at across — byte-for-byte, as the fast path keeps
+// it — so the result differs from a direct Marshal only where the input document
+// did.
 //
 // Panics if s is nil (programming error), on every call rather than only the
 // ones that reach the fallback: the function cannot complete without it, and
@@ -297,12 +299,11 @@ func UpdateMetadata(
 // until a document is malformed.
 //
 // When the fallback path succeeds, the returned [diag.Result] carries a
-// Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], every warning the Load
-// and Marshal legs produced, and, unless the caller passed a non-zero
+// Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], the warnings the Load
+// and Marshal legs stored, and, unless the caller passed a non-zero
 // [WithUpdateCreatedAt], one further Warning if the input stated a created_at
-// this path could not parse. When its Load fails, the result is Load's alone:
-// Load judges the whole document the fast path refused, so each break draws
-// one issue. A cancelled Load may not have reached the break, so it keeps
+// this path could not parse. When its Load fails, the result is Load's alone,
+// so no break draws two issues. A cancelled Load may not have reached the break, so it keeps
 // the refusal beside its own result. When its Marshal fails, the result is
 // the refusal and Marshal's issues. Neither carries a W_UPDATE_METADATA_FALLBACK. The warning's details
 // include the distinct Error and Fatal codes that triggered it via
@@ -369,9 +370,8 @@ func UpdateMetadataOrReMarshal(
 	triggeringCodes := distinctTriggeringCodes(res)
 
 	// Fall back to Load + Marshal.
-	// Load judges the whole document the fast path refused, so its result
-	// alone reports each break once. A cancelled Load may not have reached
-	// the break, so the refusal stands beside its result.
+	// Load's result stands alone, so no break draws two issues. A cancelled Load
+	// may not have reached the break, so the refusal stands beside its result.
 	loaded, loadRes := Load(ctx, data, s)
 	if loadRes.HasErrors() {
 		if hasCancellation(loadRes) {

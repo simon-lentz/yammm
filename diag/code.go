@@ -408,11 +408,11 @@ var (
 // Graph codes.
 var (
 	// E_DUPLICATE_PK indicates a primary key stated twice for one type: by two
-	// instances added to a graph, by two root instances whose stored keys the
-	// key rule both accepts in a snapshot that a graph imports under another
-	// schema or snapshot.Load, Verify or Info reads, or by two root instances a
-	// yammm data command reads from its data files and --into file, one of
-	// them refused.
+	// instances added to a graph, by two root instances whose stored keys the key
+	// rule both accepts, in a snapshot that snapshot.Info reads or, of a type that
+	// can hold one, that a graph imports under another schema or snapshot.Load or
+	// Verify reads, or by two root instances a yammm data command reads from its
+	// data files and --into file, one of them refused.
 	E_DUPLICATE_PK = NewCode("E_DUPLICATE_PK", CategoryGraph)
 
 	// E_DUPLICATE_COMPOSED_PK indicates a composition slot that cannot hold a
@@ -481,8 +481,8 @@ var (
 	// contradict, a key or target key component graph.ParseKey cannot read back,
 	// a target key of the wrong arity, an undocumented reason, a record
 	// contradicting itself, records graph.Add would not derive, or a duplicate
-	// with no conflict or another one. snapshot.Marshal raises it for input that
-	// would write such a file: an indent that is not JSON whitespace, a metadata
+	// with no conflict or another one. snapshot.Marshal raises it for input it
+	// refuses to write: an indent that is not JSON whitespace, a metadata
 	// key or value that is not valid UTF-8, or a property value the wire cannot
 	// carry; snapshot.UpdateMetadata raises it for such metadata too.
 	E_SNAPSHOT_MALFORMED = NewCode("E_SNAPSHOT_MALFORMED", CategorySnapshot)
@@ -552,7 +552,7 @@ var (
 	// [E_SNAPSHOT_UNNAMEABLE_TYPE]. The graph layer refuses all three at
 	// [github.com/simon-lentz/yammm/graph.Graph.Add], so a document stating one
 	// describes a graph that cannot be built. The message names which rule the
-	// type fails.
+	// type fails. One type draws one issue, however many positions name it.
 	E_SNAPSHOT_INVALID_ROOT = NewCode("E_SNAPSHOT_INVALID_ROOT", CategorySnapshot)
 
 	// E_SNAPSHOT_COMPOSED_ON_DUPLICATE indicates a duplicate record's instance contains
@@ -617,9 +617,10 @@ var (
 	// snapshot.UpdateMetadataOrReMarshal fell back from the UpdateMetadata
 	// fast path to Load + Marshal because the fast path reported an Error or
 	// Fatal issue other than a cancellation: E_SNAPSHOT_MALFORMED at Error,
-	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output carries the
-	// input's indentation and, when it parses and the caller sets no non-zero
-	// time through snapshot.WithUpdateCreatedAt, its created_at, so it differs
+	// E_UPDATE_METADATA_BODY_OFFSET at Fatal, or another. The output carries an
+	// indent only where a line feed directly follows an opening brace at the
+	// input's first byte, and, when it parses and the caller sets no non-zero time
+	// through snapshot.WithUpdateCreatedAt, the input's created_at, so it differs
 	// from a direct Marshal only where the input did; the warning surfaces the
 	// path transition so operators can observe fallback frequency and triage
 	// persistent cases. Details include a "triggering_codes" entry listing the

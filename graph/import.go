@@ -1,8 +1,6 @@
 package graph
 
 import (
-	"fmt"
-
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/schema"
@@ -11,13 +9,13 @@ import (
 // NewFromSnapshot creates a Graph pre-populated from a Snapshot's contents,
 // ready for [Graph.Add] calls that resolve against the imported instances.
 //
-// snap need not have been built against s, but it must hold to s under every
-// fact of the package doc's "Structural facts" but Records, whose records the
-// import derives again under s. A snapshot that breaks one is refused with
-// a nil Graph and one diagnostic for each break, naming a position, under the
-// code [Graph.Add] refuses it with, save a break that reads a unit another
-// diagnostic refused; nothing is installed. A snapshot bound to s already
-// holds to them and is not walked.
+// snap need not have been built against s. The import derives its records again
+// under s, and refuses one that breaks another fact of the package doc's
+// "Structural facts" under s, save an "absent" record under a relation that is no
+// association of s, which it drops. A refusal returns a nil Graph and one
+// diagnostic for each break, naming a position, save a break that reads a unit
+// another diagnostic refused; nothing is installed. A snapshot bound to s already holds to the facts
+// and is not walked.
 //
 // Panics if s or snap is nil (programmer error).
 func NewFromSnapshot(s *schema.Schema, snap *Snapshot, opts ...Option) (*Graph, diag.Result) {
@@ -49,10 +47,7 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 	}
 	for _, id := range snap.types {
 		for _, inst := range snap.instances[id] {
-			checkTree(r, "instance", inst)
-			if t, ok := s.TypeByID(id); ok {
-				address(r, t, inst)
-			}
+			checkRoot(r, inst)
 		}
 	}
 	for _, e := range snap.edges {
@@ -63,6 +58,7 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 			r.countRecord(e.source.typeID, e.source.primaryKey, e.relation)
 		}
 	}
+	slots := newSlotIndex[*Instance](canon)
 	for i, dup := range snap.duplicates {
 		checkTree(r, "duplicate instance", dup.instance)
 		// A root duplicate's conflict is the root at its own type and key, which
@@ -74,37 +70,14 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 		}
 		// An identity s cannot resolve is the identity rule's to report: a
 		// parent's through its type's entry, the instance's through checkTree.
-		t, ok := s.TypeByID(dup.instance.typeID)
-		if !ok {
+		if _, ok := s.TypeByID(dup.instance.typeID); !ok {
 			continue
 		}
 		if _, ok := s.TypeByID(dup.parent.typeID); !ok {
 			continue
 		}
 		at := oneSlot{source: dup.parent.typeID, key: canon.key(dup.parent.typeID, dup.parent.primaryKey).String()}
-		// A slot checkSlot refused for its name is that rule's one issue; one it
-		// refused for its children still judges the record's own position, but
-		// holds no occupants the record's conflict is resolved against.
-		slotRefused := r.refusedCompositions[oneSlot{source: at.source, key: at.key, relation: dup.relation}]
-		refuse := func(why string) {
-			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf("duplicate record %d, %s[%s], %s",
-				i, dup.instance.typeID, diag.ValueText(dup.instance.primaryKey.String()), why))
-		}
-		if rel, why := compositionOf(s, dup.instance, dup.parent, dup.relation); rel == nil {
-			if !slotRefused || declaresComposition(s, dup.parent.typeID, dup.relation) {
-				refuse(why)
-			}
-			continue
-		}
-		// A refused slot, a duplicate whose key the key rule refuses, a parent
-		// that holds no address, or an address two roots stand at resolves no
-		// conflict.
-		if slotRefused || checkStoredKey(t, dup.instance.primaryKey, dup.instance.nodeProperties().Get, canon) != nil || !r.addresses[at] || r.refused[at] {
-			continue
-		}
-		if _, why := derivedConflict(s, canon, nil, dup.instance, dup.parent, dup.relation); why != "" {
-			refuse(why)
-		}
+		composedDuplicate(r, slots, i, dup.instance, at, dup.relation, dup.parent)
 	}
 	for _, u := range snap.unresolved {
 		// An absent record holds no data, so it names no field s can lack:
@@ -113,7 +86,7 @@ func validateImport(s *schema.Schema, canon *canonicalizer, snap *Snapshot) diag
 			continue
 		}
 		rec := associationRecord{
-			position: "unresolved record of", source: u.source.typeID, sourceKey: u.source.primaryKey, relation: u.relation,
+			position: "unresolved record of", unresolved: true, source: u.source.typeID, sourceKey: u.source.primaryKey, relation: u.relation,
 			targetKey: unresolvedTargetKey(u), reason: u.reason, properties: u.properties,
 		}
 		// A target_missing record names a target, which holds to the declared

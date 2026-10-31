@@ -113,7 +113,8 @@
 // therefore loads, validates and builds. Resolving the child on the root's rule
 // instead dropped its subtree and disabled sibling duplicate detection with it.
 //
-// No lookup in this package takes a rendered type name. Where two identities
+// Save [BatchAssembler.Add], whose typeName goes to the validator, no lookup in
+// this package takes a rendered type name. Where two identities
 // render alike, a diagnostic naming them falls back to the full identity rather
 // than reading "X does not match X".
 //
@@ -167,9 +168,16 @@
 // other constructor of a snapshot refuses one that does: [RebuildSnapshot] over
 // parts, and the snapshot package's reader over a document. [NewFromSnapshot]
 // and [NewBatchAssemblerFromSnapshot], over a snapshot bound to another schema,
-// refuse one that breaks any fact but Records, and derive its records again.
+// derive its records again and refuse one that breaks any other fact, save an
+// "absent" record under a relation that is no association of that schema, which
+// they drop.
 // The facts are the whole promise: a shape they do not name, such as a
-// property value its constraint refuses, can pass a constructor. The facts are:
+// property value its constraint refuses, can pass a constructor. A type that
+// cannot hold a root is one break, however many positions name it, and a root of
+// it holds no address: it owes no required association, it is in no (one) count,
+// no duplicate's conflict resolves in its slots, and a second root at its key is
+// no duplicate. A break its records or its slots show by themselves stays its own.
+// The facts are:
 //
 //   - Identity. Every type identity resolves in the schema.
 //   - Root and denoted types. See the two sections above.
@@ -203,6 +211,10 @@
 //     "absent" or "empty" record carries no target key and no edge
 //     properties. A (one) association holds one record at most, edges and
 //     unresolved records together.
+//   - References. An edge's source and target, a record's source and a
+//     composed duplicate's parent each name a root. A reference to the address
+//     a root's key properties state, where the key rule refuses its stored key,
+//     is that root's break, and draws no diagnostic of its own.
 //   - Records. The records are the ones [Graph.Add] derives from the data, and
 //     the ones [Graph.AddOrMerge] merges into a held root from a duplicate's
 //     data. Every root holds an edge or a record under each required
@@ -240,9 +252,9 @@
 // # Build Then Commit
 //
 // [Graph.Add], [Graph.AddOrMerge] and [Graph.AddComposed] walk an instance
-// ONCE. That walk both checks the whole structure — edge names and
-// multiplicities, and every slot and child of the composition tree at any depth
-// — and assembles the [Instance] tree to install, touching no graph state. Only
+// ONCE. That walk both checks the whole structure — property names, edge names,
+// edge property names and multiplicities, a root's target keys, and every slot
+// and child of the composition tree at any depth — and assembles the [Instance] tree to install, touching no graph state. Only
 // a walk that raised no error reaches the commit phase, which installs the
 // tree, the staged association records and the attestation together under the
 // graph's lock; [Graph.AddComposed] holds that lock across its walk too. A
@@ -309,9 +321,9 @@
 //
 // # Composed Children
 //
-// A composed child is checked as a root is — its edge names and
-// multiplicities, its own key, and its own composition tree — but its
-// association edges are never staged, so their target keys go unjudged, and
+// A composed child is checked as a root is — its property names, its edge
+// names, edge property names and multiplicities, its own key, and its own
+// composition tree — but its association edges are never staged, so their target keys go unjudged, and
 // never installed. A part type that declares or
 // inherits an association therefore produces no [Edge], no
 // [UnresolvedEdge], and no effect on [Attestation]'s Associations dimension.
@@ -407,10 +419,10 @@
 //	graph.FormatKey("ABC123")       // ["ABC123"]
 //	graph.FormatKey("us", 12345)    // ["us",12345]
 //
-// Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey]. A
-// Timestamp, Date or UUID component may be spelled any way its constraint
-// accepts: every address the graph receives is canonicalized under the type's
-// key constraints before the lookup, as the key was at entry.
+// Use [FormatKey] to construct lookup keys for [Snapshot.InstanceByKey]. The
+// graph tries an address it receives as spelled, then with each Timestamp, Date
+// or UUID component canonicalized under the type's key constraints, as the key
+// was at entry. One instant at two offsets is two addresses.
 //
 // A part type may declare a primary key, which a composed child carries and
 // the graph checks and uses to tell siblings apart. It is not an address: a
@@ -490,21 +502,22 @@
 // A composed child whose identity is not in the import closure is an
 // invariant guard on both paths, Fatal E_INTERNAL: the child must already
 // equal its relation's target, which the schema resolved at load, and a
-// child from outside the closure is refused first: on the inline path by the
-// check that compares it with its relation's target
-// (E_GRAPH_INVALID_COMPOSITION), and in [Graph.AddComposed] by its schema
-// guard, which panics before that check on a schema outside the closure. No public
-// constructor reaches it.
+// child from outside the closure is refused first: by the check that compares
+// it with its relation's target (E_GRAPH_INVALID_COMPOSITION), or, in
+// [Graph.AddComposed], by a schema guard that panics before that check where
+// the child's schema path is outside the closure. No public constructor reaches
+// it.
 //
 // [Graph.Check] emits E_UNRESOLVED_REQUIRED and E_CONTEXT_CANCELLED.
 //
 // [RebuildSnapshot] and the import report a broken structural fact with the
-// code [Graph.Add] reports it with. The one exception is at [RebuildSnapshot]:
-// parts that break the identity, root, denoted-type, name, address, reason,
-// records or duplicate rule, or that name an edge or record end no instance of
-// the parts holds, come only from a broken caller, so it reports them as Fatal
-// E_INTERNAL. [RebuildSnapshot] panics on a nil schema, as [New]
-// does.
+// code [Graph.Add] reports it with, save in two cases. The import draws
+// E_GRAPH_TYPE_NOT_FOUND for a composed child whose identity the schema cannot
+// resolve, where [Graph.Add] draws E_GRAPH_INVALID_COMPOSITION. At
+// [RebuildSnapshot], parts that break the identity, root, denoted-type, name,
+// address, reason, records, duplicate or References rule come only from a
+// broken caller, so it reports them as Fatal E_INTERNAL. [RebuildSnapshot]
+// panics on a nil schema, as [New] does.
 //
 // # Diagnostics Lifecycle
 //
@@ -530,8 +543,7 @@
 // Every slice-returning [Snapshot] method produces deterministically sorted
 // output, independent of [Graph.Add] call order or concurrency:
 //
-//   - [Snapshot.Types]: lexicographic by the TypeID's String (the schema
-//     path, ":", then the name)
+//   - [Snapshot.Types]: lexicographic by the TypeID's String
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
@@ -542,10 +554,11 @@
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //
-// Every arm of each tuple is compared, so records that differ in an arm sort
-// apart, save the provenance arm: it compares a source name and a span start,
-// and a loaded provenance carries no span, so two loaded duplicates that differ
-// only in their provenance's path tie.
+// Every arm of each tuple is compared, and records that differ in an arm sort
+// apart, save in two cases. A properties arm writes no member's type inside a
+// list or map, so float64(1) and int64(1) there tie. The provenance arm compares
+// a source name and a span start, and a loaded provenance carries no span, so
+// two loaded duplicates that differ only in their provenance's path tie.
 //
 // Sorting is established when the Snapshot is constructed — by [Graph.Snapshot]
 // and by [RebuildSnapshot] alike, which reach it through one place — and is

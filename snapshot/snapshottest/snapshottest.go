@@ -42,7 +42,7 @@ func BuildSnapshot(tb testing.TB, s *schema.Schema, instances ...*instance.Valid
 // (-want +got) diff on mismatch.
 //
 // Not valid for a snapshot whose whole floats are stored as int64, because the
-// round trip heals them to float64 while [DiffSnapshots] compares exactly.
+// round trip heals them to float64 while [DiffSnapshots] compares dynamic types.
 // Round-trip such a snapshot once first; healing is idempotent, so every later
 // round trip holds. The composed-child identity repair this also warned about
 // is gone with the reader that needed it.
@@ -149,11 +149,13 @@ type unresProjection struct {
 }
 
 // DiffSnapshots compares two snapshots structurally with go-cmp and fails
-// the test with a (-want +got) diff on mismatch. Values compare exactly,
-// dynamic type included — an int64/float64 mismatch is a real defect, not a
-// wire artifact to tolerate — with one deliberate exception: a float32
-// compares equal to the float64 Load returns for it, because the wire carries
-// value fidelity, not width (see [widenFloat32]).
+// the test with a (-want +got) diff on mismatch. Values compare under go-cmp's
+// rules, dynamic type included: an int64/float64 mismatch is a real defect, not a
+// wire artifact to tolerate, a negative zero equals zero, and a type with an Equal
+// method, as time.Time, compares by it. Two deliberate exceptions stand: a nil
+// list or map compares equal to an empty one, and a float32 compares equal to the
+// float64 Load returns for it, because that float64 converts back to the float32
+// and the wire keeps no width (see [widenFloat32]).
 func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
 	tb.Helper()
 	// EquateEmpty: a built snapshot carries nil property maps where a loaded

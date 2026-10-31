@@ -101,9 +101,9 @@ type UnresolvedParts struct {
 // RebuildSnapshot constructs a Snapshot from pre-resolved parts.
 //
 // This is the deserialization entry point for the snapshot package.
-// It accepts fully-resolved data (the denoted types, instances, edges,
-// duplicates, unresolved records and the attestation) and assembles them into a Snapshot without re-running validation or edge
-// resolution.
+// It takes the denoted types, instances, edges, duplicates, unresolved records
+// and the attestation, holds them to the structural facts below, and assembles
+// them into a Snapshot. It judges no property value's constraint.
 //
 // Most users should construct snapshots via [Graph.Add] + [Graph.Snapshot].
 // RebuildSnapshot exists for [snapshot.Load] and testing.
@@ -125,9 +125,10 @@ type UnresolvedParts struct {
 // Parts are held to the package doc's "Structural facts", under the codes it
 // names: Fatal E_INTERNAL for identity, root and denoted types, declared names,
 // root addresses, reasons, records and duplicate records, and Add's codes for slots,
-// keys and associations. An edge or record addressing an instance the parts do
-// not hold is Fatal E_INTERNAL too. snapshot.Load holds a document to the same facts
-// first, so a failure it passes here is a bug in the reader.
+// keys and associations. A reference the References fact refuses is Fatal
+// E_INTERNAL too, beside every other break, and an edge or record a rule refused
+// names none. snapshot.Load holds a document to the same facts first, so a
+// failure it passes here is a bug in the reader.
 //
 // Panics if s is nil (programmer error).
 func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Result) {
@@ -175,62 +176,33 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		idx[keyStr] = inst
 	}
 
-	// Step 2: Create Edge objects, resolving pointers.
+	// Step 2: Create Edge objects, resolving pointers. validateParts has held
+	// every reference below to a root.
 	edges := make([]*Edge, 0, len(parts.Edges))
 	for _, ep := range parts.Edges {
 		// Canonicalized BEFORE the lookup: step 1 rewrote the instance keys the
 		// index is built from, so an endpoint resolved from the caller's
 		// spelling would miss an instance that is present.
 		ep = canon.edge(ep)
-		targetType := associationTarget(s, ep.SourceType, ep.Relation)
 		source := lookupInstance(instanceIndex, ep.SourceType, ep.SourceKey.String())
-		target := lookupInstance(instanceIndex, targetType, ep.TargetKey.String())
-
-		if source == nil {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: edge source %s[%s] not found in instance index",
-					ep.SourceType, diag.ValueText(ep.SourceKey.String()))).Build())
-			continue
-		}
-		if target == nil {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: edge target %s[%s] not found in instance index",
-					targetType, diag.ValueText(ep.TargetKey.String()))).Build())
-			continue
-		}
-
+		target := lookupInstance(instanceIndex, associationTarget(s, ep.SourceType, ep.Relation), ep.TargetKey.String())
 		edges = append(edges, newEdge(ep.Relation, source, target, ep.Properties))
 	}
 
 	// Step 3: Create Duplicate records.
 	duplicates := make([]*Duplicate, 0, len(parts.Duplicates))
-	root := func(id schema.TypeID, key string) *Instance { return lookupInstance(instanceIndex, id, key) }
-	for i, dp := range parts.Duplicates {
+	slots := newSlotIndex[*Instance](canon)
+	for _, dp := range parts.Duplicates {
 		// Every address in the record moves with the instances step 1 rewrote.
 		dp = canon.duplicate(dp)
 		dupInst := rebuildInstance(name, dp.Instance)
-		// Defense-in-depth: duplicate instances must not have composed children.
-		if len(dp.Instance.Composed) > 0 {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: duplicate record %d, %s[%s], has composed children",
-					i, dp.Instance.TypeID, diag.ValueText(dupInst.PrimaryKey().String()))).Build())
-			continue
-		}
-		var parent *Instance
-		if dp.Relation != "" {
-			if parent = root(dp.ParentType, dp.ParentKey.String()); parent == nil {
-				collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-					fmt.Sprintf("RebuildSnapshot: duplicate record %d names parent %s[%s], which is not a root",
-						i, dp.ParentType, diag.ValueText(dp.ParentKey.String()))).Build())
-				continue
-			}
-		}
-		conflict, why := derivedConflict(s, canon, root, dupInst, parent, dp.Relation)
-		if conflict == nil {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: duplicate record %d, %s[%s], %s",
-					i, dp.Instance.TypeID, diag.ValueText(dupInst.PrimaryKey().String()), why)).Build())
-			continue
+		var conflict, parent *Instance
+		if dp.Relation == "" {
+			conflict = lookupInstance(instanceIndex, dupInst.typeID, dupInst.primaryKey.String())
+		} else {
+			parent = lookupInstance(instanceIndex, dp.ParentType, dp.ParentKey.String())
+			rel, _ := compositionOf(s, dupInst.typeID, dp.ParentType, dp.Relation)
+			conflict, _ = slots.composedConflict(oneSlot{source: dp.ParentType, key: dp.ParentKey.String()}, rel, dupInst, parent)
 		}
 		duplicates = append(duplicates, newDuplicate(dupInst, conflict, parent, dp.Relation, diag.Issue{}))
 	}
@@ -243,12 +215,6 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		// path rendered it.
 		up = canon.unresolved(up)
 		source := lookupInstance(instanceIndex, up.SourceType, up.SourceKey.String())
-		if source == nil {
-			collector.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
-				fmt.Sprintf("RebuildSnapshot: unresolved source %s[%s] not found in instance index",
-					up.SourceType, diag.ValueText(up.SourceKey.String()))).Build())
-			continue
-		}
 
 		// Key.String() renders a keyless key as "[]", but UnresolvedEdge.TargetKey
 		// is empty for the "absent" and "empty" reasons, which carry no target.
@@ -260,10 +226,6 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 		unresolvedEdges = append(unresolvedEdges,
 			newUnresolvedEdge(source, up.Relation, associationTarget(s, up.SourceType, up.Relation), targetKey,
 				requiredUnder(s, up.SourceType, up.Relation), up.Reason, up.Properties))
-	}
-
-	if collector.HasErrors() {
-		return nil, collector.Result()
 	}
 
 	// Step 5: Assemble the Snapshot. newSnapshot establishes every ordering
@@ -278,7 +240,8 @@ func RebuildSnapshot(s *schema.Schema, parts SnapshotParts) (*Snapshot, diag.Res
 
 // validateParts holds parts to the structural rules ([structureRules]) at
 // every position: the types entries, each root and its composed children at
-// every depth, each duplicate's instance, and each edge and unresolved record.
+// every depth, each duplicate's instance, parent, position and conflict, and
+// each edge and unresolved record.
 func validateParts(r *structureRules, parts SnapshotParts) {
 	for i, id := range parts.Types {
 		r.typesEntry(i, id)
@@ -296,10 +259,7 @@ func validateParts(r *structureRules, parts SnapshotParts) {
 		r.rootType(typeID, counts[typeID])
 	}
 	for _, ip := range parts.Instances {
-		checkTree(r, "instance", ip)
-		if t, ok := r.s.TypeByID(ip.TypeID); ok {
-			address(r, t, ip)
-		}
+		checkRoot(r, ip)
 	}
 
 	for i, ep := range parts.Edges {
@@ -308,7 +268,7 @@ func validateParts(r *structureRules, parts SnapshotParts) {
 		if r.association(associationRecord{
 			position: "edge from", source: ep.SourceType, sourceKey: ep.SourceKey, relation: ep.Relation,
 			targetKey: ep.TargetKey, properties: ep.Properties, refused: r.c.ErrorCount() > before,
-		}) {
+		}) || edgeNamesNoRoot(r, ep) {
 			if r.refusedEdges == nil {
 				r.refusedEdges = make(map[int]bool)
 			}
@@ -318,28 +278,20 @@ func validateParts(r *structureRules, parts SnapshotParts) {
 		}
 	}
 
-	for i, dp := range parts.Duplicates {
-		switch {
-		case dp.Relation != "":
-			r.identity(dp.ParentType, positionAt("duplicate parent", dp.ParentKey.String()))
-		case !dp.ParentType.IsZero() || dp.ParentKey.Len() > 0:
-			// A root duplicate's conflict is the root at its own type and key, so
-			// a parent it names is a field no rule reads.
-			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf(
-				"duplicate record %d is a root duplicate, and names the parent %s[%s], which only a composed one has",
-				i, identityText(r.s, dp.ParentType), diag.ValueText(dp.ParentKey.String())))
-		}
-		checkTree(r, "duplicate instance", dp.Instance)
-	}
+	duplicateRecords(r, parts)
 
 	for i, up := range parts.Unresolved {
 		before := r.c.ErrorCount()
 		r.identity(up.SourceType, positionAt("unresolved source", up.SourceKey.String()))
 		r.unresolvedReason(up.Reason, up.TargetKey, up.Properties)
 		if r.association(associationRecord{
-			position: "unresolved record of", source: up.SourceType, sourceKey: up.SourceKey, relation: up.Relation,
+			position: "unresolved record of", unresolved: true, source: up.SourceType, sourceKey: up.SourceKey, relation: up.Relation,
 			targetKey: up.TargetKey, reason: up.Reason, properties: up.Properties, refused: r.c.ErrorCount() > before,
 		}) {
+			r.refuseRecord(i)
+		} else if !r.resolves(up.SourceType, up.SourceKey) {
+			r.refuse(diag.E_INTERNAL, fmt.Sprintf("unresolved source %s[%s] is no root",
+				up.SourceType, diag.ValueText(r.canon.key(up.SourceType, up.SourceKey).String())))
 			r.refuseRecord(i)
 		}
 	}
@@ -352,6 +304,105 @@ func validateParts(r *structureRules, parts SnapshotParts) {
 		}
 	}
 	r.oneOverflow()
+}
+
+// edgeNamesNoRoot refuses an edge whose source or target no root stands at and
+// no refused root states, and reports whether it did. An edge of no source is that
+// one break, so its target is read no further. The edge's association is one its
+// source's type declares.
+func edgeNamesNoRoot(r *structureRules, ep EdgeParts) bool {
+	if !r.resolves(ep.SourceType, ep.SourceKey) {
+		r.refuse(diag.E_INTERNAL, fmt.Sprintf("edge source %s[%s] is no root",
+			ep.SourceType, diag.ValueText(r.canon.key(ep.SourceType, ep.SourceKey).String())))
+		return true
+	}
+	target := associationTarget(r.s, ep.SourceType, ep.Relation)
+	if !r.resolves(target, ep.TargetKey) {
+		r.refuse(diag.E_INTERNAL, fmt.Sprintf("edge target %s[%s] is no root",
+			target, diag.ValueText(r.canon.key(target, ep.TargetKey).String())))
+		return true
+	}
+	return false
+}
+
+// duplicateRecords holds each duplicate record to the Duplicates fact. A record
+// with composed children is that one break, so no rule reads them. A duplicate
+// whose key the key rule refuses has no address, so no conflict is resolved for
+// it. A parent or a root a refused root states is that root's break, and the
+// record's own position is still judged.
+func duplicateRecords(r *structureRules, parts SnapshotParts) {
+	var holders map[oneSlot]int
+	slots := newSlotIndex[InstanceParts](r.canon)
+	for i, dp := range parts.Duplicates {
+		inst := dp.Instance
+		refuse := func(why string) {
+			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf("duplicate record %d, %s[%s], %s",
+				i, identityText(r.s, inst.TypeID), diag.ValueText(r.canon.key(inst.TypeID, inst.PrimaryKey).String()), why))
+		}
+		if len(inst.Composed) > 0 {
+			refuse("has composed children")
+			inst.Composed = nil
+		}
+		parentResolves := false
+		switch {
+		case dp.Relation != "":
+			parentResolves = r.identity(dp.ParentType, positionAt("duplicate parent", dp.ParentKey.String()))
+		case !dp.ParentType.IsZero() || dp.ParentKey.Len() > 0:
+			// A root duplicate's conflict is the root at its own type and key, so
+			// a parent it names is a field no rule reads.
+			r.refuse(diag.E_GRAPH_INVALID_COMPOSITION, fmt.Sprintf(
+				"duplicate record %d is a root duplicate, and names the parent %s[%s], which only a composed one has",
+				i, identityText(r.s, dp.ParentType), diag.ValueText(dp.ParentKey.String())))
+		}
+		checkTree(r, "duplicate instance", inst)
+		var at oneSlot
+		if dp.Relation != "" {
+			if !parentResolves {
+				continue
+			}
+			at = oneSlot{source: dp.ParentType, key: r.canon.key(dp.ParentType, dp.ParentKey).String()}
+			if !r.resolves(dp.ParentType, dp.ParentKey) {
+				r.refuse(diag.E_INTERNAL, fmt.Sprintf("duplicate record %d names parent %s[%s], which is not a root",
+					i, dp.ParentType, diag.ValueText(at.key)))
+				continue
+			}
+		}
+		t, ok := r.s.TypeByID(inst.TypeID)
+		if !ok {
+			continue
+		}
+		if dp.Relation == "" {
+			// One schema change fixes every position that names the type, so it is
+			// one break.
+			if _, rule := rootIneligibility(r.s, inst.TypeID); rule != "" {
+				if !r.refusedTypes[inst.TypeID] {
+					r.refuseType(inst.TypeID)
+					refuse("is a root duplicate of a type that " + rule)
+				}
+			} else if checkStoredKey(t, inst.PrimaryKey, inst.Properties.Get, r.canon) == nil && !r.resolves(inst.TypeID, inst.PrimaryKey) {
+				refuse("is a root duplicate, and no root is at its own type and key")
+			}
+			continue
+		}
+		if holders == nil {
+			holders = rootsByAddress(r, parts.Instances)
+		}
+		var parent InstanceParts
+		if holder, ok := holders[at]; ok {
+			parent = parts.Instances[holder]
+		}
+		composedDuplicate(r, slots, i, inst, at, dp.Relation, parent)
+	}
+}
+
+// rootsByAddress holds the index of each root by canonical address, relation left
+// empty. [composedDuplicate] reads a slot only at an address one sound root holds.
+func rootsByAddress(r *structureRules, roots []InstanceParts) map[oneSlot]int {
+	holders := make(map[oneSlot]int, len(roots))
+	for i, ip := range roots {
+		holders[oneSlot{source: ip.TypeID, key: r.canon.key(ip.TypeID, ip.PrimaryKey).String()}] = i
+	}
+	return holders
 }
 
 // rebuildInstance creates an Instance from InstanceParts, recursing into

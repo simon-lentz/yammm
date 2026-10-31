@@ -145,7 +145,7 @@ func TestRebuildSnapshot_UnnameableRootDuplicateRefused(t *testing.T) {
 	if !resultHasCode(result, diag.E_INTERNAL) {
 		t.Errorf("refusal reported %s, want %s", result, diag.E_INTERNAL)
 	}
-	if msg := result.String(); !strings.Contains(msg, "duplicate record 0") || !strings.Contains(msg, "no root is at its own type and key") {
+	if msg := result.String(); !strings.Contains(msg, "duplicate record 0") || !strings.Contains(msg, "of a type that is reachable only through an intermediate import") {
 		t.Errorf("refusal %q does not name the duplicate position", msg)
 	}
 	if msg := result.String(); strings.Contains(msg, "zero type identity") {

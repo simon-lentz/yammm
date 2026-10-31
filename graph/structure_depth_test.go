@@ -30,9 +30,9 @@ part type Leaf {
 `
 
 // TestRebuildSnapshot_HoldsEveryInstanceRuleAtEveryDepth drives each
-// per-instance rule at the two positions the instance walk reaches below a
-// root's children: a grandchild, and a composed child of a duplicate record's
-// instance. Each fault must draw its own rule's refusal there.
+// per-instance rule at a grandchild, the position the instance walk reaches
+// below a root's children. Each fault must draw its own rule's refusal there.
+// A duplicate's composed children are [TestRebuildSnapshot_ADuplicateWithComposedChildrenIsOneBreak]'s.
 func TestRebuildSnapshot_HoldsEveryInstanceRuleAtEveryDepth(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), depthSchema, "depth.yammm")
@@ -79,19 +79,6 @@ func TestRebuildSnapshot_HoldsEveryInstanceRuleAtEveryDepth(t *testing.T) {
 			r := node(root, "r1")
 			r.Composed = map[string][]graph.InstanceParts{"MID": {m}}
 			return graph.SnapshotParts{Types: []schema.TypeID{root}, Instances: []graph.InstanceParts{r}}
-		}},
-		{"duplicate's composed child", func(fault func(*graph.InstanceParts)) graph.SnapshotParts {
-			m := node(mid, "m1")
-			fault(&m)
-			dup := node(root, "r1")
-			dup.Composed = map[string][]graph.InstanceParts{"MID": {m}}
-			return graph.SnapshotParts{
-				Types:     []schema.TypeID{root},
-				Instances: []graph.InstanceParts{node(root, "r1")},
-				Duplicates: []graph.DuplicateParts{{
-					Instance: dup,
-				}},
-			}
 		}},
 	}
 	for _, pos := range positions {

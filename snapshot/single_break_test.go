@@ -491,11 +491,11 @@ func sbRows() []sbRow {
 		},
 		{
 			name: "composed duplicate with no row", edits: edit(sbTagDup, strings.Replace(sbTagDup, `{"type":6,`, `{"type":null,`, 1)),
-			want: malformed("duplicate record"), rebuild: 1,
+			want: malformed("duplicate record"),
 		},
 		{
 			name: "composed duplicate with no row whose stated conflict is a sibling at another key", edits: edit(sbTagDup, strings.Replace(strings.Replace(sbTagDup, `{"type":6,`, `{"type":null,`, 1), sbTagConflict, `"conflict":{"type":6,"key":["t2"]}`, 1)),
-			want: malformed("duplicate record"), rebuild: 1,
+			want: malformed("duplicate record"),
 		},
 		{
 			name: "composed duplicate whose conflict is a sibling at another key", edits: edit(`"conflict":{"type":6,"key":["t1"]}`, `"conflict":{"type":6,"key":["t2"]}`),
@@ -891,6 +891,77 @@ func sbRows() []sbRow {
 			want: malformed(`states reason "bogus"`), schemaless: true, rebuild: 1,
 		},
 
+		// An element that states nothing is one break.
+		{
+			name: "unresolved element that is null", edits: edit(sbUnresolved, sbUnresolved+`null,`),
+			want: malformed("states nothing"), schemaless: true,
+		},
+		{
+			name: "unresolved element that is an empty object", edits: edit(sbUnresolved, sbUnresolved+`{},`),
+			want: malformed("states nothing"), schemaless: true,
+		},
+		{
+			name: "duplicate element that is null", edits: edit(sbDups, sbDups+`null,`),
+			want: malformed("states nothing"), schemaless: true,
+		},
+		{
+			name: "duplicate element that is an empty object", edits: edit(sbDups, sbDups+`{},`),
+			want: malformed("states nothing"), schemaless: true,
+		},
+		{
+			name: "record with a null reason", edits: edit(sbKnowsLost, strings.Replace(sbKnowsLost, `"reason":"target_missing"`, `"reason":null`, 1)),
+			want: malformed("states no reason"), schemaless: true, rebuild: 1,
+		},
+		{
+			name: "record with a null reason and a null target key", edits: edit(sbKnowsLost, strings.Replace(strings.Replace(sbKnowsLost, `"reason":"target_missing"`, `"reason":null`, 1), `"target_key":["p8"]`, `"target_key":null`, 1)),
+			want: malformed("states no reason"), schemaless: true, rebuild: 1,
+		},
+		{
+			name: "absent record with a null reason", edits: edit(sbAbsent, strings.Replace(sbAbsent, `"reason":"absent"`, `"reason":null`, 1)),
+			want: malformed("states no reason"), required: 1, schemaless: true, rebuild: 1,
+		},
+
+		// A child whose row the walk refused states its key in its slot.
+		{
+			name: "composed child with no row at its duplicate's key", edits: edit(sbTagT1, `{"key":["t1"],"type":null,"properties":{"code":"t1"},"provenance":null}`),
+			want: malformed("composed child under sb#Order.TAGS carries no types-table row"), schemaless: true,
+		},
+		{
+			name: "composed child with a row out of range at its duplicate's key", edits: edit(sbTagT1, `{"key":["t1"],"type":99,"properties":{"code":"t1"},"provenance":null}`),
+			want: malformed("references types table row 99"), schemaless: true,
+		},
+		{
+			name: "composed child of another type at its duplicate's key", edits: edit(sbTagT1, `{"key":["t1"],"type":5,"properties":{"code":"t1"},"provenance":null}`),
+			want: one(diag.E_SNAPSHOT_TYPE_MISMATCH, "which the composition declares as sb#Tag"), rebuild: 1,
+		},
+		{
+			name: "(one) composed child with no row beside its duplicate", edits: edit(sbSeal, `"SEAL":[{"key":["s1"],"type":null,"properties":{"code":"s1"},"provenance":null}]`),
+			want: malformed("composed child under sb#Order.SEAL carries no types-table row"), schemaless: true,
+		},
+
+		// Every reference check runs before the (one) count and the record facts.
+		{
+			name: "edge to no root beside an accepted one under a (one) association", edits: edit(sbMentor, `"MENTOR":[{"target_type":4,"target_key":["p2"],"properties":{}},{"target_type":4,"target_key":["p7"],"properties":{}}]`),
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Person[["p7"]]`), rebuild: 1,
+		},
+		{
+			name: "edge to no root beside an absent record", edits: [][2]string{
+				{sbEmployer, `"EMPLOYER":[{"target_type":1,"target_key":["c7"],"properties":{"since":1999}}]`},
+				{sbUnresolved, sbUnresolved + sbRecord("p1", "EMPLOYER", "absent") + `,`},
+			},
+			want: one(diag.E_SNAPSHOT_DANGLING_REFERENCE, `references sb#Company[["c7"]]`), required: 3, rebuild: 1,
+		},
+		{
+			name: "edge to a refused root's stated address beside an accepted one under a (one) association", edits: [][2]string{
+				{sbC2, `{"key":["cx"],"properties":{"id":"c2"},"provenance":null}`},
+				{sbEmployer, sbEmployerTwice},
+			},
+			want: []sbWant{
+				sbError(diag.E_SNAPSHOT_MALFORMED, `disagrees with property "id"`),
+				sbError(diag.E_GRAPH_CARDINALITY, `(one) association "EMPLOYER"`),
+			}, rebuild: 2,
+		},
+
 		// Two breaks, each reported once.
 		{
 			name: "two (many) siblings at the key of one whose key is not its property's", edits: [][2]string{
@@ -1063,9 +1134,9 @@ func TestRead_OneBreakDrawsOneIssue(t *testing.T) {
 		if row.rebuild > 0 {
 			t.Run(row.name+"/RebuildSnapshot", func(t *testing.T) {
 				t.Parallel()
-				if n := sbFailures(snapshot.RebuildDocument([]byte(edited), s)); n != row.rebuild {
-					t.Errorf("RebuildSnapshot reports %d issues over the document's parts, want %d:\n%s",
-						n, row.rebuild, snapshot.RebuildDocument([]byte(edited), s))
+				rebuilt := snapshot.RebuildDocument([]byte(edited), s)
+				if n := sbFailures(rebuilt); n != row.rebuild || strings.Contains(rebuilt.String(), "cannot be built") {
+					t.Errorf("RebuildSnapshot reports %d issues over the document's parts, want %d:\n%s", n, row.rebuild, rebuilt)
 				}
 				if row.rebuild == 1 {
 					if n := sbFailures(snapshot.Verify(t.Context(), []byte(edited), s, snapshot.WithIssueLimit(0))); n != 1 {
@@ -1516,8 +1587,8 @@ part type K {
 }
 
 // Only a root holds composition slots: a keyed child's own children fill no
-// slot a duplicate is resolved in, so a duplicate parented at a root of the
-// child's type finds that root's children alone.
+// slot a duplicate is resolved in, and a root of the child's part type holds
+// none, so a duplicate parented at that root has no conflict to resolve.
 func TestRead_OnlyARootHoldsSlots(t *testing.T) {
 	t.Parallel()
 	s, res := schema.LoadString(t.Context(), `schema "dk"
@@ -1558,39 +1629,35 @@ part type K {
 			`{"type":0,"key":["b"],"instance":{"key":["b"],"properties":{"code":"b"},"provenance":null},"conflict":{"type":0,"key":["b"]},`+
 			`"parent_type":0,"parent_key":["a"],"relation":"K"}]`)
 	res = snapshot.Verify(t.Context(), []byte(doc), s, snapshot.WithIssueLimit(0))
-	if res.Len() != 2 || !hasCode(res, diag.E_SNAPSHOT_INVALID_ROOT) || !hasCode(res, diag.E_SNAPSHOT_DANGLING_REFERENCE) {
-		t.Errorf("%s, want the root's E_SNAPSHOT_INVALID_ROOT and the duplicate's dangling conflict", res)
+	if res.Len() != 1 || !hasCode(res, diag.E_SNAPSHOT_INVALID_ROOT) {
+		t.Errorf("%s, want the root's E_SNAPSHOT_INVALID_ROOT alone: it holds no slot, so the duplicate has no conflict to resolve", res)
 	}
 }
 
 // A root whose key property no longer gives its stored key still stands at
 // that address: every reference to it resolves, and the key's refusal is the
 // edit's one issue, as RebuildSnapshot reports it. A root whose stored key was
-// edited stands at another address, so a reference to the old one dangles at
-// the reader; RebuildSnapshot, which resolves no reference before its gate,
-// reports the key alone.
+// edited states its old address in its key property, so a reference to the old
+// one is judged no further at both layers.
 func TestRead_ARootWhoseKeyIsRefusedStillStandsAtItsAddress(t *testing.T) {
 	t.Parallel()
 	s, doc := singleBreakDoc(t)
-	for name, c := range map[string]struct {
-		from, to string
-		reader   int
-	}{
-		"a referenced Company's key property":         {sbC2, strings.Replace(sbC2, `{"id":"c2"}`, `{"id":"cx"}`, 1), 1},
-		"a Person with edges and records":             {sbP2, strings.Replace(sbP2, `{"id":"p2"}`, `{"id":"px"}`, 1), 1},
-		"a Person with no key property":               {sbP2, strings.Replace(sbP2, `{"id":"p2"}`, `{}`, 1), 1},
-		"an Order with composed duplicates":           {sbO1, strings.Replace(sbO1, `{"id":"o1"}`, `{"id":"ox"}`, 1), 1},
-		"a Person's stored key, its references stale": {sbP2, strings.Replace(sbP2, `["p2"]`, `["pz"]`, 1), -1},
+	for name, c := range map[string]struct{ from, to string }{
+		"a referenced Company's key property":         {sbC2, strings.Replace(sbC2, `{"id":"c2"}`, `{"id":"cx"}`, 1)},
+		"a Person with edges and records":             {sbP2, strings.Replace(sbP2, `{"id":"p2"}`, `{"id":"px"}`, 1)},
+		"a Person with no key property":               {sbP2, strings.Replace(sbP2, `{"id":"p2"}`, `{}`, 1)},
+		"an Order with composed duplicates":           {sbO1, strings.Replace(sbO1, `{"id":"o1"}`, `{"id":"ox"}`, 1)},
+		"a Person's stored key, its references stale": {sbP2, strings.Replace(sbP2, `["p2"]`, `["pz"]`, 1)},
 		// p9 is the target of p2's MENTOR record; a root there whose key is refused
 		// is no root graph.Add holds.
-		"a root at a record's target whose key is refused": {sbLastOrder, sbLastOrder + `{"key":["p9"],"properties":{"id":"px"},"provenance":null},`, 1},
+		"a root at a record's target whose key is refused": {sbLastOrder, sbLastOrder + `{"key":["p9"],"properties":{"id":"px"},"provenance":null},`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			edited := []byte(editOnce(t, doc, c.from, c.to))
 			res := snapshot.Verify(t.Context(), edited, s, snapshot.WithIssueLimit(0))
-			if c.reader > 0 && sbFailures(res) != c.reader {
-				t.Errorf("%d issues, want %d:\n%s", sbFailures(res), c.reader, res)
+			if n := sbFailures(res); n != 1 {
+				t.Errorf("%d issues, want 1:\n%s", n, res)
 			}
 			if !strings.Contains(res.String(), "stores key") {
 				t.Errorf("no key refusal:\n%s", res)

@@ -8,10 +8,24 @@ import (
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/internal/raceskip"
 	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
+
+// Every key of every merge renders here, and only a value outside the plain
+// scalars can be one a key cannot hold, so a plain scalar takes no second marshal.
+func TestRenderKeyValue_APlainScalarAllocatesAsAKeyDoes(t *testing.T) {
+	raceskip.Skip(t)
+	for _, v := range []any{"k", 7, int64(7), true} {
+		key := testing.AllocsPerRun(100, func() { _ = immutable.WrapKey([]any{v}).String() })
+		rendered := testing.AllocsPerRun(100, func() { _ = renderKeyValue(v) })
+		if rendered > key {
+			t.Errorf("%T: %.0f allocations, want at most a key's %.0f", v, rendered, key)
+		}
+	}
+}
 
 // canonicalizerSchema declares one type whose key canonicalizes and one whose
 // key does not, in a schema that declares a canonicalizing kind, so the

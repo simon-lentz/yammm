@@ -187,11 +187,13 @@ func WithValueConformance(report bool) LoadOption {
 // at the given severity, after every structural issue; at Error a document
 // that fails refuses to load. A root is run only when the structural checks
 // left it whole: no check refused its type, a unit of its tree, one of its
-// unresolved records, or one of its required or (one) associations, no record
-// whose types-table row the reader refused could be its, and no other root
-// stands at its address. An edge that names no root does not stop it, since
-// the validator does not judge whether a target exists; no duplicate record's
-// instance is run. It judges values — bounds,
+// edges, one of its unresolved records, or one of its required or (one) associations, no record
+// whose types-table row the reader refused could be its, and no other root the
+// reader walks stands at its address. The reader walks no root of an instances
+// entry that repeats a types-table row or names none. An edge that names no root
+// does not stop it, since the validator does not judge whether a target exists, unless it stands beside
+// another record under a (one) association; no duplicate record's instance is
+// run. It judges values — bounds,
 // enums, patterns, invariants — which the structural checks every read runs
 // leave alone, and reports each unresolved record no check refused under a
 // required association as

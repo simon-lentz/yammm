@@ -325,6 +325,16 @@ type dupWire struct {
 	Relation   string        `json:"relation,omitempty"`
 }
 
+// statesNothing reports whether the element is null or holds no field with a
+// value: each is absent, null or empty, and a conflict or provenance object,
+// even an empty one, is a value. That is one break however many facts it leaves
+// unstated.
+func (d dupWire) statesNothing() bool {
+	i := d.Instance
+	return d.Type == nil && len(d.Key) == 0 && d.Conflict == nil && d.ParentType == nil && len(d.ParentKey) == 0 && d.Relation == "" &&
+		len(i.Key) == 0 && i.Type == nil && len(i.Properties) == 0 && len(i.Edges) == 0 && len(i.Composed) == 0 && i.Provenance == nil
+}
+
 // unresolvedWire is the wire representation of an unresolved edge record.
 type unresolvedWire struct {
 	SourceType *int           `json:"source_type"`
@@ -335,6 +345,15 @@ type unresolvedWire struct {
 	Required   bool           `json:"required"`
 	Reason     string         `json:"reason"`
 	Properties map[string]any `json:"properties,omitempty"`
+}
+
+// statesNothing reports whether the element is null or holds no field with a
+// value: each is absent, null or empty, and a required of false is no value, as
+// the wire does not tell it from an absent one. That is one break however many
+// facts it leaves unstated.
+func (u unresolvedWire) statesNothing() bool {
+	return u.SourceType == nil && len(u.SourceKey) == 0 && u.Relation == "" && u.TargetType == nil && len(u.TargetKey) == 0 &&
+		!u.Required && u.Reason == "" && len(u.Properties) == 0
 }
 
 // diagWire is the wire representation of the diagnostics section.

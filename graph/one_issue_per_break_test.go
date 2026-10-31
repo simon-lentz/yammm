@@ -135,7 +135,7 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 				TypeID: emp.TypeID, PrimaryKey: emp.PrimaryKey, Properties: immutable.WrapProperties(map[string]any{"id": "e9"}),
 			})
 			p.Edges = append(p.Edges, graph.EdgeParts{
-				Relation: "WORKS_AT", SourceType: emp.TypeID, SourceKey: emp.PrimaryKey, TargetKey: immutable.WrapKey([]any{"c7"}),
+				Relation: "WORKS_AT", SourceType: emp.TypeID, SourceKey: emp.PrimaryKey, TargetKey: p.Instances[0].PrimaryKey,
 			})
 		}, 1, `disagrees with property "id"`},
 		{"two roots at one address", func(_ *schema.Schema, p *graph.SnapshotParts) {
@@ -156,12 +156,13 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 			p.Instances[1].Properties = immutable.WrapProperties(map[string]any{"id": "ex"})
 			p.Unresolved = append(p.Unresolved, record(*p, "WORKS_AT", "absent", ""))
 		}, 1, `disagrees with property "id"`},
+		// The edge a reference check refused is no count, so it is one break.
 		{"a (one) association of two edges, one to no root", func(_ *schema.Schema, p *graph.SnapshotParts) {
 			emp := p.Instances[1]
 			p.Edges = append(p.Edges, graph.EdgeParts{
 				Relation: "WORKS_AT", SourceType: emp.TypeID, SourceKey: emp.PrimaryKey, TargetKey: immutable.WrapKey([]any{"c7"}),
 			})
-		}, 1, `(one) association "WORKS_AT"`},
+		}, 1, `edge target`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -359,6 +360,21 @@ func TestNewFromSnapshot_ADuplicateUnderARefusedSlotResolvesNoConflict(t *testin
 	}
 }
 
+// A duplicate's instance holds no composed children, so holding them is the
+// record's one break, whatever they hold.
+func TestRebuildSnapshot_ADuplicateWithComposedChildrenIsOneBreak(t *testing.T) {
+	t.Parallel()
+	s, parts := recordFactsParts(t)
+	company := parts.Instances[0]
+	dup := company
+	dup.Composed = map[string][]graph.InstanceParts{"BOGUS": {{}}}
+	parts.Duplicates = []graph.DuplicateParts{{Instance: dup}}
+	_, res := graph.RebuildSnapshot(s, parts)
+	if failures(res) != 1 || !strings.Contains(res.String(), "has composed children") {
+		t.Errorf("%d issues, want the record's one refusal: %s", failures(res), res)
+	}
+}
+
 // Edges whose source no root stands at count toward no (one) association: each
 // addresses an instance the parts do not hold, which RebuildSnapshot refuses
 // as Fatal E_INTERNAL, one issue for each.
@@ -415,39 +431,38 @@ func TestRebuildSnapshot_ARootDuplicateNamesNoParent(t *testing.T) {
 	}
 }
 
-// A composed duplicate's conflict is resolved only in a slot a sound root holds
-// alone, at the import as at the reader. Under a keyless (many) slot a held
-// parent's duplicate has no conflict, which is its one break; a parent whose
-// key the importing schema refuses, or an address two roots stand at, is the
-// break instead, and the duplicate under it draws nothing more.
+// Under a keyless (many) slot a composed duplicate has no conflict, so the
+// position is its own break under any parent that is a root, at the import as at
+// the reader. A parent whose key the importing schema refuses, or an address two
+// roots stand at, is a second break beside it.
 func TestNewFromSnapshot_ADuplicateResolvesNoConflictAtAnUnheldParent(t *testing.T) {
 	t.Parallel()
 	const keylessItem = "\npart type Item {\n\tcode String\n}\n"
 	for _, c := range []struct {
 		name, built, bound string
 		parents            []string
-		code               diag.Code
+		codes              []diag.Code
 	}{
 		{
 			name:    "a held parent, the slot keyless under the importing schema",
 			built:   "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> ITEMS (_:many) Item\n}\n",
 			bound:   "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> ITEMS (_:many) Item\n}\n",
 			parents: []string{"o1"},
-			code:    diag.E_GRAPH_INVALID_COMPOSITION,
+			codes:   []diag.Code{diag.E_GRAPH_INVALID_COMPOSITION},
 		},
 		{
 			name:    "a parent whose key the importing schema refuses",
 			built:   "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> ITEMS (_:many) Item\n}\n",
 			bound:   "schema \"entry\"\n\ntype Order {\n\tid String primary\n\tn String primary\n\t*-> ITEMS (_:many) Item\n}\n",
 			parents: []string{"o1"},
-			code:    diag.E_GRAPH_INVALID_PK,
+			codes:   []diag.Code{diag.E_GRAPH_INVALID_PK, diag.E_GRAPH_INVALID_COMPOSITION},
 		},
 		{
 			name:    "two parents the importing schema keys as one",
 			built:   "schema \"entry\"\n\ntype Order {\n\tid String primary\n\t*-> ITEMS (_:many) Item\n}\n",
 			bound:   "schema \"entry\"\n\ntype Order {\n\tid Timestamp primary\n\t*-> ITEMS (_:many) Item\n}\n",
 			parents: []string{"2024-01-01T00:00:00Z", "2024-01-01T00:00:00+00:00"},
-			code:    diag.E_DUPLICATE_PK,
+			codes:   []diag.Code{diag.E_DUPLICATE_PK, diag.E_GRAPH_INVALID_COMPOSITION},
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -474,8 +489,13 @@ func TestNewFromSnapshot_ADuplicateResolvesNoConflictAtAnUnheldParent(t *testing
 				t.Fatalf("the snapshot holds %d duplicates, want 1", len(g.Snapshot().Duplicates()))
 			}
 			_, res := graph.NewFromSnapshot(loadAs(t, c.bound+keylessItem), g.Snapshot())
-			if failures(res) != 1 || !res.HasCode(c.code) {
-				t.Errorf("%d issues, want one %s: %s", failures(res), c.code, res)
+			if failures(res) != len(c.codes) {
+				t.Errorf("%d issues, want %v: %s", failures(res), c.codes, res)
+			}
+			for _, code := range c.codes {
+				if !res.HasCode(code) {
+					t.Errorf("no %s: %s", code, res)
+				}
 			}
 		})
 	}

@@ -25,9 +25,9 @@ import (
 // at every address it receives. The graph indexes an instance by the key it
 // carries, and for a Timestamp, Date or UUID key that is the canonical text
 // the value was rewritten into at entry — so [Graph.AddComposed] and
-// [Snapshot.InstanceByKey] canonicalize the address they are handed under the
-// type's key constraints before the lookup, and FormatKey over any spelling
-// of the instant addresses it. [Instance.PrimaryKey] is the address itself.
+// [Snapshot.InstanceByKey] canonicalize an address that misses as spelled under
+// the type's key constraints, and FormatKey over each spelling of one instant at
+// one offset addresses it. [Instance.PrimaryKey] is the address itself.
 //
 // Examples:
 //
@@ -35,17 +35,17 @@ import (
 //	FormatKey("us", 12345)    -> `["us",12345]`
 //	FormatKey(42)             -> `[42]`
 //
-// Valid component types are those produced by JSON unmarshaling: string,
-// int64, float64, bool, and nil.
+// It renders each value as [encoding/json] does, and the graph reads a key
+// component only as a scalar.
 //
 // Calling FormatKey with no values renders `null`, not `[]`: a variadic
 // parameter given no arguments is a nil slice, and so is one given a nil slice
-// to spread. [ParseKey] is the inverse over rendered scalars, not over that
-// case.
+// to spread. [ParseKey] reads a rendered key back, not that case, and its doc
+// names the components it does not read back as written.
 //
 // FormatKey panics if any value cannot be JSON-marshaled (e.g., channels,
-// functions, cyclic structs). This is a programmer error—primary key values
-// come from validated instances and are guaranteed JSON-marshalable.
+// functions, cyclic structs). This is a programmer error: the key rule refuses
+// such a component, so no key a graph holds reaches it.
 func FormatKey(values ...any) string {
 	data, err := json.Marshal(values)
 	if err != nil {

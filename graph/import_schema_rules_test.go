@@ -301,6 +301,22 @@ func TestNewFromSnapshot_DerivesRequiredUnderTheImportingSchema(t *testing.T) {
 	}
 }
 
+// One schema change fixes every entry that denotes a type no root can hold, so a
+// repeated entry is no second break.
+func TestRebuildSnapshot_ARepeatedEntryOfATypeNoRootHoldsIsOneBreak(t *testing.T) {
+	t.Parallel()
+	s := loadEntry(t, "schema \"entry\"\n\nabstract type Thing {\n\tid String primary\n}\n\ntype P {\n\tid String primary\n}\n")
+	thing := typeIDOf(t, s, "Thing")
+	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Types: []schema.TypeID{thing, thing, thing}})
+	got := 0
+	for range res.Issues() {
+		got++
+	}
+	if got != 1 || !strings.Contains(res.String(), "types entry 0") {
+		t.Errorf("RebuildSnapshot draws %d issues, want the first entry's alone: %s", got, res)
+	}
+}
+
 // A root duplicate's conflict is the root at its own type and key, as Graph.Add
 // records it, so a record of an abstract type, which holds no root, has none.
 func TestRebuildSnapshot_RefusesARootDuplicateOfATypeNoRootHolds(t *testing.T) {
@@ -312,7 +328,7 @@ func TestRebuildSnapshot_RefusesARootDuplicateOfATypeNoRootHolds(t *testing.T) {
 		Instance: graph.InstanceParts{TypeID: thing, PrimaryKey: immutable.WrapKey([]any{"p1"}), Properties: immutable.WrapProperties(map[string]any{"id": "p1"})},
 	}
 	_, res := graph.RebuildSnapshot(s, graph.SnapshotParts{Types: []schema.TypeID{p}, Instances: []graph.InstanceParts{p1}, Duplicates: []graph.DuplicateParts{dp}})
-	if !res.HasCode(diag.E_INTERNAL) || !strings.Contains(res.String(), "duplicate record 0") || !strings.Contains(res.String(), "no root is at its own type and key") {
+	if !res.HasCode(diag.E_INTERNAL) || !strings.Contains(res.String(), "duplicate record 0") || !strings.Contains(res.String(), "of a type that is abstract") {
 		t.Errorf("RebuildSnapshot = %s, want the record refused", res)
 	}
 }

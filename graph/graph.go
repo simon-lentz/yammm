@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -351,9 +352,9 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 //   - parentKey: the parent's primary key in [FormatKey]'s form — for example
 //     `["alice"]`, which [FormatKey]("alice") renders, or the PrimaryKey().String()
 //     of the [instance.ValidInstance] handed to [Graph.Add]. A Timestamp, Date or UUID
-//     component is canonicalized here as [Graph.Add] canonicalized it, so any
-//     spelling of the instant addresses the parent; a refusal names the
-//     spelling the caller wrote.
+//     component is canonicalized here as [Graph.Add] canonicalized it, so each
+//     spelling of one instant at one offset addresses the parent; a refusal
+//     names the spelling the caller wrote.
 //   - relationName: the composition relation name as declared in the schema
 //   - child: the validated child instance to attach
 //
@@ -1005,8 +1006,22 @@ func renderKeyComponent(v immutable.Value) string {
 	return renderKeyValue(v.Unwrap())
 }
 
-// renderKeyValue renders one unwrapped value in the canonical key form.
+// renderKeyValue renders one unwrapped value in the canonical key form. A key
+// property can hold a value no key can, as a NaN or a list holding one, which
+// [immutable.WrapKey] panics on: it renders as its text, which no key renders.
 func renderKeyValue(v any) string {
+	switch v.(type) {
+	case string, int, int64, bool:
+	default:
+		// A wrapped list marshals as a struct, so only its clone shows what WrapKey reads.
+		clone := immutable.Wrap(v).Clone()
+		if _, err := json.Marshal(clone); err != nil {
+			if held, ok := value.Scalar(clone); ok {
+				clone = held
+			}
+			return fmt.Sprintf("[%v]", clone)
+		}
+	}
 	return immutable.WrapKey([]any{v}).String()
 }
 

@@ -13,16 +13,16 @@ import (
 //
 // Values reports that the snapshot holds at least one instance and that
 // every root and composed child entered through the validator — an empty
-// snapshot attests false, so a vacuous truth cannot be re-marshalled as
-// an attestation. Rejected duplicates' payloads are outside the claim; a
+// built snapshot attests false, so a vacuous truth cannot be re-marshalled as
+// its attestation. Rejected duplicates' payloads are outside the claim; a
 // payload [Graph.AddOrMerge] merged is inside it when the merge installs a
 // record, and outside it when the merge installs nothing.
 // Associations reports that no unresolved record is Required.
 //
 // On a built snapshot both dimensions are computed. On a loaded snapshot
-// they carry the header's claim verbatim — protected against tampering by
-// the integrity hash and against nothing else, because [RebuildSnapshot]
-// accepts caller-assembled parts. The snapshot package's re-validation
+// they carry the header's claim verbatim. Nothing protects the claim: the
+// integrity hash stops no deliberate change, and [RebuildSnapshot] accepts
+// caller-assembled parts. The snapshot package's re-validation
 // load option is the reader's remedy when a claim is not enough.
 //
 // A snapshot may carry NO claim, which [Snapshot.Attestation] reports as nil.
@@ -49,8 +49,7 @@ type Attestation struct {
 // independent of Add() call order or concurrency ([Snapshot.EdgesFrom] in
 // [Snapshot.Edges]' order), and every ordering below
 // compares types by TypeID so two types rendering one name still sort apart:
-//   - [Snapshot.Types]: lexicographic by the TypeID's String (the schema
-//     path, ":", then the name)
+//   - [Snapshot.Types]: lexicographic by the TypeID's String
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
@@ -59,10 +58,11 @@ type Attestation struct {
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //
-// Every arm of each tuple is compared, so records that differ in an arm sort
-// apart, save the provenance arm, which compares a source name and a span
-// start, and a loaded provenance carries no span, so two loaded duplicates
-// that differ only in their provenance's path tie.
+// Every arm of each tuple is compared, and records that differ in an arm sort
+// apart, save in two cases. A properties arm writes no member's type inside a
+// list or map, so float64(1) and int64(1) there tie. The provenance arm compares
+// a source name and a span start, and a loaded provenance carries no span, so
+// two loaded duplicates that differ only in their provenance's path tie.
 //
 // No instance map is exposed, so there is no iteration order to be surprised
 // by: [Snapshot.AllInstances] yields every root instance in the order above,
@@ -180,12 +180,11 @@ func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
 
 // InstanceByKey looks up a single instance by type identity and primary key.
 //
-// The key is a [FormatKey]-form address. Any spelling of a component its
-// constraint accepts addresses the instance: the address is tried as spelled,
-// then canonicalized under the type's key constraints and tried again, as
-// [Graph.AddComposed] resolves the parent address it receives. The exact
-// spelling is the common case and costs one map read, so a Timestamp, Date or
-// UUID key is parsed only on a miss. [Instance.PrimaryKey]'s String is the
+// The key is a [FormatKey]-form address. The address is tried as spelled, then
+// canonicalized under the type's key constraints and tried again, as
+// [Graph.AddComposed] resolves the parent address it receives, so one instant at
+// two offsets is two addresses. The exact spelling is the common case, so a
+// Timestamp, Date or UUID key is parsed only on a miss. [Instance.PrimaryKey]'s String is the
 // address the instance carries; a string [ParseKey] refuses addresses nothing.
 // Returns (nil, false) on a miss.
 func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool) {

@@ -340,10 +340,11 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // header surfaces as Error-severity
 // E_SNAPSHOT_MALFORMED on the returned diag.Result, not as a bare error
 // return: a truncated header is a malformed document, whether the
-// truncation is on disk or in transit. Any other reader error is an I/O
-// failure and surfaces as Fatal E_SNAPSHOT_IO, the first such error as a
-// detail, so a file that opens and cannot be read is not reported as a
-// document that is wrong.
+// truncation is on disk or in transit. Another reader error that stops the
+// header's decode is an I/O failure and surfaces as Fatal E_SNAPSHOT_IO, the
+// first such error as a detail, so a file that opens and cannot be read is not
+// reported as a document that is wrong. A reader error after the types table
+// decodes is not read.
 //
 // ctx cancellation is checked at function entry; individual Read calls
 // on r are not cancellable mid-read. Readers backed by slow or network

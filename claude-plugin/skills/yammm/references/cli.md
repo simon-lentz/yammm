@@ -183,7 +183,7 @@ Validates a persisted snapshot against its schema. Checks integrity hash, schema
 | ---- | ----------- |
 | `--skip-integrity-check` | Skip integrity hash verification (hand-edited files) |
 | `--value-conformance` | Report stored `Timestamp`/`Date`/`UUID` values that do not conform to their constraints |
-| `--revalidate` | Run each root instance, with its composed children, its edges and its `target_missing` records, back through the validator; findings are reported as warnings, and a run with warnings alone exits 0. A duplicate record's instance is not run, and neither is a root a structural check refused a unit of: its type, its tree, one of its unresolved records, or one of its required or `(one)` associations, nor a root at an address another root stands at or at the key of a record whose types-table row the reader refused; an edge that names no root does not stop a root (v0.15+) |
+| `--revalidate` | Run each root instance the reader walks, with its composed children, its edges and its `target_missing` records, back through the validator; findings are reported as warnings, and a run with warnings alone exits 0. The reader walks no root of an instances entry that repeats a types-table row or names none. A duplicate record's instance is not run, and a root is not run where a structural check refused its type, its tree, one of its edges, one of its unresolved records, or one of its required or `(one)` associations, where another root the reader walks stands at its address, or where it stands at the key of a record whose types-table row the reader refused; an edge that names no root does not stop a root, unless it stands beside another record under a `(one)` association (v0.15+) |
 
 ### snapshot info
 
