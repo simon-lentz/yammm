@@ -124,14 +124,14 @@ type constKey struct {
 type nameTable struct {
 	inits       map[string]bool
 	types       map[schema.TypeID]string
-	dataTypes   map[*schema.DataType]string
-	dtKeys      map[*schema.DataType]string // each data type's exact spelling
+	dataTypes   map[schema.DataType]string
+	dtKeys      map[schema.DataType]string // each data type's exact spelling
 	layouts     map[string]string
-	edges       map[*schema.Relation]string
+	edges       map[schema.Relation]string
 	inlineEnum  map[enumKey]string
 	enumKeys    map[enumKey]string // each inline enum's exact spelling
-	elements    map[*schema.DataType]string
-	elementKeys map[*schema.DataType]string // each element enum's exact spelling
+	elements    map[schema.DataType]string
+	elementKeys map[schema.DataType]string // each element enum's exact spelling
 	consts      map[constKey]string
 }
 
@@ -144,18 +144,18 @@ type claim struct {
 // buildNameTable names every schema entity's declaration by the package doc's
 // Names rule. Every bare spelling is counted before any name is assigned, so a name
 // depends on the set of claims and never on their order.
-func buildNameTable(s *schema.Schema, inits map[string]bool, edges []edgeRec, layouts []string) *nameTable {
+func buildNameTable(s schema.Schema, inits map[string]bool, edges []edgeRec, layouts []string) *nameTable {
 	nt := &nameTable{
 		inits:       inits,
 		types:       map[schema.TypeID]string{},
-		dataTypes:   map[*schema.DataType]string{},
-		dtKeys:      map[*schema.DataType]string{},
+		dataTypes:   map[schema.DataType]string{},
+		dtKeys:      map[schema.DataType]string{},
 		layouts:     map[string]string{},
-		edges:       map[*schema.Relation]string{},
+		edges:       map[schema.Relation]string{},
 		inlineEnum:  map[enumKey]string{},
 		enumKeys:    map[enumKey]string{},
-		elements:    map[*schema.DataType]string{},
-		elementKeys: map[*schema.DataType]string{},
+		elements:    map[schema.DataType]string{},
+		elementKeys: map[schema.DataType]string{},
 		consts:      map[constKey]string{},
 	}
 	var claims []claim
@@ -169,7 +169,7 @@ func buildNameTable(s *schema.Schema, inits map[string]bool, edges []edgeRec, la
 			})
 		}
 	}
-	inlineEnums := func(ownerBare, ownerWord string, ownerParts []string, props []*schema.Property) {
+	inlineEnums := func(ownerBare, ownerWord string, ownerParts []string, props []schema.Property) {
 		ownerKey := exactSpelling(ownerWord, ownerParts...)
 		enumWord := wordEnum
 		if ownerWord == wordAssociation {
@@ -189,12 +189,12 @@ func buildNameTable(s *schema.Schema, inits map[string]bool, edges []edgeRec, la
 		}
 	}
 
-	for _, sc := range s.Closure() {
-		for _, t := range sc.TypesSlice() {
+	for sc := range s.Closure() {
+		for t := range sc.Types() {
 			id := t.ID()
 			claims = append(claims, claim{bare: nt.ident(t.Name()), exact: typeKey(t), assign: func(name string) { nt.types[id] = name }})
 		}
-		for _, dt := range sc.DataTypesSlice() {
+		for dt := range sc.DataTypes() {
 			bare := nt.ident(dt.Name())
 			exact := exactSpelling(wordDataType, sc.Name(), dt.Name())
 			nt.dtKeys[dt] = exact
@@ -216,9 +216,9 @@ func buildNameTable(s *schema.Schema, inits map[string]bool, edges []edgeRec, la
 			}
 		}
 	}
-	for _, sc := range s.Closure() {
-		for _, t := range sc.TypesSlice() {
-			inlineEnums(nt.ident(t.Name()), wordType, []string{t.SchemaName(), t.Name()}, t.AllPropertiesSlice())
+	for sc := range s.Closure() {
+		for t := range sc.Types() {
+			inlineEnums(nt.ident(t.Name()), wordType, []string{t.SchemaName(), t.Name()}, slices.Collect(t.AllProperties()))
 		}
 	}
 	for _, e := range edges {
@@ -226,7 +226,7 @@ func buildNameTable(s *schema.Schema, inits map[string]bool, edges []edgeRec, la
 		bare := "EDGE_" + nt.ident(e.owner.Name()) + "_" + rel.FieldName() + "_" + nt.ident(e.target.Name())
 		parts := []string{e.owner.SchemaName(), e.owner.Name(), rel.Name()}
 		claims = append(claims, claim{bare: bare, exact: edgeKey(e), assign: func(name string) { nt.edges[rel] = name }})
-		inlineEnums(bare, wordAssociation, parts, rel.PropertiesSlice())
+		inlineEnums(bare, wordAssociation, parts, slices.Collect(rel.Properties()))
 	}
 	for _, layout := range layouts {
 		claims = append(claims, claim{bare: layoutTypeBase(layout), exact: layoutTypeExact(layout), assign: func(name string) { nt.layouts[layout] = name }})
@@ -250,7 +250,7 @@ func buildNameTable(s *schema.Schema, inits map[string]bool, edges []edgeRec, la
 }
 
 // typeKey is t's exact spelling, which also keys its struct as an enum owner.
-func typeKey(t *schema.Type) string {
+func typeKey(t schema.Type) string {
 	return exactSpelling(wordType, t.SchemaName(), t.Name())
 }
 
@@ -295,21 +295,21 @@ func (nt *nameTable) goType(id schema.TypeID) (string, bool) {
 	return n, ok
 }
 
-// goDataType returns the resolved Go type name for a datatype (pointer-keyed).
-func (nt *nameTable) goDataType(dt *schema.DataType) (string, bool) {
+// goDataType returns the resolved Go type name for a datatype.
+func (nt *nameTable) goDataType(dt schema.DataType) (string, bool) {
 	n, ok := nt.dataTypes[dt]
 	return n, ok
 }
 
 // goInlineEnum returns the Go type name of the inline enum property p declares
 // in owner's struct.
-func (nt *nameTable) goInlineEnum(owner enumOwner, p *schema.Property) string {
+func (nt *nameTable) goInlineEnum(owner enumOwner, p schema.Property) string {
 	return nt.inlineEnum[enumKey{owner: owner.key, property: p.Name()}]
 }
 
 // goDataTypeElement returns the Go type name of the inline enum a List
 // DataType holds as its innermost element. It is false for any other DataType.
-func (nt *nameTable) goDataTypeElement(dt *schema.DataType) (string, bool) {
+func (nt *nameTable) goDataTypeElement(dt schema.DataType) (string, bool) {
 	n, ok := nt.elements[dt]
 	return n, ok
 }

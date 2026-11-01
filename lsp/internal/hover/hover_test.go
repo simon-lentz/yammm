@@ -56,7 +56,7 @@ func TestBuildHoverForSymbolWithRange_AcceptsOverrideParameter(t *testing.T) {
 		Kind:      symbols.SymbolType,
 		SourceID:  targetSourceID,
 		Selection: targetSymSpan,
-		Data:      &schema.Type{}, // Non-nil data
+		Data:      schema.Type{},
 	}
 
 	// The reference span is in the current document (different from target)

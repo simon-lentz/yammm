@@ -20,7 +20,7 @@ func TestNewImport(t *testing.T) {
 
 	imp := schema.TestNewImport("./types.yammm", "types", sourceID, span)
 
-	assert.NotNil(t, imp)
+	assert.False(t, imp.IsZero())
 	assert.Equal(t, "./types.yammm", imp.Path())
 	assert.Equal(t, "types", imp.Alias())
 	assert.Equal(t, sourceID, imp.ResolvedSourceID())
@@ -97,10 +97,10 @@ func TestImport_ResolvedPath_ZeroSourceID(t *testing.T) {
 	assert.Empty(t, result)
 }
 
-func TestImport_Schema_Nil(t *testing.T) {
+func TestImport_Schema_Zero(t *testing.T) {
 	imp := schema.TestNewImport("./types.yammm", "types", location.SourceID{}, location.Span{})
 
-	assert.Nil(t, imp.Schema())
+	assert.True(t, imp.Schema().IsZero())
 }
 
 func TestImport_Schema_Resolved(t *testing.T) {
@@ -109,7 +109,9 @@ func TestImport_Schema_Resolved(t *testing.T) {
 
 	schema.TestSetImportSchema(imp, s)
 
-	assert.Same(t, s, imp.Schema())
+	if s != imp.Schema() {
+		t.Error("s and imp.Schema() do not name one record")
+	}
 }
 
 func TestImport_Span(t *testing.T) {
@@ -132,12 +134,12 @@ func TestImport_Span(t *testing.T) {
 func TestImport_Seal_PreventsMutation(t *testing.T) {
 	tests := []struct {
 		name   string
-		mutate func(s *schema.Import)
+		mutate func(s schema.Import)
 	}{
-		{"SetResolvedSourceID", func(s *schema.Import) {
+		{"SetResolvedSourceID", func(s schema.Import) {
 			schema.TestSetImportResolvedSourceID(s, location.MustNewSourceID("test://new"))
 		}},
-		{"SetSchema", func(s *schema.Import) {
+		{"SetSchema", func(s schema.Import) {
 			schema.TestSetImportSchema(s, schema.TestNewSchema("test", location.SourceID{}, location.Span{}, ""))
 		}},
 	}
@@ -161,7 +163,9 @@ func TestImport_SettersWorkBeforeSeal(t *testing.T) {
 
 	s := schema.TestNewSchema("types", location.SourceID{}, location.Span{}, "")
 	schema.TestSetImportSchema(imp, s)
-	assert.Same(t, s, imp.Schema())
+	if s != imp.Schema() {
+		t.Error("s and imp.Schema() do not name one record")
+	}
 }
 
 func TestImport_SetResolvedSourceID_UpdatesValue(t *testing.T) {
@@ -179,7 +183,9 @@ func TestImport_SetSchema_UpdatesValue(t *testing.T) {
 
 	schema.TestSetImportSchema(imp, s)
 
-	assert.Same(t, s, imp.Schema())
+	if s != imp.Schema() {
+		t.Error("s and imp.Schema() do not name one record")
+	}
 	assert.Equal(t, "imported", imp.Schema().Name())
 }
 

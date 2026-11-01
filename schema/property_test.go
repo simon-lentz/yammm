@@ -161,7 +161,7 @@ func TestNewProperty(t *testing.T) {
 
 	p := schema.TestNewProperty("name", span, doc, constraint, schema.DataTypeRef{}, false, false, scope, nil)
 
-	assert.NotNil(t, p)
+	assert.False(t, p.IsZero())
 	assert.Equal(t, "name", p.Name())
 	assert.Equal(t, span, p.Span())
 	assert.Equal(t, doc, p.Documentation())
@@ -273,15 +273,15 @@ func TestProperty_Equal_OneNilConstraint(t *testing.T) {
 
 func TestProperty_Equal_NilProperty(t *testing.T) {
 	p1 := schema.TestNewProperty("name", location.Span{}, "", nil, schema.DataTypeRef{}, false, false, schema.DeclaringScope{}, nil)
-	var p2 *schema.Property
+	var p2 schema.Property
 
 	assert.False(t, p1.Equal(p2))
 	assert.False(t, p2.Equal(p1))
 }
 
 func TestProperty_Equal_BothNil(t *testing.T) {
-	var p1 *schema.Property
-	var p2 *schema.Property
+	var p1 schema.Property
+	var p2 schema.Property
 
 	assert.True(t, p1.Equal(p2))
 }
@@ -298,7 +298,7 @@ func TestProperty_Equal_IgnoresSpanAndDoc(t *testing.T) {
 	assert.True(t, p1.Equal(p2))
 }
 
-func narrowProp(name string, constraint schema.Constraint, optional, pk bool) *schema.Property {
+func narrowProp(name string, constraint schema.Constraint, optional, pk bool) schema.Property {
 	return schema.TestNewProperty(name, location.Span{}, "", constraint, schema.DataTypeRef{}, optional, pk, schema.DeclaringScope{}, nil)
 }
 
@@ -307,8 +307,8 @@ func TestProperty_CanNarrowFrom(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		child  *schema.Property
-		parent *schema.Property
+		child  schema.Property
+		parent schema.Property
 		want   bool
 	}{
 		{
@@ -385,20 +385,20 @@ func TestProperty_CanNarrowFrom(t *testing.T) {
 		},
 		{
 			name:   "nil properties both",
-			child:  nil,
-			parent: nil,
+			child:  schema.Property{},
+			parent: schema.Property{},
 			want:   true,
 		},
 		{
 			name:   "nil child non-nil parent",
-			child:  nil,
+			child:  schema.Property{},
 			parent: narrowProp("x", schema.NewStringConstraint(), false, false),
 			want:   false,
 		},
 		{
 			name:   "non-nil child nil parent",
 			child:  narrowProp("x", schema.NewStringConstraint(), false, false),
-			parent: nil,
+			parent: schema.Property{},
 			want:   false,
 		},
 		{

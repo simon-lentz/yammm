@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,7 +18,7 @@ import (
 // dropReasonSchema declares a required association, so a graph can hold an
 // unresolved record whose reason is "absent" — the shape whose stated target
 // key and edge properties the wire cannot carry.
-func dropReasonSchema(t *testing.T) *schema.Schema {
+func dropReasonSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "drop_reason"
 
@@ -86,10 +87,10 @@ func TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked(t *testing.T) {
 	s := dropReasonSchema(t)
 	targetType, _ := s.Type("Target")
 
-	row := func(key string) *instance.ValidInstance {
+	row := func(key string) instance.ValidInstance {
 		return instance.NewValidInstance("Target", targetType.ID(),
 			immutable.WrapKey([]any{key}),
-			immutable.WrapProperties(map[string]any{"id": key}), nil, nil, nil)
+			immutable.WrapProperties(map[string]any{"id": key}), nil, nil, location.Provenance{})
 	}
 	g := graph.New(s)
 	if r := g.Add(t.Context(), row("t1")); !r.OK() {
@@ -99,10 +100,10 @@ func TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked(t *testing.T) {
 		t.Fatal("a duplicate primary key was accepted")
 	}
 	snap := g.Snapshot()
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("duplicates = %d, want 1", len(snap.Duplicates()))
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("duplicates = %d, want 1", len(slices.Collect(snap.Duplicates())))
 	}
-	if snap.Duplicates()[0].Diagnostic().Code() == (diag.Code{}) {
+	if slices.Collect(snap.Duplicates())[0].Diagnostic().Code() == (diag.Code{}) {
 		t.Fatal("the duplicate carries no diagnostic, so this test asserts nothing")
 	}
 
@@ -114,7 +115,7 @@ func TestMarshal_ADuplicatesDiagnosticIsDroppedUnmarked(t *testing.T) {
 	if lres.HasErrors() {
 		t.Fatalf("load: %s", lres)
 	}
-	if got := loaded.Duplicates()[0].Diagnostic().Code(); got != (diag.Code{}) {
+	if got := slices.Collect(loaded.Duplicates())[0].Diagnostic().Code(); got != (diag.Code{}) {
 		t.Errorf("the round trip kept the diagnostic as %q; the wire has no field for it", got)
 	}
 }
@@ -130,7 +131,7 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	s := dropReasonSchema(t)
 	targetType, _ := s.Type("Target")
 
-	build := func(prov *location.Provenance) *graph.Snapshot {
+	build := func(prov location.Provenance) graph.Snapshot {
 		t.Helper()
 		snap, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 			Types: []schema.TypeID{targetType.ID()},
@@ -148,7 +149,7 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 		}
 		return snap
 	}
-	roundTrip := func(snap *graph.Snapshot) *graph.Instance {
+	roundTrip := func(snap graph.Snapshot) graph.Instance {
 		t.Helper()
 		data, mres := snapshot.Marshal(t.Context(), snap)
 		if mres.HasErrors() {
@@ -158,13 +159,13 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 		if lres.HasErrors() {
 			t.Fatalf("load: %s", lres)
 		}
-		return loaded.InstancesOf(targetType.ID())[0]
+		return slices.Collect(loaded.InstancesOf(targetType.ID()))[0]
 	}
 
 	// With a provenance in the document: one comes back, and its span is zero.
 	written := location.NewProvenance("a.json", path.Root(), location.Span{Start: location.Position{Line: 7, Column: 3}})
 	got := roundTrip(build(written)).Provenance()
-	if got == nil {
+	if got.IsZero() {
 		t.Fatal("a document whose instance carried a provenance loaded without one")
 	}
 	if got.SourceName() != "a.json" {
@@ -175,7 +176,7 @@ func TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne(t *testing.T) {
 	}
 
 	// With none: none comes back, which the unconditional claim denied.
-	if p := roundTrip(build(nil)).Provenance(); p != nil {
+	if p := roundTrip(build(location.Provenance{})).Provenance(); !p.IsZero() {
 		t.Errorf("a document whose instance carried no provenance loaded with %v", p)
 	}
 }

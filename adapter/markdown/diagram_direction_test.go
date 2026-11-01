@@ -94,7 +94,7 @@ func TestCheckDiagram_ReadsTheDiagramAsMermaidDoes(t *testing.T) {
 
 // mustMarshal returns Marshal's document for s, failing the test when Marshal
 // refuses it.
-func mustMarshal(t *testing.T, s *schema.Schema) []byte {
+func mustMarshal(t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	out, err := Marshal(s)
 	if err != nil {

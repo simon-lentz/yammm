@@ -20,7 +20,7 @@ func TestNewDataType(t *testing.T) {
 
 	dt := schema.TestNewDataType("Email", constraint, span, doc)
 
-	assert.NotNil(t, dt)
+	assert.False(t, dt.IsZero())
 	assert.Equal(t, "Email", dt.Name())
 	assert.Equal(t, constraint, dt.Constraint())
 	assert.Equal(t, span, dt.Span())

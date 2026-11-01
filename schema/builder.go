@@ -16,7 +16,8 @@ import (
 	"github.com/simon-lentz/yammm/schema/expr"
 )
 
-// Name productions mirrored from the grammar's lexer rules. The Builder and
+// Name productions mirrored from the grammar: the type and property names from
+// its lexer rules, the relation name from its RelationName production. The Builder and
 // the parser are two front doors to the same object model: a Builder-built
 // schema must remain expressible in the DSL, so declared names are held to
 // the same productions the parser enforces structurally. Schema names and
@@ -118,9 +119,12 @@ type ImportResolver func(path string) (location.SourceID, bool)
 //
 // # Validation Contract
 //
-// Build refuses what the DSL refuses in a name, a string value, a
-// documentation string or a constraint, so a Builder-built schema remains
-// expressible in the DSL.
+// Build refuses what the DSL refuses in a name, a string value, a documentation
+// string or a constraint, save in an import path that names a registered schema,
+// which may hold any character. Those parts of a Builder-built schema remain
+// expressible in the DSL. Completion types an invariant's expression, so an undefined variable or an
+// Op no source spells at the head of an SExpr draws E_INVALID_INVARIANT. A NaN or
+// infinite literal, and a bare or child Op no source spells, pass Build.
 // A declared type, datatype, property or relation name that the DSL's name
 // productions refuse is E_INVALID_NAME (an import alias is completion's
 // E_INVALID_ALIAS): type and datatype names are an uppercase letter
@@ -128,7 +132,7 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // built-in type names; property names start with a lowercase letter and are
 // none of as, part, in, nil, true and false; relation names are UPPER_SNAKE
 // and are not UUID. A constraint no .yammm source can state is
-// E_INVALID_CONSTRAINT: inverted bounds, a non-finite Float bound, a negative
+// E_INVALID_CONSTRAINT: a nil constraint, inverted bounds, a non-finite Float bound, a negative
 // length, an enum value empty or repeated or fewer than two values, a Pattern
 // with no pattern, more than two or one regexp.Compile refuses, a Vector
 // dimension outside 1 to 65536, a List with no element, and a Go type this
@@ -156,8 +160,8 @@ type ImportResolver func(path string) (location.SourceID, bool)
 // closure holds two schemas of one name is E_DUPLICATE_SCHEMA. An import that
 // resolves to the built schema's own source ID, or to a registered schema
 // whose closure holds that ID, is E_IMPORT_CYCLE, as a load refuses a cycle.
-// An import whose closure holds a source compiled from other bytes than an
-// earlier import's closure holds it is E_IMPORT_RESOLVE, as on a load.
+// An import whose closure holds a source as a compile without equal bytes to the
+// one an earlier import's closure holds is E_IMPORT_RESOLVE, as on a load.
 type Builder struct {
 	name           string
 	sourceID       location.SourceID
@@ -327,11 +331,11 @@ func (b *Builder) AddDataType(name string, constraint Constraint) *Builder {
 // Build constructs the final Schema from the builder state.
 //
 // If validation fails (missing SourceID for imports, semantic errors),
-// returns (nil, Result) where Result.HasErrors() is true.
+// returns the zero Schema and a Result where Result.HasErrors() is true.
 //
 // Callers should check Result.HasErrors() to determine success.
 // Builder never returns Go errors; all issues are diagnostics.
-func (b *Builder) Build() (*Schema, diag.Result) {
+func (b *Builder) Build() (Schema, diag.Result) {
 	collector := diag.NewCollector(b.issueLimit)
 
 	// Validate schema name is non-empty (required for stable SourceID)
@@ -339,13 +343,13 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 		collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
 			"schema name is required; call WithName() before Build()").
 			WithDetail(diag.DetailKeyContext, "Builder").Build())
-		return nil, collector.Result()
+		return Schema{}, collector.Result()
 	}
 	if !utf8.ValidString(b.name) {
 		collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_NAME,
 			fmt.Sprintf("schema name %q is not valid UTF-8; the DSL writes it as a string, whose value is", b.name)).
 			WithDetail(diag.DetailKeyContext, "Builder").Build())
-		return nil, collector.Result()
+		return Schema{}, collector.Result()
 	}
 
 	// Validate SourceID requirement for imports - must be set AND non-zero
@@ -353,12 +357,12 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 		collector.Collect(diag.NewIssue(diag.Error, diag.E_MISSING_SOURCE_ID,
 			"AddImport requires WithSourceID to be called with a non-zero SourceID").
 			WithDetail(diag.DetailKeyContext, "Builder").Build())
-		return nil, collector.Result()
+		return Schema{}, collector.Result()
 	}
 
 	// Validate basic input invariants before completion
 	if !b.validateInput(collector) {
-		return nil, collector.Result()
+		return Schema{}, collector.Result()
 	}
 
 	// If WithSourceID() not called, SourceID defaults to zero (identity-less).
@@ -375,7 +379,7 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 			collector.Collect(diag.NewIssue(diag.Error, diag.E_INVALID_SYNTHETIC_ID,
 				fmt.Sprintf("invalid synthetic source ID: %s", err)).
 				WithDetail(diag.DetailKeyID, sourceID.String()).Build())
-			return nil, collector.Result()
+			return Schema{}, collector.Result()
 		}
 	}
 
@@ -399,28 +403,24 @@ func (b *Builder) Build() (*Schema, diag.Result) {
 	resolvedImports := b.resolveImports(collector)
 	if len(b.imports) > 0 && resolvedImports == nil {
 		// Import resolution failed - diagnostics already collected
-		return nil, collector.Result()
+		return Schema{}, collector.Result()
 	}
 
 	// Complete the schema with resolved imports
 	s := completeModel(m, sourceID, collector, registry, resolvedImports)
-	if s == nil {
-		return nil, collector.Result()
-	}
 
-	// Ensure schema is nil when errors exist
-	// This catches cases where completion succeeded but errors were collected
-	// (e.g., property/relation conflicts that don't abort completion)
+	// completeModel returns the zero Schema only with an error collected, so this
+	// one check decides both.
 	if collector.HasErrors() {
-		return nil, collector.Result()
+		return Schema{}, collector.Result()
 	}
 
-	// Wire import schema pointers and seal imports
+	// Wire import schemas and seal imports
 	b.wireImports(s)
 
 	if issue, clash := closureNameClash(s); clash {
 		collector.Collect(issue)
-		return nil, collector.Result()
+		return Schema{}, collector.Result()
 	}
 
 	// Seal the schema to prevent further mutation
@@ -471,7 +471,7 @@ func propertiesWithPendingAnnotations(state *typeBuilderState) []*propertyDecl {
 				continue
 			}
 			// out starts as an element-wise clone of state.properties, so
-			// out[i] still being the retained pointer is exactly "not copied
+			// out[i] still being the retained record is exactly "not copied
 			// yet" — no separate bookkeeping, and no way for a second
 			// annotation on the same property to re-copy and discard the first.
 			if pd == state.properties[i] {
@@ -719,12 +719,12 @@ func (b *Builder) validateInput(collector *diag.Collector) bool {
 // CheckConstraint returns why c cannot judge a value, or nil when it can. It
 // refuses what [Builder.Build] refuses in a constraint: a nil constraint, an
 // argument no .yammm source can state, a DataType reference under a name no
-// source writes, a DataType reference resolved to another reference alone, as
-// a datatype declared as another alone is, a List with no element, more than two patterns or one
+// source writes, a List with no element, more than two patterns or one
 // regexp.Compile refuses, and a constraint of a Go type this package does not
 // construct, such as a pointer to one. A raw constraint meets
-// no completion, so it also refuses a DataType reference that resolves to no
-// constraint, at any List depth. The Neo4j adapter's Coerce and CoerceParams,
+// no completion, so it also refuses a DataType reference resolved to another
+// reference alone, as a datatype declared as another alone is, and one that
+// resolves to no constraint, at any List depth. The Neo4j adapter's Coerce and CoerceParams,
 // and instance.CheckValue and CanonicalValue, call it before they read a
 // value.
 func CheckConstraint(c Constraint) error {
@@ -958,7 +958,7 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 	resolved := make(resolvedImportMap, len(b.imports))
 	// Track seen SourceIDs for duplicate detection
 	seenSourceIDs := make(map[location.SourceID]*importDecl)
-	compiles := make(map[location.SourceID]*Schema)
+	compiles := make(map[location.SourceID]Schema)
 	hasErrors := false
 	for _, imp := range b.imports {
 		// Keep-first: once an alias has resolved, a later declaration of the
@@ -1017,7 +1017,7 @@ func (b *Builder) resolveImports(collector *diag.Collector) resolvedImportMap {
 		}
 		if member, split := b.splitCompile(compiles, resolvedID); split {
 			collector.Collect(importResolveIssue("", diag.ModuleRootNone,
-				fmt.Sprintf("import %q holds %s in its closure compiled from different bytes than an earlier import's closure holds", imp.Path, member), imp))
+				fmt.Sprintf("import %q holds %s in its closure as a different compile than an earlier import's closure holds", imp.Path, member), imp))
 			hasErrors = true
 			continue
 		}
@@ -1038,25 +1038,25 @@ func (b *Builder) importClosesCycle(id location.SourceID) bool {
 		return true
 	}
 	dep, ok := b.registry.LookupBySourceID(id)
-	return ok && slices.ContainsFunc(dep.Closure(), func(member *Schema) bool {
+	return ok && slices.ContainsFunc(slices.Collect(dep.Closure()), func(member Schema) bool {
 		return member.SourceID() == b.sourceID
 	})
 }
 
 // splitCompile walks the closure of the schema registered as id by schema,
 // not by SourceID as [Schema.Closure] does, recording each member in compiles.
-// It reports a member whose SourceID compiles already holds as a schema
-// compiled from other bytes: the built closure would keep one and resolve the
+// It reports a member whose SourceID compiles already holds as a schema without
+// equal bytes: the built closure would keep one and resolve the
 // other's references into it, which a load refuses.
-func (b *Builder) splitCompile(compiles map[location.SourceID]*Schema, id location.SourceID) (location.SourceID, bool) {
+func (b *Builder) splitCompile(compiles map[location.SourceID]Schema, id location.SourceID) (location.SourceID, bool) {
 	dep, ok := b.registry.LookupBySourceID(id)
 	if !ok {
 		return location.SourceID{}, false
 	}
-	visited := map[*Schema]bool{}
-	for queue := []*Schema{dep}; len(queue) > 0; queue = queue[1:] {
+	visited := map[Schema]bool{}
+	for queue := []Schema{dep}; len(queue) > 0; queue = queue[1:] {
 		cur := queue[0]
-		if cur == nil || visited[cur] {
+		if visited[cur] {
 			continue
 		}
 		visited[cur] = true
@@ -1074,13 +1074,13 @@ func (b *Builder) splitCompile(compiles map[location.SourceID]*Schema, id locati
 	return location.SourceID{}, false
 }
 
-// wireImports wires schema pointers and seals imports after completion.
-func (b *Builder) wireImports(s *Schema) {
+// wireImports wires schemas and seals imports after completion.
+func (b *Builder) wireImports(s Schema) {
 	if len(b.imports) == 0 || b.registry == nil {
 		return
 	}
 
-	for _, imp := range s.ImportsSlice() {
+	for imp := range s.Imports() {
 		// Look up by SourceID (which was set during completion)
 		if !imp.ResolvedSourceID().IsZero() {
 			resolved, ok := b.registry.LookupBySourceID(imp.ResolvedSourceID())
@@ -1095,9 +1095,9 @@ func (b *Builder) wireImports(s *Schema) {
 // closureNameClash reports two members of s's import closure that declare one
 // schema name, at s's declaration. The loader and the Builder each check the
 // closure they complete: an import can bring members no registry holds.
-func closureNameClash(s *Schema) (diag.Issue, bool) {
-	first := map[string]*Schema{}
-	for _, member := range s.Closure() {
+func closureNameClash(s Schema) (diag.Issue, bool) {
+	first := map[string]Schema{}
+	for member := range s.Closure() {
 		prior, taken := first[member.Name()]
 		if !taken {
 			first[member.Name()] = member
@@ -1121,21 +1121,43 @@ type TypeBuilder struct {
 // WithProperty adds a property to the type.
 func (t *TypeBuilder) WithProperty(name string, c Constraint) *TypeBuilder {
 	t.state.properties = append(t.state.properties, &propertyDecl{
-		Name:       name,
-		Constraint: c,
-		Optional:   false,
-		Span:       location.Span{}, // Synthetic
+		Name:        name,
+		Constraint:  c,
+		DataTypeRef: dataTypeRefOf(c),
+		Optional:    false,
+		Span:        location.Span{}, // Synthetic
 	})
 	return t
+}
+
+// dataTypeRefOf returns the reference c names, through any List depth, as the
+// parser records it for the same declaration. A builder reads no source, so the
+// reference holds no span.
+func dataTypeRefOf(c Constraint) DataTypeRef {
+	for {
+		switch v := c.(type) {
+		case ListConstraint:
+			c = v.element
+		case AliasConstraint:
+			qualifier, name, ok := referenceParts(v.dataTypeName)
+			if !ok {
+				return DataTypeRef{}
+			}
+			return NewDataTypeRef(qualifier, name, location.Span{})
+		default:
+			return DataTypeRef{}
+		}
+	}
 }
 
 // WithOptionalProperty adds an optional property to the type.
 func (t *TypeBuilder) WithOptionalProperty(name string, c Constraint) *TypeBuilder {
 	t.state.properties = append(t.state.properties, &propertyDecl{
-		Name:       name,
-		Constraint: c,
-		Optional:   true,
-		Span:       location.Span{}, // Synthetic
+		Name:        name,
+		Constraint:  c,
+		DataTypeRef: dataTypeRefOf(c),
+		Optional:    true,
+		Span:        location.Span{}, // Synthetic
 	})
 	return t
 }
@@ -1145,6 +1167,7 @@ func (t *TypeBuilder) WithPrimaryKey(name string, c Constraint) *TypeBuilder {
 	t.state.properties = append(t.state.properties, &propertyDecl{
 		Name:         name,
 		Constraint:   c,
+		DataTypeRef:  dataTypeRefOf(c),
 		Optional:     false,
 		IsPrimaryKey: true,
 		Span:         location.Span{}, // Synthetic

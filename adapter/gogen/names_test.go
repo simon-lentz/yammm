@@ -64,7 +64,7 @@ func TestGoPackageName(t *testing.T) {
 }
 
 // nameTableOf builds s's name table as generation does.
-func nameTableOf(t *testing.T, s *schema.Schema) *nameTable {
+func nameTableOf(t *testing.T, s schema.Schema) *nameTable {
 	t.Helper()
 	g, err := newGenerator(s)
 	if err != nil {
@@ -84,11 +84,11 @@ func nameTableOf(t *testing.T, s *schema.Schema) *nameTable {
 }
 
 // typeNames maps "<schema>.<type>" to its Go name over s's closure.
-func typeNames(t *testing.T, s *schema.Schema, nt *nameTable) map[string]string {
+func typeNames(t *testing.T, s schema.Schema, nt *nameTable) map[string]string {
 	t.Helper()
 	got := map[string]string{}
-	for _, sc := range s.Closure() {
-		for _, typ := range sc.TypesSlice() {
+	for sc := range s.Closure() {
+		for typ := range sc.Types() {
 			name, ok := nt.goType(typ.ID())
 			if !ok {
 				t.Fatalf("%s.%s has no Go name", sc.Name(), typ.Name())
@@ -124,10 +124,10 @@ func TestBuildNameTable_OneSchemaSharingACandidateTakesExactSpellings(t *testing
 			}
 			nt := nameTableOf(t, s)
 			got := map[string]string{}
-			for _, typ := range s.TypesSlice() {
+			for typ := range s.Types() {
 				got["type "+typ.Name()], _ = nt.goType(typ.ID())
 			}
-			for _, dt := range s.DataTypesSlice() {
+			for dt := range s.DataTypes() {
 				got["datatype "+dt.Name()], _ = nt.goDataType(dt)
 			}
 			if !maps.Equal(got, tc.want) {

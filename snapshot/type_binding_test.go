@@ -21,7 +21,7 @@ type County {
 // so two loads of identical text produce identical StructuralHashes and
 // different type identities — the shape a consumer hits when a snapshot outlives
 // the layout it was written under.
-func loadUnderModuleRoot(t *testing.T, moduleRoot string) *schema.Schema {
+func loadUnderModuleRoot(t *testing.T, moduleRoot string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(),
 		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm", moduleRoot)
@@ -33,7 +33,7 @@ func loadUnderModuleRoot(t *testing.T, moduleRoot string) *schema.Schema {
 
 // loadUnderSyntheticRoot loads the same fixture hermetically under a synthetic
 // root, which is what makes its identities independent of the process.
-func loadUnderSyntheticRoot(t *testing.T, root string) *schema.Schema {
+func loadUnderSyntheticRoot(t *testing.T, root string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(),
 		map[string][]byte{"geo.yammm": []byte(typeBindingSchema)}, "geo.yammm", "",
@@ -45,7 +45,7 @@ func loadUnderSyntheticRoot(t *testing.T, root string) *schema.Schema {
 }
 
 // marshalCounty writes a one-instance snapshot over s.
-func marshalCounty(t *testing.T, s *schema.Schema) []byte {
+func marshalCounty(t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	county, ok := s.Type("County")
 	if !ok {
@@ -86,7 +86,7 @@ func headerOf(t *testing.T, data []byte) *snapshot.HeaderInfo {
 // document as current and the full load succeeds. Together they are the
 // whole of what a dispatch caller checks — the hash covers every declared
 // schema and type name, so a matching hash already implies every row binds.
-func mustBind(t *testing.T, data []byte, s *schema.Schema, what string) {
+func mustBind(t *testing.T, data []byte, s schema.Schema, what string) {
 	t.Helper()
 	if !headerOf(t, data).SchemaHashMatches(s) {
 		t.Fatalf("%s: the header does not classify the document as current", what)
@@ -95,7 +95,7 @@ func mustBind(t *testing.T, data []byte, s *schema.Schema, what string) {
 	if res.HasErrors() {
 		t.Fatalf("%s: full load: %v", what, res.Err())
 	}
-	if loaded == nil {
+	if loaded.IsZero() {
 		t.Fatalf("%s: expected a loaded snapshot", what)
 	}
 }

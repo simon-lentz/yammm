@@ -191,7 +191,7 @@ func FuzzTokenStream(f *testing.F) {
 			t.Fatal(failure)
 		}
 		s, result := schema.LoadString(context.Background(), src, "fuzz.yammm")
-		if result.Err() != nil || s == nil {
+		if result.Err() != nil || s.IsZero() {
 			return
 		}
 		out, _ := format.TokenStream(src)

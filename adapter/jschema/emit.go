@@ -17,7 +17,7 @@ const fkTargetPrefix = "_target_"
 // its import closure as an ordered value tree. Envelope member order: $schema,
 // $id (only when configured), title, description, type, properties,
 // additionalProperties, $defs.
-func buildDocument(s *schema.Schema, table *defsTable, cfg config) (val, error) {
+func buildDocument(s schema.Schema, table *defsTable, cfg config) (val, error) {
 	pairs := []kv{{K: "$schema", V: scalar("https://json-schema.org/draft/2020-12/schema")}}
 	if cfg.schemaID != "" {
 		pairs = append(pairs, kv{K: "$id", V: scalar(cfg.schemaID)})
@@ -53,10 +53,10 @@ func buildDocument(s *schema.Schema, table *defsTable, cfg config) (val, error) 
 // validator resolves as type tags. A type the entry schema reaches only through
 // another import has no tag, so it appears in $defs only. Each key holds the array-of-instances
 // shape the object envelope requires.
-func topLevelProperties(s *schema.Schema, table *defsTable) (val, error) {
+func topLevelProperties(s schema.Schema, table *defsTable) (val, error) {
 	var props []kv
 	for _, sc := range table.orderedSchemas {
-		for _, t := range sc.TypesSlice() {
+		for t := range sc.Types() {
 			if t.IsAbstract() || t.IsPart() {
 				continue
 			}
@@ -135,7 +135,7 @@ func buildDefs(table *defsTable) (val, error) {
 // graph is assembled, not per file, so requiredness is stated in the
 // generated description instead. Unknown instance fields are rejected by the
 // instance layer, so additionalProperties false is faithful.
-func typeDef(t *schema.Type, table *defsTable) (val, error) {
+func typeDef(t schema.Type, table *defsTable) (val, error) {
 	pairs := []kv{{K: "type", V: scalar("object")}}
 	if doc := t.Documentation(); doc != "" {
 		pairs = append(pairs, kv{K: "description", V: scalar(doc)})
@@ -143,7 +143,7 @@ func typeDef(t *schema.Type, table *defsTable) (val, error) {
 
 	var props []kv
 	var required []val
-	for _, p := range t.AllPropertiesSlice() {
+	for p := range t.AllProperties() {
 		frag, err := schemaForProperty(p, table.dtPropName)
 		if err != nil {
 			return val{}, fmt.Errorf("jschema: type %q: %w", t.Name(), err)
@@ -158,7 +158,7 @@ func typeDef(t *schema.Type, table *defsTable) (val, error) {
 			required = append(required, scalar(p.Name()))
 		}
 	}
-	for _, rel := range t.AllCompositionsSlice() {
+	for rel := range t.AllCompositions() {
 		frag, err := compositionFrag(rel, table)
 		if err != nil {
 			return val{}, fmt.Errorf("jschema: type %q: %w", t.Name(), err)
@@ -168,7 +168,7 @@ func typeDef(t *schema.Type, table *defsTable) (val, error) {
 			required = append(required, scalar(rel.FieldName()))
 		}
 	}
-	for _, rel := range t.AllAssociationsSlice() {
+	for rel := range t.AllAssociations() {
 		frag, err := associationFrag(rel, table)
 		if err != nil {
 			return val{}, fmt.Errorf("jschema: type %q: %w", t.Name(), err)
@@ -192,7 +192,7 @@ func typeDef(t *schema.Type, table *defsTable) (val, error) {
 // E_DUPLICATE_COMPOSED_PK). The child is named by its resolved
 // identity, so a composition inherited from a cross-schema parent still
 // references the correct part type.
-func compositionFrag(rel *schema.Relation, table *defsTable) (val, error) {
+func compositionFrag(rel schema.Relation, table *defsTable) (val, error) {
 	childKey, ok := table.defName(rel.TargetID())
 	if !ok {
 		return val{}, fmt.Errorf("jschema: composition %q target %q has no $defs key", rel.Name(), rel.TargetID().String())
@@ -221,9 +221,9 @@ func compositionFrag(rel *schema.Relation, table *defsTable) (val, error) {
 // assembled, not per file, and a per-file constraint would flag data files
 // the instance layer validates cleanly — so the generated description
 // carries the multiplicity and, for required associations, where enforcement
-// happens. The EDGE_ key is shared by pointer with the declaring owner, so
+// happens. The EDGE_ key is shared by record with the declaring owner, so
 // an inherited association references the owner's single entry.
-func associationFrag(rel *schema.Relation, table *defsTable) (val, error) {
+func associationFrag(rel schema.Relation, table *defsTable) (val, error) {
 	edgeKey, ok := table.edgeDefName(rel)
 	if !ok {
 		return val{}, fmt.Errorf("jschema: association %q (owner %q) has no registered EDGE_ $defs key", rel.Name(), rel.Owner())
@@ -260,7 +260,7 @@ func associationFrag(rel *schema.Relation, table *defsTable) (val, error) {
 func edgeDef(er edgeRec, table *defsTable) (val, error) {
 	var props []kv
 	var required []val
-	for _, pk := range er.target.PrimaryKeysSlice() {
+	for pk := range er.target.PrimaryKeys() {
 		frag, err := schemaForProperty(pk, table.dtPropName)
 		if err != nil {
 			return val{}, fmt.Errorf("jschema: edge %q target %q: %w", er.rel.Name(), er.target.Name(), err)
@@ -269,7 +269,7 @@ func edgeDef(er edgeRec, table *defsTable) (val, error) {
 		props = append(props, kv{K: name, V: frag})
 		required = append(required, scalar(name))
 	}
-	for _, ep := range er.rel.PropertiesSlice() {
+	for ep := range er.rel.Properties() {
 		frag, err := schemaForProperty(ep, table.dtPropName)
 		if err != nil {
 			return val{}, fmt.Errorf("jschema: edge %q: %w", er.rel.Name(), err)
@@ -296,7 +296,7 @@ func edgeDef(er edgeRec, table *defsTable) (val, error) {
 // with a datatype its constraint lists kept as a $ref at any List depth
 // (Codes = List<FipsCode> emits items $ref FipsCode), and the DataType's
 // documentation as description.
-func dataTypeDef(d *schema.DataType, table *defsTable) (val, error) {
+func dataTypeDef(d schema.DataType, table *defsTable) (val, error) {
 	frag, err := dataTypeFragment(d, table)
 	if err != nil {
 		return val{}, fmt.Errorf("jschema: datatype %q: %w", d.Name(), err)
@@ -307,7 +307,7 @@ func dataTypeDef(d *schema.DataType, table *defsTable) (val, error) {
 	return frag, nil
 }
 
-func dataTypeFragment(d *schema.DataType, table *defsTable) (val, error) {
+func dataTypeFragment(d schema.DataType, table *defsTable) (val, error) {
 	lists, ac, ok := aliasInLists(d.Constraint())
 	if !ok {
 		return schemaForConstraint(d.Constraint())
@@ -352,7 +352,7 @@ func withDescription(v val, desc string) (val, error) {
 // multiplicity renders a relation's forward multiplicity in its DSL source
 // form: (_) optional-one, (one) required-one, (many) optional-many,
 // (one:many) required-many.
-func multiplicity(rel *schema.Relation) string {
+func multiplicity(rel schema.Relation) string {
 	switch {
 	case rel.IsMany() && rel.IsOptional():
 		return "(many)"

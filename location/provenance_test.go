@@ -13,8 +13,8 @@ func TestProvenance_RawPath_Default(t *testing.T) {
 	assert.Empty(t, prov.RawPath())
 }
 
-func TestProvenance_RawPath_NilReceiver(t *testing.T) {
-	var prov *Provenance
+func TestProvenance_RawPath_ZeroHandle(t *testing.T) {
+	var prov Provenance
 	assert.Empty(t, prov.RawPath())
 }
 
@@ -27,8 +27,8 @@ func TestProvenance_WithRawPath(t *testing.T) {
 	assert.Equal(t, "$", withRaw.Path().String())
 }
 
-func TestProvenance_WithRawPath_NilReceiver(t *testing.T) {
-	var prov *Provenance
+func TestProvenance_WithRawPath_ZeroHandle(t *testing.T) {
+	var prov Provenance
 	withRaw := prov.WithRawPath("$.custom")
 
 	assert.Equal(t, "$.custom", withRaw.RawPath())

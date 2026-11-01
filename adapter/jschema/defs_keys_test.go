@@ -13,7 +13,7 @@ import (
 // defSignatures maps every $defs key the generated document holds to what it
 // denotes independent of any key: an object by its sorted property names,
 // anything else by its JSON.
-func defSignatures(t *testing.T, s *schema.Schema) map[string]string {
+func defSignatures(t *testing.T, s schema.Schema) map[string]string {
 	t.Helper()
 	out, err := Marshal(s)
 	if err != nil {

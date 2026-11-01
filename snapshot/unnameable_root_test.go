@@ -49,7 +49,7 @@ type Beacon {
 // at it. Both constructors now refuse such a type in SnapshotParts.Types, so the
 // document can only be built by editing the wire — which is exactly the shape a
 // foreign writer, or a document written before the rule, can carry.
-func unnameableDocument(t *testing.T, items string) ([]byte, *schema.Schema) {
+func unnameableDocument(t *testing.T, items string) ([]byte, schema.Schema) {
 	t.Helper()
 	ctx := context.Background()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
@@ -62,7 +62,7 @@ func unnameableDocument(t *testing.T, items string) ([]byte, *schema.Schema) {
 	}
 
 	base, ok := s.ImportByAlias("base")
-	if !ok || base.Schema() == nil {
+	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
 	basinType, ok := base.Schema().Type("Basin")
@@ -70,7 +70,7 @@ func unnameableDocument(t *testing.T, items string) ([]byte, *schema.Schema) {
 		t.Fatal("base.Basin not found")
 	}
 	deepImp, ok := base.Schema().ImportByAlias("deep")
-	if !ok || deepImp.Schema() == nil {
+	if !ok || deepImp.Schema().IsZero() {
 		t.Fatal("import alias deep did not resolve")
 	}
 	beaconType, ok := deepImp.Schema().Type("Beacon")

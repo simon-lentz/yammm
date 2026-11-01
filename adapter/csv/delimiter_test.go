@@ -48,7 +48,7 @@ func TestParseWithTypeColumn_WithDelimiterSplitsOnTab(t *testing.T) {
 	parsed, result := New(WithTypeColumn("kind"), WithDelimiter('\t')).ParseWithTypeColumn(context.Background(),
 		location.MustNewSourceID("test://data.tsv"),
 		strings.NewReader("kind\tid\tname\tcount\nEntity\t"+tabRecord),
-		func(name string) *schema.Type {
+		func(name string) schema.Type {
 			st, _ := s.Type(name)
 			return st
 		})
@@ -182,7 +182,7 @@ func TestWithDelimiter_RefusedDelimiterIsReportedAtUse(t *testing.T) {
 			_, result := a.ParseTyped(context.Background(), id, "Entity", strings.NewReader("id\ne1\n"), st)
 			requireRefusal(t, result)
 			_, result = a.ParseWithTypeColumn(context.Background(), id, strings.NewReader("kind\nEntity\n"),
-				func(string) *schema.Type { return st })
+				func(string) schema.Type { return st })
 			requireRefusal(t, result)
 
 			_, err := a.MarshalSnapshot(context.Background(), snap)
@@ -226,7 +226,7 @@ func TestWithDelimiter_RefusalNamesTheDelimiter(t *testing.T) {
 
 			_, typed := a.ParseTyped(context.Background(), id, "Entity", strings.NewReader("id\ne1\n"), st)
 			_, byColumn := a.ParseWithTypeColumn(context.Background(), id, strings.NewReader("kind\nEntity\n"),
-				func(string) *schema.Type { return st })
+				func(string) schema.Type { return st })
 			for side, result := range map[string]diag.Result{"ParseTyped": typed, "ParseWithTypeColumn": byColumn} {
 				var messages []string
 				for issue := range result.Issues() {

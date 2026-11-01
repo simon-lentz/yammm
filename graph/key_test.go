@@ -103,7 +103,7 @@ func TestFormatKey_PanicOnUnmarshalable(t *testing.T) {
 	graph.FormatKey(ch)
 }
 
-func timestampKeySchema(t *testing.T) *schema.Schema {
+func timestampKeySchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("stamped").
@@ -154,7 +154,7 @@ func TestGraph_TimestampKeyIdentityIsCanonical(t *testing.T) {
 			first := instance.NewValidInstance("Event", eventType.ID(),
 				immutable.WrapKey([]any{tt.spelling}),
 				immutable.WrapProperties(map[string]any{"observed_at": tt.spelling}),
-				nil, nil, nil)
+				nil, nil, location.Provenance{})
 			if r := g.Add(t.Context(), first); !r.OK() {
 				t.Fatalf("adding the string-keyed instance: %s", r.String())
 			}
@@ -162,7 +162,7 @@ func TestGraph_TimestampKeyIdentityIsCanonical(t *testing.T) {
 			second := instance.NewValidInstance("Event", eventType.ID(),
 				immutable.WrapKey([]any{parsed}),
 				immutable.WrapProperties(map[string]any{"observed_at": parsed}),
-				nil, nil, nil)
+				nil, nil, location.Provenance{})
 			result := g.Add(t.Context(), second)
 
 			if gotDuplicate := !result.OK(); gotDuplicate != tt.wantDuplicate {

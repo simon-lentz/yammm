@@ -65,6 +65,10 @@ func TestMarshal_EveryRefusalQuotesTheSourcesItNames(t *testing.T) {
 		}
 		_, err := gogen.Marshal(loadEntry(t, root, "main.yammm"))
 		wantQuotedRefusal(t, err, "under one key")
+		first, second := strings.Index(err.Error(), `imported as "lib/dep"`), strings.Index(err.Error(), `imported as "real/dep"`)
+		if first < 0 || second < first {
+			t.Errorf("the refusal must name the imports in the order the walk meets them: %v", err)
+		}
 	})
 	t.Run("two sources under one key", func(t *testing.T) {
 		t.Parallel()

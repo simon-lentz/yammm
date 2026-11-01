@@ -21,9 +21,9 @@ func (c *completer) detectCollisions() {
 // detectTypeCollisions checks for collisions within a single type. Findings
 // are collected; there is no failure signal — the completer's final error
 // gate decides whether a schema is produced.
-func (c *completer) detectTypeCollisions(t *Type) {
+func (c *completer) detectTypeCollisions(t Type) {
 	// Check reserved prefixes on own properties.
-	// We intentionally check PropertiesSlice() (own) not AllPropertiesSlice() (all)
+	// We intentionally check Properties() (own) not AllProperties() (all)
 	// because inherited properties are validated when their declaring type is checked,
 	// avoiding duplicate errors when parent and child are in the same schema.
 	for p := range t.Properties() {
@@ -57,9 +57,9 @@ func (c *completer) detectTypeCollisions(t *Type) {
 // own associations whose names differ only by case: the case-folded lookup
 // the validator reads them through is sound only when the schema guarantees
 // uniqueness under fold, as it does for node properties.
-func (c *completer) checkEdgePropertyCaseCollisions(t *Type) {
+func (c *completer) checkEdgePropertyCaseCollisions(t Type) {
 	for r := range t.Associations() {
-		first := make(map[string]*Property)
+		first := make(map[string]Property)
 		for _, p := range r.properties {
 			lower := strings.ToLower(p.Name())
 			if prior, seen := first[lower]; seen {
@@ -78,12 +78,12 @@ func (c *completer) checkEdgePropertyCaseCollisions(t *Type) {
 // only by case. A collision an own declaration introduces is reported there;
 // one two ancestors introduce together is reported once, on the type that
 // combined them.
-func (c *completer) checkPropertyCaseCollisions(t *Type) {
-	own := make(map[*Property]bool)
+func (c *completer) checkPropertyCaseCollisions(t Type) {
+	own := make(map[Property]bool)
 	for p := range t.Properties() {
 		own[p] = true
 	}
-	byLower := make(map[string][]*Property)
+	byLower := make(map[string][]Property)
 	var order []string
 	for p := range t.AllProperties() {
 		lower := strings.ToLower(p.Name())
@@ -111,7 +111,7 @@ func (c *completer) checkPropertyCaseCollisions(t *Type) {
 				c.errorfRelated(first.Span(), diag.E_CASE_COLLISION,
 					[]location.RelatedInfo{{Span: p.Span(), Message: "collides with this declaration"}},
 					"property %q in type %q collides with %q (case-insensitive)", first.Name(), t.Name(), p.Name())
-			case c.aSuperCarries(t, func(s *Type) bool {
+			case c.aSuperCarries(t, func(s Type) bool {
 				_, a := s.Property(first.Name())
 				_, b := s.Property(p.Name())
 				return a && b
@@ -133,26 +133,26 @@ func (c *completer) checkPropertyCaseCollisions(t *Type) {
 // checkPropertyRelationCollisions reports a property and a relation whose
 // field name share one lower-case spelling. The own declaration is where the
 // diagnostic anchors; two inherited members anchor once on the combining type.
-func (c *completer) checkPropertyRelationCollisions(t *Type) {
-	ownProps := make(map[*Property]bool)
+func (c *completer) checkPropertyRelationCollisions(t Type) {
+	ownProps := make(map[Property]bool)
 	for p := range t.Properties() {
 		ownProps[p] = true
 	}
-	ownRels := make(map[*Relation]bool)
+	ownRels := make(map[Relation]bool)
 	for r := range t.Associations() {
 		ownRels[r] = true
 	}
 	for r := range t.Compositions() {
 		ownRels[r] = true
 	}
-	props := make(map[string]*Property)
+	props := make(map[string]Property)
 	for p := range t.AllProperties() {
 		lower := strings.ToLower(p.Name())
 		if _, seen := props[lower]; !seen {
 			props[lower] = p
 		}
 	}
-	check := func(r *Relation) {
+	check := func(r Relation) {
 		prop, found := props[r.FieldName()]
 		if !found {
 			return
@@ -167,7 +167,7 @@ func (c *completer) checkPropertyRelationCollisions(t *Type) {
 			c.errorfRelated(prop.Span(), diag.E_PROPERTY_RELATION_COLLISION,
 				[]location.RelatedInfo{{Span: r.Span(), Message: "relation declared here"}},
 				msg, r.Name(), r.FieldName(), t.Name(), prop.Name())
-		case c.aSuperCarries(t, func(s *Type) bool {
+		case c.aSuperCarries(t, func(s Type) bool {
 			_, a := s.Relation(r.Name())
 			_, b := s.Property(prop.Name())
 			return a && b
@@ -197,16 +197,16 @@ func (c *completer) checkPropertyRelationCollisions(t *Type) {
 // differ), and two own relations under one name are E_DUPLICATE_RELATION, so
 // the only clash left to find is across the two kinds — inherited from
 // different ancestors, or one own and one inherited.
-func (c *completer) checkRelationCollisions(t *Type) {
-	ownAssocs := make(map[*Relation]bool)
+func (c *completer) checkRelationCollisions(t Type) {
+	ownAssocs := make(map[Relation]bool)
 	for r := range t.Associations() {
 		ownAssocs[r] = true
 	}
-	ownComps := make(map[*Relation]bool)
+	ownComps := make(map[Relation]bool)
 	for r := range t.Compositions() {
 		ownComps[r] = true
 	}
-	assocs := make(map[string]*Relation, len(t.allAssociations))
+	assocs := make(map[string]Relation, len(t.allAssociations))
 	for r := range t.AllAssociations() {
 		assocs[r.FieldName()] = r
 	}
@@ -225,7 +225,7 @@ func (c *completer) checkRelationCollisions(t *Type) {
 			anchor = comp.Span()
 		case ownAssocs[assoc]:
 			anchor = assoc.Span()
-		case c.aSuperCarries(t, func(s *Type) bool {
+		case c.aSuperCarries(t, func(s Type) bool {
 			var hasAssoc, hasComp bool
 			for r := range s.AllAssociations() {
 				hasAssoc = hasAssoc || r == assoc
@@ -261,7 +261,7 @@ func (c *completer) validateAssociationTargets() {
 		// inherited one is a member of the holder without being declared
 		// there, so the merged view is what the rule reads.
 		if t.IsPart() {
-			own := make(map[*Relation]bool)
+			own := make(map[Relation]bool)
 			for r := range t.Associations() {
 				own[r] = true
 				c.errorf(r.Span(), diag.E_INVALID_ASSOCIATION_TARGET,
@@ -291,7 +291,7 @@ func (c *completer) validateAssociationTargets() {
 		// TypeID, so such an edge could never resolve in a graph.
 		for r := range t.Associations() {
 			target := c.resolveTypeID(r.TargetID())
-			if target == nil {
+			if target.IsZero() {
 				continue
 			}
 			switch {
@@ -325,9 +325,9 @@ func (c *completer) resolveRelationTargets() {
 	}
 }
 
-func (c *completer) resolveRelationTarget(r *Relation, kind string) {
+func (c *completer) resolveRelationTarget(r Relation, kind string) {
 	target := c.resolveTypeRef(r.Target())
-	if target == nil {
+	if target.IsZero() {
 		if c.referenceDeferred(r.Target().Qualifier()) {
 			return
 		}
@@ -343,10 +343,10 @@ func (c *completer) resolveRelationTarget(r *Relation, kind string) {
 // A registry-less completion resolves no cross-schema target, and no such schema
 // builds: the Builder refuses imports without a registry, and a qualifier naming
 // no import draws E_UNKNOWN_TYPE.
-func (c *completer) validateCompositionTarget(t *Type, r *Relation) {
+func (c *completer) validateCompositionTarget(t Type, r Relation) {
 	// An unresolved target was reported or deferred when targets resolved.
 	target := c.resolveTypeID(r.TargetID())
-	if target == nil {
+	if target.IsZero() {
 		return
 	}
 
@@ -366,10 +366,10 @@ func (c *completer) validateCompositionTarget(t *Type, r *Relation) {
 
 // aPartAncestorCarries reports whether a part type anywhere in t's linearized
 // ancestry already carries r, and so has already drawn the refusal.
-func (c *completer) aPartAncestorCarries(t *Type, r *Relation) bool {
+func (c *completer) aPartAncestorCarries(t Type, r Relation) bool {
 	for ref := range t.SuperTypes() {
 		s := c.resolveTypeID(ref.ID())
-		if s != nil && s.IsPart() && slices.Contains(s.AllAssociationsSlice(), r) {
+		if !s.IsZero() && s.IsPart() && slices.Contains(slices.Collect(s.AllAssociations()), r) {
 			return true
 		}
 	}
@@ -379,6 +379,6 @@ func (c *completer) aPartAncestorCarries(t *Type, r *Relation) bool {
 // aSuperCarries reports whether some direct supertype of t satisfies has.
 // A collision among inherited members that one ancestor already carries was
 // reported on that ancestor, so the types below it do not repeat it.
-func (c *completer) aSuperCarries(t *Type, has func(*Type) bool) bool {
+func (c *completer) aSuperCarries(t Type, has func(Type) bool) bool {
 	return slices.ContainsFunc(c.directSuperTypes(t), has)
 }

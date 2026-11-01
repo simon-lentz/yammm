@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -60,7 +61,7 @@ func TestAdd_InlineComposition_OneCardinalityViolated(t *testing.T) {
 		t.Fatalf("schema load: %v", res.Err())
 	}
 
-	wheel := func(position string) *instance.ValidInstance {
+	wheel := func(position string) instance.ValidInstance {
 		return instancetest.VI(
 			"Wheel",
 			instancetest.TypeID(mustTypeID(t, s, "Wheel")),
@@ -86,10 +87,10 @@ func TestAdd_InlineComposition_OneCardinalityViolated(t *testing.T) {
 	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
 
 	snap := g.Snapshot()
-	if cars := snap.InstancesOf(mustTypeID(t, s, "Car")); len(cars) != 0 {
+	if cars := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Car"))); len(cars) != 0 {
 		t.Fatalf("a refused record installed %d cars", len(cars))
 	}
-	if dups := snap.Duplicates(); len(dups) != 0 {
+	if dups := slices.Collect(snap.Duplicates()); len(dups) != 0 {
 		t.Fatalf("a refused record left %d Duplicate records", len(dups))
 	}
 }
@@ -121,7 +122,7 @@ part type Wheel {
 		t.Fatalf("schema load: %v", res.Err())
 	}
 
-	wheel := func(position string) *instance.ValidInstance {
+	wheel := func(position string) instance.ValidInstance {
 		return instancetest.VI(
 			"Wheel",
 			instancetest.TypeID(mustTypeID(t, s, "Wheel")),
@@ -155,10 +156,10 @@ part type Wheel {
 	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
 
 	snap := g.Snapshot()
-	if cars := snap.InstancesOf(mustTypeID(t, s, "Car")); len(cars) != 0 {
+	if cars := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Car"))); len(cars) != 0 {
 		t.Fatalf("a nested violation still installed %d roots", len(cars))
 	}
-	if dups := snap.Duplicates(); len(dups) != 0 {
+	if dups := slices.Collect(snap.Duplicates()); len(dups) != 0 {
 		t.Fatalf("a refused record left %d Duplicate records", len(dups))
 	}
 }

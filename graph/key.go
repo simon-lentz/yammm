@@ -23,11 +23,13 @@ import (
 //
 // It renders the values AS GIVEN and canonicalizes nothing; the graph does,
 // at every address it receives. The graph indexes an instance by the key it
-// carries, and for a Timestamp, Date or UUID key that is the canonical text
-// the value was rewritten into at entry — so [Graph.AddComposed] and
+// carries. For a Timestamp, Date or UUID key whose constraint renders the value,
+// the key is the canonical text that value took at entry — so [Graph.AddComposed] and
 // [Snapshot.InstanceByKey] canonicalize an address that misses as spelled under
-// the type's key constraints, and FormatKey over each spelling of one instant at
-// one offset addresses it. [Instance.PrimaryKey] is the address itself.
+// the type's key constraints, and FormatKey over each text spelling of one
+// instant at one offset addresses it, as does a time.Time at a Timestamp key with
+// no layout. A time.Time at a Date key, or at a Timestamp key whose layout does not read
+// RFC 3339, misses: pass the stored text there. [Instance.PrimaryKey] is the address itself.
 //
 // Examples:
 //
@@ -38,9 +40,9 @@ import (
 // It renders each value as [encoding/json] does, and the graph reads a key
 // component only as a scalar.
 //
-// Calling FormatKey with no values renders `null`, not `[]`: a variadic
-// parameter given no arguments is a nil slice, and so is one given a nil slice
-// to spread. [ParseKey] reads a rendered key back, not that case, and its doc
+// Calling FormatKey with no arguments, or with a nil slice to spread, renders
+// `null`, since the variadic parameter is then a nil slice. An empty slice spread
+// renders `[]`. [ParseKey] reads a rendered key back, not that case, and its doc
 // names the components it does not read back as written.
 //
 // FormatKey panics if any value cannot be JSON-marshaled (e.g., channels,
@@ -163,8 +165,8 @@ func decodeKeyArray(s string) ([]any, error) {
 // uuid.UUID whose key property's constraint does not render it, which no writer
 // writes; a keyless part's key has no key property, so a time or a UUID there
 // is refused. A string, a bool and an int64 settle without rendering. k has typ's key arity when typ declares a key.
-func unreadableComponent(typ *schema.Type, k immutable.Key) int {
-	pks := typ.PrimaryKeysSlice()
+func unreadableComponent(typ schema.Type, k immutable.Key) int {
+	pks := slices.Collect(typ.PrimaryKeys())
 	for i := range k.Len() {
 		var c schema.Constraint
 		if i < len(pks) {

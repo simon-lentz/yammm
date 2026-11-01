@@ -62,10 +62,10 @@ type Snapshot struct {
 	// Root is the module root directory used for import resolution.
 	Root string
 
-	// Schema is the loaded schema. Non-nil only when the load succeeded:
-	// any error in Result means a nil Schema (the loader's all-or-nothing
-	// contract). Warnings may still be present alongside a non-nil Schema.
-	Schema *schema.Schema
+	// Schema is the loaded schema. It is zero unless the load succeeded:
+	// any error in Result means a zero Schema (the loader's all-or-nothing
+	// contract). Warnings may still be present beside a real Schema.
+	Schema schema.Schema
 
 	// Result contains all diagnostics from analysis. Check Result.OK() to
 	// determine if the schema is semantically valid.
@@ -172,8 +172,8 @@ func (s *Snapshot) resolveQualifiedRef(ref *symbols.ReferenceSymbol, fromSourceI
 	}
 
 	// Get the resolved schema from the import
-	imp, ok := importSym.Data.(*schema.Import)
-	if !ok || imp.Schema() == nil {
+	imp, ok := importSym.Data.(schema.Import)
+	if !ok {
 		return nil
 	}
 
@@ -265,7 +265,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	// Perform the load with explicit entry path.
 	// This ensures the correct document is analyzed even when multiple
 	// documents are open (overlays from different files).
-	var loaded *schema.Sources
+	var loaded schema.Sources
 	schemaResult, diagResult := schema.LoadSourcesWithEntry(
 		ctx,
 		sources,
@@ -336,7 +336,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 	snapshot.LSPDiagnostics = a.convertDiagnostics(diagResult, sourceRegistry, entryPath, posEncoding)
 
 	// Build symbol indices for navigation
-	if schemaResult != nil {
+	if !schemaResult.IsZero() {
 		seenSymbols := make(map[location.SourceID]struct{})
 		a.buildSymbolIndices(snapshot, schemaResult, seenSymbols)
 
@@ -362,7 +362,7 @@ func (a *Analyzer) Analyze(ctx context.Context, entryPath string, overlays map[s
 // It exists for the one failure that happens BEFORE a load: the module root
 // could not be resolved, so there is nothing to hand LoadSourcesWithEntry. The
 // diagnostic still belongs on the document, and this is what puts it there —
-// a snapshot with a nil schema and no symbols, whose diagnostics convert
+// a snapshot with a zero schema and no symbols, whose diagnostics convert
 // through the same path Analyze uses, so a span-less issue lands at the entry
 // document's first position.
 //
@@ -401,7 +401,7 @@ func (a *Analyzer) SnapshotForResult(entryPath string, result diag.Result, posEn
 // buildSymbolIndices builds symbol indices for the schema and its imports.
 // The seen map prevents infinite recursion if the schema loader permits cycles
 // (or if imports resolve to the same canonical file via different paths).
-func (a *Analyzer) buildSymbolIndices(snapshot *Snapshot, s *schema.Schema, seen map[location.SourceID]struct{}) {
+func (a *Analyzer) buildSymbolIndices(snapshot *Snapshot, s schema.Schema, seen map[location.SourceID]struct{}) {
 	sourceID := s.SourceID()
 
 	// Check for cycle/duplicate - skip if already processed
@@ -415,26 +415,16 @@ func (a *Analyzer) buildSymbolIndices(snapshot *Snapshot, s *schema.Schema, seen
 
 	// Build indices for imported schemas
 	for imp := range s.Imports() {
-		resolved := imp.Schema()
-		if resolved != nil {
-			a.buildSymbolIndices(snapshot, resolved, seen)
-		}
+		a.buildSymbolIndices(snapshot, imp.Schema(), seen)
 	}
 }
 
 // extractImportPaths collects all import paths from the schema's import closure.
 // Uses Import.SourceID() for resolved identity.
-func (a *Analyzer) extractImportPaths(s *schema.Schema, seen map[string]struct{}) []string {
-	if s == nil {
-		return nil
-	}
-
+func (a *Analyzer) extractImportPaths(s schema.Schema, seen map[string]struct{}) []string {
 	var paths []string
 	for imp := range s.Imports() {
 		resolved := imp.Schema()
-		if resolved == nil {
-			continue
-		}
 
 		// Use resolved SourceID for canonical path
 		sourceID := resolved.SourceID()

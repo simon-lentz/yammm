@@ -65,14 +65,14 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	c.result("validator", r)
 
 	g := graph.New(s)
-	bypass := func(key string, props map[string]any, edges map[string]*instance.ValidEdgeData) *instance.ValidInstance {
-		return instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{key}), immutable.WrapProperties(props), edges, nil, nil)
+	bypass := func(key string, props map[string]any, edges map[string]instance.ValidEdgeData) instance.ValidInstance {
+		return instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{key}), immutable.WrapProperties(props), edges, nil, location.Provenance{})
 	}
 	c.result("graph.Add", g.Add(ctx, bypass("h1", map[string]any{"id": "h1", longText: "x"}, nil)))
 	c.result("graph.Add", g.Add(ctx, bypass("h2", map[string]any{"id": "h2"},
-		map[string]*instance.ValidEdgeData{longText: instance.NewValidEdgeData(nil)})))
+		map[string]instance.ValidEdgeData{longText: instance.NewValidEdgeData(nil)})))
 	c.result("graph.Add", g.Add(ctx, bypass("h3", map[string]any{"id": "h3"},
-		map[string]*instance.ValidEdgeData{"LINKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		map[string]instance.ValidEdgeData{"LINKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"u"}), immutable.WrapProperties(map[string]any{longText: 1})),
 		})})))
 	// The parent is held, so AddComposed reaches the relation and refuses it.
@@ -80,7 +80,7 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 		t.Fatalf("graph.Add h4: %s", r)
 	}
 	c.result("graph.AddComposed", g.AddComposed(ctx, typ.ID(), `["h4"]`, longText,
-		instance.NewValidInstance("P", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, nil)))
+		instance.NewValidInstance("P", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, location.Provenance{})))
 
 	_, r = graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{typ.ID()},
@@ -111,27 +111,27 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 	_, r = csvadapter.New().ParseTyped(ctx, csvSource, "T", strings.NewReader("id,"+longText+","+longText+"\na,1,2\n"), typ)
 	c.result("csv", r)
 	_, r = csvadapter.New(csvadapter.WithTypeColumn("type")).ParseWithTypeColumn(ctx, csvSource,
-		strings.NewReader("type,id\n"+longText+"!,a\n"), func(string) *schema.Type { return nil })
+		strings.NewReader("type,id\n"+longText+"!,a\n"), func(string) schema.Type { return schema.Type{} })
 	c.result("csv", r)
 	_, r = csvadapter.New(csvadapter.WithTypeColumn(longText)).ParseWithTypeColumn(ctx, csvSource,
-		strings.NewReader("type,id\nT,a\n"), func(string) *schema.Type { return typ })
+		strings.NewReader("type,id\nT,a\n"), func(string) schema.Type { return typ })
 	c.result("csv", r)
 	_, r = csvadapter.New(csvadapter.WithTypeColumn(longText)).ParseWithTypeColumn(ctx, csvSource,
-		strings.NewReader(longText+",id\n!,a\n"), func(string) *schema.Type { return typ })
+		strings.NewReader(longText+",id\n!,a\n"), func(string) schema.Type { return typ })
 	c.result("csv", r)
 	_, r = csvadapter.New(csvadapter.WithTypeColumn(longText+"\r\n")).ParseWithTypeColumn(ctx, csvSource,
-		strings.NewReader("type,id\nT,a\n"), func(string) *schema.Type { return typ })
+		strings.NewReader("type,id\nT,a\n"), func(string) schema.Type { return typ })
 	c.result("csv", r)
 	_, r = csvadapter.New().ParseTyped(ctx, csvSource, "T", strings.NewReader("id,"+longText+","+longText+".x\na,1,2\n"), typ)
 	c.result("csv", r)
 
 	held := graph.New(s)
 	u, _ := s.Type("U")
-	held.Add(ctx, instance.NewValidInstance("U", u.ID(), immutable.WrapKey([]any{"u"}), immutable.WrapProperties(map[string]any{"id": "u"}), nil, nil, nil))
+	held.Add(ctx, instance.NewValidInstance("U", u.ID(), immutable.WrapKey([]any{"u"}), immutable.WrapProperties(map[string]any{"id": "u"}), nil, nil, location.Provenance{}))
 	inst, vr := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{
 		"id": "a", "links": []any{map[string]any{"_target_id": "u", "w": 1}},
 	}})
-	if inst == nil {
+	if inst.IsZero() {
 		t.Fatal(vr)
 	}
 	held.Add(ctx, inst)
@@ -202,10 +202,10 @@ func TestMessages_RepeatANameCutToItsHead(t *testing.T) {
 
 	undeclared := schema.NewTypeID(typ.ID().SchemaPath(), longText)
 	c.result("graph.AddComposed", g.AddComposed(ctx, undeclared, `["h4"]`, "PARTS",
-		instance.NewValidInstance("P", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, nil)))
+		instance.NewValidInstance("P", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, location.Provenance{})))
 	c.result("graph.Add", g.Add(ctx, bypass("h5", map[string]any{"id": "h5"}, nil)))
 	c.result("graph.AddComposed", g.AddComposed(ctx, typ.ID(), `["h5"]`, "PARTS",
-		instance.NewValidInstance("P", undeclared, immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, nil)))
+		instance.NewValidInstance("P", undeclared, immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, location.Provenance{})))
 	_, r = graph.RebuildSnapshot(s, graph.SnapshotParts{
 		Types: []schema.TypeID{typ.ID()},
 		Instances: []graph.InstanceParts{{

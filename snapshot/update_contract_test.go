@@ -15,7 +15,7 @@ import (
 // given version and features literal. The body is the shape Marshal produces,
 // so UpdateMetadata's body-offset resolution succeeds and the test isolates
 // the header validation it is written for.
-func headerDoc(s *schema.Schema, version int, featuresJSON string) []byte {
+func headerDoc(s schema.Schema, version int, featuresJSON string) []byte {
 	return fmt.Appendf(nil,
 		`{"yammm_snapshot":{"version":%d,"schema_name":"test","schema_source":"test://test.yammm","schema_hash":%q,"schema_hash_algorithm":%d,"integrity_hash":"","features":%s},"types":[{"schema":"test","name":"Person"}],"instances":[{"type":0,"items":[{"key":["p1"],"properties":{"id":"p1","name":"Alice"},"provenance":null}]}],"diagnostics":{"duplicates":[],"unresolved":[]}}`,
 		version, schema.StructuralHash(s), schema.StructuralHashVersion, featuresJSON)

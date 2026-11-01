@@ -3,6 +3,7 @@ package neo4j
 import (
 	"maps"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,7 +57,7 @@ func TestWrite_AValueThatHoldsNoneReachesTheDriverAsNil(t *testing.T) {
 		}
 	}
 
-	rel := typ.AssociationsSlice()[0]
+	rel := slices.Collect(typ.Associations())[0]
 	for name, v := range map[string]any{"a nil slice": []any(nil), "a nil map": map[string]any(nil)} {
 		out, err := CoerceRelProps(map[string]any{"note": v}, rel)
 		if err != nil || out["note"] != nil {
@@ -97,7 +98,7 @@ func TestHeldForm_ANilSliceOrMapHasTheFormNil(t *testing.T) {
 
 // nilValueType loads a type with a property of each shape a nil slice or map
 // can stand at, and an association that declares an edge property.
-func nilValueType(t *testing.T) *schema.Type {
+func nilValueType(t *testing.T) schema.Type {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), `schema "p"
 
@@ -142,7 +143,7 @@ func TestCoerce_ARowOrAnUndeclaredValueThatHoldsNoneIsNil(t *testing.T) {
 	if row, ok := rows[1].(map[string]any); !ok || row["id"] != "a" {
 		t.Errorf("rows[1] = %#v; want the row", rows[1])
 	}
-	for name, rel := range map[string]*schema.Relation{"no relation": nil, "a relation": nilValueType(t).AssociationsSlice()[0]} {
+	for name, rel := range map[string]schema.Relation{"no relation": {}, "a relation": slices.Collect(nilValueType(t).Associations())[0]} {
 		got, err := CoerceRelProps(map[string]any{"undeclared": []any(nil), "kept": "x"}, rel)
 		if err != nil || got["undeclared"] != nil || got["kept"] != "x" {
 			t.Errorf("CoerceRelProps under %s = %#v, %v; want undeclared nil and kept unchanged", name, got, err)

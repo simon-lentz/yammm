@@ -20,9 +20,8 @@
 // synchronization.
 //
 // [Snapshot] has no method that changes it, and it is safe for concurrent read
-// access from multiple goroutines. Its accessors copy each slice they return,
-// but the records in it are the snapshot's own: a caller that assigns through
-// one (*e = Edge{}) changes the snapshot for every reader.
+// access from multiple goroutines. A record it returns is a handle, so no caller
+// holds the record's address.
 //
 // # Basic Usage
 //
@@ -43,7 +42,7 @@
 //	// Get snapshot for inspection
 //	snap := g.Snapshot()
 //	for _, typeID := range snap.Types() {
-//	    for _, inst := range snap.InstancesOf(typeID) {
+//	    for inst := range snap.InstancesOf(typeID) {
 //	        // Process instances
 //	    }
 //	}
@@ -69,7 +68,7 @@
 //	if err != nil {
 //	    return fmt.Errorf("batch: %w", err)
 //	}
-//	// res.Snapshot is always non-nil; pass it to snapshot.Marshal.
+//	// res.Snapshot is never zero; pass it to snapshot.Marshal.
 //
 // One validator serves every goroutine, serialized through an internal
 // mutex. See [BatchAssembler] for the full thread-safety contract.
@@ -95,7 +94,7 @@
 //
 // # Type Resolution
 //
-// Three lookups, and they answer different questions:
+// Three lookups of an instance's type, and they answer different questions:
 //
 //   - [Graph.Add] resolves a root's type from its identity, restricted as a
 //     matter of OWNERSHIP: a graph bound to a schema holds instances of the
@@ -145,8 +144,8 @@
 //
 // A composed child is held to none of the four. It is addressed through its
 // parent, its type comes from a relation the schema already resolved, and it
-// stays legal for any type in the closure — a transitively imported part type
-// included.
+// is legal only as that relation's declared target, which can be a transitively
+// imported part type.
 //
 // # Denoted type eligibility
 //
@@ -324,12 +323,11 @@
 // A composed child is checked as a root is — its property names, its edge
 // names, edge property names and multiplicities, its own key, and its own
 // composition tree — but its association edges are never staged, so their target keys go unjudged, and
-// never installed. A part type that declares or
-// inherits an association therefore produces no [Edge], no
-// [UnresolvedEdge], and no effect on [Attestation]'s Associations dimension.
-// The check still runs, so data filed under a name the part type does not
-// declare is reported rather than dropped in silence; what does not happen is
-// the edge resolution a root gets.
+// never installed. A load and [schema.Builder] refuse a part type that declares
+// or inherits an association, so every edge name a child files is reported as
+// E_GRAPH_UNKNOWN_RELATION rather than dropped in silence. A composed child
+// therefore produces no [Edge], no [UnresolvedEdge], and no effect on
+// [Attestation]'s Associations dimension.
 //
 // # Key Types
 //
@@ -337,7 +335,7 @@
 // validate→add→check→snapshot pipeline pattern; constructed via
 // [NewBatchAssembler] (or [NewBatchAssemblerFromSnapshot], seeding from
 // a prior snapshot) and finalized via [BatchAssembler.Finalize], which
-// returns a [FinalizeResult] whose Snapshot field is always non-nil.
+// returns a [FinalizeResult] whose Snapshot field is never zero.
 // [ErrAssemblerFinalized] is the sentinel returned from Add / AddValid /
 // AddValidOrMerge after Finalize.
 //
@@ -437,15 +435,16 @@
 //
 //   - [diag.Result.HasFatal]: context cancellation (E_CONTEXT_CANCELLED), or
 //     a broken invariant (E_INTERNAL)
-//   - [diag.Result.HasErrors]: semantic failure (duplicate PK, type not found)
+//   - [diag.Result.HasErrors]: any Fatal or Error issue, so a semantic failure
+//     (duplicate PK, type not found) too
 //   - [diag.Result.OK]: success (may have warnings)
 //
 // Programmer errors panic: a nil receiver at a method that adds or checks, a
-// nil instance at [Graph.Add], [Graph.AddOrMerge] or [Graph.AddComposed], a nil
-// context, a nil schema or snapshot at a constructor, an instance of another
+// zero instance at [Graph.Add], [Graph.AddOrMerge] or [Graph.AddComposed], a nil
+// context, a zero schema or snapshot at a constructor, an instance of another
 // schema, or a key value [FormatKey] cannot encode. [BatchAssembler.AddValid]
-// and [BatchAssembler.AddValidOrMerge] report a nil instance as Error
-// E_INTERNAL instead, since a validator returns nil for a refused instance.
+// and [BatchAssembler.AddValidOrMerge] report a zero instance as Error
+// E_INTERNAL instead, since a validator returns a zero instance for a refused one.
 //
 // [Graph.Add] emits the following. The first four judge a root's type in the
 // order listed, and a type breaking two draws the first:
@@ -517,16 +516,16 @@
 // [RebuildSnapshot], parts that break the identity, root, denoted-type, name,
 // address, reason, records, duplicate or References rule come only from a
 // broken caller, so it reports them as Fatal E_INTERNAL. [RebuildSnapshot]
-// panics on a nil schema, as [New] does.
+// panics on a zero schema, as [New] does.
 //
 // # Diagnostics Lifecycle
 //
 // [Snapshot.Diagnostics] returns the cumulative issues from [Graph.Add],
 // [Graph.AddOrMerge] and [Graph.AddComposed] calls, and a [BatchAssembler]'s
-// validator results, its validation failures among them, and nil-instance
+// validator results, its validation failures among them, and zero-instance
 // refusals. [BatchAssembler.Add] adds none for a record whose one fault is an
 // [instance.Refused] value, since its producer's result holds its issue; the
-// nil a validator returns for one still draws AddValid's E_INTERNAL. These are construction-time
+// zero instance a validator returns for one still draws AddValid's E_INTERNAL. These are construction-time
 // diagnostics that accumulate as instances are added to the graph.
 //
 // [Graph.Check] operates differently: it returns a fresh [diag.Result] per
@@ -540,11 +539,12 @@
 //
 // # Ordering Guarantees
 //
-// Every slice-returning [Snapshot] method produces deterministically sorted
+// Every collection accessor of [Snapshot] produces deterministically sorted
 // output, independent of [Graph.Add] call order or concurrency:
 //
 //   - [Snapshot.Types]: lexicographic by the TypeID's String
 //   - [Snapshot.InstancesOf]: lexicographic by primary key string
+//   - [Snapshot.AllInstances]: types by identity, then each type's primary keys
 //   - [Snapshot.Edges]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, edge properties)
 //   - [Snapshot.EdgesFrom]: the order of [Snapshot.Edges], over one source
@@ -554,11 +554,12 @@
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //
-// Every arm of each tuple is compared, and records that differ in an arm sort
-// apart, save in two cases. A properties arm writes no member's type inside a
-// list or map, so float64(1) and int64(1) there tie. The provenance arm compares
-// a source name and a span start, and a loaded provenance carries no span, so
-// two loaded duplicates that differ only in their provenance's path tie.
+// Every arm of each tuple is compared. A properties arm compares a rendering that
+// writes each value as %T|%#v, and a provenance arm a rendering of its source name
+// and span start, so records those renderings make equal tie in that arm. Among
+// the ties are float64(1) and int64(1) inside a list or map, a zero and an empty
+// Properties, a [time.Time] at one wall clock under two unnamed zones, and two
+// non-zero provenance values that differ only elsewhere.
 //
 // Sorting is established when the Snapshot is constructed — by [Graph.Snapshot]
 // and by [RebuildSnapshot] alike, which reach it through one place — and is
@@ -594,7 +595,7 @@
 //
 //	// Child streamed later, with nested GrandChild inline
 //	childInstance := ... // includes GrandChild in composed property
-//	g.AddComposed(ctx, parentTypeID, parentKey, "children", childInstance)
+//	g.AddComposed(ctx, parentTypeID, parentKey, "CHILDREN", childInstance)
 //	// Both Child and GrandChild are now attached
 //
 // # Dependencies

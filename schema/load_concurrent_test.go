@@ -36,12 +36,12 @@ func TestLoadString_ConcurrentCallsAreSafe(t *testing.T) {
 			src := sources[i%len(sources)]
 			for range iterations {
 				s, res := schema.LoadString(context.Background(), src, "concurrent.yammm")
-				if s == nil && !res.HasErrors() {
-					t.Errorf("nil schema with no error diagnostics for %q", src)
+				if s.IsZero() && !res.HasErrors() {
+					t.Errorf("zero schema with no error diagnostics for %q", src)
 					return
 				}
-				if s != nil && res.HasErrors() {
-					t.Errorf("non-nil schema alongside errors for %q: %v", src, res)
+				if !s.IsZero() && res.HasErrors() {
+					t.Errorf("non-zero schema alongside errors for %q: %v", src, res)
 					return
 				}
 			}
@@ -62,7 +62,7 @@ func TestLoadString_ConcurrentCallsAgree(t *testing.T) {
 		"type Beta {\n\tid String primary\n}\n"
 
 	want, res := schema.LoadString(context.Background(), src, "agree.yammm")
-	if want == nil {
+	if want.IsZero() {
 		t.Fatalf("fixture does not load: %v", res)
 	}
 	wantHash := schema.StructuralHash(want)
@@ -72,7 +72,7 @@ func TestLoadString_ConcurrentCallsAgree(t *testing.T) {
 		wg.Go(func() {
 			for range 25 {
 				got, res := schema.LoadString(context.Background(), src, "agree.yammm")
-				if got == nil {
+				if got.IsZero() {
 					t.Errorf("concurrent load returned nil: %v", res)
 					return
 				}

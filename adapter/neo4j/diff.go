@@ -105,8 +105,10 @@ type ConstraintDrift struct {
 // DiffConstraints performs a semantic diff between desired schema constraints
 // and actual database constraints.
 //
-// Only constraints on labels the schema owns are considered — see
-// [Adapter.OwnedLabels], which the caller builds once and passes in. Desired
+// Pairing considers only remote constraints on labels the schema owns — see
+// [Adapter.OwnedLabels], which the caller builds once and passes in. An unowned
+// remote constraint whose name an unmatched desired constraint holds is reported
+// as drift with that constraint as Actual. Desired
 // constraints are matched to remote ones in three phases: name and identity
 // together, then identity alone, then name alone; see [pairObjects] for why that
 // order matters. Constraint names are absent under [WithNamedConstraints](false),
@@ -115,10 +117,12 @@ type ConstraintDrift struct {
 // Property order is not significant for PAIRING: a constraint's members are a
 // set, so desiredSemanticKey and remoteSemanticKey sort them, where
 // [Adapter.DiffIndexes] compares an index's properties as a sequence. It IS
-// significant for BLOCKING: the server backs a constraint only with an index in
-// the same property order, so constraintDefinitionKey does not sort and an
-// alsoBlocking index is matched in DECLARED order. `yammm neo4j diff` passes
-// every introspected index as alsoBlocking, so that path runs on every diff.
+// significant for BLOCKING: constraintDefinitionKey states the measured server
+// rule, that only a plain RANGE index in the same property order blocks a key-backed
+// constraint,
+// so it does not sort and an alsoBlocking index is matched in DECLARED order.
+// `yammm neo4j diff` passes every index it read as alsoBlocking, so that path
+// runs unless the index read fails.
 func (a *Adapter) DiffConstraints(
 	desired []Constraint,
 	actual []RemoteConstraint,
@@ -131,9 +135,9 @@ func (a *Adapter) DiffConstraints(
 	// index carries the constraint's name, and a plain index can hold a name a
 	// CREATE CONSTRAINT wants. A caller that introspected indexes passes them as
 	// alsoBlocking so a constraint whose name an index already holds is reported
-	// as drift naming the holder, instead of a Create that IF NOT EXISTS turns
-	// into a silent no-op on every run. Omitting them is safe but weaker: such a
-	// constraint then reports as a Create that never takes effect.
+	// as drift naming the holder, instead of a Create the server refuses on
+	// every run. Omitting them is weaker: such a constraint then reports as that
+	// Create.
 	blockingIndexes := make(map[string]RemoteIndex, len(alsoBlocking))
 	// A PLAIN index over the same label and properties blocks a key-backed
 	// constraint too, under any name: the server refuses to create a constraint
@@ -509,7 +513,7 @@ var communityConstraintKinds = []ConstraintKind{ConstraintUnique}
 // The properties are NOT sorted, where [desiredSemanticKey] and
 // [remoteSemanticKey] sort theirs. A constraint's members are a set, so
 // constraint identity is order-free; an index's are a sequence, and the server
-// refuses a constraint only for a backing index in the SAME property order —
+// refuses a constraint only for a plain RANGE index in the SAME property order —
 // measured on 5.26 Enterprise, 2026.05 Enterprise and 2026.05 Community, for
 // UNIQUE and NODE KEY alike, with SHOW INDEXES reporting declaration order.
 // Sorting here would report a reversed-order index as a blocker the server

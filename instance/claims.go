@@ -11,8 +11,8 @@ import (
 // validator reads an object by. A parser that resolves names before validation
 // asks it, so the parser and the validator decide every claim once, alike.
 type Claims struct {
-	props map[string]*schema.Property
-	rels  map[string]*schema.Relation
+	props map[string]schema.Property
+	rels  map[string]schema.Relation
 }
 
 // ClaimKeys decides which member of t each of keys claims, as [Validator]
@@ -20,9 +20,9 @@ type Claims struct {
 // member, and under the default mode the one key folding onto an unclaimed
 // member claims it. strict is [WithStrictPropertyNames]'s setting. A key that
 // names no member, is shadowed by an exact one or collides claims nothing.
-func ClaimKeys(t *schema.Type, keys []string, strict bool) Claims {
+func ClaimKeys(t schema.Type, keys []string, strict bool) Claims {
 	oc := claimObject(t, sortedKeys(keys), strict)
-	c := Claims{props: make(map[string]*schema.Property, len(oc.props)), rels: make(map[string]*schema.Relation, len(oc.rels))}
+	c := Claims{props: make(map[string]schema.Property, len(oc.props)), rels: make(map[string]schema.Relation, len(oc.rels))}
 	for name, key := range oc.props {
 		c.props[key], _ = t.Property(name)
 	}
@@ -32,27 +32,34 @@ func ClaimKeys(t *schema.Type, keys []string, strict bool) Claims {
 	return c
 }
 
-// Property returns the property key claims, or nil.
-func (c Claims) Property(key string) *schema.Property { return c.props[key] }
+// Property returns the property key claims, and whether it claims one.
+func (c Claims) Property(key string) (schema.Property, bool) {
+	p, ok := c.props[key]
+	return p, ok
+}
 
-// Relation returns the association or composition key claims, or nil.
-func (c Claims) Relation(key string) *schema.Relation { return c.rels[key] }
+// Relation returns the association or composition key claims, and whether it
+// claims one.
+func (c Claims) Relation(key string) (schema.Relation, bool) {
+	r, ok := c.rels[key]
+	return r, ok
+}
 
 // EdgeClaims is the member each key of one edge-target object claims under the
 // rule the validator reads an edge object by.
 type EdgeClaims struct {
-	keys  map[string]*schema.Property
-	props map[string]*schema.Property
+	keys  map[string]schema.Property
+	props map[string]schema.Property
 }
 
 // ClaimEdgeKeys decides which member each of keys claims in one target object
 // of rel, as [Validator] decides it: a foreign-key field of target, or an edge
-// property of rel. With a nil target no key claims a foreign-key field, since
+// property of rel. With a zero target no key claims a foreign-key field, since
 // its fields are not known. strict is [WithStrictPropertyNames]'s setting.
-func ClaimEdgeKeys(rel *schema.Relation, target *schema.Type, keys []string, strict bool) EdgeClaims {
+func ClaimEdgeKeys(rel schema.Relation, target schema.Type, keys []string, strict bool) EdgeClaims {
 	ec := claimEdgeObject(rel, target, sortedKeys(keys), strict)
-	c := EdgeClaims{keys: make(map[string]*schema.Property, len(ec.fk)), props: make(map[string]*schema.Property, len(ec.props))}
-	if target != nil {
+	c := EdgeClaims{keys: make(map[string]schema.Property, len(ec.fk)), props: make(map[string]schema.Property, len(ec.props))}
+	if !target.IsZero() {
 		for pk := range target.PrimaryKeys() {
 			if key, ok := ec.fk[fkPrefix+pk.Name()]; ok {
 				c.keys[key] = pk
@@ -66,11 +73,17 @@ func ClaimEdgeKeys(rel *schema.Relation, target *schema.Type, keys []string, str
 }
 
 // Key returns the target's primary-key property whose foreign-key field key
-// claims, or nil.
-func (c EdgeClaims) Key(key string) *schema.Property { return c.keys[key] }
+// claims, and whether it claims one.
+func (c EdgeClaims) Key(key string) (schema.Property, bool) {
+	p, ok := c.keys[key]
+	return p, ok
+}
 
-// Property returns the edge property key claims, or nil.
-func (c EdgeClaims) Property(key string) *schema.Property { return c.props[key] }
+// Property returns the edge property key claims, and whether it claims one.
+func (c EdgeClaims) Property(key string) (schema.Property, bool) {
+	p, ok := c.props[key]
+	return p, ok
+}
 
 func sortedKeys(keys []string) []string {
 	out := slices.Clone(keys)
@@ -86,7 +99,7 @@ type objectClaims struct {
 	props          map[string]string // property name → key
 	folded         []string          // property names claimed by a folded key
 	propCollisions []keyCollision
-	rels           map[*schema.Relation]string
+	rels           map[schema.Relation]string
 	relCollisions  []keyCollision
 	accounted      map[string]bool // every key a member claims or a collision names
 }
@@ -94,7 +107,7 @@ type objectClaims struct {
 // keyCollision is two or more keys folding onto one unclaimed member.
 type keyCollision struct {
 	prop string
-	rel  *schema.Relation
+	rel  schema.Relation
 	keys []string
 }
 
@@ -110,10 +123,10 @@ func (oc objectClaims) collidedProperties() map[string]bool {
 	return out
 }
 
-func claimObject(t *schema.Type, names []string, strict bool) objectClaims {
+func claimObject(t schema.Type, names []string, strict bool) objectClaims {
 	oc := objectClaims{
 		props:     make(map[string]string, len(names)),
-		rels:      make(map[*schema.Relation]string),
+		rels:      make(map[schema.Relation]string),
 		accounted: make(map[string]bool, len(names)),
 	}
 	present := make(map[string]bool, len(names))
@@ -168,7 +181,7 @@ func claimObject(t *schema.Type, names []string, strict bool) objectClaims {
 		}
 	}
 
-	claimRelation := func(rel *schema.Relation) {
+	claimRelation := func(rel schema.Relation) {
 		if present[rel.FieldName()] {
 			oc.rels[rel] = rel.FieldName()
 			oc.accounted[rel.FieldName()] = true
@@ -199,7 +212,7 @@ func claimObject(t *schema.Type, names []string, strict bool) objectClaims {
 // sorted and collisions are in the order the validator reports them.
 type edgeObjectClaims struct {
 	fk         map[string]string // expected foreign-key field → key
-	props      map[*schema.Property]string
+	props      map[schema.Property]string
 	unknown    []string
 	shadowed   map[string]string // unknown key → the member an exact key claimed
 	collisions []edgeCollision
@@ -209,18 +222,18 @@ type edgeObjectClaims struct {
 // edge property.
 type edgeCollision struct {
 	fk   string
-	prop *schema.Property
+	prop schema.Property
 	keys []string
 }
 
-func claimEdgeObject(rel *schema.Relation, target *schema.Type, names []string, strict bool) edgeObjectClaims {
+func claimEdgeObject(rel schema.Relation, target schema.Type, names []string, strict bool) edgeObjectClaims {
 	ec := edgeObjectClaims{
 		fk:       make(map[string]string),
-		props:    make(map[*schema.Property]string),
+		props:    make(map[schema.Property]string),
 		shadowed: make(map[string]string),
 	}
 	fkByLower := make(map[string]string)
-	if target != nil {
+	if !target.IsZero() {
 		for pk := range target.PrimaryKeys() {
 			field := fkPrefix + pk.Name()
 			fkByLower[strings.ToLower(field)] = field
@@ -246,7 +259,7 @@ func claimEdgeObject(rel *schema.Relation, target *schema.Type, names []string, 
 
 	type member struct {
 		fk   string
-		prop *schema.Property
+		prop schema.Property
 	}
 	folded := make(map[member][]string)
 	var order []member

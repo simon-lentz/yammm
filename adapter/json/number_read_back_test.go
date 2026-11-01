@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,7 +55,7 @@ func init() {
 // numberSnapshot builds Holder h1 through instance.NewValidInstance, which
 // runs no validation, holding props beside its key and one LINK to Target t1
 // whose w is weight.
-func numberSnapshot(t *testing.T, s *schema.Schema, props map[string]any, weight any) *graph.Snapshot {
+func numberSnapshot(t *testing.T, s schema.Schema, props map[string]any, weight any) graph.Snapshot {
 	t.Helper()
 	targetT, _ := s.Type("Target")
 	holderT, _ := s.Type("Holder")
@@ -65,14 +66,14 @@ func numberSnapshot(t *testing.T, s *schema.Schema, props map[string]any, weight
 		edge["w"] = weight
 	}
 	g := graph.New(s)
-	for _, inst := range []*instance.ValidInstance{
+	for _, inst := range []instance.ValidInstance{
 		instance.NewValidInstance("Target", targetT.ID(), immutable.WrapKey([]any{"t1"}),
-			immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, nil),
+			immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, location.Provenance{}),
 		instance.NewValidInstance("Holder", holderT.ID(), immutable.WrapKey([]any{"h1"}),
 			immutable.WrapProperties(all),
-			map[string]*instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			map[string]instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(edge)),
-			})}, nil, nil),
+			})}, nil, location.Provenance{}),
 	} {
 		if r := g.Add(context.Background(), inst); r.HasErrors() {
 			t.Fatalf("graph.Add: %s", r)
@@ -83,15 +84,15 @@ func numberSnapshot(t *testing.T, s *schema.Schema, props map[string]any, weight
 
 // readBackHolder parses data with the adapter's own parser and validates the
 // one Holder it holds, the read a written document is made for.
-func readBackHolder(t *testing.T, s *schema.Schema, data []byte) (*instance.ValidInstance, error) {
+func readBackHolder(t *testing.T, s schema.Schema, data []byte) (instance.ValidInstance, error) {
 	t.Helper()
 	parsed, res := New().ParseObject(t.Context(), location.NewSourceID("numbers.json"), data)
 	if res.HasErrors() || len(parsed["Holder"]) != 1 {
-		return nil, fmt.Errorf("ParseObject: %s", res)
+		return instance.ValidInstance{}, fmt.Errorf("ParseObject: %s", res)
 	}
 	inst, vres := instance.NewValidator(s).ValidateOne(t.Context(), "Holder", parsed["Holder"][0])
-	if inst == nil || vres.HasErrors() {
-		return nil, fmt.Errorf("ValidateOne: %s", vres)
+	if inst.IsZero() || vres.HasErrors() {
+		return instance.ValidInstance{}, fmt.Errorf("ValidateOne: %s", vres)
 	}
 	return inst, nil
 }
@@ -118,39 +119,40 @@ func TestMarshalObject_ANumberIsReadBackOrRefused(t *testing.T) {
 			name, mentions string
 			props          map[string]any
 			weight         any
-			read           func(*instance.ValidInstance) (float64, bool)
+			read           func(instance.ValidInstance) (float64, bool)
 		}{
 			{
 				"a Float property", `property "f"`,
 				map[string]any{"f": n},
 				nil,
-				func(i *instance.ValidInstance) (float64, bool) { return floatProperty(i, "f") },
+				func(i instance.ValidInstance) (float64, bool) { return floatProperty(i, "f") },
 			},
 			{
 				"a List<Float> element", `property "fs"`,
 				map[string]any{"fs": []any{1.5, n}},
 				nil,
-				func(i *instance.ValidInstance) (float64, bool) { return floatElement(i, "fs", 1) },
+				func(i instance.ValidInstance) (float64, bool) { return floatElement(i, "fs", 1) },
 			},
 			{
 				"a Vector element", `property "v"`,
 				map[string]any{"v": []any{n, 2.5}},
 				nil,
-				func(i *instance.ValidInstance) (float64, bool) { return floatElement(i, "v", 0) },
+				func(i instance.ValidInstance) (float64, bool) { return floatElement(i, "v", 0) },
 			},
 			{"a String property", `property "s"`, map[string]any{"s": n}, nil, nil},
 			{
 				"a Float edge property", `edge property "w"`, nil, n,
-				func(i *instance.ValidInstance) (float64, bool) {
+				func(i instance.ValidInstance) (float64, bool) {
 					link, _ := i.Edge("LINK")
-					for target := range link.TargetsIter() {
-						w, ok := target.Properties().Get("w")
-						if !ok {
-							return 0, false
-						}
-						return w.Float()
+					targets := slices.Collect(link.Targets())
+					if len(targets) == 0 {
+						return 0, false
 					}
-					return 0, false
+					w, ok := targets[0].Properties().Get("w")
+					if !ok {
+						return 0, false
+					}
+					return w.Float()
 				},
 			},
 		} {
@@ -216,7 +218,7 @@ func TestMarshalObject_AnIntegerLiteralIsReadBackAtAnInteger(t *testing.T) {
 	}
 }
 
-func floatProperty(i *instance.ValidInstance, name string) (float64, bool) {
+func floatProperty(i instance.ValidInstance, name string) (float64, bool) {
 	v, ok := i.Property(name)
 	if !ok {
 		return 0, false
@@ -225,7 +227,7 @@ func floatProperty(i *instance.ValidInstance, name string) (float64, bool) {
 	return f, ok
 }
 
-func floatElement(i *instance.ValidInstance, name string, at int) (float64, bool) {
+func floatElement(i instance.ValidInstance, name string, at int) (float64, bool) {
 	v, ok := i.Property(name)
 	if !ok {
 		return 0, false

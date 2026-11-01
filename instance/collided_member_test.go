@@ -45,7 +45,7 @@ func TestValidateOne_ACollidedMemberDrawsTheCollisionAlone(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			valid, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
-			if valid != nil {
+			if !valid.IsZero() {
 				t.Fatal("a collided member validated")
 			}
 			for issue := range res.Issues() {

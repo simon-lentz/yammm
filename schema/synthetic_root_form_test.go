@@ -121,12 +121,12 @@ var syntheticRootRows = []struct {
 	{"embedded://app/sub/../../x", "", "a path above the authority"},
 }
 
-func loadUnderRoot(t *testing.T, root string) (*schema.Schema, string) {
+func loadUnderRoot(t *testing.T, root string) (schema.Schema, string) {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "",
 		schema.WithSourcesOnly(true), schema.WithSyntheticRoot(root))
 	if res.HasErrors() {
-		return nil, firstError(res)
+		return schema.Schema{}, firstError(res)
 	}
 	return s, ""
 }
@@ -140,7 +140,7 @@ func TestWithSyntheticRoot_IsJudgedWhole(t *testing.T) {
 			t.Parallel()
 			s, msg := loadUnderRoot(t, row.root)
 			if row.form == "" {
-				if s != nil {
+				if !s.IsZero() {
 					t.Fatalf("the root loaded as %q; want a refusal (%s)", s.ModuleRoot(), row.why)
 				}
 				if !strings.Contains(msg, "invalid synthetic root") {
@@ -148,7 +148,7 @@ func TestWithSyntheticRoot_IsJudgedWhole(t *testing.T) {
 				}
 				return
 			}
-			if s == nil {
+			if s.IsZero() {
 				t.Fatalf("refused: %s; want the form %q (%s)", msg, row.form, row.why)
 			}
 			if got := s.ModuleRoot(); got != row.form {
@@ -158,7 +158,7 @@ func TestWithSyntheticRoot_IsJudgedWhole(t *testing.T) {
 				t.Errorf("the entry identity is %q; want %q", got, want)
 			}
 			again, msg := loadUnderRoot(t, row.form)
-			if again == nil || again.ModuleRoot() != row.form {
+			if again.IsZero() || again.ModuleRoot() != row.form {
 				t.Errorf("the form %q does not load as itself: %s", row.form, msg)
 			}
 		})
@@ -198,8 +198,8 @@ func TestWithSyntheticRoot_AdmitsRFC3986sCharactersAlone(t *testing.T) {
 				root = "embedded://app/a" + string(r) + "b"
 			}
 			s, msg := loadUnderRoot(t, root)
-			if want := rootCharacterAdmitted(r, inPath); (s != nil) != want {
-				t.Errorf("root %q (U+%04X, in the path: %t): loaded %t, want %t: %s", root, r, inPath, s != nil, want, msg)
+			if want := rootCharacterAdmitted(r, inPath); (!s.IsZero()) != want {
+				t.Errorf("root %q (U+%04X, in the path: %t): loaded %t, want %t: %s", root, r, inPath, !s.IsZero(), want, msg)
 			}
 		}
 	}
@@ -211,7 +211,7 @@ func TestWithSyntheticRoot_OneIdentityMeansOneForm(t *testing.T) {
 	formOf := map[string]string{}
 	for _, row := range syntheticRootRows {
 		s, _ := loadUnderRoot(t, row.root)
-		if s == nil {
+		if s.IsZero() {
 			continue
 		}
 		id := s.SourceID().String()

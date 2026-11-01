@@ -66,7 +66,7 @@ func spliceOnce(t *testing.T, data []byte, anchor, replacement string) []byte {
 }
 
 // loadAndVerify renders both read surfaces over one document.
-func loadAndVerify(ctx context.Context, t *testing.T, data []byte, s *schema.Schema) (loadSig, verifySig string, loaded *graph.Snapshot) {
+func loadAndVerify(ctx context.Context, t *testing.T, data []byte, s schema.Schema) (loadSig, verifySig string, loaded graph.Snapshot) {
 	t.Helper()
 	snap, loadRes := snapshot.Load(ctx, data, s, snapshot.WithIntegrityCheck(false))
 	verifyRes := snapshot.Verify(ctx, data, s, snapshot.WithIntegrityCheck(false))
@@ -74,7 +74,7 @@ func loadAndVerify(ctx context.Context, t *testing.T, data []byte, s *schema.Sch
 }
 
 // marshalParts assembles parts on the identity fixture and marshals them.
-func marshalParts(ctx context.Context, t *testing.T, s *schema.Schema, parts graph.SnapshotParts) []byte {
+func marshalParts(ctx context.Context, t *testing.T, s schema.Schema, parts graph.SnapshotParts) []byte {
 	t.Helper()
 	built, result := graph.RebuildSnapshot(s, parts)
 	if result.HasErrors() {
@@ -98,7 +98,7 @@ func ident(id schema.TypeID) string {
 
 // slotSchema declares a required-single composition, the one cardinality
 // whose duplicate's conflict shares nothing with the rejected child.
-func slotSchema(t *testing.T) *schema.Schema {
+func slotSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("slot").
@@ -142,8 +142,8 @@ func TestWireProbe_DuplicateOneSlotConflict(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("snapshot holds %d duplicates, want 1", len(snap.Duplicates()))
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("snapshot holds %d duplicates, want 1", len(slices.Collect(snap.Duplicates())))
 	}
 
 	data, res := snapshot.Marshal(ctx, snap)
@@ -221,7 +221,7 @@ func TestWireProbe_DuplicateAtDepthTwo(t *testing.T) {
 }
 
 // nestedDoc marshals the depth-two composition Root r1 → MID m1 → LEAF l1.
-func nestedDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
+func nestedDoc(ctx context.Context, t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	rootID := mustTypeID(t, s, "Root")
 	parts := graph.SnapshotParts{
@@ -322,9 +322,9 @@ func TestWireProbe_TableRowStaleSchemaName(t *testing.T) {
 	edited := spliceOnce(t, data, `"schema":"base","name":"Part"`, `"schema":"ghost","name":"Part"`)
 	loadSig, verifySig, loaded := loadAndVerify(ctx, t, edited, s)
 	fact := ""
-	if loaded != nil {
+	if !loaded.IsZero() {
 		if site, ok := loaded.InstanceByKey(siteID, graph.FormatKey("s1")); ok {
-			for _, child := range site.Composed("IMPORTED") {
+			for child := range site.Composed("IMPORTED") {
 				fact = "; child bound to " + ident(child.TypeID())
 			}
 		}
@@ -360,7 +360,7 @@ func TestWireProbe_RootTypeIndexContradictsSection(t *testing.T) {
 	edited := spliceOnce(t, data, `{"key":["a1"],"properties"`, `{"key":["a1"],"type":0,"properties"`)
 	loadSig, verifySig, loaded := loadAndVerify(ctx, t, edited, s)
 	fact := ""
-	if loaded != nil {
+	if !loaded.IsZero() {
 		if _, ok := loaded.InstanceByKey(anchorID, graph.FormatKey("a1")); ok {
 			fact = "; bound to section row " + ident(anchorID)
 		}
@@ -395,7 +395,7 @@ func TestWireProbe_RootOutsideTheTypesTableKeepsItsIdentity(t *testing.T) {
 
 	loadSig, verifySig, loaded := loadAndVerify(ctx, t, data, s)
 	fact := ""
-	if loaded != nil {
+	if !loaded.IsZero() {
 		if _, ok := loaded.InstanceByKey(anchorID, graph.FormatKey("x1")); ok {
 			fact = "; went in as " + ident(siteID) + ", returned as " + ident(anchorID)
 		}
@@ -407,7 +407,7 @@ func TestWireProbe_RootOutsideTheTypesTableKeepsItsIdentity(t *testing.T) {
 }
 
 // edgeDoc marshals two Basins joined by a NEAR edge.
-func edgeDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
+func edgeDoc(ctx context.Context, t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
 	basin := func(key string) graph.InstanceParts {
@@ -434,7 +434,7 @@ func edgeDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 }
 
 // unresolvedDoc marshals one Basin carrying an unresolved NEAR edge.
-func unresolvedDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
+func unresolvedDoc(ctx context.Context, t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
 	return marshalParts(ctx, t, s, graph.SnapshotParts{
@@ -458,7 +458,7 @@ func unresolvedDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
 }
 
 // rootDupDoc marshals an Anchor beside a duplicate record naming it.
-func rootDupDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
+func rootDupDoc(ctx context.Context, t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	anchorID := mustTypeIDIn(t, s, "", "Anchor")
 	inst := graph.InstanceParts{
@@ -515,7 +515,7 @@ func TestWireProbe_DuplicateKeyDisagreesWithItsInstance(t *testing.T) {
 
 // rootDupTwoRowDoc is rootDupDoc plus a second type, so the table carries a
 // row a duplicate's instance can contradict without leaving the table.
-func rootDupTwoRowDoc(ctx context.Context, t *testing.T, s *schema.Schema) []byte {
+func rootDupTwoRowDoc(ctx context.Context, t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	anchorID := mustTypeIDIn(t, s, "", "Anchor")
 	basinID := mustTypeIDIn(t, s, "base", "Basin")
@@ -644,8 +644,8 @@ func TestWireProbe_AbsentDuplicateType(t *testing.T) {
 	edited := spliceOnce(t, data, `"duplicates":[{"type":0,`, `"duplicates":[{`)
 	loadSig, verifySig, loaded := loadAndVerify(ctx, t, edited, s)
 	fact := ""
-	if loaded != nil {
-		fact = fmt.Sprintf("; %d duplicates survive", len(loaded.Duplicates()))
+	if !loaded.IsZero() {
+		fact = fmt.Sprintf("; %d duplicates survive", len(slices.Collect(loaded.Duplicates())))
 	}
 	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
@@ -661,8 +661,8 @@ func TestWireProbe_AbsentUnresolvedSourceType(t *testing.T) {
 	edited := spliceOnce(t, data, `{"source_type":0,`, `{`)
 	loadSig, verifySig, loaded := loadAndVerify(ctx, t, edited, s)
 	fact := ""
-	if loaded != nil {
-		fact = fmt.Sprintf("; %d unresolved survive", len(loaded.Unresolved()))
+	if !loaded.IsZero() {
+		fact = fmt.Sprintf("; %d unresolved survive", len(slices.Collect(loaded.Unresolved())))
 	}
 	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED] verify[error:E_SNAPSHOT_MALFORMED]", "load["+loadSig+"] verify["+verifySig+"]"+fact)
 }
@@ -678,8 +678,8 @@ func TestWireProbe_AbsentUnresolvedTargetType(t *testing.T) {
 	edited := spliceOnce(t, data, `,"target_type":0,"target_key"`, `,"target_key"`)
 	loadSig, verifySig, loaded := loadAndVerify(ctx, t, edited, s)
 	fact := ""
-	if loaded != nil {
-		for _, u := range loaded.Unresolved() {
+	if !loaded.IsZero() {
+		for u := range loaded.Unresolved() {
 			fact = "; target bound to " + ident(u.TargetType())
 		}
 	}
@@ -762,8 +762,8 @@ func TestWireProbe_UnresolvedSourceRowOutOfRange(t *testing.T) {
 	edited := spliceOnce(t, data, `{"source_type":0,`, `{"source_type":9,`)
 	snap, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 	fact := "; snapshot=nil"
-	if snap != nil {
-		fact = fmt.Sprintf("; snapshot=non-nil with %d unresolved", len(snap.Unresolved()))
+	if !snap.IsZero() {
+		fact = fmt.Sprintf("; snapshot=non-nil with %d unresolved", len(slices.Collect(snap.Unresolved())))
 	}
 	expectOutcome(t, "load[error:E_SNAPSHOT_MALFORMED]; snapshot=nil", "load["+sigOf(loadRes)+"]"+fact)
 }
@@ -998,13 +998,13 @@ func TestWireProbe_ComposedDuplicateSecondGeneration(t *testing.T) {
 	}
 
 	fact := "gen2 duplicate lost"
-	if dups := gen2.Duplicates(); len(dups) == 1 {
+	if dups := slices.Collect(gen2.Duplicates()); len(dups) == 1 {
 		d := dups[0]
 		switch {
-		case d.Conflict() == nil:
+		case d.Conflict().IsZero():
 			fact = "gen2 conflict=nil"
-		case d.Parent() == nil || d.Relation() == "":
-			fact = fmt.Sprintf("gen2 parent=%v rel=%q", d.Parent() != nil, d.Relation())
+		case d.Parent().IsZero() || d.Relation() == "":
+			fact = fmt.Sprintf("gen2 parent=%v rel=%q", !d.Parent().IsZero(), d.Relation())
 		default:
 			fact = fmt.Sprintf("gen2 carries conflict %s[%s] under %s[%s].%s",
 				ident(d.Conflict().TypeID()), d.Conflict().PrimaryKey(),

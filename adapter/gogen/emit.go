@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"go/build/constraint"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,10 +14,10 @@ import (
 
 // closureTypes returns every type across the schema closure (entry + imports),
 // so emission is identical for single-file and imported schemas.
-func (g *generator) closureTypes() []*schema.Type {
-	var out []*schema.Type
-	for _, sc := range g.schema.Closure() {
-		out = append(out, sc.TypesSlice()...)
+func (g *generator) closureTypes() []schema.Type {
+	var out []schema.Type
+	for sc := range g.schema.Closure() {
+		out = append(out, slices.Collect(sc.Types())...)
 	}
 	return out
 }
@@ -39,8 +40,8 @@ func (g *generator) emitTypes() error {
 // inline enum inherited by several types yields one named type per owner.
 func (g *generator) emitNamedTypes() error {
 	g.emitTemporalTypes()
-	for _, sc := range g.schema.Closure() {
-		for _, dt := range sc.DataTypesSlice() {
+	for sc := range g.schema.Closure() {
+		for dt := range sc.DataTypes() {
 			name, ok := g.names.goDataType(dt)
 			if !ok {
 				return fmt.Errorf("gogen: no Go name for datatype %q", dt.Name())
@@ -80,10 +81,10 @@ func (g *generator) emitNamedTypes() error {
 		}
 	}
 	for _, t := range g.closureTypes() {
-		g.emitInlineEnums(g.typeOwner(t), t.AllPropertiesSlice())
+		g.emitInlineEnums(g.typeOwner(t), slices.Collect(t.AllProperties()))
 	}
 	for _, e := range g.edges {
-		g.emitInlineEnums(g.edgeOwner(e), e.rel.PropertiesSlice())
+		g.emitInlineEnums(g.edgeOwner(e), slices.Collect(e.rel.Properties()))
 	}
 	return nil
 }
@@ -91,7 +92,7 @@ func (g *generator) emitNamedTypes() error {
 // emitInlineEnums emits the named type and value constants of every property
 // in props that declares an enum inline, as its own constraint or as the
 // innermost element of the Lists it nests.
-func (g *generator) emitInlineEnums(owner fieldOwner, props []*schema.Property) {
+func (g *generator) emitInlineEnums(owner fieldOwner, props []schema.Property) {
 	for _, p := range props {
 		ec, ok := inlineEnum(p.Constraint())
 		if !ok {
@@ -119,7 +120,7 @@ func inlineEnum(c schema.Constraint) (schema.EnumConstraint, bool) {
 }
 
 // typeOwner is the owner of a type's struct fields.
-func (g *generator) typeOwner(t *schema.Type) fieldOwner {
+func (g *generator) typeOwner(t schema.Type) fieldOwner {
 	return fieldOwner{label: "type " + strconv.Quote(t.Name()), enum: enumOwner{key: typeKey(t)}}
 }
 
@@ -138,7 +139,7 @@ type fieldOwner struct {
 // dataTypeBase returns the Go type a non-temporal DataType is defined over. A
 // List whose innermost element names another DataType keeps that DataType's Go
 // name at every depth, resolved in sc, the schema that declares dt.
-func (g *generator) dataTypeBase(sc *schema.Schema, dt *schema.DataType) (string, error) {
+func (g *generator) dataTypeBase(sc schema.Schema, dt schema.DataType) (string, error) {
 	lc, ok := dt.Constraint().(schema.ListConstraint)
 	if !ok {
 		return g.goBaseType(dt.Constraint())
@@ -164,21 +165,21 @@ func (g *generator) dataTypeBase(sc *schema.Schema, dt *schema.DataType) (string
 
 // dataTypeTarget returns the DataType ac names, resolved in sc, the schema
 // whose declaration holds the reference.
-func dataTypeTarget(sc *schema.Schema, ac schema.AliasConstraint) (*schema.DataType, error) {
+func dataTypeTarget(sc schema.Schema, ac schema.AliasConstraint) (schema.DataType, error) {
 	qualifier, name, qualified := strings.Cut(ac.DataTypeName(), ".")
 	if !qualified {
 		qualifier, name = "", qualifier
 	}
 	target, ok := sc.ResolveDataType(schema.NewDataTypeRef(qualifier, name, location.Span{}))
 	if !ok {
-		return nil, fmt.Errorf("gogen: reference to unresolved datatype %q", ac.DataTypeName())
+		return schema.DataType{}, fmt.Errorf("gogen: reference to unresolved datatype %q", ac.DataTypeName())
 	}
 	return target, nil
 }
 
 // dataTypeGoName returns target's Go name, or "" in the collect pass, which
 // runs before any name is assigned.
-func (g *generator) dataTypeGoName(target *schema.DataType) (string, error) {
+func (g *generator) dataTypeGoName(target schema.DataType) (string, error) {
 	if g.collect != nil {
 		return "", nil
 	}
@@ -238,9 +239,9 @@ func (g *generator) emitEnumConsts(enumGoName, enumKey string, values []string) 
 // registerDataTypeFields records the DataType each type and edge property
 // names, directly or as its innermost List element, resolved from the
 // constraint in the declaring schema: an inherited reference is relative to
-// its parent's schema, and only the parser records a DataTypeRef.
+// its parent's schema.
 func (g *generator) registerDataTypeFields() error {
-	record := func(sc *schema.Schema, kind, owner string, p *schema.Property) error {
+	record := func(sc schema.Schema, kind, owner string, p schema.Property) error {
 		ac, ok := innermostDataType(p.Constraint())
 		if !ok {
 			return nil
@@ -252,15 +253,15 @@ func (g *generator) registerDataTypeFields() error {
 		g.dtFields[p] = target
 		return nil
 	}
-	for _, sc := range g.schema.Closure() {
-		for _, t := range sc.TypesSlice() {
-			for _, p := range t.PropertiesSlice() { // OWN type properties
+	for sc := range g.schema.Closure() {
+		for t := range sc.Types() {
+			for p := range t.Properties() { // OWN type properties
 				if err := record(sc, "type", t.Name(), p); err != nil {
 					return err
 				}
 			}
-			for _, rel := range t.AssociationsSlice() { // OWN associations' edge properties
-				for _, ep := range rel.PropertiesSlice() {
+			for rel := range t.Associations() { // OWN associations' edge properties
+				for ep := range rel.Properties() {
 					if err := record(sc, "edge", rel.Name(), ep); err != nil {
 						return err
 					}
@@ -273,12 +274,12 @@ func (g *generator) registerDataTypeFields() error {
 
 // collectEdges records every declared association with its declaring type and
 // its target, which resolves in the declaring schema, where the relation's ref
-// is written. An inheriting type shares the relation pointer, so each
+// is written. An inheriting type shares the relation record, so each
 // association is recorded once.
 func (g *generator) collectEdges() error {
-	for _, sc := range g.schema.Closure() {
-		for _, t := range sc.TypesSlice() {
-			for _, rel := range t.AssociationsSlice() { // OWN associations only
+	for sc := range g.schema.Closure() {
+		for t := range sc.Types() {
+			for rel := range t.Associations() { // OWN associations only
 				target, ok := sc.ResolveType(rel.Target())
 				if !ok {
 					return fmt.Errorf("gogen: association %q target %q unresolved", rel.Name(), rel.Target().String())
@@ -297,7 +298,7 @@ func (g *generator) collectEdges() error {
 // emitComposition writes a composition's field. The child is named by
 // rel.TargetID, which is absolute, because an inherited composition's syntactic
 // ref is relative to its declaring schema.
-func (g *generator) emitComposition(rel *schema.Relation, fields map[string]string) error {
+func (g *generator) emitComposition(rel schema.Relation, fields map[string]string) error {
 	childName, ok := g.names.goType(rel.TargetID())
 	if !ok {
 		return fmt.Errorf("gogen: composition %q target %q has no Go name", rel.Name(), rel.TargetID().String())
@@ -312,7 +313,7 @@ func (g *generator) emitComposition(rel *schema.Relation, fields map[string]stri
 
 // emitAssociation writes an association's field, which points at the EDGE_
 // struct its declaring type emits.
-func (g *generator) emitAssociation(rel *schema.Relation, fields map[string]string) error {
+func (g *generator) emitAssociation(rel schema.Relation, fields map[string]string) error {
 	edgeName, ok := g.names.edges[rel]
 	if !ok {
 		return fmt.Errorf("gogen: association %q (owner %q) has no registered EDGE_ name", rel.Name(), rel.Owner())
@@ -360,12 +361,12 @@ func (g *generator) emitEdgeStructs() error {
 		fmt.Fprintf(g.buf, "type %s struct {\n", g.names.edges[e.rel])
 
 		var wires []fieldWire
-		for _, pk := range e.target.PrimaryKeysSlice() {
+		for pk := range e.target.PrimaryKeys() {
 			wires = append(wires, fieldWire{wire: "_target_" + pk.Name(), bare: "Target" + g.names.ident(pk.Name())})
 		}
-		wires = g.propertyWires(wires, e.rel.PropertiesSlice())
+		wires = g.propertyWires(wires, slices.Collect(e.rel.Properties()))
 		fields := fieldNames(wires)
-		for _, pk := range e.target.PrimaryKeysSlice() {
+		for pk := range e.target.PrimaryKeys() {
 			typ, err := g.goFieldType(g.typeOwner(e.target), pk)
 			if err != nil {
 				return err
@@ -373,7 +374,7 @@ func (g *generator) emitEdgeStructs() error {
 			fmt.Fprintf(g.buf, "%s %s %s\n", fields["_target_"+pk.Name()], typ, jsonTag("_target_"+pk.Name(), ""))
 		}
 		owner := g.edgeOwner(e)
-		for _, p := range e.rel.PropertiesSlice() {
+		for p := range e.rel.Properties() {
 			if err := g.emitField(owner, p, fields); err != nil {
 				return err
 			}
@@ -467,9 +468,9 @@ func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID
 	if err := assign(entry, k, "the entry"); err != nil {
 		return nil, err
 	}
-	for queue := []*schema.Schema{g.schema}; len(queue) > 0; queue = queue[1:] {
+	for queue := []schema.Schema{g.schema}; len(queue) > 0; queue = queue[1:] {
 		sch := queue[0]
-		for _, imp := range sch.ImportsSlice() {
+		for imp := range sch.Imports() {
 			target := imp.ResolvedSourceID()
 			ik, err := schema.SyntheticImportKey(keys[sch.SourceID()], imp.Path())
 			if err != nil {
@@ -485,9 +486,8 @@ func (g *generator) embeddedKeys(ids []location.SourceID) (map[location.SourceID
 			if err := assign(target, ik, how); err != nil {
 				return nil, err
 			}
-			if imp.Schema() != nil {
-				queue = append(queue, imp.Schema())
-			}
+			// A schema a load or a Build returned has every import wired.
+			queue = append(queue, imp.Schema())
 		}
 	}
 	for _, id := range ids {
@@ -515,7 +515,7 @@ type keyRoot struct {
 // resolveKeyRoot reads the root from s, or takes a file entry's directory when
 // the load recorded none. A file root is recorded as a host path and is
 // re-derived as an identity, since a host path's bytes can differ from it.
-func resolveKeyRoot(s *schema.Schema) (keyRoot, error) {
+func resolveKeyRoot(s schema.Schema) (keyRoot, error) {
 	root := s.ModuleRoot()
 	switch {
 	case root != "" && location.ValidateSyntheticSourceID(root) == nil:
@@ -571,7 +571,7 @@ func (k keyRoot) candidate(id location.SourceID) (string, error) {
 	return "", fmt.Errorf("gogen: source %q has no key relative to the schema's root; generated keys are never generation-machine paths", id)
 }
 
-func (g *generator) emitType(t *schema.Type) error {
+func (g *generator) emitType(t schema.Type) error {
 	goName, ok := g.names.goType(t.ID())
 	if !ok {
 		return fmt.Errorf("gogen: no Go name for type %q", t.Name())
@@ -579,23 +579,23 @@ func (g *generator) emitType(t *schema.Type) error {
 	g.emitDoc(t.Documentation()) // schema doc-comment -> Go doc-comment, where present
 	fmt.Fprintf(g.buf, "type %s struct {\n", goName)
 	// Properties and relations share one field namespace.
-	wires := g.propertyWires(nil, t.AllPropertiesSlice())
-	for _, rel := range append(t.AllCompositionsSlice(), t.AllAssociationsSlice()...) {
+	wires := g.propertyWires(nil, slices.Collect(t.AllProperties()))
+	for _, rel := range append(slices.Collect(t.AllCompositions()), slices.Collect(t.AllAssociations())...) {
 		wires = append(wires, fieldWire{wire: rel.FieldName(), bare: g.names.ident(rel.FieldName())})
 	}
 	fields := fieldNames(wires)
 	owner := g.typeOwner(t)
-	for _, p := range t.AllPropertiesSlice() {
+	for p := range t.AllProperties() {
 		if err := g.emitField(owner, p, fields); err != nil {
 			return err
 		}
 	}
-	for _, rel := range t.AllCompositionsSlice() {
+	for rel := range t.AllCompositions() {
 		if err := g.emitComposition(rel, fields); err != nil {
 			return err
 		}
 	}
-	for _, rel := range t.AllAssociationsSlice() {
+	for rel := range t.AllAssociations() {
 		if err := g.emitAssociation(rel, fields); err != nil {
 			return err
 		}
@@ -606,7 +606,7 @@ func (g *generator) emitType(t *schema.Type) error {
 
 // propertyWires appends each property's wire key and bare field spelling to
 // wires.
-func (g *generator) propertyWires(wires []fieldWire, props []*schema.Property) []fieldWire {
+func (g *generator) propertyWires(wires []fieldWire, props []schema.Property) []fieldWire {
 	for _, p := range props {
 		wires = append(wires, fieldWire{wire: p.Name(), bare: g.names.ident(p.Name())})
 	}
@@ -615,7 +615,7 @@ func (g *generator) propertyWires(wires []fieldWire, props []*schema.Property) [
 
 // emitField writes one property's struct field into owner's struct, under the
 // name fields holds for its wire key.
-func (g *generator) emitField(owner fieldOwner, p *schema.Property, fields map[string]string) error {
+func (g *generator) emitField(owner fieldOwner, p schema.Property, fields map[string]string) error {
 	typ, err := g.goFieldType(owner, p)
 	if err != nil {
 		return fmt.Errorf("%s property %q: %w", owner.label, p.Name(), err)
@@ -633,7 +633,7 @@ const relationOmit = "omitempty"
 // propertyOmit returns p's json option. An optional slice takes omitzero, so a
 // present empty list, which the library keeps, is written back rather than
 // dropped as omitempty would.
-func propertyOmit(p *schema.Property) string {
+func propertyOmit(p schema.Property) string {
 	switch {
 	case !p.IsOptional():
 		return ""
@@ -647,7 +647,7 @@ func propertyOmit(p *schema.Property) string {
 // goFieldType returns the Go type of p's field in owner's struct: a pointer for
 // an optional non-slice, a named DataType under its own name at any List depth,
 // and an inline enum under its own name at any List depth.
-func (g *generator) goFieldType(owner fieldOwner, p *schema.Property) (string, error) {
+func (g *generator) goFieldType(owner fieldOwner, p schema.Property) (string, error) {
 	c := p.Constraint()
 	resolved := schema.ResolveAlias(c)
 

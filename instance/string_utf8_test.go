@@ -90,7 +90,7 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			inst, res := v.ValidateOne(t.Context(), "Holder", c.raw)
-			if inst != nil {
+			if !inst.IsZero() {
 				t.Errorf("ValidateOne returned an instance holding a string that is not valid UTF-8")
 			}
 			n := 0
@@ -128,7 +128,7 @@ func TestValidateOne_RefusesAStringThatIsNotValidUTF8(t *testing.T) {
 		})
 		raw.Properties["id"] = valid
 		inst, res := v.ValidateOne(t.Context(), "Holder", raw)
-		if inst == nil || res.HasErrors() {
+		if inst.IsZero() || res.HasErrors() {
 			t.Fatalf("ValidateOne refused valid text: %s", res)
 		}
 		if got, _ := inst.Property("text"); got.Unwrap() != valid {

@@ -81,8 +81,8 @@ type IndexDrift struct {
 // DiffIndexes performs a semantic diff between desired schema indexes and
 // actual database indexes. Each desired index is a Match, a Drift, a Create or
 // Unverified; an owned remote index that no declaration takes and the schema
-// could declare ([RemoteIndex.Declarable]) is a Drop; and every other remote
-// row is counted in Excluded.
+// could declare ([RemoteIndex.Declarable]) is a Drop; and a remote row that is no
+// declaration's Actual and no Drop is counted in Excluded.
 //
 // Only indexes on labels the schema owns are matched, created or dropped — see
 // [Adapter.OwnedLabels], which the caller builds once and passes in — and any
@@ -94,9 +94,9 @@ type IndexDrift struct {
 // Composite property order is significant, a deliberate divergence from
 // [Adapter.DiffConstraints], which sorts properties: SHOW INDEXES reports
 // properties in index-definition order, so the order-sensitive identity is
-// sound. A same-set/different-order remote index is therefore a distinct index —
-// Create + Drop when its name differs too, and Drift when it holds the desired
-// index's name.
+// sound. A same-set/different-order remote index is therefore a distinct index:
+// Create and, if [RemoteIndex.Declarable] accepts it, Drop when its name differs
+// too, and Drift when it holds the desired index's name.
 //
 // A schema-owned remote index that [RemoteIndex.Declarable] accepts and no
 // declaration matches is reported as a Drop — the drift the index feature
@@ -109,9 +109,9 @@ type IndexDrift struct {
 // index appears in SHOW INDEXES under the constraint's name and is seen here
 // automatically; a constraint with NO backing index — NOT NULL and TYPE — never
 // appears there at all, so a caller that introspected constraints passes them as
-// alsoBlocking and a desired index whose name one of them holds is reported as
-// drift naming the holder. Omitting them is safe but weaker: such an index then
-// reports as a Create that IF NOT EXISTS turns into a silent no-op on every run.
+// alsoBlocking and a desired index that no remote index realises, whose name one
+// of them holds, is reported as drift naming the holder. Omitting them is weaker: such an index then reports
+// as a Create the server refuses on every run.
 func (a *Adapter) DiffIndexes(
 	desired []Index,
 	actual []RemoteIndex,
@@ -122,7 +122,7 @@ func (a *Adapter) DiffIndexes(
 
 	// Blockers are collected from EVERY remote object, before ownership or
 	// declarability filtering, because the conditions under which a CREATE
-	// silently does nothing are not scoped the way ownership is:
+	// does nothing or is refused are not scoped the way ownership is:
 	//
 	//   - Index names are global. An index on a label this schema does not own,
 	//     of a kind it cannot declare, still holds its name against every CREATE
@@ -281,7 +281,7 @@ func (a *Adapter) DiffIndexes(
 
 	// A desired index the pairing did not realise is only a Create if the server
 	// would actually create it. Where something already blocks the statement, the
-	// CREATE is a silent no-op and reporting it produces a plan that repeats
+	// CREATE is a silent no-op or a refusal, and reporting it produces a plan that repeats
 	// unchanged forever, so it is drift naming what to remove first.
 	for _, d := range unmatched {
 		key := desiredIndexKey(d)

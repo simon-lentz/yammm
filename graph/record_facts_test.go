@@ -43,7 +43,7 @@ part type Tag {
 }
 `
 
-func recordFactsParts(t *testing.T) (*schema.Schema, graph.SnapshotParts) {
+func recordFactsParts(t *testing.T) (schema.Schema, graph.SnapshotParts) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), recordFactsSchema, "facts.yammm")
 	if res.HasErrors() {
@@ -114,7 +114,7 @@ func TestRebuildSnapshot_HoldsRecordsToTheFactsAddDerivesThemBy(t *testing.T) {
 			s, parts := recordFactsParts(t)
 			c.mutate(&parts)
 			snap, res := graph.RebuildSnapshot(s, parts)
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Error("a snapshot Add could not make was built")
 			}
 			requireFatalNaming(t, res, c.want)
@@ -180,7 +180,7 @@ func TestRebuildSnapshot_RefusesADuplicateInAKeylessManySlot(t *testing.T) {
 		}},
 		Duplicates: []graph.DuplicateParts{{Instance: line, ParentType: orderID, ParentKey: o1, Relation: "LINES"}},
 	})
-	if snap != nil {
+	if !snap.IsZero() {
 		t.Error("a duplicate in a keyless (many) slot was accepted")
 	}
 	requireFatalNaming(t, result, `is under the keyless (many) composition "LINES", where no child conflicts`)
@@ -242,7 +242,7 @@ func TestRebuildSnapshot_ARecordBesideAnOverflowIsTwoBreaks(t *testing.T) {
 				parts.Unresolved = append(parts.Unresolved, record(parts, "WORKS_AT", reason, ""))
 			}
 			snap, res := graph.RebuildSnapshot(s, parts)
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Error("a snapshot Add could not make was built")
 			}
 			beside, overflow := 0, 0
@@ -311,7 +311,7 @@ func TestRebuildSnapshot_ARecordAFactRefusesIsNoCount(t *testing.T) {
 			})
 			c.mutate(&parts, c2)
 			snap, res := graph.RebuildSnapshot(s, parts)
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Error("a snapshot Add could not make was built")
 			}
 			matched := make([]bool, len(c.want))
@@ -377,7 +377,7 @@ func TestRebuildSnapshot_RefusesAComposedDuplicateWhoseSlotHoldsNoConflict(t *te
 					Instance: tag, ParentType: orderID, ParentKey: immutable.WrapKey([]any{c.parentKey}), Relation: c.relation,
 				}},
 			})
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Error("a duplicate whose slot holds no conflict was accepted")
 			}
 			requireFatalNaming(t, res, c.want)

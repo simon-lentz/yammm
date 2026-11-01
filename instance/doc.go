@@ -18,7 +18,8 @@
 //
 // [RawInstance] represents unvalidated input data with optional provenance
 // information for error reporting. [ValidInstance] is the immutable output
-// containing typed properties, validated edges, and the extracted primary key.
+// containing typed properties, validated edges and composed children, the
+// extracted primary key, and the provenance.
 //
 // These two types use different access patterns by design:
 //   - [RawInstance] uses public struct fields (Properties, Provenance) because
@@ -61,14 +62,18 @@
 // composition scenarios where composed children are validated separately
 // from their parent.
 //
-// A refused value draws its producer's issue alone. A parser that cannot read
+// A refused value at a property, a foreign-key field or an edge property draws
+// its producer's issue alone; anywhere else the validator judges a shape, it
+// reports the value as any other of the wrong shape. A key no member claims, or
+// one that collides, is judged as any such key. A parser that cannot read
 // an input as its member's type reports that and writes a [Refused] in the value's place: the
 // validator reports nothing for it and refuses the instance, which fails as a
 // member error fails it, so no pass after the one that met it runs. A
 // [Validator.ValidateOne] result then holds no error for that member, and
 // [ErrRefusedValue] names the case for a caller that must return an error. A
 // case-fold collision is its member's one issue too: a collided required
-// property, foreign-key field or required edge property is not also missing.
+// property, foreign-key field, required edge property or required composition is
+// not also missing.
 //
 // # Validator Options
 //

@@ -41,7 +41,7 @@ func TestInvalidIdentifier_ScopeSiteMatchesTheContract(t *testing.T) {
 		"base.yammm":  []byte("schema \"base\"\n\ntype Thing {\n\tid String primary\n\twhere String\n}\n"),
 		"entry.yammm": []byte("schema \"entry\"\n\nimport \"./base\" as base\n\ntype Heir extends base.Thing {\n\textra String\n\n\t@@index(where, extra)\n}\n"),
 	}, "entry.yammm", ".", schema.WithSourcesOnly(true))
-	if s == nil {
+	if s.IsZero() {
 		t.Fatalf("load: %s", lres)
 	}
 	_, res := New().IndexesForSchema(ctx, s)
@@ -73,7 +73,7 @@ func TestInvalidIdentifier_LabelSiteCarriesTheSameContract(t *testing.T) {
 	ctx := context.Background()
 
 	s, lres := schema.LoadString(ctx, "schema \"«9x\"\n\ntype Person {\n\tid String primary\n}\n", "x.yammm")
-	if s == nil {
+	if s.IsZero() {
 		t.Fatalf("load: %s", lres)
 	}
 	_, res := New().ShapeForSchema(ctx, s)

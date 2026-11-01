@@ -583,7 +583,7 @@ func TestDiffIndexes_ConstraintBackedDefinitionHonoursState(t *testing.T) {
 // A NOT NULL or TYPE constraint has no backing index, so it appears in no SHOW
 // INDEXES row — but its name still occupies the one namespace indexes share with
 // constraints. Reaching the index diff only through alsoBlocking, it must turn a
-// Create the server would ignore into drift naming the holder.
+// Create the server refuses into drift naming the holder.
 func TestDiffIndexes_ConstraintNameBlocksCreate(t *testing.T) {
 	t.Parallel()
 	a := New()

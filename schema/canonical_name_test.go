@@ -13,12 +13,12 @@ import (
 func TestType_CanonicalPropertyName_AgreesBeforeAndAfterSealing(t *testing.T) {
 	t.Parallel()
 
-	prop := func(name string) *schema.Property {
+	prop := func(name string) schema.Property {
 		return schema.TestNewProperty(name, location.Span{}, "", schema.NewStringConstraint(),
 			schema.DataTypeRef{}, true, false, schema.DeclaringScope{}, nil)
 	}
 	typ := schema.TestNewType("T", location.SourceID{}, location.Span{}, "", false, false)
-	schema.TestSetTypeAllProperties(typ, []*schema.Property{prop("id"), prop("Name")})
+	schema.TestSetTypeAllProperties(typ, []schema.Property{prop("id"), prop("Name")})
 
 	if got, ok := typ.CanonicalPropertyName("name"); !ok || got != "Name" {
 		t.Errorf("unsealed: CanonicalPropertyName(name) = %q, %v; want Name", got, ok)

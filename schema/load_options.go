@@ -19,7 +19,7 @@ type loadConfig struct {
 	logger          *slog.Logger
 	disallowImports bool
 	sourcesOnly     bool
-	sourcesOut      **Sources
+	sourcesOut      *Sources
 	// syntheticRootSet separates "WithSyntheticRoot not passed" from
 	// "WithSyntheticRoot passed an empty root", which is an error rather than
 	// a no-op.
@@ -38,31 +38,37 @@ func defaultLoadConfig() *loadConfig {
 // fresh Registry is created for the Load operation (the default, safe for
 // any usage pattern).
 //
-// Shared-Registry semantics (post-v0.3.0). Passing the same *Registry to
+// Shared-Registry semantics (from v0.3.0). Passing the same *Registry to
 // multiple Load calls is safe and efficient:
 //
 //   - Overlapping transitive imports short-circuit via the registry cache:
 //     when loadImport encounters a SourceID already registered in r, or held
-//     inside the import closure of a schema r holds, the existing *Schema
-//     pointer is reused and the import is NOT re-parsed, whatever order the
-//     load meets its imports in. A source two schemas in r compiled from
-//     different bytes is not reused: an import of it fails with
-//     E_IMPORT_RESOLVE rather than reading it again.
-//     This is where cross-Load schema caching pays off.
+//     inside the import closure of a schema r holds, the existing Schema
+//     is reused and the import is NOT re-parsed, whatever order the
+//     load meets its imports in, save four refusals. An import of a source
+//     still loading fails with E_IMPORT_CYCLE. An import of a source two closures
+//     in r hold as compiles without equal bytes fails with E_IMPORT_RESOLVE
+//     rather than reading it again, unless r holds a compile of it at the top
+//     level. An import whose closure holds a member the load already holds as a
+//     compile without equal bytes fails with E_IMPORT_RESOLVE. An import fails with
+//     E_LOAD_SOURCE_CHANGED when the load holds bytes for a member of the bound
+//     closure, no other compile of it is bound, and that compile's bytes differ
+//     or it carries none. This is where cross-Load schema caching pays off.
 //   - Re-registering the same source — the same bytes for every source both
 //     carry, the same structural hash — is a no-op (see Registry.Register); a
-//     source whose bytes or hash changed fails the load with
+//     source whose bytes or hash changed, or that one of the two compiles
+//     carries none of, fails the load with
 //     E_LOAD_SOURCE_CHANGED naming what differed.
 //   - A root is compiled on every Load call; when r already holds its
 //     SourceID with identical content, Register keeps the first object and
-//     the Load returns that object, so every reader of r sees one *Schema per
+//     the Load returns that object, so every reader of r sees one Schema per
 //     SourceID. Divergent content is the error Registry.Register documents.
 //   - A shared registry assumes the files it holds do not change while it
 //     lives: it hands every load the object it first compiled, with that
 //     object's module root, sources, documentation and annotations. Do not
 //     share one across an edit; use a fresh Registry per load instead.
-//   - Cross-Load sharing fires whenever an import resolves to a SourceID
-//     already in r — including across loads with different WithModuleRoot
+//   - Cross-Load sharing fires when an import resolves to a SourceID already
+//     in r and no refusal above applies — including across loads with different WithModuleRoot
 //     values whose root+key combinations land on the same canonical path
 //     (nested roots reaching one shared file, for example). A cache-reused
 //     import keeps the ModuleRoot of the load that compiled it; see
@@ -93,7 +99,7 @@ func applyLoadOptions(cfg *loadConfig, opts []LoadOption) {
 // file, then the entry schema's own directory. The editor inserts its
 // workspace folder between the second and the third.
 //
-// Under this option no marker is read at all — not even a malformed one, which
+// Under a non-empty root no marker is read at all — not even a malformed one, which
 // would otherwise fail the load. That is what "explicit wins" means: a caller
 // can always override a marker it did not put there. [Load] refuses a root that
 // is not a directory it can open with a Fatal E_LOAD_IO_FAILURE, whether or not
@@ -141,7 +147,8 @@ func withSourceRegistry(reg *source.Registry) LoadOption {
 // pre-registered in-memory sources: with true a miss fails with E_IMPORT_RESOLVE
 // and the module-root sandbox is never opened; with false, the default, a miss
 // falls back to the module root on disk. A load under [WithSyntheticRoot] is
-// restricted to the in-memory sources whatever this option says. It decides where an import is read from, never a source's
+// restricted to the in-memory sources whatever this option says. A registry from
+// [WithRegistry] binds an import it holds before either rule reads it. It decides where an import is read from, never a source's
 // identity: without a synthetic root a key is resolved on the host under the
 // module root, or the working directory when the root is empty, as [Load]
 // resolves a path, through symlinks and in the disk's spelling. Only [LoadSourcesWithEntry] takes it; [Load] and [LoadString] refuse
@@ -232,10 +239,10 @@ func WithLogger(logger *slog.Logger) LoadOption {
 // CaptureSources stores the load's source registry in *dst when the load
 // starts, before it reads anything, so a load that fails early leaves *dst
 // holding that load's empty registry, never an earlier load's. A load that
-// fails returns a nil Schema, and Schema.Sources with it, so a caller that
+// fails returns a zero Schema, on which Schema.Sources panics, so a caller that
 // renders excerpts for a failed load takes the sources from here. A nil dst
 // captures nothing.
-func CaptureSources(dst **Sources) LoadOption {
+func CaptureSources(dst *Sources) LoadOption {
 	return func(c *loadConfig) {
 		c.sourcesOut = dst
 	}

@@ -308,7 +308,7 @@ type JapaneseUser {
 		}
 		assert.Fail(t, "formatTokenStream: formatted multibyte content should be parseable without errors")
 	}
-	if s != nil {
+	if !s.IsZero() {
 		assert.Equal(t, "CJKテスト", s.Name(), "formatTokenStream: schema name")
 	}
 }

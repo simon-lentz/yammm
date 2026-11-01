@@ -44,7 +44,7 @@ func symlink(t *testing.T, target, link string) {
 }
 
 // loadEntry loads root/entry with root as the module root.
-func loadEntry(t *testing.T, root, entry string) *schema.Schema {
+func loadEntry(t *testing.T, root, entry string) schema.Schema {
 	t.Helper()
 	s, res := schema.Load(context.Background(), filepath.Join(root, filepath.FromSlash(entry)), schema.WithModuleRoot(root))
 	if res.HasErrors() {
@@ -109,7 +109,7 @@ func emittedStore(t *testing.T, src []byte) (map[string][]byte, string) {
 
 // reloadEmitted re-loads generated source's embedded store through the recipe
 // the file prints, under consumerRoot, and requires the input's hash.
-func reloadEmitted(t *testing.T, src []byte, want *schema.Schema) (map[string][]byte, string) {
+func reloadEmitted(t *testing.T, src []byte, want schema.Schema) (map[string][]byte, string) {
 	t.Helper()
 	store, entry := emittedStore(t, src)
 	got, res := schema.LoadSourcesWithEntry(context.Background(), store, entry, "",
@@ -120,7 +120,7 @@ func reloadEmitted(t *testing.T, src []byte, want *schema.Schema) (map[string][]
 	if g, w := schema.StructuralHash(got), schema.StructuralHash(want); g != w {
 		t.Errorf("re-loaded hash %s, want %s", g, w)
 	}
-	for _, cs := range got.Closure() {
+	for cs := range got.Closure() {
 		if !strings.HasPrefix(cs.SourceID().String(), consumerRoot+"/") {
 			t.Errorf("closure member %s is not under the synthetic root", cs.SourceID())
 		}
@@ -460,7 +460,7 @@ func TestMarshal_SyntheticRootLoadWithARelativeImport(t *testing.T) {
 func TestMarshal_EmbeddedStoreReloadsThroughItsRecipe(t *testing.T) {
 	type input struct {
 		name string
-		s    *schema.Schema
+		s    schema.Schema
 	}
 	inputs := []input{{"imports/entry_shadow_main", loadSchema(t, "imports/entry_shadow_main")}}
 	err := fs.WalkDir(os.DirFS("testdata"), ".", func(path string, d fs.DirEntry, err error) error {

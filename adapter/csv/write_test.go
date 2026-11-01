@@ -16,7 +16,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func buildSnapshot(t *testing.T, s *schema.Schema, instances map[string][]map[string]any) *graph.Snapshot {
+func buildSnapshot(t *testing.T, s schema.Schema, instances map[string][]map[string]any) graph.Snapshot {
 	t.Helper()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -56,11 +56,11 @@ func TestMarshalSnapshot_Basic(t *testing.T) {
 	assert.Contains(t, string(entityCSV), "e2")
 }
 
-func TestMarshalSnapshot_NilSnapshot(t *testing.T) {
+func TestMarshalSnapshot_ZeroSnapshot(t *testing.T) {
 	t.Parallel()
 	a := New()
-	_, err := a.MarshalSnapshot(context.Background(), nil)
-	assert.ErrorIs(t, err, ErrNilSnapshot)
+	_, err := a.MarshalSnapshot(context.Background(), graph.Snapshot{})
+	assert.ErrorIs(t, err, ErrZeroSnapshot)
 }
 
 func TestWriteSnapshot_Basic(t *testing.T) {

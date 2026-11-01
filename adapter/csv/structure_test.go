@@ -20,7 +20,7 @@ import (
 // parseBoth runs input through both entry points: ParseTyped as Entity, and
 // ParseWithTypeColumn with a "kind" column holding Entity prepended to every
 // line but a blank one. The second input shifts no line, so a span is the same in both.
-func parseBoth(t *testing.T, a func(...Option) *Adapter, st *schema.Type, input string) map[string]struct {
+func parseBoth(t *testing.T, a func(...Option) *Adapter, st schema.Type, input string) map[string]struct {
 	raws   []instance.RawInstance
 	result diag.Result
 } {
@@ -53,7 +53,7 @@ func parseBoth(t *testing.T, a func(...Option) *Adapter, st *schema.Type, input 
 		typed.WriteString(line)
 	}
 	byType, result := a(WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(), id, strings.NewReader(typed.String()),
-		func(string) *schema.Type { return st })
+		func(string) schema.Type { return st })
 	out["ParseWithTypeColumn"] = struct {
 		raws   []instance.RawInstance
 		result diag.Result
@@ -113,7 +113,7 @@ func TestParse_ARefusedRecordIsReportedAndTheNextOneIsRead(t *testing.T) {
 // encoding/csv's LazyQuotes on, `An"n` read as the name An"n.
 func TestParse_ABareQuoteIsNotReadAsAValue(t *testing.T) {
 	t.Parallel()
-	for entry, got := range parseBoth(t, New, nil, "id,name\ne1,An\"n\n") {
+	for entry, got := range parseBoth(t, New, schema.Type{}, "id,name\ne1,An\"n\n") {
 		t.Run(entry, func(t *testing.T) {
 			t.Parallel()
 			if len(got.raws) != 0 {
@@ -131,7 +131,7 @@ func TestParse_ABareQuoteIsNotReadAsAValue(t *testing.T) {
 // read as a value inside it.
 func TestParse_AQuotedFieldNeverClosedIsTheLastRecordReported(t *testing.T) {
 	t.Parallel()
-	for entry, got := range parseBoth(t, New, nil, "id,name\ne1,Ann\ne2,\"Bo\ne3,Cy\n") {
+	for entry, got := range parseBoth(t, New, schema.Type{}, "id,name\ne1,Ann\ne2,\"Bo\ne3,Cy\n") {
 		t.Run(entry, func(t *testing.T) {
 			t.Parallel()
 			if want := []string{"e1"}; !slices.Equal(ids(got.raws), want) {
@@ -202,13 +202,13 @@ func TestParse_AFailingReaderStopsTheParseAtFatal(t *testing.T) {
 				go func() {
 					id := location.MustNewSourceID("test://data/failing.csv")
 					if entry == "ParseTyped" {
-						raws, result := New().ParseTyped(t.Context(), id, "Entity", r, nil)
+						raws, result := New().ParseTyped(t.Context(), id, "Entity", r, schema.Type{})
 						produced = len(raws)
 						done <- result
 						return
 					}
 					byType, result := New(WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(), id, r,
-						func(string) *schema.Type { return nil })
+						func(string) schema.Type { return schema.Type{} })
 					produced = len(byType["Entity"])
 					done <- result
 				}()
@@ -256,7 +256,7 @@ func TestParse_AFaultBeforeTheFirstRecordIsAnError(t *testing.T) {
 		{"an empty document", ""},
 		{"a bare quote in the header", "id,na\"me\ne1,Ann\n"},
 	} {
-		for entry, got := range parseBoth(t, New, nil, c.input) {
+		for entry, got := range parseBoth(t, New, schema.Type{}, c.input) {
 			t.Run(c.name+"/"+entry, func(t *testing.T) {
 				t.Parallel()
 				if got.result.HasFatal() || !got.result.HasErrors() {
@@ -293,7 +293,7 @@ func TestParse_AHeaderColumnNamedTwiceOrNotAtAllIsRefused(t *testing.T) {
 			"ParseWithTypeColumn": {`header names column "id" more than once`},
 		}},
 	} {
-		for entry, got := range parseBoth(t, New, nil, c.input) {
+		for entry, got := range parseBoth(t, New, schema.Type{}, c.input) {
 			t.Run(c.name+"/"+entry, func(t *testing.T) {
 				t.Parallel()
 				if len(got.raws) != 0 {
@@ -414,9 +414,9 @@ func TestParseWithTypeColumn_AValueThatIsNoTypeNameIsRefused(t *testing.T) {
 		"base.Entity,e8\n"
 	var resolved []string
 	byType, result := New(WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(), id, strings.NewReader(input),
-		func(name string) *schema.Type {
+		func(name string) schema.Type {
 			resolved = append(resolved, name)
-			return nil
+			return schema.Type{}
 		})
 
 	if want := []string{"Ghost", "base.Entity"}; !slices.Equal(resolved, want) {
@@ -485,7 +485,7 @@ func TestParseWithTypeColumn_TheTypeColumnNeedNotBeFirst(t *testing.T) {
 	st, _ := s.Type("Entity")
 	byType, result := New(WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(),
 		location.MustNewSourceID("test://data/last.csv"), strings.NewReader("id,kind,name\ne1,Entity,Ann\n"),
-		func(string) *schema.Type { return st })
+		func(string) schema.Type { return st })
 	if !result.OK() || len(byType["Entity"]) != 1 {
 		t.Fatalf("parse: %v, %s", byType, result)
 	}
@@ -517,7 +517,7 @@ func TestParseWithTypeColumn_AMissingTypeColumnIsReportedAtTheHeadersLine(t *tes
 	t.Parallel()
 	_, result := New(WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(),
 		location.MustNewSourceID("test://data/nokind.csv"), strings.NewReader("\n\nid,name\ne1,Ann\n"),
-		func(string) *schema.Type { return nil })
+		func(string) schema.Type { return schema.Type{} })
 	issue, ok := issueContaining(result, `type column "kind" not found in header`)
 	if !ok || issue.Span().Start.Line != 3 {
 		t.Errorf("want the refusal on line 3, got %s", result)

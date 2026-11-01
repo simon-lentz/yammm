@@ -3,6 +3,7 @@ package instance_test
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -187,7 +188,7 @@ func TestNewValidEdgeData_DoesNotAliasTheCallerSlice(t *testing.T) {
 	targets := []instance.ValidEdgeTarget{instance.NewValidEdgeTarget(immutable.WrapKey([]any{"c1"}), immutable.Properties{})}
 	edge := instance.NewValidEdgeData(targets)
 	targets[0] = instance.NewValidEdgeTarget(immutable.WrapKey([]any{"c9"}), immutable.Properties{})
-	if got := edge.Targets()[0].TargetKey().String(); !strings.Contains(got, "c1") {
+	if got := slices.Collect(edge.Targets())[0].TargetKey().String(); !strings.Contains(got, "c1") {
 		t.Errorf("the edge saw the caller's later mutation: %s", got)
 	}
 }
@@ -200,7 +201,7 @@ func TestValidInstance_EdgeAcceptsEitherSpelling(t *testing.T) {
 	inst, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{
 		"id": "p", "name": "n", "works_at": map[string]any{"_target_id": "c1", "note": "n"},
 	}})
-	if inst == nil {
+	if inst.IsZero() {
 		t.Fatal(res)
 	}
 	for _, name := range []string{"WORKS_AT", "works_at"} {

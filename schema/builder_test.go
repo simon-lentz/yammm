@@ -26,7 +26,7 @@ func TestBuilder_SimpleType(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.Equal(t, "test", s.Name())
 	assert.False(t, result.HasErrors())
 
@@ -35,7 +35,7 @@ func TestBuilder_SimpleType(t *testing.T) {
 	assert.Equal(t, "Person", typ.Name())
 
 	// Check properties
-	props := typ.PropertiesSlice()
+	props := slices.Collect(typ.Properties())
 	assert.Len(t, props, 2)
 }
 
@@ -50,7 +50,7 @@ func TestBuilder_MultipleTypes(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	_, ok := s.Type("Person")
@@ -69,7 +69,7 @@ func TestBuilder_OptionalProperty(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	typ, ok := s.Type("Person")
@@ -93,7 +93,7 @@ func TestBuilder_PrimaryKey(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	typ, ok := s.Type("Person")
@@ -120,14 +120,14 @@ func TestBuilder_Relation(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	typ, ok := s.Type("Person")
 	require.True(t, ok)
 
 	// Relations are split into associations and compositions
-	rels := typ.AssociationsSlice()
+	rels := slices.Collect(typ.Associations())
 	require.Len(t, rels, 1)
 	assert.Equal(t, "EMPLOYER", rels[0].Name())
 }
@@ -145,7 +145,7 @@ func TestBuilder_AbstractType(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	base, ok := s.Type("Base")
@@ -166,7 +166,7 @@ func TestBuilder_PartType(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	wheel, ok := s.Type("Wheel")
@@ -185,7 +185,7 @@ func TestBuilder_DataType(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	dt, ok := s.DataType("Email")
@@ -204,7 +204,7 @@ func TestBuilder_WithSourceID(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 	assert.Equal(t, srcID, s.SourceID())
 }
@@ -220,7 +220,7 @@ func TestBuilder_AddImportRequiresSourceID(t *testing.T) {
 		Done().
 		Build()
 
-	require.Nil(t, s, "schema should be nil when errors exist")
+	require.True(t, s.IsZero(), "schema should be nil when errors exist")
 	assert.True(t, result.HasErrors())
 	// Verify diagnostic contains the message
 	issues := slices.Collect(result.Issues())
@@ -237,7 +237,7 @@ func TestBuilder_AddImportWithSourceID(t *testing.T) {
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
-	require.NotNil(t, importedSchema)
+	require.False(t, importedSchema.IsZero())
 	require.False(t, importResult.HasErrors())
 
 	// Create a registry with the imported schema
@@ -258,7 +258,7 @@ func TestBuilder_AddImportWithSourceID(t *testing.T) {
 		Build()
 
 	require.False(t, result.HasErrors(), "result: %v", result)
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	_ = result
 }
 
@@ -272,7 +272,7 @@ func TestBuilder_Documentation(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	assert.Equal(t, "This is the test schema.", s.Documentation())
@@ -295,13 +295,13 @@ func TestBuilder_Composition(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	car, ok := s.Type("Car")
 	require.True(t, ok)
 
-	rels := car.CompositionsSlice()
+	rels := slices.Collect(car.Compositions())
 	require.Len(t, rels, 1)
 	assert.Equal(t, "WHEELS", rels[0].Name())
 	assert.Equal(t, schema.RelationComposition, rels[0].Kind())
@@ -326,13 +326,13 @@ func TestBuilder_ConstraintTypes(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	typ, ok := s.Type("AllConstraints")
 	require.True(t, ok)
 
-	props := typ.PropertiesSlice()
+	props := slices.Collect(typ.Properties())
 	assert.Len(t, props, 10)
 }
 
@@ -344,7 +344,7 @@ func TestBuilder_EmptyNameFails(t *testing.T) {
 		Done().
 		Build()
 
-	require.Nil(t, s, "schema should be nil when name is missing")
+	require.True(t, s.IsZero(), "schema should be nil when name is missing")
 	assert.True(t, result.HasErrors())
 
 	issues := slices.Collect(result.Issues())
@@ -361,7 +361,7 @@ func TestBuilder_EmptyTypeNameFails(t *testing.T) {
 		Done().
 		Build()
 
-	require.Nil(t, s, "schema should be nil when type name is empty")
+	require.True(t, s.IsZero(), "schema should be nil when type name is empty")
 	assert.True(t, result.HasErrors())
 
 	issues := slices.Collect(result.Issues())
@@ -378,7 +378,7 @@ func TestBuilder_NilConstraintFails(t *testing.T) {
 		Done().
 		Build()
 
-	require.Nil(t, s, "schema should be nil when constraint is nil")
+	require.True(t, s.IsZero(), "schema should be nil when constraint is nil")
 	assert.True(t, result.HasErrors())
 
 	issues := slices.Collect(result.Issues())
@@ -395,7 +395,7 @@ func TestBuilder_EmptyPropertyNameFails(t *testing.T) {
 		Done().
 		Build()
 
-	require.Nil(t, s, "schema should be nil when property name is empty")
+	require.True(t, s.IsZero(), "schema should be nil when property name is empty")
 	assert.True(t, result.HasErrors())
 
 	issues := slices.Collect(result.Issues())
@@ -416,7 +416,7 @@ func TestBuilder_EmptyRelationNameFails(t *testing.T) {
 		Done().
 		Build()
 
-	require.Nil(t, s, "schema should be nil when relation name is empty")
+	require.True(t, s.IsZero(), "schema should be nil when relation name is empty")
 	assert.True(t, result.HasErrors())
 
 	issues := slices.Collect(result.Issues())
@@ -432,12 +432,12 @@ func TestBuilder_EmptyRelationNameFails(t *testing.T) {
 func TestBuilder_InvalidNamesFail(t *testing.T) {
 	tests := []struct {
 		name      string
-		build     func() (*schema.Schema, diag.Result)
+		build     func() (schema.Schema, diag.Result)
 		wantInMsg string
 	}{
 		{
 			"hyphenated type name",
-			func() (*schema.Schema, diag.Result) {
+			func() (schema.Schema, diag.Result) {
 				return schema.NewBuilder().WithName("t").
 					AddType("Foo-Bar").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
 					Build()
@@ -446,7 +446,7 @@ func TestBuilder_InvalidNamesFail(t *testing.T) {
 		},
 		{
 			"lowercase type name",
-			func() (*schema.Schema, diag.Result) {
+			func() (schema.Schema, diag.Result) {
 				return schema.NewBuilder().WithName("t").
 					AddType("foo").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
 					Build()
@@ -455,7 +455,7 @@ func TestBuilder_InvalidNamesFail(t *testing.T) {
 		},
 		{
 			"digit-leading type name",
-			func() (*schema.Schema, diag.Result) {
+			func() (schema.Schema, diag.Result) {
 				return schema.NewBuilder().WithName("t").
 					AddType("9Lives").WithPrimaryKey("id", schema.NewStringConstraint()).Done().
 					Build()
@@ -464,7 +464,7 @@ func TestBuilder_InvalidNamesFail(t *testing.T) {
 		},
 		{
 			"lowercase datatype name",
-			func() (*schema.Schema, diag.Result) {
+			func() (schema.Schema, diag.Result) {
 				return schema.NewBuilder().WithName("t").
 					AddDataType("email", schema.NewStringConstraint()).
 					Build()
@@ -473,7 +473,7 @@ func TestBuilder_InvalidNamesFail(t *testing.T) {
 		},
 		{
 			"uppercase property name",
-			func() (*schema.Schema, diag.Result) {
+			func() (schema.Schema, diag.Result) {
 				return schema.NewBuilder().WithName("t").
 					AddType("Person").
 					WithPrimaryKey("id", schema.NewStringConstraint()).
@@ -485,7 +485,7 @@ func TestBuilder_InvalidNamesFail(t *testing.T) {
 		},
 		{
 			"hyphenated property name",
-			func() (*schema.Schema, diag.Result) {
+			func() (schema.Schema, diag.Result) {
 				return schema.NewBuilder().WithName("t").
 					AddType("Person").
 					WithPrimaryKey("first-name", schema.NewStringConstraint()).
@@ -496,7 +496,7 @@ func TestBuilder_InvalidNamesFail(t *testing.T) {
 		},
 		{
 			"digit-leading relation name",
-			func() (*schema.Schema, diag.Result) {
+			func() (schema.Schema, diag.Result) {
 				return schema.NewBuilder().WithName("t").
 					AddType("Car").
 					WithPrimaryKey("id", schema.NewStringConstraint()).
@@ -511,7 +511,7 @@ func TestBuilder_InvalidNamesFail(t *testing.T) {
 		},
 		{
 			"hyphenated relation name",
-			func() (*schema.Schema, diag.Result) {
+			func() (schema.Schema, diag.Result) {
 				return schema.NewBuilder().WithName("t").
 					AddType("Car").
 					WithPrimaryKey("id", schema.NewStringConstraint()).
@@ -529,7 +529,7 @@ func TestBuilder_InvalidNamesFail(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, result := tt.build()
-			require.Nil(t, s, "schema with an invalid name must not build")
+			require.True(t, s.IsZero(), "schema with an invalid name must not build")
 			require.True(t, result.HasCode(diag.E_INVALID_NAME),
 				"want E_INVALID_NAME, got: %v", result.Err())
 			assert.Contains(t, result.Err().Error(), tt.wantInMsg)
@@ -556,7 +556,7 @@ func TestBuilder_GrammarValidNamesBuild(t *testing.T) {
 		Build()
 
 	require.NoError(t, result.Err(), "grammar-valid names must build")
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 }
 
 func TestBuilder_WithIssueLimit(t *testing.T) {
@@ -569,7 +569,7 @@ func TestBuilder_WithIssueLimit(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 }
 
@@ -585,7 +585,7 @@ func TestBuilder_CrossSchemaInheritance(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, baseSchema)
+	require.False(t, baseSchema.IsZero())
 	require.False(t, baseResult.HasErrors())
 
 	// Create registry and register base schema
@@ -606,14 +606,14 @@ func TestBuilder_CrossSchemaInheritance(t *testing.T) {
 		Build()
 
 	require.False(t, derivedResult.HasErrors(), "derivedResult: %v", derivedResult)
-	require.NotNil(t, derivedSchema)
+	require.False(t, derivedSchema.IsZero())
 
 	// Verify Person type exists
 	personType, ok := derivedSchema.Type("Person")
 	require.True(t, ok)
 
 	// Verify inherited properties are accessible via AllProperties
-	allProps := personType.AllPropertiesSlice()
+	allProps := slices.Collect(personType.AllProperties())
 	propNames := make([]string, len(allProps))
 	for i, p := range allProps {
 		propNames[i] = p.Name()
@@ -640,7 +640,7 @@ func TestBuilder_DefaultSourceIDIsZero(t *testing.T) {
 		Build()
 
 	require.False(t, result.HasErrors())
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.True(t, s.SourceID().IsZero(), "SourceID should be zero when WithSourceID() not called")
 }
 
@@ -655,7 +655,7 @@ func TestBuilder_SyntheticSourceIDValidation_RejectsAbsolutePath(t *testing.T) {
 		Build()
 
 	require.True(t, result.HasErrors())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 
 	// Check for E_INVALID_SYNTHETIC_ID
 	hasError := false
@@ -679,7 +679,7 @@ func TestBuilder_SyntheticSourceIDValidation_AcceptsSchemePrefix(t *testing.T) {
 		Build()
 
 	require.False(t, result.HasErrors(), "result: %v", result)
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.Equal(t, "test://unit/person.yammm", s.SourceID().String())
 }
 
@@ -699,7 +699,7 @@ func TestBuilder_FileBackedSourceIDSkipsValidation(t *testing.T) {
 
 	// Should succeed because file-backed IDs are not validated as synthetic
 	require.False(t, result.HasErrors())
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.True(t, s.SourceID().IsFilePath())
 }
 
@@ -715,7 +715,7 @@ func TestBuilder_ImportWithoutRegistry_ReturnsError(t *testing.T) {
 		Build()
 
 	require.True(t, result.HasErrors())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 
 	// Check for E_IMPORT_RESOLVE
 	hasError := false
@@ -743,7 +743,7 @@ func TestBuilder_ImportNotFoundInRegistry_ReturnsError(t *testing.T) {
 		Build()
 
 	require.True(t, result.HasErrors())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 
 	// Check for E_IMPORT_RESOLVE
 	hasError := false
@@ -766,7 +766,7 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, baseSchema)
+	require.False(t, baseSchema.IsZero())
 	require.False(t, baseResult.HasErrors())
 
 	// Create registry and register base schema
@@ -787,20 +787,20 @@ func TestBuilder_CrossSchemaRelation(t *testing.T) {
 		Build()
 
 	require.False(t, derivedResult.HasErrors(), "derivedResult: %v", derivedResult)
-	require.NotNil(t, derivedSchema)
+	require.False(t, derivedSchema.IsZero())
 
 	// Verify relation target is resolved
 	personType, ok := derivedSchema.Type("Person")
 	require.True(t, ok)
 
-	var employerRel *schema.Relation
+	var employerRel schema.Relation
 	for rel := range personType.Associations() {
 		if rel.Name() == "EMPLOYER" {
 			employerRel = rel
 			break
 		}
 	}
-	require.NotNil(t, employerRel, "should have 'employer' relation")
+	require.False(t, employerRel.IsZero(), "should have 'employer' relation")
 
 	// The target should be the Organization type from base schema
 	assert.Equal(t, "Organization", employerRel.Target().Name())
@@ -825,13 +825,13 @@ func TestBuilder_WithInvariant(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	typ, ok := s.Type("Person")
 	require.True(t, ok)
 
-	invariants := typ.InvariantsSlice()
+	invariants := slices.Collect(typ.Invariants())
 	require.Len(t, invariants, 1)
 	assert.Equal(t, "age must be positive", invariants[0].Name())
 	assert.Equal(t, "Validates that age is greater than zero", invariants[0].Documentation())
@@ -853,13 +853,13 @@ func TestBuilder_WithInvariant_Multiple(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	assert.False(t, result.HasErrors())
 
 	typ, ok := s.Type("Person")
 	require.True(t, ok)
 
-	invariants := typ.InvariantsSlice()
+	invariants := slices.Collect(typ.Invariants())
 	assert.Len(t, invariants, 2)
 }
 
@@ -875,7 +875,7 @@ func TestBuilder_WithInvariant_EmptyNameFails(t *testing.T) {
 		Done().
 		Build()
 
-	require.Nil(t, s)
+	require.True(t, s.IsZero())
 	assert.True(t, result.HasErrors())
 
 	issues := slices.Collect(result.Issues())
@@ -895,7 +895,7 @@ func TestBuilder_WithInvariant_NilExpression(t *testing.T) {
 		Done().
 		Build()
 
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 	assert.True(t, result.HasErrors())
 
 	// Verify we get E_INVALID_INVARIANT
@@ -919,7 +919,7 @@ func TestBuilder_ZeroSourceIDWithImports_Fails(t *testing.T) {
 		Done().
 		Build()
 
-	require.Nil(t, s)
+	require.True(t, s.IsZero())
 	assert.True(t, result.HasErrors())
 
 	// Verify E_MISSING_SOURCE_ID is emitted
@@ -943,7 +943,7 @@ func TestBuilder_SyntheticSourceID_WithImportResolver(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, importedSchema)
+	require.False(t, importedSchema.IsZero())
 	require.False(t, importResult.HasErrors())
 
 	// Create a registry with the imported schema
@@ -973,10 +973,10 @@ func TestBuilder_SyntheticSourceID_WithImportResolver(t *testing.T) {
 		Build()
 
 	require.False(t, result.HasErrors(), "result: %v", result)
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 
 	// Verify the import was resolved
-	imports := s.ImportsSlice()
+	imports := slices.Collect(s.Imports())
 	require.Len(t, imports, 1)
 	assert.Equal(t, "./common", imports[0].Path())
 	assert.Equal(t, "common", imports[0].Alias())
@@ -992,7 +992,7 @@ func TestBuilder_SyntheticSourceID_RelativePathWithoutResolver_Fails(t *testing.
 		Done().
 		Build()
 
-	require.NotNil(t, importedSchema)
+	require.False(t, importedSchema.IsZero())
 	require.False(t, importResult.HasErrors())
 
 	// Create a registry with the imported schema
@@ -1014,7 +1014,7 @@ func TestBuilder_SyntheticSourceID_RelativePathWithoutResolver_Fails(t *testing.
 		Build()
 
 	require.True(t, result.HasErrors())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 
 	// Verify helpful error message about resolver requirement
 	hasResolverError := false
@@ -1039,7 +1039,7 @@ func TestBuilder_SyntheticSourceID_SchemaNameFallback(t *testing.T) {
 		Done().
 		Build()
 
-	require.NotNil(t, importedSchema)
+	require.False(t, importedSchema.IsZero())
 	require.False(t, importResult.HasErrors())
 
 	// Create a registry with the imported schema
@@ -1061,10 +1061,10 @@ func TestBuilder_SyntheticSourceID_SchemaNameFallback(t *testing.T) {
 		Build()
 
 	require.False(t, result.HasErrors(), "result: %v", result)
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 
 	// Verify the import was resolved
-	imports := s.ImportsSlice()
+	imports := slices.Collect(s.Imports())
 	require.Len(t, imports, 1)
 	assert.Equal(t, "common", imports[0].Path())
 }
@@ -1081,7 +1081,7 @@ func TestBuilder_DuplicateImportByResolvedSourceID(t *testing.T) {
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
-	require.NotNil(t, commonSchema)
+	require.False(t, commonSchema.IsZero())
 	require.False(t, commonResult.HasErrors())
 
 	// Create registry and register the schema
@@ -1112,7 +1112,7 @@ func TestBuilder_DuplicateImportByResolvedSourceID(t *testing.T) {
 		Build()
 
 	// Should fail with E_DUPLICATE_IMPORT
-	require.Nil(t, s, "schema should be nil when duplicate imports detected")
+	require.True(t, s.IsZero(), "schema should be nil when duplicate imports detected")
 	assert.True(t, result.HasErrors())
 
 	// Verify E_DUPLICATE_IMPORT is emitted with spec-compliant format
@@ -1146,7 +1146,7 @@ func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
-	require.NotNil(t, helperSchema)
+	require.False(t, helperSchema.IsZero())
 	require.False(t, helperResult.HasErrors())
 
 	// Register helper schema
@@ -1167,10 +1167,10 @@ func TestBuilder_FileBackedSourceID_RelativeImport(t *testing.T) {
 		Build()
 
 	require.False(t, mainResult.HasErrors(), "result: %v", mainResult)
-	require.NotNil(t, mainSchema)
+	require.False(t, mainSchema.IsZero())
 
 	// Verify the import was resolved
-	imports := mainSchema.ImportsSlice()
+	imports := slices.Collect(mainSchema.Imports())
 	require.Len(t, imports, 1)
 	assert.Equal(t, "./helper", imports[0].Path())
 }
@@ -1228,7 +1228,7 @@ func TestBuilder_FileBackedSourceID_RelativeImportBesideALinkOfItsBareName(t *te
 	if res.HasErrors() {
 		t.Fatal(res.Err())
 	}
-	if got := mainSchema.ImportsSlice()[0].ResolvedSourceID(); got != ids["helper"] {
+	if got := slices.Collect(mainSchema.Imports())[0].ResolvedSourceID(); got != ids["helper"] {
 		t.Errorf("./helper binds %s, want helper.yammm's %s", got, ids["helper"])
 	}
 }
@@ -1253,7 +1253,7 @@ func TestBuilder_FileBackedSourceID_RelativeImport_NotFound(t *testing.T) {
 		Build()
 
 	require.True(t, mainResult.HasErrors())
-	assert.Nil(t, mainSchema)
+	assert.True(t, mainSchema.IsZero())
 
 	// Verify we get E_IMPORT_RESOLVE
 	hasError := false
@@ -1283,7 +1283,7 @@ func TestBuilder_FileBackedSourceID_ParentDirImport(t *testing.T) {
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
-	require.NotNil(t, helperSchema)
+	require.False(t, helperSchema.IsZero())
 	require.False(t, helperResult.HasErrors())
 
 	// Register helper schema
@@ -1304,7 +1304,7 @@ func TestBuilder_FileBackedSourceID_ParentDirImport(t *testing.T) {
 		Build()
 
 	require.False(t, mainResult.HasErrors(), "result: %v", mainResult)
-	require.NotNil(t, mainSchema)
+	require.False(t, mainSchema.IsZero())
 }
 
 func TestBuilder_ImportResolver_NotFound(t *testing.T) {
@@ -1328,7 +1328,7 @@ func TestBuilder_ImportResolver_NotFound(t *testing.T) {
 		Build()
 
 	require.True(t, result.HasErrors())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 
 	// Verify E_IMPORT_RESOLVE error
 	hasError := false
@@ -1365,7 +1365,7 @@ func TestBuilder_ImportResolver_ResolvesToUnregisteredSchema(t *testing.T) {
 		Build()
 
 	require.True(t, result.HasErrors())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 }
 
 func TestBuilder_DuplicateImportByAlias(t *testing.T) {
@@ -1377,7 +1377,7 @@ func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
-	require.NotNil(t, commonSchema)
+	require.False(t, commonSchema.IsZero())
 	require.False(t, commonResult.HasErrors())
 
 	other, otherResult := schema.NewBuilder().
@@ -1387,7 +1387,7 @@ func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 		WithPrimaryKey("name", schema.NewStringConstraint()).
 		Done().
 		Build()
-	require.NotNil(t, other)
+	require.False(t, other.IsZero())
 	require.False(t, otherResult.HasErrors())
 
 	registry := schema.NewRegistry()
@@ -1407,7 +1407,7 @@ func TestBuilder_DuplicateImportByAlias(t *testing.T) {
 		Build()
 
 	require.True(t, result.HasErrors())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 
 	// Verify duplicate alias error - may be E_IMPORT_ALIAS_COLLISION or E_DUPLICATE_IMPORT
 	hasError := false
@@ -1431,7 +1431,7 @@ func TestBuilder_ReservedKeywordAlias(t *testing.T) {
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
-	require.NotNil(t, commonSchema)
+	require.False(t, commonSchema.IsZero())
 	require.False(t, commonResult.HasErrors())
 
 	registry := schema.NewRegistry()
@@ -1449,7 +1449,7 @@ func TestBuilder_ReservedKeywordAlias(t *testing.T) {
 		Build()
 
 	require.True(t, result.HasErrors())
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 
 	// Verify reserved keyword error
 	hasError := false

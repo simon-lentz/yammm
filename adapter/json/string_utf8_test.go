@@ -41,7 +41,7 @@ type jsonText string
 // utf8JSONSnapshot builds Holder h1 through instance.NewValidInstance, which
 // runs no validation, holding props beside its key and one LINK to Target t1
 // carrying label.
-func utf8JSONSnapshot(t *testing.T, props map[string]any, label any) *graph.Snapshot {
+func utf8JSONSnapshot(t *testing.T, props map[string]any, label any) graph.Snapshot {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), utf8JSONSchema, "utf8json.yammm")
 	if res.HasErrors() {
@@ -52,14 +52,14 @@ func utf8JSONSnapshot(t *testing.T, props map[string]any, label any) *graph.Snap
 	all := map[string]any{"id": "h1"}
 	maps.Copy(all, props)
 	g := graph.New(s)
-	for _, inst := range []*instance.ValidInstance{
+	for _, inst := range []instance.ValidInstance{
 		instance.NewValidInstance("Target", targetT.ID(), immutable.WrapKey([]any{"t1"}),
-			immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, nil),
+			immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, location.Provenance{}),
 		instance.NewValidInstance("Holder", holderT.ID(), immutable.WrapKey([]any{"h1"}),
 			immutable.WrapProperties(all),
-			map[string]*instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			map[string]instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(map[string]any{"label": label})),
-			})}, nil, nil),
+			})}, nil, location.Provenance{}),
 	} {
 		if r := g.Add(context.Background(), inst); r.HasErrors() {
 			t.Fatalf("graph.Add: %s", r)

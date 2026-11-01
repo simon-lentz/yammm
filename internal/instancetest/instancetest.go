@@ -12,9 +12,9 @@ type viConfig struct {
 	typeID     schema.TypeID
 	pk         immutable.Key
 	props      immutable.Properties
-	edges      map[string]*instance.ValidEdgeData
+	edges      map[string]instance.ValidEdgeData
 	composed   map[string]immutable.Value
-	provenance *location.Provenance
+	provenance location.Provenance
 }
 
 // VIOption customizes a [VI]-built instance.
@@ -43,7 +43,7 @@ func Props(m map[string]any) VIOption {
 }
 
 // Edges sets the association edge data (defaults to none).
-func Edges(edges map[string]*instance.ValidEdgeData) VIOption {
+func Edges(edges map[string]instance.ValidEdgeData) VIOption {
 	return func(c *viConfig) { c.edges = edges }
 }
 
@@ -53,15 +53,15 @@ func Composed(composed map[string]immutable.Value) VIOption {
 }
 
 // Provenance sets the source provenance (defaults to none).
-func Provenance(p *location.Provenance) VIOption {
+func Provenance(p location.Provenance) VIOption {
 	return func(c *viConfig) { c.provenance = p }
 }
 
-// VI builds a *instance.ValidInstance for tests, defaulting every field a
-// scenario does not name: zero TypeID, primary key [1], and nil
-// properties, edges, compositions, and provenance. It wraps the 7-argument
+// VI builds an instance.ValidInstance for tests, defaulting every field a
+// scenario does not name: zero TypeID, primary key [1], zero provenance, and
+// no properties, edges or compositions. It wraps the 7-argument
 // [instance.NewValidInstance] so call sites state only what they test.
-func VI(typeName string, opts ...VIOption) *instance.ValidInstance {
+func VI(typeName string, opts ...VIOption) instance.ValidInstance {
 	c := viConfig{
 		pk:    immutable.WrapKey([]any{int64(1)}),
 		props: immutable.WrapProperties(nil),

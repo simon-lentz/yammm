@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -35,7 +36,7 @@ type Reading {
 // nonFiniteSnapshot builds a graph through instance.NewValidInstance, which
 // runs no validation, because a validated Float is never non-finite. props and
 // weight place the value; the rest of the graph is finite.
-func nonFiniteSnapshot(t *testing.T, props map[string]any, weight any) *graph.Snapshot {
+func nonFiniteSnapshot(t *testing.T, props map[string]any, weight any) graph.Snapshot {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), nonFiniteSchema, "nonfinite.yammm")
 	if res.HasErrors() {
@@ -45,15 +46,15 @@ func nonFiniteSnapshot(t *testing.T, props map[string]any, weight any) *graph.Sn
 	readingT, _ := s.Type("Reading")
 	g := graph.New(s)
 	stationAt := instance.NewValidInstance("Station", stationT.ID(), immutable.WrapKey([]any{"s1"}),
-		immutable.WrapProperties(map[string]any{"id": "s1"}), nil, nil, nil)
+		immutable.WrapProperties(map[string]any{"id": "s1"}), nil, nil, location.Provenance{})
 	all := map[string]any{"id": "r1"}
 	maps.Copy(all, props)
 	reading := instance.NewValidInstance("Reading", readingT.ID(), immutable.WrapKey([]any{"r1"}),
 		immutable.WrapProperties(all),
-		map[string]*instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		map[string]instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"s1"}), immutable.WrapProperties(map[string]any{"weight": weight})),
-		})}, nil, nil)
-	for _, inst := range []*instance.ValidInstance{stationAt, reading} {
+		})}, nil, location.Provenance{})
+	for _, inst := range []instance.ValidInstance{stationAt, reading} {
 		if r := g.Add(context.Background(), inst); r.HasErrors() {
 			t.Fatalf("graph.Add: %s", r)
 		}
@@ -165,9 +166,9 @@ func (failingWriter) Write([]byte) (int, error) { return 0, errWrite }
 func TestWriters_TheRefusalClassCoversTheDataAlone(t *testing.T) {
 	t.Parallel()
 
-	_, nilErr := New().MarshalObject(context.Background(), nil)
-	if !errors.Is(nilErr, ErrNilResult) {
-		t.Errorf("a nil result = %v, want ErrNilResult", nilErr)
+	_, nilErr := New().MarshalObject(context.Background(), graph.Snapshot{})
+	if !errors.Is(nilErr, ErrZeroSnapshot) {
+		t.Errorf("a nil result = %v, want ErrZeroSnapshot", nilErr)
 	}
 	if errors.Is(nilErr, ErrUnrepresentable) {
 		t.Errorf("a nil result matched the refusal class: %v", nilErr)
@@ -218,14 +219,14 @@ type Holder {
 	holderT, _ := s.Type("Holder")
 	at := time.Date(2020, 1, 2, 12, 3, 4, 5, time.FixedZone("Zone", 3600))
 	g := graph.New(s)
-	for _, inst := range []*instance.ValidInstance{
+	for _, inst := range []instance.ValidInstance{
 		instance.NewValidInstance("Target", targetT.ID(), immutable.WrapKey([]any{at}),
-			immutable.WrapProperties(map[string]any{"at": at}), nil, nil, nil),
+			immutable.WrapProperties(map[string]any{"at": at}), nil, nil, location.Provenance{}),
 		instance.NewValidInstance("Holder", holderT.ID(), immutable.WrapKey([]any{"h1"}),
 			immutable.WrapProperties(map[string]any{"id": "h1"}),
-			map[string]*instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			map[string]instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{at}), immutable.WrapProperties(nil)),
-			})}, nil, nil),
+			})}, nil, location.Provenance{}),
 	} {
 		if r := g.Add(context.Background(), inst); r.HasErrors() {
 			t.Fatalf("graph.Add: %s", r)

@@ -28,7 +28,7 @@ type Holder {
 }
 `
 
-func vLoad(t *testing.T) *schema.Schema {
+func vLoad(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), vSchema, "v.yammm")
 	if res.HasErrors() {
@@ -37,7 +37,7 @@ func vLoad(t *testing.T) *schema.Schema {
 	return s
 }
 
-func vID(t *testing.T, s *schema.Schema, n string) schema.TypeID {
+func vID(t *testing.T, s schema.Schema, n string) schema.TypeID {
 	t.Helper()
 	ty, ok := s.Type(n)
 	if !ok {

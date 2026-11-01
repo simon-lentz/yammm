@@ -25,7 +25,7 @@ func TestMarshalObject_WritesMarkupCharactersAsThemselves(t *testing.T) {
 	const text = "endDate > startDate && size < 10"
 	g := graph.New(s)
 	inst := instance.NewValidInstance("Rule", ty.ID(), immutable.WrapKey([]any{"r<1>"}),
-		immutable.WrapProperties(map[string]any{"id": "r<1>", "text": text}), nil, nil, nil)
+		immutable.WrapProperties(map[string]any{"id": "r<1>", "text": text}), nil, nil, location.Provenance{})
 	if r := g.Add(ctx, inst); r.Err() != nil {
 		t.Fatalf("add: %v", r.Err())
 	}

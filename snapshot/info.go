@@ -91,7 +91,8 @@ type SnapshotInfo struct { //nolint:revive // intentional stutter — mirrors .y
 // [HeaderOnly] — it returns after parsing the header and skips decoding
 // the instance body, though it still scans the whole document to check
 // its shape. [HeaderOnlyRead] is the streaming sibling whose cost is
-// proportional to the header and the types table alone.
+// proportional to the header, the types table and any member before it, up to
+// [MaxHeaderSize].
 //
 // Diagnostics are capped at the same default [Load] uses (100). This surface
 // takes no option that raises it; a caller needing every issue on a
@@ -130,7 +131,7 @@ func Info(ctx context.Context, data []byte) (*SnapshotInfo, diag.Result) {
 		return nil, c.Result()
 	}
 
-	sd := newStreamDecoder(data, nil, defaultLoadConfig())
+	sd := newStreamDecoder(data, schema.Schema{}, defaultLoadConfig())
 	if err := checkDocument(data); err != nil {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED, err.Error()).Build())
 		return nil, sd.collector.Result()
@@ -234,9 +235,9 @@ type HeaderInfo struct {
 // [Load] does: the top level must be the format's four keys, in order, each
 // once and none null, with nothing after them, and no object may repeat a
 // member name or spell one the format declares in another case.
-// [HeaderOnlyRead] and [ScanDir] read through a capped reader and never hold
-// the body, so they cannot make those checks — and say so on their own
-// documentation rather than accepting a misshapen document silently.
+// [HeaderOnlyRead] and [ScanDir] read through a capped reader and stop at the
+// types table, holding any member before it up to the cap, so they cannot make
+// those checks. Their own documentation says so.
 //
 // Integrity is not verified. The returned [HeaderInfo.IntegrityHash] is
 // the value stored in the file, not a verification result. Callers that
@@ -271,7 +272,7 @@ func HeaderOnly(ctx context.Context, data []byte) (*HeaderInfo, diag.Result) {
 
 	cfg := defaultLoadConfig()
 	cfg.headerOnly = true
-	sd := newStreamDecoder(data, nil, cfg)
+	sd := newStreamDecoder(data, schema.Schema{}, cfg)
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
@@ -360,8 +361,8 @@ const MaxHeaderSize = 16 * 1024 * 1024
 // can stat.
 //
 // Shape: HeaderOnlyRead reads through a reader capped at [MaxHeaderSize] and
-// never holds the body, so it cannot check the document's outermost shape or
-// its member names. A document whose sections are absent, repeated, out of
+// stops at the types table, holding any member before it up to the cap, so it
+// cannot check the document's outermost shape or its member names. A document whose sections are absent, repeated, out of
 // order, or followed by trailing bytes, or whose objects repeat a member name,
 // reads its header here without complaint; of these, only a first section
 // other than the header and a missing types section are refused. It does not
@@ -384,7 +385,7 @@ func HeaderOnlyRead(ctx context.Context, r io.Reader) (*HeaderInfo, diag.Result)
 	lr := newLimitReader(r, MaxHeaderSize)
 	cfg := defaultLoadConfig()
 	cfg.headerOnly = true
-	sd := newStreamDecoderFromReader(lr, nil, cfg)
+	sd := newStreamDecoderFromReader(lr, schema.Schema{}, cfg)
 
 	// Decode header + types only — no instance body, no integrity check.
 	if err := sd.decodeHeader(); err != nil {
@@ -466,17 +467,14 @@ func (h *HeaderInfo) CreatedAtTime() (time.Time, bool) {
 // "forgot to compare" foot-gun out of consumer code paths.
 //
 // Nil-safety: SchemaHashMatches returns false without panicking when
-// either the receiver or s is nil, when the header's SchemaHash is
-// empty, when the header's SchemaHashAlgorithm does not match
+// the receiver is nil or s is zero, when the header's SchemaHash is
+// empty, or when the header's SchemaHashAlgorithm does not match
 // [schema.StructuralHashVersion] (a hash produced by a different
-// algorithm is not comparable, even if the string happens to match), or
-// when schema.StructuralHash(s) returns the empty string. An empty or
-// version-mismatched SchemaHash never matches anything; dispatch callers
-// treat the false return as "unknown or incompatible schema, do not
-// proceed" and surface a structured error rather than silently
-// continuing.
-func (h *HeaderInfo) SchemaHashMatches(s *schema.Schema) bool {
-	if h == nil || s == nil || h.SchemaHash == "" {
+// algorithm is not comparable, even if the string happens to match). An empty or
+// version-mismatched SchemaHash never matches anything, so false means "unknown
+// or incompatible schema".
+func (h *HeaderInfo) SchemaHashMatches(s schema.Schema) bool {
+	if h == nil || s.IsZero() || h.SchemaHash == "" {
 		return false
 	}
 	if h.SchemaHashAlgorithm != schema.StructuralHashVersion {

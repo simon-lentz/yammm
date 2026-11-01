@@ -3,6 +3,7 @@ package graph_test
 import (
 	"encoding/json"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ part type Wheel {
 }
 `
 
-func loadGuardSchema(t *testing.T) *schema.Schema {
+func loadGuardSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), bypassGuardSchema, "guards.yammm")
 	if res.HasErrors() {
@@ -57,7 +58,7 @@ func TestAdd_BypassGuard_OneAssociationCardinality(t *testing.T) {
 		t.Fatal("two targets on a (one) association passed Add")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_CARDINALITY)
-	if insts := g.Snapshot().InstancesOf(mustTypeID(t, s, "Person")); len(insts) != 0 {
+	if insts := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Person"))); len(insts) != 0 {
 		t.Fatal("the rejected instance installed anyway")
 	}
 }
@@ -83,13 +84,13 @@ func TestAdd_BypassGuard_UnknownAssociationName(t *testing.T) {
 	// The record is refused entire: data the graph cannot name is not a
 	// partial success, and a partial install disagrees with the error.
 	snap := g.Snapshot()
-	if insts := snap.InstancesOf(mustTypeID(t, s, "Person")); len(insts) != 0 {
+	if insts := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person"))); len(insts) != 0 {
 		t.Fatal("a refused instance installed")
 	}
-	if len(snap.Edges()) != 0 {
+	if len(slices.Collect(snap.Edges())) != 0 {
 		t.Fatal("edges under an undeclared name survived")
 	}
-	if len(snap.Unresolved()) != 0 {
+	if len(slices.Collect(snap.Unresolved())) != 0 {
 		t.Fatal("a refused instance left unresolved records")
 	}
 }
@@ -117,7 +118,7 @@ func TestAdd_BypassGuard_UnknownCompositionName(t *testing.T) {
 		t.Fatal("children under an undeclared composition name attached as (many)")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_UNKNOWN_RELATION)
-	if insts := g.Snapshot().InstancesOf(mustTypeID(t, s, "Car")); len(insts) != 0 {
+	if insts := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Car"))); len(insts) != 0 {
 		t.Fatal("a record carrying an undeclared composition name installed")
 	}
 }
@@ -145,7 +146,7 @@ func TestAdd_BypassGuard_InlineComposedChildTypeMismatch(t *testing.T) {
 		t.Fatal("a child of the wrong type attached on the inline path")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_INVALID_COMPOSITION)
-	if insts := g.Snapshot().InstancesOf(mustTypeID(t, s, "Car")); len(insts) != 0 {
+	if insts := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Car"))); len(insts) != 0 {
 		t.Fatal("a record carrying a wrong-typed child installed")
 	}
 }
@@ -266,7 +267,7 @@ func TestAdd_BypassGuard_TypedNilComposedChild(t *testing.T) {
 		instancetest.PK("v1"),
 		instancetest.Props(map[string]any{"vin": "v1"}),
 		instancetest.Composed(map[string]immutable.Value{
-			"SPARE": immutable.Wrap([]any{(*instance.ValidInstance)(nil)}),
+			"SPARE": immutable.Wrap([]any{instance.ValidInstance{}}),
 		}),
 	)
 
@@ -275,7 +276,7 @@ func TestAdd_BypassGuard_TypedNilComposedChild(t *testing.T) {
 		t.Fatal("a typed-nil composed child passed Add")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_INVALID_COMPOSITION)
-	if insts := g.Snapshot().InstancesOf(mustTypeID(t, s, "Car")); len(insts) != 0 {
+	if insts := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Car"))); len(insts) != 0 {
 		t.Fatal("a refused record installed")
 	}
 }
@@ -288,7 +289,7 @@ func TestAdd_BypassGuard_InlineSiblingDuplicatePK(t *testing.T) {
 	s := testSchemaWithComposition(t) // Parent -> (many) Child, Child has a PK
 	childID := mustTypeID(t, s, "Child")
 
-	child := func(name string) *instance.ValidInstance {
+	child := func(name string) instance.ValidInstance {
 		return instancetest.VI(
 			"Child",
 			instancetest.TypeID(childID),
@@ -312,7 +313,7 @@ func TestAdd_BypassGuard_InlineSiblingDuplicatePK(t *testing.T) {
 		t.Fatal("two siblings sharing a primary key passed Add")
 	}
 	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
-	if insts := g.Snapshot().InstancesOf(mustTypeID(t, s, "Parent")); len(insts) != 0 {
+	if insts := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Parent"))); len(insts) != 0 {
 		t.Fatal("a refused record installed")
 	}
 }
@@ -375,7 +376,7 @@ func TestAddComposed_BypassGuard_ChecksTheStreamedChildsSubtree(t *testing.T) {
 		t.Fatal("a streamed child with an undeclared edge name attached")
 	}
 	assertHasCode(t, result, diag.E_GRAPH_UNKNOWN_RELATION)
-	parents := g.Snapshot().InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("the parent did not survive a refused child (%d parents)", len(parents))
 	}
@@ -444,7 +445,7 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 
 	partID := mustTypeID(t, schemaC, "Part")
 	middleID := mustTypeID(t, schemaB, "Middle")
-	part := func(id string) *instance.ValidInstance {
+	part := func(id string) instance.ValidInstance {
 		return instancetest.VI(
 			"c.Part",
 			instancetest.TypeID(partID),
@@ -452,7 +453,7 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 			instancetest.Props(map[string]any{"id": id}),
 		)
 	}
-	middle := func(id string, kids ...any) *instance.ValidInstance {
+	middle := func(id string, kids ...any) instance.ValidInstance {
 		return instancetest.VI(
 			"b.Middle",
 			instancetest.TypeID(middleID),
@@ -466,7 +467,7 @@ func TestComposedChild_TransitivelyImportedType_Resolves(t *testing.T) {
 	if r := g.Add(ctx, middle("m1", part("p1"), part("p2"))); !r.OK() {
 		t.Fatalf("a composed child of a transitively imported type was refused: %s", r.String())
 	}
-	insts := g.Snapshot().InstancesOf(middleID)
+	insts := slices.Collect(g.Snapshot().InstancesOf(middleID))
 	if len(insts) != 1 || insts[0].ComposedCount("PARTS") != 2 {
 		t.Fatalf("the transitively imported children did not attach (%d instances)", len(insts))
 	}
@@ -583,7 +584,7 @@ part type Wheel {
 	if !strings.Contains(result.String(), "elsewhere.yammm:Wheel") {
 		t.Errorf("the message does not name the offending identity: %s", result.String())
 	}
-	if insts := g.Snapshot().InstancesOf(mustTypeID(t, s, "Car")); len(insts) != 1 {
+	if insts := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Car"))); len(insts) != 1 {
 		t.Fatalf("the refused record installed (%d cars, want just the control)", len(insts))
 	}
 }
@@ -598,7 +599,7 @@ func TestComposedChild_KeyRule_IsTheSameOnBothPaths(t *testing.T) {
 	parentID := mustTypeID(t, s, "Parent")
 	ctx := t.Context()
 
-	forged := func() *instance.ValidInstance {
+	forged := func() instance.ValidInstance {
 		// The key says c1, the property says c2.
 		return instancetest.VI(
 			"Child",
@@ -610,7 +611,7 @@ func TestComposedChild_KeyRule_IsTheSameOnBothPaths(t *testing.T) {
 
 	// An empty key on a keyed part type is the shape that made two keyless
 	// siblings collide on "[]" before the rule reached the composed paths.
-	keyless := func() *instance.ValidInstance {
+	keyless := func() instance.ValidInstance {
 		return instancetest.VI(
 			"Child",
 			instancetest.TypeID(childID),
@@ -727,7 +728,7 @@ part type Wheel {
 		}
 	}
 
-	car := g.Snapshot().InstancesOf(mustTypeID(t, sm, "Car"))[0]
+	car := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, sm, "Car")))[0]
 	if n := car.ComposedCount("WHEELS"); n != 2 {
 		t.Errorf("keyless siblings attached = %d, want 2", n)
 	}

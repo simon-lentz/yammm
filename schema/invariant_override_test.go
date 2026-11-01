@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -25,7 +26,7 @@ type C extends B {
 }
 `
 
-func loadOverrideChain(t *testing.T) *schema.Schema {
+func loadOverrideChain(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), overrideChain, "x.yammm")
 	if res.HasErrors() {
@@ -34,15 +35,15 @@ func loadOverrideChain(t *testing.T) *schema.Schema {
 	return s
 }
 
-func invariantNamed(t *testing.T, typ *schema.Type, name string) *schema.Invariant {
+func invariantNamed(t *testing.T, typ schema.Type, name string) schema.Invariant {
 	t.Helper()
-	for _, inv := range typ.AllInvariantsSlice() {
+	for inv := range typ.AllInvariants() {
 		if inv.Name() == name {
 			return inv
 		}
 	}
 	t.Fatalf("type %q carries no invariant %q", typ.Name(), name)
-	return nil
+	return schema.Invariant{}
 }
 
 // A subtype inherits its DIRECT parent's override, not the grandparent's
@@ -68,7 +69,7 @@ func TestInvariantOverride_SubtypeInheritsTheNearestDeclaration(t *testing.T) {
 		t.Fatal("type C missing")
 	}
 
-	ownB := typeB.InvariantsSlice()
+	ownB := slices.Collect(typeB.Invariants())
 	if len(ownB) != 1 {
 		t.Fatalf("B declares %d invariants, want 1", len(ownB))
 	}
@@ -88,7 +89,7 @@ func TestInvariantOverride_TheShadowedDeclarationIsNotAlsoInherited(t *testing.T
 	}
 
 	count := 0
-	for _, inv := range typeC.AllInvariantsSlice() {
+	for inv := range typeC.AllInvariants() {
 		if inv.Name() == "bound" {
 			count++
 		}

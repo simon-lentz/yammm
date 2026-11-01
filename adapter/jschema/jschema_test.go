@@ -15,7 +15,7 @@ import (
 )
 
 // loadSchema loads a testdata schema, failing on any diagnostic error.
-func loadSchema(t *testing.T, name string) *schema.Schema {
+func loadSchema(t *testing.T, name string) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	path, err := filepath.Abs(filepath.Join("testdata", name+".yammm"))

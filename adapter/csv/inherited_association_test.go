@@ -16,7 +16,7 @@ import (
 
 // inheritedSnapshot builds one Employee — a concrete subtype whose association
 // is declared on its abstract parent — plus the Company it points at.
-func inheritedSnapshot(t *testing.T) (*graph.Snapshot, *Adapter) {
+func inheritedSnapshot(t *testing.T) (graph.Snapshot, *Adapter) {
 	t.Helper()
 	s := loadTestSchema(t, "inherited_relations.yammm")
 	snap := buildSnapshot(t, s, map[string][]map[string]any{

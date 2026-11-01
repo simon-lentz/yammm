@@ -15,7 +15,7 @@ import (
 // This interface is implemented by schema.Registry.
 type completionRegistry interface {
 	// LookupBySourceID returns the schema at the given source ID, if loaded.
-	LookupBySourceID(id location.SourceID) (*Schema, bool)
+	LookupBySourceID(id location.SourceID) (Schema, bool)
 }
 
 // importResolution is one import alias's resolution outcome, handed from the
@@ -60,7 +60,7 @@ type resolvedImportMap map[string]importResolution
 // every independent error in a single pass.
 //
 // Errors are collected in the provided collector. completeModel returns the
-// completed *Schema, or nil if this completion contributed any Fatal or Error
+// completed Schema, or the zero Schema if this completion contributed any Fatal or Error
 // issue — a per-completion error gate, so when the collector is shared across a
 // multi-schema load each schema is judged by its own error delta. The registry
 // is optional, but a qualified reference resolves or is reported either way —
@@ -72,10 +72,10 @@ func completeModel(
 	collector *diag.Collector,
 	registry completionRegistry,
 	resolvedImports resolvedImportMap,
-) *Schema {
+) Schema {
 	if m == nil {
 		collector.Collect(diag.NewIssue(diag.Error, diag.E_INTERNAL, "no model to complete").Build())
-		return nil
+		return Schema{}
 	}
 
 	c := &completer{
@@ -84,16 +84,16 @@ func completeModel(
 		collector:       collector,
 		registry:        registry,
 		resolvedImports: resolvedImports,
-		typeIndex:       make(map[string]*Type),
-		dataIndex:       make(map[string]*DataType),
+		typeIndex:       make(map[string]Type),
+		dataIndex:       make(map[string]DataType),
 		// The collector may be shared across a whole multi-schema load, so
 		// this completion is judged on the errors IT contributes, not on
 		// errors collected before it began (a sibling import's failure must
-		// not nil an unrelated clean schema).
+		// not zero an unrelated clean schema).
 		gate:                    newErrorGate(collector),
-		unresolvedSupertypeMemo: make(map[*Type]bool),
-		diagnosedAnnotations:    make(map[*Annotation]bool),
-		conflictedProperties:    make(map[*Property]bool),
+		unresolvedSupertypeMemo: make(map[Type]bool),
+		diagnosedAnnotations:    make(map[Annotation]bool),
+		conflictedProperties:    make(map[Property]bool),
 	}
 
 	return c.complete()
@@ -139,20 +139,20 @@ type completer struct {
 	collector       *diag.Collector
 	registry        completionRegistry
 	resolvedImports resolvedImportMap
-	schema          *Schema
-	typeIndex       map[string]*Type
-	dataIndex       map[string]*DataType
+	schema          Schema
+	typeIndex       map[string]Type
+	dataIndex       map[string]DataType
 	gate            errorGate // judges this completion by the errors it contributes
 
 	// unresolvedSupertypeMemo caches [completer.hasUnresolvedSupertype] per type:
 	// the inheritance graph and resolution state are fixed across the phases that
 	// query it (validatePrimaryKeys, validateInvariantExpressions,
 	// validateAnnotations), so a type's answer cannot change between calls.
-	unresolvedSupertypeMemo map[*Type]bool
+	unresolvedSupertypeMemo map[Type]bool
 
 	// staticMembers caches [completer.membersOf] per type: the merged members
 	// keyed as an invariant expression writes them.
-	staticMembers map[*Type]staticMembers
+	staticMembers map[Type]staticMembers
 	invariantSeen map[string]bool // diagnostics already reported for the invariant being typed
 	// noValue maps each literal that stands in for one with no value, in any
 	// invariant this completion converts, to the kind of literal the source
@@ -167,20 +167,20 @@ type completer struct {
 	// diagnosedAnnotations marks the annotations that drew a diagnostic of their
 	// own during validation, so the shadow warning does not advise re-stating an
 	// annotation this same load rejects.
-	diagnosedAnnotations map[*Annotation]bool
+	diagnosedAnnotations map[Annotation]bool
 
 	// conflictedProperties marks own declarations that drew E_PROPERTY_CONFLICT,
 	// so the shadow warning does not advise editing a declaration the load has
 	// already rejected outright.
-	conflictedProperties map[*Property]bool
+	conflictedProperties map[Property]bool
 
 	// dtStates and dtStack drive [completer.resolveDataType]: each datatype's
 	// resolution state, and the datatypes whose resolution is in progress.
-	dtStates map[*DataType]dtState
-	dtStack  []*DataType
+	dtStates map[DataType]dtState
+	dtStack  []DataType
 }
 
-func (c *completer) complete() *Schema {
+func (c *completer) complete() Schema {
 	// Create the schema shell
 	c.schema = newSchema(
 		c.model.Name,
@@ -222,7 +222,7 @@ func (c *completer) complete() *Schema {
 	// produced would be garbage, and every downstream phase that reads
 	// merged members would generate noise from them.
 	if !c.detectCycles() {
-		return nil
+		return Schema{}
 	}
 
 	// Phase 5: Complete each type (linearize, merge, validate)
@@ -262,7 +262,7 @@ func (c *completer) complete() *Schema {
 	// delta, not the shared collector's total: errors collected before this
 	// completion began belong to other schemas in the same load.
 	if c.gate.tripped() {
-		return nil
+		return Schema{}
 	}
 
 	// Phase 8: Seal this schema's own declarations.
@@ -273,7 +273,7 @@ func (c *completer) complete() *Schema {
 
 // sealOwnDeclarations closes this schema's own declarations to mutation.
 // Relations come from the own sets: a merged set carries an ancestor's
-// [Relation] pointers, already sealed by their owning schema, and re-sealing
+// [Relation] records, already sealed by their owning schema, and re-sealing
 // them races two loads sharing a [Registry] ([TestSeal_SharedRegistryConcurrentLoads]).
 func (c *completer) sealOwnDeclarations() {
 	for _, t := range c.schema.types {
@@ -296,7 +296,7 @@ func (c *completer) sealOwnDeclarations() {
 // kept and indexed — so every duplicate is diagnosed in one pass and
 // downstream phases see one coherent Type per name.
 func (c *completer) indexTypes() {
-	types := make([]*Type, 0, len(c.model.Types))
+	types := make([]Type, 0, len(c.model.Types))
 
 	for _, td := range c.model.Types {
 		if td == nil {
@@ -360,7 +360,7 @@ func (c *completer) indexTypes() {
 // duplicate declaration is reported and skipped, keep-first, like
 // indexTypes.
 func (c *completer) indexDataTypes() {
-	dataTypes := make([]*DataType, 0, len(c.model.DataTypes))
+	dataTypes := make([]DataType, 0, len(c.model.DataTypes))
 
 	for _, dd := range c.model.DataTypes {
 		if dd == nil {
@@ -400,7 +400,7 @@ func (c *completer) indexDataTypes() {
 // diagnostic rather than silently resolving against the import the loader did
 // resolve, or re-blaming E_UNKNOWN_TYPE at each reference site.
 func (c *completer) indexImports() {
-	imports := make([]*Import, 0, len(c.model.Imports))
+	imports := make([]Import, 0, len(c.model.Imports))
 	aliasIndex := make(map[string]*importDecl)
 
 	// deferRejectedAlias records a rejected declaration's alias as deferred in
@@ -523,8 +523,8 @@ func (c *completer) indexImports() {
 
 // convertProperties converts propertyDecl to Property.
 // Detects duplicate property declarations within the same type.
-func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) []*Property {
-	props := make([]*Property, 0, len(decls))
+func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) []Property {
+	props := make([]Property, 0, len(decls))
 	seen := make(map[string]*propertyDecl) // Track first occurrence for related info
 
 	for _, pd := range decls {
@@ -565,7 +565,7 @@ func (c *completer) convertProperties(decls []*propertyDecl, ownerType string) [
 
 // convertRelations converts relationDecl to Relation, splitting by kind.
 // Detects duplicate relation declarations within the same type.
-func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (assocs, comps []*Relation) {
+func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (assocs, comps []Relation) {
 	seen := make(map[string]*relationDecl) // Track first occurrence by raw name
 
 	for _, rd := range decls {
@@ -595,9 +595,9 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 
 		// Convert edge properties (associations only). A name declared twice
 		// is one error, as it is for a node property.
-		var props []*Property
+		var props []Property
 		if rd.Kind == RelationAssociation && len(rd.Properties) > 0 {
-			props = make([]*Property, 0, len(rd.Properties))
+			props = make([]Property, 0, len(rd.Properties))
 			seenProp := make(map[string]*propertyDecl, len(rd.Properties))
 			for _, pd := range rd.Properties {
 				if pd == nil {
@@ -664,8 +664,8 @@ func (c *completer) convertRelations(decls []*relationDecl, ownerType string) (a
 // message is its identity, so a message declared twice on one type is a
 // duplicate: the first declaration with a message and an expression is kept,
 // and each later one reported.
-func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) []*Invariant {
-	invs := make([]*Invariant, 0, len(decls))
+func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) []Invariant {
+	invs := make([]Invariant, 0, len(decls))
 	first := make(map[string]*invariantDecl, len(decls))
 
 	for _, id := range decls {
@@ -709,11 +709,11 @@ func (c *completer) convertInvariants(typeName string, decls []*invariantDecl) [
 // validateAnnotations stamps them after linearization, before sealing. Used for
 // both type-level annotations (in indexTypes) and property-trailing ones (in
 // convertProperties), so property and type annotations share one conversion.
-func convertAnnotations(decls []*annotationDecl) []*Annotation {
+func convertAnnotations(decls []*annotationDecl) []Annotation {
 	if len(decls) == 0 {
 		return nil
 	}
-	anns := make([]*Annotation, 0, len(decls))
+	anns := make([]Annotation, 0, len(decls))
 	for _, d := range decls {
 		if d == nil {
 			continue
@@ -745,7 +745,7 @@ func convertAnnotations(decls []*annotationDecl) []*Annotation {
 // runs through List elements alone, since no door admits a datatype declared as
 // another, and is reported at every datatype on it.
 func (c *completer) resolveAliasConstraints() {
-	c.dtStates = make(map[*DataType]dtState, len(c.schema.dataTypes))
+	c.dtStates = make(map[DataType]dtState, len(c.schema.dataTypes))
 	for _, dt := range c.schema.dataTypes {
 		c.resolveDataType(dt)
 	}
@@ -777,7 +777,7 @@ const (
 // resolveDataType resolves dt's constraint once. A datatype re-entered while
 // it resolves closes a cycle: every datatype on the stack from it upward is
 // reported and fails. A datatype that fails keeps its declared constraint.
-func (c *completer) resolveDataType(dt *DataType) {
+func (c *completer) resolveDataType(dt DataType) {
 	switch c.dtStates[dt] {
 	case dtResolved, dtFailed:
 		return
@@ -1110,7 +1110,7 @@ func (c *completer) validatePropertyNames() {
 }
 
 // iterRelationSeq is the shape both relation iterators share.
-type iterRelationSeq = iter.Seq[*Relation]
+type iterRelationSeq = iter.Seq[Relation]
 
 // validatePrimaryKeys enforces that every concrete (non-abstract, non-part) type
 // declares or inherits at least one primary key. A node needs identity to be added to
@@ -1155,7 +1155,7 @@ func (c *completer) validatePrimaryKeys() {
 // shared a counting helper with this, now reads the EXTRACTED keys
 // ([Type.PrimaryKeys]) instead — a stricter question that this gate deliberately
 // does not ask, since a primary rejected for its type is still a declared one.
-func hasDeclaredPrimary(t *Type) bool {
+func hasDeclaredPrimary(t Type) bool {
 	for p := range t.AllProperties() {
 		if p.IsPrimaryKey() {
 			return true
@@ -1184,7 +1184,7 @@ func hasDeclaredPrimary(t *Type) bool {
 // detectCycles rejects inheritance cycles before this runs, so the graph is acyclic; the
 // memo is seeded false before recursing purely so the walk still terminates should that
 // ever cease to hold, then overwritten with the real answer.
-func (c *completer) hasUnresolvedSupertype(t *Type) bool {
+func (c *completer) hasUnresolvedSupertype(t Type) bool {
 	if cached, ok := c.unresolvedSupertypeMemo[t]; ok {
 		return cached
 	}
@@ -1199,7 +1199,7 @@ func (c *completer) hasUnresolvedSupertype(t *Type) bool {
 	result := false
 	for ref := range t.Inherits() {
 		super := c.resolveTypeRef(ref)
-		if super == nil {
+		if super.IsZero() {
 			result = true
 			break
 		}

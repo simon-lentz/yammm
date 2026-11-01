@@ -131,13 +131,13 @@ func NewResolvedTypeRef(ref TypeRef, id TypeID) ResolvedTypeRef {
 	return ResolvedTypeRef{ref: ref, id: id}
 }
 
-// ResolvedTypeRefFromType creates a ResolvedTypeRef for a *Type, deriving the display
+// ResolvedTypeRefFromType creates a ResolvedTypeRef for a Type, deriving the display
 // qualifier from the schema name when viewed from a different schema.
 //
 // viewingSchemaPath is the schema from whose perspective this reference is being viewed.
 // If viewingSchemaPath matches t.SourceID().String(), the type is local and no qualifier is shown.
 // Otherwise, a qualifier is derived from the target schema's name.
-func ResolvedTypeRefFromType(t *Type, viewingSchemaPath string) ResolvedTypeRef {
+func ResolvedTypeRefFromType(t Type, viewingSchemaPath string) ResolvedTypeRef {
 	var qualifier string
 	if t.SourceID().String() != viewingSchemaPath {
 		qualifier = t.SchemaName()

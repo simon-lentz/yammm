@@ -1,11 +1,13 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 )
 
 // TestFileLoadedSchema_NestedOneUnderAManyIsRefusedASecondOccupant pins the
@@ -19,36 +21,36 @@ func TestFileLoadedSchema_NestedOneUnderAManyIsRefusedASecondOccupant(t *testing
 	s := loadFromDisk(t)
 	runID := mustTypeID(t, s, "Run")
 
-	mark := func(m string) *instance.ValidInstance {
+	mark := func(m string) instance.ValidInstance {
 		return instance.NewValidInstance("Mark", mustTypeID(t, s, "Mark"),
-			immutable.WrapKey(nil), immutable.WrapProperties(map[string]any{"mark": m}), nil, nil, nil)
+			immutable.WrapKey(nil), immutable.WrapProperties(map[string]any{"mark": m}), nil, nil, location.Provenance{})
 	}
-	summary := func(label string, marks ...*instance.ValidInstance) *instance.ValidInstance {
+	summary := func(label string, marks ...instance.ValidInstance) instance.ValidInstance {
 		vals := make([]any, len(marks))
 		for i, m := range marks {
 			vals[i] = m
 		}
 		return instance.NewValidInstance("StepSummary", mustTypeID(t, s, "StepSummary"),
 			immutable.WrapKey(nil), immutable.WrapProperties(map[string]any{"label": label}), nil,
-			map[string]immutable.Value{"MARKS": immutable.Wrap(vals)}, nil)
+			map[string]immutable.Value{"MARKS": immutable.Wrap(vals)}, location.Provenance{})
 	}
-	step := func(id string, summaries ...*instance.ValidInstance) *instance.ValidInstance {
+	step := func(id string, summaries ...instance.ValidInstance) instance.ValidInstance {
 		vals := make([]any, len(summaries))
 		for i, sm := range summaries {
 			vals[i] = sm
 		}
 		return instance.NewValidInstance("Step", mustTypeID(t, s, "Step"),
 			immutable.WrapKey([]any{id}), immutable.WrapProperties(map[string]any{"step_id": id}), nil,
-			map[string]immutable.Value{"SUMMARY": immutable.Wrap(vals)}, nil)
+			map[string]immutable.Value{"SUMMARY": immutable.Wrap(vals)}, location.Provenance{})
 	}
-	run := func(steps ...*instance.ValidInstance) *instance.ValidInstance {
+	run := func(steps ...instance.ValidInstance) instance.ValidInstance {
 		vals := make([]any, len(steps))
 		for i, st := range steps {
 			vals[i] = st
 		}
 		return instance.NewValidInstance("Run", runID,
 			immutable.WrapKey([]any{rawInstant}), immutable.WrapProperties(map[string]any{"at": rawInstant}), nil,
-			map[string]immutable.Value{"STEPS": immutable.Wrap(vals)}, nil)
+			map[string]immutable.Value{"STEPS": immutable.Wrap(vals)}, location.Provenance{})
 	}
 
 	// One occupant of the nested (one) slot: accepted, and the root's raw
@@ -57,7 +59,7 @@ func TestFileLoadedSchema_NestedOneUnderAManyIsRefusedASecondOccupant(t *testing
 	if res := g.Add(t.Context(), run(step("s1", summary("L", mark("m1"), mark("m2"))))); !res.OK() {
 		t.Fatalf("the nested (one) shape was refused: %s", res)
 	}
-	if got := g.Snapshot().InstancesOf(runID)[0].PrimaryKey().String(); got != graph.FormatKey(canonInstant) {
+	if got := slices.Collect(g.Snapshot().InstancesOf(runID))[0].PrimaryKey().String(); got != graph.FormatKey(canonInstant) {
 		t.Errorf("the root key is %s, want the canonical %s", got, graph.FormatKey(canonInstant))
 	}
 

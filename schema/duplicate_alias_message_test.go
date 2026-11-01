@@ -142,7 +142,7 @@ func TestBuilder_ADuplicateAliasShowsEachImportsPath(t *testing.T) {
 			WithPrimaryKey("id", schema.NewUUIDConstraint()).
 			Done().
 			Build()
-		if dep == nil || result.HasErrors() {
+		if dep.IsZero() || result.HasErrors() {
 			t.Fatalf("the imported schema %q does not build: %v", name, result)
 		}
 		if err := registry.Register(dep); err != nil {

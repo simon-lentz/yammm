@@ -33,7 +33,7 @@ func newAdapter(t *testing.T, ctx context.Context, opts ...n4j.Option) *n4j.Adap
 	return n4j.New(append([]n4j.Option{n4j.WithEdition(edition)}, opts...)...)
 }
 
-func loadRoundTripSchema(t *testing.T) *schema.Schema {
+func loadRoundTripSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	s, res := schema.Load(context.Background(), filepath.Join("testdata", "roundtrip.yammm"))
@@ -51,7 +51,7 @@ func loadRoundTripSchema(t *testing.T) *schema.Schema {
 // Gating the whole helper on Enterprise instead would skip every caller,
 // including the index, introspection and round-trip tests whose claims hold on
 // both editions.
-func applySchemaDDL(t *testing.T, ctx context.Context, a *n4j.Adapter, s *schema.Schema) {
+func applySchemaDDL(t *testing.T, ctx context.Context, a *n4j.Adapter, s schema.Schema) {
 	t.Helper()
 	constraints, cRes := a.ConstraintsForSchema(ctx, s)
 	if cRes.HasErrors() {

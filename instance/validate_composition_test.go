@@ -15,7 +15,7 @@ import (
 
 // composedOf reads one composition relation through the Compositions
 // iterator, the surviving accessor.
-func composedOf(vi *instance.ValidInstance, relation string) (immutable.Value, bool) {
+func composedOf(vi instance.ValidInstance, relation string) (immutable.Value, bool) {
 	for rel, children := range vi.Compositions() {
 		if rel == relation {
 			return children, true
@@ -27,7 +27,7 @@ func composedOf(vi *instance.ValidInstance, relation string) (immutable.Value, b
 // compositionSchema builds the canonical composition schema — part type
 // Address(id) plus Person(id) with a many-valued "addresses" composition —
 // parameterized on whether the composition is optional.
-func compositionSchema(t *testing.T, optional bool) *schema.Schema {
+func compositionSchema(t *testing.T, optional bool) schema.Schema {
 	t.Helper()
 	return mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -70,7 +70,7 @@ func TestValidateCompositions_Single(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	composed, ok := composedOf(valid, "ADDRESSES")
 	require.True(t, ok)
@@ -107,7 +107,7 @@ func TestValidateCompositions_Multiple(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	composed, ok := composedOf(valid, "ADDRESSES")
 	require.True(t, ok)
@@ -129,7 +129,7 @@ func TestValidateCompositions_Optional_Nil(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// No composition should be present
 	composed, ok := composedOf(valid, "ADDRESSES")
@@ -152,7 +152,7 @@ func TestValidateCompositions_Optional_Empty(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// Composition should be present but empty
 	composed, ok := composedOf(valid, "ADDRESSES")
@@ -174,7 +174,7 @@ func TestValidateCompositions_Required_Missing(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "missing required composition")
 }
@@ -193,7 +193,7 @@ func TestValidateCompositions_Required_Empty(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "required composition cannot be empty")
 }
@@ -215,7 +215,7 @@ func TestValidateCompositions_DuplicatePK(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "duplicate primary key")
 }
@@ -247,7 +247,7 @@ func TestValidateCompositions_ChildValidationFails(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "missing required")
 }
@@ -268,7 +268,7 @@ func TestValidateCompositions_InvalidChildShape(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "composition child must be an object")
 }
@@ -287,7 +287,7 @@ func TestValidateCompositions_NotArray(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "expected array")
 }
@@ -307,7 +307,7 @@ func TestValidateCompositions_ExplicitNull_Optional(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid composition value")
 
@@ -329,7 +329,7 @@ func TestValidateCompositions_ExplicitNull_Required(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid composition value")
 
@@ -351,7 +351,7 @@ func TestValidateCompositions_ReasonDetail_Absent(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	yammmtest.GoldenJSON(t, "composition_diag_reason_absent", issueProjection(result))
@@ -372,7 +372,7 @@ func TestValidateCompositions_ReasonDetail_Empty(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	yammmtest.GoldenJSON(t, "composition_diag_reason_empty", issueProjection(result))
@@ -548,7 +548,7 @@ func TestValidateCompositions_OneCardinality(t *testing.T) {
 	// One child is the whole of what a (one) slot may hold.
 	valid, result := validator.ValidateOne(t.Context(), "Person", person(addr("100")))
 	require.True(t, result.OK(), result.String())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// Two is refused here, not deferred to the graph, under the code graph
 	// assembly reports the same fact with.

@@ -3,6 +3,7 @@ package graph_test
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/instance"
@@ -12,7 +13,7 @@ import (
 
 // exampleTypeID resolves a local type for the examples, which have no
 // *testing.T to fail on.
-func exampleTypeID(s *schema.Schema, name string) schema.TypeID {
+func exampleTypeID(s schema.Schema, name string) schema.TypeID {
 	t, _ := s.Type(name)
 	return t.ID()
 }
@@ -65,8 +66,8 @@ func ExampleGraph_Add() {
 
 	// Get snapshot
 	snap := g.Snapshot()
-	fmt.Println("Departments:", len(snap.InstancesOf(exampleTypeID(s, "Department"))))
-	fmt.Println("Employees:", len(snap.InstancesOf(exampleTypeID(s, "Employee"))))
+	fmt.Println("Departments:", len(slices.Collect(snap.InstancesOf(exampleTypeID(s, "Department")))))
+	fmt.Println("Employees:", len(slices.Collect(snap.InstancesOf(exampleTypeID(s, "Employee")))))
 
 	// Output:
 	// Graph OK: true

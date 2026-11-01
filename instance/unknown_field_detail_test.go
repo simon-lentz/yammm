@@ -11,7 +11,7 @@ import (
 // caseFoldSchema declares one property under the given name. A schema declaring
 // "name" lets an exact input claim it and shadow a folded one; a schema
 // declaring "fullName" lets two non-exact inputs fold onto it and collide.
-func caseFoldSchema(t *testing.T, propName string) *schema.Schema {
+func caseFoldSchema(t *testing.T, propName string) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(t.Context(), `schema "test"
 type T {

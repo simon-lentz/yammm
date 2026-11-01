@@ -159,7 +159,7 @@ func TestMarshalObject_RendersAVectorElementThroughFloat(t *testing.T) {
 			"samples":          []any{float32(0.1), float32(2.5)},
 			"aliasedEmbedding": []any{float32(0.1), float32(2.5)},
 			"aliasedSamples":   []any{float32(0.1), float32(2.5)},
-		}), nil, nil, nil)
+		}), nil, nil, location.Provenance{})
 	if r := g.Add(ctx, inst); r.Err() != nil {
 		t.Fatalf("add: %v", r.Err())
 	}

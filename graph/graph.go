@@ -30,7 +30,7 @@ import (
 // cancellation. Cancellation does not corrupt internal state; partial results
 // may be inspected.
 type Graph struct {
-	schema *schema.Schema
+	schema schema.Schema
 	config graphConfig
 	mu     sync.RWMutex
 
@@ -45,10 +45,10 @@ type Graph struct {
 	canon *canonicalizer
 
 	// instances indexes instances by TypeID, then by PK string.
-	instances map[schema.TypeID]map[string]*Instance
+	instances map[schema.TypeID]map[string]Instance
 
 	// edges holds all resolved association edges.
-	edges []*Edge
+	edges []Edge
 
 	// pending holds unresolved forward references.
 	// Key: pendingKey{targetTypeID, targetKey}
@@ -56,7 +56,7 @@ type Graph struct {
 	pending map[pendingKey][]*pendingEdge
 
 	// duplicates holds duplicate PK records.
-	duplicates []*Duplicate
+	duplicates []Duplicate
 
 	// bySource indexes edges and pending records by source and association,
 	// for [Graph.AddOrMerge]. It is nil until the first AddOrMerge to reach the
@@ -81,7 +81,7 @@ type pendingKey struct {
 
 // pendingEdge holds data for an unresolved forward reference.
 type pendingEdge struct {
-	source       *Instance
+	source       Instance
 	relation     string
 	jsonField    string // JSON field name: the lower-case relation name
 	targetType   schema.TypeID
@@ -93,11 +93,11 @@ type pendingEdge struct {
 
 // New creates a new Graph bound to the given schema.
 //
-// Panics if schema is nil (programmer error). A nil schema is never valid
+// Panics if schema is zero (programmer error). A zero schema is never valid
 // as there is no way to validate instances without a schema.
-func New(s *schema.Schema, opts ...Option) *Graph {
-	if s == nil {
-		panic("graph.New: nil schema")
+func New(s schema.Schema, opts ...Option) *Graph {
+	if s.IsZero() {
+		panic("graph.New: zero schema")
 	}
 
 	cfg := graphConfig{}
@@ -106,7 +106,7 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 	}
 
 	closure := make(map[location.SourceID]bool)
-	for _, dep := range s.Closure() {
+	for dep := range s.Closure() {
 		closure[dep.SourceID()] = true
 	}
 	return &Graph{
@@ -114,7 +114,7 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 		config:         cfg,
 		closureSchemas: closure,
 		canon:          newCanonicalizer(s),
-		instances:      make(map[schema.TypeID]map[string]*Instance),
+		instances:      make(map[schema.TypeID]map[string]Instance),
 		pending:        make(map[pendingKey][]*pendingEdge),
 		collector:      diag.NewCollector(0), // unlimited
 		attestValues:   true,
@@ -128,26 +128,26 @@ func New(s *schema.Schema, opts ...Option) *Graph {
 // forward references that target this instance.
 //
 // Return semantics: check [diag.Result.OK] for success. A non-OK result
-// contains diagnostic issues and the graph is unchanged — every rejection is
-// decided before the instance installs. The package doc's Error Handling
+// contains diagnostic issues and no instance installs — every rejection is
+// decided before the install. The graph keeps the issues and a duplicate's record. The package doc's Error Handling
 // section enumerates the codes Add can emit.
 //
-// Panics if g is nil, inst is nil, or inst's schema does not match the graph's schema.
-func (g *Graph) Add(ctx context.Context, inst *instance.ValidInstance) diag.Result {
+// Panics if g or ctx is nil, inst is zero, or inst's schema does not match the graph's schema.
+func (g *Graph) Add(ctx context.Context, inst instance.ValidInstance) diag.Result {
 	_, res := g.add(ctx, inst, "graph.Add", "yammm.graph.add", false)
 	return res
 }
 
 // add is [Graph.Add], and with merge set [Graph.AddOrMerge]. name prefixes a
 // panic and the cancellation message; traceName names the traced operation.
-func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, traceName string, merge bool) (merged bool, res diag.Result) {
+func (g *Graph) add(ctx context.Context, inst instance.ValidInstance, name, traceName string, merge bool) (merged bool, res diag.Result) {
 	// Programmer errors: a caller cannot recover from any of these.
 	if g == nil {
 		panic(name + ": nil *Graph receiver")
 	}
 
-	if inst == nil {
-		panic(name + ": nil ValidInstance")
+	if inst.IsZero() {
+		panic(name + ": zero ValidInstance")
 	}
 
 	if ctx == nil {
@@ -268,11 +268,9 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 			diagBuilder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
 				fmt.Sprintf("duplicate primary key %s for type %q", diag.ValueText(pkString), typeName)).
 				WithDetail(diag.DetailKeyTypeName, typeName).
-				WithDetail(diag.DetailKeyPrimaryKey, pkString)
-			if prov := inst.Provenance(); prov != nil {
-				diagBuilder = diagBuilder.WithSpan(prov.Span())
-			}
-			dup := newDuplicate(rejected, existing, nil, "", diagBuilder.Build())
+				WithDetail(diag.DetailKeyPrimaryKey, pkString).
+				WithSpan(inst.Provenance().Span())
+			dup := newDuplicate(rejected, existing, Instance{}, "", diagBuilder.Build())
 			g.duplicates = append(g.duplicates, dup)
 			trace.Warn(
 				ctx, g.config.logger, "duplicate primary key",
@@ -282,7 +280,7 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 			return false, g.reject(opCollector, dup.diagnostic)
 		}
 	} else {
-		g.instances[typeID] = make(map[string]*Instance)
+		g.instances[typeID] = make(map[string]Instance)
 	}
 
 	// Commit. The rejected-duplicate path above never reaches this: a rejected
@@ -292,7 +290,7 @@ func (g *Graph) add(ctx context.Context, inst *instance.ValidInstance, name, tra
 
 	for _, se := range staged {
 		if se.reason == "" {
-			if targetInst := g.findInstance(se.targetType, se.targetKey); targetInst != nil {
+			if targetInst := g.findInstance(se.targetType, se.targetKey); !targetInst.IsZero() {
 				g.installEdge(newEdge(se.relation, graphInst, targetInst, se.properties))
 				trace.Debug(
 					ctx, g.config.logger, "edge resolved",
@@ -374,15 +372,15 @@ func (g *Graph) AddComposed(
 	ctx context.Context,
 	parentType schema.TypeID,
 	parentKey, relationName string,
-	child *instance.ValidInstance,
+	child instance.ValidInstance,
 ) diag.Result {
 	// Programmer errors: a caller cannot recover from any of these.
 	if g == nil {
 		panic("graph.AddComposed: nil *Graph receiver")
 	}
 
-	if child == nil {
-		panic("graph.AddComposed: nil ValidInstance")
+	if child.IsZero() {
+		panic("graph.AddComposed: zero ValidInstance")
 	}
 
 	if ctx == nil {
@@ -434,10 +432,10 @@ func (g *Graph) AddComposed(
 	// installed, so the caller's spelling never decides the lookup. A string
 	// ParseKey refuses addresses nothing, and misses under its own spelling.
 	parentInst := g.findInstance(parentType, parentKey)
-	if parentInst == nil {
+	if parentInst.IsZero() {
 		parentInst = g.findInstance(parentType, g.canon.address(parentType, parentKey))
 	}
-	if parentInst == nil {
+	if parentInst.IsZero() {
 		return g.reject(opCollector, diag.NewIssue(diag.Error, diag.E_GRAPH_PARENT_NOT_FOUND,
 			fmt.Sprintf("parent instance %s[%s] not found", parentName, diag.ValueText(parentKey))).
 			WithDetail(diag.DetailKeyTypeName, parentName).
@@ -494,7 +492,7 @@ func (g *Graph) AddComposed(
 	}
 	// Duplicate.Instance carries no composed children, so a rejected child's
 	// record is a childless instance holding what the graph would have stored.
-	rejectedChild := func() *Instance {
+	rejectedChild := func() Instance {
 		return newInstance(builtChild.TypeName(), builtChild.TypeID(),
 			builtChild.PrimaryKey(), builtChild.Properties(), child.Provenance(), child.Validated())
 	}
@@ -504,11 +502,7 @@ func (g *Graph) AddComposed(
 	if !isMany {
 		if parentInst.HasComposed(relationName) {
 			childInst := rejectedChild()
-
-			var conflictInst *Instance
-			if existing := parentInst.composed[relationName]; len(existing) > 0 {
-				conflictInst = existing[0]
-			}
+			conflictInst := parentInst.composed[relationName][0]
 
 			builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
 				fmt.Sprintf("composition %q already has a child", relationName)).
@@ -518,7 +512,7 @@ func (g *Graph) AddComposed(
 			// The key must name the occupant that EXISTS, not the rejected
 			// child, which never attaches. A part type declaring no key has
 			// none to report, so the detail is absent rather than "[]".
-			if conflictInst != nil && childTyp.HasPrimaryKey() {
+			if childTyp.HasPrimaryKey() {
 				builder = builder.WithDetail(diag.DetailKeyPrimaryKey, conflictInst.PrimaryKey().String())
 			}
 			issue := builder.Build()
@@ -642,11 +636,7 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 				}
 			}
 
-			if prov := pend.source.Provenance(); prov != nil {
-				builder = builder.WithSpan(prov.Span())
-			}
-
-			opCollector.Collect(builder.Build())
+			opCollector.Collect(builder.WithSpan(pend.source.Provenance().Span()).Build())
 
 			trace.Warn(
 				ctx, g.config.logger, "unresolved required association",
@@ -672,13 +662,13 @@ func (g *Graph) Check(ctx context.Context) diag.Result {
 // Snapshot creates a point-in-time snapshot of the graph.
 //
 // The returned [Snapshot] is independent of subsequent graph modifications,
-// and no method of it changes it. All slice accessors on Snapshot return sorted data.
+// and no method of it changes it. Every collection accessor on Snapshot answers in sorted order.
 //
-// Snapshot acquires a read lock; concurrent Add, AddOrMerge and AddComposed
-// calls block until Snapshot completes.
-func (g *Graph) Snapshot() *Snapshot {
+// Snapshot acquires a read lock. Until Snapshot completes, a concurrent Add or
+// AddOrMerge blocks at its commit, and an AddComposed before its walk.
+func (g *Graph) Snapshot() Snapshot {
 	if g == nil {
-		return nil
+		return Snapshot{}
 	}
 
 	g.mu.RLock()
@@ -687,7 +677,7 @@ func (g *Graph) Snapshot() *Snapshot {
 	// Clone map tracks original->cloned instance mappings for the entire snapshot.
 	// This ensures all references within the Snapshot point to cloned instances,
 	// making the snapshot truly independent of future graph mutations.
-	cloneMap := make(map[*Instance]*Instance)
+	cloneMap := make(map[Instance]Instance)
 
 	// Collect and sort type identities
 	types := make([]schema.TypeID, 0, len(g.instances))
@@ -696,12 +686,12 @@ func (g *Graph) Snapshot() *Snapshot {
 	}
 
 	// Build instances map with deep-cloned instances per type
-	instances := make(map[schema.TypeID][]*Instance, len(g.instances))
-	instanceIndex := make(map[schema.TypeID]map[string]*Instance, len(g.instances))
+	instances := make(map[schema.TypeID][]Instance, len(g.instances))
+	instanceIndex := make(map[schema.TypeID]map[string]Instance, len(g.instances))
 
 	for typeID, typeInstances := range g.instances {
 		// Clone and collect instances
-		insts := make([]*Instance, 0, len(typeInstances))
+		insts := make([]Instance, 0, len(typeInstances))
 		for _, inst := range typeInstances {
 			cloned := cloneInstance(inst, cloneMap)
 			insts = append(insts, cloned)
@@ -710,75 +700,41 @@ func (g *Graph) Snapshot() *Snapshot {
 		instances[typeID] = insts
 
 		// Build index from cloned instances
-		idx := make(map[string]*Instance, len(insts))
+		idx := make(map[string]Instance, len(insts))
 		for _, inst := range insts {
 			idx[inst.PrimaryKey().String()] = inst
 		}
 		instanceIndex[typeID] = idx
 	}
 
-	// Rebuild edges with cloned source/target references.
-	// Defensive: clone on-demand if an instance is not already in cloneMap
-	// (handles potential future cases where edges reference non-root instances).
-	edges := make([]*Edge, len(g.edges))
+	// Every record below names a root or a composed child, which the walk above
+	// cloned: an edge's two ends, a pending record's source, and a duplicate's
+	// conflict and parent. A root duplicate's zero parent reads as the zero Instance.
+	edges := make([]Edge, len(g.edges))
 	for i, e := range g.edges {
-		clonedSource := cloneMap[e.source]
-		if clonedSource == nil {
-			clonedSource = cloneInstance(e.source, cloneMap)
-		}
-		clonedTarget := cloneMap[e.target]
-		if clonedTarget == nil {
-			clonedTarget = cloneInstance(e.target, cloneMap)
-		}
-		edges[i] = newEdge(e.relation, clonedSource, clonedTarget, e.properties)
+		edges[i] = newEdge(e.relation, cloneMap[e.source], cloneMap[e.target], e.properties)
 	}
 
-	// Rebuild duplicates with cloned instance references.
-	// Defensive: clone on-demand if instances are not already in cloneMap.
-	duplicates := make([]*Duplicate, len(g.duplicates))
+	duplicates := make([]Duplicate, len(g.duplicates))
 	for i, d := range g.duplicates {
-		// The rejected instance may not be in the graph's instances map,
-		// so clone it separately if not already in cloneMap
-		clonedInstance := cloneMap[d.instance]
-		if clonedInstance == nil {
-			clonedInstance = cloneInstance(d.instance, cloneMap)
-		}
-		// The conflict instance should be in instances map, but apply same
-		// defensive pattern for consistency and future resilience
-		clonedConflict := cloneMap[d.conflict]
-		if clonedConflict == nil {
-			clonedConflict = cloneInstance(d.conflict, cloneMap)
-		}
-		var clonedParent *Instance
-		if d.parent != nil {
-			clonedParent = cloneMap[d.parent]
-			if clonedParent == nil {
-				clonedParent = cloneInstance(d.parent, cloneMap)
-			}
-		}
-		duplicates[i] = newDuplicate(clonedInstance, clonedConflict, clonedParent, d.relation, d.diagnostic)
+		// A rejected instance is in no tree the walk above reached.
+		duplicates[i] = newDuplicate(cloneInstance(d.instance, cloneMap), cloneMap[d.conflict], cloneMap[d.parent], d.relation, d.diagnostic)
 	}
 
-	// Rebuild unresolved edges with cloned source references.
-	// Defensive: clone on-demand if source is not already in cloneMap.
 	totalPending := 0
 	for _, pendingList := range g.pending {
 		totalPending += len(pendingList)
 	}
-	unresolved := make([]*UnresolvedEdge, 0, totalPending)
+	unresolved := make([]UnresolvedEdge, 0, totalPending)
 	for _, pendingList := range g.pending {
 		for _, pend := range pendingList {
-			clonedSource := cloneMap[pend.source]
-			if clonedSource == nil {
-				clonedSource = cloneInstance(pend.source, cloneMap)
-			}
 			// Determine reason token
 			reason := pend.reasonDetail
 			if reason == "" {
 				reason = "target_missing"
 			}
 			unresolved = append(unresolved, newUnresolvedEdge(
-				clonedSource, pend.relation, pend.targetType, pend.targetKey,
+				cloneMap[pend.source], pend.relation, pend.targetType, pend.targetKey,
 				pend.isRequired, reason, pend.properties,
 			))
 		}
@@ -854,7 +810,7 @@ func (g *Graph) tagText(id schema.TypeID, tag string) string {
 // identityText renders a type identity for a message: whole where s resolves
 // it. Otherwise the caller wrote it, so its name is cut as a value is, and so is
 // its schema path unless a schema of the closure carries that path.
-func identityText(s *schema.Schema, id schema.TypeID) string {
+func identityText(s schema.Schema, id schema.TypeID) string {
 	if _, ok := s.TypeByID(id); ok {
 		return id.String()
 	}
@@ -863,7 +819,7 @@ func identityText(s *schema.Schema, id schema.TypeID) string {
 	if path.IsZero() {
 		return name
 	}
-	for _, cs := range s.Closure() {
+	for cs := range s.Closure() {
 		if cs.SourceID() == path {
 			return path.String() + ":" + name
 		}
@@ -877,20 +833,20 @@ func (g *Graph) instanceTagForm(id schema.TypeID) string {
 }
 
 // findInstance looks up an instance by TypeID and key.
-func (g *Graph) findInstance(typeID schema.TypeID, key string) *Instance {
+func (g *Graph) findInstance(typeID schema.TypeID, key string) Instance {
 	if typeInstances := g.instances[typeID]; typeInstances != nil {
 		return typeInstances[key]
 	}
-	return nil
+	return Instance{}
 }
 
 // iterEdges iterates over edges from a ValidInstance.
-func (g *Graph) iterEdges(inst *instance.ValidInstance) map[string]*instance.ValidEdgeData {
+func (g *Graph) iterEdges(inst instance.ValidInstance) map[string]instance.ValidEdgeData {
 	return maps.Collect(inst.Edges())
 }
 
 // checkInstanceKey applies [checkStoredKey] to a validated instance.
-func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance, canon *canonicalizer) error {
+func checkInstanceKey(typ schema.Type, inst instance.ValidInstance, canon *canonicalizer) error {
 	return checkStoredKey(typ, inst.PrimaryKey(), inst.Property, canon)
 }
 
@@ -899,7 +855,7 @@ func checkInstanceKey(typ *schema.Type, inst *instance.ValidInstance, canon *can
 // is a scalar [ParseKey] reads back. The snapshot reader refuses such a
 // component on every instance, a keyless one included, so a key every
 // constructor refuses is one no snapshot carries to the wire.
-func checkStoredKey(typ *schema.Type, key immutable.Key, property func(string) (immutable.Value, bool), canon *canonicalizer) error {
+func checkStoredKey(typ schema.Type, key immutable.Key, property func(string) (immutable.Value, bool), canon *canonicalizer) error {
 	if !typ.HasPrimaryKey() {
 		return readableKey(typ, key)
 	}
@@ -908,7 +864,7 @@ func checkStoredKey(typ *schema.Type, key immutable.Key, property func(string) (
 
 // readableKey refuses a key of typ that holds a component [ParseKey] cannot
 // read back.
-func readableKey(typ *schema.Type, key immutable.Key) error {
+func readableKey(typ schema.Type, key immutable.Key) error {
 	if i := unreadableComponent(typ, key); i >= 0 {
 		return fmt.Errorf("primary key component %d is not a scalar graph.ParseKey reads back", i)
 	}
@@ -921,7 +877,7 @@ func readableKey(typ *schema.Type, key immutable.Key) error {
 // instance's own properties state, so a key property the instance does not
 // hold leaves the key unstated. Every constructor of a snapshot shares it, so
 // a key one refuses the others refuse.
-func checkKey(typ *schema.Type, key immutable.Key, property func(string) (immutable.Value, bool), canon *canonicalizer) error {
+func checkKey(typ schema.Type, key immutable.Key, property func(string) (immutable.Value, bool), canon *canonicalizer) error {
 	if key.Len() == 0 {
 		return errors.New("primary key is empty")
 	}

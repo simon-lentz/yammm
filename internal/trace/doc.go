@@ -65,13 +65,13 @@
 // logging is disabled (nil logger or level below Debug), achieving near-zero
 // overhead (~1-2ns). All [Op] methods are safe to call on nil.
 //
-//	func Load(ctx context.Context, path string, opts ...LoadOption) (*Schema, diag.Result) {
+//	func Load(ctx context.Context, path string, opts ...LoadOption) (Schema, diag.Result) {
 //	    op := trace.Begin(ctx, cfg.logger, "yammm.schema.load", slog.String("source", path))
 //	    defer func() { op.End(result.Err()) }()
 //
 //	    schema, result := loadInternal(ctx, path, cfg)
 //	    if !result.OK() {
-//	        return nil, result
+//	        return Schema{}, result
 //	    }
 //
 //	    return schema, result

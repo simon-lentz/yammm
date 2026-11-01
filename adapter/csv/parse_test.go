@@ -18,7 +18,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func loadTestSchema(t *testing.T, name string) *schema.Schema {
+func loadTestSchema(t *testing.T, name string) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	s, result := schema.Load(context.Background(), filepath.Join("testdata", name))
@@ -94,12 +94,12 @@ func TestParseTyped_ListProperty(t *testing.T) {
 	assert.Equal(t, []any{"a", "b", "c"}, results[0].Properties["tags"])
 }
 
-func TestParseTyped_NilSchemaType(t *testing.T) {
+func TestParseTyped_ZeroSchemaType(t *testing.T) {
 	t.Parallel()
 	a := New()
 
 	input := "id,count\ne1,42\n"
-	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), nil)
+	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), schema.Type{})
 	require.True(t, result.OK(), result.String())
 	require.Len(t, results, 1)
 
@@ -113,7 +113,7 @@ func TestParseWithTypeColumn_Basic(t *testing.T) {
 	a := New(WithTypeColumn("$type"))
 
 	input := "$type,company_id,name,employee_id,works_at\nCompany,c1,Acme,,\nEmployee,,Alice,emp1,c1\n"
-	resolver := func(name string) *schema.Type {
+	resolver := func(name string) schema.Type {
 		st, _ := s.Type(name)
 		return st
 	}
@@ -145,7 +145,7 @@ func TestParseTyped_ContextCancellation(t *testing.T) {
 	cancel()
 
 	input := "id,name\ne1,Alice\ne2,Bob\n"
-	_, result := a.ParseTyped(ctx, location.SourceID{}, "Entity", strings.NewReader(input), nil)
+	_, result := a.ParseTyped(ctx, location.SourceID{}, "Entity", strings.NewReader(input), schema.Type{})
 	assert.False(t, result.OK())
 
 	// Should contain a cancellation diagnostic.
@@ -164,7 +164,7 @@ func TestParseTyped_HeaderOnlyEmptyCSV(t *testing.T) {
 	a := New()
 
 	input := "id,name\n"
-	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), nil)
+	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), schema.Type{})
 	require.True(t, result.OK(), result.String())
 	assert.Empty(t, results, "header-only CSV should produce zero instances")
 }
@@ -177,7 +177,7 @@ func TestParseTyped_FewerColumnsThanHeader(t *testing.T) {
 	// Go's csv.Reader enforces consistent field counts by default,
 	// so this produces a diagnostic error and the row is skipped.
 	input := "id,name,count\ne1\n"
-	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), nil)
+	results, result := a.ParseTyped(context.Background(), location.SourceID{}, "Entity", strings.NewReader(input), schema.Type{})
 
 	assert.False(t, result.OK(), "mismatched column count should produce a diagnostic")
 	assert.Empty(t, results, "malformed row should be skipped")
@@ -217,7 +217,7 @@ func TestParseTyped_CancellationKeepsTheRecordsItRead(t *testing.T) {
 	ctx := &cancelAfterPolls{after: 2}
 
 	got, result := New().ParseTyped(ctx, location.SourceID{}, "Entity",
-		strings.NewReader("id,name\ne1,Alice\ne2,Bob\n"), nil)
+		strings.NewReader("id,name\ne1,Alice\ne2,Bob\n"), schema.Type{})
 
 	assert.True(t, result.HasFatal(), "a cancelled parse must report HasFatal")
 	require.Len(t, got, 1, "a cancelled parse must return the records it read")
@@ -234,7 +234,7 @@ func TestParseTyped_CancellationIsFatal(t *testing.T) {
 	cancel()
 
 	_, result := New().ParseTyped(ctx, location.SourceID{}, "Entity",
-		strings.NewReader("id,name\ne1,Alice\ne2,Bob\n"), nil)
+		strings.NewReader("id,name\ne1,Alice\ne2,Bob\n"), schema.Type{})
 
 	assert.True(t, result.HasFatal(), "a cancelled parse must report HasFatal")
 	found := false

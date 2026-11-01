@@ -341,7 +341,7 @@ func TestIndexesStructured_DanglingSupertypeRejectedAtBuild(t *testing.T) {
 		WithTypeAnnotation("index", "missingProp").
 		Done().
 		Build()
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("a dangling qualified supertype must nil the schema")
 	}
 	if !res.HasCode(diag.E_UNKNOWN_TYPE) {
@@ -408,7 +408,7 @@ func TestIndexesStructured_DanglingAliasTargetRejectedAtBuild(t *testing.T) {
 		WithPropertyAnnotation("blob", "fulltext").
 		Done().
 		Build()
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("a dangling qualified property datatype must nil the schema")
 	}
 	if !res.HasCode(diag.E_UNKNOWN_TYPE) {

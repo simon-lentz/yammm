@@ -29,7 +29,7 @@ type Doc {
 }
 `
 
-func loadDoc(t *testing.T) *schema.Schema {
+func loadDoc(t *testing.T) schema.Schema {
 	t.Helper()
 	return loadSrc(t, docWithAssociation)
 }

@@ -1,19 +1,21 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // instantKeySchema declares one Run type whose key takes the named constraint, so
 // a snapshot written under one spelling of the schema can be imported under
 // another — the key migration replayed over a persisted snapshot.
-func instantKeySchema(t *testing.T, keyKind string) *schema.Schema {
+func instantKeySchema(t *testing.T, keyKind string) schema.Schema {
 	t.Helper()
 	src := `schema "instant_key"
 
@@ -28,12 +30,12 @@ type Run {
 	return s
 }
 
-func instantKeyInstance(t *testing.T, s *schema.Schema, key, prop string) *instance.ValidInstance {
+func instantKeyInstance(t *testing.T, s schema.Schema, key, prop string) instance.ValidInstance {
 	t.Helper()
 	return instance.NewValidInstance("Run", mustTypeID(t, s, "Run"),
 		immutable.WrapKey([]any{key}),
 		immutable.WrapProperties(map[string]any{"at": prop}),
-		nil, nil, nil)
+		nil, nil, location.Provenance{})
 }
 
 // TestNewFromSnapshot_ReKeysUnderTheImportingSchema pins that an imported
@@ -57,7 +59,7 @@ func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 	}
 	// The String constraint canonicalizes nothing, so the persisted address is
 	// the raw text; that is the premise the rest of the test rests on.
-	if got := persisted.Snapshot().InstancesOf(runID)[0].PrimaryKey().String(); got != graph.FormatKey(rawInstant) {
+	if got := slices.Collect(persisted.Snapshot().InstancesOf(runID))[0].PrimaryKey().String(); got != graph.FormatKey(rawInstant) {
 		t.Fatalf("the persisted address is %s, want the raw %s", got, graph.FormatKey(rawInstant))
 	}
 
@@ -65,7 +67,7 @@ func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 	imported := g.Snapshot()
 	want := graph.FormatKey(canonInstant)
 
-	own := imported.InstancesOf(runID)[0].PrimaryKey().String()
+	own := slices.Collect(imported.InstancesOf(runID))[0].PrimaryKey().String()
 	if own != want {
 		t.Errorf("the imported instance carries %s, want the canonical %s", own, want)
 	}
@@ -85,7 +87,7 @@ func TestNewFromSnapshot_ReKeysUnderTheImportingSchema(t *testing.T) {
 	if !hasIssueCode(res, diag.E_DUPLICATE_PK) {
 		t.Errorf("re-adding the imported instance did not draw E_DUPLICATE_PK: %s", res)
 	}
-	if n := len(g.Snapshot().InstancesOf(runID)); n != 1 {
+	if n := len(slices.Collect(g.Snapshot().InstancesOf(runID))); n != 1 {
 		t.Errorf("instances of Run = %d, want 1", n)
 	}
 }
@@ -102,9 +104,9 @@ func TestNewFromSnapshot_ReKeyIsANoOpOnTheCommonPath(t *testing.T) {
 	if r := src.Add(t.Context(), instantKeyInstance(t, s, rawInstant, rawInstant)); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	before := src.Snapshot().InstancesOf(runID)[0].PrimaryKey().String()
+	before := slices.Collect(src.Snapshot().InstancesOf(runID))[0].PrimaryKey().String()
 
-	after := mustImport(t, s, src.Snapshot()).Snapshot().InstancesOf(runID)[0].PrimaryKey().String()
+	after := slices.Collect(mustImport(t, s, src.Snapshot()).Snapshot().InstancesOf(runID))[0].PrimaryKey().String()
 	if after != before {
 		t.Errorf("the same-schema import moved the address: %s, was %s", after, before)
 	}
@@ -128,7 +130,7 @@ func TestAdd_KeyComponentAgreesAcrossSpellings(t *testing.T) {
 	if res := g.Add(t.Context(), instantKeyInstance(t, s, rawInstant, canonInstant)); !res.OK() {
 		t.Fatalf("two spellings of one instant were refused as a disagreement: %s", res)
 	}
-	if got := g.Snapshot().InstancesOf(runID)[0].PrimaryKey().String(); got != graph.FormatKey(canonInstant) {
+	if got := slices.Collect(g.Snapshot().InstancesOf(runID))[0].PrimaryKey().String(); got != graph.FormatKey(canonInstant) {
 		t.Errorf("the stored address is %s, want the canonical %s", got, graph.FormatKey(canonInstant))
 	}
 
@@ -193,10 +195,10 @@ type Doc {
 	docID, noteID := mustTypeID(t, s, "Doc"), mustTypeID(t, s, "Note")
 
 	note := instance.NewValidInstance("Note", noteID, immutable.WrapKey([]any{"n1"}),
-		immutable.WrapProperties(map[string]any{"id": "n1"}), nil, nil, nil)
+		immutable.WrapProperties(map[string]any{"id": "n1"}), nil, nil, location.Provenance{})
 	doc := instance.NewValidInstance("Doc", docID, immutable.WrapKey([]any{"d1"}),
 		immutable.WrapProperties(map[string]any{"id": "d1"}),
-		edgeData("CITES", map[string]any{"seen_at": rawInstant}, []any{"n1"}), nil, nil)
+		edgeData("CITES", map[string]any{"seen_at": rawInstant}, []any{"n1"}), nil, location.Provenance{})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), note); !r.OK() {
@@ -206,7 +208,7 @@ type Doc {
 		t.Fatalf("add doc: %s", r)
 	}
 
-	edges := g.Snapshot().Edges()
+	edges := slices.Collect(g.Snapshot().Edges())
 	if len(edges) != 1 {
 		t.Fatalf("edges = %d, want 1", len(edges))
 	}
@@ -280,11 +282,11 @@ type Doc {
 	if pres.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", pres)
 	}
-	if v, _ := persisted.Edges()[0].Properties().Get("seen_at"); v.Unwrap() != rawInstant {
+	if v, _ := slices.Collect(persisted.Edges())[0].Properties().Get("seen_at"); v.Unwrap() != rawInstant {
 		t.Fatalf("the persisted edge property is %v, want the raw %s", v.Unwrap(), rawInstant)
 	}
 
-	edges := mustImport(t, s, persisted).Snapshot().Edges()
+	edges := slices.Collect(mustImport(t, s, persisted).Snapshot().Edges())
 	if len(edges) != 1 {
 		t.Fatalf("edges = %d, want 1", len(edges))
 	}
@@ -300,7 +302,7 @@ type Doc {
 // composedOneSlotSchema declares a (one) composition beside a (_:many) one, so
 // the cardinality guard has both the shape it refuses and the shape it must
 // leave alone.
-func composedOneSlotSchema(t *testing.T) *schema.Schema {
+func composedOneSlotSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "composed_one_slot"
 
@@ -325,7 +327,7 @@ part type Line {
 	return s
 }
 
-func composedOneSlotPart(t *testing.T, s *schema.Schema, typeName, prop, key string) graph.InstanceParts {
+func composedOneSlotPart(t *testing.T, s schema.Schema, typeName, prop, key string) graph.InstanceParts {
 	t.Helper()
 	return graph.InstanceParts{
 		TypeID:     mustTypeID(t, s, typeName),

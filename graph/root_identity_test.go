@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -45,10 +46,10 @@ func TestRebuildSnapshot_FilesARootUnderItsOwnIdentity(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
-	if n := len(snap.InstancesOf(anchor)); n != 0 {
+	if n := len(slices.Collect(snap.InstancesOf(anchor))); n != 0 {
 		t.Errorf("InstancesOf(Anchor) = %d, want 0", n)
 	}
-	got := snap.InstancesOf(site)
+	got := slices.Collect(snap.InstancesOf(site))
 	if len(got) != 1 || got[0].TypeID() != site || got[0].TypeName() != "Site" {
 		t.Fatalf("InstancesOf(Site) = %v, want the one Site instance named Site", got)
 	}
@@ -81,7 +82,7 @@ import "base.yammm" as x
 `
 )
 
-func loadAliased(t *testing.T, entry, alias string) (*schema.Schema, schema.TypeID) {
+func loadAliased(t *testing.T, entry, alias string) (schema.Schema, schema.TypeID) {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(entry),
@@ -111,7 +112,7 @@ func TestRebuildSnapshot_RendersARootsNameFromItsIdentity(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
-	if got := snap.InstancesOf(basin)[0].TypeName(); got != "b.Basin" {
+	if got := slices.Collect(snap.InstancesOf(basin))[0].TypeName(); got != "b.Basin" {
 		t.Errorf("TypeName() = %q, want the alias-qualified b.Basin", got)
 	}
 }
@@ -136,7 +137,7 @@ func TestNewFromSnapshot_RendersNamesUnderTheImportingSchema(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
-	got := mustImport(t, sx, snap).Snapshot().InstancesOf(basin)[0].TypeName()
+	got := slices.Collect(mustImport(t, sx, snap).Snapshot().InstancesOf(basin))[0].TypeName()
 	if got != "x.Basin" {
 		t.Errorf("imported TypeName() = %q, want x.Basin, the importing schema's rendering", got)
 	}

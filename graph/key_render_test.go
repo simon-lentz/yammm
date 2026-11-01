@@ -13,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -145,7 +146,7 @@ func TestKeys_ATimeOrAUUIDComponentItsConstraintDoesNotRenderIsRefused(t *testin
 			requireInvalidKey(t, root.Add(t.Context(), instancetest.VI("Holder", instancetest.TypeID(holder), instancetest.PK(key),
 				instancetest.Props(map[string]any{"id": text}))))
 			target := graph.New(s)
-			requireInvalidKey(t, target.Add(t.Context(), holderVI(holder, "h1", instancetest.Edges(map[string]*instance.ValidEdgeData{
+			requireInvalidKey(t, target.Add(t.Context(), holderVI(holder, "h1", instancetest.Edges(map[string]instance.ValidEdgeData{
 				"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 					instance.NewValidEdgeTarget(immutable.WrapKey([]any{key}), immutable.Properties{}),
 				}),
@@ -160,7 +161,7 @@ func TestKeys_ATimeOrAUUIDComponentItsConstraintDoesNotRenderIsRefused(t *testin
 					Relation: "LINK", TargetKey: immutable.WrapKey([]any{key}), Reason: "target_missing",
 				}},
 			})
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Errorf("RebuildSnapshot built a snapshot holding the target key")
 			}
 			requireInvalidKey(t, res)
@@ -204,7 +205,7 @@ type Ev {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	u := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 	inst := instance.NewValidInstance("Ev", ev.ID(), immutable.WrapKey([]any{"x", &at, &u}),
-		immutable.WrapProperties(map[string]any{"name": "x", "at": &at, "u": &u}), nil, nil, nil)
+		immutable.WrapProperties(map[string]any{"name": "x", "at": &at, "u": &u}), nil, nil, location.Provenance{})
 	if r := graph.New(s).Add(ctx, inst); !r.OK() {
 		t.Errorf("Add refused a key whose time and UUID its constraints render: %s", r)
 	}

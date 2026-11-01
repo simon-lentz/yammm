@@ -28,7 +28,7 @@ import (
 // to json.Valid. Format assertions are enabled so the emitted advisory
 // "format" keywords (uuid, date, date-time) become checkable — matching the
 // constraints yammm itself enforces for those kinds.
-func compileEmitted(t *testing.T, s *schema.Schema) *jsonschema.Schema {
+func compileEmitted(t *testing.T, s schema.Schema) *jsonschema.Schema {
 	t.Helper()
 	out, err := Marshal(s)
 	if err != nil {
@@ -65,7 +65,7 @@ func validateEmitted(t *testing.T, compiled *jsonschema.Schema, data []byte) err
 // yammmErrors runs a data file through the yammm ingestion path the emitted
 // schema mirrors — ParseObject, then instance validation per type key — and
 // returns every error, empty when the file is fully clean.
-func yammmErrors(t *testing.T, s *schema.Schema, data []byte) []string {
+func yammmErrors(t *testing.T, s schema.Schema, data []byte) []string {
 	t.Helper()
 	ctx := context.Background()
 	var errs []string
@@ -241,7 +241,7 @@ func TestContractAsymmetry_CustomTimestampFormat(t *testing.T) {
 // yammmStageCodes runs a data file through ParseObject, instance validation
 // per type key, and graph assembly and Check — the stages every yammm data
 // command runs — and returns the codes each stage reported, keyed by stage.
-func yammmStageCodes(t *testing.T, s *schema.Schema, data []byte) map[string][]diag.Code {
+func yammmStageCodes(t *testing.T, s schema.Schema, data []byte) map[string][]diag.Code {
 	t.Helper()
 	ctx := context.Background()
 	codes := map[string][]diag.Code{}
@@ -258,7 +258,7 @@ func yammmStageCodes(t *testing.T, s *schema.Schema, data []byte) map[string][]d
 		valids, vres := v.Validate(ctx, typeName, raws[typeName])
 		collect("validate", vres)
 		for _, vi := range valids {
-			if vi != nil {
+			if !vi.IsZero() {
 				collect("graph", g.Add(ctx, vi))
 			}
 		}
@@ -402,7 +402,7 @@ func TestContractAsymmetry_ValueAndNameReading(t *testing.T) {
 			t.Fatalf("parse: %v", res)
 		}
 		valids, vres := instance.NewValidator(scalars).Validate(t.Context(), "County", raws["County"])
-		if !vres.OK() || len(valids) != 1 || valids[0] == nil {
+		if !vres.OK() || len(valids) != 1 || valids[0].IsZero() {
 			t.Fatalf("validate: %v", vres)
 		}
 		if _, present := valids[0].Property("density"); present {

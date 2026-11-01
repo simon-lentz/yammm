@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 )
 
 // testConcurrentSchema creates a schema for concurrency testing.
-func testConcurrentSchema(t *testing.T) *schema.Schema {
+func testConcurrentSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -56,7 +57,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 					personType.ID(),
 					immutable.WrapKey([]any{pk}),
 					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, nil,
+					nil, nil, location.Provenance{},
 				)
 
 				g.Add(ctx, inst)
@@ -68,7 +69,7 @@ func TestGraph_Concurrent_Add(t *testing.T) {
 
 	// Verify all instances were added
 	snap := g.Snapshot()
-	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 	expectedCount := numGoroutines * instancesPerGoroutine
 
 	if len(instances) != expectedCount {
@@ -99,7 +100,7 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 				personType.ID(),
 				immutable.WrapKey([]any{sharedKey}),
 				immutable.WrapProperties(map[string]any{"id": sharedKey, "name": fmt.Sprintf("Alice %d", i)}),
-				nil, nil, nil,
+				nil, nil, location.Provenance{},
 			)
 
 			result := g.Add(ctx, inst)
@@ -121,12 +122,12 @@ func TestGraph_Concurrent_Add_WithDuplicates(t *testing.T) {
 
 	// Verify snapshot
 	snap := g.Snapshot()
-	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 	if len(instances) != 1 {
 		t.Errorf("Expected 1 instance, got %d", len(instances))
 	}
 
-	dups := snap.Duplicates()
+	dups := slices.Collect(snap.Duplicates())
 	expectedDups := numGoroutines - 1
 	if len(dups) != expectedDups {
 		t.Errorf("Expected %d duplicates, got %d", expectedDups, len(dups))
@@ -156,7 +157,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 					personType.ID(),
 					immutable.WrapKey([]any{pk}),
 					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, nil,
+					nil, nil, location.Provenance{},
 				)
 
 				g.Add(ctx, inst)
@@ -174,7 +175,7 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 					companyType.ID(),
 					immutable.WrapKey([]any{pk}),
 					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, nil,
+					nil, nil, location.Provenance{},
 				)
 
 				g.Add(ctx, inst)
@@ -186,8 +187,8 @@ func TestGraph_Concurrent_Add_MultipleTypes(t *testing.T) {
 
 	// Verify counts
 	snap := g.Snapshot()
-	persons := snap.InstancesOf(mustTypeID(t, s, "Person"))
-	companies := snap.InstancesOf(mustTypeID(t, s, "Company"))
+	persons := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
+	companies := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Company")))
 	expectedPerType := numGoroutines * instancesPerGoroutine
 
 	if len(persons) != expectedPerType {
@@ -226,7 +227,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 					personType.ID(),
 					immutable.WrapKey([]any{pk}),
 					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, nil,
+					nil, nil, location.Provenance{},
 				)
 
 				g.Add(ctx, inst)
@@ -242,7 +243,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 				// Verify snapshot is self-consistent
 				types := snap.Types()
 				for _, typeID := range types {
-					instances := snap.InstancesOf(typeID)
+					instances := slices.Collect(snap.InstancesOf(typeID))
 					for _, inst := range instances {
 						if inst.TypeID() != typeID {
 							t.Errorf("Instance type mismatch: %q vs %q", inst.TypeID(), typeID)
@@ -257,7 +258,7 @@ func TestGraph_Concurrent_Snapshot(t *testing.T) {
 
 	// Final verification
 	snap := g.Snapshot()
-	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 	expectedCount := numWriters * instancesPerWriter
 
 	if len(instances) != expectedCount {
@@ -285,7 +286,7 @@ func TestGraph_Concurrent_Check(t *testing.T) {
 				personType.ID(),
 				immutable.WrapKey([]any{pk}),
 				immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-				nil, nil, nil,
+				nil, nil, location.Provenance{},
 			)
 
 			g.Add(ctx, inst)
@@ -336,7 +337,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 						personType.ID(),
 						immutable.WrapKey([]any{pk}),
 						immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-						nil, nil, nil,
+						nil, nil, location.Provenance{},
 					)
 
 					g.Add(ctx, inst)
@@ -347,7 +348,7 @@ func TestGraph_Concurrent_DeterministicOrder(t *testing.T) {
 		wg.Wait()
 
 		snap := g.Snapshot()
-		instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
+		instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 
 		var currentOrder []string
 		for _, inst := range instances {
@@ -399,7 +400,7 @@ func BenchmarkGraph_Add_Concurrent(b *testing.B) {
 					personType.ID(),
 					immutable.WrapKey([]any{pk}),
 					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, nil,
+					nil, nil, location.Provenance{},
 				)
 				g.Add(ctx, inst)
 			}
@@ -426,7 +427,7 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 		baseType.ID(),
 		immutable.WrapKey([]any{"base1"}),
 		immutable.WrapProperties(map[string]any{"id": "base1", "value": "base value"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	// Note: Schema A imports B which imports C
@@ -439,7 +440,7 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 		middleType.ID(),
 		immutable.WrapKey([]any{"mid1"}),
 		immutable.WrapProperties(map[string]any{"id": "mid1", "name": "middle value"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	topType, _ := schemaA.Type("TopType")
@@ -448,7 +449,7 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 		topType.ID(),
 		immutable.WrapKey([]any{"top1"}),
 		immutable.WrapProperties(map[string]any{"id": "top1", "label": "top value"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	// Add in reverse order (forward refs)
@@ -464,10 +465,10 @@ func TestIntegration_ComplexMultiSchema(t *testing.T) {
 
 	// Verify what was added successfully
 	snap := g.Snapshot()
-	if len(snap.InstancesOf(tagID(t, schemaA, "TopType"))) != 1 {
+	if len(slices.Collect(snap.InstancesOf(tagID(t, schemaA, "TopType")))) != 1 {
 		t.Error("TopType should be in graph")
 	}
-	if len(snap.InstancesOf(tagID(t, schemaA, "b.MiddleType"))) != 1 {
+	if len(slices.Collect(snap.InstancesOf(tagID(t, schemaA, "b.MiddleType")))) != 1 {
 		t.Error("b.MiddleType should be in graph")
 	}
 }
@@ -494,7 +495,7 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 	g.Add(ctx, typeA)
 
 	snap1 := g.Snapshot()
-	if len(snap1.Unresolved()) == 0 {
+	if len(slices.Collect(snap1.Unresolved())) == 0 {
 		t.Error("Should have unresolved A→B")
 	}
 
@@ -502,7 +503,7 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 
 	snap2 := g.Snapshot()
 	// A→B should be resolved, B→C still pending
-	if len(snap2.Edges()) == 0 {
+	if len(slices.Collect(snap2.Edges())) == 0 {
 		t.Error("A→B edge should be resolved")
 	}
 
@@ -510,11 +511,11 @@ func TestIntegration_ForwardRefChain(t *testing.T) {
 
 	// All should be resolved
 	snap3 := g.Snapshot()
-	if len(snap3.Unresolved()) != 0 {
-		t.Errorf("All edges should be resolved, have %d unresolved", len(snap3.Unresolved()))
+	if len(slices.Collect(snap3.Unresolved())) != 0 {
+		t.Errorf("All edges should be resolved, have %d unresolved", len(slices.Collect(snap3.Unresolved())))
 	}
-	if len(snap3.Edges()) != 2 {
-		t.Errorf("Should have 2 edges (A→B, B→C), got %d", len(snap3.Edges()))
+	if len(slices.Collect(snap3.Edges())) != 2 {
+		t.Errorf("Should have 2 edges (A→B, B→C), got %d", len(slices.Collect(snap3.Edges())))
 	}
 }
 
@@ -543,7 +544,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 
 	// Verify all children are attached
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -551,7 +552,7 @@ func TestIntegration_MixedInlineStreamed(t *testing.T) {
 	assertComposedCount(t, parents[0], "CHILDREN", 5)
 
 	// Verify children are accessible
-	children := parents[0].Composed("CHILDREN")
+	children := slices.Collect(parents[0].Composed("CHILDREN"))
 	for i, child := range children {
 		expected := fmt.Sprintf(`["c%d"]`, i)
 		if child.PrimaryKey().String() != expected {
@@ -584,7 +585,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 					"Person", personType.ID(),
 					immutable.WrapKey([]any{pk}),
 					immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-					nil, nil, nil,
+					nil, nil, location.Provenance{},
 				)
 				g.Add(ctx, person)
 
@@ -594,7 +595,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 					"Company", companyType.ID(),
 					immutable.WrapKey([]any{ck}),
 					immutable.WrapProperties(map[string]any{"id": ck, "name": ck}),
-					nil, nil, nil,
+					nil, nil, location.Provenance{},
 				)
 				g.Add(ctx, company)
 			}
@@ -617,7 +618,7 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 				snap := g.Snapshot()
 				// Just verify it returns something valid
 				_ = snap.Types()
-				_ = snap.Edges()
+				_ = slices.Collect(snap.Edges())
 			}
 		})
 	}
@@ -629,8 +630,8 @@ func TestIntegration_ConcurrentAddCheck(t *testing.T) {
 	expectedPersons := numWorkers * opsPerWorker
 	expectedCompanies := numWorkers * opsPerWorker
 
-	persons := snap.InstancesOf(mustTypeID(t, s, "Person"))
-	companies := snap.InstancesOf(mustTypeID(t, s, "Company"))
+	persons := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
+	companies := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Company")))
 
 	if len(persons) != expectedPersons {
 		t.Errorf("Expected %d persons, got %d", expectedPersons, len(persons))
@@ -666,8 +667,8 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 
 	// Verify all pending
 	snap1 := g.Snapshot()
-	if len(snap1.Unresolved()) != numWorkers {
-		t.Errorf("Expected %d unresolved edges, got %d", numWorkers, len(snap1.Unresolved()))
+	if len(slices.Collect(snap1.Unresolved())) != numWorkers {
+		t.Errorf("Expected %d unresolved edges, got %d", numWorkers, len(slices.Collect(snap1.Unresolved())))
 	}
 
 	// Add the target
@@ -677,16 +678,16 @@ func TestGraph_Concurrent_ForwardReferences(t *testing.T) {
 
 	// All should be resolved
 	snap2 := g.Snapshot()
-	if len(snap2.Unresolved()) != 0 {
-		t.Errorf("Expected 0 unresolved edges, got %d", len(snap2.Unresolved()))
+	if len(slices.Collect(snap2.Unresolved())) != 0 {
+		t.Errorf("Expected 0 unresolved edges, got %d", len(slices.Collect(snap2.Unresolved())))
 	}
-	if len(snap2.Edges()) != numWorkers {
-		t.Errorf("Expected %d edges, got %d", numWorkers, len(snap2.Edges()))
+	if len(slices.Collect(snap2.Edges())) != numWorkers {
+		t.Errorf("Expected %d edges, got %d", numWorkers, len(slices.Collect(snap2.Edges())))
 	}
 
 	// Verify all sources have edges
 	sources := make(map[string]bool)
-	for _, edge := range snap2.Edges() {
+	for edge := range snap2.Edges() {
 		sources[edge.Source().PrimaryKey().String()] = true
 	}
 	if len(sources) != numWorkers {
@@ -735,10 +736,10 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 		wg.Go(func() {
 			for range opsPerWorker {
 				snap := g.Snapshot()
-				parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+				parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 				if len(parents) > 0 {
 					// Access Composed() - this would race with addComposed() before the fix
-					_ = parents[0].Composed("CHILDREN")
+					_ = slices.Collect(parents[0].Composed("CHILDREN"))
 					_ = parents[0].ComposedCount("CHILDREN")
 					_ = parents[0].ComposedRelations()
 				}
@@ -751,7 +752,7 @@ func TestConcurrent_SnapshotAndAddComposed_Race(t *testing.T) {
 	// If we get here without race detector errors, the test passes
 	// Verify final state is consistent
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}

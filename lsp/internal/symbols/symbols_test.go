@@ -15,10 +15,10 @@ import (
 	"github.com/simon-lentz/yammm/lsp/internal/symbols"
 )
 
-func TestExtractSymbols_NilSchema(t *testing.T) {
+func TestExtractSymbols_ZeroSchema(t *testing.T) {
 	t.Parallel()
 
-	syms := symbols.ExtractSymbols(nil, nil)
+	syms := symbols.ExtractSymbols(schema.Schema{}, nil)
 	assert.Nil(t, syms, "ExtractSymbols(nil) should return nil")
 }
 
@@ -69,10 +69,10 @@ type Person {
 	assert.True(t, hasType, "missing type symbol")
 }
 
-func TestExtractReferences_NilSchema(t *testing.T) {
+func TestExtractReferences_ZeroSchema(t *testing.T) {
 	t.Parallel()
 
-	refs := symbols.ExtractReferences(nil)
+	refs := symbols.ExtractReferences(schema.Schema{})
 	assert.Nil(t, refs, "symbols.ExtractReferences(nil) should return nil")
 }
 

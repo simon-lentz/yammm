@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 	snap := buildSnapshot(t, s,
 		mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"name": "Alice"}))
 
-	built := snap.Unresolved()
+	built := slices.Collect(snap.Unresolved())
 	if len(built) != 1 {
 		t.Fatalf("fixture is vacuous: %d unresolved records, want 1", len(built))
 	}
@@ -54,7 +55,7 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	got := loaded.Unresolved()
+	got := slices.Collect(loaded.Unresolved())
 	if len(got) != 1 {
 		t.Fatalf("loaded %d unresolved records, want 1", len(got))
 	}
@@ -69,7 +70,7 @@ func TestRoundTrip_AbsentAssociationKeepsEmptyTargetKey(t *testing.T) {
 // composedSiblingCollision builds a parent whose CHILDREN slot holds two
 // children, then rejects a third colliding with the first. The conflict is one
 // of two occupants, so only a stated key can address it.
-func composedSiblingCollision(ctx context.Context, t *testing.T, s *schema.Schema) *graph.Snapshot {
+func composedSiblingCollision(ctx context.Context, t *testing.T, s schema.Schema) graph.Snapshot {
 	t.Helper()
 
 	g := graph.New(s)
@@ -88,7 +89,7 @@ func composedSiblingCollision(ctx context.Context, t *testing.T, s *schema.Schem
 	}
 
 	snap := g.Snapshot()
-	if n := len(snap.Duplicates()); n != 1 {
+	if n := len(slices.Collect(snap.Duplicates())); n != 1 {
 		t.Fatalf("snapshot holds %d duplicates, want 1", n)
 	}
 	return snap
@@ -209,7 +210,7 @@ func TestLoadVerify_RefuseAnEmptyConflictKeyUnderAKeyedManyComposition(t *testin
 			t.Parallel()
 			loaded, loadRes := snapshot.Load(ctx, edited, s, snapshot.WithIntegrityCheck(false))
 			verifyRes := snapshot.Verify(ctx, edited, s, snapshot.WithIntegrityCheck(false))
-			if loaded != nil {
+			if !loaded.IsZero() {
 				t.Error("Load returned a snapshot")
 			}
 			for surface, res := range map[string]diag.Result{"Load": loadRes, "Verify": verifyRes} {
@@ -250,11 +251,11 @@ func TestLoad_StatedConflictKeySelectsAmongSiblings(t *testing.T) {
 	if verifyRes := snapshot.Verify(ctx, data, s); verifyRes.HasErrors() {
 		t.Errorf("Verify refused a document Load accepted: %v", verifyRes)
 	}
-	if n := len(loaded.Duplicates()); n != 1 {
+	if n := len(slices.Collect(loaded.Duplicates())); n != 1 {
 		t.Fatalf("loaded %d duplicates, want 1", n)
 	}
-	conflict := loaded.Duplicates()[0].Conflict()
-	if conflict == nil {
+	conflict := slices.Collect(loaded.Duplicates())[0].Conflict()
+	if conflict.IsZero() {
 		t.Fatal("the duplicate's conflict pointer is nil — the stated key selected nothing")
 	}
 	if got := conflict.PrimaryKey().String(); got != `["c1"]` {

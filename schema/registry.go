@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"iter"
 	"maps"
 	"slices"
 	"sync"
@@ -22,9 +23,9 @@ import (
 // It is safe for concurrent use by multiple goroutines.
 type Registry struct {
 	mu       sync.RWMutex
-	schemas  map[location.SourceID]*Schema
-	byName   map[string]*Schema
-	byTypeID map[TypeID]*Type
+	schemas  map[location.SourceID]Schema
+	byName   map[string]Schema
+	byTypeID map[TypeID]Type
 	// hashes caches StructuralHash results for registered schemas keyed by
 	// SourceID. Populated lazily on the idempotence path (first duplicate-
 	// SourceID Register call); never populated for schemas that have not
@@ -37,9 +38,9 @@ type Registry struct {
 // NewRegistry creates an empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		schemas:  make(map[location.SourceID]*Schema),
-		byName:   make(map[string]*Schema),
-		byTypeID: make(map[TypeID]*Type),
+		schemas:  make(map[location.SourceID]Schema),
+		byName:   make(map[string]Schema),
+		byTypeID: make(map[TypeID]Type),
 		hashes:   make(map[location.SourceID]string),
 	}
 }
@@ -51,16 +52,18 @@ func NewRegistry() *Registry {
 // match byte for byte, and its StructuralHash matches — Register returns nil
 // without mutating the registry. This makes the common case, the same .yammm
 // file parsed twice in one process by loads sharing a Registry, a safe no-op,
-// and the existing schema's types keep their pointer identity under
+// and the existing schema's types keep their identity under
 // LookupType. Two schemas with no sources (Builder-built) are compared by hash
 // alone; a schema with sources beside one without is not the same source, so
 // a Builder-built schema never replaces a loaded one or the reverse.
 //
 // A SourceID match whose bytes or hash differ returns a
 // *RegistryError{Kind: DuplicateSourceID}. The message keeps the "schema
-// already registered with source ID: <id>" prefix and names what differed —
-// the source's bytes, or the two structural hashes — so a file that changed
-// while a registry lived fails loudly rather than being served stale. The
+// already registered with source ID: <id>" prefix and names what differed: the
+// source's bytes, the two structural hashes, or one schema carrying no sources.
+// A file that changed while a registry lived fails here when its schema reaches
+// Register. An import the loader reuses without reading it serves the old
+// compile, as [WithRegistry] states. The
 // loader reports that refusal as E_LOAD_SOURCE_CHANGED.
 //
 // New SourceIDs register normally. Zero SourceID, empty schema name, and
@@ -71,8 +74,8 @@ func NewRegistry() *Registry {
 // the duration of the check-and-register sequence. StructuralHash is computed
 // on the duplicate-SourceID path only and runs under the lock; the happy
 // path (fresh SourceID) pays no hash cost.
-func (r *Registry) Register(s *Schema) error {
-	if s == nil {
+func (r *Registry) Register(s Schema) error {
+	if s.IsZero() {
 		return nil
 	}
 
@@ -109,7 +112,7 @@ func (r *Registry) Register(s *Schema) error {
 			return &RegistryError{
 				Kind: DuplicateSourceID,
 				Message: fmt.Sprintf(
-					"schema already registered with source ID: %s (the source's bytes, or an import's, changed since it was registered)",
+					"schema already registered with source ID: %s (a source both compiles carry has different bytes)",
 					s.sourceID.String(),
 				),
 			}
@@ -162,7 +165,7 @@ func (r *Registry) Register(s *Schema) error {
 }
 
 // LookupBySourceID returns the schema with the given source ID.
-func (r *Registry) LookupBySourceID(id location.SourceID) (*Schema, bool) {
+func (r *Registry) LookupBySourceID(id location.SourceID) (Schema, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -171,7 +174,7 @@ func (r *Registry) LookupBySourceID(id location.SourceID) (*Schema, bool) {
 }
 
 // LookupByName returns the schema with the given name.
-func (r *Registry) LookupByName(name string) (*Schema, bool) {
+func (r *Registry) LookupByName(name string) (Schema, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -181,7 +184,7 @@ func (r *Registry) LookupByName(name string) (*Schema, bool) {
 
 // LookupType returns the type with the given TypeID.
 // This provides O(1) cross-schema type lookup.
-func (r *Registry) LookupType(id TypeID) (*Type, bool) {
+func (r *Registry) LookupType(id TypeID) (Type, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -207,16 +210,16 @@ func (r *Registry) Len() int {
 }
 
 // Clone creates a shallow copy of the registry.
-// The clone shares the same Schema pointers but has independent maps.
+// The clone shares the same Schema records but has independent maps.
 // This is useful for creating isolated registry views without affecting the original.
 func (r *Registry) Clone() *Registry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	clone := &Registry{
-		schemas:  make(map[location.SourceID]*Schema, len(r.schemas)),
-		byName:   make(map[string]*Schema, len(r.byName)),
-		byTypeID: make(map[TypeID]*Type, len(r.byTypeID)),
+		schemas:  make(map[location.SourceID]Schema, len(r.schemas)),
+		byName:   make(map[string]Schema, len(r.byName)),
+		byTypeID: make(map[TypeID]Type, len(r.byTypeID)),
 		hashes:   make(map[location.SourceID]string, len(r.hashes)),
 	}
 
@@ -228,20 +231,21 @@ func (r *Registry) Clone() *Registry {
 	return clone
 }
 
-// All returns all registered schemas in deterministic order (sorted by SourceID).
-// The returned slice is a copy; modifications do not affect the registry.
-func (r *Registry) All() []*Schema {
+// All returns an iterator over the schemas registered at the call, in
+// deterministic order (sorted by SourceID). A later registration does not reach
+// it, and the loop holds no lock.
+func (r *Registry) All() iter.Seq[Schema] {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	result := make([]*Schema, 0, len(r.schemas))
+	result := make([]Schema, 0, len(r.schemas))
 	for _, s := range r.schemas {
 		result = append(result, s)
 	}
-	slices.SortFunc(result, func(a, b *Schema) int {
+	slices.SortFunc(result, func(a, b Schema) int {
 		return cmp.Compare(a.sourceID.String(), b.sourceID.String())
 	})
-	return result
+	return slices.Values(result)
 }
 
 // RegistryErrorKind identifies the type of registry error.
@@ -307,12 +311,12 @@ const (
 // caller, and it is handed the registry that holds the schema's own entry, so
 // either both lookups find their entry or neither does. Register's provenance
 // message is exact for the arm that remains.
-func sameSources(a, b *Schema) sourceVerdict {
+func sameSources(a, b Schema) sourceVerdict {
 	as, bs := a.Sources(), b.Sources()
-	if as == nil && bs == nil {
+	if as.IsZero() && bs.IsZero() {
 		return sourcesUndecided
 	}
-	if as == nil || bs == nil {
+	if as.IsZero() || bs.IsZero() {
 		return sourcesProvenanceDiffers
 	}
 	ca, okA := as.ContentBySource(a.sourceID)

@@ -1091,3 +1091,94 @@ func TestMultiLabelFulltext_DoesNotBlockSingleLabelCreate(t *testing.T) {
 		t.Errorf("Excluded = %d; want the multi-label row counted", diff.Excluded)
 	}
 }
+
+// One namespace holds index and constraint names, and IF NOT EXISTS answers for a
+// name of its own kind alone: over the other kind's name the server refuses the
+// statement, so the diff's alsoBlocking argument separates a no-op from a failure.
+func TestNameHeldAcrossKinds_ServerResponse(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	t.Cleanup(func() { dropAll(t, ctx) })
+
+	const (
+		uniqueOnA  = "CREATE CONSTRAINT held FOR (n:A) REQUIRE n.x IS UNIQUE"
+		notNullOnA = "CREATE CONSTRAINT held FOR (n:A) REQUIRE n.x IS NOT NULL"
+		typeOnA    = "CREATE CONSTRAINT held FOR (n:A) REQUIRE n.x IS :: STRING"
+		indexOnA   = "CREATE INDEX held FOR (n:A) ON (n.x)"
+		indexOnB   = "CREATE INDEX held IF NOT EXISTS FOR (n:B) ON (n.y)"
+		uniqueOnB  = "CREATE CONSTRAINT held IF NOT EXISTS FOR (n:B) REQUIRE n.y IS UNIQUE"
+		notNullOnB = "CREATE CONSTRAINT held IF NOT EXISTS FOR (n:B) REQUIRE n.y IS NOT NULL"
+	)
+	tests := []struct {
+		name       string
+		holder     string
+		statement  string
+		enterprise bool
+		wantCode   string
+	}{
+		{name: "index over a backing index's name", holder: uniqueOnA, statement: indexOnB},
+		{name: "index over a not-null constraint's name", holder: notNullOnA, statement: indexOnB, enterprise: true, wantCode: "ConstraintWithNameAlreadyExists"},
+		{name: "index over a type constraint's name", holder: typeOnA, statement: indexOnB, enterprise: true, wantCode: "ConstraintWithNameAlreadyExists"},
+		{name: "constraint over a constraint's name", holder: notNullOnA, statement: uniqueOnB, enterprise: true},
+		{name: "unique constraint over an index's name", holder: indexOnA, statement: uniqueOnB, wantCode: "IndexWithNameAlreadyExists"},
+		{name: "not-null constraint over an index's name", holder: indexOnA, statement: notNullOnB, enterprise: true, wantCode: "IndexWithNameAlreadyExists"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.enterprise {
+				requireEnterprise(t, ctx)
+			}
+			dropAll(t, ctx)
+			if _, err := neo4jdriver.ExecuteQuery(ctx, driver(t), tt.holder, nil, neo4jdriver.EagerResultTransformer); err != nil {
+				t.Fatalf("creating the holder: %v", err)
+			}
+			_, err := neo4jdriver.ExecuteQuery(ctx, driver(t), tt.statement, nil, neo4jdriver.EagerResultTransformer)
+			switch {
+			case tt.wantCode == "" && err != nil:
+				t.Fatalf("server refused the statement: %v", err)
+			case tt.wantCode != "" && (err == nil || !strings.Contains(err.Error(), tt.wantCode)):
+				t.Fatalf("server answered %v, want a refusal with %s", err, tt.wantCode)
+			}
+			for _, show := range []string{"SHOW INDEXES YIELD name, labelsOrTypes", "SHOW CONSTRAINTS YIELD name, labelsOrTypes"} {
+				for _, rec := range query(t, ctx, show) {
+					labels, _ := rec["labelsOrTypes"].([]any)
+					if rec["name"] == "held" && !slices.Contains(labels, any("A")) {
+						t.Errorf("%s: the name moved off its holder: %v", show, labels)
+					}
+				}
+			}
+		})
+	}
+}
+
+// constraintDefinitionKey keeps a composite's property order because the server
+// refuses a key constraint only over an index in that same order.
+func TestConstraintOverACompositeIndex_ServerResponse(t *testing.T) {
+	ctx := context.Background()
+	driver(t)
+	t.Cleanup(func() { dropAll(t, ctx) })
+
+	tests := []struct {
+		name       string
+		constraint string
+		wantCode   string
+	}{
+		{name: "same property order", constraint: "CREATE CONSTRAINT c FOR (n:A) REQUIRE (n.x, n.y) IS UNIQUE", wantCode: "IndexAlreadyExists"},
+		{name: "reversed property order", constraint: "CREATE CONSTRAINT c FOR (n:A) REQUIRE (n.y, n.x) IS UNIQUE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dropAll(t, ctx)
+			if _, err := neo4jdriver.ExecuteQuery(ctx, driver(t), "CREATE INDEX i FOR (n:A) ON (n.x, n.y)", nil, neo4jdriver.EagerResultTransformer); err != nil {
+				t.Fatalf("creating the index: %v", err)
+			}
+			_, err := neo4jdriver.ExecuteQuery(ctx, driver(t), tt.constraint, nil, neo4jdriver.EagerResultTransformer)
+			switch {
+			case tt.wantCode == "" && err != nil:
+				t.Fatalf("server refused the constraint: %v", err)
+			case tt.wantCode != "" && (err == nil || !strings.Contains(err.Error(), tt.wantCode)):
+				t.Fatalf("server answered %v, want a refusal with %s", err, tt.wantCode)
+			}
+		})
+	}
+}

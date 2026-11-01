@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -40,21 +41,21 @@ part type Line {
 	lineProps := immutable.WrapProperties(map[string]any{"label": "l"})
 	docKey := immutable.WrapKey([]any{"d1"})
 	docProps := immutable.WrapProperties(map[string]any{"id": "d1"})
-	line := instance.NewValidInstance("Line", lineT.ID(), badKey, lineProps, nil, nil, nil)
+	line := instance.NewValidInstance("Line", lineT.ID(), badKey, lineProps, nil, nil, location.Provenance{})
 
 	results := map[string]diag.Result{}
 	g := graph.New(s)
 	results["Graph.Add"] = g.Add(ctx, instance.NewValidInstance("Doc", docT.ID(), docKey, docProps, nil,
-		map[string]immutable.Value{"LINES": immutable.Wrap([]any{line})}, nil))
-	if n := len(g.Snapshot().InstancesOf(docT.ID())); n != 0 {
+		map[string]immutable.Value{"LINES": immutable.Wrap([]any{line})}, location.Provenance{}))
+	if n := len(slices.Collect(g.Snapshot().InstancesOf(docT.ID()))); n != 0 {
 		t.Errorf("Graph.Add installed %d roots from a refused record", n)
 	}
 	g2 := graph.New(s)
-	if r := g2.Add(ctx, instance.NewValidInstance("Doc", docT.ID(), docKey, docProps, nil, nil, nil)); !r.OK() {
+	if r := g2.Add(ctx, instance.NewValidInstance("Doc", docT.ID(), docKey, docProps, nil, nil, location.Provenance{})); !r.OK() {
 		t.Fatalf("Add the root: %s", r)
 	}
 	results["Graph.AddComposed"] = g2.AddComposed(ctx, docT.ID(), docKey.String(), "LINES", line)
-	if roots := g2.Snapshot().InstancesOf(docT.ID()); len(roots) != 1 || roots[0].ComposedCount("LINES") != 0 {
+	if roots := slices.Collect(g2.Snapshot().InstancesOf(docT.ID())); len(roots) != 1 || roots[0].ComposedCount("LINES") != 0 {
 		t.Errorf("Graph.AddComposed attached a refused child")
 	}
 	_, results["RebuildSnapshot"] = graph.RebuildSnapshot(s, graph.SnapshotParts{

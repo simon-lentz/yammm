@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -80,7 +81,7 @@ func TestBuilder_StoresDocumentationAsADocCommentCarriesIt(t *testing.T) {
 	if !ok {
 		t.Fatal("type T missing")
 	}
-	invs := typ.InvariantsSlice()
+	invs := slices.Collect(typ.Invariants())
 	if len(invs) != 1 {
 		t.Fatalf("type T holds %d invariants, want 1", len(invs))
 	}

@@ -45,7 +45,7 @@ type Document {
 }
 `
 
-func loadProbeSchema(t *testing.T, ctx context.Context) *schema.Schema {
+func loadProbeSchema(t *testing.T, ctx context.Context) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(ctx, probeSchema, "probe.yammm")
 	if err := result.Err(); err != nil {
@@ -247,7 +247,7 @@ func TestDocumentedBuilderExample(t *testing.T) {
 		WithRelation("OWNER", schema.NewTypeRef("", "Person", location.Span{}), false, false).
 		Done().
 		Build()
-	if err := result.Err(); err != nil || s == nil {
+	if err := result.Err(); err != nil || s.IsZero() {
 		t.Fatalf("the documented builder example does not build: %v", err)
 	}
 }
@@ -312,8 +312,8 @@ func TestDocumentedAdapterParseSurface(t *testing.T) {
 	// calls, and nothing compiled it. The json and neo4j writers keep their
 	// write options, which is why only csv is pinned this way.
 	var (
-		marshalSnapshot func(*csvadapter.Adapter, context.Context, *graph.Snapshot) (map[string][]byte, error)
-		writeSnapshot   func(*csvadapter.Adapter, context.Context, func(string) (io.Writer, error), *graph.Snapshot) error
+		marshalSnapshot func(*csvadapter.Adapter, context.Context, graph.Snapshot) (map[string][]byte, error)
+		writeSnapshot   func(*csvadapter.Adapter, context.Context, func(string) (io.Writer, error), graph.Snapshot) error
 	)
 	marshalSnapshot = (*csvadapter.Adapter).MarshalSnapshot
 	writeSnapshot = (*csvadapter.Adapter).WriteSnapshot

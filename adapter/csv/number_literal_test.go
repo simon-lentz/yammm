@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -150,15 +151,15 @@ func cutLast(s, sep string) (head, last string, found bool) {
 func validatedNumber(t *testing.T, v *instance.Validator, raw instance.RawInstance, prop string) (any, bool) {
 	t.Helper()
 	vi, res := v.ValidateOne(t.Context(), "P", raw)
-	if !res.OK() || vi == nil {
+	if !res.OK() || vi.IsZero() {
 		return nil, false
 	}
 	if prop == "AT" {
 		edge, ok := vi.Edge("AT")
-		if !ok || len(edge.Targets()) != 1 {
+		if !ok || len(slices.Collect(edge.Targets())) != 1 {
 			t.Fatalf("validated no single AT target")
 		}
-		target := edge.Targets()[0]
+		target := slices.Collect(edge.Targets())[0]
 		w, ok := target.Properties().Get("w")
 		if !ok {
 			return nil, true

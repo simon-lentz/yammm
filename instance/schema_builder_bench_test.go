@@ -51,7 +51,7 @@ func BenchmarkSchemaBuilder_FullCycle(b *testing.B) {
 	}
 }
 
-func benchSchema(b *testing.B) *schema.Schema {
+func benchSchema(b *testing.B) schema.Schema {
 	b.Helper()
 	s, result := schema.NewBuilder().
 		WithName("bench").

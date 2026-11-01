@@ -142,7 +142,7 @@ indexes, result := adapter.IndexesStructured(ctx, s)
 // VectorDimensions, VectorSimilarity, Statement
 ```
 
-Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. An index annotation naming a property the type does not have reports `E_NEO4J_UNKNOWN_PROPERTY`, and one naming a property whose type cannot carry the index reports `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+.
+Property-level `@index` emits a single-property range index; type-level `@@index(a, b)` a composite range index (declared order significant); property-level `@vector(cosine|euclidean)` a vector index (dimension from the `Vector[N]` constraint); property-level `@fulltext` and type-level `@@fulltext(a, b)` fulltext indexes (`CREATE FULLTEXT INDEX ... ON EACH [...]`). Index names are always emitted; two indexes whose readable names would collide are disambiguated with a short deterministic digest. A load or a Build refuses an index annotation with no eligible target (`E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET`), so no schema they return draws the adapter's own codes for the two cases, `E_NEO4J_UNKNOWN_PROPERTY` and `E_NEO4J_INVALID_INDEX_TARGET`. Indexes emit for every edition (unlike constraints); the `CREATE VECTOR INDEX ... OPTIONS` form requires Neo4j 5.15+.
 
 `DiffIndexes` returns an `*IndexDiffResult` with **five** sets: Match/Drift/Create/Drop plus **Unverified** — indexes present on both sides whose definition could not be compared (no readable vector configuration, or still `POPULATING`). `DiffConstraints` has the same five sets, its `Unverified` covering a TYPE constraint whose remote record carries no `propertyType`, so its enforced type was not compared. A drift gate must count `Unverified` as an incomplete check, not a pass; summing only Drift+Create+Drop reports an unchecked index as in sync. Composite property order is significant, and a schema-owned remote index with no declaration reports as a drop when the schema could have declared it, and is counted in `Excluded` otherwise. See [Diffing Against a Live Database](#diffing-against-a-live-database) for the call shape.
 
@@ -150,7 +150,7 @@ Property-level `@index` emits a single-property range index; type-level `@@index
 
 ```go
 shape, result := adapter.ShapeForSchema(ctx, s)
-// shape.Types maps type names to NodeShape (Label, PrimaryKeys, RequiredFields)
+// shape.Types maps type identities to NodeShape (Type, Label, PrimaryKeys, RequiredFields, ImmutableKeys)
 ```
 
 ### Query Generation
@@ -213,8 +213,10 @@ Both diffs are scoped by an `*OwnedLabels` — the labels the schema owns, a
 superset of those the adapter emits for it. Build it once and pass it to both halves. The trailing
 variadic argument is the **other** side's remote objects: index and constraint
 names share one Neo4j namespace, and every emitted statement carries
-`IF NOT EXISTS`, so a declaration whose name the database already holds is a
-silent no-op rather than a create. Passing both sides lets each diff report that
+`IF NOT EXISTS`, so a declaration whose name the database already holds creates
+nothing. Over a name of its own kind the statement is a silent no-op, and a
+constraint's backing index counts as an index. Over the other kind's name the server
+refuses it. Passing both sides lets each diff report that
 as drift naming the holder.
 
 ```go
@@ -304,8 +306,8 @@ A write reports through an `error`, not a `diag.Result`, so the adapters carry s
 | -------- | ------- | ------- |
 | `csv.ErrUnrepresentable` | CSV | The snapshot holds a value CSV cannot write so that its own parser reads it back unchanged: a composed child, a lone all-empty association, a cell holding a CR LF, a list of one empty element, a null list element, a value no column renders (a value of no form, such as a map, an array, a struct, a channel or a pointer to one, or a `json.Number` whose text is no number literal, an empty one among them; or a time or a UUID its column does not render), a string that is not valid UTF-8, a number its parser does not read back as a number (a `NaN`, an infinity, a `json.Number` no finite `float64` holds) |
 | `csv.ErrConfig` | CSV | The adapter holds a setting it cannot use: a list separator the parser could not find again, or a delimiter `encoding/csv` refuses. Refused before any writer is requested. The parse-side twin is `E_CSV_CONFIG` |
-| `csv.ErrNilSnapshot`, `json.ErrNilResult` | CSV, JSON | A write method received a nil snapshot |
-| `neo4j.ErrUnrepresentable` | Neo4j | `BatchNodeQueries`, `BatchEdgeQueries`, `Coerce`, `CoerceParams` or `CoerceRelProps` refuse a value Neo4j would not store as held: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map, a string that is not valid UTF-8, a value of no form, a time or a UUID its constraint does not render, a `json.Number` no `int64` or finite `float64` holds, or a primary key that is absent or holds no value; a property the schema does not declare is judged by its one form alone. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a constraint at a nested map's or a rows param's own key, a `GraphShape` the adapter did not build for the snapshot's schema or a relationship type that is no valid identifier, and a cancelled context |
+| `csv.ErrZeroSnapshot`, `json.ErrZeroSnapshot` | CSV, JSON | A write method received a zero snapshot |
+| `neo4j.ErrUnrepresentable` | Neo4j | `BatchNodeQueries` and `BatchEdgeQueries` refuse a value Neo4j would not store as held: one its constraint's coercion refuses, a nested collection's (matching `ErrUnsupportedListElem` too), a map at a property the schema declares, a string that is not valid UTF-8, a value of no form, a time or a UUID its constraint does not render, a `json.Number` no `int64` or finite `float64` holds, or a primary key that is absent or holds no value; a property the schema does not declare is judged by its one form alone. `Coerce`, `CoerceParams` and `CoerceRelProps` mark their refusals of a value so too. No other error carries the class: a caller's own, such as a constraint `schema.CheckConstraint` refuses, a constraint at a nested map's or a rows param's own key, a `GraphShape` the adapter did not build for the snapshot's schema or a relationship type that is no valid identifier, and a cancelled context |
 | `json.ErrUnrepresentable` | JSON | The snapshot holds a value JSON cannot write as itself: a non-finite float (NaN or an infinity) at any depth, which a validated `Float` never is; a string that is not valid UTF-8 at any depth; a `json.Number` no finite `float64` holds; a `time.Time` outside a `Timestamp` or a `Date`, a `uuid.UUID` outside a `UUID`, or a time at its kind whose text does not read back, such as one outside years 0 to 9999; or a value that is no scalar, list or string-keyed map (`instance.ScalarOf`), a `json.Number` whose text is no number literal among them |
 
 An I/O failure and a cancellation match none of these classes.

@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ type Sensor {
 }
 `
 
-func loadTemporalSchema(t *testing.T) *schema.Schema {
+func loadTemporalSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(t.Context(), temporalTestSchema, "temporaltest.yammm")
 	if result.HasErrors() {
@@ -93,7 +94,7 @@ func temporalProps(id string, native bool) map[string]any {
 
 // buildTemporalSnapshot validates every instance, so the graph holds what the
 // validation arm produced.
-func buildTemporalSnapshot(t *testing.T, s *schema.Schema, native bool) *graph.Snapshot {
+func buildTemporalSnapshot(t *testing.T, s schema.Schema, native bool) graph.Snapshot {
 	t.Helper()
 	ctx := t.Context()
 	v := instance.NewValidator(s)
@@ -129,7 +130,7 @@ func edgeSeenAt(native bool) any {
 	return "2026-08-19T14:00:00+00:00"
 }
 
-func mustValidate(t *testing.T, v *instance.Validator, typeName string, props map[string]any) *instance.ValidInstance {
+func mustValidate(t *testing.T, v *instance.Validator, typeName string, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	vi, res := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
 	if !res.OK() {
@@ -138,7 +139,7 @@ func mustValidate(t *testing.T, v *instance.Validator, typeName string, props ma
 	return vi
 }
 
-func mustValidatePart(t *testing.T, v *instance.Validator, typeName string, props map[string]any) *instance.ValidInstance {
+func mustValidatePart(t *testing.T, v *instance.Validator, typeName string, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	vis, res := v.ValidateForComposition(t.Context(), "Sensor", "READINGS", []instance.RawInstance{{Properties: props}})
 	if !res.OK() {
@@ -208,7 +209,7 @@ func TestMarshal_TemporalKindsReachOneFixpoint(t *testing.T) {
 // receives no schema and runs no validation. It is the one path a value can
 // take into a graph without being canonicalized, and it is why the wire and
 // writer arms exist.
-func bypassSnapshot(t *testing.T, s *schema.Schema, props map[string]any) *graph.Snapshot {
+func bypassSnapshot(t *testing.T, s schema.Schema, props map[string]any) graph.Snapshot {
 	t.Helper()
 	g := graph.New(s)
 	inst := instancetest.VI(
@@ -335,7 +336,7 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	sensor := loaded.InstancesOf(mustTypeID(t, s, "Sensor"))[0]
+	sensor := slices.Collect(loaded.InstancesOf(mustTypeID(t, s, "Sensor")))[0]
 	v, ok := sensor.Property("created_at")
 	if !ok {
 		t.Fatal("created_at missing after load")
@@ -349,7 +350,7 @@ func TestLoad_CanonicalizesNonConformingWireText(t *testing.T) {
 // constraint can render. The bytes are edited after marshalling because
 // nothing in the library will write such a value — which is the point: a
 // document can hold one, and until this option nothing could say so.
-func nonConformingDocument(t *testing.T, s *schema.Schema) []byte {
+func nonConformingDocument(t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	data, result := snapshot.Marshal(context.Background(), buildTemporalSnapshot(t, s, false))
 	if err := result.Err(); err != nil {
@@ -379,7 +380,7 @@ func TestLoad_ValueConformanceReportsAndStillReturns(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("Load refused a non-conforming document: %v", err)
 	}
-	if loaded == nil {
+	if loaded.IsZero() {
 		t.Fatal("Load returned no snapshot; the option must report, not reject")
 	}
 	if !result.HasCode(diag.W_SNAPSHOT_VALUE_NONCONFORMING) {

@@ -512,9 +512,9 @@ func TestDeclarability_TypeComparisonIsCaseInsensitive(t *testing.T) {
 }
 
 // Neo4j keeps index and constraint names in ONE namespace, so an index holding
-// the name a constraint wants makes CREATE CONSTRAINT ... IF NOT EXISTS a silent
-// no-op: the diff must report drift naming the holder rather than a create that
-// never takes effect and reprints unchanged on every run.
+// the name a constraint wants makes the server refuse CREATE CONSTRAINT ... IF NOT
+// EXISTS: the diff must report drift naming the holder rather than a create that
+// fails and reprints unchanged on every run.
 func TestDiffConstraints_IndexNameBlocksCreate(t *testing.T) {
 	t.Parallel()
 	desired := []Constraint{

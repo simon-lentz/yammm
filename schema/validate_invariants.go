@@ -71,7 +71,7 @@ func (k scalarKind) String() string {
 type staticType struct {
 	kind           staticKind
 	scalar         scalarKind  // kindScalar
-	typs           []*Type     // kindInstance; ordered by identity, no duplicates
+	typs           []Type      // kindInstance; ordered by identity, no duplicates
 	elem           *staticType // kindList
 	viaAssociation bool
 }
@@ -105,11 +105,11 @@ func listOf(elem staticType) staticType {
 	return staticType{kind: kindList, elem: &e}
 }
 
-func instanceOf(t *Type) staticType {
-	if t == nil {
+func instanceOf(t Type) staticType {
+	if t.IsZero() {
 		return unknownType
 	}
-	return staticType{kind: kindInstance, typs: []*Type{t}}
+	return staticType{kind: kindInstance, typs: []Type{t}}
 }
 
 // typeName names an instance type as a diagnostic reads it: one type's name,
@@ -124,16 +124,16 @@ func (t staticType) typeName() string {
 
 // unionTypes is the set of both operands' types, deduplicated and ordered by
 // identity so a union built in either order is one value. Identity, not the
-// pointer: two loads sharing a registry can hold two objects for one type.
-func unionTypes(a, b []*Type) []*Type {
-	out := make([]*Type, 0, len(a)+len(b))
+// record: two loads sharing a registry can hold two objects for one type.
+func unionTypes(a, b []Type) []Type {
+	out := make([]Type, 0, len(a)+len(b))
 	out = append(out, a...)
 	for _, t := range b {
-		if !slices.ContainsFunc(out, func(x *Type) bool { return x.ID() == t.ID() }) {
+		if !slices.ContainsFunc(out, func(x Type) bool { return x.ID() == t.ID() }) {
 			out = append(out, t)
 		}
 	}
-	slices.SortFunc(out, func(x, y *Type) int { return strings.Compare(x.ID().String(), y.ID().String()) })
+	slices.SortFunc(out, func(x, y Type) int { return strings.Compare(x.ID().String(), y.ID().String()) })
 	return out
 }
 
@@ -179,11 +179,11 @@ type staticMembers map[string]staticType
 // single primary-key property as the scalar it is — every key kind renders
 // as a string — or a list of those for a composite key. An unresolved target
 // makes no claim.
-func (c *completer) keyTypeOf(target *Type) staticType {
-	if target == nil {
+func (c *completer) keyTypeOf(target Type) staticType {
+	if target.IsZero() {
 		return unknownType
 	}
-	pks := target.PrimaryKeysSlice()
+	pks := slices.Collect(target.PrimaryKeys())
 	switch len(pks) {
 	case 0:
 		return unknownType
@@ -200,12 +200,12 @@ func (c *completer) keyTypeOf(target *Type) staticType {
 }
 
 // membersOf returns t's member index, built once per type.
-func (c *completer) membersOf(t *Type) staticMembers {
+func (c *completer) membersOf(t Type) staticMembers {
 	if m, ok := c.staticMembers[t]; ok {
 		return m
 	}
 	if c.staticMembers == nil {
-		c.staticMembers = make(map[*Type]staticMembers)
+		c.staticMembers = make(map[Type]staticMembers)
 	}
 	m := make(staticMembers, len(t.allProperties)+len(t.allAssociations)+len(t.allCompositions))
 	for _, p := range t.allProperties {
@@ -261,7 +261,7 @@ func propertyType(con Constraint) staticType {
 
 // invariantErrorf reports one defect once per invariant: two occurrences of one
 // bad name in one expression are one mistake, reported at the invariant's span.
-func (c *completer) invariantErrorf(inv *Invariant, code diag.Code, format string, args ...any) {
+func (c *completer) invariantErrorf(inv Invariant, code diag.Code, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	key := code.String() + "\x00" + msg
 	if c.invariantSeen[key] {
@@ -340,7 +340,7 @@ func mergeType(a, b staticType) staticType {
 // typeBinary types a binary operator's result and checks the two operand
 // rules the evaluator refuses on every input: `+` takes two numbers, two
 // strings or two lists, and `in` takes a list on its right.
-func (c *completer) typeBinary(op string, children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeBinary(op string, children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
 	var l, r staticType
 	for i, child := range children {
 		t := c.typeExpr(child, sc, owner, inv)
@@ -376,7 +376,7 @@ func (c *completer) typeBinary(op string, children []expr.Expression, sc *static
 // two strings to a string, two numbers to a number. An instance or a key is
 // refused, as is a list beside a scalar or a string beside a number; an
 // operand of unknown kind is admitted and the result is unknown.
-func (c *completer) typePlus(l, r staticType, owner *Type, inv *Invariant) staticType {
+func (c *completer) typePlus(l, r staticType, owner Type, inv Invariant) staticType {
 	refuse := func() staticType {
 		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"+ takes two numbers, two strings or two lists in invariant %q on type %q", inv.Name(), owner.Name())
@@ -440,7 +440,7 @@ func (c *completer) validateInvariantExpressions() {
 }
 
 // typeExpr walks e, reports its defects, and returns what it evaluates to.
-func (c *completer) typeExpr(e expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeExpr(e expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
 	switch ex := e.(type) {
 	case nil:
 		return unknownType
@@ -479,7 +479,7 @@ func (c *completer) typeExpr(e expr.Expression, sc *staticScope, owner *Type, in
 	return unknownType
 }
 
-func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner Type, inv Invariant) staticType {
 	op := sexpr.Op()
 	children := sexpr.Children()
 
@@ -546,7 +546,7 @@ func (c *completer) typeSExpr(sexpr expr.SExpr, sc *staticScope, owner *Type, in
 // own defects are still reported once. The body is typed with its declared
 // parameters bound, as any builtin would bind them, so a well-formed lambda
 // is not also reported as undefined variables.
-func (c *completer) walkCallParts(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) {
+func (c *completer) walkCallParts(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) {
 	child := sc
 	bound := false
 	var body expr.Expression
@@ -582,7 +582,7 @@ func (c *completer) walkCallParts(children []expr.Expression, sc *staticScope, o
 
 // typeProperty resolves a bare name: a member of the owner, else a lambda
 // variable named without its sigil, as the evaluator's scope resolves it.
-func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
 	if len(children) != 1 {
 		return unknownType
 	}
@@ -609,7 +609,7 @@ func (c *completer) typeProperty(children []expr.Expression, sc *staticScope, ow
 // relationSpelled reports whether name, which reads a member of t by its
 // folded spelling in an invariant on owner, is a spelling docs/SPEC.md admits:
 // a property in any case, a relation by its UPPER_SNAKE name or its field name.
-func (c *completer) relationSpelled(owner, t *Type, name string, inv *Invariant) bool {
+func (c *completer) relationSpelled(owner, t Type, name string, inv Invariant) bool {
 	rel, ok := t.RelationByField(strings.ToLower(name))
 	if !ok || name == rel.Name() || name == rel.FieldName() {
 		return true
@@ -625,7 +625,7 @@ func (c *completer) relationSpelled(owner, t *Type, name string, inv *Invariant)
 // variable, so a parameter of that name shadows it by binding order alone. A
 // numeric variable evaluates to nil when unbound; any other unbound name is a
 // guaranteed evaluation error, so it is refused here.
-func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
 	if len(children) != 1 {
 		return unknownType
 	}
@@ -651,7 +651,7 @@ func (c *completer) typeVariable(children []expr.Expression, sc *staticScope, ow
 
 // memberSpelled reports whether name is the exact spelling of one of t's
 // members: a property's declared name or a relation's field name.
-func memberSpelled(t *Type, name string) bool {
+func memberSpelled(t Type, name string) bool {
 	if _, ok := t.Property(name); ok {
 		return true
 	}
@@ -672,7 +672,7 @@ func isNumericVar(name string) bool {
 }
 
 // typeMember resolves receiver.name against what the receiver is known to be.
-func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
 	if len(children) != 2 {
 		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"member access takes a receiver and one name in invariant %q on type %q", inv.Name(), owner.Name())
@@ -717,11 +717,9 @@ func (c *completer) typeMember(children []expr.Expression, sc *staticScope, owne
 // input that selects it. A type whose supertype chain has an unresolved link
 // has an incomplete member set, so nothing is claimed; the unresolved
 // reference already carries its diagnostic.
-func (c *completer) typeInstanceMember(recv staticType, name string, owner *Type, inv *Invariant) staticType {
-	for _, ty := range recv.typs {
-		if ty == nil || c.hasUnresolvedSupertype(ty) {
-			return unknownType
-		}
+func (c *completer) typeInstanceMember(recv staticType, name string, owner Type, inv Invariant) staticType {
+	if slices.ContainsFunc(recv.typs, c.hasUnresolvedSupertype) {
+		return unknownType
 	}
 	member := nilType
 	declared := make([]staticType, 0, len(recv.typs))
@@ -761,7 +759,7 @@ func (c *completer) typeInstanceMember(recv staticType, name string, owner *Type
 // typeIndexExpr resolves receiver[index]: a list yields its element, a string a
 // string; a number, a boolean or an instance cannot be indexed, and the bracket
 // takes exactly one index, as the evaluator's slice access does.
-func (c *completer) typeIndexExpr(children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeIndexExpr(children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
 	if len(children) != 2 {
 		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"indexing takes exactly one index in invariant %q on type %q", inv.Name(), owner.Name())
@@ -797,7 +795,7 @@ func (c *completer) typeIndexExpr(children []expr.Expression, sc *staticScope, o
 // typeCall types a pipeline call from its builtin's spec: it checks the call
 // shape the evaluator would refuse, binds the lambda parameters to what the
 // spec says they hold, and maps the receiver's type to the result's.
-func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, sc *staticScope, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, sc *staticScope, owner Type, inv Invariant) staticType {
 	recv := unknownType
 	if len(children) > 0 {
 		recv = c.typeExpr(children[0], sc, owner, inv)
@@ -919,7 +917,7 @@ func (c *completer) typeCall(spec expr.BuiltinSpec, children []expr.Expression, 
 // value it can yield, and refuses any two alternatives join reports disjoint:
 // the stage after would meet a value it cannot take. Every pair is compared, so
 // the order the alternatives are written in does not decide the verdict.
-func (c *completer) typeGuard(spec expr.BuiltinSpec, what string, alts []staticType, owner *Type, inv *Invariant) staticType {
+func (c *completer) typeGuard(spec expr.BuiltinSpec, what string, alts []staticType, owner Type, inv Invariant) staticType {
 	for i, a := range alts {
 		for _, b := range alts[i+1:] {
 			if _, disjoint := join(a, b); disjoint {
@@ -993,7 +991,7 @@ func paramOr(params []string, i int, implicit string) string {
 // by the catalogue's [expr.ArgKind]. A value the checker cannot type passes, as
 // it does at a receiver; the nil literal does not, because a position stating a
 // kind fails on nil for every instance.
-func (c *completer) checkArgs(spec expr.BuiltinSpec, argTypes []staticType, owner *Type, inv *Invariant) {
+func (c *completer) checkArgs(spec expr.BuiltinSpec, argTypes []staticType, owner Type, inv Invariant) {
 	for i, at := range argTypes {
 		kind, ok := spec.ArgAt(i)
 		if !ok {
@@ -1023,7 +1021,7 @@ func (c *completer) checkArgs(spec expr.BuiltinSpec, argTypes []staticType, owne
 // checkReceiver refuses a receiver the builtin refuses on every input, by the
 // catalogue's [expr.ReceiverKind]. A receiver of unknown kind, or a scalar of
 // unknown subkind, is admitted: the checker refuses only what it knows.
-func (c *completer) checkReceiver(spec expr.BuiltinSpec, recv staticType, nargs int, owner *Type, inv *Invariant) {
+func (c *completer) checkReceiver(spec expr.BuiltinSpec, recv staticType, nargs int, owner Type, inv Invariant) {
 	refuse := func(what string) {
 		c.invariantErrorf(inv, diag.E_INVALID_INVARIANT,
 			"%s takes %s, and its receiver is not one in invariant %q on type %q", spec.Name, what, inv.Name(), owner.Name())

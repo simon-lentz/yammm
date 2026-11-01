@@ -3,6 +3,7 @@ package graph_test
 import (
 	"context"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -89,7 +90,7 @@ func TestAddComposed_OneDuplicate_NamesTheAddressTheWritersAssign(t *testing.T) 
 		t.Fatalf("parent add: %s", res.String())
 	}
 
-	child := func(id string) *instance.ValidInstance {
+	child := func(id string) instance.ValidInstance {
 		return instancetest.VI(
 			"Child",
 			instancetest.TypeID(mustTypeID(t, s, "Child")),
@@ -125,15 +126,15 @@ func TestAddComposed_OneDuplicate_NamesTheAddressTheWritersAssign(t *testing.T) 
 	}
 }
 
-// TestBatchAssembler_AddValid_NilIsAPerRecordError pins the documented
+// TestBatchAssembler_AddValid_ZeroIsAPerRecordError pins the documented
 // consumer loop: instance.Validator.ValidateForComposition returns nil for
 // each failed child, and feeding one back must not crash the batch.
-func TestBatchAssembler_AddValid_NilIsAPerRecordError(t *testing.T) {
+func TestBatchAssembler_AddValid_ZeroIsAPerRecordError(t *testing.T) {
 	t.Parallel()
 	s := testSchemaWithComposition(t)
 	ba := graph.NewBatchAssembler(t.Context(), s)
 
-	err := ba.AddValid(nil)
+	err := ba.AddValid(instance.ValidInstance{})
 	if err == nil {
 		t.Fatal("AddValid(nil) returned no error")
 	}
@@ -146,7 +147,7 @@ func TestBatchAssembler_AddValid_NilIsAPerRecordError(t *testing.T) {
 	}
 	// A single token before the ordinal: an empty type name would render
 	// " (attempt #1)" and break a consumer splitting on the first space.
-	if strings.HasPrefix(ce.Tag, " ") || !strings.HasPrefix(ce.Tag, "nil-instance (attempt #") {
+	if strings.HasPrefix(ce.Tag, " ") || !strings.HasPrefix(ce.Tag, "zero-instance (attempt #") {
 		t.Errorf("tag = %q, want a single token before the ordinal", ce.Tag)
 	}
 	// The record is absent, not mis-keyed.
@@ -156,7 +157,7 @@ func TestBatchAssembler_AddValid_NilIsAPerRecordError(t *testing.T) {
 	// Every other Add rejection reaches the snapshot; this one must too, or a
 	// caller that discards per-record errors has no record of the loss.
 	if !ba.Graph().Snapshot().Diagnostics().HasCode(diag.E_INTERNAL) {
-		t.Error("the nil-instance rejection never reached Snapshot.Diagnostics()")
+		t.Error("the zero-instance rejection never reached Snapshot.Diagnostics()")
 	}
 }
 
@@ -231,7 +232,7 @@ func TestNewFromSnapshot_ComposedDuplicate_KeepsItsComposingCoordinates(t *testi
 	if res := g.Add(ctx, parent); !res.OK() {
 		t.Fatalf("parent add: %s", res.String())
 	}
-	child := func(id string) *instance.ValidInstance {
+	child := func(id string) instance.ValidInstance {
 		return instancetest.VI(
 			"Child",
 			instancetest.TypeID(mustTypeID(t, s, "Child")),
@@ -247,17 +248,17 @@ func TestNewFromSnapshot_ComposedDuplicate_KeepsItsComposingCoordinates(t *testi
 	}
 
 	seeded := mustImport(t, s, g.Snapshot()).Snapshot()
-	dups := seeded.Duplicates()
+	dups := slices.Collect(seeded.Duplicates())
 	if len(dups) != 1 {
 		t.Fatalf("seeded snapshot carries %d duplicates, want 1", len(dups))
 	}
 	if dups[0].Relation() != "CHILD" {
 		t.Errorf("Duplicate.Relation() = %q, want \"child\"", dups[0].Relation())
 	}
-	if dups[0].Parent() == nil || dups[0].Parent().PrimaryKey().String() != `["p1"]` {
+	if dups[0].Parent().IsZero() || dups[0].Parent().PrimaryKey().String() != `["p1"]` {
 		t.Error("the imported duplicate lost its composing parent")
 	}
-	if dups[0].Conflict() == nil {
+	if dups[0].Conflict().IsZero() {
 		t.Error("the imported duplicate lost its conflict")
 	}
 }
@@ -274,7 +275,7 @@ func TestAdd_DuplicatePK_CarriesTheProvenanceSpan(t *testing.T) {
 		Start: location.Position{Line: 7, Column: 3},
 		End:   location.Position{Line: 7, Column: 9},
 	}
-	withSpan := func() *instance.ValidInstance {
+	withSpan := func() instance.ValidInstance {
 		return instancetest.VI(
 			"Parent",
 			instancetest.TypeID(mustTypeID(t, s, "Parent")),
@@ -451,7 +452,7 @@ func TestAddComposed_KeylessOneSlot_NamesThePositionalAddress(t *testing.T) {
 	if r := g.Add(ctx, car); !r.OK() {
 		t.Fatalf("car add: %s", r.String())
 	}
-	wheel := func(pos string) *instance.ValidInstance {
+	wheel := func(pos string) instance.ValidInstance {
 		return instancetest.VI(
 			"Wheel",
 			instancetest.TypeID(mustTypeID(t, s, "Wheel")),

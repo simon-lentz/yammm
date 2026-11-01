@@ -64,7 +64,7 @@ type assembly struct {
 
 // loadGraph assembles the graph as [assembleGraph] does and, when nothing the
 // invocation diagnosed is an error, reports a summary line.
-func loadGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, in dataInput) (*graph.Graph, error) {
+func loadGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema, in dataInput) (*graph.Graph, error) {
 	a, err := assembleGraph(cmd, sink, s, in, nil)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func loadGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, i
 // valid instances go into base or a new graph ([cli.BuildGraph]). A --type the
 // schema lacks, given for CSV data without --type-column, is refused before any
 // file is read, and each file's parse diagnostics reach sink as it is read.
-func assembleGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, in dataInput, base *graph.Graph) (assembly, error) {
+func assembleGraph(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema, in dataInput, base *graph.Graph) (assembly, error) {
 	if in.typeColumn == "" && slices.Contains(in.formats, "csv") {
 		if _, ok := s.ResolveTypeName(in.typeName); !ok {
 			return assembly{}, cli.Usagef("type %q not found in schema", in.typeName)

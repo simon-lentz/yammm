@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -44,10 +45,10 @@ func TestGraph_EdgeResolvesAcrossKeySpellings(t *testing.T) {
 	event := instance.NewValidInstance("Event", eventID.ID(),
 		immutable.WrapKey([]any{parsed}),
 		immutable.WrapProperties(map[string]any{"observed_at": parsed}),
-		nil, nil, nil)
+		nil, nil, location.Provenance{})
 
 	// The edge addresses it with a DIFFERENT spelling of the same instant.
-	edges := map[string]*instance.ValidEdgeData{
+	edges := map[string]instance.ValidEdgeData{
 		"ABOUT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(
 				immutable.WrapKey([]any{"2020-01-02T03:04:05+00:00"}),
@@ -58,7 +59,7 @@ func TestGraph_EdgeResolvesAcrossKeySpellings(t *testing.T) {
 	note := instance.NewValidInstance("Note", noteID.ID(),
 		immutable.WrapKey([]any{"n1"}),
 		immutable.WrapProperties(map[string]any{"id": "n1"}),
-		edges, nil, nil)
+		edges, nil, location.Provenance{})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), event); !r.OK() {
@@ -69,20 +70,20 @@ func TestGraph_EdgeResolvesAcrossKeySpellings(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if n := len(snap.Unresolved()); n != 0 {
+	if n := len(slices.Collect(snap.Unresolved())); n != 0 {
 		t.Errorf("the edge did not resolve across two spellings of one instant: %d unresolved", n)
-		for _, u := range snap.Unresolved() {
+		for u := range snap.Unresolved() {
 			t.Logf("  unresolved: %s -> %s reason=%s", u.Relation(), u.TargetKey(), u.Reason())
 		}
 	}
-	if n := len(snap.Edges()); n != 1 {
+	if n := len(slices.Collect(snap.Edges())); n != 1 {
 		t.Errorf("edges = %d, want 1", n)
 	}
 }
 
 // composedSpellingSchema declares a (many) composition to a part type keyed
 // by a Timestamp, so two siblings can address one instant two ways.
-func composedSpellingSchema(t *testing.T) *schema.Schema {
+func composedSpellingSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "composed_spelling"
 
@@ -118,11 +119,11 @@ func TestGraph_ComposedSiblingsAreDuplicatesAcrossKeySpellings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	sample := func(at any) *instance.ValidInstance {
+	sample := func(at any) instance.ValidInstance {
 		return instance.NewValidInstance("Sample", sampleID,
 			immutable.WrapKey([]any{at}),
 			immutable.WrapProperties(map[string]any{"at": at}),
-			nil, nil, nil)
+			nil, nil, location.Provenance{})
 	}
 
 	t.Run("inline", func(t *testing.T) {
@@ -132,7 +133,7 @@ func TestGraph_ComposedSiblingsAreDuplicatesAcrossKeySpellings(t *testing.T) {
 			immutable.WrapProperties(map[string]any{"id": "r1"}),
 			nil, map[string]immutable.Value{
 				"SAMPLES": immutable.Wrap([]any{sample(spelled), sample(parsed)}),
-			}, nil)
+			}, location.Provenance{})
 		result := graph.New(s).Add(t.Context(), run)
 		if result.OK() {
 			t.Fatal("two spellings of one Timestamp key were accepted as two siblings")
@@ -146,7 +147,7 @@ func TestGraph_ComposedSiblingsAreDuplicatesAcrossKeySpellings(t *testing.T) {
 		run := instance.NewValidInstance("Run", runID,
 			immutable.WrapKey([]any{"r1"}),
 			immutable.WrapProperties(map[string]any{"id": "r1"}),
-			nil, nil, nil)
+			nil, nil, location.Provenance{})
 		if r := g.Add(t.Context(), run); !r.OK() {
 			t.Fatalf("add run: %s", r)
 		}
@@ -178,20 +179,20 @@ func TestGraph_AddCanonicalizesEveryPropertyPosition(t *testing.T) {
 	sample := instance.NewValidInstance("Sample", sampleID,
 		immutable.WrapKey([]any{when}),
 		immutable.WrapProperties(map[string]any{"at": when}),
-		nil, nil, nil)
+		nil, nil, location.Provenance{})
 	run := instance.NewValidInstance("Run", runID,
 		immutable.WrapKey([]any{"r1"}),
 		immutable.WrapProperties(map[string]any{"id": "r1", "started_at": when}),
-		nil, map[string]immutable.Value{"SAMPLES": immutable.Wrap([]any{sample})}, nil)
+		nil, map[string]immutable.Value{"SAMPLES": immutable.Wrap([]any{sample})}, location.Provenance{})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), run); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
 	snap := g.Snapshot()
-	root := snap.InstancesOf(runID)[0]
+	root := slices.Collect(snap.InstancesOf(runID))[0]
 	assertProp(t, root.Properties(), "started_at", wantText)
-	child := root.Composed("SAMPLES")[0]
+	child := slices.Collect(root.Composed("SAMPLES"))[0]
 	assertProp(t, child.Properties(), "at", wantText)
 	if got, want := child.PrimaryKey().String(), graph.FormatKey(wantText); got != want {
 		t.Errorf("child key = %s, want %s", got, want)

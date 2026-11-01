@@ -31,7 +31,7 @@ type Beta {
 
 // cancelSnapshot builds a snapshot holding two type groups, so a per-type-group
 // check has a group boundary to stop at.
-func cancelSnapshot(t *testing.T) *graph.Snapshot {
+func cancelSnapshot(t *testing.T) graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
 	s, res := schema.LoadString(ctx, cancelSchema, "c.yammm")
@@ -46,7 +46,7 @@ func cancelSnapshot(t *testing.T) *graph.Snapshot {
 		}
 		inst := instance.NewValidInstance(tn, ty.ID(),
 			immutable.WrapKey([]any{"k1"}),
-			immutable.WrapProperties(map[string]any{"id": "k1"}), nil, nil, nil)
+			immutable.WrapProperties(map[string]any{"id": "k1"}), nil, nil, location.Provenance{})
 		if r := g.Add(ctx, inst); r.Err() != nil {
 			t.Fatalf("add %s: %v", tn, r.Err())
 		}

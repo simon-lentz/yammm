@@ -60,7 +60,7 @@ type Symbol struct {
 	Selection  location.Span // Name-only span
 	ParentName string        // Owning schema/type name
 	Detail     string        // Signature-ish detail
-	Data       any           // Semantic pointer (*schema.Type, *schema.Property, etc.)
+	Data       any           // The schema record: a handle such as schema.Type, or schema.Property
 }
 
 // ReferenceKind represents the kind of a reference.
@@ -108,8 +108,8 @@ type SymbolIndex struct {
 // ExtractSymbols extracts all declaration symbols from a schema.
 // The sources parameter is optional; if provided, it enables more precise
 // name span computation for types without parser-generated NameSpan.
-func ExtractSymbols(s *schema.Schema, sources *lsputil.Texts) []Symbol {
-	if s == nil {
+func ExtractSymbols(s schema.Schema, sources *lsputil.Texts) []Symbol {
+	if s.IsZero() {
 		return nil
 	}
 
@@ -146,7 +146,8 @@ func ExtractSymbols(s *schema.Schema, sources *lsputil.Texts) []Symbol {
 	}
 
 	// Add data types
-	for name, dt := range s.DataTypes() {
+	for dt := range s.DataTypes() {
+		name := dt.Name()
 		if !dt.Span().IsZero() {
 			symbols = append(symbols, Symbol{
 				Name:       name,
@@ -162,7 +163,7 @@ func ExtractSymbols(s *schema.Schema, sources *lsputil.Texts) []Symbol {
 	}
 
 	// Add types and their members
-	for _, t := range s.Types() {
+	for t := range s.Types() {
 		symbols = append(symbols, extractTypeSymbols(t, schemaName, sourceID, sources)...)
 	}
 
@@ -174,7 +175,7 @@ func ExtractSymbols(s *schema.Schema, sources *lsputil.Texts) []Symbol {
 
 // extractTypeSymbols extracts symbols from a single type.
 // The sources parameter is optional; if provided, enables precise name span fallback.
-func extractTypeSymbols(t *schema.Type, schemaName string, sourceID location.SourceID, sources *lsputil.Texts) []Symbol {
+func extractTypeSymbols(t schema.Type, schemaName string, sourceID location.SourceID, sources *lsputil.Texts) []Symbol {
 	if t.Span().IsZero() {
 		return nil
 	}
@@ -283,15 +284,15 @@ func extractTypeSymbols(t *schema.Type, schemaName string, sourceID location.Sou
 }
 
 // ExtractReferences extracts all type references from a schema.
-func ExtractReferences(s *schema.Schema) []ReferenceSymbol {
-	if s == nil {
+func ExtractReferences(s schema.Schema) []ReferenceSymbol {
+	if s.IsZero() {
 		return nil
 	}
 
 	var refs []ReferenceSymbol
 
 	// Extract references from types
-	for _, t := range s.Types() {
+	for t := range s.Types() {
 		// Extends references
 		for ref := range t.Inherits() {
 			if !ref.Span().IsZero() {
@@ -363,7 +364,7 @@ func ExtractReferences(s *schema.Schema) []ReferenceSymbol {
 // BuildSymbolIndex builds a complete symbol index for a schema.
 // The sources parameter is optional; if provided, enables more precise
 // name span computation for types without parser-generated NameSpan.
-func BuildSymbolIndex(s *schema.Schema, sources *lsputil.Texts) *SymbolIndex {
+func BuildSymbolIndex(s schema.Schema, sources *lsputil.Texts) *SymbolIndex {
 	syms := ExtractSymbols(s, sources)
 
 	// Build name index for O(1) lookup by name
@@ -452,7 +453,7 @@ func (idx *SymbolIndex) ReferenceAtPosition(pos location.Position) *ReferenceSym
 }
 
 // FormatPropertyDetail formats a property for display.
-func FormatPropertyDetail(p *schema.Property) string {
+func FormatPropertyDetail(p schema.Property) string {
 	var detail string
 	if c := p.Constraint(); c != nil {
 		detail = p.Name() + " " + c.String()
@@ -469,7 +470,7 @@ func FormatPropertyDetail(p *schema.Property) string {
 }
 
 // formatRelationDetail formats a relation for display.
-func formatRelationDetail(r *schema.Relation, arrow string) string {
+func formatRelationDetail(r schema.Relation, arrow string) string {
 	mult := "one"
 	if r.IsMany() {
 		mult = "many"
@@ -532,7 +533,7 @@ func IsSmaller(a, b location.Span) bool {
 //   - "part abstract type Name" or "abstract part type Name" (offset 19)
 //
 // The selection span covers just the name, enabling precise go-to-definition.
-func computeTypeNameSpan(t *schema.Type, sourceContent []byte) location.Span {
+func computeTypeNameSpan(t schema.Type, sourceContent []byte) location.Span {
 	span := t.Span()
 	if span.IsZero() {
 		return span

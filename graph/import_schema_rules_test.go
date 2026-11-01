@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -21,7 +23,7 @@ import (
 // fact with: a snapshot the caller binds to another schema is the caller's
 // input, not a broken invariant.
 
-func loadEntry(t *testing.T, src string) *schema.Schema {
+func loadEntry(t *testing.T, src string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), src, "entry.yammm")
 	if res.HasErrors() {
@@ -30,7 +32,7 @@ func loadEntry(t *testing.T, src string) *schema.Schema {
 	return s
 }
 
-func typeIDOf(t *testing.T, s *schema.Schema, name string) schema.TypeID {
+func typeIDOf(t *testing.T, s schema.Schema, name string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(name)
 	if !ok {
@@ -39,16 +41,16 @@ func typeIDOf(t *testing.T, s *schema.Schema, name string) schema.TypeID {
 	return typ.ID()
 }
 
-func rootInstance(t *testing.T, s *schema.Schema, name, key string) *instance.ValidInstance {
+func rootInstance(t *testing.T, s schema.Schema, name, key string) instance.ValidInstance {
 	t.Helper()
 	return instance.NewValidInstance(name, typeIDOf(t, s, name),
-		immutable.WrapKey([]any{key}), immutable.WrapProperties(map[string]any{"id": key}), nil, nil, nil)
+		immutable.WrapKey([]any{key}), immutable.WrapProperties(map[string]any{"id": key}), nil, nil, location.Provenance{})
 }
 
 // requireRefused asserts the import is refused with a nil graph and an issue
 // of code whose message holds phrase, and that the seeded assembler refuses
 // the same snapshot.
-func requireRefused(t *testing.T, s *schema.Schema, snap *graph.Snapshot, code diag.Code, phrase string) {
+func requireRefused(t *testing.T, s schema.Schema, snap graph.Snapshot, code diag.Code, phrase string) {
 	t.Helper()
 	g, res := graph.NewFromSnapshot(s, snap)
 	if g != nil {
@@ -214,7 +216,7 @@ func TestNewFromSnapshot_RefusesTwoRootsAtOneAddressUnderTheImportingSchema(t *t
 	src := graph.New(asString)
 	for _, at := range []string{"2030-01-01T00:00:00Z", "2030-01-01T00:00:00+00:00"} {
 		inst := instance.NewValidInstance("Run", typeIDOf(t, asString, "Run"), immutable.WrapKey([]any{at}),
-			immutable.WrapProperties(map[string]any{"at": at}), nil, nil, nil)
+			immutable.WrapProperties(map[string]any{"at": at}), nil, nil, location.Provenance{})
 		if r := src.Add(t.Context(), inst); !r.OK() {
 			t.Fatalf("add %s: %s", at, r)
 		}
@@ -255,7 +257,7 @@ func TestNewFromSnapshot_RefusesARootTheImportingSchemaCannotName(t *testing.T) 
 	beacon, _ := b.Schema().Type("Beacon")
 	src := graph.New(direct)
 	if r := src.Add(ctx, instance.NewValidInstance("base.Beacon", beacon.ID(), immutable.WrapKey([]any{"b1"}),
-		immutable.WrapProperties(map[string]any{"id": "b1"}), nil, nil, nil)); !r.OK() {
+		immutable.WrapProperties(map[string]any{"id": "b1"}), nil, nil, location.Provenance{})); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
 	requireRefused(t, through, src.Snapshot(), diag.E_GRAPH_TYPE_NOT_FOUND, "reachable only through an intermediate import")
@@ -269,9 +271,9 @@ func TestNewFromSnapshot_RefusesAnUndeclaredNameOnADuplicate(t *testing.T) {
 	without := loadEntry(t, "schema \"entry\"\n\ntype P {\n\tid String primary\n}\n")
 	src := graph.New(with)
 	p := typeIDOf(t, with, "P")
-	src.Add(t.Context(), instance.NewValidInstance("P", p, immutable.WrapKey([]any{"p1"}), immutable.WrapProperties(map[string]any{"id": "p1"}), nil, nil, nil))
-	src.Add(t.Context(), instance.NewValidInstance("P", p, immutable.WrapKey([]any{"p1"}), immutable.WrapProperties(map[string]any{"id": "p1", "nickname": "x"}), nil, nil, nil))
-	if len(src.Snapshot().Duplicates()) != 1 {
+	src.Add(t.Context(), instance.NewValidInstance("P", p, immutable.WrapKey([]any{"p1"}), immutable.WrapProperties(map[string]any{"id": "p1"}), nil, nil, location.Provenance{}))
+	src.Add(t.Context(), instance.NewValidInstance("P", p, immutable.WrapKey([]any{"p1"}), immutable.WrapProperties(map[string]any{"id": "p1", "nickname": "x"}), nil, nil, location.Provenance{}))
+	if len(slices.Collect(src.Snapshot().Duplicates())) != 1 {
 		t.Fatal("fixture is vacuous: no duplicate")
 	}
 	requireRefused(t, without, src.Snapshot(), diag.E_UNKNOWN_FIELD, `duplicate instance`)
@@ -286,9 +288,9 @@ func TestNewFromSnapshot_DerivesRequiredUnderTheImportingSchema(t *testing.T) {
 	p := typeIDOf(t, optional, "P")
 	src := graph.New(optional)
 	src.Add(t.Context(), instance.NewValidInstance("P", p, immutable.WrapKey([]any{"p1"}), immutable.WrapProperties(map[string]any{"id": "p1"}),
-		map[string]*instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		map[string]instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"c9"}), immutable.Properties{}),
-		})}, nil, nil))
+		})}, nil, location.Provenance{}))
 	if res := src.Check(t.Context()); res.HasErrors() {
 		t.Fatalf("control: an optional unresolved record failed Check: %s", res)
 	}

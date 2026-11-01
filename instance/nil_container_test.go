@@ -84,7 +84,7 @@ func TestValidate_ANilContainerAgreesWithItsJSONForm(t *testing.T) {
 			t.Errorf("%s: the Go value drew\n%s\nits JSON form %s drew\n%s", name, goRes, encoded, jsonRes)
 			continue
 		}
-		if goValid == nil || jsonValid == nil {
+		if goValid.IsZero() || jsonValid.IsZero() {
 			continue
 		}
 		for _, prop := range []string{"optTags", "optVec", "stamps", "nested", "name"} {
@@ -269,13 +269,13 @@ func TestValidate_AnImmutableContainerAtARelationReadsAsWhatItHolds(t *testing.T
 			t.Errorf("%s: the Go value drew\n%s\nits immutable form drew\n%s", name, plainRes, heldRes)
 			continue
 		}
-		if plainValid == nil || heldValid == nil {
+		if plainValid.IsZero() || heldValid.IsZero() {
 			continue
 		}
 		for rel, edge := range plainValid.Edges() {
 			heldEdge, ok := heldValid.Edge(rel)
-			if !ok || len(heldEdge.Targets()) != len(edge.Targets()) {
-				t.Errorf("%s: edge %s holds %d targets from the Go value, %v from its immutable form", name, rel, len(edge.Targets()), heldEdge)
+			if !ok || len(slices.Collect(heldEdge.Targets())) != len(slices.Collect(edge.Targets())) {
+				t.Errorf("%s: edge %s holds %d targets from the Go value, %v from its immutable form", name, rel, len(slices.Collect(edge.Targets())), heldEdge)
 			}
 		}
 		if got, want := maps.Collect(heldValid.Compositions()), maps.Collect(plainValid.Compositions()); len(got) != len(want) {
@@ -287,7 +287,7 @@ func TestValidate_AnImmutableContainerAtARelationReadsAsWhatItHolds(t *testing.T
 		return map[string]any{"id": "x", "head": []any{line}, "one": one}
 	}
 	valid, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props(immutable.WrapProperties(co))})
-	if edge, ok := valid.Edge("ONE"); !res.OK() || !ok || len(edge.Targets()) != 1 {
+	if edge, ok := valid.Edge("ONE"); !res.OK() || !ok || len(slices.Collect(edge.Targets())) != 1 {
 		t.Errorf("a Properties at a (one) relation drew\n%s\nwant the one target", res)
 	}
 	for value, want := range map[any]string{time.Time{}: "time.Time", &co: "*map[string]interface {}"} {

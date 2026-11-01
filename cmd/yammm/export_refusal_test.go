@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 
@@ -47,15 +48,15 @@ func refusedSnapshot(t *testing.T, dir string, props, edge map[string]any) (sche
 	grid, _ := s.Type("Grid")
 	all := map[string]any{"id": "g1"}
 	maps.Copy(all, props)
-	var edges map[string]*instance.ValidEdgeData
+	var edges map[string]instance.ValidEdgeData
 	if edge != nil {
-		edges = map[string]*instance.ValidEdgeData{"NEXT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		edges = map[string]instance.ValidEdgeData{"NEXT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"g1"}), immutable.WrapProperties(edge)),
 		})}
 	}
 	g := graph.New(s)
 	if r := g.Add(ctx, instance.NewValidInstance("Grid", grid.ID(), immutable.WrapKey([]any{"g1"}),
-		immutable.WrapProperties(all), edges, nil, nil)); r.HasErrors() {
+		immutable.WrapProperties(all), edges, nil, location.Provenance{})); r.HasErrors() {
 		t.Fatalf("graph.Add: %v", r.Err())
 	}
 	data, mres := snapshot.Marshal(ctx, g.Snapshot())

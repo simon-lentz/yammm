@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 
 // identitySchema loads a one-type schema whose sole primary key carries the
 // given declaration, so the test submits one value under one key.
-func identitySchema(t *testing.T, keyDecl string) *schema.Schema {
+func identitySchema(t *testing.T, keyDecl string) schema.Schema {
 	t.Helper()
 	src := "schema \"identity\"\n\ntype Item {\n\tid " + keyDecl + " primary\n}\n"
 	s, result := schema.LoadString(t.Context(), src, "identity.yammm")
@@ -26,7 +27,7 @@ func identitySchema(t *testing.T, keyDecl string) *schema.Schema {
 
 // addSpellings validates each value as an Item and adds it to one graph,
 // returning the distinct rendered keys and the resulting snapshot.
-func addSpellings(t *testing.T, s *schema.Schema, vals []any) ([]string, *graph.Snapshot) {
+func addSpellings(t *testing.T, s schema.Schema, vals []any) ([]string, graph.Snapshot) {
 	t.Helper()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -54,16 +55,16 @@ func addSpellings(t *testing.T, s *schema.Schema, vals []any) ([]string, *graph.
 // exists for: every accepted spelling of one value is one instance under one
 // key. Before it, each spelling produced its own key and the graph reported no
 // duplicate — two rows for one entity, silently.
-func assertOneIdentity(t *testing.T, s *schema.Schema, vals []any) {
+func assertOneIdentity(t *testing.T, s schema.Schema, vals []any) {
 	t.Helper()
 	keys, snap := addSpellings(t, s, vals)
 	if len(keys) != 1 {
 		t.Fatalf("%d spellings produced %d distinct keys: %v", len(vals), len(keys), keys)
 	}
-	if n := len(snap.InstancesOf(mustTypeID(t, s, "Item"))); n != 1 {
+	if n := len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Item")))); n != 1 {
 		t.Errorf("graph holds %d instances for one value, want 1", n)
 	}
-	if n := len(snap.Duplicates()); n != len(vals)-1 {
+	if n := len(slices.Collect(snap.Duplicates())); n != len(vals)-1 {
 		t.Errorf("graph reported %d duplicates, want %d — every repeat of one value is a duplicate",
 			n, len(vals)-1)
 	}
@@ -117,7 +118,7 @@ func TestIdentity_DistinctValuesStayDistinct(t *testing.T) {
 	if len(keys) != 2 {
 		t.Errorf("two UUIDs produced %d keys: %v", len(keys), keys)
 	}
-	if n := len(snap.Duplicates()); n != 0 {
+	if n := len(slices.Collect(snap.Duplicates())); n != 0 {
 		t.Errorf("two distinct UUIDs reported %d duplicates", n)
 	}
 }
@@ -125,7 +126,7 @@ func TestIdentity_DistinctValuesStayDistinct(t *testing.T) {
 // rebuildSchema declares a canonicalizing kind in every parts position
 // RebuildSnapshot fills: instance property, composed-child property and edge
 // property.
-func rebuildSchema(t *testing.T) *schema.Schema {
+func rebuildSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "rebuild_canonical"
 
@@ -213,14 +214,14 @@ func TestRebuildSnapshot_CanonicalizesEveryPropertyPosition(t *testing.T) {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
 
-	sensor := snap.InstancesOf(sensorID)[0]
+	sensor := slices.Collect(snap.InstancesOf(sensorID))[0]
 	assertProp(t, sensor.Properties(), "created_at", wantText)
 	assertProp(t, sensor.Properties(), "run_id", id)
 
-	reading := sensor.Composed("READINGS")[0]
+	reading := slices.Collect(sensor.Composed("READINGS"))[0]
 	assertProp(t, reading.Properties(), "taken_at", wantText)
 
-	edges := snap.EdgesFrom(sensor)
+	edges := slices.Collect(snap.EdgesFrom(sensor))
 	if len(edges) != 1 {
 		t.Fatalf("want 1 edge, got %d", len(edges))
 	}
@@ -265,7 +266,7 @@ func TestRebuildSnapshot_KeepsWhatItCannotRender(t *testing.T) {
 		t.Fatalf("RebuildSnapshot refused a non-conforming value: %s", result)
 	}
 
-	props := snap.InstancesOf(sensorID)[0].Properties()
+	props := slices.Collect(snap.InstancesOf(sensorID))[0].Properties()
 	assertProp(t, props, "created_at", "not-a-timestamp")
 	assertProp(t, props, "run_id", "not-a-uuid")
 }

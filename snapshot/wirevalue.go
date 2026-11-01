@@ -94,11 +94,10 @@ func appendWireFloat(v float64, bitSize int) ([]byte, error) {
 // name is what travels: one schema text loaded from two directories declares
 // one name and two paths, and a path-keyed document written under the first
 // does not load under the second.
-func typeByWireID(s *schema.Schema, schemaName, name string) (*schema.Type, bool) {
-	if s == nil {
-		return nil, false
-	}
-	for _, cs := range s.Closure() {
+//
+// s is not zero: a schema-less read binds no row.
+func typeByWireID(s schema.Schema, schemaName, name string) (schema.Type, bool) {
+	for cs := range s.Closure() {
 		if cs.Name() != schemaName {
 			continue
 		}
@@ -106,19 +105,19 @@ func typeByWireID(s *schema.Schema, schemaName, name string) (*schema.Type, bool
 			return t, true
 		}
 	}
-	return nil, false
+	return schema.Type{}, false
 }
 
 // wireProps clones props and rewrites each value under its schema constraint
 // so float-bearing values emit with a float indicator, and returns with it the
 // least property name whose value the wire cannot carry ([wireWritable]), or "".
 // A nil clone stays nil (the wire's "properties":null shape).
-func wireProps(props immutable.Properties, t *schema.Type) (map[string]any, string) {
+func wireProps(props immutable.Properties, t schema.Type) (map[string]any, string) {
 	m := props.Clone()
 	bad := ""
 	for name, v := range m {
 		v, ok := wireForm(v)
-		if ok && t != nil {
+		if ok {
 			if prop, found := t.Property(name); found {
 				v = wireValue(v, prop.Constraint())
 			}
@@ -135,12 +134,12 @@ func wireProps(props immutable.Properties, t *schema.Type) (map[string]any, stri
 // the source type's relation rather than any target type. The resolved and
 // unresolved paths agree because both derive rel from the source instance's
 // own TypeID — the shared input, not the shared body.
-func wireEdgeProps(props immutable.Properties, rel *schema.Relation) (map[string]any, string) {
+func wireEdgeProps(props immutable.Properties, rel schema.Relation) (map[string]any, string) {
 	m := props.Clone()
 	bad := ""
 	for name, v := range m {
 		v, ok := wireForm(v)
-		if ok && rel != nil {
+		if ok {
 			if p, found := rel.Property(name); found {
 				v = wireValue(v, p.Constraint())
 			}

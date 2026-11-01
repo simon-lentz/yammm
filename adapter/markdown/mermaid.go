@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -26,12 +27,12 @@ func (g *generator) emitClassDiagram(h outlineEntry) {
 	b.WriteString("classDiagram\n")
 	b.WriteString("    direction TB\n")
 	for _, sch := range g.closure {
-		for _, t := range sch.TypesSlice() {
+		for t := range sch.Types() {
 			g.writeClass(&b, t)
 		}
 	}
 	for _, sch := range g.closure {
-		for _, t := range sch.TypesSlice() {
+		for t := range sch.Types() {
 			g.writeEdges(&b, t)
 		}
 	}
@@ -55,7 +56,7 @@ const mermaidFloorSentence = "This diagram uses Mermaid's labelled class form an
 // properties only (inheritance edges convey the rest), and none when
 // classMembers is off. A class with no annotation and no members declares
 // in the compact single-line form.
-func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
+func (g *generator) writeClass(b *strings.Builder, t schema.Type) {
 	e := g.types[t.ID()]
 	head := "class " + e.mermaidID
 	if e.display != e.mermaidID {
@@ -71,9 +72,9 @@ func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 		annotation = "<<Part>>"
 	}
 
-	var props []*schema.Property
+	var props []schema.Property
 	if g.cfg.classMembers {
-		props = t.PropertiesSlice()
+		props = slices.Collect(t.Properties())
 	}
 	if annotation == "" && len(props) == 0 {
 		b.WriteString("    " + head + "\n")
@@ -92,17 +93,17 @@ func (g *generator) writeClass(b *strings.Builder, t *schema.Type) {
 // writeEdges writes the type's inheritance edges followed by its own
 // association and composition edges. Inherited relations are not redrawn
 // on subtypes — the inheritance edge conveys them.
-func (g *generator) writeEdges(b *strings.Builder, t *schema.Type) {
+func (g *generator) writeEdges(b *strings.Builder, t schema.Type) {
 	id := g.types[t.ID()].mermaidID
-	for _, ref := range t.InheritsSlice() {
+	for ref := range t.Inherits() {
 		if parent, ok := g.resolveSuper(t, ref); ok {
 			b.WriteString("    " + parent.mermaidID + " <|-- " + id + "\n")
 		}
 	}
-	for _, rel := range t.AssociationsSlice() {
+	for rel := range t.Associations() {
 		g.writeRelationEdge(b, id, rel, "-->")
 	}
-	for _, rel := range t.CompositionsSlice() {
+	for rel := range t.Compositions() {
 		g.writeRelationEdge(b, id, rel, "*--")
 	}
 }
@@ -110,7 +111,7 @@ func (g *generator) writeEdges(b *strings.Builder, t *schema.Type) {
 // writeRelationEdge writes one labeled relation edge. A target absent from
 // the document's type map is skipped — the type's section still lists the
 // reference textually.
-func (g *generator) writeRelationEdge(b *strings.Builder, ownerID string, rel *schema.Relation, arrow string) {
+func (g *generator) writeRelationEdge(b *strings.Builder, ownerID string, rel schema.Relation, arrow string) {
 	target, ok := g.types[rel.TargetID()]
 	if !ok {
 		return

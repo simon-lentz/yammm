@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"strconv"
 	"unicode/utf8"
 
@@ -48,11 +49,11 @@ func WithIndent(indent string) WriteOption {
 // Instances include their properties, composed children (inline), and foreign key
 // references for resolved associations.
 //
-// Returns ErrNilResult if result is nil. MarshalObject checks ctx once per type
+// Returns ErrZeroSnapshot if result is zero. MarshalObject checks ctx once per type
 // group and returns an error wrapping ctx.Err(), and nothing else.
-func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opts ...WriteOption) ([]byte, error) {
-	if result == nil {
-		return nil, ErrNilResult
+func (a *Adapter) MarshalObject(ctx context.Context, result graph.Snapshot, opts ...WriteOption) ([]byte, error) {
+	if result.IsZero() {
+		return nil, ErrZeroSnapshot
 	}
 	cfg := &writeConfig{}
 	for _, opt := range opts {
@@ -82,9 +83,10 @@ func (a *Adapter) MarshalObject(ctx context.Context, result *graph.Snapshot, opt
 //
 // See MarshalObject for output format details.
 //
-// Returns the number of bytes written and ErrNilResult if result is nil.
-// Returns io.ErrShortWrite if the writer accepts fewer bytes than provided.
-func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Snapshot, opts ...WriteOption) (int64, error) {
+// Returns the number of bytes written and ErrZeroSnapshot if result is zero.
+// Returns io.ErrShortWrite if the writer reports no error and accepts fewer
+// bytes than provided.
+func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result graph.Snapshot, opts ...WriteOption) (int64, error) {
 	data, err := a.MarshalObject(ctx, result, opts...)
 	if err != nil {
 		return 0, err
@@ -109,7 +111,7 @@ func (a *Adapter) WriteObject(ctx context.Context, w io.Writer, result *graph.Sn
 // [snapshot.Marshal] checks per group during emission. The CSV writers are
 // finer: writeSnapshotTypeTo checks per instance, so a single very large type
 // group stops sooner there than here.
-func (a *Adapter) buildOutput(ctx context.Context, result *graph.Snapshot) (map[string]any, error) {
+func (a *Adapter) buildOutput(ctx context.Context, result graph.Snapshot) (map[string]any, error) {
 	output := make(map[string]any)
 	s := result.Schema()
 
@@ -124,7 +126,7 @@ func (a *Adapter) buildOutput(ctx context.Context, result *graph.Snapshot) (map[
 		if !ok {
 			return nil, fmt.Errorf("json adapter: snapshot denotes type %s, which the entry schema cannot name, so the output object has no key for it; no constructor builds such a snapshot, so an invariant is broken", typeID)
 		}
-		instances := result.InstancesOf(typeID)
+		instances := slices.Collect(result.InstancesOf(typeID))
 		serialized := make([]map[string]any, 0, len(instances))
 
 		for _, inst := range instances {
@@ -141,29 +143,16 @@ func (a *Adapter) buildOutput(ctx context.Context, result *graph.Snapshot) (map[
 	return output, nil
 }
 
-// lookupType resolves a TypeID to its schema.Type across the entry schema's
-// whole import closure. Identity, not name: a transitively imported type has
-// no alias to qualify with, so a name-keyed walk of local types and direct
-// imports cannot reach it.
-func lookupType(s *schema.Schema, id schema.TypeID) (*schema.Type, bool) {
-	if s == nil {
-		return nil, false
-	}
-	// TypeByID indexes the whole import closure. Walking direct imports found
-	// no transitively imported type, which the v3 wire preserves through Load.
-	return s.TypeByID(id)
-}
-
 // serializeInstance converts a graph.Instance to a JSON-serializable map,
 // in the shapes the adapter's own parser accepts: an association target is
 // a _target_-keyed object with its edge properties beside the components,
 // and a composition is an array for every multiplicity.
 // Edge lookup uses snap.EdgesFrom for O(1) per-instance access.
-func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Schema) (map[string]any, error) {
+func serializeInstance(inst graph.Instance, snap graph.Snapshot, s schema.Schema) (map[string]any, error) {
 	obj := make(map[string]any)
 
 	// The field names every relation renders under come from the type.
-	schemaType, ok := lookupType(s, inst.TypeID())
+	schemaType, ok := s.TypeByID(inst.TypeID())
 	if !ok {
 		return nil, fmt.Errorf("json adapter: instance %s: type %s does not resolve, so its relations' field names are unknowable; no constructor builds such a snapshot, so an invariant is broken",
 			diag.ValueText(inst.PrimaryKey().String()), inst.TypeID())
@@ -182,63 +171,61 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 
 	// 2. Add association targets using the snapshot edge index.
 	// EdgesFrom returns edges already sorted by (relation, targetType, targetKey).
-	allEdges := snap.EdgesFrom(inst)
-	if len(allEdges) > 0 {
-		// Group edges by relation name, preserving sorted order within each group.
-		byRel := make(map[string][]*graph.Edge)
-		var relOrder []string
-		for _, e := range allEdges {
-			rel := e.Relation()
-			if _, seen := byRel[rel]; !seen {
-				relOrder = append(relOrder, rel)
+	// Group edges by relation name, preserving sorted order within each group.
+	var byRel map[string][]graph.Edge
+	var relOrder []string
+	for e := range snap.EdgesFrom(inst) {
+		if byRel == nil {
+			byRel = make(map[string][]graph.Edge)
+		}
+		rel := e.Relation()
+		if _, seen := byRel[rel]; !seen {
+			relOrder = append(relOrder, rel)
+		}
+		byRel[rel] = append(byRel[rel], e)
+	}
+
+	for _, relName := range relOrder {
+		edges := byRel[relName]
+
+		// Every constructor holds an edge to an association the type
+		// declares, at its declared target, and a (one) to one record.
+		rel, _ := schemaType.Relation(relName)
+		fieldName := rel.FieldName()
+
+		objs := make([]any, len(edges))
+		for i, e := range edges {
+			target, err := edgeTargetObject(s, rel, e)
+			if err != nil {
+				return nil, err
 			}
-			byRel[rel] = append(byRel[rel], e)
+			objs[i] = target
 		}
 
-		for _, relName := range relOrder {
-			edges := byRel[relName]
-
-			// Every constructor holds an edge to an association the type
-			// declares, at its declared target, and a (one) to one record.
-			rel, _ := schemaType.Relation(relName)
-			fieldName := rel.FieldName()
-
-			objs := make([]any, len(edges))
-			for i, e := range edges {
-				target, err := edgeTargetObject(s, rel, e)
-				if err != nil {
-					return nil, err
-				}
-				objs[i] = target
-			}
-
-			// A (one) association emits the single object the parser expects,
-			// and a (many) the array.
-			if !rel.IsMany() {
-				obj[fieldName] = objs[0]
-			} else {
-				obj[fieldName] = objs
-			}
+		// A (one) association emits the single object the parser expects,
+		// and a (many) the array.
+		if !rel.IsMany() {
+			obj[fieldName] = objs[0]
+		} else {
+			obj[fieldName] = objs
 		}
 	}
 
 	// 3. Add composed children, always as an array — the
 	// parser requires one for every composition, (one) included.
-	// ComposedRelations returns sorted relation names; Composed returns a defensive copy.
+	// ComposedRelations returns sorted relation names.
 	for _, relName := range inst.ComposedRelations() {
-		children := inst.Composed(relName)
-
 		// Every constructor holds a slot to a composition the type declares.
 		rel, _ := schemaType.Relation(relName)
 		fieldName := rel.FieldName()
 
-		arr := make([]map[string]any, len(children))
-		for i, child := range children {
+		arr := make([]map[string]any, 0, inst.ComposedCount(relName))
+		for child := range inst.Composed(relName) {
 			m, err := serializeInstance(child, snap, s)
 			if err != nil {
 				return nil, err
 			}
-			arr[i] = m
+			arr = append(arr, m)
 		}
 		obj[fieldName] = arr
 	}
@@ -251,13 +238,13 @@ func serializeInstance(inst *graph.Instance, snap *graph.Snapshot, s *schema.Sch
 // with the edge properties beside them. Every constructor holds the target to
 // the association's declared type and its stored key to that type's arity,
 // so an unresolvable target is a broken invariant and carries no refusal class.
-func edgeTargetObject(s *schema.Schema, rel *schema.Relation, e *graph.Edge) (map[string]any, error) {
-	target, ok := lookupType(s, e.Target().TypeID())
+func edgeTargetObject(s schema.Schema, rel schema.Relation, e graph.Edge) (map[string]any, error) {
+	target, ok := s.TypeByID(e.Target().TypeID())
 	if !ok {
 		return nil, fmt.Errorf("json adapter: cannot render edge %q: target type %s does not resolve, so its _target_ field names are unknowable; no constructor builds such a snapshot, so an invariant is broken",
 			e.Relation(), e.Target().TypeID())
 	}
-	pks := target.PrimaryKeysSlice()
+	pks := slices.Collect(target.PrimaryKeys())
 	key := e.Target().PrimaryKey()
 
 	out := make(map[string]any, len(pks))

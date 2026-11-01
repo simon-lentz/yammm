@@ -27,7 +27,10 @@
 //
 // Editor tooling reads the curated annotation registry through
 // [AnnotationSpecs] and [VectorSimilarityFunctions] rather than hard-coding
-// names, so it cannot offer an annotation or keyword the loader rejects.
+// names, so it offers only names and keywords the loader knows. It filters names by
+// placement and keywords by annotation name, so @vector's keywords are offered at
+// @@vector( too. It can still offer an annotation a property's type refuses, such as
+// @vector on a String.
 //
 // # Loading Schemas
 //
@@ -43,14 +46,14 @@
 //	// LSP, and for a generated package's embedded sources)
 //	s, result := schema.LoadSourcesWithEntry(ctx, sources, entryPath, moduleRoot)
 //
-// A non-OK result with a nil Schema indicates failure. result.HasFatal() reports
+// A non-OK result with a zero Schema indicates failure. result.HasFatal() reports
 // a load that could not start or finish for one of these reasons: an I/O failure, a cancellation, or
 // input a load cannot begin from, such as no sources, a source key the loader
 // refuses, two keys that name one source, or a source name that is not valid
 // UTF-8 or holds a character that does not print, or a source whose header cannot be parsed, which the parser reports
 // as a Fatal E_SYNTAX. A schema name with no value is an Error, E_SYNTAX, an
 // empty one an Error, E_INVALID_NAME, and a malformed yammm.mod marker an
-// Error, E_LOAD_MODULE_ROOT_MALFORMED, each with a nil Schema. Check result.HasErrors() to determine semantic success.
+// Error, E_LOAD_MODULE_ROOT_MALFORMED, each with a zero Schema. Check result.HasErrors() to determine semantic success.
 //
 // # Load Options
 //
@@ -111,16 +114,16 @@
 // usage first-class, among them:
 //
 //   - [Registry.Register] is idempotent for exact-match: registering the same
-//     SourceID twice with the same bytes, the entry's and every import's, and
-//     the same [StructuralHash] is a no-op. The bytes decide first, since the
+//     SourceID twice with the same bytes for every source both carry, the
+//     same [StructuralHash], and sources on both schemas or on neither is a no-op. The bytes decide first, since the
 //     hash excludes annotations and documentation: changed bytes under one
 //     SourceID are an error naming the change, and matching bytes with
 //     divergent hashes an error reporting both hashes.
 //   - loadImport short-circuits cross-Load via the shared Registry: when an
 //     import's SourceID is already registered, the loader skips the parse,
-//     compile, and re-register pipeline and reuses the existing *Schema pointer,
-//     unless the registered closure conflicts with the load's, which fails the
-//     import.
+//     compile, and re-register pipeline and reuses the existing Schema,
+//     unless the source is still loading, which is an import cycle, or the
+//     registered closure conflicts with the load's. Either fails the import.
 //     This is where cross-pipeline schema-caching actually pays off — the
 //     idempotence contract alone only makes the final re-register a no-op
 //     after an unnecessary parse has already happened.
@@ -144,11 +147,12 @@
 //
 // # Merged Views and Property Identity
 //
-// A property inherited from several ancestors carries the UNION of their
-// annotations. When that union differs from the annotations of the declaration
+// A property inherited from several direct supertypes carries the UNION of their
+// merged views' annotations, so an annotation a middle type dropped does not
+// return. When that union differs from the annotations of the declaration
 // the entry is taken from, the entry in
-// [Type.AllProperties] / [Type.AllPropertiesSlice] is a synthesized copy, not
-// the *Property its declaring type holds in [Type.PropertiesSlice].
+// [Type.AllProperties] is a synthesized copy, not
+// the Property its declaring type holds in [Type.Properties].
 //
 // [Property.Origin] bridges the two views: it returns the property as declared,
 // and p itself when nothing was merged. Any map keyed by declared properties
@@ -156,8 +160,8 @@
 //
 //	name, ok := dtFieldNames[p.Origin()]
 //
-// — or the synthesized entry misses the table and the consumer silently
-// degrades. Everything Origin discards is annotation state; name, constraint,
+// — or the synthesized entry misses the table: gogen and jschema return an error there, and
+// markdown degrades with none. Everything Origin discards is annotation state; name, constraint,
 // datatype reference, optionality, primary-key status, doc comment, span, and
 // declaring scope are all preserved on the copy, so a consumer that reads only those
 // needs nothing.
@@ -173,15 +177,16 @@
 //   - Predictable behavior (no hidden mutations)
 //   - Safe sharing across goroutines
 //
-// Slice accessors return defensive copies, and an iterator (iter.Seq,
-// iter.Seq2) yields elements without handing out a slice. A [Registry] and the
-// builders change through their own methods.
+// An accessor over records, or over the references that name them, returns an
+// iterator, and an accessor over plain values returns a fresh slice. A [Registry]
+// and the builders change through their own methods.
 //
 // # Completion and Sealing
 //
 // Schemas undergo a completion phase that resolves their references and checks
 // what they declare, among its steps:
-//   - Import declarations are resolved to their target schemas
+//   - Import declarations record their targets' SourceIDs; the loader and
+//     [Builder] set each target schema
 //   - Type inheritance is computed ([Type.SuperTypes])
 //   - Relation targets are resolved
 //   - Property collisions are detected across the inheritance hierarchy
@@ -195,7 +200,11 @@
 //
 // Types are identified by [TypeID], a tuple of (SourceID, name). This enables
 // cross-schema type resolution and proper handling of imported types.
-// Two types are equal if and only if they have the same TypeID.
+// Under a non-zero SourceID, two handles name one type if and only if their
+// TypeIDs are equal. A Builder schema with no SourceID gives one TypeID to every
+// type of one name. == on two [Type] handles compares records, so two compiles of
+// one source differ under it, and a load that reuses a compile holds that compile's
+// records.
 //
 // # Thread Safety
 //

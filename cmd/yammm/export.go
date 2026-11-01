@@ -143,7 +143,7 @@ func validateExportFlags(cmd *cobra.Command, raw, target, outputPath, outputDir 
 
 // writeExport routes a snapshot to the adapter for target, which
 // [validateExportFlags] has already admitted.
-func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap *graph.Snapshot, s *schema.Schema, target, outputPath, outputDir string) error {
+func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap graph.Snapshot, s schema.Schema, target, outputPath, outputDir string) error {
 	switch target {
 	case "json":
 		return exportJSON(cmd, snap, outputPath)
@@ -154,7 +154,7 @@ func writeExport(cmd *cobra.Command, sink *cli.DiagnosticSink, snap *graph.Snaps
 	}
 }
 
-func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string) error {
+func exportJSON(cmd *cobra.Command, snapshot graph.Snapshot, outputPath string) error {
 	data, err := adapterjson.New().MarshalObject(cmd.Context(), snapshot, adapterjson.WithIndent("\t"))
 	if err != nil {
 		return writerFailure("marshal json", err)
@@ -167,7 +167,7 @@ func exportJSON(cmd *cobra.Command, snapshot *graph.Snapshot, outputPath string)
 	return nil
 }
 
-func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Snapshot, _ *schema.Schema, outputPath, outputDir string) error {
+func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot graph.Snapshot, _ schema.Schema, outputPath, outputDir string) error {
 	// --output names the one file's delimiter by its extension; --output-dir
 	// writes <type>.csv files, and stdout has no name, so both take ','.
 	adapter := csv.New(csv.WithDelimiter(cli.CSVDelimiter(outputPath)))
@@ -202,7 +202,7 @@ func exportCSV(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Sna
 	return nil
 }
 
-func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.Adapter, snapshot *graph.Snapshot, outputDir string) error {
+func exportCSVToDir(cmd *cobra.Command, sink *cli.DiagnosticSink, adapter *csv.Adapter, snapshot graph.Snapshot, outputDir string) error {
 	// Every file is rendered before the disk is touched, so a snapshot the
 	// writer refuses creates no directory and no file.
 	data, err := adapter.MarshalSnapshot(cmd.Context(), snapshot)
@@ -236,7 +236,7 @@ func writerFailure(what string, err error) error {
 // Only Statement fields are written; Params are intentionally omitted because
 // the output serves as a readable reference for integration, not as directly
 // executable Cypher. Use the Go adapter API for programmatic execution with parameters.
-func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.Snapshot, s *schema.Schema, outputPath string) error {
+func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot graph.Snapshot, s schema.Schema, outputPath string) error {
 	// The statements name labels, and a label composed differently from the one
 	// the target graph carries writes data no constraint guards. The sibling
 	// neo4j commands take these flags for the same reason.
@@ -300,7 +300,7 @@ func exportCypher(cmd *cobra.Command, sink *cli.DiagnosticSink, snapshot *graph.
 // that would not parse — means integrity was NOT fully verified, and the
 // operator must read it before the export lands, which is why the flush is
 // explicit rather than left to the wrapper.
-func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s *schema.Schema, dataPath, target, outputPath, outputDir string) error {
+func exportFromSnapshot(cmd *cobra.Command, sink *cli.DiagnosticSink, s schema.Schema, dataPath, target, outputPath, outputDir string) error {
 	snap, _, snapResult, err := cli.LoadSnapshotFile(cmd.Context(), dataPath, s)
 	if err != nil {
 		return cli.Runtimef("%v", err)

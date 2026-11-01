@@ -14,13 +14,13 @@ import (
 // allowed) and returns both the schema and the result for warning inspection.
 // It lives here, with the other shared annotation helpers, because three of the
 // annotation test files depend on it.
-func loadNoErr(t *testing.T, source string) (*schema.Schema, diag.Result) {
+func loadNoErr(t *testing.T, source string) (schema.Schema, diag.Result) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), source, "main.yammm")
 	if res.HasErrors() {
 		t.Fatalf("schema should load without errors, got: %v", res)
 	}
-	if s == nil {
+	if s.IsZero() {
 		t.Fatal("schema returned nil despite no errors")
 	}
 	return s, res
@@ -29,7 +29,7 @@ func loadNoErr(t *testing.T, source string) (*schema.Schema, diag.Result) {
 // loadAnnotationImport writes base as base.yammm and main as main.yammm in a
 // temp module root and loads main, so a test can exercise annotation behaviour
 // across an import boundary. main should import the other as "./base".
-func loadAnnotationImport(t *testing.T, base, main string) (*schema.Schema, diag.Result) {
+func loadAnnotationImport(t *testing.T, base, main string) (schema.Schema, diag.Result) {
 	t.Helper()
 	dir := t.TempDir()
 	mainPath := filepath.Join(dir, "main.yammm")
@@ -44,7 +44,7 @@ func loadAnnotationImport(t *testing.T, base, main string) (*schema.Schema, diag
 	return schema.Load(t.Context(), mainPath, schema.WithModuleRoot(dir))
 }
 
-func schemaType(t *testing.T, s *schema.Schema, name string) *schema.Type {
+func schemaType(t *testing.T, s schema.Schema, name string) schema.Type {
 	t.Helper()
 	ty, ok := s.Type(name)
 	if !ok {
@@ -53,7 +53,7 @@ func schemaType(t *testing.T, s *schema.Schema, name string) *schema.Type {
 	return ty
 }
 
-func typeProperty(t *testing.T, ty *schema.Type, prop string) *schema.Property {
+func typeProperty(t *testing.T, ty schema.Type, prop string) schema.Property {
 	t.Helper()
 	p, ok := ty.Property(prop)
 	if !ok {
@@ -63,25 +63,25 @@ func typeProperty(t *testing.T, ty *schema.Type, prop string) *schema.Property {
 }
 
 // propAnnNames returns the ordered annotation names on a property.
-func propAnnNames(p *schema.Property) []string {
+func propAnnNames(p schema.Property) []string {
 	var names []string
-	for _, a := range p.AnnotationsSlice() {
+	for a := range p.Annotations() {
 		names = append(names, a.Name())
 	}
 	return names
 }
 
 // typeAnnNames returns the ordered names of a type's linearized annotations.
-func typeAnnNames(ty *schema.Type) []string {
+func typeAnnNames(ty schema.Type) []string {
 	var names []string
-	for _, a := range ty.AllAnnotationsSlice() {
+	for a := range ty.AllAnnotations() {
 		names = append(names, a.Name())
 	}
 	return names
 }
 
 // argTexts returns the ordered arg texts of an annotation.
-func argTexts(a *schema.Annotation) []string {
+func argTexts(a schema.Annotation) []string {
 	var texts []string
 	for _, arg := range a.Args() {
 		texts = append(texts, arg.Text())
@@ -135,7 +135,7 @@ type Document {
 	@@index(state, published_on)
 }`)
 	ty := schemaType(t, s, "Document")
-	anns := ty.AllAnnotationsSlice()
+	anns := slices.Collect(ty.AllAnnotations())
 	if len(anns) != 1 {
 		t.Fatalf("want 1 type annotation, got %d", len(anns))
 	}
@@ -165,7 +165,7 @@ type Document {
 	if got, want := argTexts(v), []string{"cosine"}; !slices.Equal(got, want) {
 		t.Errorf("@vector args: got %v, want %v", got, want)
 	}
-	if ty.AllAnnotationsSlice()[0].Documentation() == "" {
+	if slices.Collect(ty.AllAnnotations())[0].Documentation() == "" {
 		t.Error("@@index doc comment not collected")
 	}
 }

@@ -472,7 +472,7 @@ func assertNotContains(t *testing.T, stmts []string, substring string) {
 // enterpriseKindCounts returns how many constraints of each kind the default
 // (Enterprise) configuration emits for s, which is what Community must report
 // as omitted for the kinds it cannot hold.
-func enterpriseKindCounts(t *testing.T, s *schema.Schema) map[ConstraintKind]int {
+func enterpriseKindCounts(t *testing.T, s schema.Schema) map[ConstraintKind]int {
 	t.Helper()
 	constraints, result := New().ConstraintsStructured(context.Background(), s)
 	if err := result.Err(); err != nil {

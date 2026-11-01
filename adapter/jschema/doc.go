@@ -1,10 +1,9 @@
 // Package jschema generates a JSON Schema (draft 2020-12) document from a
 // yammm schema, for editor-assisted authoring of instance-data JSON files,
 // which `yammm check` then judges. Call [Marshal] with a loaded, resolved
-// schema; it returns a deterministic, self-contained document that editors
-// (VS Code's JSON/YAML language servers, IntelliJ, Helix) can use for
-// completion, hover documentation, and validation while data files are being
-// written.
+// schema; it returns a deterministic, self-contained document that a JSON
+// Schema language server can use for completion, hover documentation, and
+// validation while data files are being written.
 //
 // # Schema-In, Bytes-Out
 //
@@ -13,8 +12,8 @@
 // parses, validates, or serializes instances, and it imports neither
 // instance nor graph. It maps a completed schema to one JSON document,
 // nothing more, and returns a plain error rather than the
-// [github.com/simon-lentz/yammm/diag.Result] the rest of the library threads
-// through, because its failures are a schema that breaks its preconditions or
+// [github.com/simon-lentz/yammm/diag.Result] the library's loading, validation
+// and graph code threads through, because its failures are a schema that breaks its preconditions or
 // a generator bug (see Error Conditions), not data diagnostics with source
 // locations.
 //
@@ -81,8 +80,7 @@
 // scalar property, list element at any depth (List<List<FipsCode>> emits
 // items of items $ref), edge property, _target_* foreign-key field, and
 // inside another DataType's constraint (Codes = List<FipsCode>) — so the
-// named constraint is stated once and hover shows its name and
-// documentation. Inline enums are inlined (JSON Schema needs no synthesized
+// named constraint is stated once and hover shows its documentation. Inline enums are inlined (JSON Schema needs no synthesized
 // names). A yammm value must match EVERY declared pattern, hence allOf, not
 // anyOf.
 //
@@ -166,7 +164,7 @@
 //     fractional part, whatever its spelling. So the editor accepts on an
 //     Integer a whole decimal or exponent literal such as 5.0 or 1e2, and an
 //     integer outside int64 such as 9223372036854775808 or
-//     -9223372036854775809, and on a Float a literal no float64 holds such as
+//     -9223372036854775809, and on a Float or a Vector element a literal no float64 holds such as
 //     1e400; yammm refuses each (E_TYPE_MISMATCH). A validator that reads a
 //     number exactly judges a Float's bounds on the literal's own value, where
 //     yammm judges its nearest float64, so it flags 1.00000000000000001 under
@@ -189,8 +187,8 @@
 //     The emitted schema targets canonical spellings: a case-variant file
 //     still validates under yammm, and the editor flags it toward the
 //     canonical form.
-//   - A repeated member name. adapter/json reports an object — the envelope
-//     or an instance — that names one member twice (Error E_ADAPTER_PARSE),
+//   - A repeated member name. adapter/json reports an object — the envelope,
+//     an instance or an edge object — that names one member twice (Error E_ADAPTER_PARSE),
 //     so the file fails; a JSON Schema validator reads one of the two values
 //     and accepts the object.
 //   - Patterns. Each pattern is rewritten into syntax RE2 and ECMA-262 read
@@ -201,13 +199,13 @@
 //     every class by UTF-16 code unit: it refuses a pattern whose class holds
 //     a range above U+FFFF (a Unicode class such as \p{L} rewrites to one),
 //     and a class, [^\n] or [\s\S] matches half of a character above U+FFFF.
-//     No form states such a range to RE2 and to both ECMA-262 modes, since
+//     No class range states such a range to RE2 and to both ECMA-262 modes, since
 //     RE2 has no surrogate code units. A JSON string may also hold a lone
 //     surrogate ("\ud800"): yammm's reader decodes it to U+FFFD and an
 //     ECMA-262 validator keeps the surrogate, so the two can disagree on that
 //     value.
 //   - Custom Timestamp layouts. A Timestamp["layout"] constraint is not
-//     expressible as a JSON Schema assertion; the emitted fragment is a
+//     expressible with the format keyword; the emitted fragment is a
 //     plain string whose description carries the source form. The editor
 //     accepts what yammm may reject, never the reverse.
 //
@@ -218,8 +216,8 @@
 //
 //	# yaml-language-server: $schema=./fleet.schema.json
 //
-// yammm reads no YAML data file — its data commands read JSON, JSONC and
-// CSV — so a YAML file wired this way gets the editor's checks alone.
+// yammm reads no YAML data file — its data commands read JSON, JSONC, CSV and
+// TSV — so a YAML file wired this way gets the editor's checks alone.
 //
 // For JSON data files, a json.schemas mapping in VS Code settings that
 // associates the document with a file glob. Do not add a "$schema" member to
@@ -256,11 +254,11 @@
 //
 // [Marshal] returns an error (never partial or invalid output) when:
 //
-//   - the schema is not completed as Preconditions requires: an association
+//   - a non-zero schema breaks Preconditions (a zero Schema panics instead): an association
 //     target or a datatype reference does not resolve;
-//   - a generator bug: a member with no registered $defs key, a constraint
-//     the mapper cannot render, or an emitted document that fails the
-//     self-check (invalid JSON or an unresolvable $ref).
+//   - a generator bug, such as a member with no registered $defs key, a
+//     constraint the mapper cannot render, or an emitted document that fails
+//     the self-check (invalid JSON or an unresolvable $ref).
 //
 // No name collision fails: every claimant of a contested key takes its exact
 // key.
@@ -279,8 +277,9 @@
 // byte-identical JSON Schema.
 //
 // They do reach the generator indirectly: a property inherited from several
-// ancestors carries the union of their annotations, so the merged view yields a
-// synthesized copy rather than the declared *Property. The $defs lookup
+// direct supertypes carries the union of their merged views' annotations. When
+// that union differs from the surviving property's own set, the merged view
+// yields a synthesized copy rather than the declared property. The $defs lookup
 // therefore keys through [github.com/simon-lentz/yammm/schema.Property.Origin].
 //
 // # Dependencies

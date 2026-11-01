@@ -14,7 +14,7 @@ import (
 // observed at small scale before scaling up via buildLargeBenchSchema.
 //
 // The schema registers without errors against a fresh Registry.
-func buildTinyBenchSchema(tb testing.TB) *schema.Schema {
+func buildTinyBenchSchema(tb testing.TB) schema.Schema {
 	tb.Helper()
 	s, result := schema.NewBuilder().
 		WithName("tiny_bench").
@@ -28,8 +28,8 @@ func buildTinyBenchSchema(tb testing.TB) *schema.Schema {
 	if result.HasErrors() {
 		tb.Fatalf("buildTinyBenchSchema: %v", result)
 	}
-	if s == nil {
-		tb.Fatal("buildTinyBenchSchema: nil schema")
+	if s.IsZero() {
+		tb.Fatal("buildTinyBenchSchema: zero schema")
 	}
 	return s
 }
@@ -48,7 +48,7 @@ func buildTinyBenchSchema(tb testing.TB) *schema.Schema {
 //
 // Use this helper for any future benchmark or stress test that wants a
 // wide-but-valid schema without re-authoring the shape.
-func buildLargeBenchSchema(tb testing.TB) *schema.Schema {
+func buildLargeBenchSchema(tb testing.TB) schema.Schema {
 	tb.Helper()
 
 	const (
@@ -90,8 +90,8 @@ func buildLargeBenchSchema(tb testing.TB) *schema.Schema {
 	if result.HasErrors() {
 		tb.Fatalf("buildLargeBenchSchema: %v", result)
 	}
-	if s == nil {
-		tb.Fatal("buildLargeBenchSchema: nil schema")
+	if s.IsZero() {
+		tb.Fatal("buildLargeBenchSchema: zero schema")
 	}
 	return s
 }

@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"bytes"
+	"iter"
 	"slices"
 	"strconv"
 	"strings"
@@ -422,7 +423,7 @@ func indentUnderBullet(s string) string {
 // composition lists, and invariants. Blocks are separated by single blank
 // lines; empty blocks are omitted entirely. The blocks are written straight
 // to the document so each doc comment's place in it is recorded.
-func (g *generator) emitTypeSection(t *schema.Type) {
+func (g *generator) emitTypeSection(t schema.Type) {
 	e := g.types[t.ID()]
 
 	g.buf.WriteString("### " + e.displayMD + "\n")
@@ -436,48 +437,48 @@ func (g *generator) emitTypeSection(t *schema.Type) {
 		g.writeAuthorText(doc, false)
 		g.buf.WriteString("\n")
 	}
-	if props := t.AllPropertiesSlice(); len(props) > 0 {
+	if props := slices.Collect(t.AllProperties()); len(props) > 0 {
 		block()
 		g.writePropertyTable(t, props)
 	}
 	// Associations and compositions share one relation namespace, so one
 	// resolver marks inherited relations of either kind.
-	relFrom := inheritedFrom(g, t, func(st *schema.Type) []*schema.Relation {
-		return slices.Concat(st.AssociationsSlice(), st.CompositionsSlice())
+	relFrom := inheritedFrom(g, t, func(st schema.Type) iter.Seq[schema.Relation] {
+		return slices.Values(slices.Concat(slices.Collect(st.Associations()), slices.Collect(st.Compositions())))
 	})
 	for _, list := range []struct {
 		label string
-		rels  []*schema.Relation
+		rels  []schema.Relation
 	}{
-		{"**Associations**", t.AllAssociationsSlice()},
-		{"**Compositions**", t.AllCompositionsSlice()},
+		{"**Associations**", slices.Collect(t.AllAssociations())},
+		{"**Compositions**", slices.Collect(t.AllCompositions())},
 	} {
 		if len(list.rels) > 0 {
 			block()
 			g.writeRelationList(list.label, list.rels, relFrom)
 		}
 	}
-	if invs := t.AllInvariantsSlice(); len(invs) > 0 {
+	if invs := slices.Collect(t.AllInvariants()); len(invs) > 0 {
 		block()
 		g.writeInvariantList(t, invs)
 	}
 }
 
-// inheritedOwners maps every member a type inherits — keyed by pointer — to the
+// inheritedOwners maps every member a type inherits — keyed by record — to the
 // Markdown display name of the ancestor that declares it, for the "from <Owner>"
 // provenance marker. own extracts a type's own members of the relevant kind;
 // members the type declares itself belong to no ancestor and are absent from
 // the result. Merge only pulls inherited members from resolved, closure-present
 // ancestors, so every inherited member resolves to a display name here, and
 // each member has one declaring ancestor, which the linearization lists once.
-func inheritedOwners[T comparable](g *generator, t *schema.Type, own func(*schema.Type) []T) map[T]string {
+func inheritedOwners[T comparable](g *generator, t schema.Type, own func(schema.Type) iter.Seq[T]) map[T]string {
 	owners := make(map[T]string)
-	for _, super := range t.SuperTypesSlice() {
+	for super := range t.SuperTypes() {
 		se, ok := g.types[super.ID()]
 		if !ok {
 			continue
 		}
-		for _, m := range own(se.typ) {
+		for m := range own(se.typ) {
 			owners[m] = se.displayMD
 		}
 	}
@@ -490,7 +491,7 @@ func inheritedOwners[T comparable](g *generator, t *schema.Type, own func(*schem
 // member the type declares itself. This gives
 // relation bullets and invariant bullets the same provenance the property
 // table's "from <Owner>" modifier gives inherited rows.
-func inheritedFrom[T comparable](g *generator, t *schema.Type, own func(*schema.Type) []T) func(T) string {
+func inheritedFrom[T comparable](g *generator, t schema.Type, own func(schema.Type) iter.Seq[T]) func(T) string {
 	owners := inheritedOwners(g, t, own)
 	return func(m T) string {
 		if owner, ok := owners[m]; ok {
@@ -503,7 +504,7 @@ func inheritedFrom[T comparable](g *generator, t *schema.Type, own func(*schema.
 // typeBadges renders the badges paragraph: the abstract or part marker and
 // the Extends links resolved from the declared inherits clauses. Returns
 // "" when the type has none.
-func (g *generator) typeBadges(t *schema.Type) string {
+func (g *generator) typeBadges(t schema.Type) string {
 	var parts []string
 	if t.IsAbstract() {
 		parts = append(parts, "*Abstract type* — no direct instances.")
@@ -511,7 +512,7 @@ func (g *generator) typeBadges(t *schema.Type) string {
 	if t.IsPart() {
 		parts = append(parts, "*Part type* — instances exist only as composed children.")
 	}
-	if inherits := t.InheritsSlice(); len(inherits) > 0 {
+	if inherits := slices.Collect(t.Inherits()); len(inherits) > 0 {
 		links := make([]string, len(inherits))
 		for i, ref := range inherits {
 			links[i] = g.superLink(t, ref)
@@ -524,7 +525,7 @@ func (g *generator) typeBadges(t *schema.Type) string {
 // superLink resolves a declared extends reference to a link on the parent
 // type's section, falling back to the reference's own spelling, escaped as
 // schema text, when the parent is absent from this document's type map.
-func (g *generator) superLink(t *schema.Type, ref schema.TypeRef) string {
+func (g *generator) superLink(t schema.Type, ref schema.TypeRef) string {
 	if e, ok := g.resolveSuper(t, ref); ok {
 		return g.link(e)
 	}
@@ -534,20 +535,17 @@ func (g *generator) superLink(t *schema.Type, ref schema.TypeRef) string {
 // writePropertyTable writes the flattened property table over all, the type's
 // full property set, own rows first. Inherited rows carry a "from <Owner>"
 // modifier naming the declaring ancestor as displayed in this document.
-func (g *generator) writePropertyTable(t *schema.Type, all []*schema.Property) {
-	// One PropertiesSlice call: it clones the type's property slice, so calling
-	// it again just to size the map allocates and discards a whole slice per
-	// rendered type.
-	ownProps := t.PropertiesSlice()
-	own := make(map[*schema.Property]bool, len(ownProps))
+func (g *generator) writePropertyTable(t schema.Type, all []schema.Property) {
+	ownProps := slices.Collect(t.Properties())
+	own := make(map[schema.Property]bool, len(ownProps))
 	for _, p := range ownProps {
 		own[p] = true
 	}
-	// Inherited rows reuse the declaring ancestor's own *Property values, so
-	// the pointer map keys each row to its declarer. A row whose annotations were
+	// Inherited rows reuse the declaring ancestor's own Property records, so
+	// the map keys each row to its declarer. A row whose annotations were
 	// merged across ancestors is a synthesized copy absent from every own slice,
-	// so both lookups go through Origin() to reach the declared property.
-	ownerOf := inheritedOwners(g, t, (*schema.Type).PropertiesSlice)
+	// so an inherited row goes through Origin() to reach the declared property.
+	ownerOf := inheritedOwners(g, t, schema.Type.Properties)
 
 	tw := g.newTable(0, "Property", "Type", "Modifiers", "Description")
 	for _, p := range all {
@@ -567,7 +565,7 @@ func (g *generator) writePropertyTable(t *schema.Type, all []*schema.Property) {
 
 // writeEdgePropertyTable writes the sub-table for a relation's edge properties
 // under its bullet, with the same columns as the type property table.
-func (g *generator) writeEdgePropertyTable(props []*schema.Property) {
+func (g *generator) writeEdgePropertyTable(props []schema.Property) {
 	tw := g.newTable(bulletIndent, "Property", "Type", "Modifiers", "Description")
 	for _, p := range props {
 		mods := ""
@@ -581,7 +579,7 @@ func (g *generator) writeEdgePropertyTable(props []*schema.Property) {
 // writePropertyRow writes one property-table row; the Type cell renders
 // the constraint's DSL form (named DataTypes display their name). mods is
 // Markdown already, its owner names escaped by escapeInline.
-func writePropertyRow(tw *tableWriter, p *schema.Property, mods string) {
+func writePropertyRow(tw *tableWriter, p schema.Property, mods string) {
 	tw.row(codeCellOf(p.Name()), codeCellOf(p.Constraint().String()), tableCell{md: mods}, tw.g.descriptionCellOf(p.Documentation()))
 }
 
@@ -589,7 +587,7 @@ func writePropertyRow(tw *tableWriter, p *schema.Property, mods string) {
 // with linked targets. An inherited relation carries a " — from <Owner>"
 // marker via origin, mirroring the property table. A relation's documentation
 // and edge-property sub-table nest under its bullet.
-func (g *generator) writeRelationList(label string, rels []*schema.Relation, origin func(*schema.Relation) string) {
+func (g *generator) writeRelationList(label string, rels []schema.Relation, origin func(schema.Relation) string) {
 	g.buf.WriteString(label + "\n")
 	for _, rel := range rels {
 		g.buf.WriteString("\n")
@@ -604,7 +602,7 @@ func (g *generator) writeRelationList(label string, rels []*schema.Relation, ori
 			g.writeAuthorText(doc, true)
 			g.buf.WriteString("\n")
 		}
-		if props := rel.PropertiesSlice(); len(props) > 0 {
+		if props := slices.Collect(rel.Properties()); len(props) > 0 {
 			g.buf.WriteString("\n")
 			g.writeEdgePropertyTable(props)
 		}
@@ -614,7 +612,7 @@ func (g *generator) writeRelationList(label string, rels []*schema.Relation, ori
 // relationTarget links the relation's target type; when the target is absent
 // from this document's type map it degrades to the reference's own spelling,
 // unlinked and escaped as schema text.
-func (g *generator) relationTarget(rel *schema.Relation) string {
+func (g *generator) relationTarget(rel schema.Relation) string {
 	if e, ok := g.types[rel.TargetID()]; ok {
 		return g.link(e)
 	}
@@ -626,8 +624,8 @@ func (g *generator) relationTarget(rel *schema.Relation) string {
 // the property table), the documentation indented beneath it, then the
 // declaration source in a yammm fence when the span and source content allow
 // extraction.
-func (g *generator) writeInvariantList(t *schema.Type, invs []*schema.Invariant) {
-	from := inheritedFrom(g, t, (*schema.Type).InvariantsSlice)
+func (g *generator) writeInvariantList(t schema.Type, invs []schema.Invariant) {
+	from := inheritedFrom(g, t, schema.Type.Invariants)
 	g.buf.WriteString("**Invariants**\n")
 	for _, inv := range invs {
 		g.buf.WriteString("\n" + bulletMarker + escapeInline(strconv.Quote(inv.Name())) + from(inv) + "\n")
@@ -650,9 +648,9 @@ func (g *generator) writeInvariantList(t *schema.Type, invs []*schema.Invariant)
 // Builder-built schema). The comments the span starts with — the doc comment,
 // which renders separately, and any other before the "!" — are stripped,
 // whatever they hold, so the fence starts at the declaration.
-func (g *generator) invariantSource(inv *schema.Invariant) (string, bool) {
+func (g *generator) invariantSource(inv schema.Invariant) (string, bool) {
 	span := inv.Span()
-	if g.sources == nil || !span.Start.HasByte() || !span.End.HasByte() {
+	if !span.Start.HasByte() || !span.End.HasByte() {
 		return "", false
 	}
 	content, ok := g.sourceContent(span.Source)

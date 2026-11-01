@@ -23,11 +23,11 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 
 	for _, c := range []struct {
 		name string
-		snap func(t *testing.T) (*graph.Snapshot, *schema.Schema)
+		snap func(t *testing.T) (graph.Snapshot, schema.Schema)
 	}{
 		{
 			name: "an instance holding a composed child",
-			snap: func(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+			snap: func(t *testing.T) (graph.Snapshot, schema.Schema) {
 				t.Helper()
 				return compositionSnapshot(t, map[string][]map[string]any{
 					"Order": {{"order_id": "o1", "lines": lines("a")}},
@@ -36,7 +36,7 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 		},
 		{
 			name: "a lone association target rendering every cell empty",
-			snap: func(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+			snap: func(t *testing.T) (graph.Snapshot, schema.Schema) {
 				t.Helper()
 				s := loadEmptyCellSchema(t)
 				return emptyCellSnapshot(t, s, []typedRow{
@@ -50,7 +50,7 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 		},
 		{
 			name: "a cell whose text holds a CR LF",
-			snap: func(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+			snap: func(t *testing.T) (graph.Snapshot, schema.Schema) {
 				t.Helper()
 				s := loadListRenderingSchema(t)
 				return emptyCellSnapshot(t, s, []typedRow{
@@ -60,7 +60,7 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 		},
 		{
 			name: "a list holding one empty element",
-			snap: func(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+			snap: func(t *testing.T) (graph.Snapshot, schema.Schema) {
 				t.Helper()
 				s := loadListRenderingSchema(t)
 				return emptyCellSnapshot(t, s, []typedRow{
@@ -70,7 +70,7 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 		},
 		{
 			name: "a null list element",
-			snap: func(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+			snap: func(t *testing.T) (graph.Snapshot, schema.Schema) {
 				t.Helper()
 				s := loadListRenderingSchema(t)
 				return bypassGrid(t, s, []any{"a", nil}), s
@@ -78,7 +78,7 @@ func TestWriters_AnUnrepresentableValueIsRefusedAsOneClass(t *testing.T) {
 		},
 		{
 			name: "a map value",
-			snap: func(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+			snap: func(t *testing.T) (graph.Snapshot, schema.Schema) {
 				t.Helper()
 				s := loadListRenderingSchema(t)
 				return bypassGrid(t, s, map[string]any{"k": "v"}), s
@@ -192,7 +192,7 @@ func TestWriters_ARefusedSettingIsAConfigurationRefusal(t *testing.T) {
 // The classes separate what a message cannot: an I/O failure, a nil argument
 // and a refusal of the data reach a caller through one return value, and only
 // the last two say which they are.
-func TestWriters_TheRefusalClassesDoNotCoverIOOrANilSnapshot(t *testing.T) {
+func TestWriters_TheRefusalClassesDoNotCoverIOOrAZeroSnapshot(t *testing.T) {
 	t.Parallel()
 	s := loadTestSchema(t, "basic.yammm")
 
@@ -218,7 +218,7 @@ func TestWriters_TheRefusalClassesDoNotCoverIOOrANilSnapshot(t *testing.T) {
 
 	for _, c := range []struct {
 		where  string
-		schema *schema.Schema
+		schema schema.Schema
 		rows   map[string][]map[string]any
 	}{
 		{"csv flush", s, map[string][]map[string]any{"Entity": {{"id": "e1", "name": "Alice"}}}},
@@ -236,19 +236,19 @@ func TestWriters_TheRefusalClassesDoNotCoverIOOrANilSnapshot(t *testing.T) {
 
 	nilErr := New().WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
 		return io.Discard, nil
-	}, nil)
-	if !errors.Is(nilErr, ErrNilSnapshot) {
-		t.Errorf("a nil snapshot = %v, want ErrNilSnapshot", nilErr)
+	}, graph.Snapshot{})
+	if !errors.Is(nilErr, ErrZeroSnapshot) {
+		t.Errorf("a zero snapshot = %v, want ErrZeroSnapshot", nilErr)
 	}
 	if errors.Is(nilErr, ErrUnrepresentable) || errors.Is(nilErr, ErrConfig) {
-		t.Errorf("a nil snapshot matched a refusal class: %v", nilErr)
+		t.Errorf("a zero snapshot matched a refusal class: %v", nilErr)
 	}
 }
 
 // bypassGrid builds Grid g1 holding tags through instancetest, which runs no
 // validation: the validator refuses a null list element and a map under a
 // List<String>, so only a bypass-built snapshot holds either.
-func bypassGrid(t *testing.T, s *schema.Schema, tags any) *graph.Snapshot {
+func bypassGrid(t *testing.T, s schema.Schema, tags any) graph.Snapshot {
 	t.Helper()
 	grid, _ := s.Type("Grid")
 	g := graph.New(s)

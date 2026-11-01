@@ -8,7 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func listElemSchema(t *testing.T) *schema.Schema {
+func listElemSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(t.Context(), `schema "test"
 type T {
@@ -23,7 +23,7 @@ type T {
 }
 
 // validateT validates one T and returns the instance and the rendered result.
-func validateT(t *testing.T, s *schema.Schema, props map[string]any) (*instance.ValidInstance, string) {
+func validateT(t *testing.T, s schema.Schema, props map[string]any) (instance.ValidInstance, string) {
 	t.Helper()
 	valid, result := instance.NewValidator(s).ValidateOne(t.Context(), "T", instance.RawInstance{Properties: props})
 	return valid, result.String()
@@ -52,7 +52,7 @@ func TestListNullElement_IsRejected(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			valid, detail := validateT(t, s, tc.props)
-			if valid != nil {
+			if !valid.IsZero() {
 				t.Error("a null list element validated")
 			}
 			if !strings.Contains(detail, tc.want) {
@@ -78,7 +78,7 @@ func TestListNullElement_NamesTheIndex(t *testing.T) {
 func TestListNullElement_WholeValueNullIsStillOptional(t *testing.T) {
 	valid, detail := validateT(t, listElemSchema(t), map[string]any{"id": "1", "tags": nil})
 
-	if valid == nil {
+	if valid.IsZero() {
 		t.Fatalf("an optional List set to null should validate: %s", detail)
 	}
 	if _, present := valid.Property("tags"); present {
@@ -89,7 +89,7 @@ func TestListNullElement_WholeValueNullIsStillOptional(t *testing.T) {
 // An empty list is not a null element and stays valid.
 func TestListNullElement_EmptyListIsValid(t *testing.T) {
 	if valid, detail := validateT(t, listElemSchema(t),
-		map[string]any{"id": "1", "tags": []any{}}); valid == nil {
+		map[string]any{"id": "1", "tags": []any{}}); valid.IsZero() {
 		t.Errorf("an empty list should validate: %s", detail)
 	}
 }
@@ -107,7 +107,7 @@ type T {
 	}
 
 	valid, detail := validateT(t, s, map[string]any{"id": "1", "v": []any{1.0, nil}})
-	if valid != nil {
+	if !valid.IsZero() {
 		t.Fatal("a null Vector element validated")
 	}
 	if !strings.Contains(detail, "element [1]") {

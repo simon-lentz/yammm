@@ -25,7 +25,7 @@ import (
 // A reference to an address a refused root states is that root's break, so it
 // draws no issue of its own.
 type structureRules struct {
-	s     *schema.Schema
+	s     schema.Schema
 	canon *canonicalizer
 	c     *diag.Collector
 	// op names the constructor in every message.
@@ -98,7 +98,7 @@ func (r *structureRules) refuseAddress(address oneSlot) {
 }
 
 // structureNode is one instance as the rules read it: an [InstanceParts]
-// before a rebuild, or an [*Instance] of a snapshot being imported.
+// before a rebuild, or an [Instance] of a snapshot being imported.
 type structureNode[N any] interface {
 	nodeType() schema.TypeID
 	nodeKey() immutable.Key
@@ -113,16 +113,16 @@ func (ip InstanceParts) nodeComposed() map[string][]InstanceParts {
 	return ip.Composed
 }
 
-func (i *Instance) nodeType() schema.TypeID              { return i.typeID }
-func (i *Instance) nodeKey() immutable.Key               { return i.primaryKey }
-func (i *Instance) nodeProperties() immutable.Properties { return i.properties }
-func (i *Instance) nodeComposed() map[string][]*Instance { return i.composed }
+func (i Instance) nodeType() schema.TypeID              { return i.typeID }
+func (i Instance) nodeKey() immutable.Key               { return i.primaryKey }
+func (i Instance) nodeProperties() immutable.Properties { return i.properties }
+func (i Instance) nodeComposed() map[string][]Instance  { return i.composed }
 
 // The rules reach these methods only through a type parameter, which the
 // unused analyzer does not follow; these assertions are the use it sees.
 var (
 	_ structureNode[InstanceParts] = InstanceParts{}
-	_ structureNode[*Instance]     = (*Instance)(nil)
+	_ structureNode[Instance]      = Instance{}
 )
 
 // checkRoot applies [checkTree] to a root and addresses it.
@@ -248,7 +248,7 @@ func newSlotIndex[N structureNode[N]](canon *canonicalizer) *slotIndex[N] {
 // the canonicalizer's form, so it judges an imported snapshot's records under the
 // importing schema. rel is not a keyless (many) composition, which holds no
 // conflict.
-func (x *slotIndex[N]) composedConflict(at oneSlot, rel *schema.Relation, inst, parent N) (N, string) {
+func (x *slotIndex[N]) composedConflict(at oneSlot, rel schema.Relation, inst, parent N) (N, string) {
 	var none N
 	occupants := parent.nodeComposed()[rel.Name()]
 	if !rel.IsMany() {
@@ -288,7 +288,7 @@ func composedDuplicate[N structureNode[N]](r *structureRules, x *slotIndex[N], i
 	}
 	slotRefused := r.slotRefused(at, relation)
 	rel, why := compositionOf(r.s, inst.nodeType(), at.source, relation)
-	if rel == nil {
+	if rel.IsZero() {
 		if !slotRefused || declaresComposition(r.s, at.source, relation) {
 			refuse(why)
 		}
@@ -309,7 +309,7 @@ func composedDuplicate[N structureNode[N]](r *structureRules, x *slotIndex[N], i
 
 // childStates reports whether the key properties of a child in the slot of parent
 // at at under rel state inst's key. target is rel's target type.
-func (x *slotIndex[N]) childStates(r *structureRules, at oneSlot, rel *schema.Relation, target *schema.Type, inst, parent N) bool {
+func (x *slotIndex[N]) childStates(r *structureRules, at oneSlot, rel schema.Relation, target schema.Type, inst, parent N) bool {
 	slot := oneSlot{source: at.source, key: at.key, relation: rel.Name()}
 	stated, indexed := x.stated[slot]
 	if !indexed {
@@ -325,24 +325,24 @@ func (x *slotIndex[N]) childStates(r *structureRules, at oneSlot, rel *schema.Re
 }
 
 // compositionOf returns the composition a composed duplicate of type inst under
-// a parent of type parent sits in, or nil and the reason no composition there
+// a parent of type parent sits in, or the zero Relation and the reason no composition there
 // holds one: relation is a composition parent declares, whose target is inst.
 // parent must resolve under s.
-func compositionOf(s *schema.Schema, inst, parent schema.TypeID, relation string) (*schema.Relation, string) {
+func compositionOf(s schema.Schema, inst, parent schema.TypeID, relation string) (schema.Relation, string) {
 	pt, _ := s.TypeByID(parent)
 	rel, ok := pt.Relation(relation)
 	if !ok || rel.Kind() != schema.RelationComposition {
-		return nil, fmt.Sprintf("names %s, which %s does not declare as a composition", diag.QuoteValue(relation), parent)
+		return schema.Relation{}, fmt.Sprintf("names %s, which %s does not declare as a composition", diag.QuoteValue(relation), parent)
 	}
 	if inst != rel.TargetID() {
-		return nil, fmt.Sprintf("is of type %s; the composition %q declares %s", inst, relation, rel.TargetID())
+		return schema.Relation{}, fmt.Sprintf("is of type %s; the composition %q declares %s", inst, relation, rel.TargetID())
 	}
 	return rel, ""
 }
 
 // declaresComposition reports whether the type id resolves to under s
 // declares relation as a composition.
-func declaresComposition(s *schema.Schema, id schema.TypeID, relation string) bool {
+func declaresComposition(s schema.Schema, id schema.TypeID, relation string) bool {
 	t, ok := s.TypeByID(id)
 	if !ok {
 		return false
@@ -354,7 +354,7 @@ func declaresComposition(s *schema.Schema, id schema.TypeID, relation string) bo
 // rootIneligibility names the package doc's "Root type eligibility" rule that
 // keeps id from holding a root under s, with Add's code for it, or returns ""
 // when it can hold one or s cannot resolve it.
-func rootIneligibility(s *schema.Schema, id schema.TypeID) (diag.Code, string) {
+func rootIneligibility(s schema.Schema, id schema.TypeID) (diag.Code, string) {
 	t, ok := s.TypeByID(id)
 	if !ok {
 		return diag.Code{}, ""
@@ -381,7 +381,7 @@ func rootIneligibility(s *schema.Schema, id schema.TypeID) (diag.Code, string) {
 // does not resolve is the identity rule's to report. It reports whether it
 // refused the slot itself: its name, or the children its multiplicity or a
 // sibling's key leaves no duplicate's conflict to resolve against.
-func checkSlot[N structureNode[N]](r *structureRules, t *schema.Type, parent N, relName string, children []N) bool {
+func checkSlot[N structureNode[N]](r *structureRules, t schema.Type, parent N, relName string, children []N) bool {
 	rel, ok := t.Relation(relName)
 	if !ok || rel.Kind() != schema.RelationComposition {
 		parentName := schema.TagForm(r.s, parent.nodeType())
@@ -427,7 +427,7 @@ func checkSlot[N structureNode[N]](r *structureRules, t *schema.Type, parent N, 
 // as [Graph.Add] refuses them, and reports whether it refused any. A keyless part
 // has no key to repeat, and a child of another type, or whose stored key the key
 // rule refuses, has none to compare.
-func siblingKeys[N structureNode[N]](r *structureRules, parent N, rel *schema.Relation, children []N) bool {
+func siblingKeys[N structureNode[N]](r *structureRules, parent N, rel schema.Relation, children []N) bool {
 	if !rel.IsMany() || len(children) < 2 {
 		return false
 	}
@@ -475,7 +475,7 @@ func siblingKeys[N structureNode[N]](r *structureRules, parent N, rel *schema.Re
 // refused one is no duplicate, and owns no slot there. It states the address its key properties name, and
 // refusedSlots, the root's slots [checkSlot] refused, are unheld at both. No rule
 // judges the records at an address two roots stand at.
-func address[N structureNode[N]](r *structureRules, t *schema.Type, root N, refusedSlots []string) {
+func address[N structureNode[N]](r *structureRules, t schema.Type, root N, refusedSlots []string) {
 	id, key := root.nodeType(), root.nodeKey()
 	if r.addresses == nil {
 		r.addresses = make(map[oneSlot]bool)
@@ -526,7 +526,7 @@ func address[N structureNode[N]](r *structureRules, t *schema.Type, root N, refu
 
 // statedKey returns the canonical key the key properties of an instance of t
 // state, or false where one is absent, null or no scalar [ParseKey] reads back.
-func (r *structureRules) statedKey(t *schema.Type, id schema.TypeID, props immutable.Properties) (string, bool) {
+func (r *structureRules) statedKey(t schema.Type, id schema.TypeID, props immutable.Properties) (string, bool) {
 	if !t.HasPrimaryKey() {
 		return "", false
 	}
@@ -573,7 +573,7 @@ func (r *structureRules) slotRefused(at oneSlot, relation string) bool {
 // keyless part's key to scalars [ParseKey] reads back. An address the data
 // contradicts is a forged address: an edge to it writes a foreign key that
 // reads back addressing another instance, or none.
-func (r *structureRules) key(position string, t *schema.Type, id schema.TypeID, key immutable.Key, props immutable.Properties) {
+func (r *structureRules) key(position string, t schema.Type, id schema.TypeID, key immutable.Key, props immutable.Properties) {
 	if err := checkStoredKey(t, key, props.Get, r.canon); err != nil {
 		name := schema.TagForm(r.s, id)
 		r.c.Collect(diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_PK,
@@ -586,7 +586,7 @@ func (r *structureRules) key(position string, t *schema.Type, id schema.TypeID, 
 // names refuses a stored property name t does not declare, own or inherited.
 // The validator stores values under declared names alone, and [Graph.Add]
 // refuses any other.
-func (r *structureRules) names(position string, t *schema.Type, id schema.TypeID, key immutable.Key, props immutable.Properties) {
+func (r *structureRules) names(position string, t schema.Type, id schema.TypeID, key immutable.Key, props immutable.Properties) {
 	for _, name := range undeclaredNames(props, func(n string) bool { _, ok := t.Property(n); return ok }) {
 		r.refuse(diag.E_UNKNOWN_FIELD, fmt.Sprintf("%s %s[%s] holds property %s, which it does not declare",
 			position, id, diag.ValueText(key.String()), diag.QuoteValue(name)))
@@ -693,7 +693,7 @@ func (r *structureRules) unresolvedReason(reason string, targetKey immutable.Key
 
 // associationTarget returns the declared target of relation, an association of
 // source under s, or the zero identity when s declares no such association.
-func associationTarget(s *schema.Schema, source schema.TypeID, relation string) schema.TypeID {
+func associationTarget(s schema.Schema, source schema.TypeID, relation string) schema.TypeID {
 	t, ok := s.TypeByID(source)
 	if !ok {
 		return schema.TypeID{}
@@ -841,7 +841,7 @@ func recordFacts(r *structureRules, parts SnapshotParts) {
 
 // requiredUnder reports whether relation is a required association of source
 // under s, as [Graph.Add] derives an unresolved record's Required.
-func requiredUnder(s *schema.Schema, source schema.TypeID, relation string) bool {
+func requiredUnder(s schema.Schema, source schema.TypeID, relation string) bool {
 	t, ok := s.TypeByID(source)
 	if !ok {
 		return false
@@ -901,7 +901,7 @@ func (r *structureRules) oneOverflow() {
 }
 
 // keyArity returns the number of primary-key components t declares.
-func keyArity(t *schema.Type) int {
+func keyArity(t schema.Type) int {
 	n := 0
 	for range t.PrimaryKeys() {
 		n++

@@ -59,7 +59,7 @@ func newInstanceBuilder(g *Graph, c *diag.Collector) *instanceBuilder {
 // Properties are canonicalized here beside the key, as the rebuild path's
 // canonicalizer.instance does, so a graph built through Add holds the same
 // bytes for a value as one rebuilt from parts.
-func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, key immutable.Key, stage *[]stagedEdge) *Instance {
+func (b *instanceBuilder) build(typ schema.Type, inst instance.ValidInstance, key immutable.Key, stage *[]stagedEdge) Instance {
 	b.attested = b.attested && inst.Validated()
 	graphInst := newInstance(b.g.instanceTagForm(inst.TypeID()), inst.TypeID(), key,
 		b.g.canon.properties(inst.TypeID(), inst.Properties()),
@@ -106,7 +106,7 @@ func (b *instanceBuilder) build(typ *schema.Type, inst *instance.ValidInstance, 
 // The map form is materialized only for a staging walk, which needs it for the
 // absent-required pass. A composed child's edges are checked but never
 // installed, so its walk reads the iterator and allocates nothing.
-func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, typeName string, stage *[]stagedEdge) {
+func (b *instanceBuilder) edges(typ schema.Type, inst instance.ValidInstance, typeName string, stage *[]stagedEdge) {
 	if stage == nil {
 		for relationName, edgeData := range inst.Edges() {
 			if rel, ok := b.checkEdgeRelation(typ, typeName, relationName, edgeData); ok {
@@ -126,7 +126,7 @@ func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, 
 		b.checkTargetKeys(typeName, rel, edgeData)
 		isRequired := !rel.IsOptional()
 		targetName := b.g.instanceTagForm(rel.TargetID())
-		for target := range edgeData.TargetsIter() {
+		for target := range edgeData.Targets() {
 			*stage = append(*stage, stagedEdge{
 				relation:       relationName,
 				jsonField:      rel.FieldName(),
@@ -171,28 +171,28 @@ func (b *instanceBuilder) edges(typ *schema.Type, inst *instance.ValidInstance, 
 // as an association, and a (one) slot may carry at most one target. It reports
 // the relation when the slot is sound enough to install.
 func (b *instanceBuilder) checkEdgeRelation(
-	typ *schema.Type,
+	typ schema.Type,
 	typeName string,
 	relationName string,
-	edgeData *instance.ValidEdgeData,
-) (*schema.Relation, bool) {
+	edgeData instance.ValidEdgeData,
+) (schema.Relation, bool) {
 	rel, ok := typ.Relation(relationName)
 	if !ok {
 		b.c.Collect(undeclaredRelation(typeName, relationName,
 			fmt.Sprintf("type %q declares no association %s", typeName, diag.QuoteValue(relationName))))
-		return nil, false
+		return schema.Relation{}, false
 	}
 	if rel.Kind() != schema.RelationAssociation {
 		b.c.Collect(undeclaredRelation(typeName, relationName,
 			fmt.Sprintf("relation %q on type %q is declared as a composition, not an association",
 				relationName, typeName)))
-		return nil, false
+		return schema.Relation{}, false
 	}
 	if rel.IsMany() {
 		return rel, true
 	}
 	targets := 0
-	for range edgeData.TargetsIter() {
+	for range edgeData.Targets() {
 		targets++
 	}
 	if targets > 1 {
@@ -201,15 +201,15 @@ func (b *instanceBuilder) checkEdgeRelation(
 				relationName, typeName, targets)).
 			WithDetail(diag.DetailKeyTypeName, typeName).
 			WithDetail(diag.DetailKeyRelationName, relationName).Build())
-		return nil, false
+		return schema.Relation{}, false
 	}
 	return rel, true
 }
 
 // checkEdgeProperties reports each edge property name the association does not
 // declare, on every target of the slot.
-func (b *instanceBuilder) checkEdgeProperties(typeName string, rel *schema.Relation, edgeData *instance.ValidEdgeData) {
-	for target := range edgeData.TargetsIter() {
+func (b *instanceBuilder) checkEdgeProperties(typeName string, rel schema.Relation, edgeData instance.ValidEdgeData) {
+	for target := range edgeData.Targets() {
 		for _, name := range undeclaredNames(target.Properties(), func(n string) bool { _, ok := rel.Property(n); return ok }) {
 			b.c.Collect(diag.NewIssue(diag.Error, diag.E_UNKNOWN_EDGE_FIELD,
 				fmt.Sprintf("association %q on type %q declares no edge property %s", rel.Name(), typeName, diag.QuoteValue(name))).
@@ -224,13 +224,13 @@ func (b *instanceBuilder) checkEdgeProperties(typeName string, rel *schema.Relat
 // target type's primary key, or whose component [unreadableComponent] refuses. No instance
 // can ever carry such a key, so the record would stay unresolved for the life
 // of the graph.
-func (b *instanceBuilder) checkTargetKeys(typeName string, rel *schema.Relation, edgeData *instance.ValidEdgeData) {
+func (b *instanceBuilder) checkTargetKeys(typeName string, rel schema.Relation, edgeData instance.ValidEdgeData) {
 	target, ok := b.g.schema.TypeByID(rel.TargetID())
 	if !ok {
 		return
 	}
 	declared := keyArity(target)
-	for t := range edgeData.TargetsIter() {
+	for t := range edgeData.Targets() {
 		var msg string
 		if n := t.TargetKey().Len(); n != declared {
 			msg = fmt.Sprintf("association %q on type %q carries a %d-part target key; the target declares %d",
@@ -250,10 +250,10 @@ func (b *instanceBuilder) checkTargetKeys(typeName string, rel *schema.Relation,
 // slot checks one composition slot — its cardinality and the shape of what
 // arrived in it — and builds every child it admits.
 func (b *instanceBuilder) slot(
-	graphParent *Instance,
+	graphParent Instance,
 	parentName string,
 	relationName string,
-	rel *schema.Relation,
+	rel schema.Relation,
 	composedValue immutable.Value,
 ) {
 	switch v := composedValue.Unwrap().(type) {
@@ -263,15 +263,15 @@ func (b *instanceBuilder) slot(
 		}
 		seen := make(map[string]int, v.Len())
 		for i := range v.Len() {
-			child, ok := v.Get(i).Unwrap().(*instance.ValidInstance)
-			if !ok || child == nil {
+			child, ok := v.Get(i).Unwrap().(instance.ValidInstance)
+			if !ok || child.IsZero() {
 				b.c.Collect(nonInstanceChild(parentName, relationName, rel, i))
 				continue
 			}
 			b.child(graphParent, parentName, relationName, rel, child, i, seen)
 		}
-	case *instance.ValidInstance:
-		if v == nil {
+	case instance.ValidInstance:
+		if v.IsZero() {
 			b.c.Collect(nonInstanceChild(parentName, relationName, rel, 0))
 			return
 		}
@@ -287,11 +287,11 @@ func (b *instanceBuilder) slot(
 // builds it and attaches it to the parent under construction. seen accumulates
 // the sibling keys already met, and is nil for a slot that cannot hold siblings.
 func (b *instanceBuilder) child(
-	graphParent *Instance,
+	graphParent Instance,
 	parentName string,
 	relationName string,
-	rel *schema.Relation,
-	child *instance.ValidInstance,
+	rel schema.Relation,
+	child instance.ValidInstance,
 	index int,
 	seen map[string]int,
 ) {
@@ -350,7 +350,7 @@ func (b *instanceBuilder) child(
 // not a graph-category error — and why no test drives it. Dropping the subtree
 // in silence was the alternative, and that is the regression it exists to
 // prevent.
-func unresolvableChildType(child *instance.ValidInstance) diag.Issue {
+func unresolvableChildType(child instance.ValidInstance) diag.Issue {
 	return diag.NewIssue(diag.Fatal, diag.E_INTERNAL,
 		fmt.Sprintf("composed child type %s is not in the schema's import closure", child.TypeID())).
 		WithDetail(diag.DetailKeyTypeName, child.TypeName()).
@@ -362,7 +362,7 @@ func unresolvableChildType(child *instance.ValidInstance) diag.Issue {
 func (g *Graph) composedOverflowIssue(
 	parentName string,
 	relationName string,
-	rel *schema.Relation,
+	rel schema.Relation,
 	children immutable.Slice,
 ) diag.Issue {
 	builder := diag.NewIssue(diag.Error, diag.E_DUPLICATE_COMPOSED_PK,
@@ -383,7 +383,7 @@ func (g *Graph) composedOverflowIssue(
 func (g *Graph) siblingDuplicateIssue(
 	parentName string,
 	relationName string,
-	rel *schema.Relation,
+	rel schema.Relation,
 	keyStr string,
 	firstIndex, index int,
 ) diag.Issue {
@@ -406,9 +406,8 @@ func undeclaredRelation(typeName, relationName, msg string) diag.Issue {
 }
 
 // nonInstanceChild builds the diagnostic for a composition slot holding
-// something that is not an instance — a typed nil among them, which
-// dereferenced rawly before this guard existed.
-func nonInstanceChild(typeName, relationName string, rel *schema.Relation, index int) diag.Issue {
+// something that is not an instance — a zero entry among them.
+func nonInstanceChild(typeName, relationName string, rel schema.Relation, index int) diag.Issue {
 	return diag.NewIssue(diag.Error, diag.E_GRAPH_INVALID_COMPOSITION,
 		fmt.Sprintf("composition %q on type %q: child %d is not an instance",
 			relationName, typeName, index)).

@@ -17,7 +17,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func loadT(t *testing.T, src string) *schema.Schema {
+func loadT(t *testing.T, src string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), src, "p.yammm")
 	if res.Err() != nil {
@@ -271,9 +271,9 @@ func TestValidate_BatchWideErrorBlamesNoRow(t *testing.T) {
 // immutability, so a caller that reuses its map cannot change the instance.
 func TestNewValidInstance_DoesNotAliasCallerMaps(t *testing.T) {
 	t.Parallel()
-	edges := map[string]*instance.ValidEdgeData{"AT": instance.NewValidEdgeData(nil)}
+	edges := map[string]instance.ValidEdgeData{"AT": instance.NewValidEdgeData(nil)}
 	composed := map[string]immutable.Value{}
-	vi := instance.NewValidInstance("T", schema.TypeID{}, immutable.Key{}, immutable.Properties{}, edges, composed, nil)
+	vi := instance.NewValidInstance("T", schema.TypeID{}, immutable.Key{}, immutable.Properties{}, edges, composed, location.Provenance{})
 	delete(edges, "AT")
 	if _, ok := vi.Edge("AT"); !ok {
 		t.Error("deleting from the caller's map removed the instance's edge")
@@ -288,12 +288,12 @@ func TestNewValidInstance_DoesNotAliasCallerMaps(t *testing.T) {
 	}
 }
 
-// A nil *ValidInstance — the documented shape of a failed entry in Validate's
+// A nil ValidInstance — the documented shape of a failed entry in Validate's
 // slice — answers its accessors as ValidEdgeData does, instead of panicking.
-func TestValidInstance_NilReceiverIsSafe(t *testing.T) {
+func TestValidInstance_ZeroHandleIsSafe(t *testing.T) {
 	t.Parallel()
-	var vi *instance.ValidInstance
-	if vi.TypeName() != "" || vi.Validated() || vi.Provenance() != nil {
+	var vi instance.ValidInstance
+	if vi.TypeName() != "" || vi.Validated() || !vi.Provenance().IsZero() {
 		t.Error("a nil instance must answer zero values")
 	}
 	if vi.TypeID() != (schema.TypeID{}) || vi.PrimaryKey().Len() != 0 || vi.Properties().Len() != 0 {

@@ -10,7 +10,13 @@ import (
 
 // Type represents a type definition in a schema.
 // Types are immutable after schema completion.
-type Type struct {
+type Type struct{ *typeState }
+
+// IsZero reports whether the handle names no record.
+func (t Type) IsZero() bool { return t.typeState == nil }
+
+// typeState is the record a [Type] names.
+type typeState struct {
 	name       string
 	schemaName string // owning schema's name for cross-schema display
 	sourceID   location.SourceID
@@ -21,19 +27,19 @@ type Type struct {
 	isPart     bool
 
 	// Own members (declared in this type body)
-	properties   []*Property
-	associations []*Relation
-	compositions []*Relation
-	invariants   []*Invariant
-	annotations  []*Annotation // type-level @@name(args) members, in source order
+	properties   []Property
+	associations []Relation
+	compositions []Relation
+	invariants   []Invariant
+	annotations  []Annotation // type-level @@name(args) members, in source order
 
 	// Computed at completion (linearized order)
-	allProperties   []*Property
-	primaryKeys     []*Property
-	allAssociations []*Relation
-	allCompositions []*Relation
-	allInvariants   []*Invariant
-	allAnnotations  []*Annotation // own type-level annotations then inherited, deduped keep-first
+	allProperties   []Property
+	primaryKeys     []Property
+	allAssociations []Relation
+	allCompositions []Relation
+	allInvariants   []Invariant
+	allAnnotations  []Annotation // own type-level annotations then inherited, deduped keep-first
 
 	// Inheritance
 	inherits   []TypeRef         // declared extends clause
@@ -41,9 +47,9 @@ type Type struct {
 	subTypes   []ResolvedTypeRef // LOCAL subtypes only; completeTypes records a subtype only where its supertype is in the same schema (a cross-schema descendant is invisible here — the known limit concreteEmitters and the @index redundancy rule depend on)
 
 	// O(1) lookup indices
-	propByName map[string]*Property
-	relByName  map[string]*Relation // DSL name, "WORKS_AT"
-	relByField map[string]*Relation // field name, "works_at"
+	propByName map[string]Property
+	relByName  map[string]Relation // DSL name, "WORKS_AT"
+	relByField map[string]Relation // field name, "works_at"
 
 	// suppressedAnns records, per property name, the annotation names this
 	// type's inheritance DROPPED — a re-declaration that did not re-state what
@@ -68,56 +74,56 @@ func newType(
 	span location.Span,
 	doc string,
 	isAbstract, isPart bool,
-) *Type {
-	return &Type{
+) Type {
+	return Type{&typeState{
 		name:       name,
 		sourceID:   sourceID,
 		span:       span,
 		doc:        doc,
 		isAbstract: isAbstract,
 		isPart:     isPart,
-		propByName: make(map[string]*Property),
-		relByName:  make(map[string]*Relation),
-		relByField: make(map[string]*Relation),
-	}
+		propByName: make(map[string]Property),
+		relByName:  make(map[string]Relation),
+		relByField: make(map[string]Relation),
+	}}
 }
 
 // Name returns the type name.
-func (t *Type) Name() string {
+func (t Type) Name() string {
 	return t.name
 }
 
 // ID returns the canonical TypeID for this type.
-func (t *Type) ID() TypeID {
+func (t Type) ID() TypeID {
 	return TypeID{schemaPath: t.sourceID, name: t.name}
 }
 
 // SourceID returns the source identity of the schema containing this type.
-func (t *Type) SourceID() location.SourceID {
+func (t Type) SourceID() location.SourceID {
 	return t.sourceID
 }
 
 // SchemaName returns the name of the schema containing this type.
 // Used for cross-schema display when no import alias exists.
-func (t *Type) SchemaName() string {
+func (t Type) SchemaName() string {
 	return t.schemaName
 }
 
 // Span returns the source location of this type declaration.
-func (t *Type) Span() location.Span {
+func (t Type) Span() location.Span {
 	return t.span
 }
 
 // NameSpan returns the precise source location of just the type name.
 // This is more accurate than Span() for go-to-definition operations.
 // Returns a zero span if not set (e.g., for programmatically-created types).
-func (t *Type) NameSpan() location.Span {
+func (t Type) NameSpan() location.Span {
 	return t.nameSpan
 }
 
 // setNameSpan sets the precise span of the type name.
 // This must be called before the type is sealed.
-func (t *Type) setNameSpan(span location.Span) {
+func (t Type) setNameSpan(span location.Span) {
 	if t.sealed {
 		panic("cannot modify sealed type")
 	}
@@ -125,35 +131,34 @@ func (t *Type) setNameSpan(span location.Span) {
 }
 
 // Documentation returns the documentation comment, if any.
-func (t *Type) Documentation() string {
+func (t Type) Documentation() string {
 	return t.doc
 }
 
 // IsAbstract reports whether this type is abstract.
 // Abstract types cannot be directly instantiated.
-func (t *Type) IsAbstract() bool {
+func (t Type) IsAbstract() bool {
 	return t.isAbstract
 }
 
 // IsPart reports whether this type is a part type.
 // Part types can only be instantiated as compositions.
-func (t *Type) IsPart() bool {
+func (t Type) IsPart() bool {
 	return t.isPart
 }
 
 // Property returns the property with the given name (own or inherited), if it
-// exists. The lookup is exact-case, as annotation arguments are resolved;
-// invariant expressions resolve names case-insensitively, which
-// [Type.CanonicalPropertyName] serves.
-func (t *Type) Property(name string) (*Property, bool) {
+// exists. The lookup is exact-case, as annotation arguments are resolved. An input
+// key resolves case-insensitively through [Type.CanonicalPropertyName].
+func (t Type) Property(name string) (Property, bool) {
 	p, ok := t.propByName[name]
 	return p, ok
 }
 
 // Properties returns an iterator over properties declared in this type body.
 // Does NOT include inherited properties; use AllProperties for that.
-func (t *Type) Properties() iter.Seq[*Property] {
-	return func(yield func(*Property) bool) {
+func (t Type) Properties() iter.Seq[Property] {
+	return func(yield func(Property) bool) {
 		for _, p := range t.properties {
 			if !yield(p) {
 				return
@@ -162,15 +167,10 @@ func (t *Type) Properties() iter.Seq[*Property] {
 	}
 }
 
-// PropertiesSlice returns a defensive copy of properties declared in this type.
-func (t *Type) PropertiesSlice() []*Property {
-	return slices.Clone(t.properties)
-}
-
 // AllProperties returns an iterator over all properties (own and inherited).
 // Properties are returned in linearized order: own first, then inherited.
-func (t *Type) AllProperties() iter.Seq[*Property] {
-	return func(yield func(*Property) bool) {
+func (t Type) AllProperties() iter.Seq[Property] {
+	return func(yield func(Property) bool) {
 		for _, p := range t.allProperties {
 			if !yield(p) {
 				return
@@ -179,14 +179,9 @@ func (t *Type) AllProperties() iter.Seq[*Property] {
 	}
 }
 
-// AllPropertiesSlice returns a defensive copy of all properties (own and inherited).
-func (t *Type) AllPropertiesSlice() []*Property {
-	return slices.Clone(t.allProperties)
-}
-
 // PrimaryKeys returns an iterator over primary key properties.
-func (t *Type) PrimaryKeys() iter.Seq[*Property] {
-	return func(yield func(*Property) bool) {
+func (t Type) PrimaryKeys() iter.Seq[Property] {
+	return func(yield func(Property) bool) {
 		for _, p := range t.primaryKeys {
 			if !yield(p) {
 				return
@@ -195,15 +190,10 @@ func (t *Type) PrimaryKeys() iter.Seq[*Property] {
 	}
 }
 
-// PrimaryKeysSlice returns a defensive copy of primary key properties.
-func (t *Type) PrimaryKeysSlice() []*Property {
-	return slices.Clone(t.primaryKeys)
-}
-
 // primaryKeyCount returns the number of EXTRACTED primary keys without copying
 // the slice. Unexported and non-allocating, for the completer's per-type checks
-// on the load path; external callers use [Type.PrimaryKeysSlice].
-func (t *Type) primaryKeyCount() int {
+// on the load path; external callers use [Type.PrimaryKeys].
+func (t Type) primaryKeyCount() int {
 	return len(t.primaryKeys)
 }
 
@@ -213,7 +203,7 @@ func (t *Type) primaryKeyCount() int {
 // from primaryKeys. Where this holds the key SHAPE is not yet settled: the user
 // intended a composite that currently reads as sole, so rules that turn on
 // soleness must defer rather than fire on the transient count.
-func (t *Type) hasRejectedPrimary() bool {
+func (t Type) hasRejectedPrimary() bool {
 	declared := 0
 	for _, p := range t.allProperties {
 		if p.IsPrimaryKey() {
@@ -224,14 +214,14 @@ func (t *Type) hasRejectedPrimary() bool {
 }
 
 // HasPrimaryKey reports whether this type has at least one primary key property.
-func (t *Type) HasPrimaryKey() bool {
+func (t Type) HasPrimaryKey() bool {
 	return len(t.primaryKeys) > 0
 }
 
 // Relation returns the relation with the given DSL name (own or inherited), if
 // it exists. Uses O(1) lookup. [Type.RelationByField] is the same lookup on
 // the field name instance data and expressions use.
-func (t *Type) Relation(name string) (*Relation, bool) {
+func (t Type) Relation(name string) (Relation, bool) {
 	r, ok := t.relByName[name]
 	return r, ok
 }
@@ -240,14 +230,14 @@ func (t *Type) Relation(name string) (*Relation, bool) {
 // [Relation.FieldName] is fieldName, if one exists. The lookup is exact: a
 // field name is the DSL name in lower case, so a caller that folds an input
 // key lowercases it first.
-func (t *Type) RelationByField(fieldName string) (*Relation, bool) {
+func (t Type) RelationByField(fieldName string) (Relation, bool) {
 	r, ok := t.relByField[fieldName]
 	return r, ok
 }
 
 // Associations returns an iterator over associations declared in this type body.
-func (t *Type) Associations() iter.Seq[*Relation] {
-	return func(yield func(*Relation) bool) {
+func (t Type) Associations() iter.Seq[Relation] {
+	return func(yield func(Relation) bool) {
 		for _, r := range t.associations {
 			if !yield(r) {
 				return
@@ -256,14 +246,9 @@ func (t *Type) Associations() iter.Seq[*Relation] {
 	}
 }
 
-// AssociationsSlice returns a defensive copy of associations declared in this type.
-func (t *Type) AssociationsSlice() []*Relation {
-	return slices.Clone(t.associations)
-}
-
 // AllAssociations returns an iterator over all associations (own and inherited).
-func (t *Type) AllAssociations() iter.Seq[*Relation] {
-	return func(yield func(*Relation) bool) {
+func (t Type) AllAssociations() iter.Seq[Relation] {
+	return func(yield func(Relation) bool) {
 		for _, r := range t.allAssociations {
 			if !yield(r) {
 				return
@@ -272,14 +257,9 @@ func (t *Type) AllAssociations() iter.Seq[*Relation] {
 	}
 }
 
-// AllAssociationsSlice returns a defensive copy of all associations.
-func (t *Type) AllAssociationsSlice() []*Relation {
-	return slices.Clone(t.allAssociations)
-}
-
 // Compositions returns an iterator over compositions declared in this type body.
-func (t *Type) Compositions() iter.Seq[*Relation] {
-	return func(yield func(*Relation) bool) {
+func (t Type) Compositions() iter.Seq[Relation] {
+	return func(yield func(Relation) bool) {
 		for _, r := range t.compositions {
 			if !yield(r) {
 				return
@@ -288,14 +268,9 @@ func (t *Type) Compositions() iter.Seq[*Relation] {
 	}
 }
 
-// CompositionsSlice returns a defensive copy of compositions declared in this type.
-func (t *Type) CompositionsSlice() []*Relation {
-	return slices.Clone(t.compositions)
-}
-
 // AllCompositions returns an iterator over all compositions (own and inherited).
-func (t *Type) AllCompositions() iter.Seq[*Relation] {
-	return func(yield func(*Relation) bool) {
+func (t Type) AllCompositions() iter.Seq[Relation] {
+	return func(yield func(Relation) bool) {
 		for _, r := range t.allCompositions {
 			if !yield(r) {
 				return
@@ -304,14 +279,9 @@ func (t *Type) AllCompositions() iter.Seq[*Relation] {
 	}
 }
 
-// AllCompositionsSlice returns a defensive copy of all compositions.
-func (t *Type) AllCompositionsSlice() []*Relation {
-	return slices.Clone(t.allCompositions)
-}
-
 // Invariants returns an iterator over invariants declared on this type.
-func (t *Type) Invariants() iter.Seq[*Invariant] {
-	return func(yield func(*Invariant) bool) {
+func (t Type) Invariants() iter.Seq[Invariant] {
+	return func(yield func(Invariant) bool) {
 		for _, i := range t.invariants {
 			if !yield(i) {
 				return
@@ -320,14 +290,9 @@ func (t *Type) Invariants() iter.Seq[*Invariant] {
 	}
 }
 
-// InvariantsSlice returns a defensive copy of invariants.
-func (t *Type) InvariantsSlice() []*Invariant {
-	return slices.Clone(t.invariants)
-}
-
 // AllInvariants returns an iterator over all invariants (own and inherited).
-func (t *Type) AllInvariants() iter.Seq[*Invariant] {
-	return func(yield func(*Invariant) bool) {
+func (t Type) AllInvariants() iter.Seq[Invariant] {
+	return func(yield func(Invariant) bool) {
 		for _, i := range t.allInvariants {
 			if !yield(i) {
 				return
@@ -336,23 +301,18 @@ func (t *Type) AllInvariants() iter.Seq[*Invariant] {
 	}
 }
 
-// AllInvariantsSlice returns a defensive copy of all invariants (own and inherited).
-func (t *Type) AllInvariantsSlice() []*Invariant {
-	return slices.Clone(t.allInvariants)
-}
-
-// AnnotationsSlice returns a defensive copy of the type-level annotations
-// declared in this type body (@@name(args) members). Does NOT include
-// inherited annotations; use [Type.AllAnnotations] for that.
-func (t *Type) AnnotationsSlice() []*Annotation {
-	return slices.Clone(t.annotations)
+// Annotations returns an iterator over the type-level annotations declared in
+// this type body (@@name(args) members). Does NOT include inherited
+// annotations; use [Type.AllAnnotations] for that.
+func (t Type) Annotations() iter.Seq[Annotation] {
+	return slices.Values(t.annotations)
 }
 
 // AllAnnotations returns an iterator over all type-level annotations (own and
 // inherited) in linearized order: own first, then inherited, with exact
 // duplicates deduplicated keep-first.
-func (t *Type) AllAnnotations() iter.Seq[*Annotation] {
-	return func(yield func(*Annotation) bool) {
+func (t Type) AllAnnotations() iter.Seq[Annotation] {
+	return func(yield func(Annotation) bool) {
 		for _, a := range t.allAnnotations {
 			if !yield(a) {
 				return
@@ -361,14 +321,8 @@ func (t *Type) AllAnnotations() iter.Seq[*Annotation] {
 	}
 }
 
-// AllAnnotationsSlice returns a defensive copy of all type-level annotations
-// (own and inherited).
-func (t *Type) AllAnnotationsSlice() []*Annotation {
-	return slices.Clone(t.allAnnotations)
-}
-
 // Inherits returns an iterator over the declared extends clause (syntactic refs).
-func (t *Type) Inherits() iter.Seq[TypeRef] {
+func (t Type) Inherits() iter.Seq[TypeRef] {
 	return func(yield func(TypeRef) bool) {
 		for _, ref := range t.inherits {
 			if !yield(ref) {
@@ -378,14 +332,9 @@ func (t *Type) Inherits() iter.Seq[TypeRef] {
 	}
 }
 
-// InheritsSlice returns a defensive copy of the extends clause.
-func (t *Type) InheritsSlice() []TypeRef {
-	return slices.Clone(t.inherits)
-}
-
 // SuperTypes returns an iterator over linearized ancestors.
 // Order is DFS left-to-right with keep-first deduplication.
-func (t *Type) SuperTypes() iter.Seq[ResolvedTypeRef] {
+func (t Type) SuperTypes() iter.Seq[ResolvedTypeRef] {
 	return func(yield func(ResolvedTypeRef) bool) {
 		for _, ref := range t.superTypes {
 			if !yield(ref) {
@@ -395,11 +344,6 @@ func (t *Type) SuperTypes() iter.Seq[ResolvedTypeRef] {
 	}
 }
 
-// SuperTypesSlice returns a defensive copy of linearized ancestors.
-func (t *Type) SuperTypesSlice() []ResolvedTypeRef {
-	return slices.Clone(t.superTypes)
-}
-
 // SubTypes returns an iterator over this type's known subtypes, which are
 // LOCAL to the declaring schema. Completion records a subtype only when the
 // supertype lives in the schema being completed, so a concrete descendant
@@ -407,7 +351,7 @@ func (t *Type) SuperTypesSlice() []ResolvedTypeRef {
 // per-label output for every concrete descendant of an abstract type must walk
 // the closure ([Schema.Closure]) rather than rely on this iterator, or they
 // will silently skip cross-schema descendants.
-func (t *Type) SubTypes() iter.Seq[ResolvedTypeRef] {
+func (t Type) SubTypes() iter.Seq[ResolvedTypeRef] {
 	return func(yield func(ResolvedTypeRef) bool) {
 		for _, ref := range t.subTypes {
 			if !yield(ref) {
@@ -417,16 +361,9 @@ func (t *Type) SubTypes() iter.Seq[ResolvedTypeRef] {
 	}
 }
 
-// SubTypesSlice returns a defensive copy of known subtypes. As with
-// [Type.SubTypes], these are LOCAL to the declaring schema — see that method
-// for why a cross-schema descendant is absent and what to walk instead.
-func (t *Type) SubTypesSlice() []ResolvedTypeRef {
-	return slices.Clone(t.subTypes)
-}
-
 // IsSubTypeOf reports whether this type is a subtype of the given type.
 // Uses TypeID for cross-schema comparison.
-func (t *Type) IsSubTypeOf(id TypeID) bool {
+func (t Type) IsSubTypeOf(id TypeID) bool {
 	for _, st := range t.superTypes {
 		if st.id == id {
 			return true
@@ -438,7 +375,7 @@ func (t *Type) IsSubTypeOf(id TypeID) bool {
 // CanonicalPropertyName maps a lowercased property name to the type's declared
 // spelling, the case-folded half of [Type.Property]. The caller lowercases the
 // input key; the answer comes from an index built at seal.
-func (t *Type) CanonicalPropertyName(lower string) (string, bool) {
+func (t Type) CanonicalPropertyName(lower string) (string, bool) {
 	if t.canonicalMap != nil {
 		name, ok := t.canonicalMap[lower]
 		return name, ok
@@ -457,7 +394,7 @@ func (t *Type) CanonicalPropertyName(lower string) (string, bool) {
 
 // seal marks the type as immutable.
 // Called by the completer after type completion finishes.
-func (t *Type) seal() {
+func (t Type) seal() {
 	if t.sealed {
 		panic("type: sealed twice")
 	}
@@ -471,12 +408,12 @@ func (t *Type) seal() {
 }
 
 // isSealed reports whether the type has been sealed.
-func (t *Type) isSealed() bool {
+func (t Type) isSealed() bool {
 	return t.sealed
 }
 
 // setSchemaName sets the owning schema's name (called during completion).
-func (t *Type) setSchemaName(name string) {
+func (t Type) setSchemaName(name string) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -484,7 +421,7 @@ func (t *Type) setSchemaName(name string) {
 }
 
 // setProperties sets the declared properties (called during completion).
-func (t *Type) setProperties(properties []*Property) {
+func (t Type) setProperties(properties []Property) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -495,7 +432,7 @@ func (t *Type) setProperties(properties []*Property) {
 }
 
 // setAssociations sets the declared associations (called during completion).
-func (t *Type) setAssociations(associations []*Relation) {
+func (t Type) setAssociations(associations []Relation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -507,7 +444,7 @@ func (t *Type) setAssociations(associations []*Relation) {
 }
 
 // setCompositions sets the declared compositions (called during completion).
-func (t *Type) setCompositions(compositions []*Relation) {
+func (t Type) setCompositions(compositions []Relation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -519,7 +456,7 @@ func (t *Type) setCompositions(compositions []*Relation) {
 }
 
 // setInvariants sets the invariants (called during completion).
-func (t *Type) setInvariants(invariants []*Invariant) {
+func (t Type) setInvariants(invariants []Invariant) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -527,7 +464,7 @@ func (t *Type) setInvariants(invariants []*Invariant) {
 }
 
 // setAllInvariants sets all invariants including inherited (called during completion).
-func (t *Type) setAllInvariants(all []*Invariant) {
+func (t Type) setAllInvariants(all []Invariant) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -536,7 +473,7 @@ func (t *Type) setAllInvariants(all []*Invariant) {
 
 // setAnnotations sets the type-level annotations declared in this body
 // (called during completion).
-func (t *Type) setAnnotations(annotations []*Annotation) {
+func (t Type) setAnnotations(annotations []Annotation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -545,7 +482,7 @@ func (t *Type) setAnnotations(annotations []*Annotation) {
 
 // setAllAnnotations sets all type-level annotations including inherited
 // (called during completion).
-func (t *Type) setAllAnnotations(all []*Annotation) {
+func (t Type) setAllAnnotations(all []Annotation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -553,7 +490,7 @@ func (t *Type) setAllAnnotations(all []*Annotation) {
 }
 
 // setInherits sets the declared extends clause (called during completion).
-func (t *Type) setInherits(inherits []TypeRef) {
+func (t Type) setInherits(inherits []TypeRef) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -563,7 +500,7 @@ func (t *Type) setInherits(inherits []TypeRef) {
 // setSuppressedAnnotations records the annotations this type's inheritance
 // dropped, per property (called during completion). A nil map is the normal
 // case and is stored as-is.
-func (t *Type) setSuppressedAnnotations(m map[string]map[string]bool) {
+func (t Type) setSuppressedAnnotations(m map[string]map[string]bool) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -573,12 +510,12 @@ func (t *Type) setSuppressedAnnotations(m map[string]map[string]bool) {
 // suppressedAnnotations returns the set of annotation names this type's
 // inheritance dropped for the named property, or nil. Reading a nil map is
 // safe, so callers need no guard.
-func (t *Type) suppressedAnnotations(prop string) map[string]bool {
+func (t Type) suppressedAnnotations(prop string) map[string]bool {
 	return t.suppressedAnns[prop]
 }
 
 // setAllProperties sets all properties including inherited (called during completion).
-func (t *Type) setAllProperties(all []*Property) {
+func (t Type) setAllProperties(all []Property) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -590,7 +527,7 @@ func (t *Type) setAllProperties(all []*Property) {
 }
 
 // setPrimaryKeys sets the primary key properties (called during completion).
-func (t *Type) setPrimaryKeys(pks []*Property) {
+func (t Type) setPrimaryKeys(pks []Property) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -598,7 +535,7 @@ func (t *Type) setPrimaryKeys(pks []*Property) {
 }
 
 // setAllAssociations sets all associations including inherited (called during completion).
-func (t *Type) setAllAssociations(all []*Relation) {
+func (t Type) setAllAssociations(all []Relation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -610,7 +547,7 @@ func (t *Type) setAllAssociations(all []*Relation) {
 }
 
 // setAllCompositions sets all compositions including inherited (called during completion).
-func (t *Type) setAllCompositions(all []*Relation) {
+func (t Type) setAllCompositions(all []Relation) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -622,7 +559,7 @@ func (t *Type) setAllCompositions(all []*Relation) {
 }
 
 // setSuperTypes sets the linearized ancestors (called during completion).
-func (t *Type) setSuperTypes(supers []ResolvedTypeRef) {
+func (t Type) setSuperTypes(supers []ResolvedTypeRef) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}
@@ -630,7 +567,7 @@ func (t *Type) setSuperTypes(supers []ResolvedTypeRef) {
 }
 
 // setSubTypes sets the known subtypes (called during completion).
-func (t *Type) setSubTypes(subs []ResolvedTypeRef) {
+func (t Type) setSubTypes(subs []ResolvedTypeRef) {
 	if t.sealed {
 		panic("schema: cannot mutate sealed type")
 	}

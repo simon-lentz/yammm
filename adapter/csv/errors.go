@@ -29,8 +29,8 @@ var (
 
 // Sentinel errors for configuration and argument validation.
 var (
-	// ErrNilSnapshot is returned when a write method receives a nil graph snapshot.
-	ErrNilSnapshot = errors.New("csv adapter: nil graph snapshot")
+	// ErrZeroSnapshot is returned when a write method receives a zero graph snapshot.
+	ErrZeroSnapshot = errors.New("csv adapter: zero graph snapshot")
 
 	// ErrConfig marks a write refused for the reason [E_CSV_CONFIG] reports on
 	// the parse side: the adapter holds a setting it cannot use — a list

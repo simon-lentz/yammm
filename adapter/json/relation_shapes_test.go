@@ -41,7 +41,7 @@ type kinIDs struct{ company, badge, employee schema.TypeID }
 
 // kinSnapshot rebuilds one Employee and two Companies, then lets shape add
 // edges and composed children.
-func kinSnapshot(t *testing.T, shape func(p *graph.SnapshotParts, emp *graph.InstanceParts, ids kinIDs)) *graph.Snapshot {
+func kinSnapshot(t *testing.T, shape func(p *graph.SnapshotParts, emp *graph.InstanceParts, ids kinIDs)) graph.Snapshot {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), kinSchema, "kin.yammm")
 	if res.HasErrors() {

@@ -136,7 +136,7 @@ func TestOverlayPrecedenceOverDisk(t *testing.T) {
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
 	// Verify the overlay content was used, not disk content
-	require.NotNil(t, snapshot.Schema, "snapshot.Schema is nil")
+	require.False(t, snapshot.Schema.IsZero(), "snapshot.Schema is the zero Schema")
 	assert.Equal(t, "OverlayVersion", snapshot.Schema.Name(), "overlay should win over disk")
 
 	// Verify the type from overlay exists
@@ -202,7 +202,7 @@ func TestOverlayWithSymlinkPath_StillOverridesDisk(t *testing.T) {
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
 	// Verify the overlay content was used, not disk content
-	require.NotNil(t, snapshot.Schema, "snapshot.Schema is nil")
+	require.False(t, snapshot.Schema.IsZero(), "snapshot.Schema is the zero Schema")
 	assert.Equal(t, "OverlayVersion", snapshot.Schema.Name(), "overlay via symlink path should win")
 
 	// Verify the type from overlay exists
@@ -298,7 +298,7 @@ func TestSources_FailedLoadKeepsEverySourceItRead(t *testing.T) {
 	}, tmpDir, lsputil.PositionEncodingUTF16)
 	require.NoError(t, err, "a semantic load failure is not an Analyze error")
 	require.NotNil(t, snapshot)
-	require.Nil(t, snapshot.Schema, "the load must fail for this contract to apply")
+	require.True(t, snapshot.Schema.IsZero(), "the load must fail for this contract to apply")
 	require.True(t, snapshot.Result.HasErrors())
 
 	// The registry keys an overlay by the loader's identity for it: the
@@ -376,12 +376,12 @@ func TestSources_DiskFallback(t *testing.T) {
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
 	// Verify schema loaded successfully (no errors means disk fallback worked)
-	if snapshot.Schema == nil {
+	if snapshot.Schema.IsZero() {
 		// Print diagnostics for debugging
 		for issue := range snapshot.Result.Issues() {
 			t.Logf("Diagnostic: %v", issue)
 		}
-		require.NotNil(t, snapshot.Schema, "snapshot.Schema is nil - disk fallback may have failed")
+		require.False(t, snapshot.Schema.IsZero(), "snapshot.Schema is the zero Schema: the disk fallback can have failed")
 	}
 	if !snapshot.Result.OK() {
 		for issue := range snapshot.Result.Issues() {
@@ -395,8 +395,8 @@ func TestSources_DiskFallback(t *testing.T) {
 	require.True(t, ok, "Service type should exist")
 
 	// Verify inheritance resolved correctly (confirms disk file was loaded)
-	// Use SuperTypesSlice() which returns resolved parent types
-	supers := serviceType.SuperTypesSlice()
+	// Use SuperTypes() which returns resolved parent types
+	supers := slices.Collect(serviceType.SuperTypes())
 	require.NotEmpty(t, supers, "Service should inherit from utils.Helper")
 	// The resolved parent should be "Helper" from the utils schema
 	assert.Equal(t, "Helper", supers[0].Name(), "Parent type name")
@@ -502,7 +502,7 @@ type TypeB {
 	require.NotNil(t, snapshot, "Analyze() returned nil snapshot")
 
 	// Verify the correct entry was used
-	require.NotNil(t, snapshot.Schema, "snapshot.Schema is nil")
+	require.False(t, snapshot.Schema.IsZero(), "snapshot.Schema is the zero Schema")
 
 	// The schema name should be "BMain", not "ATypes"
 	// If lexicographic selection was used, it would incorrectly be "ATypes"

@@ -46,7 +46,7 @@ type Constraint struct {
 //
 // Returns the same Cypher statements as [Adapter.ConstraintsStructured], but as
 // raw strings rather than structured [Constraint] values.
-func (a *Adapter) ConstraintsForSchema(ctx context.Context, s *schema.Schema) ([]string, diag.Result) {
+func (a *Adapter) ConstraintsForSchema(ctx context.Context, s schema.Schema) ([]string, diag.Result) {
 	structured, result := a.ConstraintsStructured(ctx, s)
 	if !result.OK() {
 		return nil, result
@@ -99,7 +99,7 @@ func (a *Adapter) ConstraintsForSchema(ctx context.Context, s *schema.Schema) ([
 // [E_NEO4J_UNSUPPORTED_TYPE] at Error, or a Fatal E_CONTEXT_CANCELLED. The
 // warnings [W_NEO4J_NODE_KEY_UNSUPPORTED] and [W_NEO4J_EDITION_CONSTRAINT_OMITTED]
 // report what the edition changed.
-func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) ([]Constraint, diag.Result) {
+func (a *Adapter) ConstraintsStructured(ctx context.Context, s schema.Schema) ([]Constraint, diag.Result) {
 	collector := diag.NewCollector(0)
 
 	collisionResult := a.DetectLabelCollisions(ctx, s)
@@ -156,7 +156,7 @@ func (a *Adapter) ConstraintsStructured(ctx context.Context, s *schema.Schema) (
 // primary key: sibling-scoped uniqueness is not a Neo4j constraint, so a
 // UNIQUE there would reject legal data. The declared key's NOT NULL and
 // TYPE constraints still emit through the ordinary walks below.
-func (a *Adapter) constraintsForType(ctx context.Context, t *schema.Type, label string, names *propertyNameCheck, collector *diag.Collector) []Constraint {
+func (a *Adapter) constraintsForType(ctx context.Context, t schema.Type, label string, names *propertyNameCheck, collector *diag.Collector) []Constraint {
 	_ = ctx // the per-type walk is bounded; cancellation is checked by the caller
 	var constraints []Constraint
 
@@ -200,14 +200,14 @@ func (a *Adapter) constraintsForType(ctx context.Context, t *schema.Type, label 
 // returned, so it writes no name and judges none.
 type propertyNameCheck struct {
 	kinds     []ConstraintKind
-	valid     map[*schema.Property]bool
+	valid     map[schema.Property]bool
 	collector *diag.Collector
 }
 
 func (a *Adapter) newPropertyNameCheck(collector *diag.Collector) *propertyNameCheck {
 	return &propertyNameCheck{
 		kinds:     a.declarableConstraintKinds(),
-		valid:     make(map[*schema.Property]bool),
+		valid:     make(map[schema.Property]bool),
 		collector: collector,
 	}
 }
@@ -216,7 +216,7 @@ func (a *Adapter) newPropertyNameCheck(collector *diag.Collector) *propertyNameC
 // the pass calls what ("primary key", "property", "list property"). A statement
 // of a kind the edition drops is built, so the omission warning counts it. A
 // name judged invalid is reported once and written by no returned statement.
-func (c *propertyNameCheck) writes(t *schema.Type, prop *schema.Property, what string, kind ConstraintKind) bool {
+func (c *propertyNameCheck) writes(t schema.Type, prop schema.Property, what string, kind ConstraintKind) bool {
 	if !slices.Contains(c.kinds, kind) {
 		return true
 	}
@@ -329,8 +329,8 @@ func constraintKindClause(k ConstraintKind) string {
 }
 
 // primaryKeyConstraints generates UNIQUE or NODE KEY constraints for primary keys.
-func (a *Adapter) primaryKeyConstraints(t *schema.Type, label string, names *propertyNameCheck) []Constraint {
-	pks := t.PrimaryKeysSlice()
+func (a *Adapter) primaryKeyConstraints(t schema.Type, label string, names *propertyNameCheck) []Constraint {
+	pks := slices.Collect(t.PrimaryKeys())
 	if len(pks) == 0 {
 		return nil
 	}
@@ -405,7 +405,7 @@ func (a *Adapter) composedKeyConstraints(label string) []Constraint {
 }
 
 // notNullConstraints generates NOT NULL constraints for required properties.
-func (a *Adapter) notNullConstraints(t *schema.Type, label string, names *propertyNameCheck) []Constraint {
+func (a *Adapter) notNullConstraints(t schema.Type, label string, names *propertyNameCheck) []Constraint {
 	var constraints []Constraint
 	seen := make(map[string]struct{})
 
@@ -417,12 +417,12 @@ func (a *Adapter) notNullConstraints(t *schema.Type, label string, names *proper
 	useNodeKey := a.useNodeKeyConstraints() && !t.IsPart()
 	pkNames := make(map[string]struct{})
 	if useNodeKey {
-		for _, pk := range t.PrimaryKeysSlice() {
+		for pk := range t.PrimaryKeys() {
 			pkNames[pk.Name()] = struct{}{}
 		}
 	}
 
-	for _, prop := range t.AllPropertiesSlice() {
+	for prop := range t.AllProperties() {
 		propName := prop.Name()
 		if propName == "" || !prop.IsRequired() {
 			continue
@@ -459,11 +459,11 @@ func (a *Adapter) notNullConstraints(t *schema.Type, label string, names *proper
 // listTypeConstraints generates IS :: LIST<T> constraints for List properties,
 // and refuses a list whose element Neo4j cannot hold under every setting, the
 // ones that emit no such constraint included.
-func (a *Adapter) listTypeConstraints(t *schema.Type, label string, names *propertyNameCheck, collector *diag.Collector) []Constraint {
+func (a *Adapter) listTypeConstraints(t schema.Type, label string, names *propertyNameCheck, collector *diag.Collector) []Constraint {
 	var constraints []Constraint
 	seen := make(map[string]struct{})
 
-	for _, prop := range t.AllPropertiesSlice() {
+	for prop := range t.AllProperties() {
 		propName := prop.Name()
 		if propName == "" {
 			continue
@@ -520,11 +520,11 @@ func (a *Adapter) listTypeConstraints(t *schema.Type, label string, names *prope
 }
 
 // scalarTypeConstraints generates IS :: TYPE constraints for scalar properties.
-func (a *Adapter) scalarTypeConstraints(t *schema.Type, label string, names *propertyNameCheck) []Constraint {
+func (a *Adapter) scalarTypeConstraints(t schema.Type, label string, names *propertyNameCheck) []Constraint {
 	var constraints []Constraint
 	seen := make(map[string]struct{})
 
-	for _, prop := range t.AllPropertiesSlice() {
+	for prop := range t.AllProperties() {
 		propName := prop.Name()
 		if propName == "" {
 			continue

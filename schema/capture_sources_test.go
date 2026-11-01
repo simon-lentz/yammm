@@ -21,9 +21,9 @@ func TestCaptureSources_KeepsAFailedLoadsSources(t *testing.T) {
 	const content = "schema \"bad\"\n\ntype T {\n\tid String primary\n\tname Strin\n}\n"
 	writeHostPathFile(t, p, content)
 
-	var captured *schema.Sources
+	var captured schema.Sources
 	s, res := schema.Load(t.Context(), p, schema.WithModuleRoot(dir), schema.CaptureSources(&captured))
-	if s != nil || res.OK() {
+	if !s.IsZero() || res.OK() {
 		t.Fatalf("the fixture loaded: schema %v, result %v", s, res)
 	}
 	var issue diag.Issue
@@ -35,7 +35,7 @@ func TestCaptureSources_KeepsAFailedLoadsSources(t *testing.T) {
 	if !issue.HasSpan() {
 		t.Fatalf("no spanned E_UNKNOWN_TYPE in %v", issueCodes(res))
 	}
-	if captured == nil {
+	if captured.IsZero() {
 		t.Fatal("the load captured no sources")
 	}
 	if got, ok := captured.Content(issue.Span()); !ok || string(got) != content {
@@ -72,14 +72,14 @@ func TestCaptureSources_AnUnreadableEntryLeavesThisLoadsEmptyRegistry(t *testing
 			t.Parallel()
 
 			dir := t.TempDir()
-			var captured *schema.Sources
+			var captured schema.Sources
 			captureOneSource(t, dir, &captured)
 
 			s, res := schema.Load(t.Context(), row.entry(t, dir), schema.WithModuleRoot(dir), schema.CaptureSources(&captured))
-			if s != nil || !res.HasFatal() {
+			if !s.IsZero() || !res.HasFatal() {
 				t.Fatalf("the entry loaded: schema %v, result %v", s, res)
 			}
-			if captured == nil {
+			if captured.IsZero() {
 				t.Fatal("the failed load captured no sources")
 			}
 			if ids := captured.SourceIDs(); len(ids) != 0 {
@@ -95,14 +95,14 @@ func TestCaptureSources_AnEmptySourcesMapLeavesThisLoadsEmptyRegistry(t *testing
 	t.Parallel()
 
 	dir := t.TempDir()
-	var captured *schema.Sources
+	var captured schema.Sources
 	captureOneSource(t, dir, &captured)
 
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{}, "main.yammm", dir, schema.CaptureSources(&captured))
-	if s != nil || !res.HasFatal() {
+	if !s.IsZero() || !res.HasFatal() {
 		t.Fatalf("the empty map loaded: schema %v, result %v", s, res)
 	}
-	if captured == nil {
+	if captured.IsZero() {
 		t.Fatal("the refused load captured no sources")
 	}
 	if ids := captured.SourceIDs(); len(ids) != 0 {
@@ -128,12 +128,12 @@ func TestCaptureSources_LoadStringCapturesTheString(t *testing.T) {
 		t.Run(row.name, func(t *testing.T) {
 			t.Parallel()
 
-			var captured *schema.Sources
+			var captured schema.Sources
 			s, res := schema.LoadString(t.Context(), row.source, "main.yammm", schema.CaptureSources(&captured))
-			if loaded := s != nil && res.OK(); loaded != row.loads {
+			if loaded := !s.IsZero() && res.OK(); loaded != row.loads {
 				t.Fatalf("schema loaded: %t, result %v; want loaded %t", loaded, res, row.loads)
 			}
-			if captured == nil {
+			if captured.IsZero() {
 				t.Fatal("the load captured no sources")
 			}
 			if ids := captured.SourceIDs(); len(ids) != 1 || ids[0] != want {
@@ -149,7 +149,7 @@ func TestCaptureSources_LoadStringCapturesTheString(t *testing.T) {
 // captureOneSource loads a well-formed entry from dir through CaptureSources(dst) and
 // holds the capture to that entry, so a later load through dst starts from
 // a registry that holds one source.
-func captureOneSource(t *testing.T, dir string, dst **schema.Sources) {
+func captureOneSource(t *testing.T, dir string, dst *schema.Sources) {
 	t.Helper()
 	p := filepath.Join(dir, "ok.yammm")
 	writeHostPathFile(t, p, "schema \"ok\"\n\ntype T {\n\tid String primary\n}\n")
@@ -159,10 +159,10 @@ func captureOneSource(t *testing.T, dir string, dst **schema.Sources) {
 	}
 
 	s, res := schema.Load(t.Context(), p, schema.WithModuleRoot(dir), schema.CaptureSources(dst))
-	if s == nil || !res.OK() {
+	if s.IsZero() || !res.OK() {
 		t.Fatalf("the fixture failed to load: %v", res)
 	}
-	if ids := (*dst).SourceIDs(); len(ids) != 1 || ids[0] != id {
+	if ids := dst.SourceIDs(); len(ids) != 1 || ids[0] != id {
 		t.Fatalf("the fixture's capture holds %v; want %v alone", ids, id)
 	}
 }
@@ -176,7 +176,7 @@ func TestCaptureSources_NilCapturesNothing(t *testing.T) {
 	writeHostPathFile(t, p, "schema \"ok\"\n\ntype T {\n\tid String primary\n}\n")
 
 	s, res := schema.Load(t.Context(), p, schema.WithModuleRoot(dir), schema.CaptureSources(nil))
-	if s == nil || !res.OK() {
+	if s.IsZero() || !res.OK() {
 		t.Fatalf("a load with CaptureSources(nil) failed: %v", res)
 	}
 }

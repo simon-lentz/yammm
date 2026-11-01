@@ -181,9 +181,11 @@ func runSnapshotSave(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink
 // countSnapshot counts what the written document holds: its root instances
 // from the graph, and its types from the type table the bytes carry, which
 // lists a composed child's type and is the set `snapshot info` reports.
-func countSnapshot(ctx context.Context, snap *graph.Snapshot, data []byte) (instances, types int) {
+func countSnapshot(ctx context.Context, snap graph.Snapshot, data []byte) (instances, types int) {
 	for _, id := range snap.Types() {
-		instances += len(snap.InstancesOf(id))
+		for range snap.InstancesOf(id) {
+			instances++
+		}
 	}
 	if header, _ := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(data)); header != nil {
 		types = len(header.Types)

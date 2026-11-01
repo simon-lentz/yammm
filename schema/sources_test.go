@@ -22,7 +22,7 @@ func registerTestSource(t *testing.T, reg *source.Registry, content, name string
 func TestNewSources_NilRegistry(t *testing.T) {
 	s := schema.NewSources(nil)
 
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 }
 
 func TestNewSources_ValidRegistry(t *testing.T) {
@@ -30,11 +30,11 @@ func TestNewSources_ValidRegistry(t *testing.T) {
 
 	s := schema.NewSources(reg)
 
-	assert.NotNil(t, s)
+	assert.False(t, s.IsZero())
 }
 
-func TestSources_ContentBySource_NilReceiver(t *testing.T) {
-	var s *schema.Sources
+func TestSources_ContentBySource_ZeroHandle(t *testing.T) {
+	var s schema.Sources
 
 	content, ok := s.ContentBySource(location.SourceID{})
 
@@ -42,8 +42,8 @@ func TestSources_ContentBySource_NilReceiver(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestSources_Content_NilReceiver(t *testing.T) {
-	var s *schema.Sources
+func TestSources_Content_ZeroHandle(t *testing.T) {
+	var s schema.Sources
 
 	content, ok := s.Content(location.Span{})
 
@@ -51,8 +51,8 @@ func TestSources_Content_NilReceiver(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestSources_PositionAt_NilReceiver(t *testing.T) {
-	var s *schema.Sources
+func TestSources_PositionAt_ZeroHandle(t *testing.T) {
+	var s schema.Sources
 
 	pos := s.PositionAt(location.SourceID{}, 0)
 
@@ -60,18 +60,8 @@ func TestSources_PositionAt_NilReceiver(t *testing.T) {
 	assert.Equal(t, location.UnknownPosition(), pos)
 }
 
-// A Sources built without NewSources holds no registry and answers as a nil
-// Sources does.
-func TestSources_PositionAt_NoRegistry(t *testing.T) {
-	s := &schema.Sources{}
-
-	if got, want := s.PositionAt(location.SourceID{}, 0), location.UnknownPosition(); got != want {
-		t.Errorf("PositionAt on a Sources with no registry = %+v; want %+v", got, want)
-	}
-}
-
-func TestSources_LineStartByte_NilReceiver(t *testing.T) {
-	var s *schema.Sources
+func TestSources_LineStartByte_ZeroHandle(t *testing.T) {
+	var s schema.Sources
 
 	offset, ok := s.LineStartByte(location.SourceID{}, 1)
 
@@ -79,24 +69,24 @@ func TestSources_LineStartByte_NilReceiver(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestSources_SourceIDs_NilReceiver(t *testing.T) {
-	var s *schema.Sources
+func TestSources_SourceIDs_ZeroHandle(t *testing.T) {
+	var s schema.Sources
 
 	ids := s.SourceIDs()
 
 	assert.Nil(t, ids)
 }
 
-func TestSources_Has_NilReceiver(t *testing.T) {
-	var s *schema.Sources
+func TestSources_Has_ZeroHandle(t *testing.T) {
+	var s schema.Sources
 
 	result := s.Has(location.SourceID{})
 
 	assert.False(t, result)
 }
 
-func TestSources_Len_NilReceiver(t *testing.T) {
-	var s *schema.Sources
+func TestSources_Len_ZeroHandle(t *testing.T) {
+	var s schema.Sources
 
 	result := s.Len()
 
@@ -191,67 +181,4 @@ func TestSources_Len_Valid(t *testing.T) {
 	s := schema.NewSources(reg)
 
 	assert.Equal(t, 2, s.Len())
-}
-
-func TestSources_SourceIDsIter_NilReceiver(t *testing.T) {
-	var s *schema.Sources
-
-	var collected []location.SourceID
-	for id := range s.SourceIDsIter() {
-		collected = append(collected, id)
-	}
-
-	assert.Empty(t, collected)
-}
-
-func TestSources_SourceIDsIter_Valid(t *testing.T) {
-	reg := source.NewRegistry()
-	id1 := registerTestSource(t, reg, "content1", "iter1")
-	id2 := registerTestSource(t, reg, "content2", "iter2")
-	s := schema.NewSources(reg)
-
-	var collected []location.SourceID
-	for id := range s.SourceIDsIter() {
-		collected = append(collected, id)
-	}
-
-	assert.Len(t, collected, 2)
-	assert.Contains(t, collected, id1)
-	assert.Contains(t, collected, id2)
-}
-
-func TestSources_SourceIDsIter_EarlyTermination(t *testing.T) {
-	reg := source.NewRegistry()
-	registerTestSource(t, reg, "content1", "early1")
-	registerTestSource(t, reg, "content2", "early2")
-	registerTestSource(t, reg, "content3", "early3")
-	s := schema.NewSources(reg)
-
-	// Break after first element
-	count := 0
-	for range s.SourceIDsIter() {
-		count++
-		break
-	}
-
-	assert.Equal(t, 1, count)
-}
-
-func TestSources_SourceIDsIter_MatchesSourceIDs(t *testing.T) {
-	reg := source.NewRegistry()
-	registerTestSource(t, reg, "content1", "match1")
-	registerTestSource(t, reg, "content2", "match2")
-	s := schema.NewSources(reg)
-
-	// Collect from iterator
-	var fromIter []location.SourceID
-	for id := range s.SourceIDsIter() {
-		fromIter = append(fromIter, id)
-	}
-
-	// Get from slice method
-	fromSlice := s.SourceIDs()
-
-	// Should match in content (order is guaranteed by Keys())
-	assert.Equal(t, fromSlice, fromIter)
 }

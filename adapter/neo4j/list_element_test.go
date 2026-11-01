@@ -24,7 +24,7 @@ import (
 // loadInline builds a sealed schema from source, failing the test if it does not
 // load. These cases need schemas that are VALID yammm and unemittable, which is a
 // narrow enough combination that inline source reads better than a fixture file.
-func loadInline(t *testing.T, src string) *schema.Schema {
+func loadInline(t *testing.T, src string) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(context.Background(), src, "list_element.yammm")
 	if err := result.Err(); err != nil {

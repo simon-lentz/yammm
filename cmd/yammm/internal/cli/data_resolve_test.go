@@ -9,7 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func closureSchema(t *testing.T) *schema.Schema {
+func closureSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	m := map[string][]byte{
 		"entry.yammm": []byte(`schema "app"

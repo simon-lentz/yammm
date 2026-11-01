@@ -387,7 +387,7 @@ func TestLoad_NoMarkerKeepsTheEntryDirectory(t *testing.T) {
 // entry directory — the silent-ignore failure mode discovery exists to remove.
 // The severity is Error, not Fatal: the marker is user content its author
 // corrects, rather than the machine-level failure Fatal marks. The load stops
-// either way, as the assertion on a nil schema below pins.
+// either way, as the assertion on a zero schema below pins.
 func TestLoad_MalformedMarkerFailsTheLoad(t *testing.T) {
 	t.Parallel()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
@@ -396,7 +396,7 @@ func TestLoad_MalformedMarkerFailsTheLoad(t *testing.T) {
 	writeMarker(t, root, "module example.com/thing\n")
 
 	s, res := schema.Load(t.Context(), entry)
-	if s != nil {
+	if !s.IsZero() {
 		t.Error("a malformed marker must not produce a schema")
 	}
 	if !res.HasErrors() {

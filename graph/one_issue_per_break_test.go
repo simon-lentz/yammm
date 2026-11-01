@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"id": id}),
 		}
 	}
-	tag := func(s *schema.Schema) graph.InstanceParts {
+	tag := func(s schema.Schema) graph.InstanceParts {
 		ty, _ := s.Type("Tag")
 		return graph.InstanceParts{
 			TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"t1"}),
@@ -55,24 +56,24 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name   string
-		mutate func(s *schema.Schema, p *graph.SnapshotParts)
+		mutate func(s schema.Schema, p *graph.SnapshotParts)
 		want   int
 		phrase string
 	}{
-		{"a required association's one record, whose source identity is zero", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a required association's one record, whose source identity is zero", func(_ schema.Schema, p *graph.SnapshotParts) {
 			unsourced(p, schema.TypeID{})
 		}, 1, "zero type identity at unresolved source"},
-		{"a required association's one record, whose source identity another schema declares", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a required association's one record, whose source identity another schema declares", func(_ schema.Schema, p *graph.SnapshotParts) {
 			unsourced(p, foreign)
 		}, 1, "unresolvable type identity"},
-		{"a required association's one edge, whose source identity is zero", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a required association's one edge, whose source identity is zero", func(_ schema.Schema, p *graph.SnapshotParts) {
 			for i := range p.Edges {
 				if p.Edges[i].Relation == "WORKS_AT" {
 					p.Edges[i].SourceType = schema.TypeID{}
 				}
 			}
 		}, 1, "zero type identity at edge source"},
-		{"a required association's one edge, whose source identity another schema declares", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a required association's one edge, whose source identity another schema declares", func(_ schema.Schema, p *graph.SnapshotParts) {
 			for i := range p.Edges {
 				if p.Edges[i].Relation == "WORKS_AT" {
 					p.Edges[i].SourceType = foreign
@@ -80,23 +81,23 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 			}
 		}, 1, "unresolvable type identity"},
 		// Such a record stands under no other relation and at no other key.
-		{"a record whose source identity is zero, at another key than a required association's root", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a record whose source identity is zero, at another key than a required association's root", func(_ schema.Schema, p *graph.SnapshotParts) {
 			unsourced(p, schema.TypeID{})
 			p.Unresolved[len(p.Unresolved)-1].SourceKey = immutable.WrapKey([]any{"e9"})
 		}, 2, `under the required association "WORKS_AT"`},
-		{"a record whose source identity is zero, under another relation than a required association's", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a record whose source identity is zero, under another relation than a required association's", func(_ schema.Schema, p *graph.SnapshotParts) {
 			unsourced(p, schema.TypeID{})
 			p.Unresolved[len(p.Unresolved)-1].Relation = "KNOWS"
 		}, 2, `under the required association "WORKS_AT"`},
-		{"an absent record under an undeclared relation", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"an absent record under an undeclared relation", func(_ schema.Schema, p *graph.SnapshotParts) {
 			p.Unresolved = append(p.Unresolved, record(*p, "NOPE", "absent", ""))
 		}, 1, `under "NOPE", which its type does not declare as an association`},
-		{"an absent record whose source identity is zero", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"an absent record whose source identity is zero", func(_ schema.Schema, p *graph.SnapshotParts) {
 			p.Unresolved = append(p.Unresolved, graph.UnresolvedParts{
 				SourceKey: immutable.WrapKey([]any{"e1"}), Relation: "WORKS_AT", Reason: "absent",
 			})
 		}, 1, "zero type identity at unresolved source"},
-		{"an empty record under a composition's name", func(s *schema.Schema, p *graph.SnapshotParts) {
+		{"an empty record under a composition's name", func(s schema.Schema, p *graph.SnapshotParts) {
 			ty, _ := s.Type("Order")
 			order := graph.InstanceParts{
 				TypeID: ty.ID(), PrimaryKey: immutable.WrapKey([]any{"o1"}),
@@ -107,14 +108,14 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 				SourceType: order.TypeID, SourceKey: order.PrimaryKey, Relation: "LINES", Reason: "empty",
 			})
 		}, 1, `under "LINES", which its type does not declare as an association`},
-		{"a root of a part type the types list", func(s *schema.Schema, p *graph.SnapshotParts) {
+		{"a root of a part type the types list", func(s schema.Schema, p *graph.SnapshotParts) {
 			p.Types = append(p.Types, tag(s).TypeID)
 			p.Instances = append(p.Instances, tag(s))
 		}, 1, "types entry 2 denotes"},
-		{"a root of a part type the types do not list", func(s *schema.Schema, p *graph.SnapshotParts) {
+		{"a root of a part type the types do not list", func(s schema.Schema, p *graph.SnapshotParts) {
 			p.Instances = append(p.Instances, tag(s))
 		}, 1, "1 root instance(s) of type"},
-		{"two roots of a keyless part type the types list", func(s *schema.Schema, p *graph.SnapshotParts) {
+		{"two roots of a keyless part type the types list", func(s schema.Schema, p *graph.SnapshotParts) {
 			ty, _ := s.Type("Line")
 			line := graph.InstanceParts{TypeID: ty.ID(), Properties: immutable.WrapProperties(map[string]any{"note": "x"})}
 			p.Types = append(p.Types, ty.ID())
@@ -123,13 +124,13 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 		// A root whose key the key rule refuses is no duplicate, in either order.
 		// The parts do not say which of two roots at one address an edge there
 		// is the edge of, so no rule judges the address's (one) count.
-		{"a root whose key is another root's and not its property's, after that root", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a root whose key is another root's and not its property's, after that root", func(_ schema.Schema, p *graph.SnapshotParts) {
 			p.Instances = append(p.Instances, company(*p, "c1", "zz"))
 		}, 1, `disagrees with property "id"`},
-		{"a root whose key is another root's and not its property's, before that root", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a root whose key is another root's and not its property's, before that root", func(_ schema.Schema, p *graph.SnapshotParts) {
 			p.Instances = append([]graph.InstanceParts{company(*p, "c1", "zz")}, p.Instances...)
 		}, 1, `disagrees with property "id"`},
-		{"a root whose key is another root's and not its property's, beside that root's (one) association of two edges", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a root whose key is another root's and not its property's, beside that root's (one) association of two edges", func(_ schema.Schema, p *graph.SnapshotParts) {
 			emp := p.Instances[1]
 			p.Instances = append(p.Instances, graph.InstanceParts{
 				TypeID: emp.TypeID, PrimaryKey: emp.PrimaryKey, Properties: immutable.WrapProperties(map[string]any{"id": "e9"}),
@@ -138,12 +139,12 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 				Relation: "WORKS_AT", SourceType: emp.TypeID, SourceKey: emp.PrimaryKey, TargetKey: p.Instances[0].PrimaryKey,
 			})
 		}, 1, `disagrees with property "id"`},
-		{"two roots at one address", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"two roots at one address", func(_ schema.Schema, p *graph.SnapshotParts) {
 			p.Instances = append(p.Instances, company(*p, "c1", "c1"))
 		}, 1, "two instances of type"},
 		// The refused edge is held, so the required association is not empty,
 		// and it is no record beside the absent one.
-		{"an edge holding an undeclared property beside an absent record", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"an edge holding an undeclared property beside an absent record", func(_ schema.Schema, p *graph.SnapshotParts) {
 			for i := range p.Edges {
 				if p.Edges[i].Relation == "WORKS_AT" {
 					p.Edges[i].Properties = immutable.WrapProperties(map[string]any{"bogus": 1})
@@ -152,12 +153,12 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 			p.Unresolved = append(p.Unresolved, record(*p, "WORKS_AT", "absent", ""))
 		}, 1, `edge property "bogus"`},
 		// A root whose key the key rule refused is judged by no record fact.
-		{"a root whose key is refused, with an edge and an absent record beside it", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a root whose key is refused, with an edge and an absent record beside it", func(_ schema.Schema, p *graph.SnapshotParts) {
 			p.Instances[1].Properties = immutable.WrapProperties(map[string]any{"id": "ex"})
 			p.Unresolved = append(p.Unresolved, record(*p, "WORKS_AT", "absent", ""))
 		}, 1, `disagrees with property "id"`},
 		// The edge a reference check refused is no count, so it is one break.
-		{"a (one) association of two edges, one to no root", func(_ *schema.Schema, p *graph.SnapshotParts) {
+		{"a (one) association of two edges, one to no root", func(_ schema.Schema, p *graph.SnapshotParts) {
 			emp := p.Instances[1]
 			p.Edges = append(p.Edges, graph.EdgeParts{
 				Relation: "WORKS_AT", SourceType: emp.TypeID, SourceKey: emp.PrimaryKey, TargetKey: immutable.WrapKey([]any{"c7"}),
@@ -169,7 +170,7 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 			s, parts := recordFactsParts(t)
 			c.mutate(s, &parts)
 			snap, res := graph.RebuildSnapshot(s, parts)
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Error("a refused rebuild returned a snapshot")
 			}
 			if n := failures(res); n != c.want {
@@ -182,7 +183,7 @@ func TestRebuildSnapshot_OneBreakDrawsOneIssue(t *testing.T) {
 	}
 }
 
-func loadAs(t *testing.T, src string) *schema.Schema {
+func loadAs(t *testing.T, src string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), src, "entry.yammm")
 	if res.HasErrors() {
@@ -192,7 +193,7 @@ func loadAs(t *testing.T, src string) *schema.Schema {
 }
 
 // snapshotOf validates each raw instance of typeName under s and adds it.
-func snapshotOf(t *testing.T, s *schema.Schema, typeName string, raws ...map[string]any) *graph.Snapshot {
+func snapshotOf(t *testing.T, s schema.Schema, typeName string, raws ...map[string]any) graph.Snapshot {
 	t.Helper()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -344,8 +345,8 @@ func TestNewFromSnapshot_ADuplicateUnderARefusedSlotResolvesNoConflict(t *testin
 			g.AddComposed(t.Context(), order.ID(), `["o1"]`, "ITEMS",
 				instancetest.VI("Item", instancetest.TypeID(item.ID()), instancetest.PK("a"), instancetest.Props(map[string]any{"code": "a"})))
 			snap := g.Snapshot()
-			if len(snap.Duplicates()) != 1 {
-				t.Fatalf("the snapshot holds %d duplicates, want 1", len(snap.Duplicates()))
+			if len(slices.Collect(snap.Duplicates())) != 1 {
+				t.Fatalf("the snapshot holds %d duplicates, want 1", len(slices.Collect(snap.Duplicates())))
 			}
 			bound := loadAs(t, c.bound)
 			_, res = graph.NewFromSnapshot(bound, snap)
@@ -485,8 +486,8 @@ func TestNewFromSnapshot_ADuplicateResolvesNoConflictAtAnUnheldParent(t *testing
 			}
 			g.AddComposed(t.Context(), order.ID(), graph.FormatKey(c.parents[0]), "ITEMS",
 				instancetest.VI("Item", instancetest.TypeID(item.ID()), instancetest.PK("a"), instancetest.Props(map[string]any{"code": "a"})))
-			if len(g.Snapshot().Duplicates()) != 1 {
-				t.Fatalf("the snapshot holds %d duplicates, want 1", len(g.Snapshot().Duplicates()))
+			if len(slices.Collect(g.Snapshot().Duplicates())) != 1 {
+				t.Fatalf("the snapshot holds %d duplicates, want 1", len(slices.Collect(g.Snapshot().Duplicates())))
 			}
 			_, res := graph.NewFromSnapshot(loadAs(t, c.bound+keylessItem), g.Snapshot())
 			if failures(res) != len(c.codes) {

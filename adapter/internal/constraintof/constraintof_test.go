@@ -7,7 +7,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func loadType(t *testing.T) *schema.Type {
+func loadType(t *testing.T) schema.Type {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), `schema "c"
 
@@ -37,7 +37,7 @@ func TestProperty(t *testing.T) {
 	if c := constraintof.Property(typ, "undeclared"); c != nil {
 		t.Errorf("an undeclared name: got %v, want nil", c)
 	}
-	if c := constraintof.Property(nil, "weight"); c != nil {
+	if c := constraintof.Property(schema.Type{}, "weight"); c != nil {
 		t.Errorf("a nil type: got %v, want nil", c)
 	}
 }

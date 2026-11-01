@@ -56,12 +56,12 @@ func TestBuilder_RefusesAClosureThatDeclaresOneSchemaNameTwice(t *testing.T) {
 		t.Fatalf("load geo: %v", res.Err())
 	}
 	reg := schema.NewRegistry()
-	for _, s := range []*schema.Schema{x, geo} {
+	for _, s := range []schema.Schema{x, geo} {
 		if err := reg.Register(s); err != nil {
 			t.Fatal(err)
 		}
 	}
-	build := func(name string, imports ...string) (*schema.Schema, diag.Result) {
+	build := func(name string, imports ...string) (schema.Schema, diag.Result) {
 		b := schema.NewBuilder().WithName(name).WithSourceID(location.MustNewSourceID("test://built.yammm")).WithRegistry(reg)
 		for _, imp := range imports {
 			b.AddImport(imp, imp)
@@ -81,14 +81,14 @@ func TestBuilder_RefusesAClosureThatDeclaresOneSchemaNameTwice(t *testing.T) {
 		t.Run(label, func(t *testing.T) {
 			t.Parallel()
 			s, res := build(tc.name, tc.imports...)
-			if s != nil {
+			if !s.IsZero() {
 				t.Fatal("a closure declaring the schema name geo twice built")
 			}
 			assertOneSchemaNameClash(t, res, "geo")
 		})
 	}
 
-	if s, res := build("main", "geo"); s == nil || res.HasErrors() {
+	if s, res := build("main", "geo"); s.IsZero() || res.HasErrors() {
 		t.Errorf("a closure of distinct names is refused: %v", res.Err())
 	}
 }
@@ -108,7 +108,7 @@ func TestLoad_RefusesAClosureThatDeclaresOneSchemaNameTwice(t *testing.T) {
 	if err := reg.Register(x); err != nil {
 		t.Fatal(err)
 	}
-	load := func(geoImport string) (*schema.Schema, diag.Result) {
+	load := func(geoImport string) (schema.Schema, diag.Result) {
 		main := "schema \"main\"\n\nimport \"./x.yammm\" as x\nimport \"./" + geoImport + "\" as geo\n\ntype M {\n\tm_id String primary\n\t--> TO (one) geo.Region\n}\n"
 		return schema.LoadSourcesWithEntry(context.Background(), sourcesOf(map[string]string{
 			"main.yammm": main, "x.yammm": xSrc, "geo_a.yammm": geoA, "geo_b.yammm": geoB,
@@ -116,8 +116,8 @@ func TestLoad_RefusesAClosureThatDeclaresOneSchemaNameTwice(t *testing.T) {
 	}
 
 	s, res := load("geo_b.yammm")
-	if s != nil {
-		t.Fatalf("a closure holding geo_a.yammm and geo_b.yammm, both schema geo, loaded: %v", s.Closure())
+	if !s.IsZero() {
+		t.Fatalf("a closure holding geo_a.yammm and geo_b.yammm, both schema geo, loaded: %v", slices.Collect(s.Closure()))
 	}
 	assertOneSchemaNameClash(t, res, "geo")
 	for issue := range res.Issues() {
@@ -126,7 +126,7 @@ func TestLoad_RefusesAClosureThatDeclaresOneSchemaNameTwice(t *testing.T) {
 		}
 	}
 
-	if s, res := load("geo_a.yammm"); s == nil || res.HasErrors() {
+	if s, res := load("geo_a.yammm"); s.IsZero() || res.HasErrors() {
 		t.Errorf("a closure reaching one geo by two paths is refused: %v", res.Err())
 	}
 }
@@ -141,16 +141,16 @@ func TestBuilder_RefusesAClosureThatHoldsTwoCompilesOfOneSource(t *testing.T) {
 	t.Parallel()
 
 	const b = "schema \"b\"\n\nimport \"./a\" as a\n\ntype Y {\n\tid String primary\n\t--> TO (one) a.X\n}\n"
-	load := func(sources map[string]string, entry string) *schema.Schema {
+	load := func(sources map[string]string, entry string) schema.Schema {
 		s, res := schema.LoadSourcesWithEntry(t.Context(), sourcesOf(sources), entry, "", schema.WithSourcesOnly(true), schema.WithSyntheticRoot("test://lib"))
 		if res.HasErrors() {
 			t.Fatalf("load %s: %v", entry, res.Err())
 		}
 		return s
 	}
-	build := func(aSrc string) (*schema.Schema, diag.Result) {
+	build := func(aSrc string) (schema.Schema, diag.Result) {
 		reg := schema.NewRegistry()
-		for _, s := range []*schema.Schema{
+		for _, s := range []schema.Schema{
 			load(map[string]string{"a.yammm": "schema \"a\"\n\ntype X {\n\tid String primary\n}\n"}, "a.yammm"),
 			load(map[string]string{"a.yammm": aSrc, "b.yammm": b}, "b.yammm"),
 		} {
@@ -164,7 +164,7 @@ func TestBuilder_RefusesAClosureThatHoldsTwoCompilesOfOneSource(t *testing.T) {
 	}
 
 	s, res := build("schema \"a\"\n\ntype X {\n\tid Date primary\n}\n")
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("a closure holding two compiles of a.yammm from different bytes built")
 	}
 	issues := slices.Collect(res.Issues())
@@ -178,7 +178,7 @@ func TestBuilder_RefusesAClosureThatHoldsTwoCompilesOfOneSource(t *testing.T) {
 		t.Errorf("message %q does not name the source compiled twice", issues[0].Message())
 	}
 
-	if s, res := build("schema \"a\"\n\ntype X {\n\tid String primary\n}\n"); s == nil || res.HasErrors() {
+	if s, res := build("schema \"a\"\n\ntype X {\n\tid String primary\n}\n"); s.IsZero() || res.HasErrors() {
 		t.Errorf("two compiles of the same bytes are refused: %v", res.Err())
 	}
 }

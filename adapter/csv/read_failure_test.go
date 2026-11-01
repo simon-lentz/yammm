@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // failsOnce serves data a byte per Read and fails the at'th Read once, as a
@@ -47,7 +48,7 @@ func TestParse_AReadFailureIsNeverLost(t *testing.T) {
 	for name, data := range inputs {
 		for at := 1; at <= len(data); at++ {
 			r := &failsOnce{data: data, at: at}
-			_, res := New().ParseTyped(t.Context(), location.MustNewSourceID("test://x.csv"), "P", r, nil)
+			_, res := New().ParseTyped(t.Context(), location.MustNewSourceID("test://x.csv"), "P", r, schema.Type{})
 			fatal := 0
 			for issue := range res.Issues() {
 				if issue.Severity() == diag.Fatal && issue.Code() == diag.E_ADAPTER_IO &&
@@ -105,7 +106,7 @@ func TestParse_TheFirstErrorEndsTheInputAndItsDataIsKept(t *testing.T) {
 		{"the end in the head, then data", []step{{"i", io.EOF}, {"d,name\np1,Ann\n", nil}}, 0, false},
 		{"the end after a record, then data", []step{{"id,name\np1,Ann\n", io.EOF}, {"p2,Bob\n", nil}}, 1, false},
 	} {
-		raws, res := New().ParseTyped(t.Context(), location.MustNewSourceID("test://x.csv"), "P", &scripted{steps: c.steps}, nil)
+		raws, res := New().ParseTyped(t.Context(), location.MustNewSourceID("test://x.csv"), "P", &scripted{steps: c.steps}, schema.Type{})
 		if len(raws) != c.records || res.HasFatal() != c.fatal {
 			t.Errorf("%s: %d records, Fatal=%v, want %d and %v: %s", c.name, len(raws), res.HasFatal(), c.records, c.fatal, res)
 		}

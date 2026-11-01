@@ -58,8 +58,8 @@ var cypherReservedKeywords = map[string]struct{}{
 	"ADD": {}, "DROP": {},
 }
 
-// SanitizeIdentifier applies Neo4j identifier sanitization rules to a string,
-// in this order:
+// SanitizeIdentifier rewrites a string by Neo4j's identifier rules, in this order:
+//   - Trims white space at each end, and a blank input returns ""
 //   - Replaces space, hyphen, period, forward slash, backslash with underscore
 //   - Prepends underscore if the string now starts with a digit
 //   - Strips all characters except ASCII letters, digits, and underscores
@@ -69,7 +69,7 @@ var cypherReservedKeywords = map[string]struct{}{
 // character stripped after the leading-digit test, so it returns "9x". The
 // output is checked by [ValidateIdentifier], and [Adapter.ShapeForSchema]
 // refuses such a schema with [E_NEO4J_INVALID_IDENTIFIER] naming the label —
-// repairing it here instead would silently accept a type name the author
+// repairing it here instead would silently accept a schema name the author
 // should see reported.
 //
 // This is the same transformation applied to each component in [Adapter.Label].
@@ -162,7 +162,7 @@ func (a *Adapter) Label(ctx context.Context, schemaName, typeName string) string
 // names, because the names are what collided:
 //
 //	types file:///a.yammm:Region and file:///b.yammm:Region all render label "geo_regions__Region"
-func (a *Adapter) DetectLabelCollisions(ctx context.Context, s *schema.Schema) diag.Result {
+func (a *Adapter) DetectLabelCollisions(ctx context.Context, s schema.Schema) diag.Result {
 	collector := diag.NewCollector(0)
 	labelToTypes := make(map[string][]schema.TypeID)
 

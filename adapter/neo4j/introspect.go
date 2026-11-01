@@ -170,11 +170,12 @@ func IntrospectConstraintsQuery() string {
 // Constraint-backing indexes are deliberately INCLUDED. They are never paired by
 // name or dropped — [RemoteIndex.Declarable] rejects them on
 // [RemoteIndex.OwningConstraint] — and one that serves a declaration is that
-// declaration's Actual; and they block: a server silently no-ops a
-// CREATE INDEX whose name they hold, and also one whose (label, properties,
-// kind) they already serve. Excluding them here would put both blocks outside
-// what the diff can observe, and a blocked declaration reports as a Create the
-// server ignores on every run.
+// declaration's Actual; and they block: a CREATE INDEX whose name they
+// hold takes no effect, and neither does one whose (label, properties, kind)
+// they already serve. Excluding them here would put the definition block outside
+// what the diff can observe, and leave the name block to alsoBlocking, and a
+// blocked declaration reports as a Create that takes no
+// effect on every run.
 //
 // Yields the options map so vector configuration is visible, and the state so an
 // index that exists but does not serve queries is distinguishable from a healthy

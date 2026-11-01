@@ -156,7 +156,8 @@ var (
 	// E_DUPLICATE_RELATION indicates a relation is defined more than once on a type.
 	E_DUPLICATE_RELATION = NewCode("E_DUPLICATE_RELATION", CategorySchema)
 
-	// E_CASE_COLLISION indicates property/relation names differ only by case.
+	// E_CASE_COLLISION indicates two property names of a type, or two edge property
+	// names of an association, differ only by case.
 	E_CASE_COLLISION = NewCode("E_CASE_COLLISION", CategorySchema)
 
 	// E_PROPERTY_RELATION_COLLISION indicates a property and relation have the same name.
@@ -245,12 +246,12 @@ var (
 	// and the load reports it as it reports an invalid schema.
 	E_LOAD_MODULE_ROOT_MALFORMED = NewCode("E_LOAD_MODULE_ROOT_MALFORMED", CategorySchema)
 
-	// E_LOAD_SOURCE_CHANGED indicates a source a shared Registry holds with
-	// content that differs from what a load holds for it: a source re-registered
-	// after its bytes changed, an import beneath an unchanged entry that did, or
-	// an import whose registered compile was made from other bytes than the
-	// load's own for that source, reported at the import. A shared registry
-	// assumes its files do not change while it lives.
+	// E_LOAD_SOURCE_CHANGED indicates a source a shared Registry holds that a load
+	// cannot reuse. At a re-registration its bytes or its structural hash differ, or
+	// the registered schema carries none. At an import the load holds bytes for it,
+	// no other compile of it is bound, and the registry's compile differs in bytes
+	// or carries none.
+	// A shared registry assumes its files do not change while it lives.
 	E_LOAD_SOURCE_CHANGED = NewCode("E_LOAD_SOURCE_CHANGED", CategorySchema)
 
 	// E_UNKNOWN_ANNOTATION indicates an annotation name absent from the built-in

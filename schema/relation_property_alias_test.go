@@ -8,7 +8,7 @@ import (
 )
 
 // mustEdgeProperty digs an association's edge property out of a loaded schema.
-func mustEdgeProperty(t *testing.T, s *schema.Schema, typeName, relName, propName string) *schema.Property {
+func mustEdgeProperty(t *testing.T, s schema.Schema, typeName, relName, propName string) schema.Property {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {

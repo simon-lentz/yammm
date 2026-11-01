@@ -334,7 +334,7 @@ func TestEdgeGroup_AClaimingColumnDecidesTheTargetCount(t *testing.T) {
 					if typeColumn {
 						in := "T,id," + row.header + "\nPerson,p1," + row.record + "\n"
 						byRowType, r := New(append(opts, WithTypeColumn("T"))...).ParseWithTypeColumn(t.Context(),
-							location.NewSourceID("p.csv"), strings.NewReader(in), func(string) *schema.Type { return person })
+							location.NewSourceID("p.csv"), strings.NewReader(in), func(string) schema.Type { return person })
 						raws, pres, codes = byRowType["Person"], r, errorCodes(r)
 					} else {
 						in := "id," + row.header + "\np1," + row.record + "\n"

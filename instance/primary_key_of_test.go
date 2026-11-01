@@ -39,7 +39,7 @@ type Floor {
 }
 `
 
-func loadPrimaryKeyOfSchema(t *testing.T) *schema.Schema {
+func loadPrimaryKeyOfSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), primaryKeyOfSchema, "pk.yammm")
 	if res.HasErrors() {
@@ -140,8 +140,8 @@ func TestPrimaryKeyOf_AgreesWithValidate(t *testing.T) {
 						valid, _ := v.ValidateOne(t.Context(), "Account", raw)
 						id, key, ok := v.PrimaryKeyOf("Account", raw)
 						switch {
-						case ok != (valid != nil):
-							t.Errorf("%s: PrimaryKeyOf read a key = %v, Validate accepted = %v", name, ok, valid != nil)
+						case ok != (!valid.IsZero()):
+							t.Errorf("%s: PrimaryKeyOf read a key = %v, Validate accepted = %v", name, ok, !valid.IsZero())
 						case ok && (id != valid.TypeID() || key.String() != valid.PrimaryKey().String()):
 							t.Errorf("%s: PrimaryKeyOf = %v %s, Validate stored %v %s", name, id, key, valid.TypeID(), valid.PrimaryKey())
 						}

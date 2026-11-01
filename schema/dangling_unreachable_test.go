@@ -173,17 +173,17 @@ func TestDanglingQualifiedReference_NeverEntersTheRegistry(t *testing.T) {
 
 	reg := schema.NewRegistry()
 	src := danglingSources["relation target"]
-	if s, result := schema.LoadString(t.Context(), src, "d.yammm", schema.WithRegistry(reg)); s != nil {
+	if s, result := schema.LoadString(t.Context(), src, "d.yammm", schema.WithRegistry(reg)); !s.IsZero() {
 		t.Fatalf("load returned a schema: %s", result)
 	}
-	if got := len(reg.All()); got != 0 {
+	if got := len(slices.Collect(reg.All())); got != 0 {
 		t.Errorf("registry holds %d schema(s) after a failed load, want 0", got)
 	}
 }
 
-func assertRejected(t *testing.T, s *schema.Schema, result diag.Result) {
+func assertRejected(t *testing.T, s schema.Schema, result diag.Result) {
 	t.Helper()
-	if s != nil {
+	if !s.IsZero() {
 		t.Error("a dangling qualified reference sealed into a schema")
 	}
 	if !result.HasErrors() {

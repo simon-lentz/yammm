@@ -55,13 +55,13 @@ func TestScope_ParentHoldsTheChildsMemo(t *testing.T) {
 	if res.Err() != nil {
 		t.Fatal(res.Err())
 	}
-	var child *ValidInstance
+	var child ValidInstance
 	for name, val := range root.Compositions() {
 		if name == "NEXT" {
 			child = composedChildren(val.Unwrap())[0]
 		}
 	}
-	if child == nil {
+	if child.IsZero() {
 		t.Fatal("no NEXT composition on the root")
 	}
 	childMemo := v.scopeOf(child)
@@ -88,7 +88,7 @@ func entriesPointer(m any) uintptr {
 
 // chainSchemaAndInstance builds L0 -> NEXT (one) L1 -> ... -> L<depth>, each
 // level with an invariant that reads its child, and one instance of it.
-func chainSchemaAndInstance(t *testing.T, depth int) (*schema.Schema, map[string]any) {
+func chainSchemaAndInstance(t *testing.T, depth int) (schema.Schema, map[string]any) {
 	t.Helper()
 	var sb strings.Builder
 	sb.WriteString("schema \"chain\"\n\n")

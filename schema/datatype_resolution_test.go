@@ -26,7 +26,7 @@ func TestLoad_ResolvesDataTypesInAnyDeclarationOrder(t *testing.T) {
 		if res.HasErrors() {
 			t.Fatalf("%s: load: %v", name, res.Err())
 		}
-		for _, dt := range s.DataTypesSlice() {
+		for dt := range s.DataTypes() {
 			if !dt.Constraint().IsResolved() {
 				t.Errorf("%s: datatype %s is not resolved: %v", name, dt.Name(), dt.Constraint())
 			}
@@ -149,7 +149,7 @@ func TestLoad_ADataTypeOverAFailedImportStaysAList(t *testing.T) {
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"main.yammm": []byte("schema \"main\"\nimport \"./missing\" as bad\n\ntype X = List<bad.Y>\n\ntype T {\n\tid String primary\n\t--> R (one) T {\n\t\tp X\n\t}\n}\n"),
 	}, "main.yammm", t.TempDir())
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("a schema importing a missing file loaded")
 	}
 	wantCounts(t, res, map[diag.Code]int{diag.E_IMPORT_RESOLVE: 1, diag.E_LIST_ON_EDGE: 1, diag.E_UNKNOWN_TYPE: 0})

@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -108,22 +109,22 @@ func partKeyProps(typ string, key []any) immutable.Properties {
 
 // partKeyChain returns the shape's chain as validated instances, the case's key
 // on the deepest part and an empty key on every part above it.
-func partKeyChain(t *testing.T, s *schema.Schema, shape partKeyShape, key []any, depth int) *instance.ValidInstance {
+func partKeyChain(t *testing.T, s schema.Schema, shape partKeyShape, key []any, depth int) instance.ValidInstance {
 	t.Helper()
 	typ, ok := s.Type(shape.types[depth])
 	if !ok {
 		t.Fatalf("no type %s", shape.types[depth])
 	}
 	if depth == len(shape.types)-1 {
-		return instance.NewValidInstance(typ.Name(), typ.ID(), immutable.WrapKey(key), partKeyProps(typ.Name(), key), nil, nil, nil)
+		return instance.NewValidInstance(typ.Name(), typ.ID(), immutable.WrapKey(key), partKeyProps(typ.Name(), key), nil, nil, location.Provenance{})
 	}
 	child := partKeyChain(t, s, shape, key, depth+1)
 	return instance.NewValidInstance(typ.Name(), typ.ID(), immutable.WrapKey(nil), partKeyProps(typ.Name(), nil), nil,
-		map[string]immutable.Value{shape.path[depth+1]: immutable.Wrap([]any{child})}, nil)
+		map[string]immutable.Value{shape.path[depth+1]: immutable.Wrap([]any{child})}, location.Provenance{})
 }
 
 // partKeyParts is partKeyChain as RebuildSnapshot's parts.
-func partKeyParts(t *testing.T, s *schema.Schema, shape partKeyShape, key []any, depth int) graph.InstanceParts {
+func partKeyParts(t *testing.T, s schema.Schema, shape partKeyShape, key []any, depth int) graph.InstanceParts {
 	t.Helper()
 	typ, _ := s.Type(shape.types[depth])
 	if depth == len(shape.types)-1 {
@@ -137,13 +138,13 @@ func partKeyParts(t *testing.T, s *schema.Schema, shape partKeyShape, key []any,
 
 // partKeyStoredKeys returns every stored key of snap's roots and their composed
 // children at every depth.
-func partKeyStoredKeys(snap *graph.Snapshot) []immutable.Key {
+func partKeyStoredKeys(snap graph.Snapshot) []immutable.Key {
 	var keys []immutable.Key
-	var walk func(*graph.Instance)
-	walk = func(inst *graph.Instance) {
+	var walk func(graph.Instance)
+	walk = func(inst graph.Instance) {
 		keys = append(keys, inst.PrimaryKey())
 		for _, rel := range inst.ComposedRelations() {
-			for _, child := range inst.Composed(rel) {
+			for child := range inst.Composed(rel) {
 				walk(child)
 			}
 		}
@@ -172,21 +173,21 @@ func TestPartKey_EveryConstructorsSnapshotLoadsBack(t *testing.T) {
 	docProps := immutable.WrapProperties(map[string]any{"id": "d1"})
 
 	type built struct {
-		snap *graph.Snapshot
+		snap graph.Snapshot
 		res  diag.Result
 	}
 	constructors := map[string]func(partKeyShape, []any) built{
 		"Graph.Add": func(shape partKeyShape, key []any) built {
 			child := partKeyChain(t, s, shape, key, 0)
 			doc := instance.NewValidInstance("Doc", docT.ID(), docKey, docProps, nil,
-				map[string]immutable.Value{shape.path[0]: immutable.Wrap([]any{child})}, nil)
+				map[string]immutable.Value{shape.path[0]: immutable.Wrap([]any{child})}, location.Provenance{})
 			g := graph.New(s)
 			r := g.Add(ctx, doc)
 			return built{g.Snapshot(), r}
 		},
 		"Graph.AddComposed": func(shape partKeyShape, key []any) built {
 			g := graph.New(s)
-			if r := g.Add(ctx, instance.NewValidInstance("Doc", docT.ID(), docKey, docProps, nil, nil, nil)); !r.OK() {
+			if r := g.Add(ctx, instance.NewValidInstance("Doc", docT.ID(), docKey, docProps, nil, nil, location.Provenance{})); !r.OK() {
 				t.Fatalf("Add the root: %s", r)
 			}
 			r := g.AddComposed(ctx, docT.ID(), docKey.String(), shape.path[0], partKeyChain(t, s, shape, key, 0))
@@ -227,7 +228,7 @@ func TestPartKey_EveryConstructorsSnapshotLoadsBack(t *testing.T) {
 				if !kc.readable {
 					t.Errorf("%s: accepted a key with a component graph.ParseKey cannot read back", at)
 				}
-				snaps := map[string]*graph.Snapshot{name: b.snap}
+				snaps := map[string]graph.Snapshot{name: b.snap}
 				if g, r := graph.NewFromSnapshot(s, b.snap); r.OK() {
 					snaps["NewFromSnapshot of "+name] = g.Snapshot()
 				} else {

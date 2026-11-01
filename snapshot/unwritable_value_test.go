@@ -38,7 +38,7 @@ part type Badge {
 }
 `
 
-func loadUnwritable(t *testing.T) *schema.Schema {
+func loadUnwritable(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), unwritableSchema, "unwritable.yammm")
 	if res.HasErrors() {
@@ -49,14 +49,14 @@ func loadUnwritable(t *testing.T) *schema.Schema {
 
 // unwritableEmployee is Employee e1 with props beside its key, and one
 // WORKS_AT target carrying edgeProps.
-func unwritableEmployee(t *testing.T, s *schema.Schema, props map[string]any, target string, edgeProps map[string]any) *instance.ValidInstance {
+func unwritableEmployee(t *testing.T, s schema.Schema, props map[string]any, target string, edgeProps map[string]any) instance.ValidInstance {
 	t.Helper()
 	empT, _ := s.Type("Employee")
 	p := map[string]any{"employee_id": "e1"}
 	maps.Copy(p, props)
 	return instancetest.VI("Employee", instancetest.TypeID(empT.ID()), instancetest.PK("e1"),
 		instancetest.Props(p),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
+		instancetest.Edges(map[string]instance.ValidEdgeData{
 			"WORKS_AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{target}), immutable.WrapProperties(edgeProps)),
 			}),
@@ -107,7 +107,7 @@ func TestMarshal_RefusesAnUnwritableValueByName(t *testing.T) {
 
 	for _, c := range []struct {
 		name     string
-		emp      *instance.ValidInstance
+		emp      instance.ValidInstance
 		property string
 		relation string
 	}{
@@ -122,7 +122,7 @@ func TestMarshal_RefusesAnUnwritableValueByName(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			g := graph.New(s)
-			for _, inst := range []*instance.ValidInstance{company, c.emp} {
+			for _, inst := range []instance.ValidInstance{company, c.emp} {
 				if r := g.Add(t.Context(), inst); r.HasErrors() {
 					t.Fatalf("Add: %s", r)
 				}
@@ -154,7 +154,7 @@ func TestMarshal_NamesTheLeastUnwritableProperty(t *testing.T) {
 	s := loadUnwritable(t)
 	for _, c := range []struct {
 		name     string
-		emp      *instance.ValidInstance
+		emp      instance.ValidInstance
 		property string
 	}{
 		{"instance properties", unwritableEmployee(t, s, map[string]any{"rating": math.NaN(), "note": make(chan int)}, "c9", nil), "note"},
@@ -184,12 +184,12 @@ func TestMarshal_NamesWhereAnUnwritableValueSits(t *testing.T) {
 	s := loadUnwritable(t)
 	empT, _ := s.Type("Employee")
 	badgeT, _ := s.Type("Badge")
-	badge := func(label any) *instance.ValidInstance {
+	badge := func(label any) instance.ValidInstance {
 		return instancetest.VI("Badge", instancetest.TypeID(badgeT.ID()), instancetest.NoKey(),
 			instancetest.Props(map[string]any{"label": label}))
 	}
 	employee := snapshot.TypeRef{Schema: "unwritable", Name: "Employee"}.String()
-	root := func(rating any) *instance.ValidInstance {
+	root := func(rating any) instance.ValidInstance {
 		return instancetest.VI("Employee", instancetest.TypeID(empT.ID()), instancetest.PK("e1"),
 			instancetest.Props(map[string]any{"employee_id": "e1", "rating": rating}))
 	}

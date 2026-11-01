@@ -28,7 +28,7 @@ func TestProvenance_SourceName(t *testing.T) {
 	})
 
 	t.Run("nil_returns_empty", func(t *testing.T) {
-		var prov *location.Provenance
+		var prov location.Provenance
 		assert.Empty(t, prov.SourceName())
 	})
 }
@@ -41,7 +41,7 @@ func TestProvenance_Path(t *testing.T) {
 	})
 
 	t.Run("nil_returns_root", func(t *testing.T) {
-		var prov *location.Provenance
+		var prov location.Provenance
 		assert.Equal(t, "$", prov.Path().String())
 	})
 }
@@ -54,7 +54,7 @@ func TestProvenance_Span(t *testing.T) {
 	})
 
 	t.Run("nil_returns_zero", func(t *testing.T) {
-		var prov *location.Provenance
+		var prov location.Provenance
 		assert.Equal(t, location.Span{}, prov.Span())
 	})
 }

@@ -52,7 +52,7 @@ func TestParseTyped_RecordsProvenancePerRow(t *testing.T) {
 		line int
 	}{{"$.Entity[0]", 2}, {"$.Entity[1]", 3}} {
 		prov := results[i].Provenance
-		if prov == nil {
+		if prov.IsZero() {
 			t.Fatalf("row %d: no provenance", i)
 		}
 		if got := prov.SourceName(); got != id.String() {
@@ -170,11 +170,11 @@ func TestParseWithTypeColumn_RecordsProvenancePerRow(t *testing.T) {
 		"Entity,e2,Bob,10,2.71,false,2024-01-01\n"
 	a := New(WithTypeColumn("kind"))
 	parsed, result := a.ParseWithTypeColumn(t.Context(), id, strings.NewReader(input),
-		func(name string) *schema.Type {
+		func(name string) schema.Type {
 			if name == "Entity" {
 				return st
 			}
-			return nil
+			return schema.Type{}
 		})
 	if !result.OK() {
 		t.Fatalf("parse: %s", result)
@@ -189,7 +189,7 @@ func TestParseWithTypeColumn_RecordsProvenancePerRow(t *testing.T) {
 		line int
 	}{{"$.Entity[0]", 2}, {"$.Entity[1]", 4}} {
 		prov := rows[i].Provenance
-		if prov == nil {
+		if prov.IsZero() {
 			t.Fatalf("row %d: no provenance", i)
 		}
 		if got := prov.Path().String(); got != want.path {
@@ -256,11 +256,11 @@ func TestParseWithTypeColumn_IndexesEachTypeSeparately(t *testing.T) {
 		"Other,o2,E,5,5.0,true,2024-01-01\n"
 	a := New(WithTypeColumn("kind"))
 	parsed, result := a.ParseWithTypeColumn(t.Context(), id, strings.NewReader(input),
-		func(name string) *schema.Type {
+		func(name string) schema.Type {
 			if name == "Entity" {
 				return st
 			}
-			return nil
+			return schema.Type{}
 		})
 
 	for _, want := range []struct {
@@ -313,7 +313,7 @@ func TestParseWithTypeColumn_MalformedRecordCarriesASpan(t *testing.T) {
 	id := location.MustNewSourceID("test://data/short.csv")
 	a := New(WithTypeColumn("kind"))
 	_, result := a.ParseWithTypeColumn(t.Context(), id, strings.NewReader("kind,id\nEntity,e1\nEntity\n"),
-		func(string) *schema.Type { return nil })
+		func(string) schema.Type { return schema.Type{} })
 
 	issue, ok := firstIssue(result)
 	if !ok {
@@ -333,7 +333,7 @@ func TestParseTyped_HeaderDiagnosticsCarryASpan(t *testing.T) {
 	t.Parallel()
 	id := location.MustNewSourceID("test://data/header.csv")
 
-	_, result := New().ParseTyped(t.Context(), id, "Entity", strings.NewReader(""), nil)
+	_, result := New().ParseTyped(t.Context(), id, "Entity", strings.NewReader(""), schema.Type{})
 	issue, ok := firstIssue(result)
 	if !ok {
 		t.Fatalf("an empty document drew no diagnostic")
@@ -344,7 +344,7 @@ func TestParseTyped_HeaderDiagnosticsCarryASpan(t *testing.T) {
 
 	a := New(WithTypeColumn("missing"))
 	_, result2 := a.ParseWithTypeColumn(t.Context(), id, strings.NewReader("a,b\n1,2\n"),
-		func(string) *schema.Type { return nil })
+		func(string) schema.Type { return schema.Type{} })
 	issue2, ok := firstIssue(result2)
 	if !ok {
 		t.Fatalf("a missing type column drew no diagnostic")

@@ -42,9 +42,9 @@ type Person {
 // verdict is the validator's answer for one instance under one mode: each
 // diagnostic's code and message, sorted, with no position, since the CSV and
 // JSON documents place one field at different lines and columns.
-func verdict(t *testing.T, s *schema.Schema, raw instance.RawInstance, opts ...instance.Option) []string {
+func verdict(t *testing.T, s schema.Schema, raw instance.RawInstance, opts ...instance.Option) []string {
 	t.Helper()
-	raw.Provenance = nil
+	raw.Provenance = location.Provenance{}
 	_, res := instance.NewValidator(s, opts...).ValidateOne(context.Background(), "Person", raw)
 	var out []string
 	for issue := range res.Issues() {
@@ -263,7 +263,7 @@ func TestColumnMapping_EachRowTypeResolvesTheHeaderItself(t *testing.T) {
 	}
 	in := "kind,id,company_id,AGE\nCompany,,C1,\nPerson,p1,,7\n"
 	byType, pres := New(WithTypeColumn("kind"), WithSchema(s)).ParseWithTypeColumn(t.Context(),
-		location.NewSourceID("mixed.csv"), strings.NewReader(in), func(name string) *schema.Type {
+		location.NewSourceID("mixed.csv"), strings.NewReader(in), func(name string) schema.Type {
 			typ, _ := s.Type(name)
 			return typ
 		})

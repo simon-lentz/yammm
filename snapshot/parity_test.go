@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -270,7 +271,7 @@ func TestMarshal_IsDeterministicWhenUnresolvedRecordsTie(t *testing.T) {
 		}
 	}
 
-	if n := len(g.Snapshot().Unresolved()); n != 80 {
+	if n := len(slices.Collect(g.Snapshot().Unresolved())); n != 80 {
 		t.Fatalf("fixture is vacuous: %d unresolved records, want 80 tied pairs", n)
 	}
 

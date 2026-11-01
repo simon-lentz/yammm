@@ -40,7 +40,7 @@ type Sensor {
 }
 `
 
-func typeMismatchLoad(t *testing.T) *schema.Schema {
+func typeMismatchLoad(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), typeMismatchSchema, "tmis.yammm")
 	if res.HasErrors() {
@@ -49,7 +49,7 @@ func typeMismatchLoad(t *testing.T) *schema.Schema {
 	return s
 }
 
-func typeMismatchTypeID(t *testing.T, s *schema.Schema, n string) schema.TypeID {
+func typeMismatchTypeID(t *testing.T, s schema.Schema, n string) schema.TypeID {
 	t.Helper()
 	ty, ok := s.Type(n)
 	if !ok {

@@ -26,7 +26,7 @@ const (
 
 // canonicalTestSchema gives Station a declared-layout Timestamp primary key,
 // so a foreign key pointing at it renders through that layout or not at all.
-func canonicalTestSchema(t *testing.T) *schema.Schema {
+func canonicalTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "json_canonical"
 
@@ -86,7 +86,7 @@ func marshalBypassBuilt(t *testing.T) string {
 			"installed":  canonicalWhen,
 			"samples":    []any{canonicalWhen, "2026-08-19T13:00:00+00:00"},
 		}),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
+		instancetest.Edges(map[string]instance.ValidEdgeData{
 			"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{canonicalWhen}), immutable.Properties{}),
 			}),

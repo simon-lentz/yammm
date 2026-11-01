@@ -8,7 +8,7 @@ import (
 
 // loadClosure loads entry from an in-memory source set and fails the test on
 // any load error.
-func loadClosure(t *testing.T, sources map[string]string, entry string) *schema.Schema {
+func loadClosure(t *testing.T, sources map[string]string, entry string) schema.Schema {
 	t.Helper()
 	bytesBy := make(map[string][]byte, len(sources))
 	for k, v := range sources {
@@ -162,5 +162,20 @@ func TestStructuralHash_NoImportHashMovedFromAlgorithm2(t *testing.T) {
 	const v2Minimal = "sha256:e295ab45c0118bcfa0a910c2a071d83fff13fc1a60d0d863a444d15ecd87845e"
 	if got := schema.StructuralHash(buildVectorSchemaMinimal()); got == v2Minimal {
 		t.Fatal("a schema with no imports still hashes as algorithm 2 did")
+	}
+}
+
+// A type's rendered record holds its inherited invariants as well as its own. The
+// parent renders the invariant too, so only the digest tells the two forms apart;
+// it moves when the hash algorithm does.
+func TestStructuralHash_ATypeHoldsItsInheritedInvariants(t *testing.T) {
+	t.Parallel()
+	s, res := schema.LoadString(t.Context(), "schema \"h\"\n\nabstract type P {\n\tid String primary\n\t! \"p\" id != \"\"\n}\n\ntype K extends P {\n\t! \"k\" id != \"x\"\n}\n", "h.yammm")
+	if res.HasErrors() {
+		t.Fatal(res)
+	}
+	const want = "sha256:b8d311ed99f90e73f7c1ac815bd42674f3cfd68391f050354d1d7757b49587af"
+	if got := schema.StructuralHash(s); got != want {
+		t.Errorf("StructuralHash = %s, want %s", got, want)
 	}
 }

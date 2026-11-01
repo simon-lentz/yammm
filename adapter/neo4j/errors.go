@@ -21,18 +21,18 @@ var (
 	E_NEO4J_UNSUPPORTED_TYPE = diag.NewCode("E_NEO4J_UNSUPPORTED_TYPE", diag.CategoryAdapter)
 
 	// E_NEO4J_UNKNOWN_PROPERTY indicates an index annotation names a property
-	// the type does not have. Load-time validation catches this on every model
-	// a public entry point produces; the adapter re-checks so a model assembled
-	// outside them cannot emit DDL for a property that will never exist.
+	// the type does not have. Load-time validation refuses this on every schema
+	// a public entry point returns, so the adapter's re-check draws this code on
+	// none of them.
 	E_NEO4J_UNKNOWN_PROPERTY = diag.NewCode("E_NEO4J_UNKNOWN_PROPERTY", diag.CategoryAdapter)
 
 	// E_NEO4J_INVALID_INDEX_TARGET indicates an index annotation names a
 	// property whose type cannot carry that index: @index or @@index on a
-	// non-scalar, @vector on a property that is not a Vector, or @vector on a
-	// Vector whose dimension is not positive. Like [E_NEO4J_UNKNOWN_PROPERTY],
-	// this is the adapter re-checking what load-time validation already
-	// enforces, so a model assembled outside the public entry points cannot
-	// emit an index the DSL's own rule forbids.
+	// non-scalar, @fulltext or @@fulltext on a non-text property, @vector on a
+	// property that is not a Vector, or @vector on a Vector whose dimension is
+	// not positive. Like [E_NEO4J_UNKNOWN_PROPERTY], this is the adapter
+	// re-checking what load-time validation refuses, so no schema a public entry
+	// point returns draws it.
 	E_NEO4J_INVALID_INDEX_TARGET = diag.NewCode("E_NEO4J_INVALID_INDEX_TARGET", diag.CategoryAdapter)
 )
 
@@ -58,10 +58,9 @@ var (
 	// W_NEO4J_INDEXES_UNREADABLE indicates a comparison could not read the
 	// database's indexes, so the half of it that needed them did not run.
 	// Index and constraint names share one namespace, which is why it degrades
-	// the constraint reading too: a CREATE CONSTRAINT whose name an index
-	// already holds is silently ignored by the server, and without the index
-	// names that declaration is reported as a create that will not take
-	// effect. A warning, not an error: the constraint comparison that did run
+	// the constraint reading too: the server refuses a CREATE CONSTRAINT whose
+	// name a plain index holds, and without the index names that declaration is
+	// reported as a create that will not take effect. A warning, not an error: the constraint comparison that did run
 	// is complete and worth keeping.
 	W_NEO4J_INDEXES_UNREADABLE = diag.NewCode("W_NEO4J_INDEXES_UNREADABLE", diag.CategoryAdapter)
 )

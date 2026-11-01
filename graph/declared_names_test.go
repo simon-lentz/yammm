@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -38,7 +40,7 @@ part type Piece {
 }
 `
 
-func loadDeclaredNamesSchema(t *testing.T) *schema.Schema {
+func loadDeclaredNamesSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), declaredNamesSchema, "names.yammm")
 	if res.HasErrors() {
@@ -119,8 +121,8 @@ func TestRebuildSnapshot_RefusesAnUndeclaredNameAtEveryPosition(t *testing.T) {
 				got++
 			}
 		}
-		if got != want || (want == 0) != (snap != nil) {
-			t.Fatalf("mask %b: want %d refusals and a snapshot only when none, got %d, snapshot %v:\n%s", mask, want, got, snap != nil, r)
+		if got != want || (want == 0) != (!snap.IsZero()) {
+			t.Fatalf("mask %b: want %d refusals and a snapshot only when none, got %d, snapshot %v:\n%s", mask, want, got, !snap.IsZero(), r)
 		}
 	}
 }
@@ -134,35 +136,35 @@ func TestAdd_BypassGuard_UndeclaredNames(t *testing.T) {
 	holderT, _ := s.Type("Holder")
 	targetT, _ := s.Type("Target")
 	pieceT, _ := s.Type("Piece")
-	piece := func(props map[string]any) *instance.ValidInstance {
-		return instance.NewValidInstance("Piece", pieceT.ID(), immutable.Key{}, immutable.WrapProperties(props), nil, nil, nil)
+	piece := func(props map[string]any) instance.ValidInstance {
+		return instance.NewValidInstance("Piece", pieceT.ID(), immutable.Key{}, immutable.WrapProperties(props), nil, nil, location.Provenance{})
 	}
-	holder := func(props, edgeProps map[string]any, child *instance.ValidInstance) *instance.ValidInstance {
+	holder := func(props, edgeProps map[string]any, child instance.ValidInstance) instance.ValidInstance {
 		var composed map[string]immutable.Value
-		if child != nil {
+		if !child.IsZero() {
 			composed = map[string]immutable.Value{"PIECES": immutable.Wrap([]any{child})}
 		}
 		return instance.NewValidInstance("Holder", holderT.ID(), immutable.WrapKey([]any{"h1"}), immutable.WrapProperties(props),
-			map[string]*instance.ValidEdgeData{"OWNER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			map[string]instance.ValidEdgeData{"OWNER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(edgeProps)),
-			})}, composed, nil)
+			})}, composed, location.Provenance{})
 	}
 	for _, c := range []struct {
 		name string
-		inst *instance.ValidInstance
+		inst instance.ValidInstance
 		code diag.Code
 	}{
-		{"a root property", holder(map[string]any{"id": "h1", "ghost": 1}, nil, nil), diag.E_UNKNOWN_FIELD},
-		{"a case variant", holder(map[string]any{"id": "h1", "NOTE": "n"}, nil, nil), diag.E_UNKNOWN_FIELD},
-		{"a name spelling an edge column", holder(map[string]any{"id": "h1", "owner._target_key": "t2"}, nil, nil), diag.E_UNKNOWN_FIELD},
-		{"an edge property", holder(map[string]any{"id": "h1"}, map[string]any{"_target_key": "t2"}, nil), diag.E_UNKNOWN_EDGE_FIELD},
+		{"a root property", holder(map[string]any{"id": "h1", "ghost": 1}, nil, instance.ValidInstance{}), diag.E_UNKNOWN_FIELD},
+		{"a case variant", holder(map[string]any{"id": "h1", "NOTE": "n"}, nil, instance.ValidInstance{}), diag.E_UNKNOWN_FIELD},
+		{"a name spelling an edge column", holder(map[string]any{"id": "h1", "owner._target_key": "t2"}, nil, instance.ValidInstance{}), diag.E_UNKNOWN_FIELD},
+		{"an edge property", holder(map[string]any{"id": "h1"}, map[string]any{"_target_key": "t2"}, instance.ValidInstance{}), diag.E_UNKNOWN_EDGE_FIELD},
 		{"an inline composed child's property", holder(map[string]any{"id": "h1"}, nil, piece(map[string]any{"ghost": 1})), diag.E_UNKNOWN_FIELD},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			g := graph.New(s)
 			if res := g.Add(t.Context(), instance.NewValidInstance("Target", targetT.ID(), immutable.WrapKey([]any{"t1"}),
-				immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, nil)); !res.OK() {
+				immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, location.Provenance{})); !res.OK() {
 				t.Fatalf("add target: %s", res)
 			}
 			res := g.Add(t.Context(), c.inst)
@@ -170,7 +172,7 @@ func TestAdd_BypassGuard_UndeclaredNames(t *testing.T) {
 				t.Fatal("an undeclared name passed Add")
 			}
 			assertHasCode(t, res, c.code)
-			if n := len(g.Snapshot().InstancesOf(holderT.ID())); n != 0 {
+			if n := len(slices.Collect(g.Snapshot().InstancesOf(holderT.ID()))); n != 0 {
 				t.Fatalf("the refused instance installed: %d", n)
 			}
 		})
@@ -179,7 +181,7 @@ func TestAdd_BypassGuard_UndeclaredNames(t *testing.T) {
 		t.Parallel()
 		g := graph.New(s)
 		if res := g.Add(t.Context(), instance.NewValidInstance("Holder", holderT.ID(), immutable.WrapKey([]any{"h1"}),
-			immutable.WrapProperties(map[string]any{"id": "h1"}), nil, nil, nil)); !res.OK() {
+			immutable.WrapProperties(map[string]any{"id": "h1"}), nil, nil, location.Provenance{})); !res.OK() {
 			t.Fatalf("add holder: %s", res)
 		}
 		res := g.AddComposed(t.Context(), holderT.ID(), `["h1"]`, "PIECES", piece(map[string]any{"label": "l", "ghost": 1}))
@@ -187,8 +189,8 @@ func TestAdd_BypassGuard_UndeclaredNames(t *testing.T) {
 			t.Fatal("an undeclared name passed AddComposed")
 		}
 		assertHasCode(t, res, diag.E_UNKNOWN_FIELD)
-		inst := g.Snapshot().InstancesOf(holderT.ID())[0]
-		if n := len(inst.Composed("PIECES")); n != 0 {
+		inst := slices.Collect(g.Snapshot().InstancesOf(holderT.ID()))[0]
+		if n := len(slices.Collect(inst.Composed("PIECES"))); n != 0 {
 			t.Fatalf("the refused child attached: %d", n)
 		}
 	})

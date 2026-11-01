@@ -119,7 +119,7 @@
 // each target of an edge group is its own object, decided by
 // [instance.ClaimEdgeKeys]. A key that claims a member takes that member's
 // coercion and empty value, and every key keeps the header's spelling. A row
-// parsed with no type (a nil one handed to ParseTyped, or one a resolver does
+// parsed with no type (a zero one handed to ParseTyped, or one a resolver does
 // not find) forms no group: every cell is carried as its text under its
 // header name, an empty cell as "" and a dotted name as written.
 //
@@ -139,9 +139,9 @@
 // field where the file means no value.
 //
 // A key that claims no member is carried as its text, as a JSON key is, for
-// the validator to report as unknown, shadowed or colliding, or to ignore under
-// [instance.WithAllowUnknownFields]; its empty cell is skipped, where the row
-// has a type. That holds at every position: a column naming no property, a
+// the validator to report as unknown, shadowed or colliding, and
+// [instance.WithAllowUnknownFields] ignores an unknown one. Its empty cell is
+// skipped, where the row has a type. That holds at every position: a column naming no property, a
 // suffix naming neither a key component nor an edge property, a key component
 // the target does not declare, a column or suffix whose spelling is shadowed
 // or collides, a cell of a dotted group whose key claims no association, and a
@@ -165,7 +165,7 @@
 //
 // # Type Coercion
 //
-// CSV values are strings. The adapter uses [*schema.Type] constraint metadata
+// CSV values are strings. The adapter uses [schema.Type] constraint metadata
 // to coerce string values to typed Go values during parsing:
 //
 //   - Integer properties: a JSON integer literal, read exactly and refused
@@ -263,12 +263,12 @@
 // property is never null, so an optional one, or a required one whose kind has
 // no empty value, is absent on that target.
 //
-// These values cannot be written so that they read back unchanged. The writer
+// Written plainly, these values do not read back unchanged. The writer
 // refuses the ones that would lose data, with an error marked
 // [ErrUnrepresentable] so a caller separates a refusal of the data from an I/O
 // failure and from [ErrConfig] without matching the message text; it writes the
-// documented limitations, which are not losses the writer can prevent, and
-// writes one shape specially so that it reads back:
+// documented limitations rather than refuse them, and writes one shape specially
+// so that it reads back:
 //
 //   - An optional property holding "" or an empty list writes the cell null
 //     writes, so it reads back as null, and an optional edge property holding

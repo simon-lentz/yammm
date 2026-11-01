@@ -505,7 +505,7 @@ type Car {
 
 ### Immutability
 
-After compilation, all schema objects — types, relations, data types, and the schema itself — are sealed and become immutable. Slice accessors on sealed objects return defensive copies. This guarantees thread-safe concurrent read access without synchronization.
+After compilation, all schema objects — types, relations, data types, and the schema itself — are sealed and become immutable. An accessor that returns a slice returns a fresh copy. This guarantees thread-safe concurrent read access without synchronization.
 
 ### Inheritance
 
@@ -1741,7 +1741,7 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_DUPLICATE_PROPERTY`, `E_UNKNOWN_PROPERTY` — a property declared twice on one type or an edge property twice on one association, or an invariant reading a member the type it reads does not declare
 - `E_DUPLICATE_RELATION`, `E_RELATION_COLLISION` — relation conflicts
 - `E_DUPLICATE_INVARIANT`, `E_INVARIANT_CONFLICT` — an invariant message declared twice on one type, or inherited with two different expressions (a literal with no value matches any literal of its kind)
-- `E_CASE_COLLISION` — names differ only by case
+- `E_CASE_COLLISION` — two property names of a type, or two edge property names of an association, differ only by case
 - `E_PROPERTY_RELATION_COLLISION` — property and relation share a name
 - `E_RESERVED_PREFIX` — name uses a reserved prefix
 - `E_INVALID_ASSOCIATION_TARGET`, `E_INVALID_COMPOSITION_TARGET` — relation definition errors
@@ -1755,8 +1755,8 @@ Codes are stable identifiers for programmatic matching. The authoritative list i
 - `E_UPSTREAM_FAIL` — imported schema failed to compile
 - `E_MISSING_SOURCE_ID`, `E_INVALID_SYNTHETIC_ID` — source identity errors
 - `E_LOAD_IO_FAILURE` — I/O error during schema loading, or a load whose arguments or options the loader refuses
-- `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link whose target cannot be read
-- `E_LOAD_SOURCE_CHANGED` — a source a shared registry holds with content that differs from the load's: re-registered after an edit, registered with its sources where the registry's schema has none, or imported where the load's own bytes for it differ from the ones the registry compiled
+- `E_LOAD_MODULE_ROOT_MALFORMED` — a `yammm.mod` module-root marker holds content other than comment lines, is not a regular file, is larger than the size limit, or is a link that resolves to no file
+- `E_LOAD_SOURCE_CHANGED` — a source a shared registry holds that a load cannot reuse. At a re-registration its bytes or its structural hash differ, or the registered schema carries no sources. At an import the load holds bytes for it, no other compile of it is bound, and the registry's compile differs in bytes or carries none
 - `E_UNKNOWN_ANNOTATION`, `E_INVALID_ANNOTATION` — annotation name, placement, arity, argument kind or value, duplicate, or inherited-disagreement errors
 - `E_UNKNOWN_ANNOTATION_TARGET`, `E_INVALID_ANNOTATION_TARGET` — annotation target-property errors (unknown reference / ineligible property)
 - `W_ANNOTATION_SHADOWED` — a re-declaration silently drops an inherited property's annotations (warning)

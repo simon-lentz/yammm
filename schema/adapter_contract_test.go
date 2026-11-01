@@ -28,7 +28,7 @@ func TestAdapter_DataTypeRefSpanCoversTheQualifier(t *testing.T) {
 		"}\n"
 
 	s, res := schema.LoadString(context.Background(), src, "ref.yammm")
-	if s == nil {
+	if s.IsZero() {
 		t.Fatalf("fixture does not load: %v", res)
 	}
 
@@ -87,7 +87,7 @@ func TestAdapter_NoSchemaNameStopsBeforeCompletion(t *testing.T) {
 	const src = "type Alpha {\n\tid Missing\n\tname String required\n}\n"
 
 	s, res := schema.LoadString(context.Background(), src, "headerless.yammm")
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("a source with no schema name must not produce a schema")
 	}
 
@@ -106,18 +106,18 @@ func TestAdapter_NoSchemaNameStopsBeforeCompletion(t *testing.T) {
 	}
 }
 
-func findProperty(t *testing.T, s *schema.Schema, typeName, propName string) *schema.Property {
+func findProperty(t *testing.T, s schema.Schema, typeName, propName string) schema.Property {
 	t.Helper()
-	for _, typ := range s.TypesSlice() {
+	for typ := range s.Types() {
 		if typ.Name() != typeName {
 			continue
 		}
-		for _, p := range typ.PropertiesSlice() {
+		for p := range typ.Properties() {
 			if p.Name() == propName {
 				return p
 			}
 		}
 	}
 	t.Fatalf("property %s.%s not found", typeName, propName)
-	return nil
+	return schema.Property{}
 }

@@ -4,12 +4,13 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/simon-lentz/yammm/internal/yammmtest"
 	"github.com/simon-lentz/yammm/schema"
 )
 
 // loadClosureFixture loads a four-schema diamond: entry imports a and b,
 // and both a and b import base.
-func loadClosureFixture(t *testing.T) *schema.Schema {
+func loadClosureFixture(t *testing.T) schema.Schema {
 	t.Helper()
 	sources := map[string][]byte{
 		"entry.yammm": []byte(`schema "entry"
@@ -58,7 +59,7 @@ type Ground {
 func TestClosure_DiamondOrderAndDedup(t *testing.T) {
 	s := loadClosureFixture(t)
 
-	closure := s.Closure()
+	closure := slices.Collect(s.Closure())
 	names := make([]string, 0, len(closure))
 	for _, sc := range closure {
 		names = append(names, sc.Name())
@@ -82,23 +83,12 @@ type Only {
 		t.Fatalf("load: %v", result.Err())
 	}
 
-	closure := s.Closure()
+	closure := slices.Collect(s.Closure())
 	if len(closure) != 1 {
 		t.Fatalf("closure length = %d, want 1", len(closure))
 	}
 	if closure[0] != s {
 		t.Error("an import-free closure must contain exactly the schema itself")
-	}
-}
-
-func TestClosure_DefensiveCopy(t *testing.T) {
-	s := loadClosureFixture(t)
-
-	first := s.Closure()
-	first[0] = nil
-	second := s.Closure()
-	if len(second) == 0 || second[0] != s {
-		t.Error("mutating a returned closure slice must not affect later calls")
 	}
 }
 
@@ -115,18 +105,18 @@ func TestTypeByID(t *testing.T) {
 			t.Fatal("TypeByID missed a local type")
 		}
 		if got != root {
-			t.Error("TypeByID must return the identical *Type")
+			t.Error("TypeByID must return the identical Type")
 		}
 	})
 
 	t.Run("transitively imported type", func(t *testing.T) {
-		var base *schema.Schema
-		for _, sc := range s.Closure() {
+		var base schema.Schema
+		for sc := range s.Closure() {
 			if sc.Name() == "base" {
 				base = sc
 			}
 		}
-		if base == nil {
+		if base.IsZero() {
 			t.Fatal("base schema missing from closure")
 		}
 		ground, ok := base.Type("Ground")
@@ -139,7 +129,7 @@ func TestTypeByID(t *testing.T) {
 			t.Fatal("TypeByID missed a transitively imported type")
 		}
 		if got != ground {
-			t.Error("TypeByID must return the identical *Type")
+			t.Error("TypeByID must return the identical Type")
 		}
 	})
 
@@ -154,4 +144,11 @@ func TestTypeByID(t *testing.T) {
 			t.Error("unknown TypeID must miss")
 		}
 	})
+}
+
+// Closure resolves its members before it returns, so a zero Schema fails at the
+// call and never hands out an iterator that fails later.
+func TestClosure_PanicsAtTheCallOnAZeroSchema(t *testing.T) {
+	t.Parallel()
+	yammmtest.AssertPanics(t, func() { _ = schema.Schema{}.Closure() })
 }

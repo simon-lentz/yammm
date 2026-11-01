@@ -81,12 +81,12 @@ func fragmentByte(b byte) bool {
 // constraint, rendering a named-DataType reference as a $ref at any List
 // depth. dtRef supplies the $defs key for a property whose constraint — or
 // whose innermost list element — is a named DataType reference; the table is
-// keyed by property pointer and populated per declaring schema, so a property
+// keyed by property record and populated per declaring schema, so a property
 // inherited from a cross-schema parent resolves to the correct def. A
 // DataType-referencing property with no registered key is a generator wiring
 // bug, surfaced as an error. Properties with no DataType reference route to
 // [schemaForConstraint].
-func schemaForProperty(p *schema.Property, dtRef func(*schema.Property) (string, bool)) (val, error) {
+func schemaForProperty(p schema.Property, dtRef func(schema.Property) (string, bool)) (val, error) {
 	c := p.Constraint()
 	lists, ac, ok := aliasInLists(c)
 	if !ok {

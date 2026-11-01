@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -10,7 +11,7 @@ import (
 
 // validatedInstance runs the real validator, so the result carries the
 // token no bypass helper can mint.
-func validatedInstance(t *testing.T, s *schema.Schema, typeName string, props map[string]any) *instance.ValidInstance {
+func validatedInstance(t *testing.T, s schema.Schema, typeName string, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	v := instance.NewValidator(s)
 	vi, res := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
@@ -39,7 +40,7 @@ func TestSnapshotAttestation_ValidatorBuiltAttestsTrue(t *testing.T) {
 	}
 
 	// The per-instance bit survives the snapshot clone.
-	insts := snap.InstancesOf(mustTypeID(t, s, "Company"))
+	insts := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Company")))
 	if len(insts) != 1 || !insts[0].Validated() {
 		t.Fatal("cloned snapshot instance lost its Validated bit")
 	}
@@ -62,7 +63,7 @@ func TestSnapshotAttestation_BypassFlipsValuesFalse(t *testing.T) {
 	if att.Values {
 		t.Fatal("a bypass-built instance did not flip Values false")
 	}
-	insts := fr.Snapshot.InstancesOf(mustTypeID(t, s, "Company"))
+	insts := slices.Collect(fr.Snapshot.InstancesOf(mustTypeID(t, s, "Company")))
 	if len(insts) != 1 || insts[0].Validated() {
 		t.Fatal("bypass-built snapshot instance reports Validated")
 	}

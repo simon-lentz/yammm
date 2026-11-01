@@ -17,7 +17,7 @@ import (
 )
 
 // ParseTyped parses CSV data where all rows belong to schemaType, which drives
-// coercion; with a nil schemaType every value is kept as a string. The header's
+// coercion; with a zero schemaType every value is kept as a string. The header's
 // names resolve as the package documentation's "Column Mapping" states, and a
 // fault is handled as its "Header and Records" states. Every instance carries a
 // [location.Provenance]: source, its path ($.Entity[0]) and its record's span.
@@ -26,7 +26,7 @@ func (a *Adapter) ParseTyped(
 	source location.SourceID,
 	typeName string,
 	r io.Reader,
-	schemaType *schema.Type,
+	schemaType schema.Type,
 ) ([]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 	if a.configRefused(collector) {
@@ -184,8 +184,8 @@ func parseErrorSpan(source location.SourceID, err error) location.Span {
 // ParseWithTypeColumn parses CSV data where a designated column contains
 // the type name for each row.
 //
-// The typeResolver function looks up a [*schema.Type] by name for coercion.
-// It may return nil for unknown types, in which case values are kept as strings.
+// The typeResolver function looks up a [schema.Type] by name for coercion.
+// It may return the zero Type for an unknown type, in which case values are kept as strings.
 // A value that is not a type name by the grammar draws E_INVALID_TYPE_TAG and
 // its row is skipped. Requires [WithTypeColumn] to name the type column: with
 // no name, or with a name holding a CR LF, which no header can hold, the
@@ -195,7 +195,7 @@ func (a *Adapter) ParseWithTypeColumn(
 	ctx context.Context,
 	source location.SourceID,
 	r io.Reader,
-	typeResolver func(string) *schema.Type,
+	typeResolver func(string) schema.Type,
 ) (map[string][]instance.RawInstance, diag.Result) {
 	collector := diag.NewCollectorUnlimited()
 
@@ -237,7 +237,7 @@ func (a *Adapter) ParseWithTypeColumn(
 			filteredCols = append(filteredCols, col)
 		}
 	}
-	plans := make(map[*schema.Type]*plan)
+	plans := make(map[schema.Type]*plan)
 
 	results := make(map[string][]instance.RawInstance)
 	parsed := 0
@@ -380,7 +380,7 @@ func (a *Adapter) recordToProps(
 	collector *diag.Collector,
 ) map[string]any {
 	props := make(map[string]any, len(record))
-	if p.typ == nil {
+	if p.typ.IsZero() {
 		for i, val := range record {
 			props[p.columns[i].name] = val
 		}
@@ -459,7 +459,7 @@ func (a *Adapter) recordToProps(
 		if _, written := props[col.name]; written {
 			continue // the group wrote the key, or holds it beside an empty cell
 		}
-		if prop := claims.Property(col.name); prop != nil {
+		if prop, ok := claims.Property(col.name); ok {
 			a.writeProperty(p, props, col.name, prop, val, span, typeName, collector)
 			continue
 		}
@@ -479,7 +479,7 @@ func (a *Adapter) recordToProps(
 func rowMask(p *plan, record []string, present, dropped []bool, mask []byte) []byte {
 	mask = mask[:0]
 	for i, c := range p.columns {
-		mask = append(mask, flag(c.kind == columnPlain && (record[i] != "" || c.exact != nil)))
+		mask = append(mask, flag(c.kind == columnPlain && (record[i] != "" || !c.exact.IsZero())))
 	}
 	for s := range p.spellings {
 		mask = append(mask, flag(present[s] && !dropped[s]))
@@ -533,10 +533,10 @@ func (a *Adapter) emptyFoldedColumns(p *plan, mask []byte, keys []string) []stri
 			folded[lower] = true
 		}
 	}
-	candidates := make(map[*schema.Property][]string)
-	var order []*schema.Property
+	candidates := make(map[schema.Property][]string)
+	var order []schema.Property
 	for i, c := range p.columns {
-		if c.kind != columnPlain || c.folds == nil || mask[i] != 0 || folded[strings.ToLower(c.folds.Name())] {
+		if c.kind != columnPlain || c.folds.IsZero() || mask[i] != 0 || folded[strings.ToLower(c.folds.Name())] {
 			continue
 		}
 		if _, seen := candidates[c.folds]; !seen {
@@ -557,7 +557,8 @@ func (a *Adapter) emptyFoldedColumns(p *plan, mask []byte, keys []string) []stri
 // the spelling names. A shadowed or colliding spelling claims nothing, so its
 // group is text for the validator to report.
 func claimsAssociation(claims instance.Claims, sp *spelling) bool {
-	return sp.rel != nil && claims.Relation(sp.field) == sp.rel
+	rel, ok := claims.Relation(sp.field)
+	return ok && rel == sp.rel
 }
 
 // groupShape is what one row's cells make of an association's group: each
@@ -636,8 +637,9 @@ func (a *Adapter) decidingColumns(p *plan, sp *spelling, record []string) []bool
 	decides := make([]bool, len(sp.cols))
 	for j, i := range sp.cols {
 		suffix := p.columns[i].suffix
-		decides[j] = sp.members[j].member == memberOpenKey ||
-			claims.Key(suffix) != nil || claims.Property(suffix) != nil
+		_, isKey := claims.Key(suffix)
+		_, isProperty := claims.Property(suffix)
+		decides[j] = sp.members[j].member == memberOpenKey || isKey || isProperty
 	}
 	return decides
 }
@@ -652,7 +654,7 @@ func (a *Adapter) holdsKey(p *plan, m suffixMember, text string) bool {
 // writeProperty writes a claimed column's cell: its property's empty value,
 // or the cell coerced, or its text as an [instance.Refused] where it does not
 // coerce, so the validator reports nothing more for it.
-func (a *Adapter) writeProperty(p *plan, props map[string]any, name string, prop *schema.Property, val string, span location.Span, typeName string, collector *diag.Collector) {
+func (a *Adapter) writeProperty(p *plan, props map[string]any, name string, prop schema.Property, val string, span location.Span, typeName string, collector *diag.Collector) {
 	if val == "" {
 		props[name] = a.emptyValue(p, emptyOf{prop: prop})
 		return
@@ -678,7 +680,7 @@ func (a *Adapter) writeProperty(p *plan, props map[string]any, name string, prop
 // cannot be null. Where the kind has none (an Integer, a Date), it is nil, so
 // the validator reports the property missing. An optional property's empty
 // cell is nil, so an optional "" or [] reads back as null.
-func (a *Adapter) emptyCell(p *schema.Property) any {
+func (a *Adapter) emptyCell(p schema.Property) any {
 	if p.IsOptional() {
 		return nil
 	}
@@ -730,9 +732,9 @@ func (a *Adapter) edgeTarget(p *plan, sp *spelling, g groupShape, t int, span lo
 	for j, i := range sp.cols {
 		suffix, seg := p.columns[i].suffix, g.segs[j][t]
 		var member suffixMember
-		if key := claims.Key(suffix); key != nil {
+		if key, ok := claims.Key(suffix); ok {
 			member = suffixMember{member: memberKey, key: key}
-		} else if eprop := claims.Property(suffix); eprop != nil {
+		} else if eprop, ok := claims.Property(suffix); ok {
 			member = suffixMember{member: memberProperty, eprop: eprop}
 		}
 		switch {

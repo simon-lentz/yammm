@@ -23,13 +23,13 @@ const MaxComposedDepth = 32
 // pkPathFromInstance builds a PK-based path segment for a validated instance.
 // Returns basePath.PK(...) if the child type has a primary key, otherwise basePath.Index(i).
 // This is used for post-validation diagnostic paths where PK data is available.
-func pkPathFromInstance(basePath path.Builder, child *ValidInstance, childType *schema.Type, index int) path.Builder {
+func pkPathFromInstance(basePath path.Builder, child ValidInstance, childType schema.Type, index int) path.Builder {
 	if !childType.HasPrimaryKey() {
 		return basePath.Index(index)
 	}
 
 	pk := child.PrimaryKey()
-	pks := childType.PrimaryKeysSlice()
+	pks := slices.Collect(childType.PrimaryKeys())
 
 	if pk.Len() == 0 || len(pks) == 0 {
 		return basePath.Index(index)
@@ -54,10 +54,10 @@ func pkPathFromInstance(basePath path.Builder, child *ValidInstance, childType *
 // children as immutable.Value, and whether a child holds a [Refused] value.
 func (v *Validator) validateCompositions(
 	ctx context.Context,
-	typ *schema.Type,
-	rels map[*schema.Relation]relationInput,
+	typ schema.Type,
+	rels map[schema.Relation]relationInput,
 	collector *diag.Collector,
-	prov *location.Provenance,
+	prov location.Provenance,
 	base path.Builder,
 	depth int,
 ) (map[string]immutable.Value, bool) {
@@ -105,10 +105,10 @@ func (v *Validator) validateCompositions(
 // child holds a [Refused] value.
 func (v *Validator) validateComposition(
 	ctx context.Context,
-	rel *schema.Relation,
+	rel schema.Relation,
 	rawValue any,
 	collector *diag.Collector,
-	prov *location.Provenance,
+	prov location.Provenance,
 	relPath path.Builder,
 	depth int,
 ) (immutable.Value, bool) {
@@ -141,7 +141,7 @@ func (v *Validator) validateComposition(
 			collector.Collect(issue.Build())
 			return immutable.Value{}, false
 		}
-		return immutable.Wrap([]*ValidInstance{}), false
+		return immutable.Wrap([]ValidInstance{}), false
 	}
 
 	// A composition always arrives as an array, so its multiplicity is not
@@ -190,8 +190,8 @@ func (v *Validator) validateComposition(
 		}
 
 		childBase := relPath.Index(i)
-		var childProv *location.Provenance
-		if prov != nil {
+		var childProv location.Provenance
+		if !prov.IsZero() {
 			childProv = location.NewProvenance(prov.SourceName(), childBase, prov.Span())
 		}
 		childRaws = append(childRaws, RawInstance{Properties: childObj, Provenance: childProv})
@@ -219,10 +219,10 @@ func (v *Validator) validateComposition(
 	// PK-less composed children use structural position (array index) for identity,
 	// so no duplicate check is needed for them.
 	if len(validChildren) > 0 {
-		if childType != nil && childType.HasPrimaryKey() {
+		if childType.HasPrimaryKey() {
 			seenPKs := make(map[string]int) // pk string -> first occurrence's input index
 			for i, child := range validChildren {
-				if child == nil {
+				if child.IsZero() {
 					continue // failed validation, or holds a Refused value: nothing to compare
 				}
 				pkStr := child.PrimaryKey().String()
@@ -247,7 +247,7 @@ func (v *Validator) validateComposition(
 		return immutable.Value{}, false
 	}
 	// A child the validator refused with no error holds a Refused value.
-	if slices.Contains(validChildren, nil) {
+	if slices.Contains(validChildren, ValidInstance{}) {
 		return immutable.Value{}, true
 	}
 

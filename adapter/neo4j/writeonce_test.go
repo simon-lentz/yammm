@@ -64,7 +64,7 @@ part type Note {
 
 func TestImmutableKeysFor_NilType(t *testing.T) {
 	t.Parallel()
-	if got := ImmutableKeysFor(nil); got != nil {
+	if got := ImmutableKeysFor(schema.Type{}); got != nil {
 		t.Errorf("ImmutableKeysFor(nil) = %v; want nil", got)
 	}
 }

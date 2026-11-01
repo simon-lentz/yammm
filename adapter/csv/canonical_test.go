@@ -33,7 +33,7 @@ const (
 // test below green. They pin the END-TO-END text a native value exports as. The
 // writer's own arm is load-bearing for numbers alone, which Add leaves as they
 // arrived, and [TestListRendering_ABypassBuiltFloat32RendersAsAFloatDoes] pins it.
-func bypassCanonicalSnapshot(t *testing.T, s *schema.Schema) *graph.Snapshot {
+func bypassCanonicalSnapshot(t *testing.T, s schema.Schema) graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
 	g := graph.New(s)
@@ -68,7 +68,7 @@ func bypassCanonicalSnapshot(t *testing.T, s *schema.Schema) *graph.Snapshot {
 			"installed":  canonicalWhen,
 			"samples":    []any{canonicalWhen, "2026-08-19T13:00:00+00:00"},
 		}),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
+		instancetest.Edges(map[string]instance.ValidEdgeData{
 			"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{canonicalWhen}), immutable.Properties{}),
 			}),
@@ -85,7 +85,7 @@ func bypassCanonicalSnapshot(t *testing.T, s *schema.Schema) *graph.Snapshot {
 // so a foreign key pointing at it renders through that layout or not at all.
 // Inline rather than a testdata fixture: every .yammm in the tree joins the
 // parser's frozen golden corpus, and this schema is about the writer.
-func canonicalTestSchema(t *testing.T) *schema.Schema {
+func canonicalTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "csv_canonical"
 

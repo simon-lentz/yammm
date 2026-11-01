@@ -62,7 +62,7 @@ type Index struct {
 // raw strings rather than structured [Index] values — including the nil result
 // for a schema that declares no index annotations, so a caller distinguishing
 // nil from empty gets the same answer from both entry points.
-func (a *Adapter) IndexesForSchema(ctx context.Context, s *schema.Schema) ([]string, diag.Result) {
+func (a *Adapter) IndexesForSchema(ctx context.Context, s schema.Schema) ([]string, diag.Result) {
 	structured, result := a.IndexesStructured(ctx, s)
 	if !result.OK() || len(structured) == 0 {
 		return nil, result
@@ -94,11 +94,9 @@ func (k IndexKind) String() string {
 // the property's Vector[N] constraint; property-level @fulltext and type-level
 // @@fulltext yield fulltext indexes over text properties. Load-time validation
 // guarantees target
-// eligibility for every schema a public entry point returns; the adapter
-// re-checks anyway — that each named property exists and that its type can
-// carry the index it was annotated with — as defense against a model
-// assembled outside those guarantees, rather than emitting DDL for a property
-// that does not exist or cannot be indexed.
+// eligibility for every schema a public entry point returns, so none of them
+// draws the adapter's own re-check that each named property exists and that its
+// type can carry the index it was annotated with.
 //
 // Abstract types are skipped (they have no Neo4j label). Part types are NOT
 // skipped: they receive a label and constraints today, so they receive index
@@ -118,15 +116,15 @@ func (k IndexKind) String() string {
 // [disambiguateIndexNames], which also explains why the readable name cannot be
 // made injective.
 //
-// Returns the index statements in deterministic order: types in schema
-// declaration order; within each type range indexes, then vector indexes, then
+// Returns the index statements in deterministic order: types in import closure
+// order, then declaration order; within each type range indexes, then vector indexes, then
 // fulltext indexes (each in property order), then type-level composites —
 // @@index and @@fulltext interleaved, in annotation order.
 //
 // If validation errors are found, returns (nil, result) where result contains
 // all issues. Issues use [E_NEO4J_LABEL_COLLISION], [E_NEO4J_INVALID_IDENTIFIER],
 // [E_NEO4J_UNKNOWN_PROPERTY], or [E_NEO4J_INVALID_INDEX_TARGET] codes.
-func (a *Adapter) IndexesStructured(ctx context.Context, s *schema.Schema) ([]Index, diag.Result) {
+func (a *Adapter) IndexesStructured(ctx context.Context, s schema.Schema) ([]Index, diag.Result) {
 	collector := diag.NewCollector(0)
 	collector.Merge(a.DetectLabelCollisions(ctx, s))
 
@@ -174,8 +172,8 @@ func (a *Adapter) IndexesStructured(ctx context.Context, s *schema.Schema) ([]In
 // doors reject a name with surrounding whitespace anyway (the grammar's UC_WORD
 // production; [schema.NewBuilder] reports E_INVALID_NAME), so the trim only
 // matters to a construction path that bypasses both.
-func (a *Adapter) emittableTypes(ctx context.Context, s *schema.Schema, collector *diag.Collector) iter.Seq2[*schema.Type, string] {
-	return func(yield func(*schema.Type, string) bool) {
+func (a *Adapter) emittableTypes(ctx context.Context, s schema.Schema, collector *diag.Collector) iter.Seq2[schema.Type, string] {
+	return func(yield func(schema.Type, string) bool) {
 		for t, label := range a.labeledTypes(ctx, s) {
 			name := strings.TrimSpace(t.Name())
 			if err := ValidateIdentifier(label, fmt.Sprintf("type %q label", name)); err != nil {
@@ -212,10 +210,10 @@ func (a *Adapter) emittableTypes(ctx context.Context, s *schema.Schema, collecto
 // a label that is also an invalid identifier are still a collision, and the
 // public collision check would otherwise go silent on exactly the schemas most
 // likely to have one.
-func (a *Adapter) labeledTypes(ctx context.Context, s *schema.Schema) iter.Seq2[*schema.Type, string] {
-	return func(yield func(*schema.Type, string) bool) {
-		for _, member := range s.Closure() {
-			for _, t := range member.TypesSlice() {
+func (a *Adapter) labeledTypes(ctx context.Context, s schema.Schema) iter.Seq2[schema.Type, string] {
+	return func(yield func(schema.Type, string) bool) {
+		for member := range s.Closure() {
+			for t := range member.Types() {
 				name := strings.TrimSpace(t.Name())
 				if name == "" || t.IsAbstract() {
 					continue
@@ -298,7 +296,7 @@ func invalidLabelIssue(typeName, label string, err error) diag.Issue {
 // then give two different names, so the schema would ask the database for the
 // same index twice. The dedup key carries the kind, so @index and @fulltext on
 // one property stay two distinct indexes.
-func indexesForType(t *schema.Type, label string, collector *diag.Collector, reported reportedTargets) []Index {
+func indexesForType(t schema.Type, label string, collector *diag.Collector, reported reportedTargets) []Index {
 	var indexes []Index
 	emitted := make(map[string]bool)
 	add := func(idx Index) {
@@ -363,7 +361,7 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector, rep
 			if !ok {
 				reportIndexTarget(collector, reported,
 					indexTargetRef{ann: ann, name: arg.Text(), code: E_NEO4J_UNKNOWN_PROPERTY},
-					ann, E_NEO4J_UNKNOWN_PROPERTY, targetScope(t, nil),
+					ann, E_NEO4J_UNKNOWN_PROPERTY, targetScope(t, schema.Property{}),
 					fmt.Sprintf("index annotation names unknown property %q", arg.Text()),
 					"property not declared on the annotated type or any resolved ancestor")
 				valid = false
@@ -411,7 +409,7 @@ func indexesForType(t *schema.Type, label string, collector *diag.Collector, rep
 //     diagnostics, burying every other independent error.
 //
 // Both subjects are stable across the merged view: linearization shares the
-// declaring ancestor's *Annotation with every heir rather than cloning it, and
+// declaring ancestor's Annotation with every heir rather than cloning it, and
 // [schema.Property.Origin] maps a synthesized copy back to the property that
 // was actually declared. Two unrelated types with the same mistake therefore
 // still draw two diagnostics, which is right — each needs its own edit.
@@ -421,8 +419,8 @@ type reportedTargets map[indexTargetRef]bool
 // prop is set; name carries the property name for both, so a multi-argument
 // @@index naming two bad properties reports both.
 type indexTargetRef struct {
-	ann  *schema.Annotation
-	prop *schema.Property
+	ann  schema.Annotation
+	prop schema.Property
 	name string
 	// code discriminates two different problems that can share a subject. One
 	// @@index on a mixin can be an unknown property on one heir and an
@@ -441,7 +439,7 @@ type indexTargetRef struct {
 // and it is the same for every heir.
 func reportIndexTarget(
 	collector *diag.Collector, reported reportedTargets,
-	ref indexTargetRef, ann *schema.Annotation,
+	ref indexTargetRef, ann schema.Annotation,
 	code diag.Code, subj identifierSubject, msg, detail string,
 ) {
 	if reported[ref] {
@@ -481,8 +479,8 @@ func reportIndexTarget(
 // A relation-scoped property is declared on an EDGE, so its scope is a relation
 // name and it is reported as one. Rendering it into the type detail told a
 // consumer a relation was a type.
-func targetScope(t *schema.Type, prop *schema.Property) identifierSubject {
-	if prop == nil {
+func targetScope(t schema.Type, prop schema.Property) identifierSubject {
+	if prop.IsZero() {
 		return identifierSubject{TypeName: t.Name()}
 	}
 	scope := prop.Origin().DeclaringScope()
@@ -505,7 +503,7 @@ func (s identifierSubject) String() string {
 // DDL. The subject is the property: one rename fixes every annotation naming
 // it, so reporting per annotation would repeat the same message for a reserved
 // keyword listed under both @index and @@index.
-func validIndexName(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
+func validIndexName(t schema.Type, prop schema.Property, ann schema.Annotation,
 	collector *diag.Collector, reported reportedTargets,
 ) bool {
 	name := prop.Name()
@@ -534,7 +532,7 @@ func validIndexName(t *schema.Type, prop *schema.Property, ann *schema.Annotatio
 // those guarantees could still carry @index on a List or on an unresolved
 // alias — trusting it would emit a range index over a property the DSL's own
 // rule forbids.
-func validScalarTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
+func validScalarTarget(t schema.Type, prop schema.Property, ann schema.Annotation,
 	collector *diag.Collector, reported reportedTargets,
 ) bool {
 	if !validIndexName(t, prop, ann, collector, reported) {
@@ -562,7 +560,7 @@ func validScalarTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 // diff reports no problem because the index is missing from the desired set
 // too. A non-positive dimension is rejected for a related reason: Neo4j
 // refuses the statement at execution, aborting a DDL apply midway through.
-func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
+func validVectorTarget(t schema.Type, prop schema.Property, ann schema.Annotation,
 	vc schema.VectorConstraint, isVector bool,
 	collector *diag.Collector, reported reportedTargets,
 ) bool {
@@ -599,7 +597,7 @@ func validVectorTarget(t *schema.Type, prop *schema.Property, ann *schema.Annota
 // a model assembled outside those guarantees could still carry @fulltext on a
 // non-text property, and trusting it would emit a fulltext index over a
 // property the DSL's own rule forbids.
-func validFulltextTarget(t *schema.Type, prop *schema.Property, ann *schema.Annotation,
+func validFulltextTarget(t schema.Type, prop schema.Property, ann schema.Annotation,
 	collector *diag.Collector, reported reportedTargets,
 ) bool {
 	if !validIndexName(t, prop, ann, collector, reported) {

@@ -255,7 +255,7 @@ func mustJSON(s string) []byte {
 
 // writtenCell writes snap and returns the text of Holder h1's p cell, as
 // encoding/csv reads the file.
-func writtenCell(t *testing.T, s *schema.Schema, snap *graph.Snapshot) (string, error) {
+func writtenCell(t *testing.T, s schema.Schema, snap graph.Snapshot) (string, error) {
 	t.Helper()
 	files, err := New(WithSchema(s)).MarshalSnapshot(t.Context(), snap)
 	if err != nil {

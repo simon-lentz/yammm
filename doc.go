@@ -7,7 +7,7 @@
 //
 // # Package Structure
 //
-// Foundation — depended on by everything above them:
+// Foundation:
 //
 //   - [github.com/simon-lentz/yammm/location]: Source positions, spans, and canonical paths
 //   - [github.com/simon-lentz/yammm/location/path]: Instance path parsing and formatting
@@ -37,9 +37,10 @@
 //   - [github.com/simon-lentz/yammm/lsp]: Language Server Protocol server
 //
 // Test helpers: [github.com/simon-lentz/yammm/snapshot/snapshottest] builds
-// snapshot fixtures. In-module suites also use internal/instancetest, which
-// builds instance fixtures, and internal/yammmtest, the repo-wide support for
-// golden files, structural diffs and log capture.
+// snapshot fixtures. In-module suites also use packages under internal/, among
+// them internal/instancetest, which builds instance fixtures, and
+// internal/yammmtest, the repo-wide support for golden files, structural diffs
+// and log capture.
 //
 // Adapters depend on library packages; library packages never depend on adapters.
 //
@@ -51,7 +52,7 @@
 //
 //	s, result := schema.Load(ctx, "path/to/schema.yammm")
 //	if result.HasFatal() {
-//	    // I/O or cancellation error
+//	    // Such as an I/O failure, a cancellation, a refused option, or a header that does not parse
 //	}
 //	if result.HasErrors() {
 //	    // Schema compilation errors
@@ -66,7 +67,7 @@
 //	if !result.OK() {
 //	    // Validation failures (type mismatch, missing required, etc.)
 //	}
-//	// valids contains validated instances (nil entries for failed instances)
+//	// valids contains validated instances (zero entries for failed instances)
 //
 // Graph construction:
 //
@@ -74,7 +75,7 @@
 //
 //	g := graph.New(s)
 //	for _, inst := range valids {
-//	    if inst == nil { continue }
+//	    if inst.IsZero() { continue }
 //	    result := g.Add(ctx, inst)
 //	    if !result.OK() {
 //	        // Diagnostic issues (duplicate PK, etc.)
@@ -82,6 +83,6 @@
 //	}
 //	result := g.Check(ctx)
 //	if !result.OK() {
-//	    // Unresolved required associations
+//	    // An unresolved required association, or a cancellation
 //	}
 package yammm

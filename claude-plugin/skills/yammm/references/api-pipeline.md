@@ -122,14 +122,12 @@ s, result := schema.NewBuilder().
 
 ```go
 s.Name()                          // schema name string
-s.Type("User")                    // (*Type, bool) lookup
-s.Types()                         // iter.Seq2[string, *Type]
-s.TypeNames()                     // []string (sorted)
-s.TypeCount()                     // int
-s.DataType("Email")               // (*DataType, bool) lookup
-s.DataTypes()                     // iter.Seq2[string, *DataType]
-s.Imports()                       // iter.Seq[*Import]
-s.ImportByAlias("common")         // (*Import, bool)
+s.Type("User")                    // (Type, bool) lookup
+s.Types()                         // iter.Seq[Type], in declaration order
+s.DataType("Email")               // (DataType, bool) lookup
+s.DataTypes()                     // iter.Seq[DataType], in declaration order
+s.Imports()                       // iter.Seq[Import]
+s.ImportByAlias("common")         // (Import, bool)
 ```
 
 ---
@@ -172,15 +170,15 @@ children, result := v.ValidateForComposition(ctx, "Order", "ITEMS", rawItems)
 ```go
 type RawInstance struct {
     Properties map[string]any
-    Provenance *location.Provenance   // optional source metadata
+    Provenance location.Provenance   // optional source metadata
 }
 ```
 
-A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place, as the CSV adapter does for each cell that draws `E_CSV_COERCE`. At a property, a foreign-key field or an edge property, the validator reports nothing for a `Refused` and refuses the instance: `ValidateOne` returns nil with no error for it, and `graph.BatchAssembler.Add` returns an error matching `instance.ErrRefusedValue`. Anywhere else a `Refused` is a value of no form and draws the issue any such value draws (`E_TYPE_MISMATCH` as a list element, for one). One break draws one issue.
+A parser that cannot read an input as its member's type reports that issue and writes `instance.Refused{Value: <the input>}` in the value's place, as the CSV adapter does for each cell that draws `E_CSV_COERCE`. At a property, a foreign-key field or an edge property, the validator reports nothing for a `Refused` and refuses the instance: `ValidateOne` returns a zero `ValidInstance` with no error for it, and `graph.BatchAssembler.Add`, for a record whose one fault it is, returns an error matching `instance.ErrRefusedValue`. Anywhere else a `Refused` is a value of no form and draws the issue any such value draws (`E_TYPE_MISMATCH` as a list element, for one). One break draws one issue.
 
 ### Build RawInstances with SchemaBuilder
 
-`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, and cardinality mismatches surface from `Build()` with the offending call site's file:line. Errors on nil schema, unknown type, or abstract type. The builder covers properties and property-less association edges; instances carrying edge properties or composed children are constructed from raw data instead.
+`instance.BuilderFor(s, typeName)` returns a `*SchemaBuilder` that constructs `RawInstance` values while enforcing schema shape at build time — unknown properties, unknown relations, cardinality mismatches, and edge-shape mismatches surface from `Build()` with the offending call site's file:line. Errors on a zero schema, an unknown type, or an abstract type. The builder covers properties and property-less association edges; instances carrying edge properties or composed children are constructed from raw data instead.
 
 ```go
 b, err := instance.BuilderFor(s, "Person")
@@ -199,9 +197,9 @@ valid.TypeName()                   // string
 valid.PrimaryKey()                 // immutable.Key
 valid.Property("name")             // (immutable.Value, bool)
 valid.Properties()                 // immutable.Properties
-valid.Edge("WORKS_AT")             // (*ValidEdgeData, bool)
+valid.Edge("WORKS_AT")             // (ValidEdgeData, bool)
 valid.Compositions()               // iter.Seq2[string, immutable.Value]
-valid.Provenance()                 // *location.Provenance
+valid.Provenance()                 // location.Provenance
 ```
 
 ---
@@ -217,10 +215,10 @@ import "github.com/simon-lentz/yammm/graph"
 
 g := graph.New(s)
 
-// Add validated instances: Validate's result was checked, so a nil entry
+// Add validated instances: Validate's result was checked, so a zero entry
 // held a refused value its producer reported
 for _, inst := range validInstances {
-    if inst == nil {
+    if inst.IsZero() {
         continue
     }
     result := g.Add(ctx, inst)
@@ -251,7 +249,7 @@ if result.HasErrors() {
 snap := g.Snapshot()
 ```
 
-Returns a `*graph.Snapshot` -- a point-in-time view of the graph that no method changes.
+Returns a `graph.Snapshot` -- a point-in-time view of the graph that no method changes.
 
 ### Graph Instance (Read API)
 
@@ -260,7 +258,7 @@ inst.TypeName()                    // string
 inst.PrimaryKey()                  // immutable.Key
 inst.Property("name")              // (immutable.Value, bool)
 inst.Properties()                  // immutable.Properties
-inst.Composed("ITEMS")             // []*Instance
+inst.Composed("ITEMS")             // iter.Seq[Instance]
 inst.ComposedRelations()           // []string
 ```
 
@@ -268,8 +266,8 @@ inst.ComposedRelations()           // []string
 
 ```go
 edge.Relation()                    // string
-edge.Source()                      // *Instance
-edge.Target()                      // *Instance
+edge.Source()                      // Instance
+edge.Target()                      // Instance
 edge.Property("weight")            // (immutable.Value, bool)
 edge.Properties()                  // immutable.Properties
 ```
@@ -338,11 +336,11 @@ updated, result := snapshot.UpdateMetadataOrReMarshal(ctx, data, newMeta, s)
 
 ## Thread Safety and Immutability
 
-- **Loaded schemas** (`*schema.Schema`) are immutable and safe for concurrent use
-- **Validated instances** (`*instance.ValidInstance`) are immutable
-- **Graph snapshots** (`*graph.Snapshot`) have no method that changes them; an accessor returns the snapshot's own records, so never assign through one
+- **Loaded schemas** (`schema.Schema`) are immutable and safe for concurrent use
+- **Validated instances** (`instance.ValidInstance`) are immutable
+- **Graph snapshots** (`graph.Snapshot`) have no method that changes them, and a record is a handle, so no caller holds its address
 - **The `Graph` type** (`*graph.Graph`) is concurrent-safe for `Add` and `AddComposed` calls — multiple goroutines may add instances in parallel; the graph handles forward references and duplicate detection atomically. `Snapshot()` acquires a read lock, briefly blocking concurrent Adds, and returns a snapshot later Adds do not change
-- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts but the Records fact, whose records it derives again). See the Batch Assembly section of `docs/API.md`
+- **`graph.BatchAssembler`** is the recommended high-level entry point for the validate→add→check→snapshot pipeline pattern: composes Validator + Graph, encodes the ordering invariant, concurrent-safe. Construct with `NewBatchAssembler` (empty graph) or `NewBatchAssemblerFromSnapshot` (graph seeded from a prior snapshot — the resume path: new adds resolve against, and may complete, the seeded state; it returns a `diag.Result` and takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again and drops an absent record under a relation that is no association of the schema). See the Batch Assembly section of `docs/API.md`
 - **Validators** (`*instance.Validator`) are safe for concurrent use (stateless after construction)
 
 ---
@@ -382,7 +380,7 @@ for typeName, raws := range parsed {
         return result.Err()
     }
     for _, inst := range valids {
-        if inst == nil {
+        if inst.IsZero() {
             continue // its producer refused a value and reported it
         }
         g.Add(ctx, inst)

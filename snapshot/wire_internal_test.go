@@ -183,7 +183,7 @@ func TestMarshal_RefusesNestingBeyondTheReadersLimit(t *testing.T) {
 		t.Fatal("Node missing")
 	}
 
-	build := func(chain int) *graph.Snapshot {
+	build := func(chain int) graph.Snapshot {
 		t.Helper()
 		root := graph.InstanceParts{
 			TypeID:     trunk.ID(),

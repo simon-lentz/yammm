@@ -22,7 +22,7 @@ type DiagnosticSink struct {
 	isTTY    bool
 	provider diag.SourceProvider
 	root     string
-	captured *schema.Sources
+	captured schema.Sources
 	results  []diag.Result
 	flushed  int
 	closed   bool
@@ -136,5 +136,5 @@ func (s *DiagnosticSink) CaptureSchemaSources() schema.LoadOption {
 	return schema.CaptureSources(&s.captured)
 }
 
-// CapturedSources returns the sources the last captured load read, or nil.
-func (s *DiagnosticSink) CapturedSources() *schema.Sources { return s.captured }
+// CapturedSources returns the sources the last captured load read, or the zero Sources.
+func (s *DiagnosticSink) CapturedSources() schema.Sources { return s.captured }

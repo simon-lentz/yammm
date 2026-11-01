@@ -121,7 +121,7 @@ func TestHostPath_Loads(t *testing.T) {
 				writeHostPathFile(t, filepath.Join(dir, "a", "b.yammm"), "schema \"two\"\n\ntype Two {\n\tid String primary\n}\n")
 				one, resOne := schema.Load(t.Context(), filepath.Join(dir, `a\b.yammm`), schema.WithModuleRoot(dir))
 				two, resTwo := schema.Load(t.Context(), filepath.Join(dir, "a", "b.yammm"), schema.WithModuleRoot(dir))
-				if one == nil || two == nil {
+				if one.IsZero() || two.IsZero() {
 					return false, fmt.Sprintf("a load failed: %v / %v", issueCodes(resOne), issueCodes(resTwo))
 				}
 				return one.SourceID() != two.SourceID(), fmt.Sprintf("SourceIDs %q and %q", one.SourceID(), two.SourceID())
@@ -169,18 +169,18 @@ func TestHostPath_LoadsWhenTheRootAndTheEntryAreSpelledDifferently(t *testing.T)
 
 	doors := []struct {
 		name string
-		load func(t *testing.T, root, path string) (*schema.Schema, diag.Result)
+		load func(t *testing.T, root, path string) (schema.Schema, diag.Result)
 	}{
 		{
 			name: "Load",
-			load: func(t *testing.T, root, path string) (*schema.Schema, diag.Result) {
+			load: func(t *testing.T, root, path string) (schema.Schema, diag.Result) {
 				t.Helper()
 				return schema.Load(t.Context(), path, schema.WithModuleRoot(root))
 			},
 		},
 		{
 			name: "LoadSourcesWithEntry",
-			load: func(t *testing.T, root, path string) (*schema.Schema, diag.Result) {
+			load: func(t *testing.T, root, path string) (schema.Schema, diag.Result) {
 				t.Helper()
 				return schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{path: []byte(hostPathEntry)}, path, root)
 			},
@@ -236,11 +236,11 @@ func TestHostPath_ImportThroughALinkedDirectoryResolvesFromItsTarget(t *testing.
 		t.Fatalf("the load fails: %s", detail)
 	}
 	dep, ok := s.ImportByAlias("dep")
-	if !ok || dep.Schema() == nil {
+	if !ok || dep.Schema().IsZero() {
 		t.Fatal("the entry's import dep is not bound")
 	}
 	leaf, ok := dep.Schema().ImportByAlias("leaf")
-	if !ok || leaf.Schema() == nil {
+	if !ok || leaf.Schema().IsZero() {
 		t.Fatal("dep's import leaf is not bound")
 	}
 	want, err := location.SourceIDFromPath(canonicalPath(t, filepath.Join(root, "a", "rel_leaf.yammm")))
@@ -285,8 +285,8 @@ func loadSourcesOutcome(t *testing.T, dir string) (bool, string) {
 		map[string][]byte{entry: []byte(hostPathEntry)}, entry, filepath.Dir(entry)))
 }
 
-func loadOutcome(s *schema.Schema, res diag.Result) (bool, string) {
-	return s != nil && !res.HasErrors(), fmt.Sprintf("schema loaded: %v, issues: %v", s != nil, issueCodes(res))
+func loadOutcome(s schema.Schema, res diag.Result) (bool, string) {
+	return !s.IsZero() && !res.HasErrors(), fmt.Sprintf("schema loaded: %v, issues: %v", !s.IsZero(), issueCodes(res))
 }
 
 // TestHostPath_ModuleRootDetailIsTheRootsIdentity holds an import-resolution

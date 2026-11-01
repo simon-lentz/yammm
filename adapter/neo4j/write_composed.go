@@ -20,13 +20,13 @@ const composedKeyProp = "_composed_key"
 // compositionClosure returns the transitive composition relation names and
 // part-type identities reachable from rootType, both sorted. The visited
 // set bounds a composition cycle.
-func compositionClosure(s *schema.Schema, rootType *schema.Type) (relNames []string, partIDs []schema.TypeID) {
+func compositionClosure(s schema.Schema, rootType schema.Type) (relNames []string, partIDs []schema.TypeID) {
 	visited := make(map[schema.TypeID]bool)
 	relSeen := make(map[string]bool)
 
-	var walk func(t *schema.Type)
-	walk = func(t *schema.Type) {
-		for _, rel := range t.AllCompositionsSlice() {
+	var walk func(t schema.Type)
+	walk = func(t schema.Type) {
+		for rel := range t.AllCompositions() {
 			if !relSeen[rel.Name()] {
 				relSeen[rel.Name()] = true
 				relNames = append(relNames, rel.Name())
@@ -137,7 +137,7 @@ type createGroup struct {
 // children: every instance of a root type whose composition closure is
 // non-empty emits a replace row, so a write with zero children still
 // deletes stale ones. Create groups run parent-first (depth ascending).
-func composedQueries(ctx context.Context, result *graph.Snapshot, shapes *GraphShape, cfg *writeConfig) ([]*BatchNodeQuery, error) {
+func composedQueries(ctx context.Context, result graph.Snapshot, shapes *GraphShape, cfg *writeConfig) ([]*BatchNodeQuery, error) {
 	s := result.Schema()
 	var replace []*BatchNodeQuery
 
@@ -172,7 +172,7 @@ func composedQueries(ctx context.Context, result *graph.Snapshot, shapes *GraphS
 			partLabels[i] = partShape.Label
 		}
 
-		instances := result.InstancesOf(typeID)
+		instances := slices.Collect(result.InstancesOf(typeID))
 		var replaceRows []map[string]any
 		for _, inst := range instances {
 			keyProps, err := extractKeyProps(inst.Properties(), &rootShape)
@@ -254,11 +254,11 @@ func composedQueries(ctx context.Context, result *graph.Snapshot, shapes *GraphS
 // collectCreateRows walks one root instance's composition tree, appending a
 // create row per child into its (depth, parent, relation, part) group.
 func collectCreateRows(
-	s *schema.Schema,
+	s schema.Schema,
 	shapes *GraphShape,
 	rootShape *NodeShape,
-	rootType *schema.Type,
-	root *graph.Instance,
+	rootType schema.Type,
+	root graph.Instance,
 	rootKeyProps map[string]any,
 	groups map[composedGroupKey]*createGroup,
 ) error {
@@ -266,8 +266,8 @@ func collectCreateRows(
 
 	// The walk carries the PATH from the root, so each level appends one hop
 	// rather than nesting the level above inside itself.
-	var walk func(parent *graph.Instance, parentType *schema.Type, path []composedStep, depth int) error
-	walk = func(parent *graph.Instance, parentType *schema.Type, path []composedStep, depth int) error {
+	var walk func(parent graph.Instance, parentType schema.Type, path []composedStep, depth int) error
+	walk = func(parent graph.Instance, parentType schema.Type, path []composedStep, depth int) error {
 		// Below the root, the rows MATCH their parent by its own composed key,
 		// which is this walk's path — the child's minus its last hop.
 		var parentCK string
@@ -291,8 +291,9 @@ func collectCreateRows(
 				return fmt.Errorf("no shape for part type %s", rel.TargetID())
 			}
 
-			children := parent.Composed(relName)
-			for i, child := range children {
+			i := -1
+			for child := range parent.Composed(relName) {
+				i++
 				// A (one) slot holds exactly one child, so its segment is the
 				// relation alone: an index would always be 0 and the child's
 				// own key would identify nothing the name does not. Under
@@ -319,8 +320,8 @@ func collectCreateRows(
 					return fmt.Errorf("part %s: %w", partShape.Label, err)
 				}
 				if props == nil {
-					// A part carrying no properties at all clones to a nil map,
-					// and the composed key still has to go somewhere.
+					// The zero Properties clone to a nil map, and the composed key
+					// still has to go somewhere.
 					props = make(map[string]any, 1)
 				}
 				props[composedKeyProp] = ck

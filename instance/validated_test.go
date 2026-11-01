@@ -5,6 +5,7 @@ import (
 
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -28,7 +29,7 @@ func TestNewValidInstance_CannotMintTheToken(t *testing.T) {
 
 	vi := instance.NewValidInstance(
 		"Parent", schema.TypeID{}, immutable.Key{}, immutable.Properties{},
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	if vi.Validated() {
 		t.Fatal("NewValidInstance minted the validated token; only the validator may set it")
@@ -65,9 +66,9 @@ func TestValidateOne_SetsValidatedOnRootAndComposedChildren(t *testing.T) {
 			t.Fatalf("composition value is %T, want immutable.Slice", comp.Unwrap())
 		}
 		for i := range slice.Len() {
-			child, ok := slice.Get(i).Unwrap().(*instance.ValidInstance)
+			child, ok := slice.Get(i).Unwrap().(instance.ValidInstance)
 			if !ok {
-				t.Fatalf("composed child is %T, want *instance.ValidInstance", slice.Get(i).Unwrap())
+				t.Fatalf("composed child is %T, want instance.ValidInstance", slice.Get(i).Unwrap())
 			}
 			if !child.Validated() {
 				t.Errorf("composed child %d does not report Validated()", i)

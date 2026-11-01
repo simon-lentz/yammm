@@ -48,12 +48,12 @@ func wantCounts(t *testing.T, res diag.Result, want map[diag.Code]int) {
 }
 
 // loadSourcesErr loads in-memory sources with main.yammm as the entry and
-// requires failure: a nil schema with error diagnostics. Returns the result
+// requires failure: a zero schema with error diagnostics. Returns the result
 // for code-count assertions.
 func loadSourcesErr(t *testing.T, sources map[string][]byte) diag.Result {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "main.yammm", t.TempDir())
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatalf("load should fail, got schema %q", s.Name())
 	}
 	if !res.HasErrors() {
@@ -73,7 +73,7 @@ func loadSourcesErr(t *testing.T, sources map[string][]byte) diag.Result {
 func loadStringErr(t *testing.T, source string) diag.Result {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), source, "main.yammm")
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatalf("load should fail, got schema %q", s.Name())
 	}
 	if !res.HasErrors() {
@@ -562,7 +562,7 @@ type Orphan {
 	n Integer[-_, 5]
 }`, "main.yammm", schema.WithIssueLimit(1))
 
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatalf("a schema whose only error was dropped at the cap must still fail load, got schema %q", s.Name())
 	}
 	if res.OK() {
@@ -634,7 +634,7 @@ type TypeB { id String primary }`),
 // TestLoad_InheritedRejectedPrimaryKey_ReportedOnce pins that a parent's
 // type-rejected primary key (Integer is not a valid key type) is reported
 // exactly once — at the declaring parent — not re-reported at every descendant
-// whose merged property set carries the same inherited *Property. The "each
+// whose merged property set carries the same inherited Property. The "each
 // independent error exactly once" contract must hold across inheritance, not
 // just for the E_NO_PRIMARY_KEY flavor that hasDeclaredPrimary suppresses.
 func TestLoad_InheritedRejectedPrimaryKey_ReportedOnce(t *testing.T) {
@@ -737,7 +737,7 @@ func TestBuild_AliasCycleAndMissingPrimaryKey_BothReported(t *testing.T) {
 		WithProperty("name", schema.NewStringConstraint()).
 		Done().
 		Build()
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatalf("build should fail, got schema %q", s.Name())
 	}
 	if !res.HasErrors() {
@@ -877,16 +877,16 @@ type Code = String[2,2]`),
 	if res.HasErrors() {
 		t.Fatalf("a resolvable imported datatype must load cleanly: %v", res)
 	}
-	if s == nil {
-		t.Fatal("expected a non-nil schema")
+	if s.IsZero() {
+		t.Fatal("expected a non-zero schema")
 	}
 }
 
 // requireBuildFailed asserts a Builder produced no schema — the all-or-nothing
-// contract (any error ⇒ nil schema) on the programmatic front door.
-func requireBuildFailed(t *testing.T, s *schema.Schema) {
+// contract (any error ⇒ zero schema) on the programmatic front door.
+func requireBuildFailed(t *testing.T, s schema.Schema) {
 	t.Helper()
-	if s == nil {
+	if s.IsZero() {
 		return
 	}
 	t.Fatalf("build should fail, got schema %q", s.Name())
@@ -1117,7 +1117,7 @@ type Code = String[2,2]`),
 	if res.HasErrors() {
 		t.Fatalf("a primary key typed by a resolved imported datatype must load cleanly: %v", res)
 	}
-	if s == nil {
-		t.Fatal("expected a non-nil schema")
+	if s.IsZero() {
+		t.Fatal("expected a non-zero schema")
 	}
 }

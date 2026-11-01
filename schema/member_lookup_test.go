@@ -30,7 +30,7 @@ type Person extends Base {
 }
 `
 
-func loadMembers(t *testing.T) *schema.Type {
+func loadMembers(t *testing.T) schema.Type {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), memberLookupSrc, "m.yammm")
 	if !res.OK() {

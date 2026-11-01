@@ -26,15 +26,15 @@ import (
 // per type. CSV is inherently single-type-per-file, so the output is a map
 // from type name to CSV bytes.
 //
-// Returns [ErrNilSnapshot] if result is nil, refuses a setting the adapter
+// Returns [ErrZeroSnapshot] if result is zero, refuses a setting the adapter
 // cannot use with [ErrConfig], and refuses a snapshot holding a composed child:
 // see [refuseComposedChildren].
 func (a *Adapter) MarshalSnapshot(
 	ctx context.Context,
-	result *graph.Snapshot,
+	result graph.Snapshot,
 ) (map[string][]byte, error) {
-	if result == nil {
-		return nil, ErrNilSnapshot
+	if result.IsZero() {
+		return nil, ErrZeroSnapshot
 	}
 	if err := a.configError(); err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func (a *Adapter) MarshalSnapshot(
 			return nil, unnameableDenotedType(typeID)
 		}
 		schemaType, _ := result.Schema().TypeByID(typeID)
-		instances := result.InstancesOf(typeID)
+		instances := slices.Collect(result.InstancesOf(typeID))
 
 		var buf bytes.Buffer
 		if err := a.writeSnapshotTypeTo(ctx, &buf, instances, result, schemaType); err != nil {
@@ -70,7 +70,7 @@ func (a *Adapter) MarshalSnapshot(
 // WriteSnapshot writes a graph snapshot to per-type writers. The writerFor
 // function is called once per type to obtain the destination writer.
 //
-// Returns [ErrNilSnapshot] if result is nil, and refuses a setting the adapter
+// Returns [ErrZeroSnapshot] if result is zero, and refuses a setting the adapter
 // cannot use, with [ErrConfig], and a snapshot holding a composed child before
 // it requests any writer: see [refuseComposedChildren]. Every other refusal
 // under the package doc's Empty Cells is found at its instance, after that
@@ -80,10 +80,10 @@ func (a *Adapter) MarshalSnapshot(
 func (a *Adapter) WriteSnapshot(
 	ctx context.Context,
 	writerFor func(typeName string) (io.Writer, error),
-	result *graph.Snapshot,
+	result graph.Snapshot,
 ) error {
-	if result == nil {
-		return ErrNilSnapshot
+	if result.IsZero() {
+		return ErrZeroSnapshot
 	}
 	if err := a.configError(); err != nil {
 		return err
@@ -106,7 +106,7 @@ func (a *Adapter) WriteSnapshot(
 		}
 
 		schemaType, _ := result.Schema().TypeByID(typeID)
-		instances := result.InstancesOf(typeID)
+		instances := slices.Collect(result.InstancesOf(typeID))
 
 		if err := a.writeSnapshotTypeTo(ctx, w, instances, result, schemaType); err != nil {
 			return fmt.Errorf("type %q: %w", typeName, err)
@@ -121,9 +121,9 @@ func (a *Adapter) WriteSnapshot(
 // writer has no column for a child and would drop the subtree. It runs before
 // any output is produced, so a refused export writes nothing. A composition
 // with no children loses nothing and is not refused.
-func refuseComposedChildren(snap *graph.Snapshot) error {
+func refuseComposedChildren(snap graph.Snapshot) error {
 	for _, typeID := range snap.Types() {
-		for _, inst := range snap.InstancesOf(typeID) {
+		for inst := range snap.InstancesOf(typeID) {
 			// ComposedRelations lists only relations holding a child.
 			rels := inst.ComposedRelations()
 			if len(rels) == 0 {
@@ -159,9 +159,9 @@ func unnameableDenotedType(id schema.TypeID) error {
 func (a *Adapter) writeSnapshotTypeTo(
 	ctx context.Context,
 	w io.Writer,
-	instances []*graph.Instance,
-	snap *graph.Snapshot,
-	schemaType *schema.Type,
+	instances []graph.Instance,
+	snap graph.Snapshot,
+	schemaType schema.Type,
 ) error {
 	columns, err := buildColumnList(schemaType, snap.Schema())
 	if err != nil {
@@ -224,10 +224,12 @@ func writeRecord(writer *csv.Writer, w io.Writer, row []string) error {
 // snapshotEdges groups an instance's outgoing edges by relation name.
 // EdgesFrom is O(1) per instance and returns sorted edges, so each group
 // keeps the (targetType, targetKey) order.
-func snapshotEdges(inst *graph.Instance, snap *graph.Snapshot) map[string][]*graph.Edge {
-	allEdges := snap.EdgesFrom(inst)
-	byRel := make(map[string][]*graph.Edge, len(allEdges))
-	for _, e := range allEdges {
+func snapshotEdges(inst graph.Instance, snap graph.Snapshot) map[string][]graph.Edge {
+	var byRel map[string][]graph.Edge
+	for e := range snap.EdgesFrom(inst) {
+		if byRel == nil {
+			byRel = make(map[string][]graph.Edge)
+		}
 		byRel[e.Relation()] = append(byRel[e.Relation()], e)
 	}
 	return byRel
@@ -243,19 +245,15 @@ func snapshotEdges(inst *graph.Instance, snap *graph.Snapshot) map[string][]*gra
 // name. Both [schema.Load] and [schema.NewBuilder] refuse a schema whose
 // association target does not resolve, so no snapshot reaches that arm and it
 // carries no refusal class.
-func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error) {
-	if schemaType == nil {
-		return nil, nil
-	}
-
+func buildColumnList(schemaType schema.Type, s schema.Schema) ([]string, error) {
 	// Collect property names.
 	var propNames []string
-	for _, prop := range schemaType.AllPropertiesSlice() {
+	for prop := range schemaType.AllProperties() {
 		propNames = append(propNames, prop.Name())
 	}
 	slices.Sort(propNames)
 
-	rels := slices.SortedFunc(schemaType.AllAssociations(), func(a, b *schema.Relation) int {
+	rels := slices.SortedFunc(schemaType.AllAssociations(), func(a, b schema.Relation) int {
 		return strings.Compare(a.FieldName(), b.FieldName())
 	})
 	var edgeCols []string
@@ -265,11 +263,11 @@ func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error
 			return nil, fmt.Errorf("csv adapter: association %q: target type %s does not resolve, so its _target_ column names are unknowable; every schema constructor refuses such a schema, so this is an invariant violation",
 				rel.Name(), rel.TargetID())
 		}
-		for _, pk := range target.PrimaryKeysSlice() {
+		for pk := range target.PrimaryKeys() {
 			edgeCols = append(edgeCols, rel.FieldName()+"._target_"+pk.Name())
 		}
-		props := rel.PropertiesSlice()
-		slices.SortFunc(props, func(a, b *schema.Property) int {
+		props := slices.Collect(rel.Properties())
+		slices.SortFunc(props, func(a, b schema.Property) int {
 			return strings.Compare(a.Name(), b.Name())
 		})
 		for _, p := range props {
@@ -288,19 +286,17 @@ func buildColumnList(schemaType *schema.Type, s *schema.Schema) ([]string, error
 // CR LF is refused.
 func (a *Adapter) instanceToRow(
 	props immutable.Properties,
-	edgesByRel map[string][]*graph.Edge,
+	edgesByRel map[string][]graph.Edge,
 	columns []string,
-	schemaType *schema.Type,
-	s *schema.Schema,
+	schemaType schema.Type,
+	s schema.Schema,
 ) ([]string, error) {
 	cells := make(map[string]string)
-	if schemaType != nil {
-		// Every constructor holds an edge to an association the type declares,
-		// so every edge has its group of columns.
-		for rel := range schemaType.AllAssociations() {
-			if err := a.relationCells(rel, s, edgesByRel[rel.Name()], cells); err != nil {
-				return nil, err
-			}
+	// Every constructor holds an edge to an association the type declares,
+	// so every edge has its group of columns.
+	for rel := range schemaType.AllAssociations() {
+		if err := a.relationCells(rel, s, edgesByRel[rel.Name()], cells); err != nil {
+			return nil, err
 		}
 	}
 
@@ -339,7 +335,7 @@ var errCRLF = refusal.New(ErrUnrepresentable, "its text holds a CR LF, which enc
 // components are all "" and whose edge properties are all absent or "" writes
 // the absent-group marker, so it would read back as no edge at all. Two or more
 // targets always write a separator, so only a lone target can collide.
-func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []*graph.Edge, cells map[string]string) error {
+func (a *Adapter) relationCells(rel schema.Relation, s schema.Schema, edges []graph.Edge, cells map[string]string) error {
 	if len(edges) == 0 {
 		return nil
 	}
@@ -353,7 +349,7 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 	field := rel.FieldName()
 	var group []string
 
-	pks := target.PrimaryKeysSlice()
+	pks := slices.Collect(target.PrimaryKeys())
 	for i, pk := range pks {
 		col := field + "._target_" + pk.Name()
 		group = append(group, col)
@@ -369,7 +365,7 @@ func (a *Adapter) relationCells(rel *schema.Relation, s *schema.Schema, edges []
 		cells[col] = strings.Join(segs, a.config.listSep)
 	}
 
-	for _, p := range rel.PropertiesSlice() {
+	for p := range rel.Properties() {
 		col := field + "." + p.Name()
 		group = append(group, col)
 		segs := make([]string, len(edges))

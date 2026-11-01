@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -190,7 +191,7 @@ func TestWireV4_UnresolvableSchemaNameIsReported(t *testing.T) {
 	if !hasCode(res, diag.E_SNAPSHOT_UNKNOWN_TYPE) {
 		t.Errorf("a moved schema path loaded without %s: %v", diag.E_SNAPSHOT_UNKNOWN_TYPE, res)
 	}
-	if !res.HasErrors() || loaded != nil {
+	if !res.HasErrors() || !loaded.IsZero() {
 		t.Errorf("a row the closure does not declare must refuse the document, not rebind it: %v", res)
 	}
 }
@@ -218,7 +219,7 @@ func TestWireV3_UnknownTableRowIsReported(t *testing.T) {
 		t.Errorf("a types table row naming nothing loaded without %s: %v",
 			diag.E_SNAPSHOT_UNKNOWN_TYPE, res)
 	}
-	if !res.HasErrors() || loaded != nil {
+	if !res.HasErrors() || !loaded.IsZero() {
 		t.Errorf("a row that denotes no type must refuse the document, not annotate it: %v", res)
 	}
 }
@@ -233,7 +234,7 @@ func TestWireV3_TableCarriesUnresolvedTargetTypes(t *testing.T) {
 	snap := buildSnapshot(t, s,
 		mustValidInstanceWithEdge(t, s, "Person", []any{"p1"},
 			map[string]any{"name": "Alice"}, "EMPLOYER", [][]any{{"c-missing"}}))
-	if len(snap.Unresolved()) == 0 {
+	if len(slices.Collect(snap.Unresolved())) == 0 {
 		t.Fatal("fixture is vacuous: no unresolved edge")
 	}
 
@@ -351,7 +352,7 @@ func TestWireV3_AbsentSectionIsMalformed(t *testing.T) {
 			if !hasMalformedReason(res, tc.wantReason) {
 				t.Errorf("Load did not report %q: %v", tc.wantReason, res)
 			}
-			if loaded != nil {
+			if !loaded.IsZero() {
 				t.Errorf("Load returned a snapshot beside a malformed document")
 			}
 
@@ -400,7 +401,7 @@ func TestWireV3_EmptySectionsAreNotAbsence(t *testing.T) {
 		t.Fatalf("fixture is vacuous: no diagnostics section:\n%s", data)
 	}
 
-	if loaded, lres := snapshot.Load(ctx, data, s); lres.HasErrors() || loaded == nil {
+	if loaded, lres := snapshot.Load(ctx, data, s); lres.HasErrors() || loaded.IsZero() {
 		t.Errorf("Load refused a document whose sections are present and empty: %v", lres)
 	}
 	if vres := snapshot.Verify(ctx, data, s); vres.HasErrors() {
@@ -488,7 +489,7 @@ func TestWireV3_EmptyProvenancePathWarns(t *testing.T) {
 // rootDuplicateDoc marshals a snapshot holding a root primary-key collision,
 // so the duplicate record states no relation and carries no parent
 // coordinates.
-func rootDuplicateDoc(t *testing.T) ([]byte, *schema.Schema) {
+func rootDuplicateDoc(t *testing.T) ([]byte, schema.Schema) {
 	t.Helper()
 	ctx := context.Background()
 	s := testSchema(t)
@@ -605,7 +606,7 @@ func TestWireV3_NegativeRowIndexIsMalformed(t *testing.T) {
 	if !hasMalformedReason(res, wantReason) {
 		t.Errorf("Load did not report %q: %v", wantReason, res)
 	}
-	if loaded != nil {
+	if !loaded.IsZero() {
 		t.Errorf("Load returned a snapshot for a negative row reference")
 	}
 

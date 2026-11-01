@@ -18,7 +18,7 @@ import (
 // follows declaration order).
 func TestMarshal_DataTypeChainAgreesAcrossOrderAndFrontDoor(t *testing.T) {
 	const body = "type T {\n\tid String primary\n\tv A required\n\tw List<B> required\n}\n"
-	load := func(t *testing.T, datatypes string) *schema.Schema {
+	load := func(t *testing.T, datatypes string) schema.Schema {
 		t.Helper()
 		s, res := schema.LoadString(t.Context(), "schema \"p\"\n\n"+datatypes+body, "p.yammm")
 		if res.HasErrors() {
@@ -38,7 +38,7 @@ func TestMarshal_DataTypeChainAgreesAcrossOrderAndFrontDoor(t *testing.T) {
 		t.Fatalf("build: %v", res.Err())
 	}
 	forward := load(t, "type A = List<B>\ntype B = List<C>\ntype C = Integer[0, 9]\n")
-	schemas := map[string]*schema.Schema{
+	schemas := map[string]schema.Schema{
 		"the DSL, referenced before declared": forward,
 		"the DSL, declared before referenced": load(t, "type C = Integer[0, 9]\ntype B = List<C>\ntype A = List<B>\n"),
 		"the Builder":                         built,

@@ -200,7 +200,7 @@ func fmtHazards(t *testing.T) map[string]string {
 // loaded.
 func fmtSchemaHash(src string) (string, bool) {
 	s, result := schema.LoadString(context.Background(), src, "hazard.yammm")
-	if result.Err() != nil || s == nil {
+	if result.Err() != nil || s.IsZero() {
 		return "", false
 	}
 	return schema.StructuralHash(s), true

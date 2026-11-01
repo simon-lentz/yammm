@@ -6,7 +6,7 @@ import (
 )
 
 // TestRegisterFailureIssue renders a Registry.Register error as the loader does.
-var TestRegisterFailureIssue = func(reg *Registry, s *Schema, err error) diag.Issue {
+var TestRegisterFailureIssue = func(reg *Registry, s Schema, err error) diag.Issue {
 	return (&loader{registry: reg}).registerFailureIssue(s, err)
 }
 
@@ -30,64 +30,64 @@ var (
 
 // Seal methods.
 var (
-	TestSealSchema   = (*Schema).seal
-	TestSealType     = (*Type).seal
-	TestSealRelation = (*Relation).seal
-	TestSealDataType = (*DataType).seal
-	TestSealImport   = (*Import).seal
+	TestSealSchema   = Schema.seal
+	TestSealType     = Type.seal
+	TestSealRelation = Relation.seal
+	TestSealDataType = DataType.seal
+	TestSealImport   = Import.seal
 )
 
 // IsSealed accessors.
 var (
-	TestIsSealedSchema   = (*Schema).isSealed
-	TestIsSealedType     = (*Type).isSealed
-	TestIsSealedRelation = (*Relation).isSealed
-	TestIsSealedDataType = (*DataType).isSealed
-	TestIsSealedImport   = (*Import).isSealed
+	TestIsSealedSchema   = Schema.isSealed
+	TestIsSealedType     = Type.isSealed
+	TestIsSealedRelation = Relation.isSealed
+	TestIsSealedDataType = DataType.isSealed
+	TestIsSealedImport   = Import.isSealed
 )
 
 // Schema mutators.
 var (
-	TestSetSchemaTypes     = (*Schema).setTypes
-	TestSetSchemaDataTypes = (*Schema).setDataTypes
-	TestSetSchemaImports   = (*Schema).setImports
-	TestSetSchemaSources   = (*Schema).setSources
+	TestSetSchemaTypes     = Schema.setTypes
+	TestSetSchemaDataTypes = Schema.setDataTypes
+	TestSetSchemaImports   = Schema.setImports
+	TestSetSchemaSources   = Schema.setSources
 )
 
 // Type mutators.
 var (
-	TestSetTypeSchemaName            = (*Type).setSchemaName
-	TestSetTypeNameSpan              = (*Type).setNameSpan
-	TestSetTypeProperties            = (*Type).setProperties
-	TestSetTypeAssociations          = (*Type).setAssociations
-	TestSetTypeCompositions          = (*Type).setCompositions
-	TestSetTypeInvariants            = (*Type).setInvariants
-	TestSetTypeAllInvariants         = (*Type).setAllInvariants
-	TestSetTypeAnnotations           = (*Type).setAnnotations
-	TestSetTypeAllAnnotations        = (*Type).setAllAnnotations
-	TestSetTypeInherits              = (*Type).setInherits
-	TestSetTypeAllProperties         = (*Type).setAllProperties
-	TestSetTypePrimaryKeys           = (*Type).setPrimaryKeys
-	TestSetTypeAllAssociations       = (*Type).setAllAssociations
-	TestSetTypeAllCompositions       = (*Type).setAllCompositions
-	TestSetTypeSuppressedAnnotations = (*Type).setSuppressedAnnotations
-	TestSetTypeSuperTypes            = (*Type).setSuperTypes
-	TestSetTypeSubTypes              = (*Type).setSubTypes
+	TestSetTypeSchemaName            = Type.setSchemaName
+	TestSetTypeNameSpan              = Type.setNameSpan
+	TestSetTypeProperties            = Type.setProperties
+	TestSetTypeAssociations          = Type.setAssociations
+	TestSetTypeCompositions          = Type.setCompositions
+	TestSetTypeInvariants            = Type.setInvariants
+	TestSetTypeAllInvariants         = Type.setAllInvariants
+	TestSetTypeAnnotations           = Type.setAnnotations
+	TestSetTypeAllAnnotations        = Type.setAllAnnotations
+	TestSetTypeInherits              = Type.setInherits
+	TestSetTypeAllProperties         = Type.setAllProperties
+	TestSetTypePrimaryKeys           = Type.setPrimaryKeys
+	TestSetTypeAllAssociations       = Type.setAllAssociations
+	TestSetTypeAllCompositions       = Type.setAllCompositions
+	TestSetTypeSuppressedAnnotations = Type.setSuppressedAnnotations
+	TestSetTypeSuperTypes            = Type.setSuperTypes
+	TestSetTypeSubTypes              = Type.setSubTypes
 )
 
 // Relation mutators.
-var TestSetRelationTargetID = (*Relation).setTargetID
+var TestSetRelationTargetID = Relation.setTargetID
 
 // Property mutators.
-var TestSetPropertyConstraint = (*Property).setConstraint
+var TestSetPropertyConstraint = Property.setConstraint
 
 // DataType mutators.
-var TestSetDataTypeConstraint = (*DataType).setConstraint
+var TestSetDataTypeConstraint = DataType.setConstraint
 
 // Import mutators.
 var (
-	TestSetImportResolvedSourceID = (*Import).setResolvedSourceID
-	TestSetImportSchema           = (*Import).setSchema
+	TestSetImportResolvedSourceID = Import.setResolvedSourceID
+	TestSetImportSchema           = Import.setSchema
 )
 
 // Internal functions from merged packages.

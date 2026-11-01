@@ -219,8 +219,8 @@ func csvLine(fields []string) string {
 // oracle builds the document a row states, by the rule the package
 // documentation states, asking the validator which key claims each member.
 type oracle struct {
-	s                  *schema.Schema
-	person             *schema.Type
+	s                  schema.Schema
+	person             schema.Type
 	strict, withSchema bool
 	stats              map[string]int
 }
@@ -282,7 +282,7 @@ func (o oracle) resolvedNodeKeys(ctx context.Context, keys []string) map[string]
 	return o.resolved(ctx, obj, keys, instance.ErrUnknownField)
 }
 
-func (o oracle) resolvedEdgeKeys(ctx context.Context, rel *schema.Relation, keys []string) map[string]bool {
+func (o oracle) resolvedEdgeKeys(ctx context.Context, rel schema.Relation, keys []string) map[string]bool {
 	target := make(map[string]any, len(keys))
 	for _, k := range keys {
 		target[k] = "s"
@@ -308,37 +308,37 @@ func (o oracle) fold(name string) string {
 }
 
 // nodeMember is the member name spells exactly or folds onto.
-func (o oracle) nodeMember(name string) (*schema.Property, *schema.Relation) {
+func (o oracle) nodeMember(name string) (schema.Property, schema.Relation) {
 	if p, ok := o.person.Property(name); ok {
-		return p, nil
+		return p, schema.Relation{}
 	}
 	if r, ok := o.person.RelationByField(name); ok {
-		return nil, r
+		return schema.Property{}, r
 	}
 	lower := o.fold(name)
 	if lower == "" {
-		return nil, nil
+		return schema.Property{}, schema.Relation{}
 	}
 	if canonical, ok := o.person.CanonicalPropertyName(lower); ok {
 		p, _ := o.person.Property(canonical)
-		return p, nil
+		return p, schema.Relation{}
 	}
 	if r, ok := o.person.RelationByField(lower); ok {
-		return nil, r
+		return schema.Property{}, r
 	}
-	return nil, nil
+	return schema.Property{}, schema.Relation{}
 }
 
 // edgeMemberOf is what a suffix names: a key component (known only with
 // WithSchema) or an edge property, and whether the suffix spells it exactly.
 // openKey reports a key component whose target is out of reach.
 type edgeMemberOf struct {
-	key, prop *schema.Property
+	key, prop schema.Property
 	exact     bool
 	openKey   bool
 }
 
-func (o oracle) edgeMember(rel *schema.Relation, suffix string) edgeMemberOf {
+func (o oracle) edgeMember(rel schema.Relation, suffix string) edgeMemberOf {
 	lower := o.fold(suffix)
 	if strings.HasPrefix(suffix, keyPrefixForTest) || strings.HasPrefix(lower, keyPrefixForTest) {
 		if !o.withSchema {
@@ -369,8 +369,8 @@ func (o oracle) edgeMember(rel *schema.Relation, suffix string) edgeMemberOf {
 
 const keyPrefixForTest = "_target_"
 
-func (m edgeMemberOf) member() *schema.Property {
-	if m.key != nil {
+func (m edgeMemberOf) member() schema.Property {
+	if !m.key.IsZero() {
 		return m.key
 	}
 	return m.prop
@@ -401,7 +401,7 @@ func literal(c schema.Constraint, text string) (string, bool) {
 
 // emptyProperty is the JSON an empty cell states for a property: null for an
 // optional property or a kind with no empty value, "" for a required String.
-func emptyProperty(p *schema.Property) string {
+func emptyProperty(p schema.Property) string {
 	if !p.IsOptional() && schema.ResolveAlias(p.Constraint()).Kind() == schema.KindString {
 		return `""`
 	}
@@ -412,9 +412,9 @@ func emptyProperty(p *schema.Property) string {
 // is absent: "" for a String key component or a required String edge property.
 func (o oracle) emptyEdge(m edgeMemberOf) string {
 	switch {
-	case m.key != nil && o.withSchema && schema.ResolveAlias(m.key.Constraint()).Kind() == schema.KindString:
+	case !m.key.IsZero() && o.withSchema && schema.ResolveAlias(m.key.Constraint()).Kind() == schema.KindString:
 		return `""`
-	case m.prop != nil && !m.prop.IsOptional() && schema.ResolveAlias(m.prop.Constraint()).Kind() == schema.KindString:
+	case !m.prop.IsZero() && !m.prop.IsOptional() && schema.ResolveAlias(m.prop.Constraint()).Kind() == schema.KindString:
 		return `""`
 	}
 	return ""
@@ -447,7 +447,7 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 	keysOf := func() []string {
 		keys := []string{"id"}
 		for name, i := range plainAt {
-			if p, _ := o.nodeMember(name); row[i] != "" || p != nil && p.Name() == name {
+			if p, _ := o.nodeMember(name); row[i] != "" || !p.IsZero() && p.Name() == name {
 				keys = append(keys, name)
 			}
 		}
@@ -458,14 +458,14 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 		}
 		return keys
 	}
-	association := func(res map[string]bool, f string) *schema.Relation {
+	association := func(res map[string]bool, f string) schema.Relation {
 		if !res[f] {
-			return nil
+			return schema.Relation{}
 		}
-		if _, r := o.nodeMember(f); r != nil && !r.IsComposition() {
+		if _, r := o.nodeMember(f); !r.IsZero() && !r.IsComposition() {
 			return r
 		}
-		return nil
+		return schema.Relation{}
 	}
 
 	var res map[string]bool
@@ -476,7 +476,7 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 			if !present[f] || dropped[f] {
 				continue
 			}
-			if rel := association(res, f); rel != nil {
+			if rel := association(res, f); !rel.IsZero() {
 				if _, clash, _, _ := o.shape(ctx, rel, header, row, groupCols[f]); clash {
 					o.count("clash")
 					csvOnly = append(csvOnly, "E_ADAPTER_PARSE")
@@ -498,7 +498,7 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 	candidates := map[string][]string{}
 	for name, i := range plainAt {
 		p, _ := o.nodeMember(name)
-		if row[i] != "" || p == nil || p.Name() == name || folded[strings.ToLower(p.Name())] {
+		if row[i] != "" || p.IsZero() || p.Name() == name || folded[strings.ToLower(p.Name())] {
 			continue
 		}
 		candidates[p.Name()] = append(candidates[p.Name()], name)
@@ -513,9 +513,9 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 	for _, k := range keys {
 		p, r := o.nodeMember(k)
 		switch {
-		case (p != nil || r != nil) && !res[k]:
+		case (!p.IsZero() || !r.IsZero()) && !res[k]:
 			o.count("member key shadowed or colliding")
-		case p != nil && p.Name() != k || r != nil && r.FieldName() != k:
+		case !p.IsZero() && p.Name() != k || !r.IsZero() && r.FieldName() != k:
 			o.count("folded key claims")
 		}
 	}
@@ -533,10 +533,10 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 		written[f] = true
 		var value string
 		rel := association(res, f)
-		if rel == nil {
+		if rel.IsZero() {
 			o.count("group carried as text")
 		}
-		if rel != nil {
+		if !rel.IsZero() {
 			var more []string
 			value, more = o.edgeGroup(ctx, rel, header, row, groupCols[f])
 			csvOnly = append(csvOnly, more...)
@@ -554,7 +554,7 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 		switch {
 		case !hasPlain || row[i] == "":
 			members = append(members, jsonMember{f, value})
-		case rel != nil:
+		case !rel.IsZero():
 			o.count("two writers, group kept")
 			members = append(members, jsonMember{f, quoted(row[i])}, jsonMember{f, value})
 		default:
@@ -579,7 +579,7 @@ func (o oracle) document(ctx context.Context, header, row []string) (string, []s
 // plainValue is what a plain column's cell states under the row's claims.
 func (o oracle) plainValue(res map[string]bool, name, cell string, csvOnly *[]string) (string, bool) {
 	p, _ := o.nodeMember(name)
-	if p == nil || !res[name] {
+	if p.IsZero() || !res[name] {
 		return quoted(cell), cell != ""
 	}
 	if cell == "" {
@@ -594,7 +594,7 @@ func (o oracle) plainValue(res map[string]bool, name, cell string, csvOnly *[]st
 
 // shape is the group's target count and each column's segments; clash reports
 // two deciding columns disagreeing on the count.
-func (o oracle) shape(ctx context.Context, rel *schema.Relation, header, row []string, cols []int) (int, bool, map[int][]string, map[int]bool) {
+func (o oracle) shape(ctx context.Context, rel schema.Relation, header, row []string, cols []int) (int, bool, map[int][]string, map[int]bool) {
 	n := -1
 	clash := false
 	segs := map[int][]string{}
@@ -616,7 +616,7 @@ func (o oracle) shape(ctx context.Context, rel *schema.Relation, header, row []s
 		_, suffix, _ := strings.Cut(header[i], ".")
 		segs[i] = strings.Split(row[i], "|")
 		m := o.edgeMember(rel, suffix)
-		deciding[i] = m.openKey || res[suffix] && m.member() != nil
+		deciding[i] = m.openKey || res[suffix] && !m.member().IsZero()
 		if !deciding[i] {
 			continue
 		}
@@ -632,7 +632,7 @@ func (o oracle) shape(ctx context.Context, rel *schema.Relation, header, row []s
 	return n, clash, segs, deciding
 }
 
-func (o oracle) edgeGroup(ctx context.Context, rel *schema.Relation, header, row []string, cols []int) (string, []string) {
+func (o oracle) edgeGroup(ctx context.Context, rel schema.Relation, header, row []string, cols []int) (string, []string) {
 	var csvOnly []string
 	n, _, segs, deciding := o.shape(ctx, rel, header, row, cols)
 	seg := func(i, t int) (string, bool) {
@@ -673,16 +673,16 @@ func (o oracle) edgeGroup(ctx context.Context, rel *schema.Relation, header, row
 				folded[l] = true
 			}
 		}
-		candidates := map[*schema.Property][]string{}
+		candidates := map[schema.Property][]string{}
 		for _, i := range cols {
 			_, suffix, _ := strings.Cut(header[i], ".")
 			v, ok := seg(i, t)
 			m := o.edgeMember(rel, suffix)
-			if !ok || v != "" || m.exact || m.member() == nil || o.emptyEdge(m) == "" {
+			if !ok || v != "" || m.exact || m.member().IsZero() || o.emptyEdge(m) == "" {
 				continue
 			}
 			name := strings.ToLower(m.member().Name())
-			if m.key != nil {
+			if !m.key.IsZero() {
 				name = strings.ToLower(keyPrefixForTest + m.key.Name())
 			}
 			if folded[name] {
@@ -709,8 +709,8 @@ func (o oracle) edgeGroup(ctx context.Context, rel *schema.Relation, header, row
 				continue
 			}
 			m := o.edgeMember(rel, suffix)
-			claimed := res[suffix] && (m.prop != nil || m.key != nil && o.withSchema)
-			if m.member() != nil && !res[suffix] {
+			claimed := res[suffix] && (!m.prop.IsZero() || !m.key.IsZero() && o.withSchema)
+			if !m.member().IsZero() && !res[suffix] {
 				o.count("edge key shadowed or colliding")
 			}
 			switch {

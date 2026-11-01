@@ -18,7 +18,7 @@ import (
 )
 
 // mustBuild builds a schema from a Builder, failing the test on error.
-func mustBuild(t *testing.T, b *schema.Builder) *schema.Schema {
+func mustBuild(t *testing.T, b *schema.Builder) schema.Schema {
 	t.Helper()
 	s, result := b.Build()
 	require.False(t, result.HasErrors(), "schema build: %s", result)
@@ -26,7 +26,7 @@ func mustBuild(t *testing.T, b *schema.Builder) *schema.Schema {
 }
 
 // mustLoadString loads a schema from YAMMM DSL source, failing the test on error.
-func mustLoadString(t *testing.T, source, name string) *schema.Schema {
+func mustLoadString(t *testing.T, source, name string) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(t.Context(), source, name)
 	require.False(t, result.HasErrors(), "schema load: %s", result)
@@ -55,7 +55,7 @@ func TestValidator_ValidateOne_Success(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 	assert.Equal(t, "Person", valid.TypeName())
 	assert.Equal(t, `["1"]`, valid.PrimaryKey().String())
 
@@ -84,7 +84,7 @@ func TestValidator_ValidateOne_TypeNotFound(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "NonExistent", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "not found")
 }
@@ -107,7 +107,7 @@ func TestValidator_ValidateOne_AbstractTypeRejected(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Entity", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "abstract")
 }
@@ -130,7 +130,7 @@ func TestValidator_ValidateOne_PartTypeRejected(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Part", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "part type")
 }
@@ -154,7 +154,7 @@ func TestValidator_ValidateOne_MissingRequiredProperty(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "missing required")
 }
@@ -179,7 +179,7 @@ func TestValidator_ValidateOne_OptionalPropertyMissing(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 }
 
 func TestValidator_ValidateOne_TypeMismatch(t *testing.T) {
@@ -201,7 +201,7 @@ func TestValidator_ValidateOne_TypeMismatch(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "age")
 }
@@ -224,7 +224,7 @@ func TestValidator_ValidateOne_UnknownField(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "unknown")
 }
@@ -248,7 +248,7 @@ func TestValidator_ValidateOne_AllowUnknownFields(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 }
 
 func TestValidator_ValidateOne_CaseInsensitivePropertyMatch(t *testing.T) {
@@ -271,7 +271,7 @@ func TestValidator_ValidateOne_CaseInsensitivePropertyMatch(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// Property should be stored with canonical name
 	firstNameVal, ok := valid.Property("firstName")
@@ -300,7 +300,7 @@ func TestValidator_ValidateOne_StrictPropertyNames(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	// Should have both "unknown field" and "missing required" errors
 }
@@ -348,9 +348,9 @@ func TestValidator_Validate_PartialSuccess(t *testing.T) {
 	require.False(t, result.OK())
 	// Batch returns positional nils: 3 entries, with index 1 nil for the failure
 	require.Len(t, valid, 3)
-	assert.NotNil(t, valid[0])
-	assert.Nil(t, valid[1])
-	assert.NotNil(t, valid[2])
+	assert.False(t, valid[0].IsZero())
+	assert.True(t, valid[1].IsZero())
+	assert.False(t, valid[2].IsZero())
 }
 
 func TestValidator_Validate_ContextCancellation(t *testing.T) {
@@ -397,7 +397,7 @@ func TestValidator_ValidateOne_ImmutableOutput(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// Get the name before mutation
 	nameVal, ok := valid.Property("name")
@@ -450,10 +450,10 @@ func TestValidator_ValidateOne_IntegerBounds(t *testing.T) {
 			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tt.wantErr {
-				assert.Nil(t, valid)
+				assert.True(t, valid.IsZero())
 				assert.False(t, result.OK())
 			} else {
-				assert.NotNil(t, valid)
+				assert.False(t, valid.IsZero())
 				assert.True(t, result.OK())
 			}
 		})
@@ -494,10 +494,10 @@ func TestValidator_ValidateOne_StringBounds(t *testing.T) {
 			valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 			if tt.wantErr {
-				assert.Nil(t, valid)
+				assert.True(t, valid.IsZero())
 				assert.False(t, result.OK())
 			} else {
-				assert.NotNil(t, valid)
+				assert.False(t, valid.IsZero())
 				assert.True(t, result.OK())
 			}
 		})
@@ -678,7 +678,7 @@ func TestValidator_ValidateOne_InvariantPass(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 }
 
 func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
@@ -708,7 +708,7 @@ func TestValidator_ValidateOne_InvariantFail(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "age must be non-negative")
 }
@@ -775,10 +775,10 @@ type Record {
 					valid, result := v.ValidateOne(t.Context(), "Record", raw)
 					if tc.wantOK {
 						assert.True(t, result.OK(), "expected pass: %s", result)
-						assert.NotNil(t, valid)
+						assert.False(t, valid.IsZero())
 					} else {
 						assert.False(t, result.OK(), "expected fail")
-						assert.Nil(t, valid)
+						assert.True(t, valid.IsZero())
 					}
 				})
 			}
@@ -835,10 +835,10 @@ type Record {
 			valid, result := v.ValidateOne(t.Context(), "Record", raw)
 			if tc.wantOK {
 				assert.True(t, result.OK(), "expected pass: %s", result)
-				assert.NotNil(t, valid)
+				assert.False(t, valid.IsZero())
 			} else {
 				assert.False(t, result.OK(), "expected fail")
-				assert.Nil(t, valid)
+				assert.True(t, valid.IsZero())
 				hasInvariantFail := false
 				for issue := range result.Issues() {
 					if issue.Code() == diag.E_INVARIANT_FAIL {
@@ -874,7 +874,7 @@ func TestValidator_PropertyPath_UsesInputName(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	var foundPath string
@@ -910,7 +910,7 @@ func TestValidator_PropertyPath_IncludesFieldDetailWhenDifferent(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	// Check that the issue has a "field" detail with the input field name
@@ -944,7 +944,7 @@ func TestValidator_Validate_NilInput_ReturnsNil(t *testing.T) {
 }
 
 func TestValidator_Validate_EmptyInput_ReturnsEmptySlice(t *testing.T) {
-	// Validate(ctx, typeName, []RawInstance{}) should return ([]*ValidInstance{}, OK result)
+	// Validate(ctx, typeName, []RawInstance{}) should return ([]ValidInstance{}, OK result)
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Person").
@@ -982,7 +982,7 @@ func TestValidator_ValidateForComposition_NilInput_ReturnsNil(t *testing.T) {
 }
 
 func TestValidator_ValidateForComposition_EmptyInput_ReturnsEmptySlice(t *testing.T) {
-	// ValidateForComposition with empty input should return ([]*ValidInstance{}, OK result)
+	// ValidateForComposition with empty input should return ([]ValidInstance{}, OK result)
 	s := mustBuild(t, schema.NewBuilder().
 		WithName("test").
 		AddType("Address").
@@ -1031,13 +1031,13 @@ func TestValidator_NilReceiver(t *testing.T) {
 	})
 }
 
-func TestNewValidator_NilSchemaPanics(t *testing.T) {
+func TestNewValidator_ZeroSchemaPanics(t *testing.T) {
 	defer func() {
 		r := recover()
-		require.NotNil(t, r, "expected panic for nil schema")
-		assert.Contains(t, r, "nil schema", "panic message should mention nil schema")
+		require.NotNil(t, r, "expected panic for a zero schema")
+		assert.Contains(t, r, "zero schema", "panic message should mention a zero schema")
 	}()
-	instance.NewValidator(nil)
+	instance.NewValidator(schema.Schema{})
 }
 
 // Ownership Isolation Tests
@@ -1056,16 +1056,16 @@ func TestNewValidator_NilSchemaPanics(t *testing.T) {
 func TestOwnership_Isolation(t *testing.T) {
 	type scenario struct {
 		name     string
-		schema   func(t *testing.T) *schema.Schema
+		schema   func(t *testing.T) schema.Schema
 		typeName string
 		// raw returns the input plus a mutate func that tampers with every
 		// alias the test retained into the raw data.
 		raw    func() (instance.RawInstance, func())
-		verify func(t *testing.T, valid *instance.ValidInstance)
+		verify func(t *testing.T, valid instance.ValidInstance)
 	}
 
-	compositionSchema := func(part, parent, relation string, extraProps ...string) func(t *testing.T) *schema.Schema {
-		return func(t *testing.T) *schema.Schema {
+	compositionSchema := func(part, parent, relation string, extraProps ...string) func(t *testing.T) schema.Schema {
+		return func(t *testing.T) schema.Schema {
 			t.Helper()
 			b := schema.NewBuilder().WithName("test").
 				AddType(part).
@@ -1082,14 +1082,14 @@ func TestOwnership_Isolation(t *testing.T) {
 		}
 	}
 
-	childProp := func(t *testing.T, valid *instance.ValidInstance, relation string, idx int, prop, want string) {
+	childProp := func(t *testing.T, valid instance.ValidInstance, relation string, idx int, prop, want string) {
 		t.Helper()
 		composed, ok := composedOf(valid, relation)
 		require.True(t, ok)
 		composedSlice, ok := composed.Slice()
 		require.True(t, ok)
 		require.Greater(t, composedSlice.Len(), idx)
-		child := composedSlice.Get(idx).Unwrap().(*instance.ValidInstance)
+		child := composedSlice.Get(idx).Unwrap().(instance.ValidInstance)
 		val, ok := child.Property(prop)
 		require.True(t, ok)
 		got, ok := val.String()
@@ -1110,7 +1110,7 @@ func TestOwnership_Isolation(t *testing.T) {
 					addressData["city"] = "Mutated City"
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				childProp(t, valid, "ADDRESSES", 0, "street", "Original Street")
 				childProp(t, valid, "ADDRESSES", 0, "city", "Original City")
@@ -1130,7 +1130,7 @@ func TestOwnership_Isolation(t *testing.T) {
 					rawData["notes"] = []any{map[string]any{"id": "999", "text": "New Note"}}
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				composed, ok := composedOf(valid, "NOTES")
 				require.True(t, ok)
@@ -1155,7 +1155,7 @@ func TestOwnership_Isolation(t *testing.T) {
 					rawData["items"] = nil
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				childProp(t, valid, "ITEMS", 0, "name", "Original Item")
 			},
@@ -1172,18 +1172,18 @@ func TestOwnership_Isolation(t *testing.T) {
 					detailData["id"] = "888"
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				childProp(t, valid, "DETAILS", 0, "value", "Original Value")
 				composed, _ := composedOf(valid, "DETAILS")
 				composedSlice, _ := composed.Slice()
-				child := composedSlice.Get(0).Unwrap().(*instance.ValidInstance)
+				child := composedSlice.Get(0).Unwrap().(instance.ValidInstance)
 				assert.Equal(t, `["1"]`, child.PrimaryKey().String(), "isolation failed: PK was mutated")
 			},
 		},
 		{
 			name: "edge properties",
-			schema: func(t *testing.T) *schema.Schema {
+			schema: func(t *testing.T) schema.Schema {
 				t.Helper()
 				return mustLoadString(t, `schema "test"
 type Company {
@@ -1207,11 +1207,11 @@ type Person {
 					edgeData["_target_id"] = "999"
 				}
 			},
-			verify: func(t *testing.T, valid *instance.ValidInstance) {
+			verify: func(t *testing.T, valid instance.ValidInstance) {
 				t.Helper()
 				edge, ok := valid.Edge("EMPLOYER")
 				require.True(t, ok)
-				targets := edge.Targets()
+				targets := slices.Collect(edge.Targets())
 				require.Len(t, targets, 1)
 				roleVal, ok := targets[0].Property("role")
 				require.True(t, ok)
@@ -1233,7 +1233,7 @@ type Person {
 
 			valid, result := validator.ValidateOne(t.Context(), tt.typeName, raw)
 			require.True(t, result.OK())
-			require.NotNil(t, valid)
+			require.False(t, valid.IsZero())
 
 			mutate()
 			tt.verify(t, valid)

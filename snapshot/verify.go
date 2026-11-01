@@ -7,19 +7,21 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-// Verify runs all structural validation checks that [Load] performs on a .ys
-// file without materializing a Snapshot. Returns diag.Result with the same
-// diagnostic codes as Load.
+// Verify runs the checks [Load] runs on a .ys file before it materializes a
+// Snapshot. Returns diag.Result with the same diagnostic codes as Load. It skips
+// [graph.RebuildSnapshot]'s own check, whose refusal of a document those checks
+// passed is a reader bug.
 //
-// Verify runs Load's pipeline and stops before materialization, so it builds
-// no Snapshot and no instance objects. It does decode the instances section
+// Verify stops before materialization, so it builds no Snapshot and no graph
+// instance; under [WithRevalidation] a validator run that passes builds an instance
+// it discards. It does decode the instances section
 // first, holding every instance's properties, so peak memory scales with
 // document size rather than with key count.
 //
-// Panics if s is nil (programming error).
-func Verify(ctx context.Context, data []byte, s *schema.Schema, opts ...LoadOption) diag.Result {
-	if s == nil {
-		panic("snapshot.Verify: nil Schema")
+// Panics if s is zero (programming error).
+func Verify(ctx context.Context, data []byte, s schema.Schema, opts ...LoadOption) diag.Result {
+	if s.IsZero() {
+		panic("snapshot.Verify: zero Schema")
 	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)

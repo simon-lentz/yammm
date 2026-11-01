@@ -3,6 +3,7 @@ package graph_test
 import (
 	"context"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ import (
 // These helpers create schemas for specific test scenarios.
 
 // testSchemaWithAssociation creates a schema with Person -> Company association.
-func testSchemaWithAssociation(t *testing.T) *schema.Schema {
+func testSchemaWithAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -45,7 +46,7 @@ func testSchemaWithAssociation(t *testing.T) *schema.Schema {
 
 // testSchemaWithEdgeProperties is testSchemaWithAssociation with EMPLOYER
 // declaring the edge properties role and since.
-func testSchemaWithEdgeProperties(t *testing.T) *schema.Schema {
+func testSchemaWithEdgeProperties(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(t.Context(), `schema "association"
 
@@ -70,7 +71,7 @@ type Person {
 }
 
 // testSchemaWithOptionalAssociation creates a schema with Person -> Company optional association.
-func testSchemaWithOptionalAssociation(t *testing.T) *schema.Schema {
+func testSchemaWithOptionalAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -94,7 +95,7 @@ func testSchemaWithOptionalAssociation(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithManyAssociation creates a schema with Person -> Company many association.
-func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
+func testSchemaWithManyAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -118,7 +119,7 @@ func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithChainedAssociations creates A -> B -> C chain.
-func testSchemaWithChainedAssociations(t *testing.T) *schema.Schema {
+func testSchemaWithChainedAssociations(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -147,7 +148,7 @@ func testSchemaWithChainedAssociations(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithComposition creates a schema with Parent -> Child composition.
-func testSchemaWithComposition(t *testing.T) *schema.Schema {
+func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -172,7 +173,7 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithOneComposition creates a schema with Parent -> Child (one) composition.
-func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
+func testSchemaWithOneComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -197,7 +198,7 @@ func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithPKLessChild creates a schema with PKless child composition.
-func testSchemaWithPKLessChild(t *testing.T) *schema.Schema {
+func testSchemaWithPKLessChild(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -221,7 +222,7 @@ func testSchemaWithPKLessChild(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithNestedComposition creates a schema with nested compositions.
-func testSchemaWithNestedComposition(t *testing.T) *schema.Schema {
+func testSchemaWithNestedComposition(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -252,7 +253,7 @@ func testSchemaWithNestedComposition(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithMultipleCompositions creates a schema with multiple composition relations.
-func testSchemaWithMultipleCompositions(t *testing.T) *schema.Schema {
+func testSchemaWithMultipleCompositions(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -282,7 +283,7 @@ func testSchemaWithMultipleCompositions(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithCompositeKey creates a schema with composite primary key.
-func testSchemaWithCompositeKey(t *testing.T) *schema.Schema {
+func testSchemaWithCompositeKey(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -302,7 +303,7 @@ func testSchemaWithCompositeKey(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithMutualAssociations creates TypeA <-> TypeB mutual associations (A→B→A cycle).
-func testSchemaWithMutualAssociations(t *testing.T) *schema.Schema {
+func testSchemaWithMutualAssociations(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -327,7 +328,7 @@ func testSchemaWithMutualAssociations(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithCircularChain creates A → B → C → A circular chain.
-func testSchemaWithCircularChain(t *testing.T) *schema.Schema {
+func testSchemaWithCircularChain(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -366,14 +367,14 @@ func testSchemaWithCircularChain(t *testing.T) *schema.Schema {
 // tagID resolves a tag form — bare or alias-qualified — to the identity it
 // renders, so a test written in names reads the same now that Snapshot's
 // accessors take identities.
-func tagID(t *testing.T, s *schema.Schema, tag string) schema.TypeID {
+func tagID(t *testing.T, s schema.Schema, tag string) schema.TypeID {
 	t.Helper()
 	alias, name, qualified := strings.Cut(tag, ".")
 	if !qualified {
 		return mustTypeID(t, s, tag)
 	}
 	imp, ok := s.ImportByAlias(alias)
-	if !ok || imp.Schema() == nil {
+	if !ok || imp.Schema().IsZero() {
 		t.Fatalf("import alias %q not found", alias)
 	}
 	typ, ok := imp.Schema().Type(name)
@@ -383,7 +384,7 @@ func tagID(t *testing.T, s *schema.Schema, tag string) schema.TypeID {
 	return typ.ID()
 }
 
-func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
+func mustTypeID(t *testing.T, s schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -394,7 +395,7 @@ func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 
 // edgeData assembles single-relation edge data: every target key shares
 // the same edge properties (pass nil for none).
-func edgeData(relationName string, edgeProps map[string]any, targetKeys ...[]any) map[string]*instance.ValidEdgeData {
+func edgeData(relationName string, edgeProps map[string]any, targetKeys ...[]any) map[string]instance.ValidEdgeData {
 	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
 	for i, targetKey := range targetKeys {
 		targets[i] = instance.NewValidEdgeTarget(
@@ -402,11 +403,11 @@ func edgeData(relationName string, edgeProps map[string]any, targetKeys ...[]any
 			immutable.WrapProperties(edgeProps),
 		)
 	}
-	return map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(targets)}
+	return map[string]instance.ValidEdgeData{relationName: instance.NewValidEdgeData(targets)}
 }
 
 // mustValidInstance creates a ValidInstance for testing.
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+func mustValidInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		typeName,
@@ -419,7 +420,7 @@ func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any
 // keyedProps returns props holding each primary-key property the key states,
 // where props does not state it, so a fixture instance holds its key the way a
 // validated one does. A key property the fixture states is kept as written.
-func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
+func keyedProps(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -440,13 +441,13 @@ func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props
 // mustValidInstanceWithEdge creates a ValidInstance with edge data.
 func mustValidInstanceWithEdge(
 	t *testing.T,
-	s *schema.Schema,
+	s schema.Schema,
 	typeName string,
 	pk []any,
 	props map[string]any,
 	relationName string,
 	targetKeys [][]any,
-) *instance.ValidInstance {
+) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		typeName,
@@ -460,14 +461,14 @@ func mustValidInstanceWithEdge(
 // mustValidInstanceWithEdgeProps creates a ValidInstance with edge data including properties.
 func mustValidInstanceWithEdgeProps(
 	t *testing.T,
-	s *schema.Schema,
+	s schema.Schema,
 	typeName string,
 	pk []any,
 	props map[string]any,
 	relationName string,
 	targetKey []any,
 	edgeProps map[string]any,
-) *instance.ValidInstance {
+) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		typeName,
@@ -481,24 +482,24 @@ func mustValidInstanceWithEdgeProps(
 // mustValidInstanceWithEmptyEdge creates a ValidInstance with an empty edge (for required many tests).
 func mustValidInstanceWithEmptyEdge(
 	t *testing.T,
-	s *schema.Schema,
+	s schema.Schema,
 	typeName string,
 	pk []any,
 	props map[string]any,
 	relationName string,
-) *instance.ValidInstance {
+) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		typeName,
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
 		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(nil)}),
+		instancetest.Edges(map[string]instance.ValidEdgeData{relationName: instance.NewValidEdgeData(nil)}),
 	)
 }
 
 // mustValidPartInstance creates a ValidInstance for a part type.
-func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+func mustValidPartInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -517,14 +518,14 @@ func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk [
 
 // mustValidPKLessInstance creates a ValidInstance for a PK-less part type.
 // The zero Key has no [instancetest.VI] option, so this one builds directly.
-func mustValidPKLessInstance(t *testing.T, s *schema.Schema, typeName string, props map[string]any) *instance.ValidInstance {
+func mustValidPKLessInstance(t *testing.T, s schema.Schema, typeName string, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	return instance.NewValidInstance(
 		typeName,
 		mustTypeID(t, s, typeName),
 		immutable.Key{}, // No PK
 		immutable.WrapProperties(props),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 }
 
@@ -532,7 +533,7 @@ func mustValidPKLessInstance(t *testing.T, s *schema.Schema, typeName string, pr
 
 // testMultiSchemaSetup creates two schemas with imports for cross-schema testing.
 // Returns (main schema, imported schema).
-func testMultiSchemaSetup(t *testing.T) (*schema.Schema, *schema.Schema) {
+func testMultiSchemaSetup(t *testing.T) (schema.Schema, schema.Schema) {
 	t.Helper()
 
 	reg := schema.NewRegistry()
@@ -578,7 +579,7 @@ func testMultiSchemaSetup(t *testing.T) (*schema.Schema, *schema.Schema) {
 
 // testTripleSchemaSetup creates three schemas for transitive import testing.
 // Schema A imports B, B imports C. A cannot directly access C types.
-func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Schema, reg *schema.Registry) {
+func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC schema.Schema, reg *schema.Registry) {
 	t.Helper()
 
 	reg = schema.NewRegistry()
@@ -645,10 +646,10 @@ func testTripleSchemaSetup(t *testing.T) (schemaA, schemaB, schemaC *schema.Sche
 // Assertion Helpers
 
 // assertInstanceCount verifies the number of instances of a type in the result.
-func assertInstanceCount(t *testing.T, result *graph.Snapshot, typeID schema.TypeID, expected int) bool {
+func assertInstanceCount(t *testing.T, result graph.Snapshot, typeID schema.TypeID, expected int) bool {
 	t.Helper()
 
-	instances := result.InstancesOf(typeID)
+	instances := slices.Collect(result.InstancesOf(typeID))
 	if len(instances) != expected {
 		t.Errorf("Expected %d instances of %s, got %d", expected, typeID, len(instances))
 		return false
@@ -657,27 +658,27 @@ func assertInstanceCount(t *testing.T, result *graph.Snapshot, typeID schema.Typ
 }
 
 // assertEdgeCount verifies the number of edges in the result.
-func assertEdgeCount(t *testing.T, result *graph.Snapshot, expected int) {
+func assertEdgeCount(t *testing.T, result graph.Snapshot, expected int) {
 	t.Helper()
 
-	edges := result.Edges()
+	edges := slices.Collect(result.Edges())
 	if len(edges) != expected {
 		t.Errorf("Expected %d edges, got %d", expected, len(edges))
 	}
 }
 
 // assertUnresolvedCount verifies the number of unresolved edges in the result.
-func assertUnresolvedCount(t *testing.T, result *graph.Snapshot, expected int) {
+func assertUnresolvedCount(t *testing.T, result graph.Snapshot, expected int) {
 	t.Helper()
 
-	unresolved := result.Unresolved()
+	unresolved := slices.Collect(result.Unresolved())
 	if len(unresolved) != expected {
 		t.Errorf("Expected %d unresolved edges, got %d", expected, len(unresolved))
 	}
 }
 
 // assertComposedCount verifies the number of composed children for a relation.
-func assertComposedCount(t *testing.T, inst *graph.Instance, relationName string, expected int) {
+func assertComposedCount(t *testing.T, inst graph.Instance, relationName string, expected int) {
 	t.Helper()
 
 	count := inst.ComposedCount(relationName)
@@ -707,7 +708,7 @@ func countCode(result diag.Result, code diag.Code) int {
 
 // mustImport imports snap into a new graph bound to s and fails the test when
 // the import is refused.
-func mustImport(tb testing.TB, s *schema.Schema, snap *graph.Snapshot) *graph.Graph {
+func mustImport(tb testing.TB, s schema.Schema, snap graph.Snapshot) *graph.Graph {
 	tb.Helper()
 	g, res := graph.NewFromSnapshot(s, snap)
 	if res.HasErrors() {
@@ -718,7 +719,7 @@ func mustImport(tb testing.TB, s *schema.Schema, snap *graph.Snapshot) *graph.Gr
 
 // mustSeed seeds a new assembler bound to s from snap and fails the test when
 // the seed is refused.
-func mustSeed(tb testing.TB, ctx context.Context, s *schema.Schema, snap *graph.Snapshot) *graph.BatchAssembler {
+func mustSeed(tb testing.TB, ctx context.Context, s schema.Schema, snap graph.Snapshot) *graph.BatchAssembler {
 	tb.Helper()
 	ba, res := graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)
 	if res.HasErrors() {

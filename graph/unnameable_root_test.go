@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -59,7 +61,7 @@ type Beacon {
 
 // unnameableFixture loads the three-schema closure and returns the entry
 // schema with the transitively imported Beacon's identity.
-func unnameableFixture(t *testing.T) (*schema.Schema, schema.TypeID) {
+func unnameableFixture(t *testing.T) (schema.Schema, schema.TypeID) {
 	t.Helper()
 	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(unnameableEntry),
@@ -70,11 +72,11 @@ func unnameableFixture(t *testing.T) (*schema.Schema, schema.TypeID) {
 		t.Fatalf("load fixture: %s", result)
 	}
 	base, ok := s.ImportByAlias("base")
-	if !ok || base.Schema() == nil {
+	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
 	deep, ok := base.Schema().ImportByAlias("deep")
-	if !ok || deep.Schema() == nil {
+	if !ok || deep.Schema().IsZero() {
 		t.Fatal("import alias deep did not resolve")
 	}
 	typ, ok := deep.Schema().Type("Beacon")
@@ -218,11 +220,11 @@ func TestRebuildSnapshot_KeepsAnUnnameableComposedChild(t *testing.T) {
 	if result.HasErrors() {
 		t.Fatalf("a composed child of a transitively imported part type was refused: %s", result)
 	}
-	roots := built.InstancesOf(basin)
+	roots := slices.Collect(built.InstancesOf(basin))
 	if len(roots) != 1 {
 		t.Fatalf("got %d roots, want 1", len(roots))
 	}
-	children := roots[0].Composed("PIECES")
+	children := slices.Collect(roots[0].Composed("PIECES"))
 	if len(children) != 1 {
 		t.Fatalf("got %d composed children, want 1", len(children))
 	}
@@ -252,7 +254,7 @@ func TestGraphAdd_UnnameableRootRefused(t *testing.T) {
 		valid := instance.NewValidInstance(spelling, typ.ID(),
 			immutable.WrapKey([]any{"d1"}),
 			immutable.WrapProperties(map[string]any{"id": "d1", "power": float64(1)}),
-			nil, nil, nil)
+			nil, nil, location.Provenance{})
 
 		addResult := graph.New(s).Add(context.Background(), valid)
 		if !addResult.HasErrors() {
@@ -291,10 +293,10 @@ func resultHasCode(result diag.Result, code diag.Code) bool {
 
 // mustImportedType resolves a directly imported type, reporting rather than
 // failing so a caller can skip the rest of its assertions.
-func mustImportedType(t *testing.T, s *schema.Schema, alias, name string) (schema.TypeID, bool) {
+func mustImportedType(t *testing.T, s schema.Schema, alias, name string) (schema.TypeID, bool) {
 	t.Helper()
 	imp, ok := s.ImportByAlias(alias)
-	if !ok || imp.Schema() == nil {
+	if !ok || imp.Schema().IsZero() {
 		t.Errorf("import alias %q did not resolve", alias)
 		return schema.TypeID{}, false
 	}

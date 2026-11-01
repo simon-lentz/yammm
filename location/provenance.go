@@ -7,10 +7,16 @@ import (
 // Provenance captures source location metadata for error reporting: it links a
 // validation error back to where in the input document the data came from.
 //
-// Every method is safe on a nil receiver. [Provenance.WithRawPath] turns nil
-// into a new Provenance carrying that raw path and no source information, and
+// Every method is safe on a zero Provenance. [Provenance.WithRawPath] turns the
+// zero Provenance into a new Provenance carrying that raw path and no source information, and
 // the accessors return zero values. The package documentation states the rules.
-type Provenance struct {
+type Provenance struct{ *provenanceState }
+
+// IsZero reports whether the handle names no record.
+func (p Provenance) IsZero() bool { return p.provenanceState == nil }
+
+// provenanceState is the record a [Provenance] names.
+type provenanceState struct {
 	sourceName string
 	path       path.Builder
 	span       Span
@@ -23,33 +29,33 @@ type Provenance struct {
 }
 
 // NewProvenance creates a new Provenance with the given source information.
-func NewProvenance(sourceName string, path path.Builder, span Span) *Provenance {
-	return &Provenance{
+func NewProvenance(sourceName string, path path.Builder, span Span) Provenance {
+	return Provenance{&provenanceState{
 		sourceName: sourceName,
 		path:       path,
 		span:       span,
-	}
+	}}
 }
 
 // SourceName returns the name of the source (e.g., filename).
-func (p *Provenance) SourceName() string {
-	if p == nil {
+func (p Provenance) SourceName() string {
+	if p.IsZero() {
 		return ""
 	}
 	return p.sourceName
 }
 
 // Path returns the JSONPath-like path to this instance within the source.
-func (p *Provenance) Path() path.Builder {
-	if p == nil {
+func (p Provenance) Path() path.Builder {
+	if p.IsZero() {
 		return path.Root()
 	}
 	return p.path
 }
 
 // Span returns the source location span.
-func (p *Provenance) Span() Span {
-	if p == nil {
+func (p Provenance) Span() Span {
+	if p.IsZero() {
 		return Span{}
 	}
 	return p.span
@@ -61,8 +67,8 @@ func (p *Provenance) Span() Span {
 // paths (adapter parsing, programmatic NewProvenance). snapshot.Load sets it
 // when the persisted path fails to parse or parses to another spelling, so a
 // marshal writes the document's own path back byte for byte.
-func (p *Provenance) RawPath() string {
-	if p == nil {
+func (p Provenance) RawPath() string {
+	if p.IsZero() {
 		return ""
 	}
 	return p.rawPath
@@ -72,23 +78,23 @@ func (p *Provenance) RawPath() string {
 //
 // The raw path is used for snapshot round-trip preservation when the
 // parsed path.Builder cannot faithfully reproduce the original path string.
-func (p *Provenance) WithRawPath(raw string) *Provenance {
-	if p == nil {
-		return &Provenance{rawPath: raw, rawPathSet: true}
+func (p Provenance) WithRawPath(raw string) Provenance {
+	if p.IsZero() {
+		return Provenance{&provenanceState{rawPath: raw, rawPathSet: true}}
 	}
-	return &Provenance{
+	return Provenance{&provenanceState{
 		sourceName: p.sourceName,
 		path:       p.path,
 		span:       p.span,
 		rawPath:    raw,
 		rawPathSet: true,
-	}
+	}}
 }
 
 // HasRawPath reports whether a raw path was recorded, which [Provenance.RawPath]
 // alone cannot answer: a recorded empty string and no record at all both render
 // as "". A writer round-tripping provenance must ask this before substituting a
 // path of its own.
-func (p *Provenance) HasRawPath() bool {
-	return p != nil && p.rawPathSet
+func (p Provenance) HasRawPath() bool {
+	return !p.IsZero() && p.rawPathSet
 }

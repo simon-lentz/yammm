@@ -3,6 +3,7 @@ package snapshottest_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
-func testSchema(t *testing.T) *schema.Schema {
+func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.NewBuilder().
 		WithName("snapshottest-self").
@@ -37,12 +38,12 @@ func testSchema(t *testing.T) *schema.Schema {
 }
 
 // buildSnapshot is a local alias for the exported helper under test.
-func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
+func buildSnapshot(t *testing.T, s schema.Schema, instances ...instance.ValidInstance) graph.Snapshot {
 	t.Helper()
 	return snapshottest.BuildSnapshot(t, s, instances...)
 }
 
-func typeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
+func typeID(t *testing.T, s schema.Schema, name string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(name)
 	if !ok {
@@ -53,7 +54,7 @@ func typeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
 
 // compositionSchema declares a two-level composition (Holder -> Account ->
 // Card) so projection depth is observable.
-func compositionSchema(t *testing.T) *schema.Schema {
+func compositionSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "snaptest"
 
@@ -79,8 +80,8 @@ type Holder {
 }
 
 // employerEdge builds the single-target EMPLOYER edge data for a Person.
-func employerEdge(target string) map[string]*instance.ValidEdgeData {
-	return map[string]*instance.ValidEdgeData{
+func employerEdge(target string) map[string]instance.ValidEdgeData {
+	return map[string]instance.ValidEdgeData{
 		"EMPLOYER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{target}), immutable.WrapProperties(nil)),
 		}),
@@ -88,7 +89,7 @@ func employerEdge(target string) map[string]*instance.ValidEdgeData {
 }
 
 // company builds a Company instance with the given primary key.
-func company(t *testing.T, s *schema.Schema, id string) *instance.ValidInstance {
+func company(t *testing.T, s schema.Schema, id string) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		"Company",
@@ -99,7 +100,7 @@ func company(t *testing.T, s *schema.Schema, id string) *instance.ValidInstance 
 }
 
 // person builds a Person instance whose EMPLOYER edge points at target.
-func person(t *testing.T, s *schema.Schema, id, name, target string) *instance.ValidInstance {
+func person(t *testing.T, s schema.Schema, id, name, target string) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		"Person",
@@ -188,7 +189,7 @@ func TestDiffSnapshots_DetectsDifference(t *testing.T) {
 // dynamic-type mismatch is a real defect, not a wire artifact.
 func TestDiffSnapshots_ComparesNumbersExactly(t *testing.T) {
 	s := testSchema(t)
-	person := func(code any) *graph.Snapshot {
+	person := func(code any) graph.Snapshot {
 		return buildSnapshot(t, s, instancetest.VI(
 			"Person",
 			instancetest.TypeID(typeID(t, s, "Person")),
@@ -216,7 +217,7 @@ func TestDiffSnapshots_ComparesNumbersExactly(t *testing.T) {
 // is data loss even when the source name is empty.
 func TestDiffSnapshots_DistinguishesProvenancePresence(t *testing.T) {
 	s := testSchema(t)
-	person := func(opts ...instancetest.VIOption) *graph.Snapshot {
+	person := func(opts ...instancetest.VIOption) graph.Snapshot {
 		base := []instancetest.VIOption{
 			instancetest.TypeID(typeID(t, s, "Person")),
 			instancetest.PK("p1"),
@@ -247,7 +248,7 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 			Properties: immutable.WrapProperties(map[string]any{"id": key}),
 		}
 	}
-	withSource := func(sourceKey, other string) *graph.Snapshot {
+	withSource := func(sourceKey, other string) graph.Snapshot {
 		built, res := graph.RebuildSnapshot(s, graph.SnapshotParts{
 			Types: []schema.TypeID{typeID(t, s, "Person")},
 			Instances: []graph.InstanceParts{
@@ -286,7 +287,7 @@ func TestDiffSnapshots_SeparatesUnresolvedBySource(t *testing.T) {
 // so a projection reading it alone reports every well-formed path as empty.
 func TestDiffSnapshots_ComparesProvenancePaths(t *testing.T) {
 	s := testSchema(t)
-	person := func(p path.Builder) *graph.Snapshot {
+	person := func(p path.Builder) graph.Snapshot {
 		return buildSnapshot(t, s, instancetest.VI(
 			"Person",
 			instancetest.TypeID(typeID(t, s, "Person")),
@@ -309,8 +310,8 @@ func TestDiffSnapshots_ComparesProvenancePaths(t *testing.T) {
 // compare equal.
 func TestDiffSnapshots_ComparesComposedTreesRecursively(t *testing.T) {
 	s := compositionSchema(t)
-	holder := func(withCard bool, accountProv *location.Provenance) *graph.Snapshot {
-		var cards []*instance.ValidInstance
+	holder := func(withCard bool, accountProv location.Provenance) graph.Snapshot {
+		var cards []instance.ValidInstance
 		if withCard {
 			cards = append(cards, instancetest.VI(
 				"Card",
@@ -332,32 +333,37 @@ func TestDiffSnapshots_ComparesComposedTreesRecursively(t *testing.T) {
 			instancetest.TypeID(typeID(t, s, "Holder")),
 			instancetest.PK("h1"),
 			instancetest.Props(map[string]any{"id": "h1"}),
-			instancetest.Composed(map[string]immutable.Value{"ACCOUNTS": immutable.Wrap([]*instance.ValidInstance{account})}),
+			instancetest.Composed(map[string]immutable.Value{"ACCOUNTS": immutable.Wrap([]instance.ValidInstance{account})}),
 		))
 	}
 
 	probe := &testing.T{}
-	snapshottest.DiffSnapshots(probe, holder(true, nil), holder(false, nil))
+	snapshottest.DiffSnapshots(probe, holder(true, location.Provenance{}), holder(false, location.Provenance{}))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect loss of a composed child's own children")
 	}
 
 	probe = &testing.T{}
 	prov := location.NewProvenance("feed", path.Root(), location.Span{})
-	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, nil))
+	snapshottest.DiffSnapshots(probe, holder(false, prov), holder(false, location.Provenance{}))
 	if !probe.Failed() {
 		t.Error("DiffSnapshots must detect loss of a composed child's provenance")
 	}
 }
 
-// recordingTB records Fatalf instead of stopping the test, so a helper's
+// recordingTB records Fatalf and Errorf instead of failing the test, so a helper's
 // failure can be asserted on.
 type recordingTB struct {
 	testing.TB
 	fatals []string
+	errors []string
 }
 
 func (r *recordingTB) Helper() {}
+
+func (r *recordingTB) Errorf(format string, args ...any) {
+	r.errors = append(r.errors, fmt.Sprintf(format, args...))
+}
 
 func (r *recordingTB) Fatalf(format string, args ...any) {
 	r.fatals = append(r.fatals, fmt.Sprintf(format, args...))
@@ -370,7 +376,7 @@ func (r *recordingTB) Fatalf(format string, args ...any) {
 func TestBuildSnapshot_FailsOnARefusalButADuplicate(t *testing.T) {
 	t.Parallel()
 	s := testSchema(t)
-	person := func(props map[string]any) *instance.ValidInstance {
+	person := func(props map[string]any) instance.ValidInstance {
 		return instancetest.VI("Person", instancetest.TypeID(typeID(t, s, "Person")), instancetest.PK("p1"), instancetest.Props(props))
 	}
 
@@ -382,7 +388,51 @@ func TestBuildSnapshot_FailsOnARefusalButADuplicate(t *testing.T) {
 
 	dup := &recordingTB{TB: t}
 	snap := snapshottest.BuildSnapshot(dup, s, person(map[string]any{"id": "p1"}), person(map[string]any{"id": "p1"}))
-	if len(dup.fatals) != 0 || len(snap.Duplicates()) != 1 {
-		t.Errorf("a duplicate fixture: fatals = %q, %d duplicates; want none and one", dup.fatals, len(snap.Duplicates()))
+	if len(dup.fatals) != 0 || len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Errorf("a duplicate fixture: fatals = %q, %d duplicates; want none and one", dup.fatals, len(slices.Collect(snap.Duplicates())))
+	}
+}
+
+func TestDiffSnapshots_ARootDuplicateNamesNoParent(t *testing.T) {
+	s := compositionSchema(t)
+	holder := func() instance.ValidInstance {
+		return instancetest.VI(
+			"Holder",
+			instancetest.TypeID(typeID(t, s, "Holder")),
+			instancetest.PK("h1"),
+			instancetest.Props(map[string]any{"id": "h1"}),
+		)
+	}
+	account := func() instance.ValidInstance {
+		return instancetest.VI(
+			"Account",
+			instancetest.TypeID(typeID(t, s, "Account")),
+			instancetest.PK("a1"),
+			instancetest.Props(map[string]any{"number": "a1"}),
+		)
+	}
+
+	failed := &recordingTB{TB: t}
+	ctx := context.Background()
+	composed := graph.New(s)
+	if res := composed.Add(ctx, holder()); res.HasErrors() {
+		t.Fatal(res)
+	}
+	for range 2 {
+		composed.AddComposed(ctx, typeID(t, s, "Holder"), immutable.WrapKey([]any{"h1"}).String(), "ACCOUNTS", account())
+	}
+	if len(slices.Collect(composed.Snapshot().Duplicates())) != 1 {
+		t.Fatal("the fixture holds no composed duplicate")
+	}
+	snapshottest.DiffSnapshots(failed, buildSnapshot(t, s, holder(), holder()), composed.Snapshot())
+	if len(failed.errors) != 1 {
+		t.Fatalf("DiffSnapshots reported %q, want one difference", failed.errors)
+	}
+	msg := failed.errors[0]
+	if !strings.Contains(msg, "ParentKey") {
+		t.Errorf("the difference does not name the parent: %s", msg)
+	}
+	if strings.Contains(msg, `"[]"`) {
+		t.Errorf("a root duplicate rendered a parent key: %s", msg)
 	}
 }

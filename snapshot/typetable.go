@@ -74,12 +74,9 @@ type schemaNames map[location.SourceID]string
 // newSchemaNames indexes the entry schema's whole import closure. A name is
 // unique across a closure: the loader registers every member and
 // [schema.Registry.Register] refuses a second schema with an existing name.
-func newSchemaNames(s *schema.Schema) schemaNames {
-	if s == nil {
-		return nil
-	}
+func newSchemaNames(s schema.Schema) schemaNames {
 	names := make(schemaNames)
-	for _, cs := range s.Closure() {
+	for cs := range s.Closure() {
 		names[cs.SourceID()] = cs.Name()
 	}
 	return names
@@ -152,14 +149,11 @@ func (tt *typeTable) rowRef(id schema.TypeID, position string) (*int, error) {
 func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 	seen := make(map[schema.TypeID]struct{})
 
-	var collectInstance func(inst *graph.Instance)
-	collectInstance = func(inst *graph.Instance) {
-		if inst == nil {
-			return
-		}
+	var collectInstance func(inst graph.Instance)
+	collectInstance = func(inst graph.Instance) {
 		seen[inst.TypeID()] = struct{}{}
 		for _, relName := range inst.ComposedRelations() {
-			for _, child := range inst.Composed(relName) {
+			for child := range inst.Composed(relName) {
 				collectInstance(child)
 			}
 		}
@@ -169,7 +163,7 @@ func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 		seen[group.id] = struct{}{}
 		for _, inst := range group.instances {
 			collectInstance(inst)
-			for _, e := range view.edges[inst] {
+			for e := range view.snap.EdgesFrom(inst) {
 				seen[e.Target().TypeID()] = struct{}{}
 			}
 		}
@@ -177,18 +171,14 @@ func buildTypeTable(view *writerView, names schemaNames) *typeTable {
 
 	for _, d := range view.duplicates {
 		collectInstance(d.Instance())
-		if d.Conflict() != nil {
-			seen[d.Conflict().TypeID()] = struct{}{}
-		}
-		if d.Parent() != nil {
+		seen[d.Conflict().TypeID()] = struct{}{}
+		if !d.Parent().IsZero() {
 			seen[d.Parent().TypeID()] = struct{}{}
 		}
 	}
 
 	for _, u := range view.unresolved {
-		if u.Source() != nil {
-			seen[u.Source().TypeID()] = struct{}{}
-		}
+		seen[u.Source().TypeID()] = struct{}{}
 		seen[u.TargetType()] = struct{}{}
 	}
 
@@ -241,7 +231,7 @@ func (sd *streamDecoder) resolveTypeTable() {
 		seen[e] = i
 	}
 
-	if sd.schema == nil {
+	if sd.schema.IsZero() {
 		return
 	}
 	// The tag renders from the row alone, so it is derived once here rather
@@ -350,11 +340,11 @@ func (sd *streamDecoder) entryText(e typeTableEntry) string {
 
 // closureHolds reports whether the import closure holds a schema named name.
 func (sd *streamDecoder) closureHolds(name string) bool {
-	if sd.schema == nil {
+	if sd.schema.IsZero() {
 		return false
 	}
 	if sd.closureNames == nil {
-		closure := sd.schema.Closure()
+		closure := slices.Collect(sd.schema.Closure())
 		sd.closureNames = make(map[string]struct{}, len(closure))
 		for _, cs := range closure {
 			sd.closureNames[cs.Name()] = struct{}{}
@@ -367,7 +357,7 @@ func (sd *streamDecoder) closureHolds(name string) bool {
 // duplicateEntryText renders a repeated row before the table is resolved: whole
 // where the schema declares it, as refText renders a resolved row.
 func (sd *streamDecoder) duplicateEntryText(e typeTableEntry) string {
-	if sd.schema != nil {
+	if !sd.schema.IsZero() {
 		if _, ok := typeByWireID(sd.schema, e.Schema, e.Name); ok {
 			return TypeRef(e).String()
 		}

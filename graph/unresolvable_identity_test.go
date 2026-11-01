@@ -54,7 +54,7 @@ func requireIdentityRefusal(t *testing.T, result diag.Result, want string) {
 	t.Errorf("no refusal names %q: %s", want, result)
 }
 
-func unresolvableFixture(t *testing.T) (*schema.Schema, schema.TypeID) {
+func unresolvableFixture(t *testing.T) (schema.Schema, schema.TypeID) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), unresolvableSchema, "entry.yammm")
 	if res.HasErrors() {
@@ -267,16 +267,16 @@ func slicesOf(result diag.Result) []diag.Issue {
 	return out
 }
 
-// TestRebuildSnapshot_NilSchemaPanics holds RebuildSnapshot to the rule New,
+// TestRebuildSnapshot_ZeroSchemaPanics holds RebuildSnapshot to the rule New,
 // NewBatchAssembler and NewBatchAssemblerFromSnapshot apply: every identity of
 // a snapshot names a type of its schema, and a nil schema names none.
-func TestRebuildSnapshot_NilSchemaPanics(t *testing.T) {
+func TestRebuildSnapshot_ZeroSchemaPanics(t *testing.T) {
 	t.Parallel()
 	_, ghost := unresolvableFixture(t)
 	defer func() {
-		if r := recover(); r != "graph.RebuildSnapshot: nil Schema" {
+		if r := recover(); r != "graph.RebuildSnapshot: zero Schema" {
 			t.Errorf("recovered %v, want the nil-schema panic", r)
 		}
 	}()
-	graph.RebuildSnapshot(nil, graph.SnapshotParts{Types: []schema.TypeID{ghost}})
+	graph.RebuildSnapshot(schema.Schema{}, graph.SnapshotParts{Types: []schema.TypeID{ghost}})
 }

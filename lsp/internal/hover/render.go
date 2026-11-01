@@ -4,6 +4,7 @@ package hover
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/location"
@@ -47,7 +48,7 @@ func renderSchema(sym *symbols.Symbol) string {
 
 // renderImport generates hover content for an import symbol.
 func renderImport(sym *symbols.Symbol) string {
-	imp, ok := sym.Data.(*schema.Import)
+	imp, ok := sym.Data.(schema.Import)
 	if !ok {
 		return ""
 	}
@@ -58,20 +59,17 @@ func renderImport(sym *symbols.Symbol) string {
 	b.WriteString("` as `")
 	b.WriteString(imp.Alias())
 	b.WriteString("`\n")
-
-	if imp.Schema() != nil {
-		b.WriteString("\n")
-		b.WriteString("Resolved to: `")
-		b.WriteString(imp.ResolvedPath())
-		b.WriteString("`")
-	}
+	b.WriteString("\n")
+	b.WriteString("Resolved to: `")
+	b.WriteString(imp.ResolvedPath())
+	b.WriteString("`")
 
 	return b.String()
 }
 
 // renderType generates hover content for a type symbol.
 func renderType(sym *symbols.Symbol, moduleRoot string) string {
-	t, ok := sym.Data.(*schema.Type)
+	t, ok := sym.Data.(schema.Type)
 	if !ok {
 		return ""
 	}
@@ -91,7 +89,7 @@ func renderType(sym *symbols.Symbol, moduleRoot string) string {
 	b.WriteString("`")
 
 	// Inheritance
-	inherits := t.InheritsSlice()
+	inherits := slices.Collect(t.Inherits())
 	if len(inherits) > 0 {
 		b.WriteString(" extends ")
 		for i, ref := range inherits {
@@ -114,9 +112,9 @@ func renderType(sym *symbols.Symbol, moduleRoot string) string {
 	}
 
 	// Summary counts
-	propCount := len(t.PropertiesSlice())
-	assocCount := len(t.AssociationsSlice())
-	compCount := len(t.CompositionsSlice())
+	propCount := len(slices.Collect(t.Properties()))
+	assocCount := len(slices.Collect(t.Associations()))
+	compCount := len(slices.Collect(t.Compositions()))
 
 	b.WriteString("\n---\n\n")
 
@@ -140,7 +138,7 @@ func renderType(sym *symbols.Symbol, moduleRoot string) string {
 
 // renderDataType generates hover content for a datatype symbol.
 func renderDataType(sym *symbols.Symbol) string {
-	dt, ok := sym.Data.(*schema.DataType)
+	dt, ok := sym.Data.(schema.DataType)
 	if !ok {
 		return ""
 	}
@@ -163,7 +161,7 @@ func renderDataType(sym *symbols.Symbol) string {
 
 // renderProperty generates hover content for a property symbol.
 func renderProperty(sym *symbols.Symbol) string {
-	p, ok := sym.Data.(*schema.Property)
+	p, ok := sym.Data.(schema.Property)
 	if !ok {
 		return ""
 	}
@@ -213,7 +211,7 @@ func renderProperty(sym *symbols.Symbol) string {
 
 // renderRelation generates hover content for a relation symbol.
 func renderRelation(sym *symbols.Symbol) string {
-	r, ok := sym.Data.(*schema.Relation)
+	r, ok := sym.Data.(schema.Relation)
 	if !ok {
 		return ""
 	}
@@ -277,7 +275,7 @@ func renderRelation(sym *symbols.Symbol) string {
 
 // renderInvariant generates hover content for an invariant symbol.
 func renderInvariant(sym *symbols.Symbol) string {
-	inv, ok := sym.Data.(*schema.Invariant)
+	inv, ok := sym.Data.(schema.Invariant)
 	if !ok {
 		return ""
 	}

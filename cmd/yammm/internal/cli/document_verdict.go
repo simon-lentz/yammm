@@ -37,7 +37,7 @@ type heldKey struct {
 type holder struct {
 	at       heldKey
 	typeName string
-	prov     *location.Provenance
+	prov     location.Provenance
 	// installed reports that Add put the instance in the graph; graphDuplicate
 	// that Add refused it as a duplicate and said so.
 	installed      bool
@@ -46,7 +46,7 @@ type holder struct {
 
 // verdict is what [documentVerdict] adds to and removes from a graph's answer.
 type verdict struct {
-	s *schema.Schema
+	s schema.Schema
 	// refused holds the keys of roots the pipeline refused for a reason other
 	// than a duplicate.
 	refused    map[heldKey]bool
@@ -56,11 +56,11 @@ type verdict struct {
 // documentVerdict reads the document's roots against g once every valid one was
 // added; added holds each valid instance's Add result. fromBase reports that g
 // held instances before the document's, which count as earlier holders of a key.
-func documentVerdict(s *schema.Schema, g *graph.Graph, fromBase bool, doc Validated, added map[*instance.ValidInstance]diag.Result) verdict {
+func documentVerdict(s schema.Schema, g *graph.Graph, fromBase bool, doc Validated, added map[instance.ValidInstance]diag.Result) verdict {
 	var holders []holder
 	for _, b := range doc.batches {
 		for i, raw := range b.raws {
-			if i < len(b.valids) && b.valids[i] != nil {
+			if i < len(b.valids) && !b.valids[i].IsZero() {
 				valid := b.valids[i]
 				result := added[valid]
 				holders = append(holders, holder{
@@ -89,7 +89,7 @@ func documentVerdict(s *schema.Schema, g *graph.Graph, fromBase bool, doc Valida
 			v.refused[h.at] = true
 		}
 	}
-	var snap *graph.Snapshot
+	var snap graph.Snapshot
 	if fromBase {
 		snap = g.Snapshot()
 	}
@@ -97,7 +97,7 @@ func documentVerdict(s *schema.Schema, g *graph.Graph, fromBase bool, doc Valida
 	collector := diag.NewCollectorUnlimited()
 	for _, h := range holders {
 		earlier, known := seen[h.at]
-		if !known && snap != nil && !fromDocument[h.at] {
+		if !known && !fromDocument[h.at] {
 			_, earlier = snap.InstanceByKey(h.at.id, h.at.key)
 		}
 		if earlier && !h.graphDuplicate {
@@ -112,14 +112,12 @@ func documentVerdict(s *schema.Schema, g *graph.Graph, fromBase bool, doc Valida
 // duplicateIssue is the E_DUPLICATE_PK [graph.Graph.Add] raises, for a holder
 // of a key an earlier holder states where the graph reported no duplicate.
 func duplicateIssue(h holder) diag.Issue {
-	b := diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
+	return diag.NewIssue(diag.Error, diag.E_DUPLICATE_PK,
 		fmt.Sprintf("duplicate primary key %s for type %q", diag.ValueText(h.at.key), h.typeName)).
 		WithDetail(diag.DetailKeyTypeName, h.typeName).
-		WithDetail(diag.DetailKeyPrimaryKey, h.at.key)
-	if h.prov != nil {
-		b = b.WithSpan(h.prov.Span())
-	}
-	return b.Build()
+		WithDetail(diag.DetailKeyPrimaryKey, h.at.key).
+		WithSpan(h.prov.Span()).
+		Build()
 }
 
 // explain returns check without each E_UNRESOLVED_REQUIRED whose missing target

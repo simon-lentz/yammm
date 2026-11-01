@@ -30,8 +30,8 @@ func hashTwoVariants(t *testing.T, shared map[string]string, entryA, entryB stri
 		if res.Err() != nil {
 			t.Fatalf("load %s: %v", entry, res.Err())
 		}
-		if s == nil {
-			t.Fatalf("load %s returned a nil schema", entry)
+		if s.IsZero() {
+			t.Fatalf("load %s returned a zero schema", entry)
 		}
 		return schema.StructuralHash(s)
 	}

@@ -19,11 +19,14 @@
 //   - Composed children as arrays, (one) compositions included
 //
 // The output round-trips when the snapshot's [graph.Snapshot.Attestation]
-// reports Values — every instance entered through the validator — and it holds
-// no unresolved edge ([graph.Snapshot.Unresolved] is empty): ParseObject plus
+// reports Values — every instance entered through the validator — it holds no
+// unresolved edge ([graph.Snapshot.Unresolved] is empty), no invariant reads a
+// relation an input left empty, and neither [graph.Graph.AddComposed] nor
+// [graph.Graph.AddOrMerge] grew a relation an invariant reads, since an invariant
+// runs on each input alone: ParseObject plus
 // the validator accept every shape this writer emits. A loaded snapshot carries
 // its header's claim, and [graph.Attestation] states what that claim proves. An
-// unresolved edge is not written, so an invariant that reads its relation, even
+// unresolved edge is not written, nor is an empty relation, so an invariant that reads its relation, even
 // an optional one, can fail on the way back; persist such a snapshot in the .ys
 // format when its edges must survive. Any other snapshot is written as held —
 // each value in its one form, in the form its constraint stores where the
@@ -69,7 +72,7 @@
 //
 // Every valid type name whose value is an array is an entry of the result, an
 // empty array included, unless a fault or a cancellation stops the parse
-// before it is read. Three
+// before it is read. Four
 // shapes that a decoder would resolve silently are Error diagnostics instead,
 // because what a decoder keeps of them is one reader's convention and not the
 // document's meaning. Each is reported where it stands:
@@ -84,6 +87,8 @@
 //     decoder keeps. Each repeat is reported where it stands, and the instance
 //     is produced holding the value the decoder kept, the last one the object
 //     states.
+//   - A null element of an instance array, which a decoder reads as a nil map
+//     with no error.
 //   - Anything but white space and closed comments after the root object,
 //     reported where it starts, whether or not it reads as a JSON value. An
 //     unterminated block comment is content.
@@ -104,8 +109,9 @@
 // encoding/json reads it, where a string may hold any byte of an invalid UTF-8
 // sequence, and jsonc's comments wherever white space may stand. jsonc blanks
 // a comma that a closing delimiter follows, so "[," can still close and
-// "[1,,]" is refused at its second comma. A "/" that no "/" or "*" follows is
-// refused at the byte after it.
+// "[1,,]" is refused at its second comma. At a blank position, a "/" that no "/" or "*"
+// follows is refused at the byte after it; inside a literal or a number, or
+// after the root, it is refused at the "/" itself.
 //
 // The nesting limit is 10,000 levels, counted as the running implementation of
 // encoding/json counts it. Its own implementation counts within each value it

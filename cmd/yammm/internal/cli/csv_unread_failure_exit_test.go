@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/adapter/csv"
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/location"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 // headerThenFailure returns a refused header and its failure in one Read.
@@ -37,7 +38,7 @@ func TestExitForResult_ARefusedCSVHeaderWhoseReaderFailedIsRuntime(t *testing.T)
 	failure := errors.New("input/output error")
 	for _, header := range []string{"id,id\n", "id,\n", "i\"d,name\n", "\"id\"x,name"} {
 		_, res := csv.New().ParseTyped(t.Context(), location.MustNewSourceID("test://x.csv"), "P",
-			&headerThenFailure{header: header, err: failure}, nil)
+			&headerThenFailure{header: header, err: failure}, schema.Type{})
 		if !res.HasCode(diag.E_ADAPTER_PARSE) {
 			t.Fatalf("%q is not refused, so the case asserts nothing: %s", header, res)
 		}

@@ -9,7 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func loadClosure(t *testing.T) *schema.Schema {
+func loadClosure(t *testing.T) schema.Schema {
 	t.Helper()
 	m := map[string][]byte{
 		"entry.yammm": []byte(`schema "geo"

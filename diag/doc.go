@@ -10,7 +10,7 @@
 // The diag package follows several key design principles:
 //
 //   - Structured data, string-last presentation: Location is stored as data
-//     ([location.Span], instance path strings), never embedded in message strings.
+//     ([location.Span], instance path strings), and a message can name a path or a line too.
 //   - Immutable results: [Result] stores issues in unexported fields and exposes
 //     them only through iterators ([Result.Issues], [Result.Errors],
 //     [Result.BySeverity]); callers wanting a mutable slice take an explicit copy
@@ -30,14 +30,21 @@
 // # Entry Point Pattern
 //
 // A YAMMM operation that produces a value and diagnostics returns (T, [Result]),
-// and one that produces diagnostics alone returns a [Result]; graph.BatchAssembler,
-// whose methods return an error, carries its diagnostics in a [*ContextualError].
+// and one that produces diagnostics alone returns a [Result]. Other surfaces carry
+// diagnostics in their own shape. snapshot.ScanDir yields each file's Result on
+// its entry. schema.ModuleRootIssue and graph.Duplicate's Diagnostic return a bare
+// [Issue]. format.TokenStream's error for a source that does not parse is a
+// *format.SyntaxError that holds an [Issue]. Each Add method and Finalize of graph.BatchAssembler returns an error
+// whose cause is a [*ContextualError], unless it is
+// graph.ErrAssemblerFinalized or wraps instance.ErrRefusedValue, and the finalized
+// snapshot's Diagnostics hold the rest.
 // A Result reads:
 //
-//   - [Result.HasFatal]: an unrecoverable condition — an I/O failure, a
-//     cancellation, an internal fault, or input a reader cannot go past, such
-//     as a schema header that does not parse
-//   - [Result.HasErrors]: semantic failure represented as structured issues
+//   - [Result.HasFatal]: any Fatal issue, such as an I/O failure, a cancellation,
+//     an internal fault, input a reader cannot go past (a schema header that does
+//     not parse), an argument or option a loader refuses, or a finding that
+//     snapshot.WithRevalidation raises at Fatal
+//   - [Result.HasErrors]: any Error or Fatal issue
 //   - [Result.OK]: success (may still include warnings/info/hints)
 //
 // A serializer that reports issues returns ([]byte, [Result]), as
@@ -66,8 +73,8 @@
 //	    WithRelated(location.RelatedInfo{Span: previousSpan, Message: "previous definition here"}).
 //	    Build()
 //
-// Direct struct literal construction bypasses validity checks and will cause
-// panics when the issue is collected.
+// An Issue's fields are unexported, so diag.Issue{} is the one literal another
+// package can write, and a zero Issue panics when collected.
 //
 // # Collection and Results
 //
@@ -87,7 +94,7 @@
 //	result := collector.Result()
 //
 //	if err := result.Err(); err != nil {
-//	    // handle semantic failures
+//	    // handle any Error or Fatal issue
 //	}
 //
 // [Collector] is thread-safe and provides O(1) severity queries via

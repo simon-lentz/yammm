@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -22,7 +23,7 @@ import (
 
 // mustImport imports snap into a new graph bound to s and fails the test when
 // the import is refused.
-func mustImport(tb testing.TB, s *schema.Schema, snap *graph.Snapshot) *graph.Graph {
+func mustImport(tb testing.TB, s schema.Schema, snap graph.Snapshot) *graph.Graph {
 	tb.Helper()
 	g, res := graph.NewFromSnapshot(s, snap)
 	if res.HasErrors() {
@@ -88,15 +89,15 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 	}
 
 	after := mustImport(t, s, built).Snapshot()
-	roots := after.InstancesOf(siteID)
+	roots := slices.Collect(after.InstancesOf(siteID))
 	if len(roots) != 1 {
 		t.Fatalf("importing dropped the root: want 1, got %d", len(roots))
 	}
-	parents := roots[0].Composed("IMPORTED")
+	parents := slices.Collect(roots[0].Composed("IMPORTED"))
 	if len(parents) != 1 {
 		t.Fatalf("importing dropped the base.Part child: want 1, got %d", len(parents))
 	}
-	children := parents[0].Composed("DEEP")
+	children := slices.Collect(parents[0].Composed("DEEP"))
 	if len(children) != 1 {
 		t.Fatalf("importing a transitively imported child dropped it: want 1, got %d", len(children))
 	}
@@ -116,7 +117,7 @@ func TestImportSnapshot_KeepsATransitivelyImportedComposedChild(t *testing.T) {
 // sameNameBeacons builds a snapshot holding the entry schema's Beacon beside
 // the one it imports as base. Both are addressable, their tags differ, and
 // their bare names do not.
-func sameNameBeacons(t *testing.T, s *schema.Schema) (*graph.Snapshot, schema.TypeID, schema.TypeID) {
+func sameNameBeacons(t *testing.T, s schema.Schema) (graph.Snapshot, schema.TypeID, schema.TypeID) {
 	t.Helper()
 	localBeacon := mustTypeIDIn(t, s, "", "Beacon")
 	importedBeacon := mustTypeIDIn(t, s, "base", "Beacon")
@@ -160,10 +161,10 @@ func TestRebuildSnapshot_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	s := loadIdentitySchema(t)
 
 	built, localBeacon, importedBeacon := sameNameBeacons(t, s)
-	if got := len(built.InstancesOf(localBeacon)); got != 1 {
+	if got := len(slices.Collect(built.InstancesOf(localBeacon))); got != 1 {
 		t.Errorf("the local Beacon was merged away: want 1 instance, got %d", got)
 	}
-	if got := len(built.InstancesOf(importedBeacon)); got != 1 {
+	if got := len(slices.Collect(built.InstancesOf(importedBeacon))); got != 1 {
 		t.Errorf("the imported Beacon was merged away: want 1 instance, got %d", got)
 	}
 }
@@ -203,10 +204,10 @@ func TestRoundTrip_SeparatesOneNameTwoSchemasDeclare(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("load rejected a document Marshal produced: %v\n%s", err, data)
 	}
-	if got := len(loaded.InstancesOf(localBeacon)); got != 1 {
+	if got := len(slices.Collect(loaded.InstancesOf(localBeacon))); got != 1 {
 		t.Errorf("the local Beacon did not survive the round trip: got %d\n%s", got, data)
 	}
-	if got := len(loaded.InstancesOf(importedBeacon)); got != 1 {
+	if got := len(slices.Collect(loaded.InstancesOf(importedBeacon))); got != 1 {
 		t.Errorf("the imported Beacon did not survive the round trip: got %d\n%s", got, data)
 	}
 }
@@ -389,9 +390,9 @@ func TestTypeRef_IsWriteOnly(t *testing.T) {
 // schemaNameOf returns the declared name of the closure member that declares
 // id — the form a .ys types-table row carries since the wire was keyed by
 // schema name rather than source path.
-func schemaNameOf(t *testing.T, s *schema.Schema, id schema.TypeID) string {
+func schemaNameOf(t *testing.T, s schema.Schema, id schema.TypeID) string {
 	t.Helper()
-	for _, cs := range s.Closure() {
+	for cs := range s.Closure() {
 		if cs.SourceID() == id.SchemaPath() {
 			return cs.Name()
 		}

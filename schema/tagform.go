@@ -9,8 +9,8 @@ package schema
 // s does not import at all, so two same-named types in different schemas can
 // render identically. Use [TypeID] wherever the answer has to be exact, and
 // [AddressableTag] where a name has to denote one type.
-func TagForm(s *Schema, id TypeID) string {
-	if s == nil || id.IsZero() || id.SchemaPath() == s.SourceID() {
+func TagForm(s Schema, id TypeID) string {
+	if s.IsZero() || id.IsZero() || id.SchemaPath() == s.SourceID() {
 		return id.Name()
 	}
 	if alias := s.FindImportAlias(id.SchemaPath()); alias != "" {

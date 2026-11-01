@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -63,13 +64,13 @@ func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 	wheel, _ := s.Type("Wheel")
 	longPart, _ := s.Type(declaredPartName)
 	strangerType, _ := other.Type("Wheel")
-	part := func(typeName string, id schema.TypeID) *instance.ValidInstance {
+	part := func(typeName string, id schema.TypeID) instance.ValidInstance {
 		return instance.NewValidInstance(typeName, id, immutable.WrapKey([]any{"left"}),
-			immutable.WrapProperties(map[string]any{"position": "left"}), nil, nil, nil)
+			immutable.WrapProperties(map[string]any{"position": "left"}), nil, nil, location.Provenance{})
 	}
-	root := func(vin string, composed map[string]immutable.Value) *instance.ValidInstance {
+	root := func(vin string, composed map[string]immutable.Value) instance.ValidInstance {
 		return instance.NewValidInstance(declaredTypeName, vehicle.ID(), immutable.WrapKey([]any{vin}),
-			immutable.WrapProperties(map[string]any{"vin": vin}), nil, composed, nil)
+			immutable.WrapProperties(map[string]any{"vin": vin}), nil, composed, location.Provenance{})
 	}
 	messages := func(r diag.Result) string {
 		var b strings.Builder
@@ -107,7 +108,7 @@ func TestMessages_NameADeclaredIdentityWhole(t *testing.T) {
 				typeName = "Garage"
 			}
 			inst, r := v.ValidateOne(ctx, typeName, instance.RawInstance{Properties: props})
-			if inst == nil {
+			if inst.IsZero() {
 				t.Fatal(r)
 			}
 			held.Add(ctx, inst)

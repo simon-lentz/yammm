@@ -61,7 +61,7 @@ func TestParseTyped_ACellThatDoesNotCoerceDrawsOneIssue(t *testing.T) {
 				}
 			}
 			valid, vres := instance.NewValidator(s).ValidateOne(t.Context(), "Person", raws[0])
-			if valid != nil || vres.Len() != 0 {
+			if !valid.IsZero() || vres.Len() != 0 {
 				t.Errorf("validate: instance %v, %s; want a refused row and no issue", valid, vres)
 			}
 		})
@@ -85,7 +85,7 @@ func TestParseTyped_ARefusedCellGatesAsAPropertyError(t *testing.T) {
 		t.Fatalf("parse: %d rows, %s", len(raws), pres)
 	}
 	valid, vres := instance.NewValidator(s).ValidateOne(t.Context(), "Person", raws[0])
-	if valid != nil || vres.Len() != 1 || countCode(vres, instance.ErrMissingRequired) != 1 {
+	if !valid.IsZero() || vres.Len() != 1 || countCode(vres, instance.ErrMissingRequired) != 1 {
 		t.Errorf("validate: instance %v, %s; want the missing born property alone", valid, vres)
 	}
 }

@@ -25,8 +25,8 @@ func TestVI_Defaults(t *testing.T) {
 	if got := vi.PrimaryKey().String(); got != "[1]" {
 		t.Errorf("PrimaryKey() = %s, want [1]", got)
 	}
-	if vi.Provenance() != nil {
-		t.Errorf("Provenance() = %v, want nil", vi.Provenance())
+	if !vi.Provenance().IsZero() {
+		t.Errorf("Provenance() = %v, want the zero Provenance", vi.Provenance())
 	}
 	for range vi.Edges() {
 		t.Error("default instance must have no edges")
@@ -40,7 +40,7 @@ func TestVI_Defaults(t *testing.T) {
 func TestVI_Options(t *testing.T) {
 	typeID := schema.NewTypeID(location.SourceID{}, "Person")
 	prov := location.NewProvenance("test.json", path.Root(), location.Span{})
-	edges := map[string]*instance.ValidEdgeData{
+	edges := map[string]instance.ValidEdgeData{
 		"manager": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(9)}), immutable.WrapProperties(nil)),
 		}),
@@ -82,7 +82,7 @@ func TestVI_Options(t *testing.T) {
 	if !foundAddresses {
 		t.Error("Compositions() missing addresses relation")
 	}
-	if vi.Provenance() == nil {
+	if vi.Provenance().IsZero() {
 		t.Error("Provenance() = nil, want set")
 	}
 }

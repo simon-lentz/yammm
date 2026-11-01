@@ -157,15 +157,15 @@ func TestShapeForSchema_TransitivelyImportedTypeKeepsItsOwnLabel(t *testing.T) {
 	if !ok {
 		t.Fatal("the entry schema's own Hub did not resolve")
 	}
-	var deep *schema.Type
-	for _, ty := range s.Closure() {
-		for _, cand := range ty.TypesSlice() {
+	var deep schema.Type
+	for ty := range s.Closure() {
+		for cand := range ty.Types() {
 			if cand.Name() == "Hub" && cand.ID() != local.ID() {
 				deep = cand
 			}
 		}
 	}
-	if deep == nil {
+	if deep.IsZero() {
 		t.Fatal("fixture is vacuous: the deep Hub did not resolve through the closure")
 	}
 	if schema.TagForm(s, deep.ID()) != local.Name() {

@@ -25,9 +25,7 @@ type NodeShape struct {
 	//
 	// Non-nil when [Adapter.ShapeForSchema] computed the set, including when the
 	// set is empty; nil marks a shape that never computed one. The write path
-	// honors @writeOnce from this field, so the guarantee holds for a caller
-	// passing a nil *schema.Type — the documented streaming call shape — and
-	// costs no per-node derivation.
+	// honors @writeOnce from this field, which costs no per-node derivation.
 	ImmutableKeys []string
 
 	// keyConstraints maps each name in PrimaryKeys to the schema constraint its
@@ -57,7 +55,8 @@ type GraphShape struct {
 	Types map[schema.TypeID]NodeShape
 
 	// schemaID is the identity of the schema [Adapter.ShapeForSchema] built this
-	// shape from. Its zero value means the shape came from somewhere else.
+	// shape from. Its zero value means the shape came from somewhere else, or from
+	// a schema with no SourceID, as a Builder gives without WithSourceID.
 	//
 	// The write path requires it, and requires it to match the snapshot's own
 	// schema. A shape the adapter did not build carries no key constraints, so
@@ -77,14 +76,14 @@ type GraphShape struct {
 
 // requireShapeFor refuses a [GraphShape] this adapter did not build, and one
 // built from a schema other than the snapshot's.
-func requireShapeFor(shapes *GraphShape, s *schema.Schema) error {
+func requireShapeFor(shapes *GraphShape, s schema.Schema) error {
 	switch {
 	case shapes == nil:
 		return errors.New("neo4j adapter: nil GraphShape; build one with Adapter.ShapeForSchema")
 	case shapes.schemaID.IsZero():
 		return errors.New("neo4j adapter: GraphShape was not built by Adapter.ShapeForSchema, so it carries no key constraints; " +
 			"merge keys would pass through uncoerced while their properties are coerced from the schema, and every re-ingestion would duplicate instead of match")
-	case s == nil:
+	case s.IsZero():
 		return errors.New("neo4j adapter: snapshot carries no schema to check the GraphShape against")
 	case shapes.schemaID != s.SourceID():
 		return fmt.Errorf("neo4j adapter: GraphShape was built from schema %s but the snapshot carries schema %s",
@@ -107,7 +106,7 @@ func requireShapeFor(shapes *GraphShape, s *schema.Schema) error {
 // [E_NEO4J_INVALID_IDENTIFIER] or [E_NEO4J_LABEL_COLLISION] issues — two
 // closure members sharing a schema name render colliding labels, and a
 // TypeID-keyed map would silently hold two shapes under one label.
-func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphShape, diag.Result) {
+func (a *Adapter) ShapeForSchema(ctx context.Context, s schema.Schema) (*GraphShape, diag.Result) {
 	collector := diag.NewCollector(0)
 	shape := &GraphShape{
 		Types:    make(map[schema.TypeID]NodeShape),
@@ -136,7 +135,7 @@ func (a *Adapter) ShapeForSchema(ctx context.Context, s *schema.Schema) (*GraphS
 }
 
 // recordShape computes and stores one type's NodeShape.
-func (a *Adapter) recordShape(shape *GraphShape, t *schema.Type, label string) {
+func (a *Adapter) recordShape(shape *GraphShape, t schema.Type, label string) {
 	{
 		// Trimmed to match the label, which is built from the same form. The
 		// map is keyed by identity, so this is the display name alone.
@@ -151,7 +150,7 @@ func (a *Adapter) recordShape(shape *GraphShape, t *schema.Type, label string) {
 		// can coerce the value the MERGE matches on.
 		var primary []string
 		keyConstraints := make(map[string]schema.Constraint)
-		for _, pk := range t.PrimaryKeysSlice() {
+		for pk := range t.PrimaryKeys() {
 			if pkName := strings.TrimSpace(pk.Name()); pkName != "" {
 				primary = append(primary, pkName)
 				keyConstraints[pkName] = pk.Constraint()
@@ -161,7 +160,7 @@ func (a *Adapter) recordShape(shape *GraphShape, t *schema.Type, label string) {
 		// Extract required fields (non-optional properties) with dedup.
 		var required []string
 		seen := make(map[string]struct{})
-		for _, prop := range t.AllPropertiesSlice() {
+		for prop := range t.AllProperties() {
 			propName := strings.TrimSpace(prop.Name())
 			if propName == "" {
 				continue

@@ -33,8 +33,8 @@ import (
 // while its document carried another; canonicalizing here makes one value have
 // one spelling in the graph, and the document inherits it.
 type canonicalizer struct {
-	byType    map[schema.TypeID][]*schema.Property
-	byEdge    map[edgeKey][]*schema.Property
+	byType    map[schema.TypeID][]schema.Property
+	byEdge    map[edgeKey][]schema.Property
 	byKeyType map[schema.TypeID][]keyPosition
 	// byTarget is each association's declared target, the type its records'
 	// target keys are canonicalized under.
@@ -46,7 +46,7 @@ type canonicalizer struct {
 // index in the key and the property declaring its constraint.
 type keyPosition struct {
 	index int
-	prop  *schema.Property
+	prop  schema.Property
 }
 
 // edgeKey addresses a relation by the source type that declares it.
@@ -57,22 +57,20 @@ type edgeKey struct {
 
 // newCanonicalizer walks every type in s's closure once. An entry is written
 // for every type and relation, empty where nothing canonicalizes, so a later
-// read never misses and never writes.
-func newCanonicalizer(s *schema.Schema) *canonicalizer {
+// read never misses and never writes. s is not zero: [New] and [RebuildSnapshot]
+// refuse a zero schema first.
+func newCanonicalizer(s schema.Schema) *canonicalizer {
 	c := &canonicalizer{
-		byType:    make(map[schema.TypeID][]*schema.Property),
-		byEdge:    make(map[edgeKey][]*schema.Property),
+		byType:    make(map[schema.TypeID][]schema.Property),
+		byEdge:    make(map[edgeKey][]schema.Property),
 		byKeyType: make(map[schema.TypeID][]keyPosition),
 		byTarget:  make(map[edgeKey]schema.TypeID),
 		inactive:  true,
 	}
-	if s == nil {
-		return c
-	}
-	for _, sc := range s.Closure() {
-		for _, t := range sc.Types() {
+	for sc := range s.Closure() {
+		for t := range sc.Types() {
 			id := t.ID()
-			var props []*schema.Property
+			var props []schema.Property
 			for p := range t.AllProperties() {
 				if value.Canonicalizes(p.Constraint()) {
 					props = append(props, p)
@@ -91,7 +89,7 @@ func newCanonicalizer(s *schema.Schema) *canonicalizer {
 			c.inactive = c.inactive && len(props) == 0 && len(positions) == 0
 			for _, rels := range []iterRelations{t.AllAssociations(), t.AllCompositions()} {
 				for rel := range rels {
-					var eps []*schema.Property
+					var eps []schema.Property
 					for p := range rel.Properties() {
 						if value.Canonicalizes(p.Constraint()) {
 							eps = append(eps, p)
@@ -110,16 +108,16 @@ func newCanonicalizer(s *schema.Schema) *canonicalizer {
 }
 
 // iterRelations is the shape both relation iterators share.
-type iterRelations = iter.Seq[*schema.Relation]
+type iterRelations = iter.Seq[schema.Relation]
 
 // typeProps returns the declared properties of id whose kind canonicalizes.
-func (c *canonicalizer) typeProps(id schema.TypeID) []*schema.Property {
+func (c *canonicalizer) typeProps(id schema.TypeID) []schema.Property {
 	return c.byType[id]
 }
 
 // edgeProps returns the properties of the named relation on the source type
 // whose kind canonicalizes.
-func (c *canonicalizer) edgeProps(source schema.TypeID, relation string) []*schema.Property {
+func (c *canonicalizer) edgeProps(source schema.TypeID, relation string) []schema.Property {
 	return c.byEdge[edgeKey{source: source, relation: relation}]
 }
 
@@ -202,7 +200,7 @@ func (c *canonicalizer) properties(id schema.TypeID, props immutable.Properties)
 // render is left as it arrived: RebuildSnapshot reconstructs a document rather
 // than validating one, and a document written before this rule existed must
 // still load.
-func apply(props immutable.Properties, ps []*schema.Property) immutable.Properties {
+func apply(props immutable.Properties, ps []schema.Property) immutable.Properties {
 	if len(ps) == 0 || props.Len() == 0 {
 		return props
 	}
@@ -257,8 +255,8 @@ func (c *canonicalizer) instance(ip InstanceParts) InstanceParts {
 // place, as instance rewrites InstanceParts. The clone is not yet reachable
 // from the graph, so writing it is safe; key is idempotent, so an already
 // canonical instance is unchanged.
-func (c *canonicalizer) reinstance(inst *Instance) {
-	if c.inactive || inst == nil {
+func (c *canonicalizer) reinstance(inst Instance) {
+	if c.inactive {
 		return
 	}
 	inst.primaryKey = c.key(inst.typeID, inst.primaryKey)
@@ -272,8 +270,13 @@ func (c *canonicalizer) reinstance(inst *Instance) {
 
 // edgeProperties rewrites an edge's own properties under the constraints the
 // source type's relation declares. Every path that installs an edge reaches
-// it, so the Add path and the rebuild path cannot store one value two ways.
+// it, so the Add path and the rebuild path cannot store one value two ways. An
+// edge with no property holds the zero Properties on every path, because a
+// document's {} cannot say which empty value the writer held.
 func (c *canonicalizer) edgeProperties(source schema.TypeID, relation string, props immutable.Properties) immutable.Properties {
+	if props.Len() == 0 {
+		return immutable.Properties{}
+	}
 	if c.inactive {
 		return props
 	}
@@ -283,10 +286,10 @@ func (c *canonicalizer) edgeProperties(source schema.TypeID, relation string, pr
 // edge rewrites an edge's own properties, whose constraints hang off the
 // source type's relation rather than off either endpoint type.
 func (c *canonicalizer) edge(ep EdgeParts) EdgeParts {
+	ep.Properties = c.edgeProperties(ep.SourceType, ep.Relation, ep.Properties)
 	if c.inactive {
 		return ep
 	}
-	ep.Properties = c.edgeProperties(ep.SourceType, ep.Relation, ep.Properties)
 	// Both endpoints move with the instances they address, or the edge stops
 	// resolving against an index whose keys this same pass rewrote.
 	ep.SourceKey = c.key(ep.SourceType, ep.SourceKey)
@@ -312,10 +315,10 @@ func (c *canonicalizer) duplicate(dp DuplicateParts) DuplicateParts {
 // the relation's declared target type does, and a record built through Add
 // and one rebuilt from parts must carry one address for one input.
 func (c *canonicalizer) unresolved(up UnresolvedParts) UnresolvedParts {
+	up.Properties = c.edgeProperties(up.SourceType, up.Relation, up.Properties)
 	if c.inactive {
 		return up
 	}
-	up.Properties = c.edgeProperties(up.SourceType, up.Relation, up.Properties)
 	up.SourceKey = c.key(up.SourceType, up.SourceKey)
 	up.TargetKey = c.key(c.byTarget[edgeKey{source: up.SourceType, relation: up.Relation}], up.TargetKey)
 	return up

@@ -11,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -77,7 +78,7 @@ func (c slotCase) String() string {
 	return fmt.Sprintf("depth%d/%s/%s", c.depth, c.rel, c.child)
 }
 
-func loadSlotSchema(t *testing.T) *schema.Schema {
+func loadSlotSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), compositionSlotSchema, "slots.yammm")
 	if res.HasErrors() {
@@ -86,7 +87,7 @@ func loadSlotSchema(t *testing.T) *schema.Schema {
 	return s
 }
 
-func partsChild(t *testing.T, s *schema.Schema, typeName, code string) graph.InstanceParts {
+func partsChild(t *testing.T, s schema.Schema, typeName, code string) graph.InstanceParts {
 	t.Helper()
 	return graph.InstanceParts{
 		TypeID: mustTypeID(t, s, typeName), PrimaryKey: immutable.WrapKey([]any{code}),
@@ -96,7 +97,7 @@ func partsChild(t *testing.T, s *schema.Schema, typeName, code string) graph.Ins
 
 // slotParts files the case's child in parts: e1 holds it at depth 1, e2's b2
 // at depth 2, and e2 also holds a Note so every part type is in play.
-func slotParts(t *testing.T, s *schema.Schema, c slotCase) graph.SnapshotParts {
+func slotParts(t *testing.T, s schema.Schema, c slotCase) graph.SnapshotParts {
 	t.Helper()
 	emp := mustTypeID(t, s, "Employee")
 	child := partsChild(t, s, c.child, "x1")
@@ -121,15 +122,15 @@ func slotParts(t *testing.T, s *schema.Schema, c slotCase) graph.SnapshotParts {
 	return graph.SnapshotParts{Types: []schema.TypeID{emp}, Instances: []graph.InstanceParts{e1, e2}}
 }
 
-func validChild(t *testing.T, s *schema.Schema, typeName, code string, composed map[string]immutable.Value) *instance.ValidInstance {
+func validChild(t *testing.T, s schema.Schema, typeName, code string, composed map[string]immutable.Value) instance.ValidInstance {
 	t.Helper()
 	return instance.NewValidInstance(typeName, mustTypeID(t, s, typeName), immutable.WrapKey([]any{code}),
-		immutable.WrapProperties(map[string]any{"code": code}), nil, composed, nil)
+		immutable.WrapProperties(map[string]any{"code": code}), nil, composed, location.Provenance{})
 }
 
 // addSlot files the case's child through Graph.Add, the contract's other
 // implementation, and reports whether Add accepted both roots.
-func addSlot(t *testing.T, s *schema.Schema, c slotCase) bool {
+func addSlot(t *testing.T, s schema.Schema, c slotCase) bool {
 	t.Helper()
 	ctx := context.Background()
 	emp := mustTypeID(t, s, "Employee")
@@ -141,19 +142,19 @@ func addSlot(t *testing.T, s *schema.Schema, c slotCase) bool {
 		b2Composed = map[string]immutable.Value{c.rel: immutable.Wrap([]any{child})}
 	}
 	e1 := instance.NewValidInstance("Employee", emp, immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"staff_id": "e1"}), nil, e1Composed, nil)
+		immutable.WrapProperties(map[string]any{"staff_id": "e1"}), nil, e1Composed, location.Provenance{})
 	e2 := instance.NewValidInstance("Employee", emp, immutable.WrapKey([]any{"e2"}),
 		immutable.WrapProperties(map[string]any{"staff_id": "e2"}), nil, map[string]immutable.Value{
 			"BADGES": immutable.Wrap([]any{validChild(t, s, "Badge", "b2", b2Composed)}),
 			"NOTE":   immutable.Wrap([]any{validChild(t, s, "Note", "n2", nil)}),
-		}, nil)
+		}, location.Provenance{})
 	g := graph.New(s)
 	return g.Add(ctx, e1).OK() && g.Add(ctx, e2).OK()
 }
 
 // slotWireDoc marshals the legal document every wire case edits: e1 holds
 // Badge x1 under BADGES, and e2 holds Badge b2 with Stamp x1 under STAMPS.
-func slotWireDoc(t *testing.T, s *schema.Schema) ([]byte, map[string]int) {
+func slotWireDoc(t *testing.T, s schema.Schema) ([]byte, map[string]int) {
 	t.Helper()
 	legal := slotParts(t, s, slotCase{depth: 1, rel: "BADGES", child: "Badge"})
 	legal.Instances[1].Composed["BADGES"][0].Composed = map[string][]graph.InstanceParts{

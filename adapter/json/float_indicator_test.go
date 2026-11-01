@@ -58,7 +58,7 @@ func indicatorDoc(t *testing.T, props map[string]any) string {
 	g := graph.New(s)
 	inst := instance.NewValidInstance("Reading", ty.ID(),
 		immutable.WrapKey([]any{"r1"}),
-		immutable.WrapProperties(props), nil, nil, nil)
+		immutable.WrapProperties(props), nil, nil, location.Provenance{})
 	if r := g.Add(ctx, inst); r.Err() != nil {
 		t.Fatalf("add: %v", r.Err())
 	}
@@ -191,7 +191,7 @@ type Counter {
 		inst := instance.NewValidInstance("Counter", ty.ID(),
 			immutable.WrapKey([]any{c.key}),
 			immutable.WrapProperties(map[string]any{"id": c.key, "n": c.n}),
-			nil, nil, nil)
+			nil, nil, location.Provenance{})
 		if r := g.Add(ctx, inst); r.Err() != nil {
 			t.Fatalf("add: %v", r.Err())
 		}
@@ -236,7 +236,7 @@ func TestMarshalObject_IndentedOutputKeepsTheIndicator(t *testing.T) {
 	inst := instance.NewValidInstance("Reading", ty.ID(),
 		immutable.WrapKey([]any{"r1"}),
 		immutable.WrapProperties(map[string]any{"id": "r1", "ratio": float64(1)}),
-		nil, nil, nil)
+		nil, nil, location.Provenance{})
 	if r := g.Add(ctx, inst); r.Err() != nil {
 		t.Fatalf("add: %v", r.Err())
 	}

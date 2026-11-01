@@ -46,7 +46,7 @@ func TestParseObject_RecordsProvenancePerInstance(t *testing.T) {
 	}
 	for _, c := range cases {
 		prov := parsed[c.typeName][c.index].Provenance
-		if prov == nil {
+		if prov.IsZero() {
 			t.Fatalf("%s[%d]: no provenance", c.typeName, c.index)
 		}
 		if got := prov.SourceName(); got != id.String() {

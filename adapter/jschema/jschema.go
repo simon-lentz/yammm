@@ -39,7 +39,7 @@ func WithSchemaID(uri string) Option {
 // before return: the bytes must parse as JSON and every "$ref" must resolve
 // to an entry of the "$defs" object those bytes hold; a failure there is a
 // generator bug surfaced as an error, never emitted output.
-func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
+func Marshal(s schema.Schema, opts ...Option) ([]byte, error) {
 	cfg := config{}
 	for _, o := range opts {
 		o(&cfg)

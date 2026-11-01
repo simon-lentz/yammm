@@ -14,7 +14,7 @@ import (
 // cancellationSchema declares a foldable property beside two relations whose field
 // names fold, so one row can carry a property error, a property-name collision
 // and a relation collision at once.
-func cancellationSchema(t *testing.T) *schema.Schema {
+func cancellationSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "cancellation"
 
@@ -175,7 +175,7 @@ func TestValidate_EachGateReadsItsOwnPassesErrors(t *testing.T) {
 
 // cancelOnNormalize cancels the context the moment the normalization record is
 // emitted, which puts the cancellation inside the row rather than between rows.
-func cancelOnNormalize(t *testing.T, s *schema.Schema) (*Validator, context.Context) {
+func cancelOnNormalize(t *testing.T, s schema.Schema) (*Validator, context.Context) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
@@ -200,7 +200,7 @@ func TestValidateOne_CancelledMidRowReturnsTheCancellationAlone(t *testing.T) {
 	inst, res := v.ValidateOne(ctx, "Row", RawInstance{
 		Properties: map[string]any{"id": "r1", "Count": "not a number"},
 	})
-	if inst != nil {
+	if !inst.IsZero() {
 		t.Error("a cancelled row yielded an instance")
 	}
 	if !res.HasCode(diag.E_CONTEXT_CANCELLED) {

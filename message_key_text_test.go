@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -104,7 +105,7 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatal(res)
 	}
-	typeOf := func(s *schema.Schema, name string) schema.TypeID {
+	typeOf := func(s schema.Schema, name string) schema.TypeID {
 		t.Helper()
 		typ, ok := s.Type(name)
 		if !ok {
@@ -147,22 +148,22 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	k := func(v ...any) immutable.Key { return immutable.WrapKey(v) }
 	p := func(m map[string]any) immutable.Properties { return immutable.WrapProperties(m) }
 	vi := func(name string, id schema.TypeID, key immutable.Key, props map[string]any,
-		edges map[string]*instance.ValidEdgeData, composed map[string]immutable.Value,
-	) *instance.ValidInstance {
-		return instance.NewValidInstance(name, id, key, p(props), edges, composed, nil)
+		edges map[string]instance.ValidEdgeData, composed map[string]immutable.Value,
+	) instance.ValidInstance {
+		return instance.NewValidInstance(name, id, key, p(props), edges, composed, location.Provenance{})
 	}
-	to := func(keys ...string) *instance.ValidEdgeData {
+	to := func(keys ...string) instance.ValidEdgeData {
 		targets := make([]instance.ValidEdgeTarget, len(keys))
 		for i, key := range keys {
 			targets[i] = instance.NewValidEdgeTarget(k(key), p(nil))
 		}
 		return instance.NewValidEdgeData(targets)
 	}
-	needs := map[string]*instance.ValidEdgeData{"NEEDS": to("u")}
-	part := func(key string) *instance.ValidInstance {
+	needs := map[string]instance.ValidEdgeData{"NEEDS": to("u")}
+	part := func(key string) instance.ValidInstance {
 		return vi("P", pID, k(key), map[string]any{"pid": key}, nil, nil)
 	}
-	parts := func(children ...*instance.ValidInstance) immutable.Value {
+	parts := func(children ...instance.ValidInstance) immutable.Value {
 		list := make([]any, len(children))
 		for i, child := range children {
 			list[i] = child
@@ -208,11 +209,11 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	shows("AddComposed a child of an undeclared type", messages(mistyped), `child type "Nope" does not match relation target "P"`)
 
 	if r := g.Add(ctx, vi("T", tID, k(longText), map[string]any{"id": longText},
-		map[string]*instance.ValidEdgeData{"NEEDS": to("u"), "MAYBE": to("u")}, nil)); r.HasErrors() {
+		map[string]instance.ValidEdgeData{"NEEDS": to("u"), "MAYBE": to("u")}, nil)); r.HasErrors() {
 		t.Fatal(r)
 	}
 	_, merged := g.AddOrMerge(ctx, vi("T", tID, k(longText), map[string]any{"id": longText},
-		map[string]*instance.ValidEdgeData{"NEEDS": to("u"), "MAYBE": to("u2")}, nil))
+		map[string]instance.ValidEdgeData{"NEEDS": to("u"), "MAYBE": to("u2")}, nil))
 	result("AddOrMerge a second (one) target", merged)
 
 	for _, key := range []string{"[" + longDigits + "e99999]", "null " + longText, `[] "` + longText + `"`} {
@@ -335,7 +336,7 @@ func TestMessages_RepeatAKeyCutToItsHead(t *testing.T) {
 	if r := old.Add(ctx, vi(longTypeName, fromL, k("l"), map[string]any{"id": "l"}, nil, nil)); r.HasErrors() {
 		t.Fatal(r)
 	}
-	if r := old.Add(ctx, vi("T", fromT, k("t"), map[string]any{"id": "t"}, map[string]*instance.ValidEdgeData{"NEEDS": to("l")},
+	if r := old.Add(ctx, vi("T", fromT, k("t"), map[string]any{"id": "t"}, map[string]instance.ValidEdgeData{"NEEDS": to("l")},
 		map[string]immutable.Value{"PARTS": parts(vi("P", fromP, k(longText), map[string]any{"pid": longText}, nil, nil))})); r.HasErrors() {
 		t.Fatal(r)
 	}

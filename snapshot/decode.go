@@ -36,7 +36,7 @@ type streamDecoder struct {
 	header    headerWire       // decoded header
 	typeTable []typeTableEntry // decoded types table
 	tableIDs  []schema.TypeID  // identity per table row, zero where unresolved
-	tableTags []string         // rendered tag per table row; nil when schema is nil
+	tableTags []string         // rendered tag per table row; nil when the schema is zero
 	// rootlessRows holds each row [streamDecoder.checkRootTypeEligible] refused.
 	rootlessRows map[int]bool
 	collector    *diag.Collector // accumulates diagnostics
@@ -54,8 +54,8 @@ type streamDecoder struct {
 	// loadCfg holds deserialization options (e.g., skip integrity check).
 	loadCfg loadConfig
 
-	// schema is the provided schema, nil for a reader that validates against none.
-	schema *schema.Schema
+	// schema is the provided schema, zero for a reader that validates against none.
+	schema schema.Schema
 
 	// revalidator is non-nil only when WithRevalidation was passed and a
 	// schema is present; [streamDecoder.revalidate] then runs each root the
@@ -72,7 +72,7 @@ type streamDecoder struct {
 }
 
 // newStreamDecoder creates a new streamDecoder from raw .ys bytes.
-func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDecoder {
+func newStreamDecoder(data []byte, s schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
 		data:        data,
 		collector:   diag.NewCollector(cfg.issueLimit),
@@ -84,11 +84,12 @@ func newStreamDecoder(data []byte, s *schema.Schema, cfg loadConfig) *streamDeco
 }
 
 // newRevalidator builds the validator the revalidation walk runs, or nil
-// when nobody asked or no schema is present to validate against. It caps a
+// when nobody asked. Only [Load] and [Verify] take the option, and each panics
+// on a zero schema, so a schema is present to validate against. It caps a
 // row at the load's limit, so the load has one cap and an unlimited load
 // stores every finding a row draws.
-func newRevalidator(s *schema.Schema, cfg loadConfig) *instance.Validator {
-	if !cfg.revalidate || s == nil {
+func newRevalidator(s schema.Schema, cfg loadConfig) *instance.Validator {
+	if !cfg.revalidate {
 		return nil
 	}
 	return instance.NewValidator(s, instance.WithIssueLimit(cfg.issueLimit))
@@ -97,7 +98,7 @@ func newRevalidator(s *schema.Schema, cfg loadConfig) *instance.Validator {
 // newStreamDecoderFromReader creates a streamDecoder backed by an io.Reader,
 // which decodeHeader consumes once; decodeSections and verifyIntegrity need
 // the full byte slice and must not be called on it.
-func newStreamDecoderFromReader(r io.Reader, s *schema.Schema, cfg loadConfig) *streamDecoder {
+func newStreamDecoderFromReader(r io.Reader, s schema.Schema, cfg loadConfig) *streamDecoder {
 	return &streamDecoder{
 		reader:     r,
 		collector:  diag.NewCollector(cfg.issueLimit),
@@ -189,7 +190,7 @@ func (sd *streamDecoder) decodeHeader() error {
 	}
 
 	// Verify schema hash (only if schema is provided and algorithm is recognized).
-	if sd.schema != nil && sd.header.SchemaHashAlgorithm == schema.StructuralHashVersion {
+	if !sd.schema.IsZero() && sd.header.SchemaHashAlgorithm == schema.StructuralHashVersion {
 		expectedHash := schema.StructuralHash(sd.schema)
 		if expectedHash != sd.header.SchemaHash {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_INCOMPATIBLE_SCHEMA,
@@ -640,7 +641,7 @@ func (sd *streamDecoder) walkInstances(ctx context.Context, groups []instanceGro
 // denoted type's name. No load option excuses a member, and a schema-less read
 // checks none.
 func (sd *streamDecoder) checkRootTypeEligible(row int, position string) bool {
-	if sd.schema == nil || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || row >= len(sd.tableIDs) {
 		return true
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -891,7 +892,7 @@ func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own in
 				targetKey: sd.canonicalWireKey(targetRow, e.TargetKey),
 				slot:      slot,
 				own:       own,
-				one:       rel != nil && !rel.IsMany(),
+				one:       !rel.IsZero() && !rel.IsMany(),
 			})
 		}
 	}
@@ -901,7 +902,7 @@ func (sd *streamDecoder) walkEdges(row int, inst instWire, keyStr string, own in
 // kind of type whose root holds an address. A schema-less read, or a row that
 // resolves to no type, compares every root's key as written.
 func (sd *streamDecoder) declaresKey(row int) bool {
-	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || row < 0 || row >= len(sd.tableIDs) {
 		return true
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -909,10 +910,11 @@ func (sd *streamDecoder) declaresKey(row int) bool {
 }
 
 // declaresComposition reports whether the type at row declares relation as a
-// composition. A schema-less read, or a row that resolves to no type, reports
-// true: it judges no name.
+// composition. A row that resolves to no type reports true: it judges no name.
+// It reads the schema: only a slot the walk refused reaches it, and a schema-less
+// walk refuses no slot.
 func (sd *streamDecoder) declaresComposition(row int, relation string) bool {
-	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+	if row < 0 || row >= len(sd.tableIDs) {
 		return true
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -928,7 +930,7 @@ func (sd *streamDecoder) declaresComposition(row int, relation string) bool {
 // declares. No edge in the list reaches that check, and Marshal writes no
 // empty list, so the name is the list's one fact.
 func (sd *streamDecoder) checkEdgeListName(row int, key []any, relation string) {
-	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || row < 0 || row >= len(sd.tableIDs) {
 		return
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -956,7 +958,7 @@ func (sd *streamDecoder) checkEdgeListName(row int, key []any, relation string) 
 // that resolves to no type, makes no claim, as every other schema-derived check
 // here.
 func (sd *streamDecoder) checkComposedSlot(row int, relation string, occupants int) (schema.TypeID, bool) {
-	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || row < 0 || row >= len(sd.tableIDs) {
 		return schema.TypeID{}, false
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -1060,7 +1062,7 @@ func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 			Build())
 		return false
 	}
-	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || row < 0 || row >= len(sd.tableIDs) {
 		return true
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -1105,7 +1107,7 @@ func (sd *streamDecoder) checkStoredKey(row int, inst instWire) bool {
 // statedKey returns the canonical address inst's key properties name, or false
 // where its type declares no key or a key property is absent or unreadable.
 func (sd *streamDecoder) statedKey(row int, inst instWire) (string, bool) {
-	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || row < 0 || row >= len(sd.tableIDs) {
 		return "", false
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -1171,7 +1173,7 @@ func readsBack(written string) bool {
 }
 
 // keyArity returns the number of primary-key components t declares.
-func keyArity(t *schema.Type) int {
+func keyArity(t schema.Type) int {
 	n := 0
 	for range t.PrimaryKeys() {
 		n++
@@ -1354,7 +1356,7 @@ func reportsTheRun(code diag.Code) bool {
 // whose edges revalidateRoot has joined the root's target_missing records to,
 // so every relation is one t declares, at its declared target and arity, and a
 // (one) association holds at most one record.
-func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, inst instWire) map[string]any {
+func (sd *streamDecoder) rebuildRawProperties(t schema.Type, inst instWire) map[string]any {
 	// The validator judges the document's own text: a number stays the
 	// decoder's json.Number, which the checkers read exactly, so a wide integer
 	// is refused as written rather than passed as the float64 that
@@ -1365,7 +1367,7 @@ func (sd *streamDecoder) rebuildRawProperties(t *schema.Type, inst instWire) map
 	for _, relName := range slices.Sorted(maps.Keys(inst.Edges)) {
 		rel, _ := t.Relation(relName)
 		targetType, _ := sd.schema.TypeByID(rel.TargetID())
-		pks := targetType.PrimaryKeysSlice()
+		pks := slices.Collect(targetType.PrimaryKeys())
 		targets := inst.Edges[relName]
 		arr := make([]any, 0, len(targets))
 		for _, e := range targets {
@@ -1452,11 +1454,9 @@ func (sd *streamDecoder) identRef(id schema.TypeID) string {
 			return sd.refAt(i)
 		}
 	}
-	if sd.schema != nil {
-		for _, cs := range sd.schema.Closure() {
-			if cs.SourceID() == id.SchemaPath() {
-				return TypeRef{Schema: cs.Name(), Name: id.Name()}.String()
-			}
+	for cs := range sd.schema.Closure() {
+		if cs.SourceID() == id.SchemaPath() {
+			return TypeRef{Schema: cs.Name(), Name: id.Name()}.String()
 		}
 	}
 	return TypeRef{Schema: id.SchemaPath().String(), Name: id.Name()}.String()
@@ -1510,7 +1510,7 @@ func (sd *streamDecoder) checkProvenancePath(inst instWire, row int) {
 // drop the name or write it as the field it spells. Structural, like the other
 // refusals no option excuses; a schema-less read makes no claim.
 func (sd *streamDecoder) checkDeclaredProperties(row int, key []any, props map[string]any) {
-	if sd.schema == nil || len(props) == 0 || row < 0 || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || len(props) == 0 || row < 0 || row >= len(sd.tableIDs) {
 		return
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -1531,7 +1531,7 @@ func (sd *streamDecoder) checkDeclaredProperties(row int, key []any, props map[s
 // not declare as an association has no declared edge properties to judge
 // against; checkAssociation refuses that relation.
 func (sd *streamDecoder) checkDeclaredEdgeProperties(row int, key []any, relation string, props map[string]any) {
-	if sd.schema == nil || len(props) == 0 || row < 0 || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || len(props) == 0 || row < 0 || row >= len(sd.tableIDs) {
 		return
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
@@ -1580,7 +1580,7 @@ func undeclaredWireNames(props map[string]any, declared func(string) bool) []str
 // patterns and invariants are not checked; silence is not proof of validity,
 // and the option's documentation says so.
 func (sd *streamDecoder) checkValueConformance(inst instWire, row int) {
-	if !sd.loadCfg.valueConformance || sd.schema == nil || len(inst.Properties) == 0 {
+	if !sd.loadCfg.valueConformance || len(inst.Properties) == 0 {
 		return
 	}
 	if row < 0 || row >= len(sd.tableIDs) {
@@ -1793,7 +1793,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		// A keyed (many) slot holds its conflict at a key, so a record with a key
 		// of its own states one, whatever the slot holds. By length: an empty
 		// JSON array decodes non-nil.
-		if keyed && conflictOK && rel != nil && rel.IsMany() && len(dup.Conflict.Key) == 0 && len(dup.Instance.Key) > 0 {
+		if keyed && conflictOK && !rel.IsZero() && rel.IsMany() && len(dup.Conflict.Key) == 0 && len(dup.Instance.Key) > 0 {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states no conflict key; under the (many) composition %q its conflict is the child at its own key, %s",
 					di, slot.relation, diag.ValueText(carried))).Build())
@@ -1820,7 +1820,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		// graph.AddComposed records a keyed (many) duplicate against the child at
 		// its own key. A (one) slot's occupant is its sole child. A conflict
 		// standing at the key the record itself states adds no break to that key's.
-		if rowOK && rel != nil && rel.IsMany() && occupant.key != carried && occupant.key != stated {
+		if rowOK && !rel.IsZero() && rel.IsMany() && occupant.key != carried && occupant.key != stated {
 			sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 				fmt.Sprintf("duplicate record %d states conflict %s[%s]; under the (many) composition %q its conflict is the child at its own key, %s",
 					di, sd.refText(occupant.row), diag.ValueText(occupant.key), slot.relation, diag.ValueText(carried))).Build())
@@ -1838,7 +1838,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 		switch {
 		case refused:
 			idx.refuseRecord(ui)
-		case rel != nil && !rel.IsMany() && idx.held(slot.parentRow, slot.parentKey):
+		case !rel.IsZero() && !rel.IsMany() && idx.held(slot.parentRow, slot.parentKey):
 			// A record of a root whose key a check refused, or of an address two
 			// roots share, counts toward no (one) association.
 			idx.pending = append(idx.pending, pendingOne{ui: ui, at: oneCoord{slot: slot}})
@@ -1850,7 +1850,7 @@ func (sd *streamDecoder) validateDiagnostics(diags diagWire, idx *docIndex) {
 // itself and reports whether it refused it, with the association the record is
 // under and its place there. It writes to idx only the memo
 // [streamDecoder.refusedAddress] keeps.
-func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (slotCoord, *schema.Relation, bool) {
+func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (slotCoord, schema.Relation, bool) {
 	start := sd.mark()
 	documented := sd.checkUnresolvedReason(ui, u)
 	sourceRow, ok := sd.requireRow(u.SourceType, func() string {
@@ -1858,7 +1858,7 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 	})
 	sd.requireRow(u.TargetType, func() string { return fmt.Sprintf("unresolved record %d target", ui) })
 	var slot slotCoord
-	var rel *schema.Relation
+	var rel schema.Relation
 	if ok {
 		sd.checkDeclaredEdgeProperties(sourceRow, u.SourceKey, u.Relation, u.Properties)
 		sourceKey := sd.canonicalWireKey(sourceRow, u.SourceKey)
@@ -1890,14 +1890,14 @@ func (sd *streamDecoder) checkRecord(ui int, u unresolvedWire, idx *docIndex) (s
 // refuses the records it reports, so no (one) count holds them; the records
 // beside them stay in it. A schema-less read makes no claim.
 func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
-	if sd.schema == nil {
+	if sd.schema.IsZero() {
 		return
 	}
-	// rel is nil where the record's source row resolves and declares no such
-	// association: the record is held there and judged by no fact.
+	// rel is zero where checkRecord refused the record for naming no association:
+	// the record is held there and judged by no fact.
 	type record struct {
 		slot slotCoord
-		rel  *schema.Relation
+		rel  schema.Relation
 		ok   bool
 	}
 	records := make([]record, len(diags.Unresolved))
@@ -1915,7 +1915,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 	// neither in the (one) count nor another record beside an absent one.
 	for ui, u := range diags.Unresolved {
 		rec := records[ui]
-		if rec.rel == nil || idx.refusedRecords[ui] {
+		if idx.refusedRecords[ui] {
 			continue
 		}
 		switch u.Reason {
@@ -1969,7 +1969,7 @@ func (sd *streamDecoder) checkRecordFacts(diags diagWire, idx *docIndex) {
 	reported := make(map[slotCoord]bool)
 	for ui, u := range diags.Unresolved {
 		rec := records[ui]
-		if rec.rel == nil || idx.refusedRecords[ui] || (u.Reason != "absent" && u.Reason != "empty") {
+		if idx.refusedRecords[ui] || (u.Reason != "absent" && u.Reason != "empty") {
 			continue
 		}
 		if beside[rec.slot] < 2 || !idx.held(rec.slot.parentRow, rec.slot.parentKey) {
@@ -2115,19 +2115,19 @@ func (sd *streamDecoder) warnUnresolvedRequired(sourceRow int, u unresolvedWire)
 }
 
 // associationAt returns relation as an association of the type at row, or
-// false for a schema-less read, a row that resolves to no type, or a relation
-// that is not an association of it.
-func (sd *streamDecoder) associationAt(row int, relation string) (*schema.Relation, bool) {
-	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
-		return nil, false
+// false for a row that resolves to no type or a relation that is not an
+// association of it. It reads the schema: both callers run only on a read with one.
+func (sd *streamDecoder) associationAt(row int, relation string) (schema.Relation, bool) {
+	if row < 0 || row >= len(sd.tableIDs) {
+		return schema.Relation{}, false
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[row])
 	if !ok {
-		return nil, false
+		return schema.Relation{}, false
 	}
 	rel, ok := t.Relation(relation)
 	if !ok || !rel.IsAssociation() {
-		return nil, false
+		return schema.Relation{}, false
 	}
 	return rel, true
 }
@@ -2138,11 +2138,11 @@ func (sd *streamDecoder) associationAt(row int, relation string) (*schema.Relati
 // components graph.ParseKey reads back. The first fact the record breaks is
 // the one reported, in graph's order. A record whose reason names no target,
 // or is not a documented one, owes no target key: checkUnresolvedReason judges
-// what it carries. It returns the association, or nil where the source's type
+// what it carries. It returns the association, or the zero Relation where the source's type
 // declares none or cannot be read.
 func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey []any, relation string,
 	targetRow *int, targetKey []any, reason string, documented bool,
-) *schema.Relation {
+) schema.Relation {
 	namesTarget := documented && reason != "absent" && reason != "empty"
 	// The document's name is cut until the schema declares the association.
 	relationText := diag.QuoteValue(relation)
@@ -2155,14 +2155,14 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 				Build())
 		}
 	}
-	if sd.schema == nil || sourceRow < 0 || sourceRow >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || sourceRow < 0 || sourceRow >= len(sd.tableIDs) {
 		scalarKey()
-		return nil
+		return schema.Relation{}
 	}
 	t, ok := sd.schema.TypeByID(sd.tableIDs[sourceRow])
 	if !ok {
 		scalarKey()
-		return nil
+		return schema.Relation{}
 	}
 	source := sd.refAt(sourceRow)
 	at := fmt.Sprintf("%s of %s[%s] under ", what, sd.refText(sourceRow), diag.ValueText(formatWireKey(sourceKey)))
@@ -2173,7 +2173,7 @@ func (sd *streamDecoder) checkAssociation(what string, sourceRow int, sourceKey 
 			WithDetail(diag.DetailKeyTypeName, source).
 			WithDetail(diag.DetailKeyRelationName, relation).
 			Build())
-		return nil
+		return schema.Relation{}
 	}
 	relationText = strconv.Quote(relation)
 	at += relationText
@@ -2232,15 +2232,15 @@ func (sd *streamDecoder) checkOnes(idx *docIndex) {
 // conflict from: slot is a composition its parent's type declares, the
 // record's type is that composition's declared target, and the composition is
 // not a keyless (many) one, which holds no conflict. It judges the position
-// alone, whatever the slot holds. It returns the composition, nil on a
+// alone, whatever the slot holds. It returns the composition, zero on a
 // schema-less read, and false where it refused the record.
-func (sd *streamDecoder) checkDuplicateSlot(di, row int, rowOK bool, slot slotCoord) (*schema.Relation, bool) {
-	if sd.schema == nil || slot.parentRow >= len(sd.tableIDs) {
-		return nil, true
+func (sd *streamDecoder) checkDuplicateSlot(di, row int, rowOK bool, slot slotCoord) (schema.Relation, bool) {
+	if sd.schema.IsZero() || slot.parentRow >= len(sd.tableIDs) {
+		return schema.Relation{}, true
 	}
 	pt, ok := sd.schema.TypeByID(sd.tableIDs[slot.parentRow])
 	if !ok {
-		return nil, true
+		return schema.Relation{}, true
 	}
 	rel, ok := pt.Relation(slot.relation)
 	if !ok || rel.Kind() != schema.RelationComposition {
@@ -2250,19 +2250,19 @@ func (sd *streamDecoder) checkDuplicateSlot(di, row int, rowOK bool, slot slotCo
 			WithDetail(diag.DetailKeyTypeName, sd.refAt(slot.parentRow)).
 			WithDetail(diag.DetailKeyRelationName, slot.relation).
 			Build())
-		return nil, false
+		return schema.Relation{}, false
 	}
 	if rowOK && row < len(sd.tableIDs) && sd.tableIDs[row] != rel.TargetID() {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_TYPE_MISMATCH,
 			fmt.Sprintf("duplicate record %d is typed %s, which the composition %q declares as %s",
 				di, sd.refText(row), slot.relation, sd.identRef(rel.TargetID()))).Build())
-		return nil, false
+		return schema.Relation{}, false
 	}
 	if target, ok := sd.schema.TypeByID(rel.TargetID()); ok && rel.IsMany() && !target.HasPrimaryKey() {
 		sd.collector.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
 			fmt.Sprintf("duplicate record %d is under the keyless (many) composition %q, where no child conflicts",
 				di, slot.relation)).Build())
-		return nil, false
+		return schema.Relation{}, false
 	}
 	return rel, true
 }
@@ -2649,7 +2649,7 @@ type wireKeyPosition struct {
 // building the whole table on first use. A schema-less read and a row that
 // resolves to no type have none, which leaves every key as written.
 func (sd *streamDecoder) rowKeyPositions(row int) []wireKeyPosition {
-	if sd.schema == nil || row < 0 || row >= len(sd.tableIDs) {
+	if sd.schema.IsZero() || row < 0 || row >= len(sd.tableIDs) {
 		return nil
 	}
 	if sd.keyPositions == nil {

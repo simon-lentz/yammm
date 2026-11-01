@@ -9,10 +9,9 @@ import (
 )
 
 // defenseModel is a schema every public entry point accepts. Its annotations
-// are borrowed below and paired with properties they do not name, which is the
-// shape the target re-checks defend against: a model assembled outside the
-// entry points that guarantee the pairing is sound.
-func defenseModel(t *testing.T) *schema.Type {
+// are borrowed below and paired with properties they do not name, a pairing no
+// schema an entry point returns holds, so only these tests reach the re-checks.
+func defenseModel(t *testing.T) schema.Type {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("defense").
@@ -38,7 +37,7 @@ func defenseModel(t *testing.T) *schema.Type {
 	return typ
 }
 
-func annotationOn(t *testing.T, typ *schema.Type, prop, name string) (*schema.Property, *schema.Annotation) {
+func annotationOn(t *testing.T, typ schema.Type, prop, name string) (schema.Property, schema.Annotation) {
 	t.Helper()
 	p, ok := typ.Property(prop)
 	if !ok {
@@ -51,7 +50,7 @@ func annotationOn(t *testing.T, typ *schema.Type, prop, name string) (*schema.Pr
 	return p, ann
 }
 
-func propertyOn(t *testing.T, typ *schema.Type, name string) *schema.Property {
+func propertyOn(t *testing.T, typ schema.Type, name string) schema.Property {
 	t.Helper()
 	p, ok := typ.Property(name)
 	if !ok {

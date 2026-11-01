@@ -47,8 +47,8 @@ func TestMarshal_EmbedsTheSourceStore(t *testing.T) {
 }
 
 // TestMarshal_NotSourceBacked pins the precondition: a Builder-built schema retains
-// no source content (nil Sources()), so Marshal must reject it gracefully rather than
-// emit an embedded source store it cannot honor — and never panic on the nil Sources().
+// no source content (zero Sources()), so Marshal must reject it gracefully rather than
+// emit an embedded source store it cannot honor — and never panic on the zero Sources().
 func TestMarshal_NotSourceBacked(t *testing.T) {
 	s, res := schema.NewBuilder().
 		WithName("geo").
@@ -95,7 +95,7 @@ func TestMarshal_NotSourceBackedWithDataTypeProperties(t *testing.T) {
 // successful Marshal also proves the multi-source round-trip self-check passed.
 func TestMarshal_Imports(t *testing.T) {
 	s := loadSchema(t, "imports/main")
-	if len(s.ImportsSlice()) == 0 {
+	if len(slices.Collect(s.Imports())) == 0 {
 		t.Fatal("expected imports/main to declare an import")
 	}
 	got, err := gogen.Marshal(s)
@@ -762,8 +762,8 @@ func TestMarshal_RelativeImport(t *testing.T) {
 	t.Parallel()
 
 	s := loadSchema(t, "imports/rel_main")
-	if len(s.ImportsSlice()) != 1 {
-		t.Fatalf("expected imports/rel_main to declare one import, got %d", len(s.ImportsSlice()))
+	if len(slices.Collect(s.Imports())) != 1 {
+		t.Fatalf("expected imports/rel_main to declare one import, got %d", len(slices.Collect(s.Imports())))
 	}
 	got, err := gogen.Marshal(s)
 	if err != nil {
@@ -894,7 +894,7 @@ func TestMarshal_ModuleRoot_SharedRegistryDeterministic(t *testing.T) {
 // loadModrootSchema loads the modroot fixture entry with the fixture tree's
 // top directory as the module root — the registry-style consumer load shape
 // (module root != entry directory).
-func loadModrootSchema(t *testing.T, opts ...schema.LoadOption) *schema.Schema {
+func loadModrootSchema(t *testing.T, opts ...schema.LoadOption) schema.Schema {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("testdata", "modroot"))
 	if err != nil {
@@ -909,7 +909,7 @@ func loadModrootSchema(t *testing.T, opts ...schema.LoadOption) *schema.Schema {
 }
 
 // loadSchema loads a testdata schema, failing on any diagnostic error.
-func loadSchema(t *testing.T, name string) *schema.Schema {
+func loadSchema(t *testing.T, name string) schema.Schema {
 	t.Helper()
 	path, err := filepath.Abs(filepath.Join("testdata", name+".yammm"))
 	if err != nil {

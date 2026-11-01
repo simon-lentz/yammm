@@ -18,7 +18,7 @@ type adapterConfig struct {
 	delimiter  rune
 	typeColumn string // empty = no type column
 	listSep    string // "" only outside New; the zero delimiter refuses before any list
-	schema     *schema.Schema
+	schema     schema.Schema
 	strict     bool // match names exactly, as a strict validator does
 }
 
@@ -99,16 +99,16 @@ func WithStrictPropertyNames(strict bool) Option {
 }
 
 // WithSchema gives the parser the import closure, and with it each
-// association's target type, which the per-call [*schema.Type] cannot reach.
+// association's target type, which the per-call [schema.Type] cannot reach.
 // The parser needs the target's primary keys to read an empty foreign-key
 // segment: with them, it is the key's empty value where the key's kind has one
 // and is otherwise absent, and an empty column naming no key of the target is
 // skipped. Without it every empty foreign-key segment is absent. A non-empty
 // segment keeps its text either way, except that with it a Date or Timestamp
 // key that does not parse draws E_CSV_COERCE and is an [instance.Refused]. s must be the schema that owns the
-// [*schema.Type] the parse methods are given: a target is resolved in s by the
+// [schema.Type] the parse methods are given: a target is resolved in s by the
 // association's identity, and another schema's type of that name is another type.
-func WithSchema(s *schema.Schema) Option {
+func WithSchema(s schema.Schema) Option {
 	return func(c *adapterConfig) {
 		c.schema = s
 	}

@@ -185,7 +185,7 @@ type C extends A, B {
 
 // One inheritance conflict is one diagnostic, however deep the chains carrying
 // it are. mergeProperties visits every linearized ancestor and an ancestor that
-// merely inherits the annotated property yields the same *Property, so the
+// merely inherits the annotated property yields the same Property, so the
 // conflict is re-detected once per ancestor; only the first report is emitted.
 func TestAnnotation_Union_ConflictReportedOncePerConflict(t *testing.T) {
 	t.Parallel()

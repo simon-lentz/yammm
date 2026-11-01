@@ -135,21 +135,21 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	g := graph.New(s)
 	for range 2 {
 		inst, r := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": longText}})
-		if inst == nil {
+		if inst.IsZero() {
 			t.Fatal(r)
 		}
 		c.result("graph.Add", g.Add(ctx, inst))
 	}
 	c.result("graph.Add", g.Add(ctx, instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{"h1"}),
-		immutable.WrapProperties(map[string]any{"id": "h1", "te\xffxt": "x"}), nil, nil, nil)))
+		immutable.WrapProperties(map[string]any{"id": "h1", "te\xffxt": "x"}), nil, nil, location.Provenance{})))
 	c.result("graph.AddComposed", g.AddComposed(ctx, typ.ID(), `["absent `+longText+`"]`, "NONE",
-		instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"id": "c"}), nil, nil, nil)))
+		instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"id": "c"}), nil, nil, location.Provenance{})))
 	_, err := graph.ParseKey(longText)
 	c.err("graph.ParseKey", err)
 
 	bypass := graph.New(s)
 	bypass.Add(ctx, instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{longText}),
-		immutable.WrapProperties(map[string]any{"id": longText, "u": longText, "d": longText, "ts": longText, "tf": longText}), nil, nil, nil))
+		immutable.WrapProperties(map[string]any{"id": longText, "u": longText, "d": longText, "ts": longText, "tf": longText}), nil, nil, location.Provenance{}))
 	for range 2 {
 		inst, _ := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": longText + "2"}})
 		bypass.Add(ctx, inst)
@@ -163,7 +163,7 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 
 	unwritable := graph.New(s)
 	unwritable.Add(ctx, instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{longText}),
-		immutable.WrapProperties(map[string]any{"id": longText, "f": math.NaN()}), nil, nil, nil))
+		immutable.WrapProperties(map[string]any{"id": longText, "f": math.NaN()}), nil, nil, location.Provenance{}))
 	_, err = jsonadapter.New().MarshalObject(ctx, unwritable.Snapshot())
 	c.err("json writer", err)
 	_, err = csvadapter.New().MarshalSnapshot(ctx, unwritable.Snapshot())
@@ -172,8 +172,8 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	composed := graph.New(s)
 	composed.Add(ctx, instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{longText}), immutable.WrapProperties(map[string]any{"id": longText}), nil,
 		map[string]immutable.Value{"PARTS": immutable.Wrap([]any{
-			instance.NewValidInstance("P", pt.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, nil),
-		})}, nil))
+			instance.NewValidInstance("P", pt.ID(), immutable.WrapKey([]any{"c"}), immutable.WrapProperties(map[string]any{"pid": "c"}), nil, nil, location.Provenance{}),
+		})}, location.Provenance{}))
 	_, err = csvadapter.New().MarshalSnapshot(ctx, composed.Snapshot())
 	c.err("csv writer", err)
 	ls, res := schema.LoadString(ctx, "schema \"links\"\n\ntype L {\n\tid String primary\n\t--> TO (many) M {\n\t\tw Float\n\t}\n}\n\ntype M {\n\tid String primary\n}\n", "links.yammm")
@@ -183,11 +183,11 @@ func TestMessages_RepeatAValueCutToItsHead(t *testing.T) {
 	lt, _ := ls.Type("L")
 	mt, _ := ls.Type("M")
 	linked := graph.New(ls)
-	linked.Add(ctx, instance.NewValidInstance("M", mt.ID(), immutable.WrapKey([]any{longText}), immutable.WrapProperties(map[string]any{"id": longText}), nil, nil, nil))
+	linked.Add(ctx, instance.NewValidInstance("M", mt.ID(), immutable.WrapKey([]any{longText}), immutable.WrapProperties(map[string]any{"id": longText}), nil, nil, location.Provenance{}))
 	linked.Add(ctx, instance.NewValidInstance("L", lt.ID(), immutable.WrapKey([]any{"l"}), immutable.WrapProperties(map[string]any{"id": "l"}),
-		map[string]*instance.ValidEdgeData{"TO": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		map[string]instance.ValidEdgeData{"TO": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{longText}), immutable.WrapProperties(map[string]any{"w": math.NaN()})),
-		})}, nil, nil))
+		})}, nil, location.Provenance{}))
 	_, err = jsonadapter.New().MarshalObject(ctx, linked.Snapshot())
 	c.err("json writer", err)
 

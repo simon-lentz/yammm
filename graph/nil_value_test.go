@@ -7,6 +7,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 )
 
 // A nil list an instance built past the validator holds stays nil at every
@@ -35,7 +36,7 @@ type T {
 	}
 	props := immutable.WrapProperties(raw, immutable.WithClone(true))
 	g := graph.New(s)
-	if res := g.Add(t.Context(), instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{"x"}), props, nil, nil, nil)); res.Err() != nil {
+	if res := g.Add(t.Context(), instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{"x"}), props, nil, nil, location.Provenance{})); res.Err() != nil {
 		t.Fatalf("add: %v", res.Err())
 	}
 	for inst := range g.Snapshot().AllInstances() {
@@ -68,7 +69,7 @@ type T {
 		"a pointer to a nil slice":   new([]any),
 	} {
 		props := immutable.WrapProperties(map[string]any{"id": none})
-		res := graph.New(s).Add(t.Context(), instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{none}), props, nil, nil, nil))
+		res := graph.New(s).Add(t.Context(), instance.NewValidInstance("T", typ.ID(), immutable.WrapKey([]any{none}), props, nil, nil, location.Provenance{}))
 		if res.Err() == nil || !strings.Contains(res.String(), `primary key property "id" is absent or null`) {
 			t.Errorf("%s: Add = %s; want the key property refused as absent", name, res)
 		}

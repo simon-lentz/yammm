@@ -8,7 +8,7 @@ import (
 
 // FuzzLoadString fuzzes the full parse→compile→load path. yammm is a DSL
 // parser, so arbitrary input must never panic: malformed sources surface
-// as diagnostics, and a nil schema without error diagnostics is a contract
+// as diagnostics, and a zero schema without error diagnostics is a contract
 // violation.
 func FuzzLoadString(f *testing.F) {
 	seeds := []string{
@@ -52,8 +52,8 @@ func FuzzLoadString(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, src string) {
 		s, result := schema.LoadString(t.Context(), src, "fuzz.yammm")
-		if s == nil && !result.HasErrors() {
-			t.Errorf("LoadString returned nil schema without error diagnostics for %q", src)
+		if s.IsZero() && !result.HasErrors() {
+			t.Errorf("LoadString returned zero schema without error diagnostics for %q", src)
 		}
 	})
 }

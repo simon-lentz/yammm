@@ -98,7 +98,7 @@ func TestHandleFormatting_NeverEditsWhatASchemaMeans(t *testing.T) {
 // loaded.
 func lspSchemaHash(src string) (string, bool) {
 	s, result := schema.LoadString(context.Background(), src, "x.yammm")
-	if result.Err() != nil || s == nil {
+	if result.Err() != nil || s.IsZero() {
 		return "", false
 	}
 	return schema.StructuralHash(s), true

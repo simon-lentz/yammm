@@ -17,7 +17,7 @@ import (
 
 // loadTestdata loads a corpus schema from testdata, failing on any
 // diagnostic error.
-func loadTestdata(t *testing.T, name string) *schema.Schema {
+func loadTestdata(t *testing.T, name string) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	path, err := filepath.Abs(filepath.Join("testdata", name+".yammm"))

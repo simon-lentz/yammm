@@ -128,7 +128,7 @@ func TestDiagRootFor_DiscoversOnTheFailurePath(t *testing.T) {
 	}
 	entry := filepath.Join(sub, "bad.yammm")
 
-	got := diagRootFor(nil, "", entry)
+	got := diagRootFor(schema.Schema{}, "", entry)
 	onDisk, err := yammmtest.DiskSpelling(root)
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +181,7 @@ func TestDiagRootFor_ResolvesAnExplicitRootOnTheFailurePath(t *testing.T) {
 			}
 			typed := row.typed(t, base)
 
-			got := diagRootFor(nil, typed, filepath.Join(typed, "bad.yammm"))
+			got := diagRootFor(schema.Schema{}, typed, filepath.Join(typed, "bad.yammm"))
 			onDisk, err := yammmtest.DiskSpelling(real)
 			if err != nil {
 				t.Fatal(err)

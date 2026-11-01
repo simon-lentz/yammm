@@ -63,7 +63,7 @@ type OwnedLabels struct {
 // application's objects on the same bare label are the schema's to report,
 // because the two are genuinely sharing the label. Scope a schema with a name,
 // or a prefix, to keep the namespaces apart.
-func (a *Adapter) OwnedLabels(ctx context.Context, s *schema.Schema) *OwnedLabels {
+func (a *Adapter) OwnedLabels(ctx context.Context, s schema.Schema) *OwnedLabels {
 	owned := &OwnedLabels{labels: make(map[string]struct{})}
 	for _, label := range a.labeledTypes(ctx, s) {
 		owned.labels[label] = struct{}{}

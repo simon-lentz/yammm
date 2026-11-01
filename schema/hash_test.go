@@ -24,9 +24,9 @@ func testSourceID(name string) location.SourceID {
 // buildMinimalSchema creates a sealed schema with optional types and data types.
 func buildMinimalSchema(
 	name string,
-	types []*schema.Type,
-	dataTypes []*schema.DataType,
-) *schema.Schema {
+	types []schema.Type,
+	dataTypes []schema.DataType,
+) schema.Schema {
 	sid := testSourceID(name)
 	s := schema.TestNewSchema(name, sid, zeroSpan, "")
 	if types != nil {
@@ -46,12 +46,12 @@ func buildMinimalSchema(
 }
 
 // makeProp creates a property with the given name, constraint, and optional/pk flags.
-func makeProp(name string, c schema.Constraint, optional, pk bool) *schema.Property {
+func makeProp(name string, c schema.Constraint, optional, pk bool) schema.Property {
 	return schema.TestNewProperty(name, zeroSpan, "", c, schema.DataTypeRef{}, optional, pk, schema.DeclaringScope{}, nil)
 }
 
 // makeAssoc creates an association relation.
-func makeAssoc(name, targetName string, optional, many bool, edgeProps []*schema.Property) *schema.Relation { //nolint:unparam // test helper - name varies across test files
+func makeAssoc(name, targetName string, optional, many bool, edgeProps []schema.Property) schema.Relation { //nolint:unparam // test helper - name varies across test files
 	targetID := schema.NewTypeID(location.SourceID{}, targetName)
 	return schema.TestNewRelation(
 		schema.RelationAssociation,
@@ -69,7 +69,7 @@ func makeAssoc(name, targetName string, optional, many bool, edgeProps []*schema
 }
 
 // makeComp creates a composition relation.
-func makeComp(name, targetName string, optional, many bool) *schema.Relation {
+func makeComp(name, targetName string, optional, many bool) schema.Relation {
 	targetID := schema.NewTypeID(location.SourceID{}, targetName)
 	return schema.TestNewRelation(
 		schema.RelationComposition,
@@ -87,12 +87,12 @@ func makeComp(name, targetName string, optional, many bool) *schema.Relation {
 }
 
 // buildTypeWithProps creates a type with AllProperties and PrimaryKeys set.
-func buildTypeWithProps(name string, props []*schema.Property) *schema.Type {
+func buildTypeWithProps(name string, props []schema.Property) schema.Type {
 	typ := schema.TestNewType(name, location.SourceID{}, zeroSpan, "", false, false)
 	schema.TestSetTypeProperties(typ, props)
 	schema.TestSetTypeAllProperties(typ, props)
 
-	var pks []*schema.Property
+	var pks []schema.Property
 	for _, p := range props {
 		if p.IsPrimaryKey() {
 			pks = append(pks, p)
@@ -110,15 +110,15 @@ func TestStructuralHashVersion(t *testing.T) {
 func TestStructuralHash_NilPanics(t *testing.T) {
 	assert.PanicsWithValue(
 		t,
-		"schema: StructuralHash called on nil *Schema",
-		func() { schema.StructuralHash(nil) },
+		"schema: StructuralHash called on a zero Schema",
+		func() { schema.StructuralHash(schema.Schema{}) },
 	)
 }
 
 func TestStructuralHash_Determinism(t *testing.T) {
 	prop := makeProp("id", schema.NewUUIDConstraint(), false, true)
-	typ := buildTypeWithProps("User", []*schema.Property{prop})
-	s := buildMinimalSchema("app", []*schema.Type{typ}, nil)
+	typ := buildTypeWithProps("User", []schema.Property{prop})
+	s := buildMinimalSchema("app", []schema.Type{typ}, nil)
 
 	h1 := schema.StructuralHash(s)
 	h2 := schema.StructuralHash(s)
@@ -146,12 +146,12 @@ func TestStructuralHash_NameSensitivity(t *testing.T) {
 
 func TestStructuralHash_PropertyConstraintSensitivity(t *testing.T) {
 	propA := makeProp("name", schema.NewStringConstraint(), false, false)
-	typA := buildTypeWithProps("Person", []*schema.Property{propA})
-	sA := buildMinimalSchema("app", []*schema.Type{typA}, nil)
+	typA := buildTypeWithProps("Person", []schema.Property{propA})
+	sA := buildMinimalSchema("app", []schema.Type{typA}, nil)
 
 	propB := makeProp("name", schema.StringMinLen(1), false, false)
-	typB := buildTypeWithProps("Person", []*schema.Property{propB})
-	sB := buildMinimalSchema("app", []*schema.Type{typB}, nil)
+	typB := buildTypeWithProps("Person", []schema.Property{propB})
+	sB := buildMinimalSchema("app", []schema.Type{typB}, nil)
 
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB),
 		"different property constraints must produce different hashes")
@@ -159,12 +159,12 @@ func TestStructuralHash_PropertyConstraintSensitivity(t *testing.T) {
 
 func TestStructuralHash_RequiredVsOptional(t *testing.T) {
 	propReq := makeProp("email", schema.NewStringConstraint(), false, false) // required
-	typReq := buildTypeWithProps("User", []*schema.Property{propReq})
-	sReq := buildMinimalSchema("app", []*schema.Type{typReq}, nil)
+	typReq := buildTypeWithProps("User", []schema.Property{propReq})
+	sReq := buildMinimalSchema("app", []schema.Type{typReq}, nil)
 
 	propOpt := makeProp("email", schema.NewStringConstraint(), true, false) // optional
-	typOpt := buildTypeWithProps("User", []*schema.Property{propOpt})
-	sOpt := buildMinimalSchema("app", []*schema.Type{typOpt}, nil)
+	typOpt := buildTypeWithProps("User", []schema.Property{propOpt})
+	sOpt := buildMinimalSchema("app", []schema.Type{typOpt}, nil)
 
 	assert.NotEqual(t, schema.StructuralHash(sReq), schema.StructuralHash(sOpt),
 		"required vs optional must produce different hashes")
@@ -173,15 +173,15 @@ func TestStructuralHash_RequiredVsOptional(t *testing.T) {
 func TestStructuralHash_AssociationTargetSensitivity(t *testing.T) {
 	assocA := makeAssoc("WORKS_AT", "Company", false, false, nil)
 	typA := buildTypeWithProps("Person", nil)
-	schema.TestSetTypeAssociations(typA, []*schema.Relation{assocA})
-	schema.TestSetTypeAllAssociations(typA, []*schema.Relation{assocA})
-	sA := buildMinimalSchema("app", []*schema.Type{typA}, nil)
+	schema.TestSetTypeAssociations(typA, []schema.Relation{assocA})
+	schema.TestSetTypeAllAssociations(typA, []schema.Relation{assocA})
+	sA := buildMinimalSchema("app", []schema.Type{typA}, nil)
 
 	assocB := makeAssoc("WORKS_AT", "Organization", false, false, nil)
 	typB := buildTypeWithProps("Person", nil)
-	schema.TestSetTypeAssociations(typB, []*schema.Relation{assocB})
-	schema.TestSetTypeAllAssociations(typB, []*schema.Relation{assocB})
-	sB := buildMinimalSchema("app", []*schema.Type{typB}, nil)
+	schema.TestSetTypeAssociations(typB, []schema.Relation{assocB})
+	schema.TestSetTypeAllAssociations(typB, []schema.Relation{assocB})
+	sB := buildMinimalSchema("app", []schema.Type{typB}, nil)
 
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB),
 		"different association targets must produce different hashes")
@@ -190,15 +190,15 @@ func TestStructuralHash_AssociationTargetSensitivity(t *testing.T) {
 func TestStructuralHash_AssociationMultiplicitySensitivity(t *testing.T) {
 	assocOne := makeAssoc("WORKS_AT", "Company", false, false, nil)
 	typOne := buildTypeWithProps("Person", nil)
-	schema.TestSetTypeAssociations(typOne, []*schema.Relation{assocOne})
-	schema.TestSetTypeAllAssociations(typOne, []*schema.Relation{assocOne})
-	sOne := buildMinimalSchema("app", []*schema.Type{typOne}, nil)
+	schema.TestSetTypeAssociations(typOne, []schema.Relation{assocOne})
+	schema.TestSetTypeAllAssociations(typOne, []schema.Relation{assocOne})
+	sOne := buildMinimalSchema("app", []schema.Type{typOne}, nil)
 
 	assocMany := makeAssoc("WORKS_AT", "Company", false, true, nil)
 	typMany := buildTypeWithProps("Person", nil)
-	schema.TestSetTypeAssociations(typMany, []*schema.Relation{assocMany})
-	schema.TestSetTypeAllAssociations(typMany, []*schema.Relation{assocMany})
-	sMany := buildMinimalSchema("app", []*schema.Type{typMany}, nil)
+	schema.TestSetTypeAssociations(typMany, []schema.Relation{assocMany})
+	schema.TestSetTypeAllAssociations(typMany, []schema.Relation{assocMany})
+	sMany := buildMinimalSchema("app", []schema.Type{typMany}, nil)
 
 	assert.NotEqual(t, schema.StructuralHash(sOne), schema.StructuralHash(sMany),
 		"different association multiplicities must produce different hashes")
@@ -206,17 +206,17 @@ func TestStructuralHash_AssociationMultiplicitySensitivity(t *testing.T) {
 
 func TestStructuralHash_AssociationEdgeProperties(t *testing.T) {
 	edgeProp := makeProp("since", schema.NewDateConstraint(), false, false)
-	assocWith := makeAssoc("WORKS_AT", "Company", false, false, []*schema.Property{edgeProp})
+	assocWith := makeAssoc("WORKS_AT", "Company", false, false, []schema.Property{edgeProp})
 	typWith := buildTypeWithProps("Person", nil)
-	schema.TestSetTypeAssociations(typWith, []*schema.Relation{assocWith})
-	schema.TestSetTypeAllAssociations(typWith, []*schema.Relation{assocWith})
-	sWith := buildMinimalSchema("app", []*schema.Type{typWith}, nil)
+	schema.TestSetTypeAssociations(typWith, []schema.Relation{assocWith})
+	schema.TestSetTypeAllAssociations(typWith, []schema.Relation{assocWith})
+	sWith := buildMinimalSchema("app", []schema.Type{typWith}, nil)
 
 	assocWithout := makeAssoc("WORKS_AT", "Company", false, false, nil)
 	typWithout := buildTypeWithProps("Person", nil)
-	schema.TestSetTypeAssociations(typWithout, []*schema.Relation{assocWithout})
-	schema.TestSetTypeAllAssociations(typWithout, []*schema.Relation{assocWithout})
-	sWithout := buildMinimalSchema("app", []*schema.Type{typWithout}, nil)
+	schema.TestSetTypeAssociations(typWithout, []schema.Relation{assocWithout})
+	schema.TestSetTypeAllAssociations(typWithout, []schema.Relation{assocWithout})
+	sWithout := buildMinimalSchema("app", []schema.Type{typWithout}, nil)
 
 	assert.NotEqual(t, schema.StructuralHash(sWith), schema.StructuralHash(sWithout),
 		"association with vs without edge properties must differ")
@@ -225,15 +225,15 @@ func TestStructuralHash_AssociationEdgeProperties(t *testing.T) {
 func TestStructuralHash_CompositionSensitivity(t *testing.T) {
 	compA := makeComp("CONTAINS", "Wheel", false, true)
 	typA := buildTypeWithProps("Car", nil)
-	schema.TestSetTypeCompositions(typA, []*schema.Relation{compA})
-	schema.TestSetTypeAllCompositions(typA, []*schema.Relation{compA})
-	sA := buildMinimalSchema("app", []*schema.Type{typA}, nil)
+	schema.TestSetTypeCompositions(typA, []schema.Relation{compA})
+	schema.TestSetTypeAllCompositions(typA, []schema.Relation{compA})
+	sA := buildMinimalSchema("app", []schema.Type{typA}, nil)
 
 	compB := makeComp("CONTAINS", "Engine", false, true)
 	typB := buildTypeWithProps("Car", nil)
-	schema.TestSetTypeCompositions(typB, []*schema.Relation{compB})
-	schema.TestSetTypeAllCompositions(typB, []*schema.Relation{compB})
-	sB := buildMinimalSchema("app", []*schema.Type{typB}, nil)
+	schema.TestSetTypeCompositions(typB, []schema.Relation{compB})
+	schema.TestSetTypeAllCompositions(typB, []schema.Relation{compB})
+	sB := buildMinimalSchema("app", []schema.Type{typB}, nil)
 
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB),
 		"different composition targets must produce different hashes")
@@ -296,10 +296,10 @@ func TestStructuralHash_ConstraintSensitivity(t *testing.T) {
 
 func TestStructuralHash_DataTypeSensitivity(t *testing.T) {
 	dtA := schema.TestNewDataType("Email", schema.StringMinLen(1), zeroSpan, "")
-	sA := buildMinimalSchema("app", nil, []*schema.DataType{dtA})
+	sA := buildMinimalSchema("app", nil, []schema.DataType{dtA})
 
 	dtB := schema.TestNewDataType("Email", schema.StringMinLen(5), zeroSpan, "")
-	sB := buildMinimalSchema("app", nil, []*schema.DataType{dtB})
+	sB := buildMinimalSchema("app", nil, []schema.DataType{dtB})
 
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB),
 		"different data type constraints must produce different hashes")
@@ -307,10 +307,10 @@ func TestStructuralHash_DataTypeSensitivity(t *testing.T) {
 
 func TestStructuralHash_DataTypeName(t *testing.T) {
 	dtA := schema.TestNewDataType("Email", schema.NewStringConstraint(), zeroSpan, "")
-	sA := buildMinimalSchema("app", nil, []*schema.DataType{dtA})
+	sA := buildMinimalSchema("app", nil, []schema.DataType{dtA})
 
 	dtB := schema.TestNewDataType("Phone", schema.NewStringConstraint(), zeroSpan, "")
-	sB := buildMinimalSchema("app", nil, []*schema.DataType{dtB})
+	sB := buildMinimalSchema("app", nil, []schema.DataType{dtB})
 
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB),
 		"different data type names must produce different hashes")
@@ -324,11 +324,11 @@ func TestStructuralHash_SuperTypeSensitivity(t *testing.T) {
 		schema.NewTypeID(location.SourceID{}, "User"),
 	)
 	schema.TestSetTypeSuperTypes(typ1, []schema.ResolvedTypeRef{superRef})
-	s1 := buildMinimalSchema("app", []*schema.Type{typ1}, nil)
+	s1 := buildMinimalSchema("app", []schema.Type{typ1}, nil)
 
 	// Same type without super type.
 	typ2 := buildTypeWithProps("Admin", nil)
-	s2 := buildMinimalSchema("app", []*schema.Type{typ2}, nil)
+	s2 := buildMinimalSchema("app", []schema.Type{typ2}, nil)
 
 	assert.NotEqual(t, schema.StructuralHash(s1), schema.StructuralHash(s2),
 		"type with vs without supertypes must produce different hashes")
@@ -336,12 +336,12 @@ func TestStructuralHash_SuperTypeSensitivity(t *testing.T) {
 
 func TestStructuralHash_PrimaryKeySensitivity(t *testing.T) {
 	propPK := makeProp("id", schema.NewUUIDConstraint(), false, true)
-	typPK := buildTypeWithProps("User", []*schema.Property{propPK})
-	sPK := buildMinimalSchema("app", []*schema.Type{typPK}, nil)
+	typPK := buildTypeWithProps("User", []schema.Property{propPK})
+	sPK := buildMinimalSchema("app", []schema.Type{typPK}, nil)
 
 	propNonPK := makeProp("id", schema.NewUUIDConstraint(), false, false)
-	typNonPK := buildTypeWithProps("User", []*schema.Property{propNonPK})
-	sNonPK := buildMinimalSchema("app", []*schema.Type{typNonPK}, nil)
+	typNonPK := buildTypeWithProps("User", []schema.Property{propNonPK})
+	sNonPK := buildMinimalSchema("app", []schema.Type{typNonPK}, nil)
 
 	assert.NotEqual(t, schema.StructuralHash(sPK), schema.StructuralHash(sNonPK),
 		"PK vs non-PK property must produce different hashes")
@@ -350,14 +350,14 @@ func TestStructuralHash_PrimaryKeySensitivity(t *testing.T) {
 func TestStructuralHash_AliasResolution(t *testing.T) {
 	// Schema with a direct StringMinLen(1) constraint on a property.
 	propDirect := makeProp("email", schema.StringMinLen(1), false, false)
-	typDirect := buildTypeWithProps("User", []*schema.Property{propDirect})
-	sDirect := buildMinimalSchema("app", []*schema.Type{typDirect}, nil)
+	typDirect := buildTypeWithProps("User", []schema.Property{propDirect})
+	sDirect := buildMinimalSchema("app", []schema.Type{typDirect}, nil)
 
 	// Schema with an alias that resolves to StringMinLen(1).
 	alias := schema.NewAliasConstraint("Email", schema.StringMinLen(1))
 	propAlias := makeProp("email", alias, false, false)
-	typAlias := buildTypeWithProps("User", []*schema.Property{propAlias})
-	sAlias := buildMinimalSchema("app", []*schema.Type{typAlias}, nil)
+	typAlias := buildTypeWithProps("User", []schema.Property{propAlias})
+	sAlias := buildMinimalSchema("app", []schema.Type{typAlias}, nil)
 
 	assert.Equal(t, schema.StructuralHash(sDirect), schema.StructuralHash(sAlias),
 		"alias constraint must resolve to same hash as direct constraint")
@@ -367,15 +367,15 @@ func TestStructuralHash_TypeOrderingDeterministic(t *testing.T) {
 	// Create schema with types added in one order.
 	propA := makeProp("id", schema.NewUUIDConstraint(), false, true)
 	propB := makeProp("name", schema.NewStringConstraint(), false, false)
-	typA := buildTypeWithProps("Alpha", []*schema.Property{propA})
-	typB := buildTypeWithProps("Beta", []*schema.Property{propB})
+	typA := buildTypeWithProps("Alpha", []schema.Property{propA})
+	typB := buildTypeWithProps("Beta", []schema.Property{propB})
 
-	// Schema.Types() returns lexicographic order regardless of insertion order.
-	// Each schema seals its own objects, so the second gets fresh ones.
-	s1 := buildMinimalSchema("app", []*schema.Type{typB, typA}, nil)
-	typA2 := buildTypeWithProps("Alpha", []*schema.Property{makeProp("id", schema.NewUUIDConstraint(), false, true)})
-	typB2 := buildTypeWithProps("Beta", []*schema.Property{makeProp("name", schema.NewStringConstraint(), false, false)})
-	s2 := buildMinimalSchema("app", []*schema.Type{typA2, typB2}, nil)
+	// The hash sorts members, so declaration order does not reach it.
+	// Each schema seals its own records, so the second gets fresh ones.
+	s1 := buildMinimalSchema("app", []schema.Type{typB, typA}, nil)
+	typA2 := buildTypeWithProps("Alpha", []schema.Property{makeProp("id", schema.NewUUIDConstraint(), false, true)})
+	typB2 := buildTypeWithProps("Beta", []schema.Property{makeProp("name", schema.NewStringConstraint(), false, false)})
+	s2 := buildMinimalSchema("app", []schema.Type{typA2, typB2}, nil)
 
 	assert.Equal(t, schema.StructuralHash(s1), schema.StructuralHash(s2),
 		"type insertion order must not affect hash")
@@ -401,29 +401,29 @@ func TestStructuralHash_ComprehensiveSchema(t *testing.T) {
 	ageProp := makeProp("age", schema.IntegerBetween(0, 200), true, false)
 	activeProp := makeProp("active", schema.NewBooleanConstraint(), false, false)
 
-	personType := buildTypeWithProps("Person", []*schema.Property{idProp, nameProp, ageProp, activeProp})
+	personType := buildTypeWithProps("Person", []schema.Property{idProp, nameProp, ageProp, activeProp})
 
 	companyID := makeProp("id", schema.NewUUIDConstraint(), false, true)
 	companyName := makeProp("name", schema.NewStringConstraint(), false, false)
-	companyType := buildTypeWithProps("Company", []*schema.Property{companyID, companyName})
+	companyType := buildTypeWithProps("Company", []schema.Property{companyID, companyName})
 
 	edgeProp := makeProp("since", schema.NewDateConstraint(), false, false)
-	worksAt := makeAssoc("WORKS_AT", "Company", false, false, []*schema.Property{edgeProp})
-	schema.TestSetTypeAssociations(personType, []*schema.Relation{worksAt})
-	schema.TestSetTypeAllAssociations(personType, []*schema.Relation{worksAt})
+	worksAt := makeAssoc("WORKS_AT", "Company", false, false, []schema.Property{edgeProp})
+	schema.TestSetTypeAssociations(personType, []schema.Relation{worksAt})
+	schema.TestSetTypeAllAssociations(personType, []schema.Relation{worksAt})
 
 	addressProp := makeProp("street", schema.NewStringConstraint(), false, false)
-	addressType := buildTypeWithProps("Address", []*schema.Property{addressProp})
+	addressType := buildTypeWithProps("Address", []schema.Property{addressProp})
 	hasAddress := makeComp("HAS_ADDRESS", "Address", true, false)
-	schema.TestSetTypeCompositions(personType, []*schema.Relation{hasAddress})
-	schema.TestSetTypeAllCompositions(personType, []*schema.Relation{hasAddress})
+	schema.TestSetTypeCompositions(personType, []schema.Relation{hasAddress})
+	schema.TestSetTypeAllCompositions(personType, []schema.Relation{hasAddress})
 
 	emailDT := schema.TestNewDataType("Email", schema.StringMinLen(1), zeroSpan, "")
 
 	s := buildMinimalSchema(
 		"hr",
-		[]*schema.Type{personType, companyType, addressType},
-		[]*schema.DataType{emailDT},
+		[]schema.Type{personType, companyType, addressType},
+		[]schema.DataType{emailDT},
 	)
 
 	h1 := schema.StructuralHash(s)
@@ -434,23 +434,23 @@ func TestStructuralHash_ComprehensiveSchema(t *testing.T) {
 
 // assertConstraintsDiffer verifies two properties with different constraints
 // produce different schema hashes.
-func assertConstraintsDiffer(t *testing.T, propA, propB *schema.Property) {
+func assertConstraintsDiffer(t *testing.T, propA, propB schema.Property) {
 	t.Helper()
-	typA := buildTypeWithProps("T", []*schema.Property{propA})
-	sA := buildMinimalSchema("s", []*schema.Type{typA}, nil)
-	typB := buildTypeWithProps("T", []*schema.Property{propB})
-	sB := buildMinimalSchema("s", []*schema.Type{typB}, nil)
+	typA := buildTypeWithProps("T", []schema.Property{propA})
+	sA := buildMinimalSchema("s", []schema.Type{typA}, nil)
+	typB := buildTypeWithProps("T", []schema.Property{propB})
+	sB := buildMinimalSchema("s", []schema.Type{typB}, nil)
 	assert.NotEqual(t, schema.StructuralHash(sA), schema.StructuralHash(sB))
 }
 
 // assertConstraintsMatch verifies two properties with equivalent constraints
 // produce the same schema hash.
-func assertConstraintsMatch(t *testing.T, propA, propB *schema.Property) {
+func assertConstraintsMatch(t *testing.T, propA, propB schema.Property) {
 	t.Helper()
-	typA := buildTypeWithProps("T", []*schema.Property{propA})
-	sA := buildMinimalSchema("s", []*schema.Type{typA}, nil)
-	typB := buildTypeWithProps("T", []*schema.Property{propB})
-	sB := buildMinimalSchema("s", []*schema.Type{typB}, nil)
+	typA := buildTypeWithProps("T", []schema.Property{propA})
+	sA := buildMinimalSchema("s", []schema.Type{typA}, nil)
+	typB := buildTypeWithProps("T", []schema.Property{propB})
+	sB := buildMinimalSchema("s", []schema.Type{typB}, nil)
 	assert.Equal(t, schema.StructuralHash(sA), schema.StructuralHash(sB))
 }
 
@@ -574,7 +574,7 @@ func TestStructuralHashVectors(t *testing.T) {
 	require.NotEmpty(t, vectors, "hash_vectors.json must contain at least one vector")
 
 	// Build the three reference schemas matching the vector descriptions
-	schemas := map[string]*schema.Schema{
+	schemas := map[string]schema.Schema{
 		"minimal":         buildVectorSchemaMinimal(),
 		"relational":      buildVectorSchemaRelational(),
 		"constraint_rich": buildVectorSchemaConstraintRich(),
@@ -594,40 +594,40 @@ func TestStructuralHashVectors(t *testing.T) {
 }
 
 // buildVectorSchemaMinimal: single type, one string PK, no relations.
-func buildVectorSchemaMinimal() *schema.Schema {
+func buildVectorSchemaMinimal() schema.Schema {
 	idProp := makeProp("id", schema.NewStringConstraint(), false, true)
-	typ := buildTypeWithProps("Item", []*schema.Property{idProp})
-	return buildMinimalSchema("minimal", []*schema.Type{typ}, nil)
+	typ := buildTypeWithProps("Item", []schema.Property{idProp})
+	return buildMinimalSchema("minimal", []schema.Type{typ}, nil)
 }
 
 // buildVectorSchemaRelational: two types with association (+ edge props) and composition.
-func buildVectorSchemaRelational() *schema.Schema {
+func buildVectorSchemaRelational() schema.Schema {
 	personID := makeProp("id", schema.NewStringConstraint(), false, true)
 	personName := makeProp("name", schema.NewStringConstraint(), false, false)
-	personType := buildTypeWithProps("Person", []*schema.Property{personID, personName})
+	personType := buildTypeWithProps("Person", []schema.Property{personID, personName})
 
 	companyID := makeProp("id", schema.NewStringConstraint(), false, true)
 	companyName := makeProp("name", schema.NewStringConstraint(), false, false)
-	companyType := buildTypeWithProps("Company", []*schema.Property{companyID, companyName})
+	companyType := buildTypeWithProps("Company", []schema.Property{companyID, companyName})
 
 	edgeProp := makeProp("since", schema.NewDateConstraint(), false, false)
-	worksAt := makeAssoc("WORKS_AT", "Company", false, false, []*schema.Property{edgeProp})
-	schema.TestSetTypeAssociations(personType, []*schema.Relation{worksAt})
-	schema.TestSetTypeAllAssociations(personType, []*schema.Relation{worksAt})
+	worksAt := makeAssoc("WORKS_AT", "Company", false, false, []schema.Property{edgeProp})
+	schema.TestSetTypeAssociations(personType, []schema.Relation{worksAt})
+	schema.TestSetTypeAllAssociations(personType, []schema.Relation{worksAt})
 
 	addressStreet := makeProp("street", schema.NewStringConstraint(), false, false)
-	addressType := buildTypeWithProps("Address", []*schema.Property{addressStreet})
+	addressType := buildTypeWithProps("Address", []schema.Property{addressStreet})
 	hasAddress := makeComp("HAS_ADDRESS", "Address", true, true)
-	schema.TestSetTypeCompositions(personType, []*schema.Relation{hasAddress})
-	schema.TestSetTypeAllCompositions(personType, []*schema.Relation{hasAddress})
+	schema.TestSetTypeCompositions(personType, []schema.Relation{hasAddress})
+	schema.TestSetTypeAllCompositions(personType, []schema.Relation{hasAddress})
 
 	return buildMinimalSchema("relational",
-		[]*schema.Type{personType, companyType, addressType}, nil)
+		[]schema.Type{personType, companyType, addressType}, nil)
 }
 
 // buildVectorSchemaConstraintRich: one type with properties exercising every constraint kind.
-func buildVectorSchemaConstraintRich() *schema.Schema {
-	props := []*schema.Property{
+func buildVectorSchemaConstraintRich() schema.Schema {
+	props := []schema.Property{
 		makeProp("id", schema.NewStringConstraint(), false, true),
 		makeProp("str_bounded", schema.StringLenBetween(1, 255), false, false),
 		makeProp("int_bounded", schema.IntegerBetween(0, 1000), false, false),
@@ -642,7 +642,7 @@ func buildVectorSchemaConstraintRich() *schema.Schema {
 		makeProp("tags", schema.ListLenBetween(schema.NewStringConstraint(), 1, 10), false, false),
 	}
 	typ := buildTypeWithProps("Everything", props)
-	return buildMinimalSchema("constraint_rich", []*schema.Type{typ}, nil)
+	return buildMinimalSchema("constraint_rich", []schema.Type{typ}, nil)
 }
 
 // TestStructuralHash_DataTypeEdgeProperty pins the loaded-schema shape whose
@@ -651,7 +651,7 @@ func buildVectorSchemaConstraintRich() *schema.Schema {
 // instead of the unrecognized-kind panic an unresolved alias produces. The
 // hash must be deterministic and sensitive to the edge property's presence.
 func TestStructuralHash_DataTypeEdgeProperty(t *testing.T) {
-	load := func(edgeProps string) *schema.Schema {
+	load := func(edgeProps string) schema.Schema {
 		t.Helper()
 		s, result := schema.LoadString(t.Context(), `schema "geo"
 

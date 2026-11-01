@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"iter"
 	"slices"
 
 	"github.com/simon-lentz/yammm/immutable"
@@ -21,7 +22,13 @@ import (
 // [Snapshot.InstanceByKey]; a composed child via [Instance.Composed]; and the
 // instances an edge, a duplicate or an unresolved record names via that
 // record's methods.
-type Instance struct {
+type Instance struct{ *instanceState }
+
+// IsZero reports whether the handle names no record.
+func (i Instance) IsZero() bool { return i.instanceState == nil }
+
+// instanceState is the record a [Instance] names.
+type instanceState struct {
 	// typeName is the canonical instance tag form.
 	// Local types: unqualified (e.g., "Person")
 	// Imported types: alias-qualified (e.g., "c.Entity")
@@ -39,11 +46,11 @@ type Instance struct {
 	// composed holds composed children indexed by relation name.
 	// Only populated for instances that have compositions.
 	// nil if the instance has no compositions.
-	composed map[string][]*Instance
+	composed map[string][]Instance
 
 	// provenance holds source location metadata for the instance.
-	// nil if no provenance was provided by the adapter.
-	provenance *location.Provenance
+	// Zero if the adapter provided no provenance.
+	provenance location.Provenance
 
 	// validated records whether this instance entered through a
 	// validator-built ValidInstance. Rebuilt instances are always false:
@@ -63,8 +70,8 @@ type Instance struct {
 // [github.com/simon-lentz/yammm/schema.TagForm] renders any identity as this
 // form, and [github.com/simon-lentz/yammm/schema.AddressableTag] renders only
 // the ones the bound schema can name.
-func (i *Instance) TypeName() string {
-	if i == nil {
+func (i Instance) TypeName() string {
+	if i.IsZero() {
 		return ""
 	}
 	return i.typeName
@@ -73,9 +80,9 @@ func (i *Instance) TypeName() string {
 // TypeID returns the semantic type identity.
 //
 // Use TypeID for equality comparisons, inheritance checks, and cross-schema
-// type resolution. Use [Instance.TypeName] for display and map lookups.
-func (i *Instance) TypeID() schema.TypeID {
-	if i == nil {
+// type resolution. Use [Instance.TypeName] for display alone.
+func (i Instance) TypeID() schema.TypeID {
+	if i.IsZero() {
 		return schema.TypeID{}
 	}
 	return i.typeID
@@ -85,8 +92,8 @@ func (i *Instance) TypeID() schema.TypeID {
 //
 // The returned Key is immutable. Use [immutable.Key.String] for map key
 // lookups or [immutable.Key.Clone] to get a mutable copy.
-func (i *Instance) PrimaryKey() immutable.Key {
-	if i == nil {
+func (i Instance) PrimaryKey() immutable.Key {
+	if i.IsZero() {
 		return immutable.Key{}
 	}
 	return i.primaryKey
@@ -97,8 +104,8 @@ func (i *Instance) PrimaryKey() immutable.Key {
 //
 // Property names are matched case-sensitively. Use the schema's canonical
 // property names for reliable lookups.
-func (i *Instance) Property(name string) (immutable.Value, bool) {
-	if i == nil {
+func (i Instance) Property(name string) (immutable.Value, bool) {
+	if i.IsZero() {
 		return immutable.Value{}, false
 	}
 	return i.properties.Get(name)
@@ -108,8 +115,8 @@ func (i *Instance) Property(name string) (immutable.Value, bool) {
 //
 // The returned Properties is immutable. Use [immutable.Properties.SortedRange]
 // for deterministic iteration or [immutable.Properties.Clone] for a mutable copy.
-func (i *Instance) Properties() immutable.Properties {
-	if i == nil {
+func (i Instance) Properties() immutable.Properties {
+	if i.IsZero() {
 		return immutable.Properties{}
 	}
 	return i.properties
@@ -117,11 +124,11 @@ func (i *Instance) Properties() immutable.Properties {
 
 // Provenance returns the source location metadata for this instance.
 //
-// Returns nil if no provenance was provided by the adapter.
+// Returns the zero Provenance if the adapter provided none.
 // Provenance includes SourceName, Path, and Span for diagnostic reporting.
-func (i *Instance) Provenance() *location.Provenance {
-	if i == nil {
-		return nil
+func (i Instance) Provenance() location.Provenance {
+	if i.IsZero() {
+		return location.Provenance{}
 	}
 	return i.provenance
 }
@@ -130,35 +137,27 @@ func (i *Instance) Provenance() *location.Provenance {
 // validator-built ValidInstance (see [Graph.Add]). Instances rebuilt from
 // a loaded snapshot report false; [Snapshot.Attestation] carries the
 // writing library's claim for those.
-func (i *Instance) Validated() bool {
-	if i == nil {
+func (i Instance) Validated() bool {
+	if i.IsZero() {
 		return false
 	}
 	return i.validated
 }
 
-// Composed returns composed children for the given relation name.
-//
-// Returns nil if the relation does not exist or has no children.
-// The slice is a copy, so changing it does not affect the instance; the
-// children are the snapshot's own.
-func (i *Instance) Composed(relationName string) []*Instance {
-	if i == nil || i.composed == nil {
-		return nil
+// Composed returns an iterator over the composed children of the given relation
+// name. It yields nothing if the relation does not exist or has no children.
+func (i Instance) Composed(relationName string) iter.Seq[Instance] {
+	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
+	var children []Instance
+	if !i.IsZero() {
+		children = i.composed[relationName]
 	}
-	children := i.composed[relationName]
-	if len(children) == 0 {
-		return nil
-	}
-	// Return defensive copy
-	result := make([]*Instance, len(children))
-	copy(result, children)
-	return result
+	return slices.Values(children)
 }
 
 // ComposedCount returns the number of composed children for the given relation.
-func (i *Instance) ComposedCount(relationName string) int {
-	if i == nil || i.composed == nil {
+func (i Instance) ComposedCount(relationName string) int {
+	if i.IsZero() || i.composed == nil {
 		return 0
 	}
 	return len(i.composed[relationName])
@@ -166,14 +165,14 @@ func (i *Instance) ComposedCount(relationName string) int {
 
 // HasComposed reports whether the instance has any composed children
 // for the given relation.
-func (i *Instance) HasComposed(relationName string) bool {
+func (i Instance) HasComposed(relationName string) bool {
 	return i.ComposedCount(relationName) > 0
 }
 
 // ComposedRelations returns the names of all relations that have composed children.
 // The returned slice is sorted lexicographically for deterministic iteration.
-func (i *Instance) ComposedRelations() []string {
-	if i == nil || len(i.composed) == 0 {
+func (i Instance) ComposedRelations() []string {
+	if i.IsZero() || len(i.composed) == 0 {
 		return nil
 	}
 	result := make([]string, 0, len(i.composed))
@@ -192,34 +191,35 @@ func newInstance(
 	typeID schema.TypeID,
 	primaryKey immutable.Key,
 	properties immutable.Properties,
-	provenance *location.Provenance,
+	provenance location.Provenance,
 	validated bool,
-) *Instance {
-	return &Instance{
+) Instance {
+	return Instance{&instanceState{
 		typeName:   typeName,
 		typeID:     typeID,
 		primaryKey: primaryKey,
 		properties: properties,
 		provenance: provenance,
 		validated:  validated,
-	}
+	}}
 }
 
 // addComposed attaches a composed child to the instance.
 // This is an internal method called during graph construction.
-func (i *Instance) addComposed(relationName string, child *Instance) {
+func (i Instance) addComposed(relationName string, child Instance) {
 	if i.composed == nil {
-		i.composed = make(map[string][]*Instance)
+		i.composed = make(map[string][]Instance)
 	}
 	i.composed[relationName] = append(i.composed[relationName], child)
 }
 
 // cloneInstance creates a deep copy of an Instance including its composed children.
-// The cloneMap tracks original-to-clone mappings to handle the full instance tree.
-// Returns the cloned instance and updates cloneMap with the new mapping.
+// cloneMap receives the original-to-clone mapping of every instance in the tree,
+// which is how a caller resolves a record naming one of them. orig names a record,
+// and no record is cloned twice: a composition tree shares no child.
 //
 // dependency: This function shares primaryKey (immutable.Key),
-// properties (immutable.Properties), and provenance (*location.Provenance)
+// properties (immutable.Properties), and provenance (location.Provenance)
 // by direct assignment rather than deep-copying.
 // This is safe because these types guarantee structural immutability:
 // all internal maps and slices are unexported and never modified after construction.
@@ -229,18 +229,9 @@ func (i *Instance) addComposed(relationName string, child *Instance) {
 // Fields shared directly: typeName, typeID, primaryKey, properties,
 // provenance, validated
 // Fields deep-copied: composed map and its child instance trees
-func cloneInstance(orig *Instance, cloneMap map[*Instance]*Instance) *Instance {
-	if orig == nil {
-		return nil
-	}
-
-	// Check if already cloned (handles potential reference cycles)
-	if clone, exists := cloneMap[orig]; exists {
-		return clone
-	}
-
+func cloneInstance(orig Instance, cloneMap map[Instance]Instance) Instance {
 	// Create the clone - immutable fields can be shared directly
-	clone := &Instance{
+	clone := &instanceState{
 		typeName:   orig.typeName,
 		typeID:     orig.typeID,
 		primaryKey: orig.primaryKey,
@@ -249,14 +240,13 @@ func cloneInstance(orig *Instance, cloneMap map[*Instance]*Instance) *Instance {
 		validated:  orig.validated,
 	}
 
-	// Register clone before recursing to handle any reference cycles
-	cloneMap[orig] = clone
+	cloneMap[orig] = Instance{clone}
 
 	// Deep clone composed children
 	if orig.composed != nil {
-		clone.composed = make(map[string][]*Instance, len(orig.composed))
+		clone.composed = make(map[string][]Instance, len(orig.composed))
 		for relationName, children := range orig.composed {
-			clonedChildren := make([]*Instance, len(children))
+			clonedChildren := make([]Instance, len(children))
 			for i, child := range children {
 				clonedChildren[i] = cloneInstance(child, cloneMap)
 			}
@@ -264,5 +254,5 @@ func cloneInstance(orig *Instance, cloneMap map[*Instance]*Instance) *Instance {
 		}
 	}
 
-	return clone
+	return Instance{clone}
 }

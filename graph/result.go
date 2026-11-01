@@ -26,7 +26,8 @@ import (
 // load option is the reader's remedy when a claim is not enough.
 //
 // A snapshot may carry NO claim, which [Snapshot.Attestation] reports as nil.
-// A document written before the attestation existed carries none, and silence
+// A v4 document that omits the attestation carries none, as do parts built with
+// a nil one, and silence
 // is not the same statement as a claim that both dimensions are false — the
 // absence is represented as absence so it cannot be read as the stronger
 // negative one.
@@ -38,14 +39,15 @@ type Attestation struct {
 // Snapshot is a snapshot of the graph at a point in time.
 //
 // Snapshot has no method that changes it, and it is safe for concurrent read
-// access from multiple goroutines. Its accessors return the snapshot's own
-// instances, edges, duplicates and records, so an assignment through one
-// changes the snapshot; see the package doc's "Thread Safety".
+// access from multiple goroutines. Its accessors return handles to the
+// snapshot's own records, and no caller holds a record's address, so no
+// assignment through a handle changes the snapshot; see the package doc's
+// "Thread Safety".
 //
 // Types are identified by [schema.TypeID], never by name; see the package doc
 // for why, and [schema.TagForm] for rendering one as a name.
 //
-// Every slice-returning method produces deterministically sorted output,
+// Every collection accessor produces deterministically sorted output,
 // independent of Add() call order or concurrency ([Snapshot.EdgesFrom] in
 // [Snapshot.Edges]' order), and every ordering below
 // compares types by TypeID so two types rendering one name still sort apart:
@@ -58,19 +60,26 @@ type Attestation struct {
 //   - [Snapshot.Unresolved]: (sourceType, sourceKey, relation, targetType,
 //     targetKey, reason, required, edge properties)
 //
-// Every arm of each tuple is compared, and records that differ in an arm sort
-// apart, save in two cases. A properties arm writes no member's type inside a
-// list or map, so float64(1) and int64(1) there tie. The provenance arm compares
-// a source name and a span start, and a loaded provenance carries no span, so
-// two loaded duplicates that differ only in their provenance's path tie.
+// Every arm of each tuple is compared. A properties arm compares a rendering that
+// writes each value as %T|%#v, and a provenance arm a rendering of its source name
+// and span start, so records those renderings make equal tie in that arm. Among
+// the ties are float64(1) and int64(1) inside a list or map, a zero and an empty
+// Properties, a [time.Time] at one wall clock under two unnamed zones, and two
+// non-zero provenance values that differ only elsewhere.
 //
 // No instance map is exposed, so there is no iteration order to be surprised
 // by: [Snapshot.AllInstances] yields every root instance in the order above,
 // and [Snapshot.Types] with [Snapshot.InstancesOf] walks the same order a
-// slice at a time.
-type Snapshot struct {
+// type at a time.
+type Snapshot struct{ *snapshotState }
+
+// IsZero reports whether the handle names no record.
+func (r Snapshot) IsZero() bool { return r.snapshotState == nil }
+
+// snapshotState is the record a [Snapshot] names.
+type snapshotState struct {
 	// schema is the schema used for validation.
-	schema *schema.Schema
+	schema schema.Schema
 
 	// canon rewrites a received address into the spelling instanceIndex holds,
 	// as the constructor that built the index rewrote every key it installed.
@@ -80,24 +89,24 @@ type Snapshot struct {
 	types []schema.TypeID
 
 	// instances maps type identity to sorted instances.
-	instances map[schema.TypeID][]*Instance
+	instances map[schema.TypeID][]Instance
 
 	// instanceIndex provides O(1) lookup by (type, key).
-	instanceIndex map[schema.TypeID]map[string]*Instance
+	instanceIndex map[schema.TypeID]map[string]Instance
 
 	// edges contains all resolved edges in sorted order.
-	edges []*Edge
+	edges []Edge
 
 	// edgeIndex maps each instance to its outgoing edges for O(1) lookup.
 	// Built eagerly in newSnapshot from the sorted edges slice.
-	// Uses pointer identity: only instances from this snapshot are found.
-	edgeIndex map[*Instance][]*Edge
+	// Uses record identity: only instances from this snapshot are found.
+	edgeIndex map[Instance][]Edge
 
 	// duplicates contains duplicate records in sorted order.
-	duplicates []*Duplicate
+	duplicates []Duplicate
 
 	// unresolved contains unresolved edge records in sorted order.
-	unresolved []*UnresolvedEdge
+	unresolved []UnresolvedEdge
 
 	// diagnostics contains all issues from graph construction.
 	diagnostics diag.Result
@@ -116,9 +125,9 @@ type Snapshot struct {
 // provided to snapshot.Load, not the schema used at original construction
 // time. The loaded schema is verified for structural compatibility via
 // schema.StructuralHash.
-func (r *Snapshot) Schema() *schema.Schema {
-	if r == nil {
-		return nil
+func (r Snapshot) Schema() schema.Schema {
+	if r.IsZero() {
+		return schema.Schema{}
 	}
 	return r.schema
 }
@@ -129,8 +138,8 @@ func (r *Snapshot) Schema() *schema.Schema {
 // so [schema.AddressableTag] accepts it; a composed child's type is a part
 // type and is never denoted, so walk [Instance.ComposedRelations] for a
 // subtree. The slice is a copy, and a [schema.TypeID] is a value.
-func (r *Snapshot) Types() []schema.TypeID {
-	if r == nil || len(r.types) == 0 {
+func (r Snapshot) Types() []schema.TypeID {
+	if r.IsZero() || len(r.types) == 0 {
 		return nil
 	}
 	result := make([]schema.TypeID, len(r.types))
@@ -141,20 +150,14 @@ func (r *Snapshot) Types() []schema.TypeID {
 // InstancesOf returns instances of the given type in sorted order.
 //
 // Instances are sorted by primary key using [FormatKey] string comparison.
-// Returns nil if the type has no instances in the graph.
-//
-// The slice is a copy; the instances are the snapshot's own.
-func (r *Snapshot) InstancesOf(id schema.TypeID) []*Instance {
-	if r == nil || r.instances == nil {
-		return nil
+// It yields nothing if the type has no instances in the graph.
+func (r Snapshot) InstancesOf(id schema.TypeID) iter.Seq[Instance] {
+	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
+	var instances []Instance
+	if !r.IsZero() {
+		instances = r.instances[id]
 	}
-	instances := r.instances[id]
-	if len(instances) == 0 {
-		return nil
-	}
-	result := make([]*Instance, len(instances))
-	copy(result, instances)
-	return result
+	return slices.Values(instances)
 }
 
 // AllInstances returns an iterator over every root instance in the graph, in
@@ -163,9 +166,9 @@ func (r *Snapshot) InstancesOf(id schema.TypeID) []*Instance {
 //
 // Composed children are not yielded. For the subtree beneath a root, walk
 // [Instance.ComposedRelations] and [Instance.Composed].
-func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
-	return func(yield func(*Instance) bool) {
-		if r == nil {
+func (r Snapshot) AllInstances() iter.Seq[Instance] {
+	return func(yield func(Instance) bool) {
+		if r.IsZero() {
 			return
 		}
 		for _, typeID := range r.types {
@@ -186,14 +189,14 @@ func (r *Snapshot) AllInstances() iter.Seq[*Instance] {
 // two offsets is two addresses. The exact spelling is the common case, so a
 // Timestamp, Date or UUID key is parsed only on a miss. [Instance.PrimaryKey]'s String is the
 // address the instance carries; a string [ParseKey] refuses addresses nothing.
-// Returns (nil, false) on a miss.
-func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool) {
-	if r == nil || r.instanceIndex == nil {
-		return nil, false
+// Returns the zero Instance and false on a miss.
+func (r Snapshot) InstanceByKey(id schema.TypeID, key string) (Instance, bool) {
+	if r.IsZero() || r.instanceIndex == nil {
+		return Instance{}, false
 	}
 	typeIndex := r.instanceIndex[id]
 	if typeIndex == nil {
-		return nil, false
+		return Instance{}, false
 	}
 	if inst, ok := typeIndex[key]; ok {
 		return inst, true
@@ -206,15 +209,13 @@ func (r *Snapshot) InstanceByKey(id schema.TypeID, key string) (*Instance, bool)
 //
 // Edges are sorted by the tuple (sourceType, sourceKey, relation, targetType,
 // targetKey, edge properties), comparing types by identity.
-//
-// The slice is a copy; the edges are the snapshot's own.
-func (r *Snapshot) Edges() []*Edge {
-	if r == nil || len(r.edges) == 0 {
-		return nil
+func (r Snapshot) Edges() iter.Seq[Edge] {
+	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
+	var edges []Edge
+	if !r.IsZero() {
+		edges = r.edges
 	}
-	result := make([]*Edge, len(r.edges))
-	copy(result, r.edges)
-	return result
+	return slices.Values(edges)
 }
 
 // EdgesFrom returns the outgoing edges for the given instance, sorted by
@@ -225,31 +226,26 @@ func (r *Snapshot) Edges() []*Edge {
 // O(1) lookup per instance.
 //
 // The instance must belong to this snapshot. Instances from other snapshots
-// or from a mutable Graph always return nil (the index uses pointer identity).
+// or from a mutable Graph always yield nothing (the index uses record identity).
 //
-// Returns nil if the instance has no outgoing edges.
-// The slice is a copy, so changing it does not affect the snapshot; the edges
-// are the snapshot's own.
-func (r *Snapshot) EdgesFrom(inst *Instance) []*Edge {
-	if r == nil || inst == nil || r.edgeIndex == nil {
-		return nil
+// It yields nothing if the instance has no outgoing edges.
+func (r Snapshot) EdgesFrom(inst Instance) iter.Seq[Edge] {
+	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
+	var edges []Edge
+	if !r.IsZero() {
+		edges = r.edgeIndex[inst]
 	}
-	edges := r.edgeIndex[inst]
-	if len(edges) == 0 {
-		return nil
-	}
-	result := make([]*Edge, len(edges))
-	copy(result, edges)
-	return result
+	return slices.Values(edges)
 }
 
 // Diagnostics returns validation issues from graph construction.
 //
-// This includes errors and warnings from [Graph.Add], [Graph.AddOrMerge] and
+// This includes the issues of [Graph.Add], [Graph.AddOrMerge] and
 // [Graph.AddComposed] calls, and a [BatchAssembler]'s validator results, its
-// validation failures among them, and nil-instance refusals. A record
-// refused for an [instance.Refused] value adds none: its producer's result
-// holds its issue.
+// validation failures among them, and zero-instance refusals. A record
+// [BatchAssembler.Add] refuses for its one fault, an [instance.Refused] value,
+// adds none: its producer's result holds its issue. [BatchAssembler.AddValid] of
+// the zero entry such a value leaves adds E_INTERNAL.
 // [Graph.Check] results are returned separately per-call and are not accumulated
 // here, making Check idempotent: multiple calls have no effect on snapshot diagnostics.
 //
@@ -261,8 +257,8 @@ func (r *Snapshot) EdgesFrom(inst *Instance) []*Edge {
 // option to re-check a loaded document's instance data.
 //
 // Use [diag.Result.OK] to check if the graph construction succeeded.
-func (r *Snapshot) Diagnostics() diag.Result {
-	if r == nil {
+func (r Snapshot) Diagnostics() diag.Result {
+	if r.IsZero() {
 		return diag.OK()
 	}
 	return r.diagnostics
@@ -276,28 +272,27 @@ func (r *Snapshot) Diagnostics() diag.Result {
 // fields are exported, so returning the stored pointer would let one caller
 // rewrite another's claim by a field assignment, as [Snapshot.Types] copies
 // the identities it returns.
-func (r *Snapshot) Attestation() *Attestation {
-	if r == nil || r.attestation == nil {
+func (r Snapshot) Attestation() *Attestation {
+	if r.IsZero() || r.attestation == nil {
 		return nil
 	}
 	att := *r.attestation
 	return &att
 }
 
-// Duplicates returns duplicate primary key records in sorted order.
+// Duplicates returns the [Duplicate] records of rejected instances in sorted order.
 //
 // Duplicates are sorted by the tuple (type, primaryKey, relation,
 // conflictType, conflictKey, parent slot, rejected instance's properties,
 // rejected instance's provenance).
-// Returns nil if no duplicates were detected.
-// The slice is a copy; the records are the snapshot's own (see [Duplicate]).
-func (r *Snapshot) Duplicates() []*Duplicate {
-	if r == nil || len(r.duplicates) == 0 {
-		return nil
+// It yields nothing if no duplicates were detected.
+func (r Snapshot) Duplicates() iter.Seq[Duplicate] {
+	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
+	var duplicates []Duplicate
+	if !r.IsZero() {
+		duplicates = r.duplicates
 	}
-	result := make([]*Duplicate, len(r.duplicates))
-	copy(result, r.duplicates)
-	return result
+	return slices.Values(duplicates)
 }
 
 // Unresolved returns unresolved edge records in sorted order.
@@ -306,15 +301,14 @@ func (r *Snapshot) Duplicates() []*Duplicate {
 // holds no root for, or a required one the data left absent or empty. They are sorted by the tuple (sourceType, sourceKey, relation,
 // targetType, targetKey, reason, required, edge properties).
 //
-// Returns nil if all edges are resolved.
-// The slice is a copy; the records are the snapshot's own.
-func (r *Snapshot) Unresolved() []*UnresolvedEdge {
-	if r == nil || len(r.unresolved) == 0 {
-		return nil
+// It yields nothing if all edges are resolved.
+func (r Snapshot) Unresolved() iter.Seq[UnresolvedEdge] {
+	// One return lets the compiler resolve the closure at the call, so a range over it keeps its variables off the heap.
+	var unresolved []UnresolvedEdge
+	if !r.IsZero() {
+		unresolved = r.unresolved
 	}
-	result := make([]*UnresolvedEdge, len(r.unresolved))
-	copy(result, r.unresolved)
-	return result
+	return slices.Values(unresolved)
 }
 
 // newSnapshot creates a Snapshot, establishing the ordering its accessors
@@ -329,17 +323,17 @@ func (r *Snapshot) Unresolved() []*UnresolvedEdge {
 // Composed children are deliberately untouched: their order is the caller's,
 // and a keyless child's position IS its identity ([InstanceParts]).
 func newSnapshot(
-	s *schema.Schema,
+	s schema.Schema,
 	canon *canonicalizer,
 	types []schema.TypeID,
-	instances map[schema.TypeID][]*Instance,
-	instanceIndex map[schema.TypeID]map[string]*Instance,
-	edges []*Edge,
-	duplicates []*Duplicate,
-	unresolved []*UnresolvedEdge,
+	instances map[schema.TypeID][]Instance,
+	instanceIndex map[schema.TypeID]map[string]Instance,
+	edges []Edge,
+	duplicates []Duplicate,
+	unresolved []UnresolvedEdge,
 	diagnostics diag.Result,
 	attestation *Attestation,
-) *Snapshot {
+) Snapshot {
 	// A repeated identity would make every instance of that type appear twice
 	// in AllInstances and twice in the persisted document.
 	slices.SortFunc(types, func(a, b schema.TypeID) int {
@@ -348,7 +342,7 @@ func newSnapshot(
 	types = slices.CompactFunc(types, func(a, b schema.TypeID) bool { return a == b })
 
 	for _, insts := range instances {
-		slices.SortFunc(insts, func(a, b *Instance) int {
+		slices.SortFunc(insts, func(a, b Instance) int {
 			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
 		})
 	}
@@ -356,7 +350,7 @@ func newSnapshot(
 	slices.SortFunc(duplicates, compareDuplicates)
 	slices.SortFunc(unresolved, compareUnresolved)
 
-	snap := &Snapshot{
+	snap := &snapshotState{
 		schema:        s,
 		canon:         canon,
 		types:         types,
@@ -369,10 +363,10 @@ func newSnapshot(
 		attestation:   attestation,
 	}
 	if len(edges) > 0 {
-		snap.edgeIndex = make(map[*Instance][]*Edge)
+		snap.edgeIndex = make(map[Instance][]Edge)
 		for _, e := range edges {
 			snap.edgeIndex[e.source] = append(snap.edgeIndex[e.source], e)
 		}
 	}
-	return snap
+	return Snapshot{snap}
 }

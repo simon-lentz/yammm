@@ -41,7 +41,7 @@ import (
 // deeper than the reader accepts returns nil bytes with Error
 // E_SNAPSHOT_DEPTH_EXCEEDED — the same code and severity the reader raises, so
 // the bound reads identically from both sides. Fatal E_INTERNAL marks only a
-// broken invariant of the snapshot itself. Panics if snap is nil.
+// broken invariant of the snapshot itself. Panics if snap is zero.
 //
 // Three further refusals, each Error: an indent that is not JSON whitespace, which
 // would produce bytes that are not JSON ([diag.E_SNAPSHOT_MALFORMED]); a
@@ -49,9 +49,9 @@ import (
 // write as U+FFFD ([diag.E_SNAPSHOT_MALFORMED]); and a denoted type whose
 // schema is outside the entry schema's import closure, which the document has
 // no portable name for ([diag.E_SNAPSHOT_UNKNOWN_TYPE]).
-func Marshal(ctx context.Context, snap *graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
-	if snap == nil {
-		panic("snapshot.Marshal: nil Snapshot")
+func Marshal(ctx context.Context, snap graph.Snapshot, opts ...Option) ([]byte, diag.Result) {
+	if snap.IsZero() {
+		panic("snapshot.Marshal: zero Snapshot")
 	}
 	if err := ctx.Err(); err != nil {
 		c := diag.NewCollector(0)
@@ -171,30 +171,29 @@ func marshalSection(v any, indent string) ([]byte, error) {
 // instance's own identity.
 type writerGroup struct {
 	id        schema.TypeID
-	instances []*graph.Instance
+	instances []graph.Instance
 }
 
-// writerView is one read of the snapshot the writer emits from, so the table
-// pass and the emit pass see the same data without re-walking the snapshot's
-// defensive-copy accessors.
+// writerView holds the groups and diagnostic records the table pass and the emit
+// pass both read, in one order. Each pass reads an instance's edges from the
+// snapshot itself.
 type writerView struct {
+	snap       graph.Snapshot
 	groups     []writerGroup
-	edges      map[*graph.Instance][]*graph.Edge
-	duplicates []*graph.Duplicate
-	unresolved []*graph.UnresolvedEdge
+	duplicates []graph.Duplicate
+	unresolved []graph.UnresolvedEdge
 }
 
 // newWriterView reads the snapshot once. Instances are grouped by their own
 // TypeID — the filing key is a container detail, and an instance whose group
 // differs from its identity would otherwise be silently rebound on load —
 // and a type the snapshot holds with no instances keeps an empty group.
-func newWriterView(snap *graph.Snapshot, names schemaNames) *writerView {
-	// Types returns a fresh defensive copy per call, so it is taken once.
+func newWriterView(snap graph.Snapshot, names schemaNames) *writerView {
+	// Types returns a fresh slice per call, so it is taken once.
 	snapTypes := snap.Types()
 
-	byID := make(map[schema.TypeID][]*graph.Instance)
+	byID := make(map[schema.TypeID][]graph.Instance)
 	order := make([]schema.TypeID, 0, len(snapTypes))
-	edges := make(map[*graph.Instance][]*graph.Edge)
 
 	addGroup := func(id schema.TypeID) {
 		if _, ok := byID[id]; !ok {
@@ -205,20 +204,17 @@ func newWriterView(snap *graph.Snapshot, names schemaNames) *writerView {
 
 	for _, typeID := range snapTypes {
 		addGroup(typeID)
-		for _, inst := range snap.InstancesOf(typeID) {
+		for inst := range snap.InstancesOf(typeID) {
 			id := inst.TypeID()
 			addGroup(id)
 			byID[id] = append(byID[id], inst)
-			if es := snap.EdgesFrom(inst); len(es) > 0 {
-				edges[inst] = es
-			}
 		}
 	}
 
 	groups := make([]writerGroup, 0, len(order))
 	for _, id := range order {
 		insts := byID[id]
-		slices.SortFunc(insts, func(a, b *graph.Instance) int {
+		slices.SortFunc(insts, func(a, b graph.Instance) int {
 			return cmp.Compare(a.PrimaryKey().String(), b.PrimaryKey().String())
 		})
 		groups = append(groups, writerGroup{id: id, instances: insts})
@@ -237,16 +233,16 @@ func newWriterView(snap *graph.Snapshot, names schemaNames) *writerView {
 
 	return &writerView{
 		groups:     groups,
-		edges:      edges,
-		duplicates: snap.Duplicates(),
-		unresolved: snap.Unresolved(),
+		snap:       snap,
+		duplicates: slices.Collect(snap.Duplicates()),
+		unresolved: slices.Collect(snap.Unresolved()),
 	}
 }
 
 // marshalInstances builds the instances section: one entry per group, in
 // table-row order. A type denoted only as a reference target has no group
 // and no entry.
-func marshalInstances(ctx context.Context, view *writerView, s *schema.Schema, tt *typeTable) ([]instanceGroupWire, error) {
+func marshalInstances(ctx context.Context, view *writerView, s schema.Schema, tt *typeTable) ([]instanceGroupWire, error) {
 	groups := make([]instanceGroupWire, 0, len(view.groups))
 	for _, group := range view.groups {
 		if err := ctx.Err(); err != nil {
@@ -258,7 +254,7 @@ func marshalInstances(ctx context.Context, view *writerView, s *schema.Schema, t
 		}
 		items := make([]instWire, 0, len(group.instances))
 		for _, inst := range group.instances {
-			w, err := marshalInstance(inst, view.edges[inst], s, tt, false, 0)
+			w, err := marshalInstance(inst, view.snap, s, tt, false, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -273,9 +269,9 @@ func marshalInstances(ctx context.Context, view *writerView, s *schema.Schema, t
 // only where the position already denotes the type: a root instance (its
 // group entry) and a duplicate's rejected instance (its record).
 func marshalInstance(
-	inst *graph.Instance,
-	edges []*graph.Edge,
-	s *schema.Schema,
+	inst graph.Instance,
+	snap graph.Snapshot,
+	s schema.Schema,
 	tt *typeTable,
 	carryType bool,
 	depth int,
@@ -308,42 +304,40 @@ func marshalInstance(
 		w.Type = row
 	}
 
-	if len(edges) > 0 {
-		edgeMap := make(map[string][]edgeWire)
-		for _, e := range edges {
-			var rel *schema.Relation
-			if t != nil {
-				rel, _ = t.Relation(e.Relation())
-			}
-			row, err := tt.rowRef(e.Target().TypeID(), "edge target")
-			if err != nil {
-				return instWire{}, err
-			}
-			eprops, bad := wireEdgeProps(e.Properties(), rel)
-			if bad != "" {
-				return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), relation: e.Relation(), property: bad}
-			}
-			ew := edgeWire{
-				TargetType: row,
-				TargetKey:  e.Target().PrimaryKey().Clone(),
-				Properties: eprops,
-			}
-			if ew.Properties == nil {
-				ew.Properties = map[string]any{}
-			}
-			edgeMap[e.Relation()] = append(edgeMap[e.Relation()], ew)
+	var edgeMap map[string][]edgeWire
+	for e := range snap.EdgesFrom(inst) {
+		if edgeMap == nil {
+			edgeMap = make(map[string][]edgeWire)
 		}
-		w.Edges = edgeMap
+		rel, _ := t.Relation(e.Relation())
+		row, err := tt.rowRef(e.Target().TypeID(), "edge target")
+		if err != nil {
+			return instWire{}, err
+		}
+		eprops, bad := wireEdgeProps(e.Properties(), rel)
+		if bad != "" {
+			return instWire{}, &unwritableValueError{ref: tt.ref(id), key: inst.PrimaryKey().String(), relation: e.Relation(), property: bad}
+		}
+		ew := edgeWire{
+			TargetType: row,
+			TargetKey:  e.Target().PrimaryKey().Clone(),
+			Properties: eprops,
+		}
+		if ew.Properties == nil {
+			ew.Properties = map[string]any{}
+		}
+		edgeMap[e.Relation()] = append(edgeMap[e.Relation()], ew)
 	}
+	w.Edges = edgeMap
 
 	compRels := inst.ComposedRelations()
 	if len(compRels) > 0 {
 		compMap := make(map[string][]instWire, len(compRels))
 		for _, relName := range compRels {
-			children := inst.Composed(relName)
-			childWires := make([]instWire, 0, len(children))
-			for i, child := range children {
-				cw, err := marshalInstance(child, nil, s, tt, true, depth+1)
+			childWires := make([]instWire, 0, inst.ComposedCount(relName))
+			for child := range inst.Composed(relName) {
+				i := len(childWires)
+				cw, err := marshalInstance(child, snap, s, tt, true, depth+1)
 				if ue, ok := errors.AsType[*unwritableValueError](err); ok {
 					// Readdressed at each level, so the refusal names the root.
 					ue.ref, ue.key = tt.ref(id), inst.PrimaryKey().String()
@@ -364,25 +358,21 @@ func marshalInstance(
 }
 
 // marshalDiagnostics builds the diagnostics section. Every duplicate record
-// states its conflict's address; the graph API guarantees the invariants
-// checked here, so a violation is a caller-assembled inconsistency.
-func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diagWire, error) {
+// states its conflict's address. Every constructor of a snapshot gives a
+// duplicate a conflict, a composed one a parent, and an unresolved record a source.
+func marshalDiagnostics(view *writerView, s schema.Schema, tt *typeTable) (diagWire, error) {
 	dupWires := make([]dupWire, 0, len(view.duplicates))
 	for _, d := range view.duplicates {
 		row, err := tt.rowRef(d.Instance().TypeID(), "duplicate type")
 		if err != nil {
 			return diagWire{}, err
 		}
-		inst, err := marshalInstance(d.Instance(), nil, s, tt, false, 0)
+		inst, err := marshalInstance(d.Instance(), view.snap, s, tt, false, 0)
 		if ue, ok := errors.AsType[*unwritableValueError](err); ok {
 			ue.duplicate = true
 		}
 		if err != nil {
 			return diagWire{}, err
-		}
-		if d.Conflict() == nil {
-			return diagWire{}, fmt.Errorf("duplicate %s[%s] carries no conflict instance",
-				d.Instance().TypeID(), diag.ValueText(d.Instance().PrimaryKey().String()))
 		}
 		conflictRow, err := tt.rowRef(d.Conflict().TypeID(), "duplicate conflict type")
 		if err != nil {
@@ -399,10 +389,6 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 			Conflict: conflict,
 		}
 		if d.Relation() != "" {
-			if d.Parent() == nil {
-				return diagWire{}, fmt.Errorf("duplicate %s[%s] carries relation %q with no parent",
-					d.Instance().TypeID(), diag.ValueText(d.Instance().PrimaryKey().String()), d.Relation())
-			}
 			parentRow, err := tt.rowRef(d.Parent().TypeID(), "duplicate parent type")
 			if err != nil {
 				return diagWire{}, err
@@ -416,9 +402,6 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 
 	unresWires := make([]unresolvedWire, 0, len(view.unresolved))
 	for _, u := range view.unresolved {
-		if u.Source() == nil {
-			return diagWire{}, fmt.Errorf("unresolved edge record for relation %q carries no source instance", u.Relation())
-		}
 		sourceID := u.Source().TypeID()
 		sourceRow, err := tt.rowRef(sourceID, "unresolved source type")
 		if err != nil {
@@ -446,7 +429,7 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 					tt.ref(sourceID), diag.ValueText(u.Source().PrimaryKey().String()), u.Relation(), err)
 			}
 			uw.TargetKey = key
-			var rel *schema.Relation
+			var rel schema.Relation
 			if srcType, ok := s.TypeByID(sourceID); ok {
 				rel, _ = srcType.Relation(u.Relation())
 			}
@@ -465,9 +448,9 @@ func marshalDiagnostics(view *writerView, s *schema.Schema, tt *typeTable) (diag
 // marshalProvenance converts an instance's provenance to its wire form,
 // preferring the raw path a load kept, for a path that failed to parse or
 // parsed to another spelling.
-func marshalProvenance(inst *graph.Instance) *provenanceWire {
+func marshalProvenance(inst graph.Instance) *provenanceWire {
 	prov := inst.Provenance()
-	if prov == nil {
+	if prov.IsZero() {
 		return nil
 	}
 	// A recorded raw path is written back verbatim, INCLUDING an empty one.

@@ -20,8 +20,9 @@
 //
 // The .ys header carries the writing library's attestation of values and
 // associations, whose rules [graph.Attestation] states. The integrity hash is an unkeyed SHA-256 of the
-// document: it detects corruption and an edit nobody rehashed, and anyone can
-// recompute it, so it stops no deliberate one. [graph.RebuildSnapshot] is exported,
+// document: it detects corruption and an edit nobody rehashed, save in a document
+// whose stored hash is empty, which no check compares. Anyone can
+// recompute it, so it stops no deliberate edit. [graph.RebuildSnapshot] is exported,
 // so any process can assemble and sign a document whose header claims what
 // its instances never earned; the unforgeable point is the instance layer,
 // and the attestation is the writer's word, not a proof.
@@ -92,11 +93,11 @@
 //
 // # Functions
 //
-// [Marshal] serializes a *graph.Snapshot to .ys bytes. Output is deterministic
+// [Marshal] serializes a graph.Snapshot to .ys bytes. Output is deterministic
 // by default (no timestamp unless [WithCreatedAt] or [WithCreatedAtFrom] is
 // used).
 //
-// [Load] deserializes .ys bytes back to a *graph.Snapshot, verifying structural
+// [Load] deserializes .ys bytes back to a graph.Snapshot, verifying structural
 // integrity and schema compatibility.
 //
 // [Verify] validates a .ys file without materializing a Snapshot — useful for
@@ -128,7 +129,7 @@
 // E_SNAPSHOT_MALFORMED message.
 //
 // [HeaderInfo.SchemaHashMatches] is the nil-safe dispatch-site helper
-// for comparing a header's schema hash against a loaded *schema.Schema.
+// for comparing a header's schema hash against a loaded schema.Schema.
 // Use it after [HeaderOnly] or [HeaderOnlyRead] when the dispatch
 // decision depends on whether the snapshot was produced under a
 // matching schema version.
@@ -168,8 +169,9 @@
 // admits and yields one [ScanEntry] per file, with the header parsed lazily via
 // [HeaderOnlyRead] on demand. The iterator's second yielded value is
 // non-nil only for operation-level failures (dir-open, context
-// cancellation); per-file failures (corrupt header, per-file I/O)
-// surface on [ScanEntry.Result] and iteration continues. Files whose
+// cancellation); per-file failures (corrupt header, a failed open or read)
+// surface on [ScanEntry.Result] and iteration continues. A failed stat raises
+// nothing and leaves the entry's size and modification time zero. Files whose
 // basename ends with [TmpSuffix] are skipped so crash-residual
 // staging files are not confused for complete snapshots. The directory is
 // cleaned before it is read, so each [ScanEntry.Path] names an entry of the

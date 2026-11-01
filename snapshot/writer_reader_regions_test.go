@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -58,7 +59,7 @@ type Basin {
 }
 `
 
-func mustProvenance(t *testing.T, name, p string) *location.Provenance {
+func mustProvenance(t *testing.T, name, p string) location.Provenance {
 	t.Helper()
 	parsed, err := path.Parse(p)
 	if err != nil {
@@ -120,19 +121,19 @@ func TestMarshal_ProvenanceSurvivesTheRoundTrip(t *testing.T) {
 		t.Fatal("parent missing after round trip")
 	}
 	rp := root.Provenance()
-	if rp == nil {
+	if rp.IsZero() {
 		t.Fatal("root provenance is nil after the round trip")
 	}
 	if rp.SourceName() != "parents.json" {
 		t.Errorf("root provenance source = %q, want %q", rp.SourceName(), "parents.json")
 	}
 
-	children := root.Composed("CHILDREN")
+	children := slices.Collect(root.Composed("CHILDREN"))
 	if len(children) != 1 {
 		t.Fatalf("CHILDREN = %d, want 1", len(children))
 	}
 	cp := children[0].Provenance()
-	if cp == nil {
+	if cp.IsZero() {
 		t.Fatal("composed-child provenance is nil after the round trip")
 	}
 	if cp.SourceName() != "children.json" {
@@ -197,11 +198,11 @@ func TestMarshal_NestedCompositionSurvivesToDepthTwo(t *testing.T) {
 	if !ok {
 		t.Fatal("root missing after round trip")
 	}
-	mids := root.Composed("MID")
+	mids := slices.Collect(root.Composed("MID"))
 	if len(mids) != 1 {
 		t.Fatalf("MID = %d, want 1", len(mids))
 	}
-	leaves := mids[0].Composed("LEAF")
+	leaves := slices.Collect(mids[0].Composed("LEAF"))
 	if len(leaves) != 1 {
 		t.Fatalf("LEAF = %d, want 1 — the grandchild was dropped between marshal and load", len(leaves))
 	}
@@ -269,7 +270,7 @@ func TestRoundTrip_ResolvedEdgeToImportedTypeTarget(t *testing.T) {
 	if !ok {
 		t.Fatal("anchor missing after round trip")
 	}
-	edges := loaded.EdgesFrom(anchor)
+	edges := slices.Collect(loaded.EdgesFrom(anchor))
 	if len(edges) != 1 {
 		t.Fatalf("edges from anchor = %d, want 1", len(edges))
 	}
@@ -402,8 +403,8 @@ func TestLoad_ParallelEdgeOrderIsDeterministic(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("assembling: %s", res)
 	}
-	if len(built.Edges()) != len(edges) {
-		t.Fatalf("fixture is vacuous: %d edges survived assembly, want %d", len(built.Edges()), len(edges))
+	if len(slices.Collect(built.Edges())) != len(edges) {
+		t.Fatalf("fixture is vacuous: %d edges survived assembly, want %d", len(slices.Collect(built.Edges())), len(edges))
 	}
 
 	first, mres := snapshot.Marshal(ctx, built)

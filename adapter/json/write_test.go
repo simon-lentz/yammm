@@ -25,7 +25,7 @@ import (
 // Test Schema Builders
 
 // mustBuild finishes a schema build, failing the test on any build error.
-func mustBuild(t *testing.T, s *schema.Schema, result interface{ HasErrors() bool }) *schema.Schema {
+func mustBuild(t *testing.T, s schema.Schema, result interface{ HasErrors() bool }) schema.Schema {
 	t.Helper()
 	if result.HasErrors() {
 		t.Fatalf("failed to build test schema")
@@ -33,7 +33,7 @@ func mustBuild(t *testing.T, s *schema.Schema, result interface{ HasErrors() boo
 	return s
 }
 
-func testSchemaSimple(t *testing.T) *schema.Schema {
+func testSchemaSimple(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("simple").
@@ -47,7 +47,7 @@ func testSchemaSimple(t *testing.T) *schema.Schema {
 	return mustBuild(t, s, result)
 }
 
-func testSchemaMultiType(t *testing.T) *schema.Schema {
+func testSchemaMultiType(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("multi").
@@ -64,7 +64,7 @@ func testSchemaMultiType(t *testing.T) *schema.Schema {
 	return mustBuild(t, s, result)
 }
 
-func testSchemaWithAssociation(t *testing.T) *schema.Schema {
+func testSchemaWithAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("association").
@@ -82,7 +82,7 @@ func testSchemaWithAssociation(t *testing.T) *schema.Schema {
 	return mustBuild(t, s, result)
 }
 
-func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
+func testSchemaWithManyAssociation(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("many_association").
@@ -100,7 +100,7 @@ func testSchemaWithManyAssociation(t *testing.T) *schema.Schema {
 	return mustBuild(t, s, result)
 }
 
-func testSchemaWithComposition(t *testing.T) *schema.Schema {
+func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("composition").
@@ -119,7 +119,7 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 	return mustBuild(t, s, result)
 }
 
-func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
+func testSchemaWithOneComposition(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("one_composition").
@@ -140,7 +140,7 @@ func testSchemaWithOneComposition(t *testing.T) *schema.Schema {
 
 // testSchemaWithCamelCaseRelation creates a schema whose relation name lowers
 // to a multi-word field name, to pin that the writer keys on the field name.
-func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
+func testSchemaWithCamelCaseRelation(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("camelcase").
@@ -162,7 +162,7 @@ func testSchemaWithCamelCaseRelation(t *testing.T) *schema.Schema {
 // elements and as a Vector's, beside two Integers: one holding an integer,
 // which takes no indicator, and one holding a float, which keeps it because the
 // indicator follows the value held.
-func testSchemaFloats(t *testing.T) *schema.Schema {
+func testSchemaFloats(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), `schema "floats"
 
@@ -188,7 +188,7 @@ type Reading {
 // testSchemaTemporal carries every kind that canonicalizes — Timestamp
 // (default and declared layout), UUID and Date — plus a List<Date>, so the
 // writer's rendering of each stored form has a fixture.
-func testSchemaTemporal(t *testing.T) *schema.Schema {
+func testSchemaTemporal(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("temporal").
@@ -208,7 +208,7 @@ func testSchemaTemporal(t *testing.T) *schema.Schema {
 // Instance creation helpers
 
 // mustTypeID resolves a schema type's ID, failing the test if absent.
-func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
+func mustTypeID(t *testing.T, s schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -217,7 +217,7 @@ func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	return typ.ID()
 }
 
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+func mustValidInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		typeName,
@@ -229,13 +229,13 @@ func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any
 
 func mustValidInstanceWithEdge(
 	t *testing.T,
-	s *schema.Schema,
+	s schema.Schema,
 	typeName string,
 	pk []any,
 	props map[string]any,
 	relationName string,
 	targetKeys [][]any,
-) *instance.ValidInstance {
+) instance.ValidInstance {
 	t.Helper()
 	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
 	for i, targetKey := range targetKeys {
@@ -249,13 +249,13 @@ func mustValidInstanceWithEdge(
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
 		instancetest.Props(props),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{relationName: instance.NewValidEdgeData(targets)}),
+		instancetest.Edges(map[string]instance.ValidEdgeData{relationName: instance.NewValidEdgeData(targets)}),
 	)
 }
 
 // mustAdd adds instances to the graph, failing fast on any add issue so a
 // broken fixture cannot silently produce an empty graph.
-func mustAdd(t *testing.T, g *graph.Graph, instances ...*instance.ValidInstance) {
+func mustAdd(t *testing.T, g *graph.Graph, instances ...instance.ValidInstance) {
 	t.Helper()
 	for _, inst := range instances {
 		if err := g.Add(context.Background(), inst).Err(); err != nil {
@@ -265,7 +265,7 @@ func mustAdd(t *testing.T, g *graph.Graph, instances ...*instance.ValidInstance)
 }
 
 // mustAddComposed attaches a composed part instance, failing fast on issues.
-func mustAddComposed(t *testing.T, g *graph.Graph, parentType schema.TypeID, parentKey, relation string, part *instance.ValidInstance) {
+func mustAddComposed(t *testing.T, g *graph.Graph, parentType schema.TypeID, parentKey, relation string, part instance.ValidInstance) {
 	t.Helper()
 	if err := g.AddComposed(context.Background(), parentType, parentKey, relation, part).Err(); err != nil {
 		t.Fatalf("graph.AddComposed(%s.%s): %v", parentType, relation, err)
@@ -277,18 +277,18 @@ func mustAddComposed(t *testing.T, g *graph.Graph, parentType schema.TypeID, par
 func TestMarshalObject_NilResult(t *testing.T) {
 	adapter := newAdapter(t)
 
-	_, err := adapter.MarshalObject(context.Background(), nil)
+	_, err := adapter.MarshalObject(context.Background(), graph.Snapshot{})
 	require.Error(t, err)
-	assert.Equal(t, ErrNilResult, err)
+	assert.Equal(t, ErrZeroSnapshot, err)
 }
 
 func TestWriteObject_NilResult(t *testing.T) {
 	adapter := newAdapter(t)
 
 	var buf bytes.Buffer
-	_, err := adapter.WriteObject(context.Background(), &buf, nil)
+	_, err := adapter.WriteObject(context.Background(), &buf, graph.Snapshot{})
 	require.Error(t, err)
-	assert.Equal(t, ErrNilResult, err)
+	assert.Equal(t, ErrZeroSnapshot, err)
 }
 
 // TestMarshalObject_Golden pins the complete marshalled output per graph
@@ -298,19 +298,19 @@ func TestWriteObject_NilResult(t *testing.T) {
 func TestMarshalObject_Golden(t *testing.T) {
 	cases := []struct {
 		name   string
-		schema func(*testing.T) *schema.Schema
-		build  func(*testing.T, *schema.Schema, *graph.Graph)
+		schema func(*testing.T) schema.Schema
+		build  func(*testing.T, schema.Schema, *graph.Graph)
 		opts   []WriteOption
 	}{
 		{
 			name:   "empty_graph",
 			schema: testSchemaSimple,
-			build:  func(*testing.T, *schema.Schema, *graph.Graph) {},
+			build:  func(*testing.T, schema.Schema, *graph.Graph) {},
 		},
 		{
 			name:   "single_type",
 			schema: testSchemaSimple,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(t, g, mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{
 					"id": "p1", "name": "Alice", "age": int64(30),
@@ -320,7 +320,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "multiple_instances",
 			schema: testSchemaSimple,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(
 					t, g,
@@ -332,7 +332,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "multiple_types",
 			schema: testSchemaMultiType,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(
 					t, g,
@@ -344,7 +344,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "with_edge",
 			schema: testSchemaWithAssociation,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(
 					t, g,
@@ -357,7 +357,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "with_many_edges",
 			schema: testSchemaWithManyAssociation,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(
 					t, g,
@@ -371,7 +371,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "many_association_single_target",
 			schema: testSchemaWithManyAssociation,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				// A many-relation with one target must still serialize as an
 				// array (schema cardinality, not runtime count).
@@ -386,7 +386,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "with_composition",
 			schema: testSchemaWithComposition,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(t, g, mustValidInstance(t, s, "Order", []any{"o1"}, map[string]any{
 					"id": "o1", "customer": "Alice",
@@ -400,7 +400,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "many_composition_single_child",
 			schema: testSchemaWithComposition,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(t, g, mustValidInstance(t, s, "Order", []any{"o1"}, map[string]any{
 					"id": "o1", "customer": "Alice",
@@ -412,7 +412,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "with_one_composition",
 			schema: testSchemaWithOneComposition,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(t, g, mustValidInstance(t, s, "Car", []any{"VIN123"}, map[string]any{
 					"vin": "VIN123", "model": "Sedan",
@@ -424,7 +424,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "lower_snake_field_names",
 			schema: testSchemaWithCamelCaseRelation,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				// HTTP_PROXY must serialize under its field name, http_proxy.
 				mustAdd(
@@ -438,7 +438,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 		{
 			name:   "temporal_kinds",
 			schema: testSchemaTemporal,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				// Bypass-built from native Go values, which Graph.Add rewrites to
 				// their stored form before the writer sees them: the golden pins
@@ -478,7 +478,7 @@ func TestMarshalObject_Golden(t *testing.T) {
 			// writer no other way, and Graph.Add leaves a number as it arrived.
 			name:   "float_kinds",
 			schema: testSchemaFloats,
-			build: func(t *testing.T, s *schema.Schema, g *graph.Graph) {
+			build: func(t *testing.T, s schema.Schema, g *graph.Graph) {
 				t.Helper()
 				mustAdd(
 					t, g,
@@ -662,7 +662,7 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 }
 
 // testSchemaWithTimestamp is the smallest schema carrying a Timestamp property.
-func testSchemaWithTimestamp(t *testing.T) *schema.Schema {
+func testSchemaWithTimestamp(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("stamped").

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ type Holder {
 // numberBypass builds Holder h1 through instancetest, which runs no
 // validation, holding props beside its key and one LINK to Target t1 whose w
 // is weight.
-func numberBypass(t *testing.T, s *schema.Schema, props map[string]any, weight any) *graph.Snapshot {
+func numberBypass(t *testing.T, s schema.Schema, props map[string]any, weight any) graph.Snapshot {
 	t.Helper()
 	target, _ := s.Type("Target")
 	holder, _ := s.Type("Holder")
@@ -52,12 +53,12 @@ func numberBypass(t *testing.T, s *schema.Schema, props map[string]any, weight a
 		edge["w"] = weight
 	}
 	g := graph.New(s)
-	for _, inst := range []*instance.ValidInstance{
+	for _, inst := range []instance.ValidInstance{
 		instancetest.VI("Target", instancetest.TypeID(target.ID()), instancetest.PK("t1"),
 			instancetest.Props(map[string]any{"key": "t1"})),
 		instancetest.VI("Holder", instancetest.TypeID(holder.ID()), instancetest.PK("h1"),
 			instancetest.Props(all),
-			instancetest.Edges(map[string]*instance.ValidEdgeData{
+			instancetest.Edges(map[string]instance.ValidEdgeData{
 				"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 					instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(edge)),
 				}),
@@ -75,14 +76,14 @@ func numberBypass(t *testing.T, s *schema.Schema, props map[string]any, weight a
 type numberPosition struct {
 	name, mentions string
 	hold           func(v any) (props map[string]any, weight any)
-	read           func(*instance.ValidInstance) (float64, bool)
+	read           func(instance.ValidInstance) (float64, bool)
 }
 
 var numberPositions = []numberPosition{
 	{
 		"a Float property", `property "f"`,
 		func(v any) (map[string]any, any) { return map[string]any{"f": v}, nil },
-		func(i *instance.ValidInstance) (float64, bool) {
+		func(i instance.ValidInstance) (float64, bool) {
 			p, ok := i.Property("f")
 			if !ok {
 				return 0, false
@@ -94,12 +95,12 @@ var numberPositions = []numberPosition{
 	{
 		"a List<Float> element", `property "fs": list element 1`,
 		func(v any) (map[string]any, any) { return map[string]any{"fs": []any{1.5, v}}, nil },
-		func(i *instance.ValidInstance) (float64, bool) { return floatAt(i, "fs", 1) },
+		func(i instance.ValidInstance) (float64, bool) { return floatAt(i, "fs", 1) },
 	},
 	{
 		"a Vector element", `property "v": list element 0`,
 		func(v any) (map[string]any, any) { return map[string]any{"v": []any{v, 2.5}}, nil },
-		func(i *instance.ValidInstance) (float64, bool) { return floatAt(i, "v", 0) },
+		func(i instance.ValidInstance) (float64, bool) { return floatAt(i, "v", 0) },
 	},
 	{
 		"a String property", `property "s"`,
@@ -108,21 +109,22 @@ var numberPositions = []numberPosition{
 	{
 		"a Float edge property", `edge property "w"`,
 		func(v any) (map[string]any, any) { return nil, v },
-		func(i *instance.ValidInstance) (float64, bool) {
+		func(i instance.ValidInstance) (float64, bool) {
 			link, _ := i.Edge("LINK")
-			for target := range link.TargetsIter() {
-				w, ok := target.Property("w")
-				if !ok {
-					return 0, false
-				}
-				return w.Float()
+			targets := slices.Collect(link.Targets())
+			if len(targets) == 0 {
+				return 0, false
 			}
-			return 0, false
+			w, ok := targets[0].Property("w")
+			if !ok {
+				return 0, false
+			}
+			return w.Float()
 		},
 	},
 }
 
-func floatAt(i *instance.ValidInstance, name string, at int) (float64, bool) {
+func floatAt(i instance.ValidInstance, name string, at int) (float64, bool) {
 	p, ok := i.Property(name)
 	if !ok {
 		return 0, false
@@ -143,22 +145,22 @@ func floatAt(i *instance.ValidInstance, name string, at int) (float64, bool) {
 
 // writeAndReadBack writes snap, and when the writer does not refuse it parses
 // the Holder file with the adapter's own parser and validates its one row.
-func writeAndReadBack(t *testing.T, s *schema.Schema, snap *graph.Snapshot) (written []byte, inst *instance.ValidInstance, writeErr, readErr error) {
+func writeAndReadBack(t *testing.T, s schema.Schema, snap graph.Snapshot) (written []byte, inst instance.ValidInstance, writeErr, readErr error) {
 	t.Helper()
 	holder, _ := s.Type("Holder")
 	a := New(WithSchema(s))
 	files, err := a.MarshalSnapshot(t.Context(), snap)
 	if err != nil {
-		return nil, nil, err, nil
+		return nil, instance.ValidInstance{}, err, nil
 	}
 	written = files["Holder"]
 	raws, res := a.ParseTyped(t.Context(), location.NewSourceID("numbers.csv"), "Holder", bytes.NewReader(written), holder)
 	if res.HasErrors() || len(raws) != 1 {
-		return written, nil, nil, fmt.Errorf("ParseTyped: %d rows: %s", len(raws), res)
+		return written, instance.ValidInstance{}, nil, fmt.Errorf("ParseTyped: %d rows: %s", len(raws), res)
 	}
 	inst, vres := instance.NewValidator(s).ValidateOne(t.Context(), "Holder", raws[0])
-	if inst == nil || vres.HasErrors() {
-		return written, nil, nil, fmt.Errorf("ValidateOne: %s", vres)
+	if inst.IsZero() || vres.HasErrors() {
+		return written, instance.ValidInstance{}, nil, fmt.Errorf("ValidateOne: %s", vres)
 	}
 	return written, inst, nil, nil
 }

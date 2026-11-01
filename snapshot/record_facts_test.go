@@ -50,7 +50,7 @@ part type Tag {
 // sharing Order o1's key; Employee e1 with an
 // edge to c1 under WORKS_AT and AUDITS; Order o1 with one keyless Line and the
 // Tags t1 and t2.
-func readerFactsDoc(t *testing.T) (*schema.Schema, string) {
+func readerFactsDoc(t *testing.T) (schema.Schema, string) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), readerFactsSchema, "facts.yammm")
 	if res.HasErrors() {
@@ -63,7 +63,7 @@ func readerFactsDoc(t *testing.T) (*schema.Schema, string) {
 		}
 		return ty.ID()
 	}
-	to := func(key string) *instance.ValidEdgeData {
+	to := func(key string) instance.ValidEdgeData {
 		return instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{key}), immutable.WrapProperties(nil)),
 		})
@@ -76,7 +76,7 @@ func readerFactsDoc(t *testing.T) (*schema.Schema, string) {
 			instancetest.Props(map[string]any{"id": "o1"}))),
 		g.Add(t.Context(), instancetest.VI("Employee", instancetest.TypeID(typeID("Employee")), instancetest.PK("e1"),
 			instancetest.Props(map[string]any{"id": "e1"}),
-			instancetest.Edges(map[string]*instance.ValidEdgeData{"WORKS_AT": to("c1"), "AUDITS": to("c1")}))),
+			instancetest.Edges(map[string]instance.ValidEdgeData{"WORKS_AT": to("c1"), "AUDITS": to("c1")}))),
 		g.Add(t.Context(), instancetest.VI("Order", instancetest.TypeID(typeID("Order")), instancetest.PK("o1"),
 			instancetest.Props(map[string]any{"id": "o1"}))),
 		g.AddComposed(t.Context(), typeID("Order"), `["o1"]`, "LINES",
@@ -215,7 +215,7 @@ func TestLoad_HoldsRecordsToTheFactsAddDerivesThemBy(t *testing.T) {
 			s, doc := readerFactsDoc(t)
 			edited := applyReaderEdits(t, doc, c.edits)
 			g, res := snapshot.Load(t.Context(), []byte(edited), s, snapshot.WithIntegrityCheck(false))
-			if g != nil {
+			if !g.IsZero() {
 				t.Error("Load returned a graph Add could not build")
 			}
 			for issue := range res.Issues() {
@@ -318,7 +318,7 @@ func TestVerify_RecordFactsCompareCanonicalKeysAndInheritedAssociations(t *testi
 			instancetest.Props(map[string]any{"id": "s1"}))),
 		g.Add(t.Context(), instancetest.VI("Clerk", instancetest.TypeID(clerkT.ID()), instancetest.PK("2024-01-01T00:00:00Z"),
 			instancetest.Props(map[string]any{"at": "2024-01-01T00:00:00Z"}),
-			instancetest.Edges(map[string]*instance.ValidEdgeData{"BOOKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			instancetest.Edges(map[string]instance.ValidEdgeData{"BOOKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"s1"}), immutable.WrapProperties(nil)),
 			})}))),
 	} {

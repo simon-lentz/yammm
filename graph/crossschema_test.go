@@ -29,7 +29,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 		userType.ID(),
 		immutable.WrapKey([]any{"u1"}),
 		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, user)
@@ -47,7 +47,7 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
 		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	if res := g.Add(ctx, entity); !res.OK() {
@@ -55,10 +55,10 @@ func TestGraph_StrictResolution_LocalOnly(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.InstancesOf(tagID(t, mainSchema, "User"))) != 1 {
-		t.Errorf("Expected 1 User instance, got %d", len(snap.InstancesOf(tagID(t, mainSchema, "User"))))
+	if len(slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "User")))) != 1 {
+		t.Errorf("Expected 1 User instance, got %d", len(slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "User")))))
 	}
-	if n := len(snap.InstancesOf(entityType.ID())); n != 1 {
+	if n := len(slices.Collect(snap.InstancesOf(entityType.ID()))); n != 1 {
 		t.Errorf("Expected the Entity to install under the common schema's identity, got %d", n)
 	}
 }
@@ -76,7 +76,7 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
 		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, entity)
@@ -86,7 +86,7 @@ func TestGraph_StrictResolution_QualifiedLookup(t *testing.T) {
 
 	// Verify entity is in graph with qualified type name
 	snap := g.Snapshot()
-	instances := snap.InstancesOf(tagID(t, mainSchema, "c.Entity"))
+	instances := slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "c.Entity")))
 	if len(instances) != 1 {
 		t.Errorf("Expected 1 c.Entity instance, got %d", len(instances))
 	}
@@ -105,7 +105,7 @@ func TestGraph_StrictResolution_UnknownAlias(t *testing.T) {
 		unknownType,
 		immutable.WrapKey([]any{"x1"}),
 		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	defer func() {
@@ -129,7 +129,7 @@ func TestGraph_InstanceByKey_Qualified(t *testing.T) {
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
 		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	g.Add(ctx, entity)
@@ -167,7 +167,7 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 		userType.ID(),
 		immutable.WrapKey([]any{"u1"}),
 		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	g.Add(ctx, user)
@@ -179,7 +179,7 @@ func TestGraph_Types_InstanceTagForm(t *testing.T) {
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
 		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	g.Add(ctx, entity)
@@ -219,7 +219,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
 		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	g.Add(ctx, entity)
@@ -232,7 +232,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 			immutable.Properties{},
 		),
 	}
-	edges := map[string]*instance.ValidEdgeData{
+	edges := map[string]instance.ValidEdgeData{
 		"ENTITY": instance.NewValidEdgeData(targets),
 	}
 	user := instance.NewValidInstance(
@@ -242,7 +242,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
 		edges,
 		nil,
-		nil,
+		location.Provenance{},
 	)
 
 	result := g.Add(ctx, user)
@@ -252,7 +252,7 @@ func TestGraph_Edge_CrossSchema(t *testing.T) {
 
 	// Verify edge exists from User to c.Entity
 	snap := g.Snapshot()
-	edgeList := snap.Edges()
+	edgeList := slices.Collect(snap.Edges())
 	if len(edgeList) != 1 {
 		t.Fatalf("Expected 1 edge, got %d", len(edgeList))
 	}
@@ -335,7 +335,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 		resourceB.ID(),
 		immutable.WrapKey([]any{"r1"}),
 		immutable.WrapProperties(map[string]any{"id": "r1", "nameB": "Resource from B"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	g.Add(ctx, instB)
@@ -347,7 +347,7 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 		resourceC.ID(),
 		immutable.WrapKey([]any{"r1"}), // Same PK is OK - different types
 		immutable.WrapProperties(map[string]any{"id": "r1", "nameC": "Resource from C"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	g.Add(ctx, instC)
@@ -355,12 +355,12 @@ func TestGraph_MultiImport_Disambiguation(t *testing.T) {
 	// Verify both are in graph with correct types
 	snap := g.Snapshot()
 
-	bInstances := snap.InstancesOf(tagID(t, schemaA, "b.Resource"))
+	bInstances := slices.Collect(snap.InstancesOf(tagID(t, schemaA, "b.Resource")))
 	if len(bInstances) != 1 {
 		t.Errorf("Expected 1 b.Resource, got %d", len(bInstances))
 	}
 
-	cInstances := snap.InstancesOf(tagID(t, schemaA, "c.Resource"))
+	cInstances := slices.Collect(snap.InstancesOf(tagID(t, schemaA, "c.Resource")))
 	if len(cInstances) != 1 {
 		t.Errorf("Expected 1 c.Resource, got %d", len(cInstances))
 	}

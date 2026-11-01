@@ -73,7 +73,7 @@ func roundTripOutcome(t *testing.T, src string) string {
 func loadHash(t *testing.T, src string) (string, bool) {
 	t.Helper()
 	s, result := schema.LoadString(context.Background(), src, "roundtrip.yammm")
-	if result.Err() != nil || s == nil {
+	if result.Err() != nil || s.IsZero() {
 		return "", false
 	}
 	return schema.StructuralHash(s), true

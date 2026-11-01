@@ -33,7 +33,7 @@ func BenchmarkAdd_WithComposedChildren(b *testing.B) {
 	}
 	composed := map[string]immutable.Value{"CHILDREN": immutable.Wrap(kids)}
 
-	insts := make([]*instance.ValidInstance, b.N)
+	insts := make([]instance.ValidInstance, b.N)
 	for i := range insts {
 		insts[i] = instancetest.VI(
 			"Parent",
@@ -60,7 +60,7 @@ func BenchmarkAdd_PlainInstance(b *testing.B) {
 	s, parentID, _ := benchFixture(b)
 	ctx := b.Context()
 
-	insts := make([]*instance.ValidInstance, b.N)
+	insts := make([]instance.ValidInstance, b.N)
 	for i := range insts {
 		insts[i] = instancetest.VI(
 			"Parent",
@@ -82,7 +82,7 @@ func BenchmarkAdd_PlainInstance(b *testing.B) {
 
 // benchFixture builds the benchmark schema without a zero-value *testing.T,
 // whose Fatalf would panic on a nil runner instead of failing the benchmark.
-func benchFixture(b *testing.B) (*schema.Schema, schema.TypeID, schema.TypeID) {
+func benchFixture(b *testing.B) (schema.Schema, schema.TypeID, schema.TypeID) {
 	b.Helper()
 	s, res := schema.NewBuilder().
 		WithName("composition").

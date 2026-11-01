@@ -207,7 +207,7 @@ func TestModuleRoot_WorkspaceFolderHoldsAnotherSpellingOfItsDocument(t *testing.
 			if want := mustDiskSpelling(t, folder); snap.Root != want {
 				t.Errorf("analysis root = %q, want the workspace folder %q", snap.Root, want)
 			}
-			if snap.Schema == nil {
+			if snap.Schema.IsZero() {
 				t.Errorf("the module-style import did not resolve against the workspace folder: %v", snap.Result.Err())
 			}
 		})
@@ -283,7 +283,7 @@ func TestSnapshotForResult_KeepsAnalyzeContract(t *testing.T) {
 	if snap == nil {
 		t.Fatal("SnapshotForResult returned no snapshot")
 	}
-	if snap.Schema != nil {
+	if !snap.Schema.IsZero() {
 		t.Error("snapshot carries a schema; nothing was loaded")
 	}
 	if len(snap.LSPDiagnostics) != 1 {

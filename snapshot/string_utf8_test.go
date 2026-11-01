@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"maps"
+	"slices"
 	"testing"
 	"unicode/utf8"
 
@@ -39,7 +40,7 @@ type wireText string
 // utf8WireSnapshot builds Holder h1 through instancetest, which runs no
 // validation, holding props beside its key and one LINK to target carrying
 // label. Target t1 is in the graph, so a LINK to any other key is unresolved.
-func utf8WireSnapshot(t *testing.T, props map[string]any, target string, label any) (*schema.Schema, *graph.Snapshot) {
+func utf8WireSnapshot(t *testing.T, props map[string]any, target string, label any) (schema.Schema, graph.Snapshot) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), utf8WireSchema, "utf8wire.yammm")
 	if res.HasErrors() {
@@ -50,12 +51,12 @@ func utf8WireSnapshot(t *testing.T, props map[string]any, target string, label a
 	all := map[string]any{"id": "h1"}
 	maps.Copy(all, props)
 	g := graph.New(s)
-	for _, inst := range []*instance.ValidInstance{
+	for _, inst := range []instance.ValidInstance{
 		instancetest.VI("Target", instancetest.TypeID(targetT.ID()), instancetest.PK("t1"),
 			instancetest.Props(map[string]any{"key": "t1"})),
 		instancetest.VI("Holder", instancetest.TypeID(holderT.ID()), instancetest.PK("h1"),
 			instancetest.Props(all),
-			instancetest.Edges(map[string]*instance.ValidEdgeData{
+			instancetest.Edges(map[string]instance.ValidEdgeData{
 				"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 					instance.NewValidEdgeTarget(immutable.WrapKey([]any{target}), immutable.WrapProperties(map[string]any{"label": label})),
 				}),
@@ -131,7 +132,7 @@ func TestMarshal_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 			t.Fatalf("Marshal(%q) refused valid text: %s", text, res)
 		}
 		loaded, lres := snapshot.Load(t.Context(), data, s)
-		if loaded == nil {
+		if loaded.IsZero() {
 			t.Fatalf("Load(%q): %s", text, lres)
 		}
 		holderT, _ := s.Type("Holder")
@@ -146,7 +147,7 @@ func TestMarshal_AStringReadsBackAsTheBytesHeld(t *testing.T) {
 		if elems, ok := tags.Slice(); !ok || elems.Len() != 2 || elems.Get(1).Unwrap() != text {
 			t.Errorf("tags read back as %v, want its second element %q", tags.Unwrap(), text)
 		}
-		edges := loaded.EdgesFrom(inst)
+		edges := slices.Collect(loaded.EdgesFrom(inst))
 		if len(edges) != 1 {
 			t.Fatalf("Load(%q): %d edges", text, len(edges))
 		}

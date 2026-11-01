@@ -3,9 +3,9 @@ package constraintof
 import "github.com/simon-lentz/yammm/schema"
 
 // Property returns a declared property's constraint, or nil for a name the
-// type does not declare or a nil type.
-func Property(t *schema.Type, name string) schema.Constraint {
-	if t == nil {
+// type does not declare or a zero type.
+func Property(t schema.Type, name string) schema.Constraint {
+	if t.IsZero() {
 		return nil
 	}
 	p, ok := t.Property(name)

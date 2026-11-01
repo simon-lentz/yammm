@@ -66,7 +66,7 @@ func TestRoundTrip_CSVWriteParseValidateIsTheIdentity(t *testing.T) {
 		},
 	}
 
-	build := func(source map[string][]map[string]any) *graph.Snapshot {
+	build := func(source map[string][]map[string]any) graph.Snapshot {
 		t.Helper()
 		v := instance.NewValidator(s)
 		g := graph.New(s)

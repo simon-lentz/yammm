@@ -46,11 +46,11 @@ func firstError(result diag.Result) string {
 
 // typeIDByName indexes the closure's types by name, so a test can compare two
 // loads of one schema without depending on declaration order.
-func typeIDByName(t *testing.T, s *schema.Schema) map[string]schema.TypeID {
+func typeIDByName(t *testing.T, s schema.Schema) map[string]schema.TypeID {
 	t.Helper()
 	out := map[string]schema.TypeID{}
-	for _, cs := range s.Closure() {
-		for _, ty := range cs.TypesSlice() {
+	for cs := range s.Closure() {
+		for ty := range cs.Types() {
 			out[ty.Name()] = ty.ID()
 		}
 	}
@@ -131,10 +131,10 @@ func TestWithSyntheticRoot_ModuleStyleImportResolves(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("load: %s", firstError(res))
 	}
-	if len(s.ImportsSlice()) != 1 {
-		t.Fatalf("expected one import, got %d", len(s.ImportsSlice()))
+	if len(slices.Collect(s.Imports())) != 1 {
+		t.Fatalf("expected one import, got %d", len(slices.Collect(s.Imports())))
 	}
-	if s.ImportsSlice()[0].Schema() == nil {
+	if slices.Collect(s.Imports())[0].Schema().IsZero() {
 		t.Error("the import resolved to no schema")
 	}
 }
@@ -167,7 +167,7 @@ func TestWithSyntheticRoot_RelativeImportResolvesByKey(t *testing.T) {
 			if res.HasErrors() {
 				t.Fatalf("load: %s", firstError(res))
 			}
-			if got := s.ImportsSlice()[0].ResolvedSourceID().String(); got != tc.wantID {
+			if got := slices.Collect(s.Imports())[0].ResolvedSourceID().String(); got != tc.wantID {
 				t.Errorf("import resolved to %q, want %q", got, tc.wantID)
 			}
 		})
@@ -276,7 +276,7 @@ func TestWithSyntheticRoot_KeyEscapingRootResolves(t *testing.T) {
 	if got, want := s.SourceID().String(), "embedded://root/../main.yammm"; got != want {
 		t.Errorf("entry identity = %q, want %q", got, want)
 	}
-	if len(s.ImportsSlice()) != 1 || s.ImportsSlice()[0].Schema() == nil {
+	if len(slices.Collect(s.Imports())) != 1 || slices.Collect(s.Imports())[0].Schema().IsZero() {
 		t.Error("the module-style import did not resolve from an escaping entry key")
 	}
 }
@@ -415,7 +415,7 @@ func TestWithSyntheticRoot_IsHermeticByItself(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, res := schema.LoadSourcesWithEntry(t.Context(), syntheticRootSources(), "main.yammm", "", opts...)
-			if s == nil || res.HasErrors() {
+			if s.IsZero() || res.HasErrors() {
 				t.Fatalf("the load failed: %s", firstError(res))
 			}
 			entryOnly := map[string][]byte{"main.yammm": syntheticRootSources()["main.yammm"]}
@@ -573,7 +573,7 @@ func TestSyntheticImportKey_IsTheLoadersLookup(t *testing.T) {
 			if res.HasErrors() {
 				t.Fatalf("load: %s", firstError(res))
 			}
-			if id := s.ImportsSlice()[0].ResolvedSourceID().String(); id != root+"/"+tc.want {
+			if id := slices.Collect(s.Imports())[0].ResolvedSourceID().String(); id != root+"/"+tc.want {
 				t.Errorf("the loader resolved %q to %q, want %q", tc.imp, id, root+"/"+tc.want)
 			}
 		})

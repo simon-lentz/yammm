@@ -59,7 +59,7 @@ func TestOpenDocuments_NormalizationTwinsLeaveEveryAnalysisLoading(t *testing.T)
 	for _, f := range files[1:] {
 		uri := lsputil.PathToURI(f.path)
 		snap := ws.LatestSnapshot(uri)
-		if snap == nil || snap.Schema == nil {
+		if snap == nil || snap.Schema.IsZero() {
 			var err error
 			if snap != nil {
 				err = snap.Result.Err()
@@ -67,7 +67,7 @@ func TestOpenDocuments_NormalizationTwinsLeaveEveryAnalysisLoading(t *testing.T)
 			t.Errorf("analysis of %s did not load with both twins open: %v", filepath.Base(f.path), err)
 		}
 	}
-	if snap := ws.LatestSnapshot(lsputil.PathToURI(nfd)); snap != nil && snap.Schema != nil && snap.Schema.Name() != "nfc" {
+	if snap := ws.LatestSnapshot(lsputil.PathToURI(nfd)); snap != nil && !snap.Schema.IsZero() && snap.Schema.Name() != "nfc" {
 		t.Errorf("the NFD twin analysed schema %q; want \"nfc\", the text of the twin opened first", snap.Schema.Name())
 	}
 }

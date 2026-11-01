@@ -24,7 +24,7 @@ type T {
 	if res.Err() == nil {
 		t.Fatal("a property named self loaded clean")
 	}
-	if s != nil {
+	if !s.IsZero() {
 		t.Error("a schema was produced beside the refusal")
 	}
 	is, ok := issueWithCode(res, diag.E_INVALID_NAME)
@@ -84,7 +84,7 @@ func TestPropertyNamedSelf_RefusedByBuilder(t *testing.T) {
 	if res.Err() == nil {
 		t.Fatal("the Builder accepted a property named self")
 	}
-	if s != nil {
+	if !s.IsZero() {
 		t.Error("a schema was produced beside the refusal")
 	}
 	if _, ok := issueWithCode(res, diag.E_INVALID_NAME); !ok {

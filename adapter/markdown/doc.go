@@ -92,7 +92,8 @@
 // direction keyword as one direction statement. Two displays that sanitize to
 // one id stay two classes: the later takes the id suffixed _2, _3, and so on.
 // A class whose id differs from its display takes the display as its label.
-// That labelled form needs Mermaid 10.1.0 or later. An imported type always
+// That labelled form needs Mermaid 10.1.0 or later, the oldest release the oracle
+// pins; 9.4.3 and 10.0.0 refuse it. An imported type always
 // takes it, and an entry type only when its id differs from its name, so an
 // import-free schema in which no id differs renders on Mermaid 9. When the
 // diagram holds a labelled class the document says so in one sentence under
@@ -251,9 +252,10 @@
 // indexes` renders it.
 //
 // They do reach the generator indirectly: a property inherited from several
-// ancestors carries the union of their annotations, so the merged view a
+// direct supertypes carries the union of their merged views' annotations. When
+// that union differs from the surviving property's own set, the merged view a
 // property table iterates yields a synthesized copy rather than the declared
-// *Property. The own-versus-inherited lookups therefore key through
+// property. The own-versus-inherited lookups therefore key through
 // [github.com/simon-lentz/yammm/schema.Property.Origin]; without it the owner
 // lookup misses such a row, which would read "from " with no owner where
 // "from base.A" is meant.

@@ -3,6 +3,7 @@ package graph_test
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ type referenceParts struct {
 	company, employee, order, tag, line schema.TypeID
 }
 
-func newReferenceParts(t *testing.T) (*schema.Schema, *referenceParts) {
+func newReferenceParts(t *testing.T) (schema.Schema, *referenceParts) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), referenceBreakSchema, "refs.yammm")
 	if res.HasErrors() {
@@ -107,11 +108,11 @@ func TestRebuildSnapshot_TheReferencePartsAreClean(t *testing.T) {
 	t.Parallel()
 	s, p := newReferenceParts(t)
 	snap, res := graph.RebuildSnapshot(s, p.SnapshotParts)
-	if snap == nil || failures(res) != 0 {
+	if snap.IsZero() || failures(res) != 0 {
 		t.Fatalf("the parts are refused: %s", res)
 	}
-	dups := snap.Duplicates()
-	if len(dups) != 1 || dups[0].Conflict() == nil || dups[0].Conflict().PrimaryKey().String() != `["t1"]` {
+	dups := slices.Collect(snap.Duplicates())
+	if len(dups) != 1 || dups[0].Conflict().IsZero() || dups[0].Conflict().PrimaryKey().String() != `["t1"]` {
 		t.Errorf("duplicates %v, want one whose conflict is the Tag at t1", dups)
 	}
 }
@@ -328,7 +329,7 @@ func TestRebuildSnapshot_ReferencesDrawTheirIssueBesideAnotherBreak(t *testing.T
 			s, p := newReferenceParts(t)
 			c.mutate(p)
 			snap, res := graph.RebuildSnapshot(s, p.SnapshotParts)
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Error("a refused rebuild returned a snapshot")
 			}
 			if failures(res) != len(c.phrases) {
@@ -487,7 +488,7 @@ func TestNewFromSnapshot_ADuplicateOfACanonicalParentIsJudged(t *testing.T) {
 	}
 	g.AddComposed(t.Context(), mustTypeID(t, built, "Order"), graph.FormatKey(offset), "ITEMS", instancetest.VI("Item",
 		instancetest.TypeID(mustTypeID(t, built, "Item")), instancetest.PK("b"), instancetest.Props(map[string]any{"code": "b"})))
-	if n := len(g.Snapshot().Duplicates()); n != 1 {
+	if n := len(slices.Collect(g.Snapshot().Duplicates())); n != 1 {
 		t.Fatalf("%d duplicates, want 1", n)
 	}
 	_, imported := graph.NewFromSnapshot(bound, g.Snapshot())

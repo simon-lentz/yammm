@@ -109,7 +109,7 @@ type annotationKey struct {
 type annotationSpec struct {
 	doc      string
 	argHint  string
-	validate func(c *completer, t *Type, prop *Property, a *Annotation)
+	validate func(c *completer, t Type, prop Property, a Annotation)
 }
 
 // annotationRegistry is the curated built-in set. Adding a kind is one entry;
@@ -184,11 +184,11 @@ func (c *completer) validateAnnotations() {
 // ancestor's annotation is not marked in diagnosedAnnotations for the same
 // reason reportAnnotationDisagreement does not mark — it was not rejected at
 // its declaration, and a shadow warning about it elsewhere stays legitimate.
-func (c *completer) validateInheritedHolderRules(t *Type) {
+func (c *completer) validateInheritedHolderRules(t Type) {
 	if !t.IsPart() {
 		return
 	}
-	own := make(map[*Property]bool, len(t.properties))
+	own := make(map[Property]bool, len(t.properties))
 	for p := range t.Properties() {
 		own[p] = true
 	}
@@ -209,8 +209,8 @@ func (c *completer) validateInheritedHolderRules(t *Type) {
 
 // validatePropertyAnnotations validates the property-trailing annotations on
 // one own property, rejecting a repeated annotation name on the property.
-func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
-	seen := make(map[string]*Annotation)
+func (c *completer) validatePropertyAnnotations(t Type, prop Property) {
+	seen := make(map[string]Annotation)
 	for _, a := range prop.annotations {
 		// An annotation on a line of its own binds to the property ABOVE it,
 		// because the grammar's property-trailing annotation* does not care
@@ -246,8 +246,8 @@ func (c *completer) validatePropertyAnnotations(t *Type, prop *Property) {
 
 // validateTypeAnnotations validates the type-level @@ members of one type,
 // rejecting an exact-duplicate member (name plus ordered argument texts).
-func (c *completer) validateTypeAnnotations(t *Type) {
-	seen := make(map[string]*Annotation)
+func (c *completer) validateTypeAnnotations(t Type) {
+	seen := make(map[string]Annotation)
 	for _, a := range t.annotations {
 		spec, known := annotationRegistry[annotationKey{PlacementType, a.name}]
 
@@ -265,7 +265,7 @@ func (c *completer) validateTypeAnnotations(t *Type) {
 			c.reportUnknownOrMisplaced(a, PlacementType)
 			continue
 		}
-		spec.validate(c, t, nil, a)
+		spec.validate(c, t, Property{}, a)
 	}
 }
 
@@ -283,7 +283,7 @@ func (c *completer) validateTypeAnnotations(t *Type) {
 //
 // span is separate from a because a target-eligibility error is anchored at the
 // offending property, not at the annotation.
-func (c *completer) annotationErrorf(a *Annotation, span location.Span, code diag.Code, format string, args ...any) {
+func (c *completer) annotationErrorf(a Annotation, span location.Span, code diag.Code, format string, args ...any) {
 	c.diagnosedAnnotations[a] = true
 	c.errorf(span, code, format, args...)
 }
@@ -292,7 +292,7 @@ func (c *completer) annotationErrorf(a *Annotation, span location.Span, code dia
 // related span, recording the annotation exactly as [completer.annotationErrorf]
 // does. Used where completer.errorf's single span is not enough: a duplicate
 // (pointing at the first occurrence) and a redundancy (pointing at the emitter).
-func (c *completer) annotationErrorWithRelated(a *Annotation, span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any) {
+func (c *completer) annotationErrorWithRelated(a Annotation, span location.Span, code diag.Code, related []location.RelatedInfo, format string, args ...any) {
 	c.diagnosedAnnotations[a] = true
 	c.errorfRelated(span, code, related, format, args...)
 }
@@ -301,7 +301,7 @@ func (c *completer) annotationErrorWithRelated(a *Annotation, span location.Span
 // registered at the other placement, and a genuinely unknown annotation
 // otherwise. The placement-mismatch path is a registry lookup miss on
 // (placement, name), not a special case.
-func (c *completer) reportUnknownOrMisplaced(a *Annotation, place AnnotationPlacement) {
+func (c *completer) reportUnknownOrMisplaced(a Annotation, place AnnotationPlacement) {
 	other := PlacementType
 	if place == PlacementType {
 		other = PlacementProperty
@@ -317,7 +317,7 @@ func (c *completer) reportUnknownOrMisplaced(a *Annotation, place AnnotationPlac
 
 // duplicateAnnotation reports E_INVALID_ANNOTATION at the second occurrence with
 // a related span at the first, matching the duplicate-property diagnostic shape.
-func (c *completer) duplicateAnnotation(dup, first *Annotation, format string, args ...any) {
+func (c *completer) duplicateAnnotation(dup, first Annotation, format string, args ...any) {
 	c.annotationErrorWithRelated(dup, dup.Span(), diag.E_INVALID_ANNOTATION,
 		[]location.RelatedInfo{{Span: first.Span(), Message: "first declared here"}},
 		format, args...)
@@ -330,7 +330,7 @@ func (c *completer) duplicateAnnotation(dup, first *Annotation, format string, a
 // Redundancy is judged over the types that actually emit the uniqueness
 // constraint, not over the type carrying the annotation; see
 // [completer.indexOnPrimaryKeyIsRedundant].
-func validateIndexProperty(c *completer, t *Type, prop *Property, a *Annotation) {
+func validateIndexProperty(c *completer, t Type, prop Property, a Annotation) {
 	if a.argCount() > 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
 			"@index takes no arguments; for a composite index use @@index(...) at the type level")
@@ -363,7 +363,7 @@ func validateIndexProperty(c *completer, t *Type, prop *Property, a *Annotation)
 // Only @index reaches here: @@index over a sole primary key is accepted per
 // docs/SPEC.md (see validateIndexType). The helper stays generic in its message
 // so that asymmetry lives at the one call site, not baked into this shape.
-func (c *completer) reportIndexRedundancy(a *Annotation, span location.Span, t, emitter *Type, format string, args ...any) {
+func (c *completer) reportIndexRedundancy(a Annotation, span location.Span, t, emitter Type, format string, args ...any) {
 	var related []location.RelatedInfo
 	if emitter != t {
 		related = []location.RelatedInfo{{
@@ -413,8 +413,8 @@ func (c *completer) reportIndexRedundancy(a *Annotation, span location.Span, t, 
 // same model written in a single file is rejected. Closing that needs
 // registry-wide descendant visibility at validation time; until then the rule is
 // sound for what it can see and silent beyond it, which errs toward accepting.
-func (c *completer) indexOnPrimaryKeyIsRedundant(t *Type) (*Type, bool) {
-	var first *Type
+func (c *completer) indexOnPrimaryKeyIsRedundant(t Type) (Type, bool) {
+	var first Type
 	for e := range c.concreteEmitters(t) {
 		// Defer on any emitter whose key shape is not settled: an unresolved
 		// supertype may add a co-key, and a rejected primary means the intended
@@ -422,30 +422,30 @@ func (c *completer) indexOnPrimaryKeyIsRedundant(t *Type) (*Type, bool) {
 		// question has no stable answer yet, and firing would stack a redundancy
 		// error on the real one (the unresolved reference, or the bad key type).
 		if c.hasUnresolvedSupertype(e) || e.hasRejectedPrimary() {
-			return nil, false
+			return Type{}, false
 		}
 		if e.primaryKeyCount() != 1 {
-			return nil, false
+			return Type{}, false
 		}
-		if first == nil {
+		if first.IsZero() {
 			first = e
 		}
 	}
-	return first, first != nil
+	return first, !first.IsZero()
 }
 
 // concreteEmitters yields the types that emit store-level constraints covering
 // t's members: t itself when it is not abstract, plus each of its concrete
 // descendants ([Type.SubTypes] is transitively closed). An abstract type
 // receives no Neo4j label and emits nothing.
-func (c *completer) concreteEmitters(t *Type) iter.Seq[*Type] {
-	return func(yield func(*Type) bool) {
+func (c *completer) concreteEmitters(t Type) iter.Seq[Type] {
+	return func(yield func(Type) bool) {
 		if !t.IsAbstract() && !yield(t) {
 			return
 		}
 		for ref := range t.SubTypes() {
 			sub := c.resolveTypeID(ref.ID())
-			if sub == nil || sub.IsAbstract() {
+			if sub.IsAbstract() {
 				continue
 			}
 			if !yield(sub) {
@@ -457,7 +457,7 @@ func (c *completer) concreteEmitters(t *Type) iter.Seq[*Type] {
 
 // validateVectorProperty checks @vector: exactly one similarity keyword and a
 // Vector-constrained target.
-func validateVectorProperty(c *completer, _ *Type, prop *Property, a *Annotation) {
+func validateVectorProperty(c *completer, _ Type, prop Property, a Annotation) {
 	if len(a.args) != 1 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
 			"@vector takes exactly one similarity keyword: %s", strings.Join(vectorSimilarityFunctions, " or "))
@@ -498,8 +498,8 @@ func validateVectorProperty(c *completer, _ *Type, prop *Property, a *Annotation
 // primary-key property (sole or composite member) — every merge match key is
 // immutable on match by construction, so the marker would be redundant and
 // confusing there.
-func validateWriteOnceProperty(c *completer, t *Type, prop *Property, a *Annotation) {
-	if t != nil && t.IsPart() {
+func validateWriteOnceProperty(c *completer, t Type, prop Property, a Annotation) {
+	if t.IsPart() {
 		// A part is replaced whole on every parent write, so create-once
 		// semantics cannot hold there.
 		c.annotationErrorf(a, prop.Span(), diag.E_INVALID_ANNOTATION_TARGET,
@@ -522,7 +522,7 @@ func validateWriteOnceProperty(c *completer, t *Type, prop *Property, a *Annotat
 // constraint's backing index is a range index and cannot serve fulltext
 // queries, so a fulltext index over a primary key is a distinct, legitimate
 // object — the @index sole-key redundancy rule does not transfer.
-func validateFulltextProperty(c *completer, _ *Type, prop *Property, a *Annotation) {
+func validateFulltextProperty(c *completer, _ Type, prop Property, a Annotation) {
 	if a.argCount() > 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION,
 			"@fulltext takes no arguments; for a multi-property fulltext index use @@fulltext(...) at the type level")
@@ -548,7 +548,7 @@ func validateFulltextProperty(c *completer, _ *Type, prop *Property, a *Annotati
 // Literal arguments are rejected, and that rejection is a reserved surface,
 // not just hygiene: a trailing string literal is the extension slot for a
 // future analyzer option, which stays additive only while v1 refuses it.
-func validateFulltextType(c *completer, t *Type, _ *Property, a *Annotation) {
+func validateFulltextType(c *completer, t Type, _ Property, a Annotation) {
 	if a.argCount() == 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION, "@@fulltext requires at least one property reference")
 		return
@@ -595,7 +595,7 @@ func validateFulltextType(c *completer, t *Type, _ *Property, a *Annotation) {
 // the type (own or inherited; primary-key members are allowed). Unknown-property
 // reporting defers when the type has an unresolved supertype, since the
 // reference may live on a not-yet-visible cross-schema ancestor.
-func validateIndexType(c *completer, t *Type, _ *Property, a *Annotation) {
+func validateIndexType(c *completer, t Type, _ Property, a Annotation) {
 	if a.argCount() == 0 {
 		c.annotationErrorf(a, a.Span(), diag.E_INVALID_ANNOTATION, "@@index requires at least one property reference")
 		return
@@ -745,7 +745,7 @@ func isVectorSimilarity(s string) bool {
 // source: "@@name(a, b)" with arguments, "@@name" without. The grammar's
 // argument list requires at least one argument, so an unconditional "(%s)" would
 // show the user "@@name()" — a spelling that is itself a syntax error.
-func annotationDisplay(a *Annotation) string {
+func annotationDisplay(a Annotation) string {
 	if len(a.args) == 0 {
 		return PlacementType.String() + a.name
 	}

@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,7 +17,7 @@ import (
 // fkSchema builds the canonical two-type FK schema — Company(id) plus
 // Person(id) with an "employer" relation to Company — parameterized on the
 // relation's (optional, many) multiplicity.
-func fkSchema(t *testing.T, optional, many bool) *schema.Schema {
+func fkSchema(t *testing.T, optional, many bool) schema.Schema {
 	t.Helper()
 	return mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -32,7 +33,7 @@ func fkSchema(t *testing.T, optional, many bool) *schema.Schema {
 // compositeFKSchema builds the canonical composite-PK FK schema —
 // Enrollment(region, studentId) plus Person(id) with an optional-one
 // "enrollment" relation to Enrollment.
-func compositeFKSchema(t *testing.T) *schema.Schema {
+func compositeFKSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	return mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -80,13 +81,13 @@ func TestValidateEdges_SingleFK(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
-	assert.Len(t, edge.Targets(), 1)
-	assert.Equal(t, `["42"]`, edge.Targets()[0].TargetKey().String())
+	require.False(t, edge.IsZero())
+	assert.Len(t, slices.Collect(edge.Targets()), 1)
+	assert.Equal(t, `["42"]`, slices.Collect(edge.Targets())[0].TargetKey().String())
 }
 
 func TestValidateEdges_Many(t *testing.T) {
@@ -108,12 +109,12 @@ func TestValidateEdges_Many(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
-	assert.Len(t, edge.Targets(), 3)
+	require.False(t, edge.IsZero())
+	assert.Len(t, slices.Collect(edge.Targets()), 3)
 }
 
 func TestValidateEdges_Optional_Nil(t *testing.T) {
@@ -131,12 +132,12 @@ func TestValidateEdges_Optional_Nil(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// No edge should be present
 	edge, ok := valid.Edge("EMPLOYER")
 	assert.False(t, ok)
-	assert.Nil(t, edge)
+	assert.True(t, edge.IsZero())
 }
 
 func TestValidateEdges_Required_Absent(t *testing.T) {
@@ -157,12 +158,12 @@ func TestValidateEdges_Required_Absent(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// No edge data should be present
 	edge, ok := valid.Edge("EMPLOYER")
 	assert.False(t, ok)
-	assert.Nil(t, edge)
+	assert.True(t, edge.IsZero())
 }
 
 func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
@@ -179,7 +180,7 @@ func TestValidateEdges_ShapeMismatch_ArrayForSingle(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "expected object")
 }
@@ -198,7 +199,7 @@ func TestValidateEdges_ShapeMismatch_ObjectForMany(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "expected array")
 }
@@ -217,7 +218,7 @@ func TestValidateEdges_MissingFK(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "_target_id")
 }
@@ -239,7 +240,7 @@ func TestValidateEdges_UnknownField(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "unknown field")
 }
@@ -262,7 +263,7 @@ func TestValidateEdges_UnknownField_Allowed(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 }
 
 func TestValidateEdges_EdgePropertyValidation(t *testing.T) {
@@ -293,15 +294,15 @@ type Person {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
-	assert.Len(t, edge.Targets(), 1)
+	require.False(t, edge.IsZero())
+	assert.Len(t, slices.Collect(edge.Targets()), 1)
 
 	// Check edge property
-	roleVal, ok := edge.Targets()[0].Properties().Get("role")
+	roleVal, ok := slices.Collect(edge.Targets())[0].Properties().Get("role")
 	require.True(t, ok)
 	role, ok := roleVal.String()
 	require.True(t, ok)
@@ -335,7 +336,7 @@ type Person {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "missing required edge property")
 }
@@ -367,7 +368,7 @@ type Person {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "rating")
 }
@@ -388,7 +389,7 @@ func TestValidateEdges_FKTypeMismatch(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "_target_id")
 }
@@ -409,7 +410,7 @@ func TestValidateEdges_EmptyTargetInElement(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "expected object for edge target")
 }
@@ -429,12 +430,12 @@ func TestValidateEdges_OptionalEdgeWithEmptyArray(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// Edge should be present but empty
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
+	require.False(t, edge.IsZero())
 	assert.True(t, edge.IsEmpty())
 }
 
@@ -456,12 +457,12 @@ func TestValidateEdges_RequiredEdgeWithEmptyArray(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	// Edge should be present but empty
 	edge, ok := valid.Edge("EMPLOYER")
 	require.True(t, ok)
-	require.NotNil(t, edge)
+	require.False(t, edge.IsZero())
 	assert.True(t, edge.IsEmpty())
 }
 
@@ -483,14 +484,14 @@ func TestValidateEdges_CompositeFK(t *testing.T) {
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	edge, ok := valid.Edge("ENROLLMENT")
 	require.True(t, ok)
-	require.NotNil(t, edge)
-	assert.Len(t, edge.Targets(), 1)
+	require.False(t, edge.IsZero())
+	assert.Len(t, slices.Collect(edge.Targets()), 1)
 	// Key should have both components
-	assert.Equal(t, 2, edge.Targets()[0].TargetKey().Len())
+	assert.Equal(t, 2, slices.Collect(edge.Targets())[0].TargetKey().Len())
 }
 
 func TestValidateEdges_PartialCompositeFK(t *testing.T) {
@@ -510,7 +511,7 @@ func TestValidateEdges_PartialCompositeFK(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "incomplete composite FK")
 }
@@ -534,7 +535,7 @@ func TestValidateEdges_FKFieldCase(t *testing.T) {
 		valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 		require.True(t, result.OK(), result.String())
-		require.NotNil(t, valid, "_target_ID folds to _target_id under the default mode")
+		require.False(t, valid.IsZero(), "_target_ID folds to _target_id under the default mode")
 	})
 
 	t.Run("wrong_case_fails_with_strict_mode", func(t *testing.T) {
@@ -550,7 +551,7 @@ func TestValidateEdges_FKFieldCase(t *testing.T) {
 
 		valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-		assert.Nil(t, valid, "Should fail: _Target_id != _target_id (case-sensitive)")
+		assert.True(t, valid.IsZero(), "Should fail: _Target_id != _target_id (case-sensitive)")
 		require.False(t, result.OK())
 		assert.Contains(t, result.String(), "missing FK field")
 	})
@@ -568,7 +569,7 @@ func TestValidateEdges_FKFieldCase(t *testing.T) {
 		valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
 		require.True(t, result.OK())
-		require.NotNil(t, valid, "Should succeed: exact case match")
+		require.False(t, valid.IsZero(), "Should succeed: exact case match")
 	})
 }
 
@@ -587,7 +588,7 @@ func TestValidateEdges_ExplicitNull_Optional(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
@@ -609,7 +610,7 @@ func TestValidateEdges_ExplicitNull_Required(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
@@ -631,7 +632,7 @@ func TestValidateEdges_ExplicitNull_Many(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 	assert.Contains(t, result.String(), "null is not a valid edge value")
 
@@ -653,7 +654,7 @@ func TestValidateEdges_FKDiagnosticDetails_MissingAll(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	yammmtest.GoldenJSON(t, "edge_diag_fk_missing_all", issueProjection(result))
@@ -676,7 +677,7 @@ func TestValidateEdges_FKDiagnosticDetails_Partial(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	yammmtest.GoldenJSON(t, "edge_diag_fk_partial", issueProjection(result))
@@ -700,7 +701,7 @@ func TestValidateEdges_SingleFK_NullValue(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	assert.Contains(t, result.String(), "null")
@@ -726,7 +727,7 @@ func TestValidateEdges_CompositeFK_OneNullOneValid(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	assert.Contains(t, result.String(), "_target_region")
@@ -752,7 +753,7 @@ func TestValidateEdges_CompositeFK_OneNullOneMissing(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	assert.Contains(t, result.String(), "_target_region")
@@ -778,7 +779,7 @@ func TestValidateEdges_CompositeFK_OneNullOneInvalidType(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	yammmtest.GoldenJSON(t, "edge_diag_composite_both_invalid", issueProjection(result))
@@ -804,7 +805,7 @@ func TestValidateEdges_CompositeFK_OneInvalidOneMissing(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 
-	assert.Nil(t, valid)
+	assert.True(t, valid.IsZero())
 	require.False(t, result.OK())
 
 	yammmtest.GoldenJSON(t, "edge_diag_composite_one_invalid_one_missing", issueProjection(result))
@@ -1000,18 +1001,18 @@ func TestValidateEdges_MultiplicityMatrix(t *testing.T) {
 
 			if tc.expectSuccess {
 				require.True(t, result.OK(), "%s: should succeed but got failure", tc.description)
-				require.NotNil(t, valid, "%s: should have valid instance", tc.description)
+				require.False(t, valid.IsZero(), "%s: should have valid instance", tc.description)
 
 				edge, ok := valid.Edge("EMPLOYER")
 				if tc.expectEdges > 0 {
 					require.True(t, ok, "%s: should have edge", tc.description)
-					assert.Len(t, edge.Targets(), tc.expectEdges, "%s: edge count", tc.description)
+					assert.Len(t, slices.Collect(edge.Targets()), tc.expectEdges, "%s: edge count", tc.description)
 				} else if ok {
 					// Zero edges means either no edge data or empty
-					assert.Empty(t, edge.Targets(), "%s: should have 0 targets", tc.description)
+					assert.Empty(t, slices.Collect(edge.Targets()), "%s: should have 0 targets", tc.description)
 				}
 			} else {
-				assert.Nil(t, valid, "%s: should fail but got valid", tc.description)
+				assert.True(t, valid.IsZero(), "%s: should fail but got valid", tc.description)
 				require.False(t, result.OK(), "%s: should have failure", tc.description)
 			}
 		})
@@ -1050,11 +1051,11 @@ type County {
 		}
 		valid, result := validator.ValidateOne(t.Context(), "County", raw)
 		require.True(t, result.OK(), "valid DataType edge-property value must validate: %s", result)
-		require.NotNil(t, valid)
+		require.False(t, valid.IsZero())
 
 		edge, ok := valid.Edge("IN_STATE")
 		require.True(t, ok)
-		tagVal, ok := edge.Targets()[0].Properties().Get("code_tag")
+		tagVal, ok := slices.Collect(edge.Targets())[0].Properties().Get("code_tag")
 		require.True(t, ok)
 		tag, ok := tagVal.String()
 		require.True(t, ok)
@@ -1072,7 +1073,7 @@ type County {
 			},
 		}
 		valid, result := validator.ValidateOne(t.Context(), "County", raw)
-		assert.Nil(t, valid)
+		assert.True(t, valid.IsZero())
 		require.False(t, result.OK())
 		assert.True(t, result.HasCode(instance.ErrConstraintFail),
 			"want E_CONSTRAINT_FAIL, got: %s", result)

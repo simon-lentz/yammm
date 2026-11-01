@@ -66,7 +66,7 @@ type Car {
 	if res.HasErrors() {
 		t.Fatalf("load: %v", res.Err())
 	}
-	for _, dt := range s.DataTypesSlice() {
+	for dt := range s.DataTypes() {
 		if err := schema.CheckConstraint(dt.Constraint()); err != nil {
 			t.Errorf("datatype %s: %v", dt.Name(), err)
 		}

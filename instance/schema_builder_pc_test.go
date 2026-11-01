@@ -17,7 +17,7 @@ import (
 // pcTestSchema is the in-package fixture for these tests. The external suite's
 // personSchema is not visible from package instance, and these tests need
 // unexported access.
-func pcTestSchema(t *testing.T) *schema.Schema {
+func pcTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("pctest").

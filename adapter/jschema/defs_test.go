@@ -1,6 +1,7 @@
 package jschema
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ part type Wheel {
 }
 `
 
-func loadFixture(t *testing.T, src, name string) *schema.Schema {
+func loadFixture(t *testing.T, src, name string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), src, name)
 	if res.HasErrors() {
@@ -41,7 +42,7 @@ func loadFixture(t *testing.T, src, name string) *schema.Schema {
 }
 
 // loadMulti loads sources hermetically with "main.yammm" as the entry.
-func loadMulti(t *testing.T, sources map[string]string) *schema.Schema {
+func loadMulti(t *testing.T, sources map[string]string) schema.Schema {
 	t.Helper()
 	m := make(map[string][]byte, len(sources))
 	for k, v := range sources {
@@ -54,7 +55,7 @@ func loadMulti(t *testing.T, sources map[string]string) *schema.Schema {
 	return s
 }
 
-func mustType(t *testing.T, s *schema.Schema, name string) *schema.Type {
+func mustType(t *testing.T, s schema.Schema, name string) schema.Type {
 	t.Helper()
 	typ, ok := s.Type(name)
 	if !ok {
@@ -63,7 +64,7 @@ func mustType(t *testing.T, s *schema.Schema, name string) *schema.Type {
 	return typ
 }
 
-func mustDefName(t *testing.T, table *defsTable, typ *schema.Type) string {
+func mustDefName(t *testing.T, table *defsTable, typ schema.Type) string {
 	t.Helper()
 	name, ok := table.defName(typ.ID())
 	if !ok {
@@ -105,7 +106,7 @@ func TestBuildDefsTable_SingleSchema(t *testing.T) {
 	// EDGE_ registration: owner-qualified key from collision-resolved def
 	// names plus the relation's JSON field name.
 	car := mustType(t, s, "Car")
-	assocs := car.AssociationsSlice()
+	assocs := slices.Collect(car.Associations())
 	if len(assocs) != 1 {
 		t.Fatalf("expected 1 association on Car, got %d", len(assocs))
 	}
@@ -131,9 +132,9 @@ func TestBuildDefsTable_DataTypePropertyRegistration(t *testing.T) {
 
 	state := mustType(t, s, "State")
 	car := mustType(t, s, "Car")
-	rel := car.AssociationsSlice()[0]
+	rel := slices.Collect(car.Associations())[0]
 
-	edgeProp := func(name string) *schema.Property {
+	edgeProp := func(name string) schema.Property {
 		p, ok := rel.Property(name)
 		if !ok {
 			t.Fatalf("edge property %q missing", name)
@@ -143,7 +144,7 @@ func TestBuildDefsTable_DataTypePropertyRegistration(t *testing.T) {
 
 	// DataType-typed members register: a type property, a list element, and
 	// an edge property. Non-DataType members miss.
-	registered := []*schema.Property{
+	registered := []schema.Property{
 		prop(t, state, "code"), // direct alias
 		prop(t, car, "zips"),   // list-of-alias element
 		edgeProp("tag"),        // alias edge property
@@ -153,7 +154,7 @@ func TestBuildDefsTable_DataTypePropertyRegistration(t *testing.T) {
 			t.Errorf("property %q: dtPropName %q ok=%v, want StateCode", p.Name(), name, ok)
 		}
 	}
-	for _, p := range []*schema.Property{prop(t, car, "vin"), edgeProp("since")} {
+	for _, p := range []schema.Property{prop(t, car, "vin"), edgeProp("since")} {
 		if _, ok := table.dtPropName(p); ok {
 			t.Errorf("property %q should not be registered", p.Name())
 		}
@@ -222,7 +223,7 @@ type Region {
 	// The edge key's bare spelling is built from the names as written, and
 	// nothing else claims it.
 	county := mustType(t, s, "County")
-	edgeName, ok := table.edgeDefName(county.AssociationsSlice()[0])
+	edgeName, ok := table.edgeDefName(slices.Collect(county.Associations())[0])
 	if !ok || edgeName != "EDGE_County_in_region_Region" {
 		t.Errorf("edge def name %q ok=%v, want EDGE_County_in_region_Region", edgeName, ok)
 	}
@@ -261,13 +262,13 @@ abstract type Located {
 	// The inherited property's pointer (registered while walking its
 	// DECLARING schema) resolves to the datatype defined there.
 	city := mustType(t, s, "City")
-	var region *schema.Property
-	for _, p := range city.AllPropertiesSlice() {
+	var region schema.Property
+	for p := range city.AllProperties() {
 		if p.Name() == "region" {
 			region = p
 		}
 	}
-	if region == nil {
+	if region.IsZero() {
 		t.Fatal("inherited property region missing from City")
 	}
 	if name, ok := table.dtPropName(region); !ok || name != "RegionCode" {
@@ -276,20 +277,20 @@ abstract type Located {
 
 	// Abstract types are registered in the table (lookup by TargetID must
 	// always succeed); whether they are EMITTED is the emitter's concern.
-	var located *schema.Type
+	var located schema.Type
 	for _, typ := range table.orderedTypes {
 		if typ.Name() == "Located" {
 			located = typ
 		}
 	}
-	if located == nil {
+	if located.IsZero() {
 		t.Fatal("Located missing from orderedTypes")
 	}
 	if got := mustDefName(t, table, located); got != "Located" {
 		t.Errorf("Located def name %q, want bare", got)
 	}
 	// The composition target resolves through the table by TargetID.
-	comps := city.AllCompositionsSlice()
+	comps := slices.Collect(city.AllCompositions())
 	if len(comps) != 1 {
 		t.Fatalf("expected 1 inherited composition, got %d", len(comps))
 	}
@@ -322,8 +323,8 @@ type Person extends Member {
 
 	member := mustType(t, s, "Member")
 	person := mustType(t, s, "Person")
-	declared := member.AssociationsSlice()[0]
-	inherited := person.AllAssociationsSlice()[0]
+	declared := slices.Collect(member.Associations())[0]
+	inherited := slices.Collect(person.AllAssociations())[0]
 
 	declaredName, ok1 := table.edgeDefName(declared)
 	inheritedName, ok2 := table.edgeDefName(inherited)
@@ -398,7 +399,7 @@ type Car {
 		t.Errorf("the declared type's key = %q, want fleet.EDGE_Car_owner_Person", got)
 	}
 	car := mustType(t, s, "Car")
-	if got, _ := table.edgeDefName(car.AssociationsSlice()[0]); got != "fleet.Car.OWNER.edge" {
+	if got, _ := table.edgeDefName(slices.Collect(car.Associations())[0]); got != "fleet.Car.OWNER.edge" {
 		t.Errorf("the edge key = %q, want fleet.Car.OWNER.edge", got)
 	}
 }
@@ -427,8 +428,8 @@ type A_b {
 	if err != nil {
 		t.Fatalf("buildDefsTable: %v", err)
 	}
-	first, _ := table.edgeDefName(mustType(t, s, "A").AssociationsSlice()[0])
-	second, _ := table.edgeDefName(mustType(t, s, "A_b").AssociationsSlice()[0])
+	first, _ := table.edgeDefName(slices.Collect(mustType(t, s, "A").Associations())[0])
+	second, _ := table.edgeDefName(slices.Collect(mustType(t, s, "A_b").Associations())[0])
 	if first != "p.A.B_X.edge" || second != "p.A_b.X.edge" {
 		t.Errorf("edge keys = %q, %q; want p.A.B_X.edge, p.A_b.X.edge", first, second)
 	}

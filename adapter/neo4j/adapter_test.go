@@ -124,7 +124,7 @@ func TestAdapter_LabelConsistency(t *testing.T) {
 	}
 
 	// For each type: Label() == shape.Label == constraint label == MERGE label.
-	for _, t2 := range s.TypesSlice() {
+	for t2 := range s.Types() {
 		if t2.IsAbstract() {
 			continue
 		}

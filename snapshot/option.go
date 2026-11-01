@@ -165,15 +165,14 @@ func WithIssueLimit(limit int) LoadOption {
 // default, so nothing changes and the walk costs nothing when nobody asks.
 //
 // It reports values of the three kinds that have a canonical stored form —
-// Timestamp, Date and UUID — and nothing else. Bounds, enums, patterns and
+// Timestamp, Date and UUID — and of a list of them, and nothing else. Bounds, enums, patterns and
 // invariants stay unchecked. This is not re-validation, and a document it
 // reports nothing for is not thereby valid; [WithRevalidation] is the full
 // check.
 //
 // Warning severity is deliberate: Load still returns the snapshot together
-// with the findings. Reporting a document is not refusing it, and the values
-// themselves are rendered rather than rejected — this option re-validates
-// nothing.
+// with the findings. Reporting a document is not refusing it, and each reported
+// value is kept as it arrived — this option re-validates nothing.
 func WithValueConformance(report bool) LoadOption {
 	return func(c *loadConfig) {
 		c.valueConformance = report
@@ -212,7 +211,8 @@ func WithRevalidation(severity diag.Severity) LoadOption {
 // validation still runs and produces diagnostics with the standard snapshot
 // codes. This follows etcd's SkipHashCheck pattern and supports debugging
 // workflows where .ys files have been hand-edited for inspection. With true —
-// the default — a mismatch draws E_SNAPSHOT_INTEGRITY_MISMATCH.
+// the default — a mismatch draws E_SNAPSHOT_INTEGRITY_MISMATCH. An empty stored
+// hash is skipped either way.
 func WithIntegrityCheck(check bool) LoadOption {
 	return func(c *loadConfig) {
 		c.skipIntegrityCheck = !check

@@ -30,13 +30,13 @@ const fkPrefix = "_target_"
 // a [Refused] value.
 func (v *Validator) validateEdges(
 	ctx context.Context,
-	typ *schema.Type,
-	rels map[*schema.Relation]relationInput,
+	typ schema.Type,
+	rels map[schema.Relation]relationInput,
 	collector *diag.Collector,
-	prov *location.Provenance,
+	prov location.Provenance,
 	base path.Builder,
-) (map[string]*ValidEdgeData, bool) {
-	var edges map[string]*ValidEdgeData
+) (map[string]ValidEdgeData, bool) {
+	var edges map[string]ValidEdgeData
 	refused := false
 
 	for rel := range typ.AllAssociations() {
@@ -55,12 +55,12 @@ func (v *Validator) validateEdges(
 
 		edgeData, targetRefused := v.validateEdgeData(ctx, rel, in.value, collector, prov, base.Key(in.key))
 		refused = refused || targetRefused
-		if edgeData != nil {
-			if edges == nil {
-				edges = make(map[string]*ValidEdgeData)
-			}
-			edges[rel.Name()] = edgeData
+		if edges == nil {
+			edges = make(map[string]ValidEdgeData)
 		}
+		// Zero data comes with an error, a refusal or a cancellation, and on each
+		// of those the caller discards the map.
+		edges[rel.Name()] = edgeData
 	}
 
 	return edges, refused
@@ -70,17 +70,17 @@ func (v *Validator) validateEdges(
 // input key's location, and reports whether a target holds a [Refused] value.
 func (v *Validator) validateEdgeData(
 	ctx context.Context,
-	rel *schema.Relation,
+	rel schema.Relation,
 	rawValue any,
 	collector *diag.Collector,
-	prov *location.Provenance,
+	prov location.Provenance,
 	relPath path.Builder,
-) (*ValidEdgeData, bool) {
+) (ValidEdgeData, bool) {
 	// An explicit null is a shape error whatever the multiplicity.
 	if isAbsent(rawValue) {
 		collector.Collect(shapeMismatch(rel, "edge "+rel.Name()+": null is not a valid edge value",
 			expectedShapeForRelation(rel), "null", prov, relPath))
-		return nil, false
+		return ValidEdgeData{}, false
 	}
 
 	if rel.IsMany() {
@@ -88,7 +88,7 @@ func (v *Validator) validateEdgeData(
 		if !ok {
 			collector.Collect(shapeMismatch(rel, "edge "+rel.Name()+": expected array, got "+kindOf(rawValue),
 				"array", kindOf(rawValue), prov, relPath))
-			return nil, false
+			return ValidEdgeData{}, false
 		}
 
 		// An empty array is valid at the instance layer for every association;
@@ -97,7 +97,7 @@ func (v *Validator) validateEdgeData(
 		refused := false
 		for i, elem := range arr {
 			if err := ctx.Err(); err != nil {
-				return nil, refused
+				return ValidEdgeData{}, refused
 			}
 			target, targetRefused := v.validateEdgeTarget(rel, elem, collector, prov, relPath.Index(i))
 			refused = refused || targetRefused
@@ -106,7 +106,7 @@ func (v *Validator) validateEdgeData(
 			}
 		}
 		if refused {
-			return nil, true
+			return ValidEdgeData{}, true
 		}
 		return NewValidEdgeData(targets), false
 	}
@@ -115,11 +115,11 @@ func (v *Validator) validateEdgeData(
 	if !ok {
 		collector.Collect(shapeMismatch(rel, "edge "+rel.Name()+": expected object, got "+kindOf(rawValue),
 			"object", kindOf(rawValue), prov, relPath))
-		return nil, false
+		return ValidEdgeData{}, false
 	}
 	target, refused := v.validateEdgeTarget(rel, obj, collector, prov, relPath)
 	if target == nil {
-		return nil, refused
+		return ValidEdgeData{}, refused
 	}
 	return NewValidEdgeData([]ValidEdgeTarget{*target}), false
 }
@@ -127,7 +127,7 @@ func (v *Validator) validateEdgeData(
 // shapeMismatch builds an E_EDGE_SHAPE_MISMATCH carrying the expected and got
 // shapes as details on every arm, so a structured consumer reads them the
 // same way whichever arm fired.
-func shapeMismatch(rel *schema.Relation, message, expected, got string, prov *location.Provenance, at path.Builder) diag.Issue {
+func shapeMismatch(rel schema.Relation, message, expected, got string, prov location.Provenance, at path.Builder) diag.Issue {
 	issue := diag.NewIssue(diag.Error, ErrEdgeShapeMismatch, message).
 		WithExpectedGot(expected, got)
 	withProvenance(issue, prov, at.String()).
@@ -186,17 +186,17 @@ func coercionIssue(err error, message string) *diag.IssueBuilder {
 // reported at the object.
 type edgeObject struct {
 	obj      map[string]any
-	fk       map[string]string           // expected FK field → input key
-	props    map[*schema.Property]string // edge property → input key
-	unknown  []string                    // input keys naming no member, sorted
-	shadowed map[string]string           // unknown key → the member an exact match already claimed
+	fk       map[string]string          // expected FK field → input key
+	props    map[schema.Property]string // edge property → input key
+	unknown  []string                   // input keys naming no member, sorted
+	shadowed map[string]string          // unknown key → the member an exact match already claimed
 	// collidedFK and collidedProps hold each member a collision claims. The
 	// collision is that member's one issue: it is present, and judged no further.
 	collidedFK    map[string]bool
-	collidedProps map[*schema.Property]bool
+	collidedProps map[schema.Property]bool
 }
 
-func (v *Validator) resolveEdgeObject(rel *schema.Relation, targetType *schema.Type, obj map[string]any, collector *diag.Collector, prov *location.Provenance, targetPath path.Builder) edgeObject {
+func (v *Validator) resolveEdgeObject(rel schema.Relation, targetType schema.Type, obj map[string]any, collector *diag.Collector, prov location.Provenance, targetPath path.Builder) edgeObject {
 	claims := claimEdgeObject(rel, targetType, slices.Sorted(maps.Keys(obj)), v.cfg.strictPropertyNames)
 	eo := edgeObject{obj: obj, fk: claims.fk, props: claims.props, unknown: claims.unknown, shadowed: claims.shadowed}
 	for _, c := range claims.collisions {
@@ -207,7 +207,7 @@ func (v *Validator) resolveEdgeObject(rel *schema.Relation, targetType *schema.T
 			eo.collidedFK[c.fk] = true
 		} else {
 			if eo.collidedProps == nil {
-				eo.collidedProps = make(map[*schema.Property]bool)
+				eo.collidedProps = make(map[schema.Property]bool)
 			}
 			eo.collidedProps[c.prop] = true
 		}
@@ -220,7 +220,7 @@ func (v *Validator) resolveEdgeObject(rel *schema.Relation, targetType *schema.T
 			ErrCaseFoldCollision,
 			fmt.Sprintf("multiple input fields %s fold to %s", nameList(c.keys), what),
 		).WithDetail(diag.DetailKeyRelationName, rel.Name())
-		if c.prop != nil {
+		if !c.prop.IsZero() {
 			issue.WithDetail(diag.DetailKeyPropertyName, c.prop.Name())
 		}
 		withProvenance(issue, prov, targetPath.String())
@@ -229,8 +229,8 @@ func (v *Validator) resolveEdgeObject(rel *schema.Relation, targetType *schema.T
 	return eo
 }
 
-func memberName(fk string, p *schema.Property) string {
-	if p != nil {
+func memberName(fk string, p schema.Property) string {
+	if !p.IsZero() {
 		return p.Name()
 	}
 	return fk
@@ -240,10 +240,10 @@ func memberName(fk string, p *schema.Property) string {
 // reports whether a foreign-key field or an edge property holds a [Refused]
 // value. A refused target is nil and reports nothing for that value.
 func (v *Validator) validateEdgeTarget(
-	rel *schema.Relation,
+	rel schema.Relation,
 	elem any,
 	collector *diag.Collector,
-	prov *location.Provenance,
+	prov location.Provenance,
 	targetPath path.Builder,
 ) (*ValidEdgeTarget, bool) {
 	// A per-target collector keeps one target's issues from coupling to
@@ -278,7 +278,7 @@ func (v *Validator) validateEdgeTarget(
 
 	eo := v.resolveEdgeObject(rel, targetType, obj, targetCollector, prov, targetPath)
 
-	pkFields := targetType.PrimaryKeysSlice()
+	pkFields := slices.Collect(targetType.PrimaryKeys())
 	allExpectedFKFields := make([]string, len(pkFields))
 	for i, pk := range pkFields {
 		allExpectedFKFields[i] = fkPrefix + pk.Name()
@@ -542,7 +542,7 @@ func kindOf(v any) string {
 
 // expectedShapeForRelation returns the expected JSON shape description for a relation.
 // Used in error messages to indicate what shape was expected.
-func expectedShapeForRelation(rel *schema.Relation) string {
+func expectedShapeForRelation(rel schema.Relation) string {
 	if rel.IsMany() {
 		return "array"
 	}

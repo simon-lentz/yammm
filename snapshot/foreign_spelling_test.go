@@ -2,12 +2,14 @@ package snapshot_test
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -21,7 +23,7 @@ const (
 // composed child, plus an optional association, so one document can carry a
 // composed duplicate record and an unresolved-edge record whose addresses
 // are all canonicalizing.
-func foreignSpellingSchema(t *testing.T) *schema.Schema {
+func foreignSpellingSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "foreign_spelling"
 
@@ -59,21 +61,21 @@ func TestLoad_RecordAddressesResolveFromAForeignSpelling(t *testing.T) {
 	sensorType, _ := s.Type("Sensor")
 	readingType, _ := s.Type("Reading")
 
-	reading := func() *instance.ValidInstance {
+	reading := func() instance.ValidInstance {
 		return instance.NewValidInstance("Reading", readingType.ID(),
 			immutable.WrapKey([]any{canonicalStamp}),
 			immutable.WrapProperties(map[string]any{"taken_at": canonicalStamp}),
-			nil, nil, nil)
+			nil, nil, location.Provenance{})
 	}
 	// The association names a Station that is never added, so the snapshot
 	// carries an unresolved record whose SOURCE is the Timestamp-keyed root.
 	sensor := instance.NewValidInstance("Sensor", sensorType.ID(),
 		immutable.WrapKey([]any{canonicalStamp}),
 		immutable.WrapProperties(map[string]any{"observed_at": canonicalStamp}),
-		map[string]*instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		map[string]instance.ValidEdgeData{"AT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{"missing"}), immutable.WrapProperties(nil)),
 		})},
-		map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading()})}, nil)
+		map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading()})}, location.Provenance{})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), sensor); !r.OK() {
@@ -87,11 +89,11 @@ func TestLoad_RecordAddressesResolveFromAForeignSpelling(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("duplicates = %d, want 1", len(snap.Duplicates()))
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("duplicates = %d, want 1", len(slices.Collect(snap.Duplicates())))
 	}
-	if len(snap.Unresolved()) != 1 {
-		t.Fatalf("unresolved = %d, want 1", len(snap.Unresolved()))
+	if len(slices.Collect(snap.Unresolved())) != 1 {
+		t.Fatalf("unresolved = %d, want 1", len(slices.Collect(snap.Unresolved())))
 	}
 
 	data, mr := snapshot.Marshal(t.Context(), snap)

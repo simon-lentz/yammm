@@ -41,7 +41,7 @@ type Holder {
 }
 `
 
-func loadUTF8CSVSchema(t *testing.T) *schema.Schema {
+func loadUTF8CSVSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), utf8CSVSchema, "utf8.yammm")
 	if res.HasErrors() {
@@ -82,7 +82,7 @@ func TestParseTyped_ACellThatIsNotValidUTF8YieldsNoValidInstance(t *testing.T) {
 				t.Fatalf("ParseTyped returned %d rows, want 1: %s", len(raws), pres)
 			}
 			inst, vres := v.ValidateOne(t.Context(), "Holder", raws[0])
-			if !pres.HasErrors() && inst != nil {
+			if !pres.HasErrors() && !inst.IsZero() {
 				t.Errorf("a cell that is not valid UTF-8 was parsed and validated")
 			}
 			if !pres.HasErrors() && !vres.HasErrors() {
@@ -101,19 +101,19 @@ func TestParseTyped_ACellThatIsNotValidUTF8YieldsNoValidInstance(t *testing.T) {
 
 // utf8Bypass builds Holder h1 through instancetest, which runs no validation,
 // holding props beside its key and one LINK to Target t1 carrying label.
-func utf8Bypass(t *testing.T, s *schema.Schema, props map[string]any, label any) *graph.Snapshot {
+func utf8Bypass(t *testing.T, s schema.Schema, props map[string]any, label any) graph.Snapshot {
 	t.Helper()
 	target, _ := s.Type("Target")
 	holder, _ := s.Type("Holder")
 	all := map[string]any{"id": "h1"}
 	maps.Copy(all, props)
 	g := graph.New(s)
-	for _, inst := range []*instance.ValidInstance{
+	for _, inst := range []instance.ValidInstance{
 		instancetest.VI("Target", instancetest.TypeID(target.ID()), instancetest.PK("t1"),
 			instancetest.Props(map[string]any{"key": "t1"})),
 		instancetest.VI("Holder", instancetest.TypeID(holder.ID()), instancetest.PK("h1"),
 			instancetest.Props(all),
-			instancetest.Edges(map[string]*instance.ValidEdgeData{
+			instancetest.Edges(map[string]instance.ValidEdgeData{
 				"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 					instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(map[string]any{"label": label})),
 				}),

@@ -50,7 +50,7 @@ type D {
 	if res.Err() != nil {
 		t.Fatal(res.Err())
 	}
-	rel := func(typeName string) *schema.Relation {
+	rel := func(typeName string) schema.Relation {
 		typ, _ := s.Type(typeName)
 		r, _ := typ.Relation("R")
 		return r

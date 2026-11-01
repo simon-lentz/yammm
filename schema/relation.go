@@ -2,7 +2,6 @@ package schema
 
 import (
 	"iter"
-	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/location"
@@ -34,20 +33,26 @@ func (k RelationKind) String() string {
 
 // Relation represents a relationship between types.
 // Relations are immutable after schema completion.
-type Relation struct {
+type Relation struct{ *relationState }
+
+// IsZero reports whether the handle names no record.
+func (r Relation) IsZero() bool { return r.relationState == nil }
+
+// relationState is the record a [Relation] names.
+type relationState struct {
 	kind       RelationKind
-	name       string               // DSL name (e.g., "OWNER")
-	fieldName  string               // lower-case name, cached at completion
-	target     TypeRef              // syntactic reference
-	targetID   TypeID               // resolved identity
-	span       location.Span        // source location
-	doc        string               // documentation comment
-	optional   bool                 // forward multiplicity: optional?
-	many       bool                 // forward multiplicity: many?
-	owner      string               // declaring type name
-	properties []*Property          // edge properties (associations only)
-	propByFold map[string]*Property // lowercased name → property, built at seal
-	sealed     bool                 // true after completion; prevents further mutation
+	name       string              // DSL name (e.g., "OWNER")
+	fieldName  string              // lower-case name, cached at completion
+	target     TypeRef             // syntactic reference
+	targetID   TypeID              // resolved identity
+	span       location.Span       // source location
+	doc        string              // documentation comment
+	optional   bool                // forward multiplicity: optional?
+	many       bool                // forward multiplicity: many?
+	owner      string              // declaring type name
+	properties []Property          // edge properties (associations only)
+	propByFold map[string]Property // lowercased name → property, built at seal
+	sealed     bool                // true after completion; prevents further mutation
 }
 
 // newRelation creates a new Relation. This is primarily for internal use;
@@ -62,9 +67,9 @@ func newRelation(
 	doc string,
 	optional, many bool,
 	owner string,
-	properties []*Property,
-) *Relation {
-	return &Relation{
+	properties []Property,
+) Relation {
+	return Relation{&relationState{
 		kind:       kind,
 		name:       name,
 		fieldName:  fieldName,
@@ -76,28 +81,28 @@ func newRelation(
 		many:       many,
 		owner:      owner,
 		properties: properties,
-	}
+	}}
 }
 
 // Kind returns the relation kind (association or composition).
-func (r *Relation) Kind() RelationKind {
+func (r Relation) Kind() RelationKind {
 	return r.kind
 }
 
 // Name returns the DSL name of the relation (e.g., "OWNER").
-func (r *Relation) Name() string {
+func (r Relation) Name() string {
 	return r.name
 }
 
 // FieldName returns the field name instance data and expressions use: the
 // relation name in lower case, "WORKS_AT" → "works_at". A relation name is
 // UPPER_SNAKE, so the two spellings differ only by case. Cached at completion.
-func (r *Relation) FieldName() string {
+func (r Relation) FieldName() string {
 	return r.fieldName
 }
 
 // Target returns the syntactic type reference for diagnostics.
-func (r *Relation) Target() TypeRef {
+func (r Relation) Target() TypeRef {
 	return r.target
 }
 
@@ -106,14 +111,14 @@ func (r *Relation) Target() TypeRef {
 // relation read from a completed schema always carries it; it is zero only
 // while completion is in progress or for a target that never resolved, which
 // fails the load.
-func (r *Relation) TargetID() TypeID {
+func (r Relation) TargetID() TypeID {
 	return r.targetID
 }
 
 // setTargetID sets the resolved canonical type identity.
 // Internal use only; called during schema completion.
 // Panics if called after seal().
-func (r *Relation) setTargetID(id TypeID) {
+func (r Relation) setTargetID(id TypeID) {
 	if r.sealed {
 		panic("relation: cannot mutate sealed relation")
 	}
@@ -123,11 +128,11 @@ func (r *Relation) setTargetID(id TypeID) {
 // seal prevents further mutation of the relation. Every relation is sealed
 // exactly once, by the completer of the schema that declares it; a second
 // call is a bug and panics like the mutators it protects.
-func (r *Relation) seal() {
+func (r Relation) seal() {
 	if r.sealed {
 		panic("relation: sealed twice")
 	}
-	r.propByFold = make(map[string]*Property, len(r.properties))
+	r.propByFold = make(map[string]Property, len(r.properties))
 	for _, p := range r.properties {
 		r.propByFold[strings.ToLower(p.name)] = p
 	}
@@ -135,41 +140,41 @@ func (r *Relation) seal() {
 }
 
 // isSealed reports whether the relation has been sealed.
-func (r *Relation) isSealed() bool {
+func (r Relation) isSealed() bool {
 	return r.sealed
 }
 
 // Span returns the source location of this relation declaration.
-func (r *Relation) Span() location.Span {
+func (r Relation) Span() location.Span {
 	return r.span
 }
 
 // Documentation returns the documentation comment, if any.
-func (r *Relation) Documentation() string {
+func (r Relation) Documentation() string {
 	return r.doc
 }
 
 // IsOptional reports whether the forward direction is optional.
-func (r *Relation) IsOptional() bool {
+func (r Relation) IsOptional() bool {
 	return r.optional
 }
 
 // IsMany reports whether the forward direction allows many targets.
-func (r *Relation) IsMany() bool {
+func (r Relation) IsMany() bool {
 	return r.many
 }
 
 // Owner returns the declaring type's name as spelled in the declaring schema.
 // It is local to that schema: resolve it there, never against a reader's
 // type index, where the same spelling may name a different type.
-func (r *Relation) Owner() string {
+func (r Relation) Owner() string {
 	return r.owner
 }
 
 // Properties returns an iterator over edge properties.
 // For compositions, this returns an empty iterator.
-func (r *Relation) Properties() iter.Seq[*Property] {
-	return func(yield func(*Property) bool) {
+func (r Relation) Properties() iter.Seq[Property] {
+	return func(yield func(Property) bool) {
 		for _, p := range r.properties {
 			if !yield(p) {
 				return
@@ -178,46 +183,40 @@ func (r *Relation) Properties() iter.Seq[*Property] {
 	}
 }
 
-// PropertiesSlice returns a defensive copy of edge properties.
-// For compositions, this returns an empty slice.
-func (r *Relation) PropertiesSlice() []*Property {
-	return slices.Clone(r.properties)
-}
-
 // Property returns the edge property with the given name, if it exists.
 //
 // Uses linear search. Edge properties are typically few (0-3), so O(n)
-// lookup is acceptable and avoids additional memory overhead of an index.
-func (r *Relation) Property(name string) (*Property, bool) {
+// lookup is acceptable and avoids a second index beside propByFold.
+func (r Relation) Property(name string) (Property, bool) {
 	for _, p := range r.properties {
 		if p.name == name {
 			return p, true
 		}
 	}
-	return nil, false
+	return Property{}, false
 }
 
 // PropertyFold returns the edge property whose lowercased name is lower, if
 // one exists. The caller lowercases the input key; this is the case-folded
 // half of [Relation.Property], answered from an index built at seal.
-func (r *Relation) PropertyFold(lower string) (*Property, bool) {
+func (r Relation) PropertyFold(lower string) (Property, bool) {
 	p, ok := r.propByFold[lower]
 	return p, ok
 }
 
 // IsAssociation reports whether this relation is an association.
-func (r *Relation) IsAssociation() bool {
+func (r Relation) IsAssociation() bool {
 	return r.kind == RelationAssociation
 }
 
 // IsComposition reports whether this relation is a composition.
-func (r *Relation) IsComposition() bool {
+func (r Relation) IsComposition() bool {
 	return r.kind == RelationComposition
 }
 
 // HasProperties reports whether this relation has edge properties.
 // Always false for compositions; may be true for associations.
-func (r *Relation) HasProperties() bool {
+func (r Relation) HasProperties() bool {
 	return len(r.properties) > 0
 }
 
@@ -226,8 +225,8 @@ func (r *Relation) HasProperties() bool {
 // set). Span and docs are declaration-site facts and are not compared. A
 // relation whose target never resolved is equal to nothing, itself included —
 // the load that left it unresolved already carries that diagnostic.
-func (r *Relation) Equal(other *Relation) bool {
-	if r == nil || other == nil {
+func (r Relation) Equal(other Relation) bool {
+	if r.IsZero() || other.IsZero() {
 		return r == other
 	}
 	if r.name != other.name {
@@ -246,7 +245,7 @@ func (r *Relation) Equal(other *Relation) bool {
 		return false
 	}
 	// Compare edge properties by name set (order-independent)
-	ownProps := make(map[string]*Property, len(r.properties))
+	ownProps := make(map[string]Property, len(r.properties))
 	for _, p := range r.properties {
 		ownProps[p.Name()] = p
 	}

@@ -85,7 +85,7 @@ func buildFuzzSeed(tb testing.TB, opts ...snapshot.Option) []byte {
 		"Person", typ.ID(),
 		immutable.WrapKey([]any{"p1"}),
 		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	g := graph.New(s)
 	if res := g.Add(context.Background(), inst); res.HasErrors() {

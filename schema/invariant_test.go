@@ -21,7 +21,7 @@ func TestNewInvariant(t *testing.T) {
 
 	inv := schema.TestNewInvariant("age must be positive", e, span, doc)
 
-	assert.NotNil(t, inv)
+	assert.False(t, inv.IsZero())
 	assert.Equal(t, "age must be positive", inv.Name())
 	assert.Equal(t, e, inv.Expression())
 	assert.Equal(t, span, inv.Span())

@@ -34,30 +34,30 @@ const StructuralHashVersion = 4
 // properties, relations, compositions, data types, constraints, invariants,
 // and the abstract and part markers.
 //
-// Two schemas that hash the same agree on every rule everywhere in their
-// closures. The converse does not hold: a hash can move on a change to an
+// Two schemas that hash the same agree on every hashed rule in their closures.
+// Import edges are not hashed, so one member set under two import graphs hashes
+// the same, though a name one graph resolves can miss under the other. The converse does not hold: a hash can move on a change to an
 // imported schema this schema never references, because closure membership
 // is part of the identity. Each member is framed under its schema name, the
 // entry schema first and the remaining members ordered by name, so the
 // order imports are declared in does not enter the digest.
 //
 // Annotations are deliberately excluded — they configure downstream store
-// DDL and never reject data. So are import aliases and source paths: a member
+// DDL or, for @writeOnce, the write path's update, and never reject data. So are import aliases and source paths: a member
 // frame carries the schema's declared name, never its source, and a relation
 // target is the pair (owning schema name, type name) — never a path. A hashed
 // path would make embedded:// and disk loads of one schema text disagree, and
 // consumer dispatch relies on the hash carrying no source path. A supertype
-// hashes by name alone, which loses nothing: inheritance merges the ancestor's
-// members into the subtype and those members are hashed here, so two
-// candidate ancestors that differ in any rule already produce different
-// digests.
+// hashes by name alone: inheritance merges the ancestor's members into the
+// subtype and those members are hashed here. An ancestor's abstract marker and an
+// ancestor member the subtype re-declares do not enter the subtype's frame.
 //
 // The returned string has the format "sha256:<hex>".
 //
-// Panics if s is nil.
-func StructuralHash(s *Schema) string {
-	if s == nil {
-		panic("schema: StructuralHash called on nil *Schema")
+// Panics if s is zero.
+func StructuralHash(s Schema) string {
+	if s.IsZero() {
+		panic("schema: StructuralHash called on a zero Schema")
 	}
 
 	h := sha256.New()
@@ -69,8 +69,8 @@ func StructuralHash(s *Schema) string {
 	// name so a re-ordered import list hashes the same. The slice is a copy,
 	// so sorting it in place touches no cached state. Ties on name keep
 	// closure order, which is deterministic, so the digest stays so.
-	members := s.Closure()
-	slices.SortStableFunc(members[1:], func(a, b *Schema) int {
+	members := slices.Collect(s.Closure())
+	slices.SortStableFunc(members[1:], func(a, b Schema) int {
 		return compareName(a.Name(), b.Name())
 	})
 
@@ -91,17 +91,15 @@ func StructuralHash(s *Schema) string {
 // frame opened by its name: its local types, then its local data types. The
 // frame is what keeps two different closures from serializing to one byte
 // stream.
-func hashSchemaMember(h io.Writer, s *Schema, owners map[location.SourceID]string) {
+func hashSchemaMember(h io.Writer, s Schema, owners map[location.SourceID]string) {
 	writeTag(h, "schema")
 	writeStr(h, s.Name())
 
-	// Types (lexicographic iteration guaranteed by s.Types()).
-	for _, typ := range s.Types() {
+	for _, typ := range slices.SortedFunc(s.Types(), func(a, b Type) int { return cmp.Compare(a.name, b.name) }) {
 		hashType(h, typ, owners)
 	}
 
-	// Data types (lexicographic iteration guaranteed by s.DataTypes()).
-	for _, dt := range s.DataTypes() {
+	for _, dt := range slices.SortedFunc(s.DataTypes(), func(a, b DataType) int { return cmp.Compare(a.name, b.name) }) {
 		writeTag(h, "datatype")
 		writeStr(h, dt.Name())
 		hashConstraint(h, dt.Constraint())
@@ -109,15 +107,15 @@ func hashSchemaMember(h io.Writer, s *Schema, owners map[location.SourceID]strin
 }
 
 // hashType hashes a single type's structural shape.
-func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
+func hashType(h io.Writer, typ Type, owners map[location.SourceID]string) {
 	writeTag(h, "type")
 	writeStr(h, typ.ID().Name())
 	writeBool(h, typ.IsAbstract())
 	writeBool(h, typ.IsPart())
 
 	// Primary keys (sorted by name).
-	pks := typ.PrimaryKeysSlice()
-	slices.SortFunc(pks, func(a, b *Property) int {
+	pks := slices.Collect(typ.PrimaryKeys())
+	slices.SortFunc(pks, func(a, b Property) int {
 		return compareName(a.Name(), b.Name())
 	})
 	for _, pk := range pks {
@@ -127,8 +125,8 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	}
 
 	// All properties (sorted by name).
-	props := typ.AllPropertiesSlice()
-	slices.SortFunc(props, func(a, b *Property) int {
+	props := slices.Collect(typ.AllProperties())
+	slices.SortFunc(props, func(a, b Property) int {
 		return compareName(a.Name(), b.Name())
 	})
 	for _, prop := range props {
@@ -140,8 +138,8 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	}
 
 	// All associations (sorted by name).
-	assocs := typ.AllAssociationsSlice()
-	slices.SortFunc(assocs, func(a, b *Relation) int {
+	assocs := slices.Collect(typ.AllAssociations())
+	slices.SortFunc(assocs, func(a, b Relation) int {
 		return compareName(a.Name(), b.Name())
 	})
 	for _, rel := range assocs {
@@ -152,8 +150,8 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 		writeBool(h, rel.IsMany())
 
 		// Edge properties (sorted by name).
-		edgeProps := rel.PropertiesSlice()
-		slices.SortFunc(edgeProps, func(a, b *Property) int {
+		edgeProps := slices.Collect(rel.Properties())
+		slices.SortFunc(edgeProps, func(a, b Property) int {
 			return compareName(a.Name(), b.Name())
 		})
 		for _, prop := range edgeProps {
@@ -165,8 +163,8 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	}
 
 	// All compositions (sorted by name).
-	comps := typ.AllCompositionsSlice()
-	slices.SortFunc(comps, func(a, b *Relation) int {
+	comps := slices.Collect(typ.AllCompositions())
+	slices.SortFunc(comps, func(a, b Relation) int {
 		return compareName(a.Name(), b.Name())
 	})
 	for _, rel := range comps {
@@ -178,7 +176,7 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	}
 
 	// Super types (sorted by ID name).
-	supers := typ.SuperTypesSlice()
+	supers := slices.Collect(typ.SuperTypes())
 	slices.SortFunc(supers, func(a, b ResolvedTypeRef) int {
 		return compareName(a.ID().Name(), b.ID().Name())
 	})
@@ -192,7 +190,7 @@ func hashType(h io.Writer, typ *Type, owners map[location.SourceID]string) {
 	// its own blob; the blobs sort by bytes and hash length-prefixed. The
 	// name is excluded — it is the failure message — and inherited
 	// invariants hash like local ones, since both decide validity.
-	invs := typ.AllInvariantsSlice()
+	invs := slices.Collect(typ.AllInvariants())
 	blobs := make([][]byte, 0, len(invs))
 	for _, inv := range invs {
 		e := inv.Expression()

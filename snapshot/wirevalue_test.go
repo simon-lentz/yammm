@@ -46,7 +46,7 @@ type Sensor {
 }
 `
 
-func loadWireTestSchema(t *testing.T) *schema.Schema {
+func loadWireTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(t.Context(), wireTestSchema, "wiretest.yammm")
 	if result.HasErrors() {
@@ -67,7 +67,7 @@ func sensorProps(id string, reading any, samples []any) map[string]any {
 	}
 }
 
-func buildWireTestSnapshot(t *testing.T, s *schema.Schema, reading any, samples []any) *graph.Snapshot {
+func buildWireTestSnapshot(t *testing.T, s schema.Schema, reading any, samples []any) graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
 	g := graph.New(s)
@@ -75,7 +75,7 @@ func buildWireTestSnapshot(t *testing.T, s *schema.Schema, reading any, samples 
 	station := mustValidInstance(t, s, "Station", []any{"st1"}, map[string]any{"id": "st1"})
 	g.Add(ctx, station)
 
-	edge := map[string]*instance.ValidEdgeData{"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+	edge := map[string]instance.ValidEdgeData{"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 		instance.NewValidEdgeTarget(wrapKey("st1"), wrapProps(map[string]any{"gain": float64(2)})),
 	})}
 	sensor := instancetest.VI(
@@ -101,7 +101,7 @@ func buildWireTestSnapshot(t *testing.T, s *schema.Schema, reading any, samples 
 
 	// Edge to a missing station: an unresolved (target_missing) record whose
 	// gain property rides the diagnostics section.
-	ghostEdge := map[string]*instance.ValidEdgeData{"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+	ghostEdge := map[string]instance.ValidEdgeData{"FEED": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 		instance.NewValidEdgeTarget(wrapKey("ghost"), wrapProps(map[string]any{"gain": float64(2)})),
 	})}
 	stray := instancetest.VI(

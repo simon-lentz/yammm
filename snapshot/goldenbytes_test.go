@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -82,15 +83,15 @@ func TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes(t *testing.T) {
 			personA := buildPersonWithEdgeProps(t, s, "pA", edge.TargetKey, propsForTarget)
 			//nolint:contextcheck // buildSnapshot uses context.Background() internally; shared helper across the snapshot test suite
 			snapResolved := buildSnapshot(t, s, targetCompany, personA)
-			require.Len(t, snapResolved.Edges(), 1, "expected resolved edge")
-			require.Empty(t, snapResolved.Unresolved(), "snapshot A: no unresolved edge expected")
+			require.Len(t, slices.Collect(snapResolved.Edges()), 1, "expected resolved edge")
+			require.Empty(t, slices.Collect(snapResolved.Unresolved()), "snapshot A: no unresolved edge expected")
 
 			// Snapshot B: edge stays unresolved (target absent).
 			personB := buildPersonWithEdgeProps(t, s, "pB", edge.TargetKey, propsForTarget)
 			//nolint:contextcheck // buildSnapshot uses context.Background() internally; shared helper across the snapshot test suite
 			snapUnresolved := buildSnapshot(t, s, personB)
-			require.Empty(t, snapUnresolved.Edges(), "snapshot B: no resolved edge expected")
-			require.Len(t, snapUnresolved.Unresolved(), 1, "expected unresolved edge")
+			require.Empty(t, slices.Collect(snapUnresolved.Edges()), "snapshot B: no resolved edge expected")
+			require.Len(t, slices.Collect(snapUnresolved.Unresolved()), 1, "expected unresolved edge")
 
 			dataR, mres := snapshot.Marshal(ctx, snapResolved)
 			require.NoError(t, mres.Err())
@@ -109,7 +110,7 @@ func TestMarshalLoad_UnresolvedEdgePropertiesGoldenBytes(t *testing.T) {
 
 // buildPersonWithEdgeProps is a thin wrapper over mustValidInstanceWithEdgeProps
 // that keeps the golden-bytes test body readable.
-func buildPersonWithEdgeProps(t *testing.T, s *schema.Schema, personID, targetKey string, props map[string]any) *instance.ValidInstance {
+func buildPersonWithEdgeProps(t *testing.T, s schema.Schema, personID, targetKey string, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	return mustValidInstanceWithEdgeProps(t, s, "Person",
 		[]any{personID}, map[string]any{"id": personID, "name": personID},

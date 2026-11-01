@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -35,11 +37,11 @@ func TestAdd_StoresATimeOrAUUIDBehindACarrierAsItsText(t *testing.T) {
 		}
 		g := graph.New(s)
 		inst := instance.NewValidInstance("T", mustTypeID(t, s, "T"), immutable.WrapKey([]any{"x"}),
-			immutable.WrapProperties(props), nil, nil, nil)
+			immutable.WrapProperties(props), nil, nil, location.Provenance{})
 		if r := g.Add(t.Context(), inst); !r.OK() {
 			t.Fatalf("%s: add: %s", name, r)
 		}
-		got := g.Snapshot().InstancesOf(mustTypeID(t, s, "T"))[0]
+		got := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "T")))[0]
 		for prop := range props {
 			if prop == "id" {
 				continue

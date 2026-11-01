@@ -143,7 +143,7 @@ func TestValidateOne_ANilCarrierIsAnAbsentValue(t *testing.T) {
 		"a nil map keyed by no string":                         map[int]int(nil),
 	} {
 		inst, res := v.ValidateOne(t.Context(), "T", instance.RawInstance{Properties: map[string]any{"id": "x", "must": "m", "name": carrier}})
-		if res.Err() != nil || inst == nil {
+		if res.Err() != nil || inst.IsZero() {
 			t.Errorf("%s at an optional property: %v", name, codes(res))
 		} else if p, ok := inst.Property("name"); ok && !p.IsNil() {
 			t.Errorf("%s at an optional property stored %#v", name, p.Unwrap())

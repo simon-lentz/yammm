@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -43,7 +44,7 @@ type Run {
 
 type assocIDs struct{ company, pair, badge, person, run schema.TypeID }
 
-func loadAssociationShapes(t *testing.T) (*schema.Schema, assocIDs) {
+func loadAssociationShapes(t *testing.T) (schema.Schema, assocIDs) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), associationShapeSchema, "assoc.yammm")
 	if res.HasErrors() {
@@ -135,7 +136,7 @@ func TestRebuildSnapshot_HoldsEveryAssociationRecordToWhatAddStages(t *testing.T
 			parts := personParts(ids)
 			c.shape(&parts)
 			snap, res := graph.RebuildSnapshot(s, parts)
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Error("a refused rebuild returned a snapshot")
 			}
 			found := false
@@ -192,7 +193,7 @@ func TestRebuildSnapshot_DerivesRequiredFromTheRelation(t *testing.T) {
 		t.Fatalf("rebuild: %s", res)
 	}
 	got := map[string]bool{}
-	for _, u := range snap.Unresolved() {
+	for u := range snap.Unresolved() {
 		got[u.Relation()] = u.Required()
 	}
 	if !got["MANAGER"] || got["FRIENDS"] {
@@ -206,7 +207,7 @@ func TestRebuildSnapshot_DerivesRequiredFromTheRelation(t *testing.T) {
 func TestAdd_RefusesATargetKeyOfTheWrongArity(t *testing.T) {
 	t.Parallel()
 	s, ids := loadAssociationShapes(t)
-	target := func(key ...any) *instance.ValidEdgeData {
+	target := func(key ...any) instance.ValidEdgeData {
 		return instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey(key), immutable.Properties{}),
 		})
@@ -221,7 +222,7 @@ func TestAdd_RefusesATargetKeyOfTheWrongArity(t *testing.T) {
 	} {
 		inst := instance.NewValidInstance("Person", ids.person, immutable.WrapKey([]any{"p1"}),
 			immutable.WrapProperties(map[string]any{"id": "p1"}),
-			map[string]*instance.ValidEdgeData{c.relation: target(c.key...)}, nil, nil)
+			map[string]instance.ValidEdgeData{c.relation: target(c.key...)}, nil, location.Provenance{})
 		res := graph.New(s).Add(t.Context(), inst)
 		found := false
 		for issue := range res.Issues() {

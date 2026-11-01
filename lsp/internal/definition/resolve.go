@@ -76,7 +76,7 @@ func ResolveReference(
 // ResolveSymbol handles definition requests on symbol declarations.
 // For most symbols, returns the symbol's own location. For import aliases,
 // navigates to the imported file.
-// Returns nil when no definition is found (e.g., unresolved import).
+// Returns nil when no definition is found.
 func ResolveSymbol(
 	snapshot *analysis.Snapshot,
 	sym *symbols.Symbol,
@@ -98,8 +98,8 @@ func resolveImport(
 	enc lsputil.PositionEncoding,
 	mapURI func(string) string,
 ) *protocol.Location {
-	imp, ok := sym.Data.(*schema.Import)
-	if !ok || imp.Schema() == nil {
+	imp, ok := sym.Data.(schema.Import)
+	if !ok {
 		return nil
 	}
 

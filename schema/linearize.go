@@ -49,7 +49,7 @@ func (c *completer) detectCycles() bool {
 		stack = append(stack, name)
 
 		t := c.typeIndex[name]
-		if t != nil {
+		if !t.IsZero() {
 			for ref := range t.Inherits() {
 				superName := c.resolveTypeRefName(ref)
 				if superName != "" {
@@ -135,8 +135,8 @@ func (c *completer) completeTypes() {
 		t.setSchemaName(schemaName)
 	}
 
-	var completeType func(t *Type)
-	completeType = func(t *Type) {
+	var completeType func(t Type)
+	completeType = func(t Type) {
 		if completed[t.Name()] {
 			return
 		}
@@ -158,7 +158,7 @@ func (c *completer) completeTypes() {
 		var linearize func(ref TypeRef) //nolint:staticcheck // recursive closure requires separate declaration
 		linearize = func(ref TypeRef) {
 			resolved := c.resolveTypeRef(ref)
-			if resolved == nil {
+			if resolved.IsZero() {
 				// Defer a qualified ref when no registry is present to resolve it
 				// (a schema.Builder schema built without WithRegistry, or a direct
 				// completeModel caller), or when its qualifier names an import the
@@ -215,7 +215,7 @@ func (c *completer) completeTypes() {
 		// Merge properties from ancestors, then settle their annotations.
 		// The order is load-bearing: resolveInheritedAnnotations replaces
 		// entries of allProps with annotation-merged clones, and
-		// setAllProperties snapshots those pointers into the by-name index, so
+		// setAllProperties snapshots those records into the by-name index, so
 		// indexing first would leave Type.Property returning the structural
 		// survivor with one ancestor's annotations instead of the union.
 		allProps := c.mergeProperties(t, supers)
@@ -224,10 +224,10 @@ func (c *completer) completeTypes() {
 
 		// Extract primary keys. mergeProperties emits t's own properties first
 		// (unmodified) and inherited ones after, so allProps[:ownPropCount] are
-		// exactly t's own — an O(1), pointer-exact "declared on t?" test for the
+		// exactly t's own — an O(1), record-exact "declared on t?" test for the
 		// rejection branch below, without a clone or a per-type set.
 		ownPropCount := len(t.properties)
-		pks := make([]*Property, 0)
+		pks := make([]Property, 0)
 		for i, p := range allProps {
 			if p.IsPrimaryKey() {
 				// A primary whose type bottoms out in an already-diagnosed
@@ -243,7 +243,7 @@ func (c *completer) completeTypes() {
 					// Report only at the declaring type. An inherited rejected
 					// primary was already reported when its ancestor completed
 					// (supertypes complete before their subtypes); re-checking the
-					// same inherited *Property at every descendant would duplicate
+					// same inherited Property at every descendant would duplicate
 					// the identical diagnostic at the identical span. i < ownPropCount
 					// holds exactly for t's own properties (see above).
 					if i < ownPropCount {
@@ -266,11 +266,11 @@ func (c *completer) completeTypes() {
 		t.setPrimaryKeys(pks)
 
 		// Merge associations from ancestors
-		allAssocs := c.mergeRelations(t, t.AssociationsSlice(), supers, RelationAssociation)
+		allAssocs := c.mergeRelations(t, slices.Collect(t.Associations()), supers, RelationAssociation)
 		t.setAllAssociations(allAssocs)
 
 		// Merge compositions from ancestors
-		allComps := c.mergeRelations(t, t.CompositionsSlice(), supers, RelationComposition)
+		allComps := c.mergeRelations(t, slices.Collect(t.Compositions()), supers, RelationComposition)
 		t.setAllCompositions(allComps)
 
 		// Merge invariants from ancestors
@@ -296,19 +296,18 @@ func (c *completer) completeTypes() {
 			if superID.SchemaPath() != c.sourceID {
 				continue
 			}
-			if superType := c.resolveTypeID(superID); superType != nil {
-				subs := superType.SubTypesSlice()
-				subs = append(subs, ResolvedTypeRefFromType(t, superID.SchemaPath().String()))
-				superType.setSubTypes(subs)
-			}
+			superType := c.resolveTypeID(superID)
+			subs := slices.Collect(superType.SubTypes())
+			subs = append(subs, ResolvedTypeRefFromType(t, superID.SchemaPath().String()))
+			superType.setSubTypes(subs)
 		}
 	}
 }
 
 // resolveTypeRef resolves a TypeRef to a Type.
-func (c *completer) resolveTypeRef(ref TypeRef) *Type {
+func (c *completer) resolveTypeRef(ref TypeRef) Type {
 	if ref.Name() == "" {
-		return nil
+		return Type{}
 	}
 
 	if ref.Qualifier() == "" {
@@ -318,12 +317,12 @@ func (c *completer) resolveTypeRef(ref TypeRef) *Type {
 
 	// Qualified type - requires registry lookup
 	if c.registry == nil {
-		return nil
+		return Type{}
 	}
 
 	importedSchema, ok := c.resolveImportedSchema(ref.Qualifier())
 	if !ok {
-		return nil
+		return Type{}
 	}
 
 	t, _ := importedSchema.Type(ref.Name())
@@ -339,27 +338,27 @@ func (c *completer) resolveTypeRef(ref TypeRef) *Type {
 // completion through classifyQualifier keeps a qualifier's deferred/resolved
 // state read in one place during a load, not two. The caller must have already
 // handled the registry-less case (no registry means the reference defers).
-func (c *completer) resolveImportedSchema(qualifier string) (*Schema, bool) {
+func (c *completer) resolveImportedSchema(qualifier string) (Schema, bool) {
 	state, sourceID := c.classifyQualifier(qualifier)
 	if state != aliasResolved {
-		return nil, false
+		return Schema{}, false
 	}
 	return c.registry.LookupBySourceID(sourceID)
 }
 
 // resolveTypeID resolves a TypeID to a Type.
-func (c *completer) resolveTypeID(id TypeID) *Type {
+func (c *completer) resolveTypeID(id TypeID) Type {
 	if id.SchemaPath() == c.sourceID {
 		return c.typeIndex[id.Name()]
 	}
 
 	if c.registry == nil {
-		return nil
+		return Type{}
 	}
 
 	importedSchema, ok := c.registry.LookupBySourceID(id.SchemaPath())
 	if !ok {
-		return nil
+		return Type{}
 	}
 
 	t, _ := importedSchema.Type(id.Name())
@@ -371,8 +370,8 @@ func (c *completer) resolveTypeID(id TypeID) *Type {
 // reached the type from rather than reading a declaring scope off a merged
 // clone, which can name the same ancestor twice.
 type annotationSource struct {
-	from *Type
-	ann  *Annotation
+	from Type
+	ann  Annotation
 }
 
 // mergeProperties merges own properties with inherited properties.
@@ -381,14 +380,14 @@ type annotationSource struct {
 // When a child re-declares a parent property, constraint narrowing is attempted:
 // the child's version is accepted if it narrows the parent's (via CanNarrowFrom).
 //
-// The walk decides STRUCTURE only — which *Property survives under each name.
+// The walk decides STRUCTURE only — which Property survives under each name.
 // Annotations are settled afterwards by [completer.resolveInheritedAnnotations],
 // which reads the DIRECT supertypes' already-merged views instead of re-deriving
 // anything from this transitively-closed list.
-func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Property {
+func (c *completer) mergeProperties(t Type, supers []ResolvedTypeRef) []Property {
 	// Start with own properties
-	result := t.PropertiesSlice()
-	seen := make(map[string]*Property)
+	result := slices.Collect(t.Properties())
+	seen := make(map[string]Property)
 	ownProps := make(map[string]bool)
 	for _, p := range result {
 		seen[p.Name()] = p
@@ -424,16 +423,16 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 	//
 	// Entries are declared origins, unique, in arrival order, and the map is
 	// built lazily: a name that never reaches a merge branch never allocates.
-	var mergedInto map[string][]*Property
-	noteMerged := func(name string, survivor, folded *Property) {
+	var mergedInto map[string][]Property
+	noteMerged := func(name string, survivor, folded Property) {
 		chain, seeded := mergedInto[name]
 		if !seeded {
 			if mergedInto == nil {
-				mergedInto = make(map[string][]*Property)
+				mergedInto = make(map[string][]Property)
 			}
-			chain = []*Property{survivor.Origin()}
+			chain = []Property{survivor.Origin()}
 		}
-		if folded != nil {
+		if !folded.IsZero() {
 			chain = appendOrigin(chain, folded)
 		}
 		mergedInto[name] = chain
@@ -442,7 +441,7 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 	// Add inherited properties in linearized order
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
-		if superType == nil {
+		if superType.IsZero() {
 			continue
 		}
 
@@ -479,7 +478,7 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 					c.conflictedProperties[existing] = true
 				}
 				// The survivor is on the surviving side; p is the conflict.
-				noteMerged(p.Name(), existing, nil)
+				noteMerged(p.Name(), existing, Property{})
 				matched := false
 				for _, cl := range clashes {
 					if cl.matches(p.Name(), p) {
@@ -491,7 +490,7 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 				if !matched {
 					clashes = append(clashes, &propertyClash{
 						name:     p.Name(),
-						incomers: []*Property{p.Origin()},
+						incomers: []Property{p.Origin()},
 					})
 				}
 			}
@@ -535,7 +534,7 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 }
 
 // resolveInheritedAnnotations settles the annotation set of every merged
-// property, once mergeProperties has decided which *Property survives under each
+// property, once mergeProperties has decided which Property survives under each
 // name. The rule is one line:
 //
 //	effective(T, n) = T's own declaration's annotations, when T declares n
@@ -556,7 +555,7 @@ func (c *completer) mergeProperties(t *Type, supers []ResolvedTypeRef) []*Proper
 //
 // Iteration is over result — a slice, in merged order — so every diagnostic this
 // emits is deterministically ordered.
-func (c *completer) resolveInheritedAnnotations(t *Type, result []*Property) {
+func (c *completer) resolveInheritedAnnotations(t Type, result []Property) {
 	supers := c.directSuperTypes(t)
 	if len(supers) == 0 {
 		return // Nothing to inherit; own annotations stand as declared.
@@ -630,12 +629,12 @@ func (c *completer) resolveInheritedAnnotations(t *Type, result []*Property) {
 // the declared supertypes only (a handful), via [Type.IsSubTypeOf] against the
 // transitively-closed [Type.SuperTypes], so it is cheap; it is NOT the
 // closure-wide maximal scan that made an earlier design superlinear.
-func (c *completer) directSuperTypes(t *Type) []*Type {
-	var resolved []*Type
+func (c *completer) directSuperTypes(t Type) []Type {
+	var resolved []Type
 	var seen map[TypeID]bool
 	for ref := range t.Inherits() {
 		s := c.resolveTypeRef(ref)
-		if s == nil {
+		if s.IsZero() {
 			continue
 		}
 		if seen == nil {
@@ -651,11 +650,11 @@ func (c *completer) directSuperTypes(t *Type) []*Type {
 		return resolved
 	}
 
-	var out []*Type
+	var out []Type
 	for _, cand := range resolved {
 		subsumed := false
 		for _, other := range resolved {
-			if other != cand && other.IsSubTypeOf(cand.ID()) {
+			if other.IsSubTypeOf(cand.ID()) {
 				subsumed = true
 				break
 			}
@@ -710,8 +709,8 @@ func (c *completer) directSuperTypes(t *Type) []*Type {
 // map. If that rule is ever relaxed so the carrying arm wins, this union must
 // be filtered here or the annotation would silently read as dropped for the
 // whole subtree.
-func (c *completer) inheritedAnnotations(t *Type, supers []*Type, name string, reported map[string]bool) ([]*Annotation, map[string]bool) {
-	var merged []*Annotation
+func (c *completer) inheritedAnnotations(t Type, supers []Type, name string, reported map[string]bool) ([]Annotation, map[string]bool) {
+	var merged []Annotation
 	var byName map[string]annotationSource
 	var suppressed map[string]bool
 
@@ -740,7 +739,7 @@ func (c *completer) inheritedAnnotations(t *Type, supers []*Type, name string, r
 			}
 			seenHere[a.name] = true
 
-			if dropper := suppressingSuper(supers, s, name, a.name); dropper != nil {
+			if dropper := suppressingSuper(supers, name, a.name); !dropper.IsZero() {
 				c.reportAnnotationDisagreement(t, name, a, reported,
 					fmt.Sprintf("type %q inherits @%s for property %q from %s, but %s drops it; re-state or omit it on %s to decide",
 						t.Name(), a.name, name, s.Name(), dropper.Name(), t.Name()),
@@ -769,16 +768,17 @@ func (c *completer) inheritedAnnotations(t *Type, supers []*Type, name string, r
 	return merged, suppressed
 }
 
-// suppressingSuper returns the direct supertype, other than carrier, that
-// suppressed annotation ann on property name — the arm whose decision to drop it
-// contradicts carrier's decision to keep it.
-func suppressingSuper(supers []*Type, carrier *Type, name, ann string) *Type {
+// suppressingSuper returns the direct supertype that suppressed annotation ann
+// on property name — the arm whose decision to drop it contradicts the decision
+// of the arm that keeps it. No type both keeps and suppresses one name, so the
+// arm found is never the one that keeps it.
+func suppressingSuper(supers []Type, name, ann string) Type {
 	for _, s := range supers {
-		if s != carrier && s.suppressedAnnotations(name)[ann] {
+		if s.suppressedAnnotations(name)[ann] {
 			return s
 		}
 	}
-	return nil
+	return Type{}
 }
 
 // reportAnnotationDisagreement reports one inherited-annotation disagreement,
@@ -790,11 +790,11 @@ func suppressingSuper(supers []*Type, carrier *Type, name, ann string) *Type {
 // AT ITS DECLARATION; a disagreement is the opposite — the annotation is
 // perfectly valid, and re-stating it is the RESOLUTION the message recommends.
 // Marking it would also be completer-wide, silencing a legitimate shadow warning
-// for the same *Annotation at an unrelated type. The disagreeing type re-declares
+// for the same Annotation at an unrelated type. The disagreeing type re-declares
 // nothing (a re-declaration would resolve the disagreement), so it queues no
 // shadow warning of its own for the mark to suppress.
 func (c *completer) reportAnnotationDisagreement(
-	t *Type, prop string, a *Annotation, reported map[string]bool,
+	t Type, prop string, a Annotation, reported map[string]bool,
 	msg string, otherSpan location.Span, otherLabel string,
 ) {
 	key := prop + "\x00" + a.name
@@ -825,7 +825,7 @@ func (c *completer) reportAnnotationDisagreement(
 // recorded detection failed to unify in the walk.
 type propertyClash struct {
 	name     string
-	incomers []*Property
+	incomers []Property
 }
 
 // matches reports whether a conflicting declaration re-detects this clash: it
@@ -850,7 +850,7 @@ type propertyClash struct {
 // sibling types with reversed extends clauses re-detect one clash with
 // survivor and conflict exchanged, which is why the caller keeps this state
 // per call rather than completer-wide.
-func (cl *propertyClash) matches(name string, incomer *Property) bool {
+func (cl *propertyClash) matches(name string, incomer Property) bool {
 	if cl.name != name {
 		return false
 	}
@@ -863,7 +863,7 @@ func (cl *propertyClash) matches(name string, incomer *Property) bool {
 }
 
 // appendOrigin appends p's declared origin to side unless already present.
-func appendOrigin(side []*Property, p *Property) []*Property {
+func appendOrigin(side []Property, p Property) []Property {
 	o := p.Origin()
 	if slices.Contains(side, o) {
 		return side
@@ -877,14 +877,14 @@ func appendOrigin(side []*Property, p *Property) []*Property {
 // mean conflict-free: an own declaration that widens an inherited property is
 // compatible with it yet still clashes, because the walk refuses to narrow an
 // own declaration back to what it inherits.
-func propertiesCompatible(a, b *Property) bool {
+func propertiesCompatible(a, b Property) bool {
 	return a.Equal(b) || a.CanNarrowFrom(b) || b.CanNarrowFrom(a)
 }
 
 // replaceMerged swaps the property named replacement.Name() in result and seen
 // for replacement. Both hold exactly one property of that name by construction,
 // so it updates the slice element in place (no append) and the index entry.
-func replaceMerged(result []*Property, seen map[string]*Property, replacement *Property) {
+func replaceMerged(result []Property, seen map[string]Property, replacement Property) {
 	seen[replacement.Name()] = replacement
 	for i, r := range result {
 		if r.Name() == replacement.Name() {
@@ -899,16 +899,16 @@ func replaceMerged(result []*Property, seen map[string]*Property, replacement *P
 // Queued during linearization and emitted after annotation validation — see
 // [completer.flushShadowedAnnotations].
 type shadowedAnnotation struct {
-	own  *Property
-	from *Type
-	ann  *Annotation
+	own  Property
+	from Type
+	ann  Annotation
 }
 
 // shadowGroupKey groups queued shadow entries by (own declaration, contributing
 // supertype) for [completer.flushShadowedAnnotations].
 type shadowGroupKey struct {
-	own  *Property
-	from *Type
+	own  Property
+	from Type
 }
 
 // recordShadowedAnnotations queues a W_ANNOTATION_SHADOWED for every annotation
@@ -917,7 +917,7 @@ type shadowGroupKey struct {
 // Per supertype, not per annotation name: two incomparable mixins that both
 // annotate the property are two independent declarations the re-declaration
 // dropped, and the user needs to be pointed at both — even when they happen to
-// use the SAME annotation name. Deduplication is by declared *Annotation
+// use the SAME annotation name. Deduplication is by declared Annotation
 // identity, so one annotation reaching t through both arms of a diamond is one
 // entry, while two mixins declaring their own @index are two.
 //
@@ -939,7 +939,7 @@ type shadowGroupKey struct {
 // subtypes: the uncontested annotations it dropped, plus its supertypes' still-
 // live suppressions, minus anything it re-states. A re-declaration that re-states
 // an annotation revives it for the whole subtree.
-func (c *completer) recordShadowedAnnotations(own *Property, supers []*Type) map[string]bool {
+func (c *completer) recordShadowedAnnotations(own Property, supers []Type) map[string]bool {
 	var have map[string]bool
 	if len(own.annotations) > 0 {
 		have = make(map[string]bool, len(own.annotations))
@@ -973,7 +973,7 @@ func (c *completer) recordShadowedAnnotations(own *Property, supers []*Type) map
 		}
 	}
 
-	var seen map[*Annotation]bool
+	var seen map[Annotation]bool
 	for _, s := range supers {
 		sp, ok := s.Property(own.Name())
 		if !ok {
@@ -988,7 +988,7 @@ func (c *completer) recordShadowedAnnotations(own *Property, supers []*Type) map
 				continue
 			}
 			if seen == nil {
-				seen = make(map[*Annotation]bool)
+				seen = make(map[Annotation]bool)
 			}
 			seen[a] = true
 			c.pendingShadowed = append(c.pendingShadowed,
@@ -1023,13 +1023,13 @@ func (c *completer) recordShadowedAnnotations(own *Property, supers []*Type) map
 // so the emitted warnings are deterministically ordered.
 func (c *completer) flushShadowedAnnotations() {
 	type group struct {
-		own  *Property
-		from *Type
-		anns []*Annotation
+		own  Property
+		from Type
+		anns []Annotation
 	}
 	var groups []*group
 	// A typed key rather than [2]any: the pair is (own property, contributing
-	// supertype), both comparable pointers, so boxing them into interfaces buys
+	// supertype), both comparable handles, so boxing them into interfaces buys
 	// nothing and only risks an accidental type-mismatched lookup.
 	index := make(map[shadowGroupKey]*group)
 
@@ -1104,8 +1104,8 @@ func (c *completer) flushShadowedAnnotations() {
 // no value would make the two one, so the definitions of a name are unified,
 // not compared with the first alone: a later definition conflicts when it
 // cannot be made one with every definition merged before it.
-func (c *completer) mergeInvariants(t *Type) []*Invariant {
-	result := t.InvariantsSlice()
+func (c *completer) mergeInvariants(t Type) []Invariant {
+	result := slices.Collect(t.Invariants())
 	own := make(map[string]bool, len(result))
 	for _, inv := range result {
 		own[inv.Name()] = true
@@ -1113,10 +1113,10 @@ func (c *completer) mergeInvariants(t *Type) []*Invariant {
 
 	// One conflict is one diagnostic naming every rival, as mergeRelations
 	// reports a relation clash: the walk collects, then reports once per name.
-	inherited := make(map[string]*Invariant)
-	merged := make(map[string]*Invariant)
+	inherited := make(map[string]Invariant)
+	merged := make(map[string]Invariant)
 	at := make(map[string]int)
-	rivals := make(map[string][]*Invariant)
+	rivals := make(map[string][]Invariant)
 	var conflicted []string
 	for _, superType := range c.directSuperTypes(t) {
 		for inv := range superType.AllInvariants() {
@@ -1181,13 +1181,13 @@ func sameExpression(a, b expr.Expression) bool {
 // which it then becomes, or with another such literal of that kind. With no
 // such literal in either, a and b are one when their expressions are the same,
 // and the result is a.
-func (c *completer) unifyInvariants(a, b *Invariant) (*Invariant, bool) {
+func (c *completer) unifyInvariants(a, b Invariant) (Invariant, bool) {
 	if len(c.noValue) == 0 {
 		return a, sameExpression(a.Expression(), b.Expression())
 	}
 	e, ok := unifyNode(a.Expression(), b.Expression(), c.noValue)
 	if !ok {
-		return nil, false
+		return Invariant{}, false
 	}
 	return newInvariant(a.Name(), e, a.Span(), a.Documentation()), true
 }
@@ -1269,8 +1269,8 @@ func literalKindOf(v any) parse.LiteralKind {
 // — so the merged view an adapter reads reflects what the type body actually
 // declares. validateTypeAnnotations reports the duplicate independently, off the
 // raw own slice, so the two never interact.
-func (c *completer) mergeAnnotations(t *Type, supers []ResolvedTypeRef) []*Annotation {
-	result := t.AnnotationsSlice()
+func (c *completer) mergeAnnotations(t Type, supers []ResolvedTypeRef) []Annotation {
+	result := slices.Collect(t.Annotations())
 	seen := make(map[string]bool)
 	for _, a := range result {
 		seen[a.identity()] = true
@@ -1278,13 +1278,10 @@ func (c *completer) mergeAnnotations(t *Type, supers []ResolvedTypeRef) []*Annot
 
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
-		if superType == nil {
+		if superType.IsZero() {
 			continue
 		}
 
-		// AllAnnotations, not AllAnnotationsSlice: the sibling merge helpers
-		// iterate their ancestors' members rather than cloning a slice per
-		// ancestor only to discard it after the range.
 		for a := range superType.AllAnnotations() {
 			id := a.identity()
 			if seen[id] {
@@ -1302,15 +1299,15 @@ func (c *completer) mergeAnnotations(t *Type, supers []ResolvedTypeRef) []*Annot
 // Similar to mergeProperties but for relations of a specific kind.
 // Reports E_RELATION_COLLISION when an inherited relation conflicts
 // with an existing relation (own or from another ancestor).
-func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTypeRef, kind RelationKind) []*Relation {
+func (c *completer) mergeRelations(t Type, own []Relation, supers []ResolvedTypeRef, kind RelationKind) []Relation {
 	result := own
-	seen := make(map[string]*Relation)
+	seen := make(map[string]Relation)
 	for _, r := range result {
 		seen[r.FieldName()] = r
 	}
 
 	// One collision is one diagnostic per affected type. Ancestors that merely
-	// INHERIT a relation carry the same *Relation forward, and two ancestors
+	// INHERIT a relation carry the same Relation forward, and two ancestors
 	// may independently declare rivals that are structurally identical; both
 	// are re-detections of one collision, and one edit to the surviving
 	// declaration clears them together.
@@ -1327,15 +1324,15 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 
 	for _, superRef := range supers {
 		superType := c.resolveTypeID(superRef.ID())
-		if superType == nil {
+		if superType.IsZero() {
 			continue
 		}
 
-		var inherited []*Relation
+		var inherited []Relation
 		if kind == RelationAssociation {
-			inherited = superType.AllAssociationsSlice()
+			inherited = slices.Collect(superType.AllAssociations())
 		} else {
-			inherited = superType.AllCompositionsSlice()
+			inherited = slices.Collect(superType.AllCompositions())
 		}
 
 		for _, r := range inherited {
@@ -1357,7 +1354,7 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 					if !matched {
 						collisions = append(collisions, &relationClash{
 							survivor: existing,
-							rivals:   []*Relation{r},
+							rivals:   []Relation{r},
 						})
 					}
 				}
@@ -1399,8 +1396,8 @@ func (c *completer) mergeRelations(t *Type, own []*Relation, supers []ResolvedTy
 // the survivor resolves all of them — and unique by declaration, since the
 // linearized closure re-presents each rival once per carrying ancestor.
 type relationClash struct {
-	survivor *Relation
-	rivals   []*Relation
+	survivor Relation
+	rivals   []Relation
 }
 
 // matches reports whether a rival re-detects this collision: same field, and
@@ -1409,13 +1406,13 @@ type relationClash struct {
 // relation — structural equality, hence transitive — so every recorded rival
 // answers identically. The property side cannot take this shortcut: its
 // compatibility relation is not transitive, so it must test every member.
-func (cl *relationClash) matches(rival *Relation) bool {
+func (cl *relationClash) matches(rival Relation) bool {
 	return cl.survivor.FieldName() == rival.FieldName() && cl.rivals[0].Equal(rival)
 }
 
 // appendUniqueRelation appends r to rivals unless the same declaration is
 // already recorded.
-func appendUniqueRelation(rivals []*Relation, r *Relation) []*Relation {
+func appendUniqueRelation(rivals []Relation, r Relation) []Relation {
 	if slices.Contains(rivals, r) {
 		return rivals
 	}

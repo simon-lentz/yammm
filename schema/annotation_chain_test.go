@@ -119,7 +119,7 @@ type Leaf extends Mid {
 }
 
 // An ancestor that merely INHERITS an annotated property yields the same
-// declared *Property, so the shadowing was re-detected once per ancestor in the
+// declared Property, so the shadowing was re-detected once per ancestor in the
 // chain and printed the identical warning twice.
 func TestAnnotation_Chain_ShadowWarningNotDuplicatedThroughChain(t *testing.T) {
 	t.Parallel()
@@ -542,7 +542,7 @@ type Doc extends M1, M2 { id String primary }`)
 // of narrowing chains the walk could not unify — whatever member of a chain is
 // the survivor or the incomer at the point of detection. This one table pins
 // every shape that breaks a weaker dedup scheme: a scalar key (property name,
-// [2]*Property pair, incomer Origin, constraint-kind pair) double-reports one
+// [2]Property pair, incomer Origin, constraint-kind pair) double-reports one
 // clash or collapses two, and single-representative matching with a role swap
 // silently DROPS conflicts two ways — through a wide own survivor pairwise-
 // compatible with both of two disjoint incomers, and through a survivor swap

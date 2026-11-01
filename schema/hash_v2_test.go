@@ -6,7 +6,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func loadHashSchema(t *testing.T, src string) *schema.Schema {
+func loadHashSchema(t *testing.T, src string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), src, "hashv2.yammm")
 	if res.HasErrors() {

@@ -40,7 +40,7 @@ part type Remark {
 // compositionSnapshot builds the named types' instances from raw objects,
 // composed children included, through the validator and graph.Add as an import
 // does.
-func compositionSnapshot(t *testing.T, byType map[string][]map[string]any) (*graph.Snapshot, *schema.Schema) {
+func compositionSnapshot(t *testing.T, byType map[string][]map[string]any) (graph.Snapshot, schema.Schema) {
 	t.Helper()
 	s, result := schema.LoadString(context.Background(), compositionSchema, "orders.yammm")
 	if result.HasErrors() {

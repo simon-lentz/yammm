@@ -12,7 +12,7 @@ import (
 )
 
 // loadSchema loads a test schema from testdata and returns the sealed schema.
-func loadSchema(t *testing.T, name string) *schema.Schema {
+func loadSchema(t *testing.T, name string) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	s, result := schema.Load(context.Background(), filepath.Join("testdata", name))
@@ -23,7 +23,7 @@ func loadSchema(t *testing.T, name string) *schema.Schema {
 }
 
 // loadSchemaAndValidator loads a test schema and returns the schema + validator.
-func loadSchemaAndValidator(t *testing.T, name string) (*schema.Schema, *instance.Validator) {
+func loadSchemaAndValidator(t *testing.T, name string) (schema.Schema, *instance.Validator) {
 	t.Helper()
 	s := loadSchema(t, name)
 	return s, instance.NewValidator(s)
@@ -31,7 +31,7 @@ func loadSchemaAndValidator(t *testing.T, name string) (*schema.Schema, *instanc
 
 // setupWrite loads a fixture and prepares the full write-path harness:
 // a default adapter, the sealed schema, its validator, and the graph shape.
-func setupWrite(t *testing.T, fixture string) (*Adapter, *schema.Schema, *instance.Validator, *GraphShape) {
+func setupWrite(t *testing.T, fixture string) (*Adapter, schema.Schema, *instance.Validator, *GraphShape) {
 	t.Helper()
 	s, v := loadSchemaAndValidator(t, fixture)
 	a := New()
@@ -43,7 +43,7 @@ func setupWrite(t *testing.T, fixture string) (*Adapter, *schema.Schema, *instan
 }
 
 // buildGraphResult validates instances and builds a graph.Snapshot.
-func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, instances map[string][]map[string]any) *graph.Snapshot {
+func buildGraphResult(t *testing.T, s schema.Schema, v *instance.Validator, instances map[string][]map[string]any) graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
 	g := graph.New(s)
@@ -65,7 +65,7 @@ func buildGraphResult(t *testing.T, s *schema.Schema, v *instance.Validator, ins
 // typeID resolves a type name against the schema. GraphShape is keyed by
 // identity, so a test that names a type in its fixture resolves it here and
 // fails loudly when the fixture and the schema disagree.
-func typeID(t *testing.T, s *schema.Schema, name string) schema.TypeID {
+func typeID(t *testing.T, s schema.Schema, name string) schema.TypeID {
 	t.Helper()
 	ty, ok := s.Type(name)
 	if !ok {

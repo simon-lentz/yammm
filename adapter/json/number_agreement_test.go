@@ -139,7 +139,7 @@ func jsonReader(ctx context.Context, t *testing.T, v *instance.Validator, prop, 
 }
 
 // csvReader reads a CSV file holding lit at prop and validates the row.
-func csvReader(ctx context.Context, t *testing.T, v *instance.Validator, ty *schema.Type, prop, lit string) (any, bool) {
+func csvReader(ctx context.Context, t *testing.T, v *instance.Validator, ty schema.Type, prop, lit string) (any, bool) {
 	t.Helper()
 	text := "id,n,f\na," + lit + ",0.5\n"
 	if prop == "f" {
@@ -166,7 +166,7 @@ func validated(ctx context.Context, v *instance.Validator, raw instance.RawInsta
 
 // ysTemplate writes a .ys document holding n 0 and f 0.5, whose numbers
 // ysReader replaces.
-func ysTemplate(t *testing.T, s *schema.Schema, v *instance.Validator) []byte {
+func ysTemplate(t *testing.T, s schema.Schema, v *instance.Validator) []byte {
 	t.Helper()
 	ctx := context.Background()
 	vi, vres := v.ValidateOne(ctx, "T", instance.RawInstance{Properties: map[string]any{"id": "a", "n": int64(0), "f": 0.5}})
@@ -191,7 +191,7 @@ func ysTemplate(t *testing.T, s *schema.Schema, v *instance.Validator) []byte {
 
 // ysReader loads the template with lit at prop under revalidation and reports
 // whether the validator accepted it.
-func ysReader(ctx context.Context, t *testing.T, s *schema.Schema, ys []byte, prop, lit string) bool {
+func ysReader(ctx context.Context, t *testing.T, s schema.Schema, ys []byte, prop, lit string) bool {
 	t.Helper()
 	anchor := map[string]string{"n": `"n":0`, "f": `"f":0.5`}[prop]
 	data := bytes.Replace(ys, []byte(anchor), []byte(`"`+prop+`":`+lit), 1)
@@ -262,7 +262,7 @@ func TestWriters_MarkEveryHeldFloat(t *testing.T) {
 	} {
 		g := graph.New(s)
 		inst := instance.NewValidInstance("T", ty.ID(), immutable.WrapKey([]any{"a"}),
-			immutable.WrapProperties(map[string]any{"id": "a", c.prop: c.held}), nil, nil, nil)
+			immutable.WrapProperties(map[string]any{"id": "a", c.prop: c.held}), nil, nil, location.Provenance{})
 		if r := g.Add(ctx, inst); r.HasErrors() {
 			t.Fatalf("add %s=%#v: %s", c.prop, c.held, r)
 		}

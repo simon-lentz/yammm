@@ -13,7 +13,13 @@ import (
 // inheritance: a subtype's invariant overrides an inherited one of the same
 // name, one type may not declare a name twice, and two inherited invariants
 // sharing a name must carry the same expression.
-type Invariant struct {
+type Invariant struct{ *invariantState }
+
+// IsZero reports whether the handle names no record.
+func (i Invariant) IsZero() bool { return i.invariantState == nil }
+
+// invariantState is the record an [Invariant] names.
+type invariantState struct {
 	name string          // user-facing message shown when invariant fails
 	expr expr.Expression // compiled expression
 	span location.Span   // source location
@@ -27,32 +33,33 @@ type Invariant struct {
 //   - Advanced use cases like building schemas programmatically via Builder
 //
 // Most users should load schemas from .yammm files using the load package.
-func newInvariant(name string, e expr.Expression, span location.Span, doc string) *Invariant {
-	return &Invariant{
+func newInvariant(name string, e expr.Expression, span location.Span, doc string) Invariant {
+	return Invariant{&invariantState{
 		name: name,
 		expr: e,
 		span: span,
 		doc:  doc,
-	}
+	}}
 }
 
 // Name returns the user-facing message for this invariant.
 // This is displayed when the invariant evaluates to false.
-func (i *Invariant) Name() string {
+func (i Invariant) Name() string {
 	return i.name
 }
 
-// Expression returns the compiled expression for this invariant.
-func (i *Invariant) Expression() expr.Expression {
+// Expression returns the compiled expression for this invariant. The tree is the
+// schema's own, so a caller must not write to it.
+func (i Invariant) Expression() expr.Expression {
 	return i.expr
 }
 
 // Span returns the source location of this invariant declaration.
-func (i *Invariant) Span() location.Span {
+func (i Invariant) Span() location.Span {
 	return i.span
 }
 
 // Documentation returns the documentation comment, if any.
-func (i *Invariant) Documentation() string {
+func (i Invariant) Documentation() string {
 	return i.doc
 }

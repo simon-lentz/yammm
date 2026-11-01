@@ -411,7 +411,7 @@ func TestUpdateMetadata_CrossMarshalParityProperty(t *testing.T) {
 
 	snaps := []struct {
 		name string
-		snap *graph.Snapshot
+		snap graph.Snapshot
 	}{
 		{"empty", buildSnapshot(t, s)},
 		{"populated", buildSnapshot(
@@ -597,7 +597,7 @@ func seedCorpus(dir string) error {
 		"Person", typ.ID(),
 		immutable.WrapKey([]any{"p1"}),
 		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	g := graph.New(s)
 	if res := g.Add(ctx, inst); res.HasErrors() {

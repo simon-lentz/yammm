@@ -75,7 +75,7 @@ func marshalCorpus(t *testing.T) []corpusEntry {
 	var corpus []corpusEntry
 	for _, snapPair := range []struct {
 		name string
-		snap *graph.Snapshot
+		snap graph.Snapshot
 	}{
 		{"empty", emptySnap},
 		{"populated", populatedSnap},

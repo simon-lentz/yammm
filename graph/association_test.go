@@ -54,7 +54,7 @@ func TestGraph_ForwardReference_Basic(t *testing.T) {
 	assertEdgeCount(t, snap, 1)
 
 	// Verify edge details
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if edges[0].Source().TypeName() != "Person" {
 		t.Errorf("Edge source should be Person, got %s", edges[0].Source().TypeName())
 	}
@@ -85,8 +85,8 @@ func TestGraph_ForwardReference_Multiple(t *testing.T) {
 	snap := g.Snapshot()
 	assertInstanceCount(t, snap, mustTypeID(t, s, "Person"), 3)
 	// All 3 pending edges should be tracked (one per source)
-	if len(snap.Unresolved()) != 3 {
-		t.Errorf("Expected 3 unresolved edges (one per source), got %d", len(snap.Unresolved()))
+	if len(slices.Collect(snap.Unresolved())) != 3 {
+		t.Errorf("Expected 3 unresolved edges (one per source), got %d", len(slices.Collect(snap.Unresolved())))
 	}
 
 	// Add Company (target)
@@ -97,7 +97,7 @@ func TestGraph_ForwardReference_Multiple(t *testing.T) {
 
 	// All 3 edges should resolve
 	snap = g.Snapshot()
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 3 {
 		t.Errorf("Expected 3 resolved edges (one per source), got %d", len(edges))
 	}
@@ -170,7 +170,7 @@ func TestGraph_ForwardReference_Snapshot(t *testing.T) {
 	g.Add(ctx, person)
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -205,7 +205,7 @@ func TestUnresolvedEdge_RequiredAndReasonFields(t *testing.T) {
 	g.Add(ctx, person)
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -234,7 +234,7 @@ func TestUnresolvedEdge_OptionalAssociation(t *testing.T) {
 	g.Add(ctx, person)
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -262,7 +262,7 @@ func TestUnresolvedEdge_AbsentReason(t *testing.T) {
 	g.Add(ctx, person)
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -294,7 +294,7 @@ func TestUnresolvedEdge_EmptyReason(t *testing.T) {
 	g.Add(ctx, person)
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 1 {
 		t.Fatalf("Expected 1 unresolved edge, got %d", len(unresolved))
@@ -327,7 +327,7 @@ func TestGraph_ForwardReference_AfterResolution(t *testing.T) {
 
 	// Confirm pending exists
 	snap1 := g.Snapshot()
-	if len(snap1.Unresolved()) == 0 {
+	if len(slices.Collect(snap1.Unresolved())) == 0 {
 		t.Fatal("Expected unresolved edge before adding target")
 	}
 
@@ -339,13 +339,13 @@ func TestGraph_ForwardReference_AfterResolution(t *testing.T) {
 
 	// Confirm pending is gone
 	snap2 := g.Snapshot()
-	if len(snap2.Unresolved()) != 0 {
-		t.Errorf("Expected no unresolved edges after adding target, got %d", len(snap2.Unresolved()))
+	if len(slices.Collect(snap2.Unresolved())) != 0 {
+		t.Errorf("Expected no unresolved edges after adding target, got %d", len(slices.Collect(snap2.Unresolved())))
 	}
 
 	// Confirm edge exists
-	if len(snap2.Edges()) != 1 {
-		t.Errorf("Expected 1 edge after resolution, got %d", len(snap2.Edges()))
+	if len(slices.Collect(snap2.Edges())) != 1 {
+		t.Errorf("Expected 1 edge after resolution, got %d", len(slices.Collect(snap2.Edges())))
 	}
 }
 
@@ -515,7 +515,7 @@ func TestGraph_Edge_Properties(t *testing.T) {
 	g.Add(ctx, person)
 
 	snap := g.Snapshot()
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 1 {
 		t.Fatalf("Expected 1 edge, got %d", len(edges))
 	}
@@ -565,10 +565,10 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 	g.Add(ctx, person)
 
 	snap := g.Snapshot()
-	if len(snap.Edges()) != 0 {
-		t.Fatalf("expected 0 resolved edges, got %d", len(snap.Edges()))
+	if len(slices.Collect(snap.Edges())) != 0 {
+		t.Fatalf("expected 0 resolved edges, got %d", len(slices.Collect(snap.Edges())))
 	}
-	unres := snap.Unresolved()
+	unres := slices.Collect(snap.Unresolved())
 	if len(unres) != 1 {
 		t.Fatalf("expected 1 unresolved edge, got %d", len(unres))
 	}
@@ -602,21 +602,21 @@ func TestGraph_UnresolvedEdge_Properties(t *testing.T) {
 // TestUnresolvedEdge_NilReceiver pins the nil-safety contract on the
 // Property / Properties accessors — parallel to graph.Edge's nil-safety.
 func TestUnresolvedEdge_NilReceiver(t *testing.T) {
-	var u *graph.UnresolvedEdge
+	var u graph.UnresolvedEdge
 	if _, ok := u.Property("role"); ok {
 		t.Error("nil receiver Property should return (_, false)")
 	}
 	if u.Properties().Len() != 0 {
 		t.Error("nil receiver Properties should return empty")
 	}
-	if u.Source() != nil || u.Relation() != "" || !u.TargetType().IsZero() || u.TargetKey() != "" || u.Required() || u.Reason() != "" {
+	if !u.Source().IsZero() || u.Relation() != "" || !u.TargetType().IsZero() || u.TargetKey() != "" || u.Required() || u.Reason() != "" {
 		t.Error("a nil UnresolvedEdge's accessors should return zero values")
 	}
 }
 
 func TestDuplicate_NilReceiver(t *testing.T) {
-	var d *graph.Duplicate
-	if d.Instance() != nil || d.Conflict() != nil || d.Parent() != nil || d.Relation() != "" || !d.Diagnostic().IsZero() {
+	var d graph.Duplicate
+	if !d.Instance().IsZero() || !d.Conflict().IsZero() || !d.Parent().IsZero() || d.Relation() != "" || !d.Diagnostic().IsZero() {
 		t.Error("a nil Duplicate's accessors should return zero values")
 	}
 }
@@ -686,7 +686,7 @@ func TestGraph_ForwardReference_Multiple_Unresolved_Snapshot(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) != 3 {
 		t.Errorf("Expected 3 unresolved edges, got %d", len(unresolved))
@@ -772,7 +772,7 @@ func TestGraph_Check_UnresolvedRequired_HasProvenanceSpan(t *testing.T) {
 			immutable.Properties{},
 		),
 	}
-	edges := map[string]*instance.ValidEdgeData{
+	edges := map[string]instance.ValidEdgeData{
 		"EMPLOYER": instance.NewValidEdgeData(targets),
 	}
 
@@ -853,7 +853,7 @@ func TestGraph_BackwardReference_Basic(t *testing.T) {
 	assertEdgeCount(t, snap, 1)
 
 	// Verify edge details
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if edges[0].Source().TypeName() != "Person" {
 		t.Errorf("Edge source should be Person, got %s", edges[0].Source().TypeName())
 	}
@@ -890,7 +890,7 @@ func TestGraph_BackwardReference_Multiple(t *testing.T) {
 
 	// Verify all 3 sources have edges
 	sources := make(map[string]bool)
-	for _, edge := range snap.Edges() {
+	for edge := range snap.Edges() {
 		sources[edge.Source().PrimaryKey().String()] = true
 		if edge.Target().PrimaryKey().String() != `["acme"]` {
 			t.Errorf("Edge target should be [\"acme\"], got %s", edge.Target().PrimaryKey().String())
@@ -987,7 +987,7 @@ func TestGraph_CircularReference_Chain(t *testing.T) {
 	}
 
 	// Verify edges form the expected cycle
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 3 {
 		t.Fatalf("Expected 3 edges in cycle, got %d", len(edges))
 	}

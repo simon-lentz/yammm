@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -147,7 +148,7 @@ func (c storedKeyCase) props() map[string]any { return c.shape.props(c.typ.names
 func (c storedKeyCase) String() string        { return c.typ.name + "/" + c.shape.name }
 func holderProps() map[string]any             { return map[string]any{"id": "h1"} }
 func holderKey() immutable.Key                { return immutable.WrapKey([]any{"h1"}) }
-func loadStoredKeySchema(t *testing.T) *schema.Schema {
+func loadStoredKeySchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), storedKeySchema, "keys.yammm")
 	if res.HasErrors() {
@@ -156,7 +157,7 @@ func loadStoredKeySchema(t *testing.T) *schema.Schema {
 	return s
 }
 
-func (c storedKeyCase) parts(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+func (c storedKeyCase) parts(t *testing.T, s schema.Schema) graph.SnapshotParts {
 	t.Helper()
 	id := mustTypeID(t, s, c.typ.name)
 	ip := graph.InstanceParts{TypeID: id, PrimaryKey: immutable.WrapKey(c.key()), Properties: immutable.WrapProperties(c.props())}
@@ -170,13 +171,13 @@ func (c storedKeyCase) parts(t *testing.T, s *schema.Schema) graph.SnapshotParts
 	}}}
 }
 
-func (c storedKeyCase) add(t *testing.T, s *schema.Schema) bool {
+func (c storedKeyCase) add(t *testing.T, s schema.Schema) bool {
 	t.Helper()
 	id := mustTypeID(t, s, c.typ.name)
-	inst := instance.NewValidInstance(c.typ.name, id, immutable.WrapKey(c.key()), immutable.WrapProperties(c.props()), nil, nil, nil)
+	inst := instance.NewValidInstance(c.typ.name, id, immutable.WrapKey(c.key()), immutable.WrapProperties(c.props()), nil, nil, location.Provenance{})
 	if c.typ.composed {
 		inst = instance.NewValidInstance("Holder", mustTypeID(t, s, "Holder"), holderKey(), immutable.WrapProperties(holderProps()),
-			nil, map[string]immutable.Value{"PARTS": immutable.Wrap([]any{inst})}, nil)
+			nil, map[string]immutable.Value{"PARTS": immutable.Wrap([]any{inst})}, location.Provenance{})
 	}
 	return graph.New(s).Add(context.Background(), inst).OK()
 }
@@ -196,7 +197,7 @@ type keyWireGroup struct {
 
 // keyWireFrame marshals a legal snapshot holding every type, whose header and
 // types table each wire case reuses with its own instances section.
-func keyWireFrame(t *testing.T, s *schema.Schema) (head, tail string, rows map[string]int) {
+func keyWireFrame(t *testing.T, s schema.Schema) (head, tail string, rows map[string]int) {
 	t.Helper()
 	var ids []schema.TypeID
 	var insts []graph.InstanceParts

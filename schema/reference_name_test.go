@@ -114,7 +114,7 @@ func dslStates(t *testing.T, ref, body string) referenceAnswer {
 	s, res := schema.LoadSourcesWithEntry(t.Context(),
 		map[string][]byte{"main.yammm": []byte(main), "lib.yammm": []byte(referenceLibSource)},
 		"main.yammm", "", schema.WithSourcesOnly(true), schema.WithSyntheticRoot("test://refs"))
-	if s != nil && !res.HasErrors() {
+	if !s.IsZero() && !res.HasErrors() {
 		if stated := statedReference(t, s); stated != ref {
 			return refNotAName // the source states another name
 		}
@@ -130,7 +130,7 @@ func dslStates(t *testing.T, ref, body string) referenceAnswer {
 
 // statedReference returns the reference name the loaded source holds: in the
 // datatype X, or else at the property x of Car or of its NEAR edge.
-func statedReference(t *testing.T, s *schema.Schema) string {
+func statedReference(t *testing.T, s schema.Schema) string {
 	t.Helper()
 	held := func(c schema.Constraint) string {
 		for {
@@ -161,7 +161,7 @@ func referenceBuilder(t *testing.T) *schema.Builder {
 	lib, res := schema.NewBuilder().WithName("lib").
 		WithSourceID(location.MustNewSourceID("test://refs/lib.yammm")).
 		AddDataType("Zip", schema.StringLenBetween(5, 5)).Build()
-	if lib == nil {
+	if lib.IsZero() {
 		t.Fatalf("build lib: %s", res.String())
 	}
 	reg := schema.NewRegistry()
@@ -198,18 +198,18 @@ func TestReferenceName_EveryDoorGivesTheDSLsAnswer(t *testing.T) {
 				built, res := b.Build()
 				switch sp.want {
 				case refResolves:
-					if built == nil || res.HasErrors() {
+					if built.IsZero() || res.HasErrors() {
 						t.Fatalf("Build refused a name the DSL resolves: %s", res.String())
 					}
 					if got := statedReference(t, built); got != sp.name {
 						t.Errorf("the built schema holds the reference %q; want %q", got, sp.name)
 					}
 				case refNamesNothing:
-					if built != nil || !hasCode(res, diag.E_UNKNOWN_TYPE) || hasCode(res, diag.E_INVALID_CONSTRAINT) {
+					if !built.IsZero() || !hasCode(res, diag.E_UNKNOWN_TYPE) || hasCode(res, diag.E_INVALID_CONSTRAINT) {
 						t.Errorf("Build = %v, %s; want E_UNKNOWN_TYPE alone", built, res.String())
 					}
 				case refNotAName:
-					if built != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || hasCode(res, diag.E_UNKNOWN_TYPE) {
+					if !built.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) || hasCode(res, diag.E_UNKNOWN_TYPE) {
 						t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT alone", built, res.String())
 					}
 					if !strings.Contains(res.String(), fmt.Sprintf("datatype reference %q", sp.name)) {
@@ -241,7 +241,7 @@ func TestReferenceName_TheZeroReferenceIsRefusedAsAnEmptyName(t *testing.T) {
 		s, res := schema.NewBuilder().WithName("main").
 			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 			WithOptionalProperty("x", c).Done().Build()
-		if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), want) {
+		if !s.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), want) {
 			t.Errorf("%s: Build = %v, %s; want E_INVALID_CONSTRAINT naming the empty reference", name, s, res.String())
 		}
 	}

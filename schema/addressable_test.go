@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -46,7 +47,7 @@ type Beacon {
 }
 `
 
-func loadAddrSchema(t *testing.T) *schema.Schema {
+func loadAddrSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(addrEntrySource),
@@ -61,10 +62,10 @@ func loadAddrSchema(t *testing.T) *schema.Schema {
 
 // closureTypes returns every type of every closure member, so the sweep below
 // reaches the transitively imported ones no entry-relative name can reach.
-func closureTypes(s *schema.Schema) []*schema.Type {
-	var out []*schema.Type
-	for _, member := range s.Closure() {
-		out = append(out, member.TypesSlice()...)
+func closureTypes(s schema.Schema) []schema.Type {
+	var out []schema.Type
+	for member := range s.Closure() {
+		out = append(out, slices.Collect(member.Types())...)
 	}
 	return out
 }
@@ -123,11 +124,11 @@ func TestAddressableTag_RefusesATransitivelyImportedType(t *testing.T) {
 	s := loadAddrSchema(t)
 
 	base, ok := s.ImportByAlias("base")
-	if !ok || base.Schema() == nil {
+	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
 	deep, ok := base.Schema().ImportByAlias("deep")
-	if !ok || deep.Schema() == nil {
+	if !ok || deep.Schema().IsZero() {
 		t.Fatal("import alias deep did not resolve")
 	}
 	probe, ok := deep.Schema().Type("Probe")
@@ -155,7 +156,7 @@ func TestAddressableTag_RefusesANameTheAliasedSchemaDoesNotDeclare(t *testing.T)
 	s := loadAddrSchema(t)
 
 	base, ok := s.ImportByAlias("base")
-	if !ok || base.Schema() == nil {
+	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
 	// The path resolves through the alias; the name is declared nowhere.

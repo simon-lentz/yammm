@@ -121,7 +121,13 @@ func (a AnnotationArg) displayText() string {
 // type. Meaning (DDL emission, write-shape derivation) lives in adapters; the
 // core carries structure and, after completion, validated argument kinds.
 // Annotations are immutable after schema completion.
-type Annotation struct {
+type Annotation struct{ *annotationState }
+
+// IsZero reports whether the handle names no record.
+func (a Annotation) IsZero() bool { return a.annotationState == nil }
+
+// annotationState is the record an [Annotation] names.
+type annotationState struct {
 	name string
 	args []AnnotationArg
 	doc  string
@@ -138,35 +144,35 @@ type Annotation struct {
 
 // newAnnotation builds an annotation from parsed parts. Argument semantic kinds
 // start ArgUnvalidated and are stamped by completion before sealing.
-func newAnnotation(name string, args []AnnotationArg, doc string, span location.Span) *Annotation {
-	return &Annotation{name: name, args: args, doc: doc, span: span}
+func newAnnotation(name string, args []AnnotationArg, doc string, span location.Span) Annotation {
+	return Annotation{&annotationState{name: name, args: args, doc: doc, span: span}}
 }
 
 // setDetachedFrom records the line this annotation was written on, when that
 // is later than the line of the property it binds to. Zero means attached.
-func (a *Annotation) setDetachedFrom(line int) { a.detachedFrom = line }
+func (a Annotation) setDetachedFrom(line int) { a.detachedFrom = line }
 
 // Name returns the annotation name, without the @ / @@ sigil.
-func (a *Annotation) Name() string { return a.name }
+func (a Annotation) Name() string { return a.name }
 
 // Args returns a defensive copy of the annotation's arguments in source order.
-func (a *Annotation) Args() []AnnotationArg { return slices.Clone(a.args) }
+func (a Annotation) Args() []AnnotationArg { return slices.Clone(a.args) }
 
 // argCount returns the argument count without copying.
-func (a *Annotation) argCount() int { return len(a.args) }
+func (a Annotation) argCount() int { return len(a.args) }
 
 // Documentation returns the leading doc comment, if any. Only type-level
 // (@@name) annotations may carry one.
-func (a *Annotation) Documentation() string { return a.doc }
+func (a Annotation) Documentation() string { return a.doc }
 
 // Span returns the source location of the annotation.
-func (a *Annotation) Span() location.Span { return a.span }
+func (a Annotation) Span() location.Span { return a.span }
 
 // setArgKind stamps the validated semantic kind of the i-th argument. Internal;
 // called only during completion, before the owning type is sealed. It mutates
 // the backing slice in place; Args returns a copy, so the sealed public surface
 // stays immutable.
-func (a *Annotation) setArgKind(i int, kind AnnotationArgKind) {
+func (a Annotation) setArgKind(i int, kind AnnotationArgKind) {
 	a.args[i].kind = kind
 }
 
@@ -188,7 +194,7 @@ func (a *Annotation) setArgKind(i int, kind AnnotationArgKind) {
 // text's byte length before
 // its bytes makes the encoding self-delimiting and therefore injective,
 // whatever the text contains.
-func (a *Annotation) identity() string {
+func (a Annotation) identity() string {
 	const sep = "\x00"
 	var b strings.Builder
 	// The NAME is length-prefixed for the same reason the arguments are: it is

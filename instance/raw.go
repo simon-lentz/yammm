@@ -7,7 +7,7 @@ import (
 // RawInstance represents unvalidated instance data.
 //
 // RawInstance is the input to the validation pipeline. It contains the raw
-// property values from the input source (typically JSON) and optional
+// property and relation values from the input source (typically JSON) and optional
 // provenance information for error reporting.
 type RawInstance struct {
 	// Properties contains the raw member values keyed by name: each property's,
@@ -20,8 +20,8 @@ type RawInstance struct {
 	Properties map[string]any
 
 	// Provenance optionally captures source location metadata.
-	// If nil, error messages will not include source locations.
-	Provenance *location.Provenance
+	// If zero, error messages will not include source locations.
+	Provenance location.Provenance
 }
 
 // Refused is a member value its producer refused: a parser that cannot read

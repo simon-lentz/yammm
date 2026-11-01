@@ -61,8 +61,8 @@ type ScanEntry struct {
 //
 // ScanDir inherits [HeaderOnlyRead]'s limit: it validates each file's
 // header and types table, and judges neither the document's outermost shape
-// nor its member names beyond refusing a first section other than the header
-// and a missing types section. It does
+// nor its member names beyond refusing a top level that is no JSON object, a first
+// section other than the header and a missing types section. It does
 // not accept a misshapen document by omission — it does not see one. Use
 // [HeaderOnly], [Verify] or [Load] when that matters.
 //
@@ -92,7 +92,7 @@ type ScanEntry struct {
 // operation-level failures that end iteration:
 //   - Dir-open error (ENOENT, EACCES, ENOTDIR, ...): yields exactly
 //     one (ScanEntry{}, err) pair wrapping the os error and ends.
-//   - Context cancellation observed between files: yields exactly
+//   - Context cancellation observed at entry or between files: yields exactly
 //     one (ScanEntry{}, ctx.Err()) pair (context.Canceled or
 //     context.DeadlineExceeded) and ends.
 //

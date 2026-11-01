@@ -64,7 +64,7 @@ func TestValidateOne_ARefusedValueRefusesTheInstanceAndDrawsNoIssue(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			valid, res := v.ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: props})
-			if valid != nil || res.Len() != 0 {
+			if !valid.IsZero() || res.Len() != 0 {
 				t.Errorf("instance %v, %s; want nil and no issue", valid, res)
 			}
 		})
@@ -82,14 +82,14 @@ func TestValidate_ARefusedInstanceIsANilEntryWithNoIssue(t *testing.T) {
 		{Properties: ok},
 		{Properties: refusedPerson(map[string]any{"nick": instance.Refused{Value: 7}})},
 	})
-	if len(valids) != 2 || valids[0] == nil || valids[1] != nil || res.Len() != 0 {
+	if len(valids) != 2 || valids[0].IsZero() || !valids[1].IsZero() || res.Len() != 0 {
 		t.Errorf("valids %v, %s; want the second entry nil and no issue", valids, res)
 	}
 	children, res := v.ValidateForComposition(t.Context(), "Person", "LINES", []instance.RawInstance{
 		{Properties: map[string]any{"sku": "a"}},
 		{Properties: map[string]any{"sku": instance.Refused{Value: "b"}}},
 	})
-	if len(children) != 2 || children[0] == nil || children[1] != nil || res.Len() != 0 {
+	if len(children) != 2 || children[0].IsZero() || !children[1].IsZero() || res.Len() != 0 {
 		t.Errorf("children %v, %s; want the second nil and no issue", children, res)
 	}
 }

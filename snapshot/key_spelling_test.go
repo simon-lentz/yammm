@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -100,7 +102,7 @@ func TestUpdateMetadataOrReMarshal_FallbackMarksACreatedAtItCannotCarry(t *testi
 
 // linkedTimestampSchema declares a Timestamp-keyed target and a type that
 // addresses it through an association.
-func linkedTimestampSchema(t *testing.T) *schema.Schema {
+func linkedTimestampSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "linked"
 
@@ -124,21 +126,21 @@ type Note {
 // addressing it, then rewrites the Event's key and property — and, when
 // edgeToo is set, the edge's target key — to a non-canonical spelling of the
 // same instant, as a foreign writer would, and re-signs it.
-func foreignSpellingDocument(t *testing.T, s *schema.Schema, edgeToo bool) []byte {
+func foreignSpellingDocument(t *testing.T, s schema.Schema, edgeToo bool) []byte {
 	t.Helper()
 	const canon = "2020-01-02T03:04:05Z"
 	const raw = "2020-01-02T03:04:05+00:00"
 	eventID, _ := s.Type("Event")
 	noteID, _ := s.Type("Note")
 	event := instance.NewValidInstance("Event", eventID.ID(), immutable.WrapKey([]any{canon}),
-		immutable.WrapProperties(map[string]any{"observed_at": canon}), nil, nil, nil)
-	edges := map[string]*instance.ValidEdgeData{"ABOUT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		immutable.WrapProperties(map[string]any{"observed_at": canon}), nil, nil, location.Provenance{})
+	edges := map[string]instance.ValidEdgeData{"ABOUT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 		instance.NewValidEdgeTarget(immutable.WrapKey([]any{canon}), immutable.WrapProperties(nil)),
 	})}
 	note := instance.NewValidInstance("Note", noteID.ID(), immutable.WrapKey([]any{"n1"}),
-		immutable.WrapProperties(map[string]any{"id": "n1"}), edges, nil, nil)
+		immutable.WrapProperties(map[string]any{"id": "n1"}), edges, nil, location.Provenance{})
 	g := graph.New(s)
-	for _, inst := range []*instance.ValidInstance{event, note} {
+	for _, inst := range []instance.ValidInstance{event, note} {
 		if r := g.Add(t.Context(), inst); !r.OK() {
 			t.Fatalf("add: %s", r)
 		}
@@ -171,11 +173,11 @@ func TestLoad_ForeignSpellingOfAKeyLoadsAndResolves(t *testing.T) {
 		if res.HasErrors() {
 			t.Fatalf("edge raw too = %v: Load: %s", edgeToo, res)
 		}
-		inst := snap.InstancesOf(eventID.ID())[0]
+		inst := slices.Collect(snap.InstancesOf(eventID.ID()))[0]
 		if _, ok := snap.InstanceByKey(eventID.ID(), inst.PrimaryKey().String()); !ok {
 			t.Errorf("edge raw too = %v: InstanceByKey by the instance's own key misses", edgeToo)
 		}
-		if n := len(snap.Edges()); n != 1 {
+		if n := len(slices.Collect(snap.Edges())); n != 1 {
 			t.Errorf("edge raw too = %v: edges = %d, want 1", edgeToo, n)
 		}
 	}
@@ -193,7 +195,7 @@ func TestLoad_TwoSpellingsOfOneKeyAreOneDuplicate(t *testing.T) {
 	g := graph.New(s)
 	for _, at := range []string{first, second} {
 		ev := instance.NewValidInstance("Event", eventID.ID(), immutable.WrapKey([]any{at}),
-			immutable.WrapProperties(map[string]any{"observed_at": at}), nil, nil, nil)
+			immutable.WrapProperties(map[string]any{"observed_at": at}), nil, nil, location.Provenance{})
 		if r := g.Add(t.Context(), ev); !r.OK() {
 			t.Fatalf("add: %s", r)
 		}
@@ -206,7 +208,7 @@ func TestLoad_TwoSpellingsOfOneKeyAreOneDuplicate(t *testing.T) {
 	doc := rehashDocument(t, bytes.ReplaceAll(data, []byte(second), []byte("2020-01-02T03:04:05+00:00")))
 
 	snap, res := snapshot.Load(t.Context(), doc, s)
-	if snap != nil || !res.HasErrors() {
+	if !snap.IsZero() || !res.HasErrors() {
 		t.Fatalf("two spellings of one key loaded as two roots: %s", res)
 	}
 	if !hasCode(res, diag.E_DUPLICATE_PK) {
@@ -227,11 +229,11 @@ func TestLoad_UnresolvedTargetIsCanonicalized(t *testing.T) {
 	noteID, _ := s.Type("Note")
 	const canon = "2020-01-02T03:04:05Z"
 	const raw = "2020-01-02T03:04:05+00:00"
-	edges := map[string]*instance.ValidEdgeData{"ABOUT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+	edges := map[string]instance.ValidEdgeData{"ABOUT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 		instance.NewValidEdgeTarget(immutable.WrapKey([]any{canon}), immutable.WrapProperties(nil)),
 	})}
 	note := instance.NewValidInstance("Note", noteID.ID(), immutable.WrapKey([]any{"n1"}),
-		immutable.WrapProperties(map[string]any{"id": "n1"}), edges, nil, nil)
+		immutable.WrapProperties(map[string]any{"id": "n1"}), edges, nil, location.Provenance{})
 	g := graph.New(s)
 	if r := g.Add(t.Context(), note); !r.OK() {
 		t.Fatalf("add: %s", r)
@@ -248,7 +250,7 @@ func TestLoad_UnresolvedTargetIsCanonicalized(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("Load: %s", res)
 	}
-	if u := snap.Unresolved(); len(u) != 1 || u[0].TargetKey() != graph.FormatKey(canon) {
+	if u := slices.Collect(snap.Unresolved()); len(u) != 1 || u[0].TargetKey() != graph.FormatKey(canon) {
 		t.Errorf("unresolved target after Load = %v, want %s", u, graph.FormatKey(canon))
 	}
 }

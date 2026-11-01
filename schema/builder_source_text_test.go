@@ -109,7 +109,7 @@ func TestStringValues_TheDSLAndTheBuilderAcceptWhatJSONKeeps(t *testing.T) {
 					t.Errorf("the DSL loads %q: %v, want %v (%s)", v, loads, want, lres.String())
 				}
 				s, bres := place.build(v).Build()
-				if builds := s != nil && !bres.HasErrors(); builds != want {
+				if builds := !s.IsZero() && !bres.HasErrors(); builds != want {
 					t.Errorf("the Builder builds %q: %v, want %v (%s)", v, builds, want, bres.String())
 				}
 			})
@@ -161,7 +161,7 @@ func TestBuilder_RefusesAStringValueNotValidUTF8(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s, res := tc.b.Build()
-			if s != nil || !hasCode(res, tc.code) || !strings.Contains(res.String(), tc.quote) {
+			if !s.IsZero() || !hasCode(res, tc.code) || !strings.Contains(res.String(), tc.quote) {
 				t.Errorf("Build = %v, %s; want %s naming %s", s, res.String(), tc.code, tc.quote)
 			}
 			if diag.IsImportResolutionCode(tc.code.String()) {
@@ -204,14 +204,14 @@ func TestBuilder_RefusesADocNoDocCommentCanCarry(t *testing.T) {
 		for doc, why := range refused {
 			t.Run(fmt.Sprintf("%s %q", place, doc), func(t *testing.T) {
 				s, res := build(doc).Build()
-				if s != nil || !hasCode(res, diag.E_SYNTAX) || !strings.Contains(res.String(), why) {
+				if !s.IsZero() || !hasCode(res, diag.E_SYNTAX) || !strings.Contains(res.String(), why) {
 					t.Errorf("Build = %v, %s; want E_SYNTAX naming %s", s, res.String(), why)
 				}
 			})
 		}
 		for _, doc := range []string{"a /* b", "two\nlines", "tab\there", "\\x00 as text"} {
 			t.Run(fmt.Sprintf("%s %q builds", place, doc), func(t *testing.T) {
-				if s, res := build(doc).Build(); s == nil || res.HasErrors() {
+				if s, res := build(doc).Build(); s.IsZero() || res.HasErrors() {
 					t.Errorf("Build refused: %s", res.String())
 				}
 			})
@@ -235,7 +235,7 @@ func TestBuilder_RefusesAPatternWritingASurrogate(t *testing.T) {
 	want := `regex pattern "a\\x{D800}" names the surrogate code point U+D800, which no string holds`
 	s, res := schema.NewBuilder().WithName("s").AddType("Car").WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithProperty("p", c).Done().Build()
-	if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), want) {
+	if !s.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), want) {
 		t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT: %s", s, res.String(), want)
 	}
 	if err := schema.CheckConstraint(c); err == nil || !strings.Contains(err.Error(), want) {
@@ -254,7 +254,7 @@ func TestBuilder_RefusesAStringValueInsideACallArgument(t *testing.T) {
 	call := expr.SExpr{expr.Op("StartsWith"), id, expr.NewLiteral([]expr.Expression{expr.NewLiteral("a\xff")}), expr.NewLiteral([]string{}), nil}
 	s, res := schema.NewBuilder().WithName("s").AddType("Car").WithPrimaryKey("id", schema.NewStringConstraint()).
 		WithInvariant("m", call, "").Done().Build()
-	if s != nil || !hasCode(res, diag.E_INVALID_INVARIANT) || !strings.Contains(res.String(), "which is not valid UTF-8") {
+	if !s.IsZero() || !hasCode(res, diag.E_INVALID_INVARIANT) || !strings.Contains(res.String(), "which is not valid UTF-8") {
 		t.Errorf("Build = %v, %s; want E_INVALID_INVARIANT", s, res.String())
 	}
 }

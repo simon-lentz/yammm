@@ -13,13 +13,13 @@ import (
 
 // indexedInstance builds a bypass instance of typ keyed id, naming each
 // relation's targets by key.
-func indexedInstance(t *testing.T, s *schema.Schema, typ, id string, edges map[string][]string) *instance.ValidInstance {
+func indexedInstance(t *testing.T, s schema.Schema, typ, id string, edges map[string][]string) instance.ValidInstance {
 	t.Helper()
 	tt, ok := s.Type(typ)
 	if !ok {
 		t.Fatalf("no type %s", typ)
 	}
-	data := make(map[string]*instance.ValidEdgeData, len(edges))
+	data := make(map[string]instance.ValidEdgeData, len(edges))
 	for rel, keys := range edges {
 		ts := make([]instance.ValidEdgeTarget, len(keys))
 		for i, k := range keys {
@@ -50,7 +50,7 @@ func assertIndexMatchesARebuild(t *testing.T, g *Graph, step string) {
 	}
 }
 
-func (h *heldRecords) edgeList() []*Edge {
+func (h *heldRecords) edgeList() []Edge {
 	if h == nil {
 		return nil
 	}

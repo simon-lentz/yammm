@@ -23,7 +23,7 @@ import (
 // fixtures. A duplicate primary key is recorded in the snapshot, so a fixture
 // may build one on purpose; any other refusal fails tb, because the refused
 // instance would be missing from the snapshot the test then asserts on.
-func BuildSnapshot(tb testing.TB, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
+func BuildSnapshot(tb testing.TB, s schema.Schema, instances ...instance.ValidInstance) graph.Snapshot {
 	tb.Helper()
 	g := graph.New(s)
 	for i, inst := range instances {
@@ -46,7 +46,7 @@ func BuildSnapshot(tb testing.TB, s *schema.Schema, instances ...*instance.Valid
 // Round-trip such a snapshot once first; healing is idempotent, so every later
 // round trip holds. The composed-child identity repair this also warned about
 // is gone with the reader that needed it.
-func AssertRoundTrip(tb testing.TB, snap *graph.Snapshot, s *schema.Schema, opts ...snapshot.Option) {
+func AssertRoundTrip(tb testing.TB, snap graph.Snapshot, s schema.Schema, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()
 
@@ -65,7 +65,7 @@ func AssertRoundTrip(tb testing.TB, snap *graph.Snapshot, s *schema.Schema, opts
 
 // AssertDeterministic marshals a snapshot twice with the same options and
 // verifies byte-level equality.
-func AssertDeterministic(tb testing.TB, snap *graph.Snapshot, opts ...snapshot.Option) {
+func AssertDeterministic(tb testing.TB, snap graph.Snapshot, opts ...snapshot.Option) {
 	tb.Helper()
 	ctx := context.Background()
 
@@ -156,16 +156,14 @@ type unresProjection struct {
 // list or map compares equal to an empty one, and a float32 compares equal to the
 // float64 Load returns for it, because that float64 converts back to the float32
 // and the wire keeps no width (see [widenFloat32]).
-func DiffSnapshots(tb testing.TB, want, got *graph.Snapshot) {
+func DiffSnapshots(tb testing.TB, want, got graph.Snapshot) {
 	tb.Helper()
-	// EquateEmpty: a built snapshot carries nil property maps where a loaded
-	// one carries empty maps; that distinction is outside the contract.
 	if d := cmp.Diff(project(want), project(got), cmpopts.EquateEmpty()); d != "" {
 		tb.Errorf("snapshots differ (-want +got):\n%s", d)
 	}
 }
 
-func project(s *graph.Snapshot) snapProjection {
+func project(s graph.Snapshot) snapProjection {
 	ids := s.Types()
 	p := snapProjection{
 		Types:       make([]string, 0, len(ids)),
@@ -175,9 +173,9 @@ func project(s *graph.Snapshot) snapProjection {
 	for _, typeID := range ids {
 		key := typeID.String()
 		p.Types = append(p.Types, key)
-		for _, inst := range s.InstancesOf(typeID) {
+		for inst := range s.InstancesOf(typeID) {
 			ip := projectInstanceTree(inst)
-			for _, e := range s.EdgesFrom(inst) {
+			for e := range s.EdgesFrom(inst) {
 				ip.Edges = append(ip.Edges, edgeProjection{
 					Relation:   e.Relation(),
 					TargetType: e.Target().TypeID().String(),
@@ -188,22 +186,20 @@ func project(s *graph.Snapshot) snapProjection {
 			p.Instances[key] = append(p.Instances[key], ip)
 		}
 	}
-	for _, d := range s.Duplicates() {
+	for d := range s.Duplicates() {
 		dp := dupProjection{
-			Instance: projectInstanceTree(d.Instance()),
-			Relation: d.Relation(),
+			Instance:     projectInstanceTree(d.Instance()),
+			ConflictType: d.Conflict().TypeID().String(),
+			ConflictKey:  d.Conflict().PrimaryKey().String(),
+			Relation:     d.Relation(),
 		}
-		if d.Conflict() != nil {
-			dp.ConflictType = d.Conflict().TypeID().String()
-			dp.ConflictKey = d.Conflict().PrimaryKey().String()
-		}
-		if d.Parent() != nil {
+		if !d.Parent().IsZero() {
 			dp.ParentType = d.Parent().TypeID().String()
 			dp.ParentKey = d.Parent().PrimaryKey().String()
 		}
 		p.Duplicates = append(p.Duplicates, dp)
 	}
-	for _, u := range s.Unresolved() {
+	for u := range s.Unresolved() {
 		p.Unresolved = append(p.Unresolved, unresProjection{
 			SourceType: u.Source().TypeID().String(),
 			SourceKey:  u.Source().PrimaryKey().String(),
@@ -223,7 +219,7 @@ func project(s *graph.Snapshot) snapProjection {
 // children and provenance), so the comparison descends to match. Edges are
 // appended by the caller for root instances only; composed children cannot
 // carry edges.
-func projectInstanceTree(inst *graph.Instance) instProjection {
+func projectInstanceTree(inst graph.Instance) instProjection {
 	ip := instProjection{
 		TypeName:   inst.TypeName(),
 		TypeID:     inst.TypeID().String(),
@@ -233,12 +229,12 @@ func projectInstanceTree(inst *graph.Instance) instProjection {
 	if rels := inst.ComposedRelations(); len(rels) > 0 {
 		ip.Composed = make(map[string][]instProjection, len(rels))
 		for _, rel := range rels {
-			for _, child := range inst.Composed(rel) {
+			for child := range inst.Composed(rel) {
 				ip.Composed[rel] = append(ip.Composed[rel], projectInstanceTree(child))
 			}
 		}
 	}
-	if prov := inst.Provenance(); prov != nil {
+	if prov := inst.Provenance(); !prov.IsZero() {
 		ip.Provenance = &provProjection{
 			SourceName: prov.SourceName(),
 			Path:       prov.Path().String(),

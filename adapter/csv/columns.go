@@ -35,17 +35,17 @@ const (
 type column struct {
 	name     string
 	kind     columnKind
-	exact    *schema.Property // columnPlain: the property the name spells exactly
-	folds    *schema.Property // columnPlain: the property the name folds onto, unless strict
-	spelling int              // columnDotted: its field spelling in [plan.spellings]
-	suffix   string           // columnDotted: the text after the dot, as written
+	exact    schema.Property // columnPlain: the property the name spells exactly
+	folds    schema.Property // columnPlain: the property the name folds onto, unless strict
+	spelling int             // columnDotted: its field spelling in [plan.spellings]
+	suffix   string          // columnDotted: the text after the dot, as written
 }
 
 // plan is a header read against one row type: each column's candidate member
 // and each field spelling's group. Which key claims a member is decided per
 // row by [instance.ClaimKeys], since only the row knows which keys it holds.
 type plan struct {
-	typ       *schema.Type
+	typ       schema.Type
 	columns   []column
 	spellings []spelling // in header order
 	claimMemo map[string]instance.Claims
@@ -55,7 +55,7 @@ type plan struct {
 // emptyOf names what an empty cell of a property holds, as a key component
 // or as a property: it depends on the property alone, so a plan reads it once.
 type emptyOf struct {
-	prop *schema.Property
+	prop schema.Property
 	key  bool
 }
 
@@ -66,8 +66,8 @@ type spelling struct {
 	field     string
 	cols      []int // column indexes, in header order
 	plain     int   // the plain column spelled as field, or -1
-	rel       *schema.Relation
-	target    *schema.Type
+	rel       schema.Relation
+	target    schema.Type
 	members   []suffixMember // over positions in cols; nil unless rel is set
 	claimMemo map[string]instance.EdgeClaims
 }
@@ -76,18 +76,18 @@ type spelling struct {
 type suffixMember struct {
 	member edgeMember
 	exact  bool
-	key    *schema.Property // memberKey
-	eprop  *schema.Property // memberProperty
+	key    schema.Property // memberKey
+	eprop  schema.Property // memberProperty
 }
 
 // planColumns reads each header column against schemaType, once per header. A
-// nil schemaType keeps every cell as its string.
-func (a *Adapter) planColumns(columns []string, schemaType *schema.Type) *plan {
+// zero schemaType keeps every cell as its string.
+func (a *Adapter) planColumns(columns []string, schemaType schema.Type) *plan {
 	p := &plan{typ: schemaType, columns: make([]column, len(columns)), claimMemo: make(map[string]instance.Claims), emptyMemo: make(map[emptyOf]any)}
 	for i, name := range columns {
 		p.columns[i] = column{name: name, kind: columnString}
 	}
-	if schemaType == nil {
+	if schemaType.IsZero() {
 		return p
 	}
 
@@ -118,7 +118,7 @@ func (a *Adapter) planColumns(columns []string, schemaType *schema.Type) *plan {
 			sp.plain = i
 		}
 		sp.rel = a.associationNamed(schemaType, sp.field)
-		if sp.rel != nil {
+		if !sp.rel.IsZero() {
 			a.planSuffixes(p, sp)
 		}
 	}
@@ -127,29 +127,29 @@ func (a *Adapter) planColumns(columns []string, schemaType *schema.Type) *plan {
 
 // propertyNamed returns the property name spells exactly, or else, unless
 // strict, the one it folds onto.
-func propertyNamed(t *schema.Type, name string, strict bool) (exact, folds *schema.Property) {
+func propertyNamed(t schema.Type, name string, strict bool) (exact, folds schema.Property) {
 	if prop, ok := t.Property(name); ok {
-		return prop, nil
+		return prop, schema.Property{}
 	}
 	if strict {
-		return nil, nil
+		return schema.Property{}, schema.Property{}
 	}
 	lower, ok := instance.FoldKey(name)
 	if !ok {
-		return nil, nil
+		return schema.Property{}, schema.Property{}
 	}
 	canonical, ok := t.CanonicalPropertyName(lower)
 	if !ok {
-		return nil, nil
+		return schema.Property{}, schema.Property{}
 	}
 	prop, _ := t.Property(canonical)
-	return nil, prop
+	return schema.Property{}, prop
 }
 
 // associationNamed returns the association field spells exactly or, unless
 // strict, by fold. A composition is not one: the parser assembles no composed
 // child, so its group is carried as text for the validator to judge.
-func (a *Adapter) associationNamed(t *schema.Type, field string) *schema.Relation {
+func (a *Adapter) associationNamed(t schema.Type, field string) schema.Relation {
 	rel, ok := t.RelationByField(field)
 	if !ok && !a.config.strict {
 		if lower, folds := instance.FoldKey(field); folds {
@@ -157,7 +157,7 @@ func (a *Adapter) associationNamed(t *schema.Type, field string) *schema.Relatio
 		}
 	}
 	if !ok || rel.IsComposition() {
-		return nil
+		return schema.Relation{}
 	}
 	return rel
 }
@@ -166,11 +166,11 @@ func (a *Adapter) associationNamed(t *schema.Type, field string) *schema.Relatio
 // association: a key component of the target, which [WithSchema] supplies, or
 // an edge property.
 func (a *Adapter) planSuffixes(p *plan, sp *spelling) {
-	if a.config.schema != nil {
+	if !a.config.schema.IsZero() {
 		sp.target, _ = a.config.schema.TypeByID(sp.rel.TargetID())
 	}
-	keyByFold := make(map[string]*schema.Property)
-	if sp.target != nil {
+	keyByFold := make(map[string]schema.Property)
+	if !sp.target.IsZero() {
 		for pk := range sp.target.PrimaryKeys() {
 			keyByFold[strings.ToLower(keyPrefix+pk.Name())] = pk
 		}
@@ -183,13 +183,13 @@ func (a *Adapter) planSuffixes(p *plan, sp *spelling) {
 		folds = folds && !a.config.strict
 		switch {
 		case strings.HasPrefix(suffix, keyPrefix) || folds && strings.HasPrefix(lower, keyPrefix):
-			if sp.target == nil {
+			if sp.target.IsZero() {
 				m.member = memberOpenKey
 				continue
 			}
-			if key := keyByFold[strings.ToLower(suffix)]; key != nil && keyPrefix+key.Name() == suffix {
+			if key := keyByFold[strings.ToLower(suffix)]; !key.IsZero() && keyPrefix+key.Name() == suffix {
 				m.member, m.key, m.exact = memberKey, key, true
-			} else if key := keyByFold[lower]; folds && key != nil {
+			} else if key := keyByFold[lower]; folds && !key.IsZero() {
 				m.member, m.key = memberKey, key
 			}
 		default:

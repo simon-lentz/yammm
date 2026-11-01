@@ -87,10 +87,9 @@
 // whose dimension comes from the property's Vector[N] constraint. Load-time
 // validation guarantees eligibility for every schema a public entry point
 // returns — dangling references are rejected at construction — and the adapter
-// still re-checks as defense in depth, reporting [E_NEO4J_UNKNOWN_PROPERTY]
-// for a property that does not exist and [E_NEO4J_INVALID_INDEX_TARGET] for
-// one whose type cannot carry the index, rather than trusting a model that
-// may have been assembled outside those guarantees.
+// still re-checks, with [E_NEO4J_UNKNOWN_PROPERTY] for a property that does not
+// exist and [E_NEO4J_INVALID_INDEX_TARGET] for one whose type cannot carry the
+// index. No schema those entry points return draws either code.
 //
 // Index names are always emitted — {label}_{props}_idx for range,
 // {label}_{prop}_vector_idx for vector, {label}_{props}_fulltext_idx for
@@ -169,8 +168,8 @@
 // complete [graph.Snapshot] for high-throughput batch writes. They are the
 // write surface, and the package has no single-item write.
 //
-// Both require a [GraphShape] that [Adapter.ShapeForSchema] built from the
-// snapshot's own schema, and refuse one built by hand or from another schema:
+// Both require a [GraphShape] that [Adapter.ShapeForSchema] built from a schema
+// with the snapshot's SourceID, and refuse one built by hand or from another:
 // a shape the adapter did not build carries no key constraints, so merge keys
 // would reach the driver uncoerced while the same properties are coerced from
 // the schema. [GraphShape.Types] is keyed by [schema.TypeID], so two closure
@@ -180,14 +179,14 @@
 // separator beside a schema name that ends in what precedes it;
 // [Adapter.ShapeForSchema] refuses that closure.
 //
-// A value Neo4j would not store as the snapshot holds it is refused with an
-// error marked [ErrUnrepresentable], as the JSON and CSV adapters mark theirs:
-// one its constraint's coercion refuses, a nested collection's, a map, a string
-// that is not valid UTF-8, a value of no form, a time or a UUID its constraint does
-// not render, a number no driver number holds, or a primary key that is absent
-// or holds no value. A property the schema does not declare has no constraint,
-// so its value is judged by its one form alone, as [Coerce] passes a value at a
-// nil constraint. Of these values a validated snapshot holds only a nested
+// An error marked [ErrUnrepresentable], as the JSON and CSV adapters mark theirs,
+// refuses these values: one its constraint's coercion refuses, a nested collection's, a map at a
+// property the schema declares, a string that is not valid UTF-8, a value of no form, a time or a UUID its constraint does
+// not render, a [encoding/json.Number] no driver number holds, or a primary key
+// that is absent or holds no value. A uint64 past int64 at a String passes these
+// checks, reaches the driver and draws its own unmarked OverflowError. An integer
+// at a Float position passes them and rounds to its nearest float64. No snapshot these writers accept holds a property the schema does not
+// declare, since every constructor refuses one. Of the values the mark refuses, a validated snapshot holds only a nested
 // collection's, which the validator accepts; any other is held only by a
 // snapshot whose values no validator refused at Error. [Coerce], [CoerceParams]
 // and [CoerceRelProps] mark their refusals of a value so too. No other error
@@ -332,13 +331,16 @@
 // The trailing variadic argument is the OTHER side's remote objects. Index and
 // constraint names share ONE Neo4j namespace, and every emitted statement
 // carries IF NOT EXISTS, so a declaration whose name the database already holds
-// is a silent no-op rather than a create. Passing both sides lets each diff
+// creates nothing. Over a name of its own kind the statement is a silent no-op,
+// and a constraint's backing index counts as an index. Over the other kind's name
+// the server refuses it: a CREATE INDEX over a NOT NULL or TYPE constraint's name,
+// and a CREATE CONSTRAINT over a plain index's name. Passing both sides lets each diff
 // report such a declaration as drift naming the holder. A constraint backed by
 // an index appears in SHOW INDEXES under the constraint's name and is seen
 // automatically; NOT NULL and TYPE constraints have no backing index and reach
-// [Adapter.DiffIndexes] only this way. Omitting the argument is safe but weaker
-// — the blocked declaration then reports as a create the server ignores on
-// every run.
+// [Adapter.DiffIndexes] only this way. Omitting the argument is weaker: the
+// blocked declaration then reports as a create on every run, which the server
+// refuses.
 //
 // # Constraint Diffing
 //
@@ -378,7 +380,8 @@
 // properties and no index type. Composite property order is
 // significant, a deliberate divergence from [Adapter.DiffConstraints]: a
 // same-set/different-order remote index is a distinct index — create + drop when
-// its name differs too, and drift when it holds the desired index's name. A
+// its name differs too and [RemoteIndex.Declarable] accepts it, create alone when
+// that refuses it, and drift when it holds the desired index's name. A
 // schema-owned remote index that [RemoteIndex.Declarable] accepts and no
 // declaration matches is reported as a drop — the drift the index feature
 // exists to surface. An owned index it refuses is never a drop: it is counted in [IndexDiffResult.Excluded], a
@@ -428,7 +431,8 @@
 // The default configuration targets Neo4j 5.9+ Enterprise, and 5.10+ for a
 // schema with a List or Vector property: it emits PROPERTY_TYPE constraints,
 // which Neo4j 5.9 added for scalar types and 5.10 for LIST types. With
-// [WithScalarTypeConstraints](false) it targets Neo4j 5.0+.
+// [WithScalarTypeConstraints](false) it targets Neo4j 5.0+, and 5.9+ for a schema
+// with a composition, whose replace query uses a quantified path pattern.
 // [WithNodeKeyConstraints](true) needs no newer release than the default.
 // The emitted CREATE VECTOR INDEX ... OPTIONS statement form (from @vector
 // annotations) requires Neo4j 5.15+.
@@ -447,7 +451,7 @@
 // Configuration is immutable after [New] returns. Every method reads the
 // frozen config and writes only to values it allocates, save one package-level
 // value: a concurrency-safe memo of which zone names the host's tz database
-// resolves, which [Coerce] fills; it caches a host fact fixed for the process
+// resolves, which coercion of a Timestamp in a named zone fills; it caches a host fact fixed for the process
 // lifetime and holds no adapter state.
 //
 // # Dependencies

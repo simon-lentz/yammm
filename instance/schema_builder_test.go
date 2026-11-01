@@ -22,7 +22,7 @@ import (
 // Note: compositions target concrete part types per schema/collision.go:274–287;
 // no abstract composition targets are exercised here (the schema layer would
 // reject them at Build time, making such fixtures unrealizable).
-func personSchema(t *testing.T) *schema.Schema {
+func personSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	return mustBuild(t, schema.NewBuilder().
 		WithName("test").
@@ -64,7 +64,7 @@ func personSchema(t *testing.T) *schema.Schema {
 // does not expose edge-property declaration at the TypeBuilder level.
 // Optional edge properties omit the 'required' keyword, which the SPEC's
 // RelProperty production makes optional.
-func edgePropsSchema(t *testing.T) *schema.Schema {
+func edgePropsSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "edgepropstest"
 
@@ -93,10 +93,10 @@ type Employee {
 // ---------- BuilderFor constructor ----------
 
 func TestBuilderFor_NilSchema(t *testing.T) {
-	b, err := instance.BuilderFor(nil, "Person")
+	b, err := instance.BuilderFor(schema.Schema{}, "Person")
 	require.Error(t, err)
 	assert.Nil(t, b)
-	assert.Contains(t, err.Error(), "nil schema")
+	assert.Contains(t, err.Error(), "zero schema")
 }
 
 func TestBuilderFor_UnknownType(t *testing.T) {
@@ -453,7 +453,7 @@ func TestSchemaBuilder_RoundTrip_ValidatorAccepts(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 	require.True(t, result.OK(), "validator rejected builder output: %s", result)
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 	assert.Equal(t, "Person", valid.TypeName())
 }
 

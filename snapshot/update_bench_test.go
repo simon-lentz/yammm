@@ -21,7 +21,7 @@ import (
 // loaded schema so every benchmark invocation measures the primitive
 // under test rather than the setup cost.
 type benchInputs struct {
-	schema  *schema.Schema
+	schema  schema.Schema
 	data    []byte
 	newMeta map[string]string
 }
@@ -67,7 +67,7 @@ func loadBenchInputs(tb testing.TB) benchInputs {
 					"email": fmt.Sprintf("person%06d@example.org", i),
 					"role":  "contributor",
 				}),
-				nil, nil, nil,
+				nil, nil, location.Provenance{},
 			)
 			if res := g.Add(ctx, inst); res.HasErrors() {
 				tb.Fatalf("bench add: %v", res.Err())

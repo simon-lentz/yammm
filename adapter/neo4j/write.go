@@ -118,18 +118,18 @@ func WithEdgeChunkSize(size int) WriteOption {
 // Returns a phased, ordered slice: every [NodeMerge] query, then every
 // [CompositionReplace], then every [CompositionCreate] parent-first by
 // depth — execute in order and each parent's composed subtree is replaced
-// whole (see [NodeQueryKind]). Types with more instances than the chunk
-// size produce multiple queries per phase.
+// whole (see [NodeQueryKind]). A phase with more rows than the chunk size
+// produces several queries.
 //
-// Requires a [GraphShape] that [Adapter.ShapeForSchema] built from this
-// snapshot's schema, and refuses one built by hand or from another: a shape the
-// adapter did not build carries no key constraints, so merge keys would reach
+// Requires a [GraphShape] that [Adapter.ShapeForSchema] built from a schema with
+// this snapshot's non-zero SourceID, and refuses one built by hand, from another
+// SourceID or from a zero one: a shape the adapter did not build carries no key constraints, so merge keys would reach
 // the driver uncoerced while the same properties are coerced from the schema.
 // [GraphShape.Types] is keyed by [schema.TypeID], so two closure types sharing
 // one bare name each get their own label.
 func (a *Adapter) BatchNodeQueries(
 	ctx context.Context,
-	result *graph.Snapshot,
+	result graph.Snapshot,
 	shapes *GraphShape,
 	opts ...WriteOption,
 ) ([]*BatchNodeQuery, error) {
@@ -165,7 +165,7 @@ func (a *Adapter) BatchNodeQueries(
 			km = immutableKeys
 		}
 
-		instances := result.InstancesOf(typeID)
+		instances := slices.Collect(result.InstancesOf(typeID))
 		var rows []map[string]any
 
 		for _, inst := range instances {
@@ -218,15 +218,16 @@ func (a *Adapter) BatchNodeQueries(
 // keyed by [schema.TypeID], so two closure types sharing one bare name each get
 // their own label.
 //
-// shapes must come from [Adapter.ShapeForSchema] over this snapshot's schema; a
-// hand-built or foreign one is refused, for the reason [Adapter.BatchNodeQueries]
-// states. It must cover the whole import closure, not just the entry schema: every
+// shapes must come from [Adapter.ShapeForSchema] over a schema with this
+// snapshot's non-zero SourceID; [Adapter.BatchNodeQueries] states what else is
+// refused. It must cover the whole import closure, not just the entry schema: every
 // edge's source and target type is looked up in it, and a missing entry returns
-// "no shape for source type ..." with no further explanation. Build it with
+// "no shape for source type ..." or "no shape for target type ..." with no
+// further explanation. Build it with
 // [Adapter.ShapeForSchema], which walks the closure.
 func (a *Adapter) BatchEdgeQueries(
 	ctx context.Context,
-	result *graph.Snapshot,
+	result graph.Snapshot,
 	shapes *GraphShape,
 	opts ...WriteOption,
 ) ([]*BatchEdgeQuery, error) {
@@ -239,7 +240,7 @@ func (a *Adapter) BatchEdgeQueries(
 		return nil, err
 	}
 
-	edges := result.Edges()
+	edges := slices.Collect(result.Edges())
 
 	// Validate all relationship types upfront (fail fast).
 	for _, edge := range edges {
@@ -283,10 +284,10 @@ func (a *Adapter) BatchEdgeQueries(
 		}
 
 		// Resolve the relation so typed edge properties coerce to
-		// driver-native types; nil means coerceRelProps passes them through.
+		// driver-native types; a zero rel means coerceRelProps passes them through.
 		// By identity, which reaches the whole closure — an imported type's
 		// rendered name is in no schema's local table.
-		var rel *schema.Relation
+		var rel schema.Relation
 		if len(sigEdges) > 0 {
 			if srcType, ok := result.Schema().TypeByID(sigEdges[0].Source().TypeID()); ok {
 				rel, _ = srcType.Relation(sig.relType)
@@ -307,7 +308,7 @@ func (a *Adapter) BatchEdgeQueries(
 		// chokepoint, and a hub node at the end of a thousand edges paid for it
 		// a thousand times.
 		keyCache := make(map[string]map[string]any)
-		endpointKeys := func(inst *graph.Instance, shape *NodeShape) (map[string]any, error) {
+		endpointKeys := func(inst graph.Instance, shape *NodeShape) (map[string]any, error) {
 			id := inst.TypeID().String() + "\x00" + inst.PrimaryKey().String()
 			if cached, ok := keyCache[id]; ok {
 				return cached, nil
@@ -392,7 +393,7 @@ func (a *Adapter) BatchEdgeQueries(
 // A value that holds one at a List whose element is a collection is refused
 // first ([nestedCollection]). Every other value is then read in its one form,
 // declared or not, and a value [heldForm] refuses is an error too.
-func propsToParamMap(props immutable.Properties, schemaType *schema.Type) (map[string]any, error) {
+func propsToParamMap(props immutable.Properties, schemaType schema.Type) (map[string]any, error) {
 	raw := props.Clone()
 	for _, key := range slices.Sorted(maps.Keys(raw)) {
 		val := raw[key]
@@ -783,7 +784,7 @@ func widenInt64(v any) (int64, bool) {
 // ([github.com/simon-lentz/yammm/instance.ScalarOf]), which CoerceRelProps does
 // not do. A value that holds none is returned as nil, as Coerce returns it,
 // declared or not. props is never mutated and the result shares no top-level
-// storage with it; a nil rel, or one with no declared properties, returns a
+// storage with it; a zero rel, or one with no declared properties, returns a
 // copy with every other value unchanged, and a nil map returns nil. Keys are processed in sorted order, so
 // when several fail the error names the lexicographically-first failing
 // property on every run.
@@ -791,7 +792,7 @@ func widenInt64(v any) (int64, bool) {
 // Call this for an edge property map that sits below the one nesting level
 // [CoerceParams] walks — the rel_props map inside a $rows row of a hand-built
 // relationship MERGE — where [ParamTypesForType] cannot reach.
-func CoerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error) {
+func CoerceRelProps(props map[string]any, rel schema.Relation) (map[string]any, error) {
 	return coerceRelProps(maps.Clone(props), rel)
 }
 
@@ -809,13 +810,13 @@ func CoerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 // against the scalar constraint. The arm is shared rather than special-casing
 // a scalar-only path, so this stays correct if that rule ever changes.
 //
-// Any other property not declared on rel passes through unchanged, for a nil
+// Any other property not declared on rel passes through unchanged, for a zero
 // relation or one with no declared properties too. Properties are processed
 // in sorted key order, so a coercion error names the lexicographically-first
 // failing property on every run (matching [CoerceParams] and [propsToParamMap]).
 // Mutates and returns props; [CoerceRelProps] is the copying entry point.
-func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any, error) {
-	declares := rel != nil && rel.HasProperties()
+func coerceRelProps(props map[string]any, rel schema.Relation) (map[string]any, error) {
+	declares := !rel.IsZero() && rel.HasProperties()
 	for _, k := range slices.Sorted(maps.Keys(props)) {
 		v := props[k]
 		if holdsNone(v) {
@@ -839,10 +840,10 @@ func coerceRelProps(props map[string]any, rel *schema.Relation) (map[string]any,
 }
 
 // relConstraint returns the constraint rel declares for a property name, or
-// nil for a name it does not declare or a nil rel.
-func relConstraint(rel *schema.Relation) func(string) schema.Constraint {
+// nil for a name it does not declare or a zero rel.
+func relConstraint(rel schema.Relation) func(string) schema.Constraint {
 	return func(name string) schema.Constraint {
-		if rel == nil {
+		if rel.IsZero() {
 			return nil
 		}
 		p, ok := rel.Property(name)
@@ -966,8 +967,8 @@ type edgeSignature struct {
 }
 
 // groupEdgesBySignature groups edges by their (sourceType, relationType, targetType) signature.
-func groupEdgesBySignature(edges []*graph.Edge) map[edgeSignature][]*graph.Edge {
-	groups := make(map[edgeSignature][]*graph.Edge)
+func groupEdgesBySignature(edges []graph.Edge) map[edgeSignature][]graph.Edge {
+	groups := make(map[edgeSignature][]graph.Edge)
 	for _, edge := range edges {
 		sig := edgeSignature{
 			sourceType: edge.Source().TypeID(),

@@ -35,7 +35,7 @@ import (
 	"github.com/simon-lentz/yammm/snapshot/snapshottest"
 )
 
-func testSchema(t *testing.T) *schema.Schema {
+func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("test").
@@ -58,7 +58,7 @@ func testSchema(t *testing.T) *schema.Schema {
 
 // testSchemaWithEdgeProps is testSchema with EMPLOYER declaring every edge
 // property the edge-property round-trip tests and their fixture store.
-func testSchemaWithEdgeProps(t *testing.T) *schema.Schema {
+func testSchemaWithEdgeProps(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadString(t.Context(), `schema "test"
 
@@ -87,7 +87,7 @@ type Company {
 	return s
 }
 
-func testSchemaWithComposition(t *testing.T) *schema.Schema {
+func testSchemaWithComposition(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("test_comp").
@@ -110,7 +110,7 @@ func testSchemaWithComposition(t *testing.T) *schema.Schema {
 }
 
 // mustTypeID resolves a schema type's ID, failing the test if absent.
-func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
+func mustTypeID(t *testing.T, s schema.Schema, typeName string) schema.TypeID {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -119,7 +119,7 @@ func mustTypeID(t *testing.T, s *schema.Schema, typeName string) schema.TypeID {
 	return typ.ID()
 }
 
-func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+func mustValidInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		typeName,
@@ -129,7 +129,7 @@ func mustValidInstance(t *testing.T, s *schema.Schema, typeName string, pk []any
 	)
 }
 
-func mustValidInstanceWithEdge(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKeys [][]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
+func mustValidInstanceWithEdge(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKeys [][]any) instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
 	targets := make([]instance.ValidEdgeTarget, len(targetKeys))
 	for i, tk := range targetKeys {
@@ -140,11 +140,11 @@ func mustValidInstanceWithEdge(t *testing.T, s *schema.Schema, typeName string, 
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
 		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
+		instancetest.Edges(map[string]instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
 	)
 }
 
-func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) *instance.ValidInstance {
+func mustValidPartInstance(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) instance.ValidInstance {
 	t.Helper()
 	return instancetest.VI(
 		typeName,
@@ -156,7 +156,7 @@ func mustValidPartInstance(t *testing.T, s *schema.Schema, typeName string, pk [
 
 // mustValidInstanceWithEdgeProps builds a ValidInstance with a single edge
 // that carries schema-declared edge properties.
-func mustValidInstanceWithEdgeProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKey []any, edgeProps map[string]any) *instance.ValidInstance { //nolint:unparam // test helper kept general
+func mustValidInstanceWithEdgeProps(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any, relName string, targetKey []any, edgeProps map[string]any) instance.ValidInstance { //nolint:unparam // test helper kept general
 	t.Helper()
 	targets := []instance.ValidEdgeTarget{
 		instance.NewValidEdgeTarget(immutable.WrapKey(targetKey), immutable.WrapProperties(edgeProps)),
@@ -166,14 +166,14 @@ func mustValidInstanceWithEdgeProps(t *testing.T, s *schema.Schema, typeName str
 		instancetest.TypeID(mustTypeID(t, s, typeName)),
 		instancetest.PK(pk...),
 		instancetest.Props(keyedProps(t, s, typeName, pk, props)),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
+		instancetest.Edges(map[string]instance.ValidEdgeData{relName: instance.NewValidEdgeData(targets)}),
 	)
 }
 
 // keyedProps returns props holding each primary-key property the key states,
 // where props does not state it, so a fixture instance holds its key the way a
 // validated one does. A key property the fixture states is kept as written.
-func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
+func keyedProps(t *testing.T, s schema.Schema, typeName string, pk []any, props map[string]any) map[string]any {
 	t.Helper()
 	typ, ok := s.Type(typeName)
 	if !ok {
@@ -191,7 +191,7 @@ func keyedProps(t *testing.T, s *schema.Schema, typeName string, pk []any, props
 	return out
 }
 
-func buildSnapshot(t *testing.T, s *schema.Schema, instances ...*instance.ValidInstance) *graph.Snapshot {
+func buildSnapshot(t *testing.T, s schema.Schema, instances ...instance.ValidInstance) graph.Snapshot {
 	t.Helper()
 	return snapshottest.BuildSnapshot(t, s, instances...)
 }
@@ -203,27 +203,27 @@ func TestMarshal_NilPanics(t *testing.T) {
 			t.Error("expected panic for nil snapshot")
 		}
 	}()
-	snapshot.Marshal(context.Background(), nil)
+	snapshot.Marshal(context.Background(), graph.Snapshot{})
 }
 
-func TestVerify_NilSchemaPanics(t *testing.T) {
+func TestVerify_ZeroSchemaPanics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
 			t.Error("expected panic for nil schema")
 		}
 	}()
-	snapshot.Verify(context.Background(), []byte(`{}`), nil)
+	snapshot.Verify(context.Background(), []byte(`{}`), schema.Schema{})
 }
 
-func TestLoad_NilSchemaPanics(t *testing.T) {
+func TestLoad_ZeroSchemaPanics(t *testing.T) {
 	defer func() {
 		r := recover()
 		if r == nil {
 			t.Error("expected panic for nil schema")
 		}
 	}()
-	snapshot.Load(context.Background(), []byte(`{}`), nil)
+	snapshot.Load(context.Background(), []byte(`{}`), schema.Schema{})
 }
 
 func TestMarshal_EmptySnapshot(t *testing.T) {
@@ -316,12 +316,12 @@ func TestMarshalLoad_EdgeReconstruction(t *testing.T) {
 	}
 
 	// Verify EdgesFrom on loaded snapshot.
-	persons := loaded.InstancesOf(tidOf(t, s, "Person"))
+	persons := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Person")))
 	if len(persons) != 1 {
 		t.Fatalf("expected 1 Person, got %d", len(persons))
 	}
 
-	edges := loaded.EdgesFrom(persons[0])
+	edges := slices.Collect(loaded.EdgesFrom(persons[0]))
 	if len(edges) != 1 {
 		t.Fatalf("expected 1 edge from Person, got %d", len(edges))
 	}
@@ -923,7 +923,7 @@ func assertLoadTruncationClean(t *testing.T, offset int) {
 	truncated := data[:offset]
 	loaded, result := snapshot.Load(ctx, truncated, s)
 
-	assert.Nil(t, loaded, "truncated Load must not return a partial struct")
+	assert.True(t, loaded.IsZero(), "truncated Load must not return a partial struct")
 	require.True(t, result.HasErrors(), "truncated Load must surface errors")
 
 	var found bool
@@ -1141,7 +1141,7 @@ func TestHeaderInfo_SchemaHashMatches(t *testing.T) {
 	})
 	t.Run("nil_schema_returns_false_without_panic", func(t *testing.T) {
 		h := &snapshot.HeaderInfo{SchemaHash: realHash, SchemaHashAlgorithm: schema.StructuralHashVersion}
-		assert.False(t, h.SchemaHashMatches(nil))
+		assert.False(t, h.SchemaHashMatches(schema.Schema{}))
 	})
 	t.Run("empty_schema_hash_returns_false", func(t *testing.T) {
 		h := &snapshot.HeaderInfo{SchemaHash: "", SchemaHashAlgorithm: schema.StructuralHashVersion}
@@ -1179,7 +1179,7 @@ func TestMarshal_WithIndent(t *testing.T) {
 	if err := result.Err(); err != nil {
 		t.Fatalf("Load indented: %v", err)
 	}
-	if loaded == nil {
+	if loaded.IsZero() {
 		t.Fatal("Load returned nil")
 	}
 }
@@ -1247,7 +1247,7 @@ func TestLoad_TypeIDReconstruction(t *testing.T) {
 	data, _ := snapshot.Marshal(ctx, snap)
 	loaded, _ := snapshot.Load(ctx, data, s)
 
-	companies := loaded.InstancesOf(tidOf(t, s, "Company"))
+	companies := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Company")))
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 Company, got %d", len(companies))
 	}
@@ -1272,13 +1272,13 @@ func TestLoad_NullProvenanceRoundTrip(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	companies := loaded.InstancesOf(tidOf(t, s, "Company"))
+	companies := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Company")))
 	if len(companies) != 1 {
 		t.Fatalf("expected 1 Company, got %d", len(companies))
 	}
 
 	// Provenance should be nil (no provenance was set).
-	if companies[0].Provenance() != nil {
+	if !companies[0].Provenance().IsZero() {
 		t.Error("expected nil provenance for instance without provenance")
 	}
 }
@@ -1290,8 +1290,8 @@ func TestMarshalLoad_DuplicateRoundTrip(t *testing.T) {
 	snap := buildSnapshot(t, s, c1, c1dup)
 
 	// The constructed snapshot should have a duplicate.
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("expected 1 duplicate, got %d", len(snap.Duplicates()))
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("expected 1 duplicate, got %d", len(slices.Collect(snap.Duplicates())))
 	}
 
 	ctx := context.Background()
@@ -1301,11 +1301,11 @@ func TestMarshalLoad_DuplicateRoundTrip(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if len(loaded.Duplicates()) != 1 {
-		t.Fatalf("loaded duplicates: expected 1, got %d", len(loaded.Duplicates()))
+	if len(slices.Collect(loaded.Duplicates())) != 1 {
+		t.Fatalf("loaded duplicates: expected 1, got %d", len(slices.Collect(loaded.Duplicates())))
 	}
 
-	dup := loaded.Duplicates()[0]
+	dup := slices.Collect(loaded.Duplicates())[0]
 	if dup.Instance().TypeName() != "Company" {
 		t.Errorf("duplicate type: got %q, want %q", dup.Instance().TypeName(), "Company")
 	}
@@ -1320,7 +1320,7 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 	person := mustValidInstanceWithEdge(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}, "EMPLOYER", [][]any{{"c99"}})
 	snap := buildSnapshot(t, s, person)
 
-	if len(snap.Unresolved()) == 0 {
+	if len(slices.Collect(snap.Unresolved())) == 0 {
 		t.Fatal("expected unresolved edges")
 	}
 
@@ -1331,8 +1331,8 @@ func TestMarshalLoad_UnresolvedRoundTrip(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if len(loaded.Unresolved()) != len(snap.Unresolved()) {
-		t.Errorf("unresolved count: got %d, want %d", len(loaded.Unresolved()), len(snap.Unresolved()))
+	if len(slices.Collect(loaded.Unresolved())) != len(slices.Collect(snap.Unresolved())) {
+		t.Errorf("unresolved count: got %d, want %d", len(slices.Collect(loaded.Unresolved())), len(slices.Collect(snap.Unresolved())))
 	}
 }
 
@@ -1351,8 +1351,8 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 		map[string]any{"role": "Engineer", "since": int64(2020)})
 
 	snap := buildSnapshot(t, s, person)
-	if len(snap.Unresolved()) != 1 {
-		t.Fatalf("expected 1 unresolved edge, got %d", len(snap.Unresolved()))
+	if len(slices.Collect(snap.Unresolved())) != 1 {
+		t.Fatalf("expected 1 unresolved edge, got %d", len(slices.Collect(snap.Unresolved())))
 	}
 
 	ctx := context.Background()
@@ -1361,8 +1361,8 @@ func TestMarshalLoad_UnresolvedEdgePropertiesRoundTrip(t *testing.T) {
 	loaded, result := snapshot.Load(ctx, data, s)
 	require.NoError(t, result.Err(), "Load")
 
-	require.Len(t, loaded.Unresolved(), 1)
-	u := loaded.Unresolved()[0]
+	require.Len(t, slices.Collect(loaded.Unresolved()), 1)
+	u := slices.Collect(loaded.Unresolved())[0]
 	require.Equal(t, "target_missing", u.Reason())
 
 	role, ok := u.Property("role")
@@ -1403,8 +1403,8 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 		"EMPLOYER", []any{"missing"}, edgeProps)
 
 	snap := buildSnapshot(t, s, resolvedCompany, personA, personB)
-	require.Len(t, snap.Edges(), 1, "expected one resolved edge")
-	require.Len(t, snap.Unresolved(), 1, "expected one unresolved edge")
+	require.Len(t, slices.Collect(snap.Edges()), 1, "expected one resolved edge")
+	require.Len(t, slices.Collect(snap.Unresolved()), 1, "expected one unresolved edge")
 
 	ctx := context.Background()
 	data, mres := snapshot.Marshal(ctx, snap)
@@ -1414,8 +1414,8 @@ func TestMarshalLoad_MixedResolvedAndUnresolvedEdgeProperties(t *testing.T) {
 
 	// Both the resolved and unresolved entries survive with identical
 	// property content (per-key comparison using the .Clone() map form).
-	resolvedProps := loaded.Edges()[0].Properties().Clone()
-	unresolvedProps := loaded.Unresolved()[0].Properties().Clone()
+	resolvedProps := slices.Collect(loaded.Edges())[0].Properties().Clone()
+	unresolvedProps := slices.Collect(loaded.Unresolved())[0].Properties().Clone()
 	require.Equal(t, edgeProps, resolvedProps,
 		"resolved edge properties must survive round-trip")
 	require.Equal(t, edgeProps, unresolvedProps,
@@ -1443,7 +1443,7 @@ func TestLoad_V1Rejected(t *testing.T) {
 
 	ctx := context.Background()
 	loaded, result := snapshot.Load(ctx, []byte(doc), s, snapshot.WithIntegrityCheck(false))
-	require.Nil(t, loaded, "a refused document yields no snapshot")
+	require.True(t, loaded.IsZero(), "a refused document yields no snapshot")
 	require.True(t, hasCode(result, diag.E_SNAPSHOT_UNSUPPORTED_VERSION),
 		"v1 must be refused with the supported version named: %v", result)
 	require.Contains(t, result.Err().Error(), "supported: 4")
@@ -1483,7 +1483,7 @@ func TestLoad_UnsupportedVersion(t *testing.T) {
 
 // fidelitySchema loads an inline schema with a single property of the given
 // type declaration and returns both the schema and a validator.
-func fidelitySchema(t *testing.T, propDecl string) (*schema.Schema, *instance.Validator) {
+func fidelitySchema(t *testing.T, propDecl string) (schema.Schema, *instance.Validator) {
 	t.Helper()
 	src := `schema "PropTest"
 type Item {
@@ -1497,12 +1497,12 @@ type Item {
 
 // fidelityRoundTrip validates an instance, builds a graph+snapshot,
 // marshals, loads, and returns the loaded property map.
-func fidelityRoundTrip(t *testing.T, s *schema.Schema, v *instance.Validator, val any) map[string]any {
+func fidelityRoundTrip(t *testing.T, s schema.Schema, v *instance.Validator, val any) map[string]any {
 	t.Helper()
 	raw := instance.RawInstance{Properties: map[string]any{"id": "x", "val": val}}
 	valid, result := v.ValidateOne(t.Context(), "Item", raw)
 	require.True(t, result.OK(), "validate: %s", result)
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 
 	g := graph.New(s)
 	g.Add(t.Context(), valid)
@@ -1514,7 +1514,7 @@ func fidelityRoundTrip(t *testing.T, s *schema.Schema, v *instance.Validator, va
 	loaded, lr := snapshot.Load(t.Context(), data, s)
 	require.True(t, lr.OK(), "load: %s", lr)
 
-	items := loaded.InstancesOf(tidOf(t, s, "Item"))
+	items := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Item")))
 	require.Len(t, items, 1)
 	return items[0].Properties().Clone()
 }
@@ -1564,7 +1564,7 @@ func TestMarshalLoad_PropertyFidelity(t *testing.T) {
 		loaded, lr := snapshot.Load(t.Context(), data, s)
 		require.True(t, lr.OK())
 
-		items := loaded.InstancesOf(tidOf(t, s, "Item"))
+		items := slices.Collect(loaded.InstancesOf(tidOf(t, s, "Item")))
 		require.Len(t, items, 1)
 		val, ok := items[0].Properties().Get("val")
 		require.True(t, ok)

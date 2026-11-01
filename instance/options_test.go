@@ -33,7 +33,7 @@ func TestRecommendedOptions(t *testing.T) {
 
 	valid, result := validator.ValidateOne(t.Context(), "Person", raw)
 	require.True(t, result.OK())
-	require.NotNil(t, valid)
+	require.False(t, valid.IsZero())
 }
 
 func TestOptionsWithProvenance(t *testing.T) {
@@ -69,7 +69,7 @@ func TestOptionsWithProvenance(t *testing.T) {
 				"id": "1",
 				// Missing required "name"
 			},
-			Provenance: nil,
+			Provenance: location.Provenance{},
 		}
 
 		_, result := validator.ValidateOne(t.Context(), "Person", raw)

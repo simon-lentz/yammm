@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -44,16 +45,16 @@ func TestLoad_DuplicateRecordKeyAgreesAcrossSpellings(t *testing.T) {
 	sensorType, _ := s.Type("Sensor")
 	readingType, _ := s.Type("Reading")
 
-	reading := func() *instance.ValidInstance {
+	reading := func() instance.ValidInstance {
 		return instance.NewValidInstance("Reading", readingType.ID(),
 			immutable.WrapKey([]any{canonicalStamp}),
 			immutable.WrapProperties(map[string]any{"taken_at": canonicalStamp}),
-			nil, nil, nil)
+			nil, nil, location.Provenance{})
 	}
 	sensor := instance.NewValidInstance("Sensor", sensorType.ID(),
 		immutable.WrapKey([]any{canonicalStamp}),
 		immutable.WrapProperties(map[string]any{"observed_at": canonicalStamp}),
-		nil, map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading()})}, nil)
+		nil, map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading()})}, location.Provenance{})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), sensor); !r.OK() {
@@ -80,7 +81,7 @@ func TestLoad_DuplicateRecordKeyAgreesAcrossSpellings(t *testing.T) {
 // oneSlotReaderSchema declares a (one) ADDRESS composition beside a (_:many)
 // LINES, so the reader's cardinality guard has both the shape it refuses and
 // the shape it must leave alone.
-func oneSlotReaderSchema(t *testing.T) *schema.Schema {
+func oneSlotReaderSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "one_slot_reader"
 
@@ -114,7 +115,7 @@ part type Line {
 // foreign document is the only way to present it to the reader. The splice is
 // byte-level because the reader requires yammm_snapshot to be the object's
 // first key, which a JSON round trip through a Go map does not preserve.
-func oneSlotDocument(t *testing.T, s *schema.Schema) (sole, twoOccupants []byte) {
+func oneSlotDocument(t *testing.T, s schema.Schema) (sole, twoOccupants []byte) {
 	t.Helper()
 	orderType, _ := s.Type("Order")
 	addressType, _ := s.Type("Address")
@@ -124,8 +125,8 @@ func oneSlotDocument(t *testing.T, s *schema.Schema) (sole, twoOccupants []byte)
 		immutable.WrapProperties(map[string]any{"id": "o1"}), nil,
 		map[string]immutable.Value{"ADDRESS": immutable.Wrap([]any{
 			instance.NewValidInstance("Address", addressType.ID(), immutable.WrapKey([]any{"first"}),
-				immutable.WrapProperties(map[string]any{"street": "first"}), nil, nil, nil),
-		})}, nil)
+				immutable.WrapProperties(map[string]any{"street": "first"}), nil, nil, location.Provenance{}),
+		})}, location.Provenance{})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), order); !r.OK() {

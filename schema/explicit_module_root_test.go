@@ -72,7 +72,7 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 			t.Run(entry+", "+name, func(t *testing.T) {
 				t.Parallel()
 				s, res := schema.Load(context.Background(), filepath.Join(dir, entry), schema.WithModuleRoot(root))
-				if s == nil || res.HasErrors() {
+				if s.IsZero() || res.HasErrors() {
 					t.Errorf("Load under module root %s failed: %s", root, res)
 				}
 			})
@@ -86,7 +86,7 @@ func TestLoad_RefusesAnExplicitModuleRootThatIsNotADirectory(t *testing.T) {
 func checkRefusedRoot(t *testing.T, entry, root, cause string) {
 	t.Helper()
 	s, res := schema.Load(context.Background(), entry, schema.WithModuleRoot(root))
-	if s != nil {
+	if !s.IsZero() {
 		t.Errorf("Load returned a schema under module root %s", root)
 	}
 	var issues []diag.Issue
@@ -119,7 +119,7 @@ func TestLoadSourcesWithEntry_TakesARootNoDirectoryHolds(t *testing.T) {
 		"dep.yammm":   []byte(depSchema),
 	}
 	s, res := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", root)
-	if s == nil || res.HasErrors() {
+	if s.IsZero() || res.HasErrors() {
 		t.Errorf("LoadSourcesWithEntry under root %s failed: %s", root, res)
 	}
 }

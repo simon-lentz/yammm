@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ import (
 // package's only file-backed schema: every other test builds one from a
 // synthetic source ID, whose [schema.TypeID] renders no filesystem path and so
 // cannot exercise anything that leaks one.
-func loadFromDisk(t *testing.T) *schema.Schema {
+func loadFromDisk(t *testing.T) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	path, err := filepath.Abs(filepath.Join("testdata", "composed.yammm"))
@@ -63,7 +64,7 @@ func TestDuplicateComposedPK_DetailIsAPrimaryKey(t *testing.T) {
 	s := loadFromDisk(t)
 	ctx := t.Context()
 
-	note := func(id string) *instance.ValidInstance {
+	note := func(id string) instance.ValidInstance {
 		return instancetest.VI(
 			"Note",
 			instancetest.TypeID(mustTypeID(t, s, "Note")),
@@ -124,7 +125,7 @@ func TestDiagnosticDetails_CarryNoSchemaPath(t *testing.T) {
 	s := loadFromDisk(t)
 	root := filepath.Dir(mustTypeID(t, s, "Order").SchemaPath().String())
 
-	note := func(id string) *instance.ValidInstance {
+	note := func(id string) instance.ValidInstance {
 		return instancetest.VI(
 			"Note",
 			instancetest.TypeID(mustTypeID(t, s, "Note")),
@@ -202,7 +203,7 @@ func TestFileLoadedSchema_OneCompositionShapes(t *testing.T) {
 		t.Fatalf("a (one) composition to a keyed and a keyless part was refused: %s", res.String())
 	}
 
-	roots := g.Snapshot().InstancesOf(mustTypeID(t, s, "Order"))
+	roots := slices.Collect(g.Snapshot().InstancesOf(mustTypeID(t, s, "Order")))
 	if len(roots) != 1 {
 		t.Fatalf("got %d Order instances; want 1", len(roots))
 	}

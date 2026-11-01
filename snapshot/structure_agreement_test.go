@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -177,7 +179,7 @@ func revisions() []revision {
 	return append(out, revision{widened: true})
 }
 
-func loadRevisionSchema(t *testing.T, src string) *schema.Schema {
+func loadRevisionSchema(t *testing.T, src string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), src, "rev.yammm")
 	if res.HasErrors() {
@@ -190,7 +192,7 @@ func loadRevisionSchema(t *testing.T, src string) *schema.Schema {
 // position that stores it: a root of every type, a composed child, an edge
 // with a property, an unresolved record with a property, a duplicate, and a
 // (many) association holding an edge and an unresolved record of one source.
-func revisionGraph(t *testing.T, s *schema.Schema) *graph.Snapshot {
+func revisionGraph(t *testing.T, s schema.Schema) graph.Snapshot {
 	t.Helper()
 	ctx := t.Context()
 	v := instance.NewValidator(s)
@@ -219,15 +221,15 @@ func revisionGraph(t *testing.T, s *schema.Schema) *graph.Snapshot {
 	}, true)
 	add("Person", map[string]any{"id": "p1", "nickname": "z"}, false)
 	snap := g.Snapshot()
-	if len(snap.Edges()) != 2 || len(snap.Unresolved()) != 2 || len(snap.Duplicates()) != 1 {
-		t.Fatalf("fixture: %d edges, %d unresolved, %d duplicates", len(snap.Edges()), len(snap.Unresolved()), len(snap.Duplicates()))
+	if len(slices.Collect(snap.Edges())) != 2 || len(slices.Collect(snap.Unresolved())) != 2 || len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("fixture: %d edges, %d unresolved, %d duplicates", len(slices.Collect(snap.Edges())), len(slices.Collect(snap.Unresolved())), len(slices.Collect(snap.Duplicates())))
 	}
 	return snap
 }
 
 // addDoor offers every root of snap to Graph.Add under s, as instances that
 // carry what snap holds, and reports every refusal.
-func addDoor(t *testing.T, s *schema.Schema, snap *graph.Snapshot) diag.Result {
+func addDoor(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
 	t.Helper()
 	g := graph.New(s)
 	c := diag.NewCollector(0)
@@ -237,13 +239,13 @@ func addDoor(t *testing.T, s *schema.Schema, snap *graph.Snapshot) diag.Result {
 	return c.Result()
 }
 
-func validInstanceOf(t *testing.T, snap *graph.Snapshot, inst *graph.Instance) *instance.ValidInstance {
+func validInstanceOf(t *testing.T, snap graph.Snapshot, inst graph.Instance) instance.ValidInstance {
 	t.Helper()
 	targets := map[string][]instance.ValidEdgeTarget{}
-	for _, e := range snap.EdgesFrom(inst) {
+	for e := range snap.EdgesFrom(inst) {
 		targets[e.Relation()] = append(targets[e.Relation()], instance.NewValidEdgeTarget(e.Target().PrimaryKey(), e.Properties()))
 	}
-	for _, u := range snap.Unresolved() {
+	for u := range snap.Unresolved() {
 		if u.Source().TypeID() != inst.TypeID() || u.Source().PrimaryKey().String() != inst.PrimaryKey().String() {
 			continue
 		}
@@ -253,10 +255,10 @@ func validInstanceOf(t *testing.T, snap *graph.Snapshot, inst *graph.Instance) *
 		}
 		targets[u.Relation()] = append(targets[u.Relation()], instance.NewValidEdgeTarget(immutable.WrapKey(vals), u.Properties()))
 	}
-	var edges map[string]*instance.ValidEdgeData
+	var edges map[string]instance.ValidEdgeData
 	for rel, ts := range targets {
 		if edges == nil {
-			edges = map[string]*instance.ValidEdgeData{}
+			edges = map[string]instance.ValidEdgeData{}
 		}
 		edges[rel] = instance.NewValidEdgeData(ts)
 	}
@@ -265,13 +267,13 @@ func validInstanceOf(t *testing.T, snap *graph.Snapshot, inst *graph.Instance) *
 		if composed == nil {
 			composed = map[string]immutable.Value{}
 		}
-		var children []*instance.ValidInstance
-		for _, child := range inst.Composed(rel) {
+		var children []instance.ValidInstance
+		for child := range inst.Composed(rel) {
 			children = append(children, validInstanceOf(t, snap, child))
 		}
 		composed[rel] = immutable.Wrap(children)
 	}
-	return instance.NewValidInstance(inst.TypeName(), inst.TypeID(), inst.PrimaryKey(), inst.Properties(), edges, composed, nil)
+	return instance.NewValidInstance(inst.TypeName(), inst.TypeID(), inst.PrimaryKey(), inst.Properties(), edges, composed, location.Provenance{})
 }
 
 var schemaHashField = regexp.MustCompile(`"schema_hash":"[^"]*"`)
@@ -279,7 +281,7 @@ var schemaHashField = regexp.MustCompile(`"schema_hash":"[^"]*"`)
 // loadDoor marshals snap and loads it against s as a writer that claims s
 // would have written it: the header names s's hash, and the integrity hash
 // is not checked. A refusal then comes from the document's contents.
-func loadDoor(t *testing.T, s *schema.Schema, snap *graph.Snapshot) diag.Result {
+func loadDoor(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
 	t.Helper()
 	data, mres := snapshot.Marshal(t.Context(), snap)
 	if mres.HasErrors() {
@@ -431,7 +433,7 @@ func TestStructuralFacts_EveryConstructorAgreesAcrossEveryRevision(t *testing.T)
 	t.Logf("%d legal revisions, %d illegal", accepted, refused)
 }
 
-func rebuildDoor(t *testing.T, s *schema.Schema, snap *graph.Snapshot) diag.Result {
+func rebuildDoor(t *testing.T, s schema.Schema, snap graph.Snapshot) diag.Result {
 	t.Helper()
 	_, res := graph.RebuildSnapshot(s, partsOf(t, snap))
 	return res

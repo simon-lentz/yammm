@@ -49,7 +49,7 @@ func TestValidateInvariant_ValidProperty(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for valid property reference")
 }
 
@@ -89,7 +89,7 @@ func TestValidateInvariant_UnknownProperty(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.Nil(t, s, "schema should fail to compile")
+	require.True(t, s.IsZero(), "schema should fail to compile")
 	require.True(t, collector.HasErrors())
 
 	issues := slices.Collect(collector.Result().Issues())
@@ -173,7 +173,7 @@ func TestValidateInvariant_LambdaValidProperty(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for valid lambda property")
 }
 
@@ -241,7 +241,7 @@ func TestValidateInvariant_LambdaUnknownProperty(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.Nil(t, s, "schema should fail to compile")
+	require.True(t, s.IsZero(), "schema should fail to compile")
 	require.True(t, collector.HasErrors())
 
 	found := false
@@ -296,7 +296,7 @@ func TestValidateInvariant_SelfDotProperty(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for $self.name reference")
 }
 
@@ -340,7 +340,7 @@ func TestValidateInvariant_SelfDotUnknownProperty(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.Nil(t, s, "schema should fail to compile")
+	require.True(t, s.IsZero(), "schema should fail to compile")
 	require.True(t, collector.HasErrors())
 
 	found := false
@@ -401,7 +401,7 @@ func TestValidateInvariant_InheritedProperty(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for inherited property reference")
 }
 
@@ -442,7 +442,7 @@ func TestValidateInvariant_CaseInsensitive(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for case-insensitive property reference")
 }
 
@@ -504,7 +504,7 @@ func TestValidateInvariant_RelationNameValid(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for relation name reference in invariant")
 }
 
@@ -575,7 +575,7 @@ func TestValidateInvariant_ReduceBuiltin(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for valid Reduce builtin")
 }
 
@@ -643,7 +643,7 @@ func TestValidateInvariant_ReduceUnknownProperty(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.Nil(t, s, "schema should fail to compile")
+	require.True(t, s.IsZero(), "schema should fail to compile")
 	require.True(t, collector.HasErrors())
 
 	found := false
@@ -705,7 +705,7 @@ func TestValidateInvariant_ThenBuiltin(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for valid Then builtin")
 }
 
@@ -790,7 +790,7 @@ func TestValidateInvariant_NestedCollectionBuiltins(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	assert.False(t, collector.HasErrors(), "no errors expected for nested collection builtins")
 }
 
@@ -799,8 +799,8 @@ func TestInvariantInheritance_SingleParent(t *testing.T) {
 
 	// Abstract Auditable has invariant "must_be_active".
 	// Account extends Auditable with no own invariants.
-	// Account.InvariantsSlice() should be empty (own only).
-	// Account.AllInvariantsSlice() should contain ["must_be_active"].
+	// Account.Invariants() should be empty (own only).
+	// Account.AllInvariants() should contain ["must_be_active"].
 	model := &schema.TestModel{
 		Name: "test",
 		Types: []*schema.TestTypeDecl{
@@ -841,17 +841,17 @@ func TestInvariantInheritance_SingleParent(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	require.False(t, collector.HasErrors(), "no errors expected")
 
 	account, ok := s.Type("Account")
 	require.True(t, ok)
 
 	// Own invariants should be empty
-	assert.Empty(t, account.InvariantsSlice(), "Account should have no own invariants")
+	assert.Empty(t, slices.Collect(account.Invariants()), "Account should have no own invariants")
 
 	// All invariants should include inherited
-	allInvs := account.AllInvariantsSlice()
+	allInvs := slices.Collect(account.AllInvariants())
 	require.Len(t, allInvs, 1, "Account should inherit 1 invariant")
 	assert.Equal(t, "must_be_active", allInvs[0].Name())
 }
@@ -861,7 +861,7 @@ func TestInvariantInheritance_ChildOverride(t *testing.T) {
 
 	// Abstract Base has invariant "check".
 	// Child extends Base, declares own "check" (override) and "extra".
-	// Child.AllInvariantsSlice() should have 2: child's "check" first, then "extra".
+	// Child.AllInvariants() should have 2: child's "check" first, then "extra".
 	// The parent's "check" is deduplicated because child already has it.
 	model := &schema.TestModel{
 		Name: "test",
@@ -913,18 +913,18 @@ func TestInvariantInheritance_ChildOverride(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	require.False(t, collector.HasErrors(), "no errors expected")
 
 	child, ok := s.Type("Child")
 	require.True(t, ok)
 
 	// Own invariants: "check" and "extra"
-	ownInvs := child.InvariantsSlice()
+	ownInvs := slices.Collect(child.Invariants())
 	require.Len(t, ownInvs, 2, "Child should have 2 own invariants")
 
 	// All invariants: child's "check", "extra" (parent's "check" deduplicated)
-	allInvs := child.AllInvariantsSlice()
+	allInvs := slices.Collect(child.AllInvariants())
 	require.Len(t, allInvs, 2, "Child should have 2 total invariants (parent's check deduplicated)")
 	assert.Equal(t, "check", allInvs[0].Name())
 	assert.Equal(t, "extra", allInvs[1].Name())
@@ -937,7 +937,7 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 	// Left extends Root (invariant "left_check")
 	// Right extends Root (invariant "right_check")
 	// Bottom extends Left, Right
-	// Bottom.AllInvariantsSlice() should have 3: root_check, left_check, right_check
+	// Bottom.AllInvariants() should have 3: root_check, left_check, right_check
 	// root_check is inherited via both Left and Right but deduplicated.
 	model := &schema.TestModel{
 		Name: "test",
@@ -1006,18 +1006,18 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
-	require.NotNil(t, s, "schema should compile")
+	require.False(t, s.IsZero(), "schema should compile")
 	require.False(t, collector.HasErrors(), "no errors expected")
 
 	// Verify intermediate types first
 	left, ok := s.Type("Left")
 	require.True(t, ok)
-	leftAll := left.AllInvariantsSlice()
+	leftAll := slices.Collect(left.AllInvariants())
 	require.Len(t, leftAll, 2, "Left should have left_check + root_check")
 
 	right, ok := s.Type("Right")
 	require.True(t, ok)
-	rightAll := right.AllInvariantsSlice()
+	rightAll := slices.Collect(right.AllInvariants())
 	require.Len(t, rightAll, 2, "Right should have right_check + root_check")
 
 	// Verify Bottom
@@ -1025,11 +1025,11 @@ func TestInvariantInheritance_Diamond(t *testing.T) {
 	require.True(t, ok)
 
 	// No own invariants
-	assert.Empty(t, bottom.InvariantsSlice(), "Bottom should have no own invariants")
+	assert.Empty(t, slices.Collect(bottom.Invariants()), "Bottom should have no own invariants")
 
 	// All invariants: inherited from Left (left_check, root_check) and Right (right_check)
 	// root_check appears in both Left and Right but is deduplicated.
-	allInvs := bottom.AllInvariantsSlice()
+	allInvs := slices.Collect(bottom.AllInvariants())
 	require.Len(t, allInvs, 3, "Bottom should have 3 invariants (root_check deduplicated)")
 
 	names := make([]string, len(allInvs))

@@ -12,7 +12,7 @@ import (
 // from data without the reader's own refusals, so a test can count what the
 // rebuild reports for a document the reader refuses. A document whose parts
 // cannot be built, as one holding a null row, reports one Fatal issue.
-func RebuildDocument(data []byte, s *schema.Schema) (res diag.Result) {
+func RebuildDocument(data []byte, s schema.Schema) (res diag.Result) {
 	fail := func(msg string) diag.Result {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Fatal, diag.E_INTERNAL, msg).Build())

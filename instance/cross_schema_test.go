@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -15,7 +16,7 @@ import (
 // imported-type declarations, name shadowing, and cross-schema inheritance.
 
 // loadCrossSchema loads an in-memory multi-source schema rooted at entry.yammm.
-func loadCrossSchema(t *testing.T, sources map[string]string) *schema.Schema {
+func loadCrossSchema(t *testing.T, sources map[string]string) schema.Schema {
 	t.Helper()
 	m := make(map[string][]byte, len(sources))
 	for k, v := range sources {
@@ -71,7 +72,7 @@ type Basin {
 	if !ok {
 		t.Fatal("IN_BASIN edge missing from validated instance")
 	}
-	if got := len(edge.Targets()); got != 1 {
+	if got := len(slices.Collect(edge.Targets())); got != 1 {
 		t.Errorf("target count = %d, want 1", got)
 	}
 }
@@ -79,7 +80,7 @@ type Basin {
 // shadowedRegionSchema declares Region in both the entry and the imported
 // schema with different primary keys; common.City's unqualified target must
 // resolve to common's Region (PK "id"), never the entry's (PK "code").
-func shadowedRegionSchema(t *testing.T) *schema.Schema {
+func shadowedRegionSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	return loadCrossSchema(t, map[string]string{
 		"entry.yammm": `schema "app"
@@ -118,7 +119,7 @@ func TestValidate_ShadowedEdgeTarget(t *testing.T) {
 		if !result.OK() {
 			t.Fatalf("correct-keyed edge must validate: %s", result)
 		}
-		if valid == nil {
+		if valid.IsZero() {
 			t.Fatal("validated instance is nil")
 		}
 	})
@@ -130,7 +131,7 @@ func TestValidate_ShadowedEdgeTarget(t *testing.T) {
 				"in_region": map[string]any{"_target_code": "R1"},
 			},
 		})
-		if valid != nil {
+		if !valid.IsZero() {
 			t.Error("wrong-keyed edge must not produce a valid instance")
 		}
 		if result.OK() {
@@ -193,7 +194,7 @@ part type Piece {
 
 // crossInheritanceSchema gives the entry type a cross-schema abstract parent
 // whose association and composition targets are declaring-schema-local names.
-func crossInheritanceSchema(t *testing.T) *schema.Schema {
+func crossInheritanceSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	return loadCrossSchema(t, map[string]string{
 		"entry.yammm": `schema "app"
@@ -240,7 +241,7 @@ func TestValidate_CrossSchemaInheritedRelations(t *testing.T) {
 	if !ok {
 		t.Fatal("IN_REGION edge missing from validated instance")
 	}
-	if got := len(edge.Targets()); got != 1 {
+	if got := len(slices.Collect(edge.Targets())); got != 1 {
 		t.Errorf("target count = %d, want 1", got)
 	}
 	foundMarker := false
@@ -293,7 +294,7 @@ part type Item {
 			},
 		},
 	})
-	if valid != nil {
+	if !valid.IsZero() {
 		t.Error("duplicate composed PKs must not produce a valid instance")
 	}
 	if result.OK() {
@@ -334,7 +335,7 @@ func TestSchemaBuilder_CrossSchemaTargets(t *testing.T) {
 		if !result.OK() {
 			t.Fatalf("built instance must validate: %s", result)
 		}
-		if valid == nil {
+		if valid.IsZero() {
 			t.Fatal("validated instance is nil")
 		}
 	})
@@ -353,7 +354,7 @@ func TestValidate_DanglingQualifiedTargetRejectedAtBuild(t *testing.T) {
 		WithRelation("LINKED", schema.NewTypeRef("ext", "Thing", location.Span{}), true, false).
 		Done().
 		Build()
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("a dangling qualified relation target must nil the schema")
 	}
 	if !result.HasCode(diag.E_UNKNOWN_TYPE) {

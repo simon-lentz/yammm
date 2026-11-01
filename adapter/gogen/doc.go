@@ -327,7 +327,7 @@
 //     cannot be imported without an alias. An explicit name, the empty one
 //     included, must be a Go identifier that is not a keyword and not "_", and may
 //     be "main", "init" or a predeclared identifier.
-//   - [WithInitialisms]: register extra acronyms (e.g. "GUID", "JWT") the name mapper
+//   - [WithInitialisms]: register extra acronyms (e.g. "JWT") the name mapper
 //     upper-cases wholesale in exported identifiers. They merge with gogen's default
 //     golint acronym set and are matched case-insensitively. This is how a downstream
 //     generator injects its own domain vocabulary without that vocabulary ever living
@@ -337,8 +337,8 @@
 //
 // [Marshal] returns an error (never partial or broken Go) when:
 //
-//   - the schema is not source-backed (e.g. built via
-//     [github.com/simon-lentz/yammm/schema.NewBuilder] without retained source);
+//   - the schema is non-zero and holds no retained source (e.g. built via
+//     [github.com/simon-lentz/yammm/schema.NewBuilder]; the zero Schema panics once the package name passes);
 //   - the [WithPackageName] value cannot head a package clause
 //     ([ErrInvalidPackageName]; [CheckPackageName] applies the same rule
 //     before a schema is loaded);
@@ -347,8 +347,10 @@
 //     no base, or a key is one the re-load's key rule refuses (see Embedded
 //     Source);
 //   - the module root the load recorded no longer resolves as a host path;
-//   - a source the schema records holds no content;
-//   - any other failure, each a generator bug: emission meets a state it
+//   - a load through a registry that holds a sourceless compile of an import
+//     left the schema's Sources without that import's bytes, so the embedded
+//     store does not re-load;
+//   - any other failure, which is a generator bug: emission meets a state it
 //     cannot write, such as an unresolved reference, alias or target, a kind
 //     it does not handle or whose constraint it does not carry, or a name with
 //     no Go spelling registered; the generated source
@@ -377,8 +379,8 @@
 //
 // They do reach the generator indirectly: a property inherited from several
 // ancestors carries the union of their annotations, so the merged view yields a
-// synthesized copy rather than the declared *Property. Every lookup keyed by a
-// *Property here therefore goes through [github.com/simon-lentz/yammm/schema.Property.Origin].
+// synthesized copy rather than the declared property. Every lookup keyed by a
+// property here therefore goes through [github.com/simon-lentz/yammm/schema.Property.Origin].
 //
 // # Dependencies
 //

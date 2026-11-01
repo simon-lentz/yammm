@@ -45,7 +45,7 @@ type Thing {
 }
 `
 
-func revalLoadSchema(t *testing.T) *schema.Schema {
+func revalLoadSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), revalSchema, "reval.yammm")
 	if res.HasErrors() {
@@ -54,7 +54,7 @@ func revalLoadSchema(t *testing.T) *schema.Schema {
 	return s
 }
 
-func revalItem(t *testing.T, s *schema.Schema, sku string) *instance.ValidInstance {
+func revalItem(t *testing.T, s schema.Schema, sku string) instance.ValidInstance {
 	t.Helper()
 	item, _ := s.Type("Item")
 	return instancetest.VI(
@@ -68,7 +68,7 @@ func revalItem(t *testing.T, s *schema.Schema, sku string) *instance.ValidInstan
 // validator never approved. A Target "x1" rides along so an edge to it
 // resolves — an unresolved edge moves to the diagnostics section and never
 // reaches the instance's edges.
-func revalDocument(t *testing.T, s *schema.Schema, opts ...instancetest.VIOption) []byte {
+func revalDocument(t *testing.T, s schema.Schema, opts ...instancetest.VIOption) []byte {
 	t.Helper()
 	thing, _ := s.Type("Thing")
 	target, _ := s.Type("Target")
@@ -105,7 +105,7 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 
 	goodItems := func() instancetest.VIOption {
 		return instancetest.Composed(map[string]immutable.Value{
-			"ITEMS": immutable.Wrap([]*instance.ValidInstance{revalItem(t, s, "sku-1")}),
+			"ITEMS": immutable.Wrap([]instance.ValidInstance{revalItem(t, s, "sku-1")}),
 		})
 	}
 
@@ -159,7 +159,7 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 			opts: []instancetest.VIOption{
 				instancetest.Props(map[string]any{"id": "t1"}),
 				instancetest.Composed(map[string]immutable.Value{
-					"ITEMS": immutable.Wrap([]*instance.ValidInstance{revalItem(t, s, "bad")}),
+					"ITEMS": immutable.Wrap([]instance.ValidInstance{revalItem(t, s, "bad")}),
 				}),
 			},
 			want: diag.E_CONSTRAINT_FAIL,
@@ -182,7 +182,7 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 
 			// Reported under the option, still loading at Warning severity.
 			snap, res := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Warning))
-			if res.HasErrors() || snap == nil {
+			if res.HasErrors() || snap.IsZero() {
 				t.Fatalf("Warning-severity revalidation refused the load: %s", res.String())
 			}
 			if !res.HasCode(tc.want) {
@@ -191,7 +191,7 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 
 			// Error severity refuses the document.
 			snap, res = snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
-			if snap != nil || !res.HasErrors() {
+			if !snap.IsZero() || !res.HasErrors() {
 				t.Error("Error-severity revalidation returned a snapshot for a failing document")
 			}
 		})
@@ -200,7 +200,7 @@ func TestLoad_RevalidationMatrix(t *testing.T) {
 
 // revalCleanDocument marshals a validator-built Target and Thing, so a
 // revalidating load of it reports nothing about the data.
-func revalCleanDocument(t *testing.T, s *schema.Schema) []byte {
+func revalCleanDocument(t *testing.T, s schema.Schema) []byte {
 	t.Helper()
 	v := instance.NewValidator(s)
 
@@ -221,7 +221,7 @@ func revalCleanDocument(t *testing.T, s *schema.Schema) []byte {
 	if !res.OK() {
 		t.Fatalf("validate Thing: %s", res.String())
 	}
-	for _, vi := range []*instance.ValidInstance{target, thing} {
+	for _, vi := range []instance.ValidInstance{target, thing} {
 		if r := g.Add(t.Context(), vi); !r.OK() {
 			t.Fatalf("Add: %s", r.String())
 		}
@@ -239,7 +239,7 @@ func TestLoad_RevalidationCleanDataSilent(t *testing.T) {
 	data := revalCleanDocument(t, s)
 
 	snap, lres := snapshot.Load(t.Context(), data, s, snapshot.WithRevalidation(diag.Error))
-	if snap == nil || lres.HasErrors() {
+	if snap.IsZero() || lres.HasErrors() {
 		t.Fatalf("clean validator-built data failed revalidation: %s", lres.String())
 	}
 	for issue := range lres.Issues() {
@@ -292,12 +292,12 @@ func TestLoad_RevalidationReportsACancelledRowAtItsOwnSeverity(t *testing.T) {
 		ctx := &cancelAfterPolls{after: after}
 		snap, res := snapshot.Load(ctx, data, s, snapshot.WithRevalidation(diag.Warning))
 		if ctx.polled() < after {
-			if snap == nil {
+			if snap.IsZero() {
 				t.Fatalf("an uncancelled load failed: %s", res)
 			}
 			break
 		}
-		if snap != nil {
+		if !snap.IsZero() {
 			t.Fatalf("poll %d: a cancelled load returned a snapshot", after)
 		}
 		if !res.HasCode(diag.E_CONTEXT_CANCELLED) {
@@ -360,7 +360,7 @@ func TestLoad_RefusesAnEdgeUnderAnUndeclaredRelation(t *testing.T) {
 	data := revalDocument(
 		t, s,
 		instancetest.Props(map[string]any{"id": "t1"}),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
+		instancetest.Edges(map[string]instance.ValidEdgeData{
 			"LINKS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"x1"}), immutable.Properties{}),
 			}),
@@ -388,9 +388,9 @@ func TestLoad_RevalidationUnresolvedRequired(t *testing.T) {
 		t, s,
 		instancetest.Props(map[string]any{"id": "t1"}),
 		instancetest.Composed(map[string]immutable.Value{
-			"ITEMS": immutable.Wrap([]*instance.ValidInstance{revalItem(t, s, "sku-1")}),
+			"ITEMS": immutable.Wrap([]instance.ValidInstance{revalItem(t, s, "sku-1")}),
 		}),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
+		instancetest.Edges(map[string]instance.ValidEdgeData{
 			"OWNER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"missing"}), immutable.Properties{}),
 			}),
@@ -520,7 +520,7 @@ type T {
 		t.Fatalf("validate T: %s", tr.String())
 	}
 	g := graph.New(s)
-	for _, vi := range []*instance.ValidInstance{u, ti} {
+	for _, vi := range []instance.ValidInstance{u, ti} {
 		if r := g.Add(ctx, vi); r.HasErrors() {
 			t.Fatalf("add: %s", r.String())
 		}

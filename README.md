@@ -103,7 +103,7 @@ func main() {
     if !result.OK() {
         log.Fatal("validation failed:", result)
     }
-    if person == nil {
+    if person.IsZero() {
         log.Fatal("refused: its producer reported the value") // an instance.Refused
     }
 
@@ -143,14 +143,14 @@ for i, rec := range records { // rec is an instance.RawInstance
     }
 }
 
-res, err := ba.Finalize(ctx) // res.Snapshot is non-nil even on error
+res, err := ba.Finalize(ctx) // res.Snapshot is not zero even on error
 if err != nil {
     log.Fatal("batch failed:", err)
 }
 data, result := snapshot.Marshal(ctx, res.Snapshot)
 ```
 
-To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts but the Records fact, whose records it derives again — new adds resolve against the seeded instances and `Finalize` checks the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
+To resume a persisted batch on a later run, seed the assembler from a loaded snapshot with `graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)`, which takes a snapshot bound to the schema as it stands and refuses one built against another schema that breaks any of the schema's structural facts, save that it derives the Records fact's records again and drops an absent record under a relation that is no association of the schema — new adds resolve against the seeded instances and `Finalize` checks the union. Snapshot metadata can be rewritten in place, without a full load/re-marshal round-trip, via `snapshot.UpdateMetadataOrReMarshal`.
 
 ### Build Instances Programmatically
 
@@ -231,9 +231,9 @@ Internal                 : internal/* (no compatibility guarantees)
 
 Diagnostic-producing operations return `(T, diag.Result)`:
 
-- `result.HasFatal()`: Unrecoverable condition (I/O failure, context cancellation)
+- `result.HasFatal()`: Any Fatal issue (such as an I/O failure, a cancellation, an internal fault, input a reader cannot go past, or an argument or option a loader refuses)
 - `result.HasErrors()`: An Error or a Fatal: a semantic failure (structured issues), or the condition above
-- `result.OK()`: Success (may have warnings). A validator's nil instance beside it held an `instance.Refused` value, which its producer reported
+- `result.OK()`: Success (may have warnings). A validator's zero instance beside it held an `instance.Refused` value, which its producer reported
 
 Pure adapter transformations (JSON/CSV serialization, Cypher batch queries, Go source, JSON Schema, and Markdown generation) return their output beside a Go `error`, as `(T, error)`, but for `adapter/csv`'s `WriteSnapshot`, which returns the `error` alone, and `adapter/neo4j`'s `BuildBatchRelationshipMergeQuery`, a query template that cannot fail; the Neo4j adapter's schema-derived DDL and shape builders report through a `diag.Result`, and its drop-statement builders return `(string, error)`. Snapshot serialization (`snapshot.Marshal`) is diagnostic-producing and returns `(T, diag.Result)`.
 

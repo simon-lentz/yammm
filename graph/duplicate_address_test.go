@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -20,7 +22,7 @@ const (
 
 // keyedDuplicateSchema declares a canonicalizing key at a root and at a keyed
 // composed child, which is what the duplicate records address.
-func keyedDuplicateSchema(t *testing.T) *schema.Schema {
+func keyedDuplicateSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "keyed_duplicates"
 
@@ -51,11 +53,11 @@ func TestAdd_RootDuplicateRecordCarriesTheCanonicalAddress(t *testing.T) {
 	s := keyedDuplicateSchema(t)
 	sensorID := mustTypeID(t, s, "Sensor")
 
-	sensor := func(spelling string) *instance.ValidInstance {
+	sensor := func(spelling string) instance.ValidInstance {
 		return instance.NewValidInstance("Sensor", sensorID,
 			immutable.WrapKey([]any{spelling}),
 			immutable.WrapProperties(map[string]any{"observed_at": spelling}),
-			nil, nil, nil)
+			nil, nil, location.Provenance{})
 	}
 
 	g := graph.New(s)
@@ -66,7 +68,7 @@ func TestAdd_RootDuplicateRecordCarriesTheCanonicalAddress(t *testing.T) {
 		t.Fatal("a second spelling of one address was accepted as a second instance")
 	}
 
-	dups := g.Snapshot().Duplicates()
+	dups := slices.Collect(g.Snapshot().Duplicates())
 	if len(dups) != 1 {
 		t.Fatalf("duplicates = %d, want 1", len(dups))
 	}
@@ -85,17 +87,17 @@ func TestAdd_RootDuplicateRecordCarriesTheCanonicalAddress(t *testing.T) {
 
 // addSensorWithReading adds one Sensor carrying one Reading, both spelled
 // canonically, and returns the graph.
-func addSensorWithReading(t *testing.T, s *schema.Schema) *graph.Graph {
+func addSensorWithReading(t *testing.T, s schema.Schema) *graph.Graph {
 	t.Helper()
 	sensorID, readingID := mustTypeID(t, s, "Sensor"), mustTypeID(t, s, "Reading")
 	reading := instance.NewValidInstance("Reading", readingID,
 		immutable.WrapKey([]any{canonStamp}),
 		immutable.WrapProperties(map[string]any{"taken_at": canonStamp, "note": "first"}),
-		nil, nil, nil)
+		nil, nil, location.Provenance{})
 	sensor := instance.NewValidInstance("Sensor", sensorID,
 		immutable.WrapKey([]any{canonStamp}),
 		immutable.WrapProperties(map[string]any{"observed_at": canonStamp}),
-		nil, map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading})}, nil)
+		nil, map[string]immutable.Value{"READINGS": immutable.Wrap([]any{reading})}, location.Provenance{})
 
 	g := graph.New(s)
 	if r := g.Add(t.Context(), sensor); !r.OK() {
@@ -118,7 +120,7 @@ func TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress(t *testing.T) {
 	second := instance.NewValidInstance("Reading", readingID,
 		immutable.WrapKey([]any{rawStamp}),
 		immutable.WrapProperties(map[string]any{"taken_at": rawStamp, "note": "second"}),
-		nil, nil, nil)
+		nil, nil, location.Provenance{})
 	result := g.AddComposed(t.Context(), sensorID, graph.FormatKey(canonStamp), "READINGS", second)
 	if result.OK() {
 		t.Fatal("a second spelling of one sibling address was accepted")
@@ -150,7 +152,7 @@ func TestAddComposed_SiblingDuplicateReportsTheCanonicalAddress(t *testing.T) {
 	}
 
 	// The rejected child's own key and properties.
-	dups := g.Snapshot().Duplicates()
+	dups := slices.Collect(g.Snapshot().Duplicates())
 	if len(dups) != 1 {
 		t.Fatalf("duplicates = %d, want 1", len(dups))
 	}
@@ -209,17 +211,17 @@ func TestRebuildSnapshot_DuplicateRecordResolvesFromEverySpelling(t *testing.T) 
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
 
-	dups := snap.Duplicates()
+	dups := slices.Collect(snap.Duplicates())
 	if len(dups) != 1 {
 		t.Fatalf("duplicates = %d, want 1", len(dups))
 	}
 	d := dups[0]
-	if d.Conflict() == nil {
+	if d.Conflict().IsZero() {
 		t.Error("the conflict did not resolve from the raw spelling")
 	} else if got, want := d.Conflict().PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
 		t.Errorf("conflict key = %s, want %s", got, want)
 	}
-	if d.Parent() == nil {
+	if d.Parent().IsZero() {
 		t.Error("the parent did not resolve from the raw spelling")
 	} else if got, want := d.Parent().PrimaryKey().String(), graph.FormatKey(canonStamp); got != want {
 		t.Errorf("parent key = %s, want %s", got, want)
@@ -332,7 +334,7 @@ type Doc {
 		t.Fatalf("RebuildSnapshot: %s", rres)
 	}
 
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 1 {
 		t.Fatalf("edges = %d, want 1", len(edges))
 	}

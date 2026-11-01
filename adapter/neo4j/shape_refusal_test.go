@@ -25,7 +25,7 @@ type Beacon {
 `
 
 // shapeFixtureSnapshot builds the smallest snapshot a write path accepts.
-func shapeFixtureSnapshot(t *testing.T) *graph.Snapshot {
+func shapeFixtureSnapshot(t *testing.T) graph.Snapshot {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), shapeFixtureSource, "entry.yammm")
 	if res.HasErrors() {
@@ -99,7 +99,7 @@ func TestBatchNodeQueries_ShapeFromAnotherSchemaRefused(t *testing.T) {
 	snap := shapeFixtureSnapshot(t)
 
 	other, res := schema.LoadString(ctx, "schema \"unrelated\"\n\ntype Widget {\n\tid String primary\n}\n", "other.yammm")
-	if other == nil {
+	if other.IsZero() {
 		t.Fatalf("load unrelated schema: %s", res)
 	}
 	otherShape, sres := a.ShapeForSchema(ctx, other)

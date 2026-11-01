@@ -93,7 +93,7 @@ func LoadAndParseJSON(ctx context.Context, path string) (map[string][]instance.R
 // Returns (T, diag.Result, error) because the error return captures I/O
 // failures (file open errors) which are distinct from semantic parse
 // issues reported through the diag.Result.
-func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *schema.Schema) (map[string][]instance.RawInstance, diag.Result, error) {
+func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s schema.Schema) (map[string][]instance.RawInstance, diag.Result, error) {
 	sourceID, hostPath, err := location.ResolveSourcePath(path)
 	if err != nil {
 		return nil, diag.Result{}, fmt.Errorf("resolve data file %q: %w", path, err)
@@ -107,7 +107,7 @@ func LoadAndParseCSV(ctx context.Context, path, typeName, typeColumn string, s *
 
 	if typeColumn != "" {
 		adapter := csv.New(csv.WithTypeColumn(typeColumn), csv.WithSchema(s), csv.WithDelimiter(CSVDelimiter(path)))
-		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) *schema.Type {
+		parsed, result := adapter.ParseWithTypeColumn(ctx, sourceID, f, func(name string) schema.Type {
 			t, _ := s.ResolveTypeName(name)
 			return t
 		})
@@ -133,17 +133,17 @@ type Validated struct {
 }
 
 // validatedBatch is one type name's instances and the validator's answer for
-// each: valids holds one entry per raw, nil where the validator refused it, and
+// each: valids holds one entry per raw, zero where the validator refused it, and
 // is nil when the batch was refused whole or did not complete.
 type validatedBatch struct {
 	typeName string
 	raws     []instance.RawInstance
-	valids   []*instance.ValidInstance
+	valids   []instance.ValidInstance
 }
 
 // ValidateInstances validates parsed instances against the schema and returns
 // them with the merged diagnostics.
-func ValidateInstances(ctx context.Context, s *schema.Schema, parsed map[string][]instance.RawInstance) (Validated, diag.Result) {
+func ValidateInstances(ctx context.Context, s schema.Schema, parsed map[string][]instance.RawInstance) (Validated, diag.Result) {
 	doc := Validated{validator: instance.NewValidator(s)}
 	collector := diag.NewCollectorUnlimited()
 	for _, typeName := range slices.Sorted(maps.Keys(parsed)) {
@@ -156,11 +156,11 @@ func ValidateInstances(ctx context.Context, s *schema.Schema, parsed map[string]
 }
 
 // Valids returns the instances the validator accepted, in validation order.
-func (d Validated) Valids() []*instance.ValidInstance {
-	var out []*instance.ValidInstance
+func (d Validated) Valids() []instance.ValidInstance {
+	var out []instance.ValidInstance
 	for _, b := range d.batches {
 		for _, valid := range b.valids {
-			if valid != nil {
+			if !valid.IsZero() {
 				out = append(out, valid)
 			}
 		}
@@ -171,14 +171,14 @@ func (d Validated) Valids() []*instance.ValidInstance {
 // BuildGraph adds the document's valid instances to base, or to a new graph
 // when base is nil, runs the graph-level checks, and returns the graph with a
 // verdict about the document (see [documentVerdict]).
-func BuildGraph(ctx context.Context, s *schema.Schema, base *graph.Graph, doc Validated) (*graph.Graph, diag.Result) {
+func BuildGraph(ctx context.Context, s schema.Schema, base *graph.Graph, doc Validated) (*graph.Graph, diag.Result) {
 	g := base
 	if g == nil {
 		g = graph.New(s)
 	}
 	collector := diag.NewCollectorUnlimited()
 	valids := doc.Valids()
-	added := make(map[*instance.ValidInstance]diag.Result, len(valids))
+	added := make(map[instance.ValidInstance]diag.Result, len(valids))
 	refusals := false
 	for _, valid := range valids {
 		result := g.Add(ctx, valid)
@@ -260,7 +260,7 @@ func IsSnapshotFile(path string) (bool, error) {
 	return key == "yammm_snapshot", nil
 }
 
-// LoadSnapshotFile reads a .ys file and loads it into a [*graph.Snapshot],
+// LoadSnapshotFile reads a .ys file and loads it into a [graph.Snapshot],
 // beside the header that document carries.
 //
 // The header comes back because [graph.Snapshot] exposes no metadata or
@@ -268,10 +268,10 @@ func IsSnapshotFile(path string) (bool, error) {
 // route to it; it is nil when the header cannot be parsed. Returns
 // (T, diag.Result, error) following the CLI helper convention: error captures
 // I/O failures, diag.Result captures semantic issues.
-func LoadSnapshotFile(ctx context.Context, path string, s *schema.Schema, opts ...snapshot.LoadOption) (*graph.Snapshot, *snapshot.HeaderInfo, diag.Result, error) {
+func LoadSnapshotFile(ctx context.Context, path string, s schema.Schema, opts ...snapshot.LoadOption) (graph.Snapshot, *snapshot.HeaderInfo, diag.Result, error) {
 	data, err := ReadFile(path)
 	if err != nil {
-		return nil, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
+		return graph.Snapshot{}, nil, diag.Result{}, fmt.Errorf("read snapshot file: %w", err)
 	}
 	snap, result := snapshot.Load(ctx, data, s, opts...)
 	// Load has checked the whole document and reported its issues, so the header

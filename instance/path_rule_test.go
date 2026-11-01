@@ -12,7 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func loadSrc(t *testing.T, src string) *schema.Schema {
+func loadSrc(t *testing.T, src string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), src, "p.yammm")
 	if !res.OK() {
@@ -49,12 +49,12 @@ func detailValues(is diag.Issue, key string) []string {
 	return out
 }
 
-func kids(val any) []*instance.ValidInstance {
-	var out []*instance.ValidInstance
+func kids(val any) []instance.ValidInstance {
+	var out []instance.ValidInstance
 	switch c := val.(type) {
-	case *instance.ValidInstance:
+	case instance.ValidInstance:
 		out = append(out, c)
-	case []*instance.ValidInstance:
+	case []instance.ValidInstance:
 		out = append(out, c...)
 	case immutable.Slice:
 		for e := range c.Iter() {
@@ -64,8 +64,8 @@ func kids(val any) []*instance.ValidInstance {
 	return out
 }
 
-func composedChildren(inst *instance.ValidInstance) []*instance.ValidInstance {
-	var out []*instance.ValidInstance
+func composedChildren(inst instance.ValidInstance) []instance.ValidInstance {
+	var out []instance.ValidInstance
 	for _, val := range inst.Compositions() {
 		out = append(out, kids(val.Unwrap())...)
 	}
@@ -127,7 +127,7 @@ func TestComposedChildProvenance_FollowsTheParent(t *testing.T) {
 		t.Fatal(res)
 	}
 	for _, c := range composedChildren(inst) {
-		if c.Provenance() == nil {
+		if c.Provenance().IsZero() {
 			t.Fatal("child provenance is nil under a parent that has one")
 		}
 		if got := c.Provenance().SourceName(); got != "data.json" {
@@ -143,7 +143,7 @@ func TestComposedChildProvenance_FollowsTheParent(t *testing.T) {
 		t.Fatal(res)
 	}
 	for _, c := range composedChildren(inst) {
-		if c.Provenance() != nil {
+		if !c.Provenance().IsZero() {
 			t.Errorf("a parent without provenance yields a child with %v", c.Provenance())
 		}
 	}

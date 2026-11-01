@@ -407,7 +407,7 @@ func (e *ResultError) Error() string {
 //
 //	s, result := schema.Load(ctx, path)
 //	if err := result.Err(); err != nil {
-//	    return nil, fmt.Errorf("load schema: %w", err)
+//	    return schema.Schema{}, fmt.Errorf("load schema: %w", err)
 //	}
 //	return s, nil
 //

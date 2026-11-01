@@ -63,7 +63,7 @@ func TestReaders_AFifthTopLevelKeyIsCut(t *testing.T) {
 
 // longNamedSchema declares one type whose name is longer than a value a
 // message shows whole.
-func longNamedSchema(t *testing.T, typeName string) *schema.Schema {
+func longNamedSchema(t *testing.T, typeName string) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("test").
@@ -123,6 +123,45 @@ func TestLoad_ARepeatedTypesRowIsShownWholeOnlyWhereTheSchemaDeclaresIt(t *testi
 			msgs := malformedMessages(result)
 			if !slices.Contains(msgs, tc.want) {
 				t.Fatalf("E_SNAPSHOT_MALFORMED messages = %q, want one %q", msgs, tc.want)
+			}
+		})
+	}
+}
+
+// A read with no schema has no declaration to show a repeated row whole by, so
+// every such reader cuts it, whatever a schema would declare.
+func TestSchemalessReaders_ARepeatedTypesRowIsCut(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	declared := "Account" + strings.Repeat("Ledger", 6)
+	s := longNamedSchema(t, declared)
+	snap := buildSnapshot(t, s,
+		mustValidInstance(t, s, declared, []any{"a1"}, map[string]any{"id": "a1"}))
+	data, res := snapshot.Marshal(ctx, snap)
+	if res.HasErrors() {
+		t.Fatalf("marshal: %v", res)
+	}
+	row := `{"schema":"test","name":"` + declared + `"}`
+	if !bytes.Contains(data, []byte(`"types":[`+row+`]`)) {
+		t.Fatalf("fixture shape changed; types section is not [%s]:\n%s", row, data)
+	}
+	doc := bytes.Replace(data, []byte(`"types":[`+row+`]`), []byte(`"types":[`+row+`,`+row+`]`), 1)
+	want := "types table rows 0 and 1 carry one identity test#" + declared[:32] + "… (43 bytes)"
+
+	readers := []struct {
+		name string
+		read func() diag.Result
+	}{
+		{"Info", func() diag.Result { _, r := snapshot.Info(ctx, doc); return r }},
+		{"HeaderOnly", func() diag.Result { _, r := snapshot.HeaderOnly(ctx, doc); return r }},
+		{"HeaderOnlyRead", func() diag.Result { _, r := snapshot.HeaderOnlyRead(ctx, bytes.NewReader(doc)); return r }},
+		{"UpdateMetadata", func() diag.Result { _, r := snapshot.UpdateMetadata(ctx, doc, map[string]string{"k": "v"}); return r }},
+	}
+	for _, reader := range readers {
+		t.Run(reader.name, func(t *testing.T) {
+			t.Parallel()
+			if msgs := malformedMessages(reader.read()); !slices.Contains(msgs, want) {
+				t.Fatalf("E_SNAPSHOT_MALFORMED messages = %q, want one %q", msgs, want)
 			}
 		})
 	}

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -66,16 +67,16 @@ func refusedPaths(props map[string]any) map[string]bool {
 
 // pathedVerdict is [verdict] with each issue's path, sorted, and whether the
 // instance validated.
-func pathedVerdict(t *testing.T, s *schema.Schema, raw instance.RawInstance, opts ...instance.Option) ([]string, bool) {
+func pathedVerdict(t *testing.T, s schema.Schema, raw instance.RawInstance, opts ...instance.Option) ([]string, bool) {
 	t.Helper()
-	raw.Provenance = nil
+	raw.Provenance = location.Provenance{}
 	valid, res := instance.NewValidator(s, opts...).ValidateOne(t.Context(), "Person", raw)
 	var out []string
 	for issue := range res.Issues() {
 		out = append(out, fmt.Sprintf("%s\t%s %s", issue.Path(), issue.Code(), issue.Message()))
 	}
 	slices.Sort(out)
-	return out, valid != nil
+	return out, !valid.IsZero()
 }
 
 // judgedAlike holds the one-break rule between a CSV row and its JSON
@@ -84,7 +85,7 @@ func pathedVerdict(t *testing.T, s *schema.Schema, raw instance.RawInstance, opt
 // the parser refused: the parser's E_CSV_COERCE stands in its place. A row
 // that holds a refused cell never validates; any other validates as the
 // document does.
-func judgedAlike(t *testing.T, s *schema.Schema, csvRaw, jsonRaw instance.RawInstance, opts ...instance.Option) string {
+func judgedAlike(t *testing.T, s schema.Schema, csvRaw, jsonRaw instance.RawInstance, opts ...instance.Option) string {
 	t.Helper()
 	refused := refusedPaths(csvRaw.Properties)
 	got, rowValid := pathedVerdict(t, s, csvRaw, opts...)

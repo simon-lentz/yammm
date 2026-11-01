@@ -43,8 +43,8 @@ type temporalDemand struct {
 func (g *generator) collectTemporalDemand() ([]string, error) {
 	g.collect = &temporalDemand{layouts: map[string]bool{}}
 	defer func() { g.collect = nil }()
-	for _, sc := range g.schema.Closure() {
-		for _, dt := range sc.DataTypesSlice() {
+	for sc := range g.schema.Closure() {
+		for dt := range sc.DataTypes() {
 			// A temporal DataType is its own carrier (emitNamedTypes).
 			if temporalLayout(dt.Constraint()) != "" {
 				g.temporal.helpers = true
@@ -60,7 +60,7 @@ func (g *generator) collectTemporalDemand() ([]string, error) {
 	}
 	for _, t := range g.closureTypes() {
 		owner := g.typeOwner(t)
-		for _, p := range t.AllPropertiesSlice() {
+		for p := range t.AllProperties() {
 			if _, err := g.goFieldType(owner, p); err != nil {
 				return nil, fmt.Errorf("%s property %q: %w", owner.label, p.Name(), err)
 			}
@@ -68,7 +68,7 @@ func (g *generator) collectTemporalDemand() ([]string, error) {
 	}
 	for _, e := range g.edges {
 		owner := g.edgeOwner(e)
-		for _, p := range e.rel.PropertiesSlice() {
+		for p := range e.rel.Properties() {
 			if _, err := g.goFieldType(owner, p); err != nil {
 				return nil, fmt.Errorf("%s property %q: %w", owner.label, p.Name(), err)
 			}

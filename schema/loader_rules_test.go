@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,7 +21,7 @@ func TestLoad_EmptySchemaNameIsRefused(t *testing.T) {
 	t.Parallel()
 
 	s, res := schema.LoadString(t.Context(), "schema \"\"\n\ntype T {\n    id String primary\n}\n", "s.yammm")
-	if s != nil {
+	if !s.IsZero() {
 		t.Error("a nameless schema must not load")
 	}
 	if !res.HasCode(diag.E_INVALID_NAME) {
@@ -109,7 +110,7 @@ type B {
 		var (
 			wg      sync.WaitGroup
 			mu      sync.Mutex
-			entries []*schema.Schema
+			entries []schema.Schema
 		)
 		for _, entry := range []string{"first.yammm", "second.yammm"} {
 			wg.Go(func() {
@@ -126,7 +127,7 @@ type B {
 		wg.Wait()
 
 		for _, s := range entries {
-			imp := s.ImportsSlice()[0]
+			imp := slices.Collect(s.Imports())[0]
 			canonical, ok := reg.LookupBySourceID(imp.ResolvedSourceID())
 			if !ok {
 				t.Fatal("the import's schema is not in the registry")
@@ -272,7 +273,7 @@ func TestLoadSourcesWithEntry_TwoKeysNamingOneSourceAreRefused(t *testing.T) {
 			first, second := row.keys(t, root)
 			sources := map[string][]byte{first: src, second: src}
 			s, res := schema.LoadSourcesWithEntry(t.Context(), sources, second, root)
-			if s != nil {
+			if !s.IsZero() {
 				t.Errorf("loaded %q; want the two keys refused", s.Name())
 			}
 			if !res.HasFatal() || !res.HasCode(diag.E_LOAD_IO_FAILURE) {
@@ -294,7 +295,7 @@ func TestLoadString_RefusesASourceNameThatIsNotValidUTF8(t *testing.T) {
 	t.Parallel()
 
 	s, res := schema.LoadString(t.Context(), "schema \"s\"\n\ntype T {\n    id String primary\n}\n", "caf\xff")
-	if s != nil {
+	if !s.IsZero() {
 		t.Errorf("loaded %q; want the source name refused", s.Name())
 	}
 	if !res.HasFatal() || !res.HasCode(diag.E_LOAD_IO_FAILURE) || !strings.Contains(res.Err().Error(), location.ErrInvalidUTF8Path.Error()) {
@@ -340,7 +341,7 @@ func TestSharedRegistry_AnImportFromARegisteredClosureBindsItsCompiledSchema(t *
 	if !ok {
 		t.Fatal("common has no import mid")
 	}
-	if fromApp.Schema() == nil || fromApp.Schema() != fromCommon.Schema() {
+	if fromApp.Schema().IsZero() || fromApp.Schema() != fromCommon.Schema() {
 		t.Error("app's import of mid is not the schema common's closure was compiled with")
 	}
 }
@@ -362,7 +363,7 @@ func TestLoadSourcesWithEntry_EntryKeyChoosesTheSchema(t *testing.T) {
 		if res.Err() != nil {
 			t.Fatalf("entry %s: %v", row.entry, res.Err())
 		}
-		if s == nil || s.Name() != row.want {
+		if s.IsZero() || s.Name() != row.want {
 			t.Errorf("entry %s chose %v; want %q", row.entry, s, row.want)
 		}
 	}
@@ -382,7 +383,7 @@ func TestLoadSourcesWithEntry_EmptyEntrySelectsTheSmallestKey(t *testing.T) {
 		if res.Err() != nil {
 			t.Fatalf("run %d: %v", i, res.Err())
 		}
-		if s == nil || s.Name() != "alpha" {
+		if s.IsZero() || s.Name() != "alpha" {
 			t.Fatalf("run %d chose %v; want the schema under alpha.yammm", i, s)
 		}
 	}
@@ -442,13 +443,13 @@ func TestSharedRegistry_EditedSourceIsNotTheSameSource(t *testing.T) {
 	}
 	write("@index")
 	second, res := schema.Load(t.Context(), path, schema.WithModuleRoot(dir), schema.WithRegistry(reg))
-	if res.Err() == nil || !strings.Contains(res.Err().Error(), "changed since it was registered") {
+	if res.Err() == nil || !strings.Contains(res.Err().Error(), "a source both compiles carry has different bytes") {
 		t.Fatalf("an edited source must not re-register; got %v", res.Err())
 	}
 	if !res.HasCode(diag.E_LOAD_SOURCE_CHANGED) {
 		t.Errorf("a changed source is the caller's condition, not the loader's; got %v", res.Err())
 	}
-	if second != nil {
+	if !second.IsZero() {
 		t.Error("a failed load returns no schema")
 	}
 	if kept, _ := reg.LookupBySourceID(first.SourceID()); kept != first {
@@ -490,7 +491,7 @@ func TestSharedRegistry_AsymmetricProvenanceIsNotTheSameSource(t *testing.T) {
 		if !res.HasCode(diag.E_LOAD_SOURCE_CHANGED) {
 			t.Fatalf("a load must not adopt a source-less registered schema; got %v", res.Err())
 		}
-		if loaded != nil {
+		if !loaded.IsZero() {
 			t.Error("a refused load returns no schema")
 		}
 	})

@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -33,7 +34,7 @@ func TestDiffSnapshots_SeesDuplicatePropertyDifference(t *testing.T) {
 
 	// Two instances share a primary key, so the second lands in the
 	// duplicates section, where its properties are the only difference.
-	build := func(dupName string) *graph.Snapshot {
+	build := func(dupName string) graph.Snapshot {
 		g := graph.New(s)
 		g.Add(context.Background(),
 			mustValidInstance(t, s, "Person", []any{"p1"}, map[string]any{"id": "p1", "name": "Alice"}))
@@ -47,9 +48,9 @@ func TestDiffSnapshots_SeesDuplicatePropertyDifference(t *testing.T) {
 	}
 
 	want, got := build("Bob"), build("Carol")
-	if len(want.Duplicates()) != 1 || len(got.Duplicates()) != 1 {
+	if len(slices.Collect(want.Duplicates())) != 1 || len(slices.Collect(got.Duplicates())) != 1 {
 		t.Fatalf("fixture must produce one duplicate each, got %d and %d",
-			len(want.Duplicates()), len(got.Duplicates()))
+			len(slices.Collect(want.Duplicates())), len(slices.Collect(got.Duplicates())))
 	}
 
 	probe := &probeTB{TB: t}

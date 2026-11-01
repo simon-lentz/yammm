@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ const (
 
 type rederiveShape struct{ key, worksAt, audits string }
 
-func loadRederive(t *testing.T, sh rederiveShape) *schema.Schema {
+func loadRederive(t *testing.T, sh rederiveShape) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), fmt.Sprintf(rederiveSchema, sh.key, sh.worksAt, sh.audits, sh.key), "rederive.yammm")
 	if res.HasErrors() {
@@ -86,7 +87,7 @@ func rederiveData() []rederiveRow {
 
 // addAll validates D under s and adds it through Graph.Add. The row Add records
 // as a duplicate draws E_DUPLICATE_PK, and only that row may.
-func addAll(t *testing.T, s *schema.Schema) *graph.Snapshot {
+func addAll(t *testing.T, s schema.Schema) graph.Snapshot {
 	t.Helper()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -137,8 +138,8 @@ func TestNewFromSnapshot_RederiveFixtureMovesARecordUnderEachChange(t *testing.T
 	t.Parallel()
 	base := rederiveShape{key: "String", worksAt: "(_:one)", audits: "(one:many)"}
 	built := addAll(t, loadRederive(t, base))
-	count := func(snap *graph.Snapshot) (edges, records int) {
-		return len(snap.Edges()), len(snap.Unresolved())
+	count := func(snap graph.Snapshot) (edges, records int) {
+		return len(slices.Collect(snap.Edges())), len(slices.Collect(snap.Unresolved()))
 	}
 	be, br := count(built)
 	for _, sh := range []rederiveShape{
@@ -182,7 +183,7 @@ part type Part {
 	code String primary
 }
 `
-	load := func(multiplicity string) *schema.Schema {
+	load := func(multiplicity string) schema.Schema {
 		s, res := schema.LoadString(t.Context(), fmt.Sprintf(orders, multiplicity), "orders.yammm")
 		if res.HasErrors() {
 			t.Fatalf("load schema: %s", res)
@@ -207,8 +208,8 @@ part type Part {
 		t.Fatal("a second child of a (one) slot was attached")
 	}
 	snap := g.Snapshot()
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("want the one duplicate record, got %d", len(snap.Duplicates()))
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("want the one duplicate record, got %d", len(slices.Collect(snap.Duplicates())))
 	}
 
 	imported, res := graph.NewFromSnapshot(load("(many)"), snap)
@@ -229,7 +230,7 @@ part type Part {
 // judged against a composition the schema cannot name.
 func TestNewFromSnapshot_RefusesADuplicateWhoseParentTypeTheSchemaDrops(t *testing.T) {
 	t.Parallel()
-	load := func(src string) *schema.Schema {
+	load := func(src string) schema.Schema {
 		s, res := schema.LoadString(t.Context(), src, "orders.yammm")
 		if res.HasErrors() {
 			t.Fatalf("load schema: %s", res)
@@ -263,8 +264,8 @@ type Order {
 	mustOK(t, g.Add(t.Context(), order))
 	g.AddComposed(t.Context(), mustTypeID(t, s, "Order"), `["o1"]`, "MAIN", second[0])
 	snap := g.Snapshot()
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("want the one duplicate record, got %d", len(snap.Duplicates()))
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("want the one duplicate record, got %d", len(slices.Collect(snap.Duplicates())))
 	}
 
 	imported, res := graph.NewFromSnapshot(load(`schema "orders"
@@ -278,7 +279,7 @@ type Order {
 }
 
 // people is a schema whose Person has the association assoc, or none.
-func people(t *testing.T, assoc string) *schema.Schema {
+func people(t *testing.T, assoc string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), `schema "people"
 
@@ -306,7 +307,7 @@ type Person {
 // records nothing.
 func TestNewFromSnapshot_DropsAnAbsentRecordUnderADroppedAssociation(t *testing.T) {
 	t.Parallel()
-	add := func(s *schema.Schema) *graph.Snapshot {
+	add := func(s schema.Schema) graph.Snapshot {
 		t.Helper()
 		vi, res := instance.NewValidator(s).ValidateOne(t.Context(), "Person", instance.RawInstance{Properties: map[string]any{"id": "p1"}})
 		if res.HasErrors() {
@@ -317,7 +318,7 @@ func TestNewFromSnapshot_DropsAnAbsentRecordUnderADroppedAssociation(t *testing.
 		return g.Snapshot()
 	}
 	built := add(people(t, "--> WORKS_AT (one) Company"))
-	if n := len(built.Unresolved()); n != 1 {
+	if n := len(slices.Collect(built.Unresolved())); n != 1 {
 		t.Fatalf("want the one absent record, got %d", n)
 	}
 	sPrime := people(t, "")
@@ -357,7 +358,7 @@ func TestNewFromSnapshot_RefusesATargetMissingRecordUnderARetargetedAssociation(
 // identity rule's to refuse; its slot is not judged as well.
 func TestNewFromSnapshot_RefusesADuplicateOfATypeTheSchemaDropsOnce(t *testing.T) {
 	t.Parallel()
-	load := func(part string) *schema.Schema {
+	load := func(part string) schema.Schema {
 		s, res := schema.LoadString(t.Context(), `schema "orders"
 
 type Order {
@@ -405,7 +406,7 @@ part type `+part+` {
 // the instance that carries it and the record's target where it is named.
 func TestNewFromSnapshot_ATargetTypeTheSchemaDropsIsTheIdentityRulesAlone(t *testing.T) {
 	t.Parallel()
-	load := func(target string) *schema.Schema {
+	load := func(target string) schema.Schema {
 		s, res := schema.LoadString(t.Context(), `schema "links"
 
 type Source {

@@ -2,6 +2,7 @@ package jschema
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/simon-lentz/yammm/schema"
@@ -10,12 +11,12 @@ import (
 // edgeRec carries what emission needs for one declared association: the
 // relation (edge properties, field name) and its resolved target (primary-key
 // fields for the _target_* block). The $defs key lives in defsTable.edges,
-// keyed by relation pointer — an inherited association is the SAME pointer in
-// the declaring type's own slice and in every subtype's AllAssociationsSlice,
+// keyed by relation record — an inherited association is the SAME record in
+// the declaring type's own slice and in every subtype's AllAssociations,
 // so subtypes reference the one entry their declaring owner gets.
 type edgeRec struct {
-	rel    *schema.Relation
-	target *schema.Type
+	rel    schema.Relation
+	target schema.Type
 }
 
 // defsTable holds the $defs key of every type, datatype and EDGE_ entry, all
@@ -23,14 +24,14 @@ type edgeRec struct {
 // each datatype listing another datatype resolves to.
 type defsTable struct {
 	types     map[schema.TypeID]string
-	dataTypes map[*schema.DataType]string
-	dtProps   map[*schema.Property]string
-	dtInner   map[*schema.DataType]string
-	edges     map[*schema.Relation]string
+	dataTypes map[schema.DataType]string
+	dtProps   map[schema.Property]string
+	dtInner   map[schema.DataType]string
+	edges     map[schema.Relation]string
 
-	orderedSchemas   []*schema.Schema
-	orderedTypes     []*schema.Type
-	orderedDataTypes []*schema.DataType
+	orderedSchemas   []schema.Schema
+	orderedTypes     []schema.Type
+	orderedDataTypes []schema.DataType
 	orderedEdges     []edgeRec
 }
 
@@ -38,19 +39,19 @@ type defsTable struct {
 // keys every type, datatype and declared association, and resolves every
 // DataType-typed property (type properties and association edge properties)
 // and every datatype listing another datatype in its declaring schema.
-func buildDefsTable(s *schema.Schema) (*defsTable, error) {
+func buildDefsTable(s schema.Schema) (*defsTable, error) {
 	table := &defsTable{
 		types:     map[schema.TypeID]string{},
-		dataTypes: map[*schema.DataType]string{},
-		dtProps:   map[*schema.Property]string{},
-		dtInner:   map[*schema.DataType]string{},
-		edges:     map[*schema.Relation]string{},
+		dataTypes: map[schema.DataType]string{},
+		dtProps:   map[schema.Property]string{},
+		dtInner:   map[schema.DataType]string{},
+		edges:     map[schema.Relation]string{},
 
-		orderedSchemas: s.Closure(),
+		orderedSchemas: slices.Collect(s.Closure()),
 	}
 	for _, sc := range table.orderedSchemas {
-		table.orderedTypes = append(table.orderedTypes, sc.TypesSlice()...)
-		table.orderedDataTypes = append(table.orderedDataTypes, sc.DataTypesSlice()...)
+		table.orderedTypes = append(table.orderedTypes, slices.Collect(sc.Types())...)
+		table.orderedDataTypes = append(table.orderedDataTypes, slices.Collect(sc.DataTypes())...)
 	}
 	if err := table.assignKeys(); err != nil {
 		return nil, err
@@ -74,17 +75,17 @@ type keyClaim struct {
 func (dt *defsTable) assignKeys() error {
 	var claims []keyClaim
 	for _, sc := range dt.orderedSchemas {
-		for _, t := range sc.TypesSlice() {
+		for t := range sc.Types() {
 			id := t.ID()
 			claims = append(claims, keyClaim{bare: t.Name(), exact: typeExactKey(sc.Name(), t.Name()), assign: func(key string) { dt.types[id] = key }})
 		}
-		for _, d := range sc.DataTypesSlice() {
+		for d := range sc.DataTypes() {
 			claims = append(claims, keyClaim{bare: d.Name(), exact: dataTypeExactKey(sc.Name(), d.Name()), assign: func(key string) { dt.dataTypes[d] = key }})
 		}
 	}
 	for _, sc := range dt.orderedSchemas {
-		for _, t := range sc.TypesSlice() {
-			for _, rel := range t.AssociationsSlice() { // OWN associations only
+		for t := range sc.Types() {
+			for rel := range t.Associations() { // OWN associations only
 				target, ok := sc.ResolveType(rel.Target())
 				if !ok {
 					return fmt.Errorf("jschema: association %q target %q unresolved", rel.Name(), rel.Target().String())
@@ -133,26 +134,25 @@ func edgeExactKey(schemaName, owner, relation string) string {
 // element — type properties, association edge properties, and datatypes
 // whose constraint lists another datatype. Each is resolved from the
 // constraint in its DECLARING schema, so a property inherited from a
-// cross-schema parent maps to the right datatype, and a Builder-built
-// property, which carries no DataTypeRef, resolves too. Properties are keyed
-// by pointer; members naming no datatype skip.
+// cross-schema parent maps to the right datatype. Properties are keyed
+// by record; members naming no datatype skip.
 func (dt *defsTable) registerDataTypeProps() error {
 	for _, sc := range dt.orderedSchemas {
-		for _, t := range sc.TypesSlice() {
-			for _, p := range t.PropertiesSlice() { // OWN type properties
+		for t := range sc.Types() {
+			for p := range t.Properties() { // OWN type properties
 				if err := dt.recordProperty(sc, "type", t.Name(), p); err != nil {
 					return err
 				}
 			}
-			for _, rel := range t.AssociationsSlice() { // OWN associations' edge properties
-				for _, ep := range rel.PropertiesSlice() {
+			for rel := range t.Associations() { // OWN associations' edge properties
+				for ep := range rel.Properties() {
 					if err := dt.recordProperty(sc, "edge", rel.Name(), ep); err != nil {
 						return err
 					}
 				}
 			}
 		}
-		for _, d := range sc.DataTypesSlice() {
+		for d := range sc.DataTypes() {
 			name, ok, err := dt.aliasKey(sc, d.Constraint())
 			if err != nil {
 				return fmt.Errorf("jschema: datatype %q: %w", d.Name(), err)
@@ -165,7 +165,7 @@ func (dt *defsTable) registerDataTypeProps() error {
 	return nil
 }
 
-func (dt *defsTable) recordProperty(sc *schema.Schema, kind, owner string, p *schema.Property) error {
+func (dt *defsTable) recordProperty(sc schema.Schema, kind, owner string, p schema.Property) error {
 	name, ok, err := dt.aliasKey(sc, p.Constraint())
 	if err != nil {
 		return fmt.Errorf("jschema: %s %q property %q: %w", kind, owner, p.Name(), err)
@@ -179,7 +179,7 @@ func (dt *defsTable) recordProperty(sc *schema.Schema, kind, owner string, p *sc
 // aliasKey returns the $defs key of the datatype c names, directly or as its
 // innermost List element, resolving the name in sc, the schema that declares
 // c. It reports false when c names no datatype.
-func (dt *defsTable) aliasKey(sc *schema.Schema, c schema.Constraint) (string, bool, error) {
+func (dt *defsTable) aliasKey(sc schema.Schema, c schema.Constraint) (string, bool, error) {
 	_, ac, ok := aliasInLists(c)
 	if !ok {
 		return "", false, nil
@@ -197,15 +197,16 @@ func (dt *defsTable) aliasKey(sc *schema.Schema, c schema.Constraint) (string, b
 
 // dataTypeNamed resolves a datatype reference as an alias constraint spells
 // it: "Name" in sc, or "alias.Name" in the schema sc imports as alias.
-func dataTypeNamed(sc *schema.Schema, name string) (*schema.DataType, bool) {
+func dataTypeNamed(sc schema.Schema, name string) (schema.DataType, bool) {
 	qualifier, local, qualified := strings.Cut(name, ".")
 	if !qualified {
 		return sc.DataType(name)
 	}
 	imp, ok := sc.ImportByAlias(qualifier)
-	if !ok || imp.Schema() == nil {
-		return nil, false
+	if !ok {
+		return schema.DataType{}, false
 	}
+	// A schema a load or a Build returned has every import wired.
 	return imp.Schema().DataType(local)
 }
 
@@ -215,29 +216,29 @@ func (dt *defsTable) defName(id schema.TypeID) (string, bool) {
 	return n, ok
 }
 
-// dataTypeDefName returns the $defs key for a datatype (pointer-keyed).
-func (dt *defsTable) dataTypeDefName(d *schema.DataType) (string, bool) {
+// dataTypeDefName returns the $defs key for a datatype.
+func (dt *defsTable) dataTypeDefName(d schema.DataType) (string, bool) {
 	n, ok := dt.dataTypes[d]
 	return n, ok
 }
 
 // edgeDefName returns the EDGE_ $defs key for a declared (or inherited —
-// same pointer) association.
-func (dt *defsTable) edgeDefName(rel *schema.Relation) (string, bool) {
+// same record) association.
+func (dt *defsTable) edgeDefName(rel schema.Relation) (string, bool) {
 	n, ok := dt.edges[rel]
 	return n, ok
 }
 
 // innerDataTypeName reports the $defs key of the datatype a datatype's own
 // constraint lists.
-func (dt *defsTable) innerDataTypeName(d *schema.DataType) (string, bool) {
+func (dt *defsTable) innerDataTypeName(d schema.DataType) (string, bool) {
 	n, ok := dt.dtInner[d]
 	return n, ok
 }
 
 // dtPropName reports the datatype $defs key for a DataType-typed property.
 // Its signature satisfies schemaForProperty's dtRef callback.
-func (dt *defsTable) dtPropName(p *schema.Property) (string, bool) {
+func (dt *defsTable) dtPropName(p schema.Property) (string, bool) {
 	// Keyed by the DECLARED property (see registerDataTypeProps, which walks own
 	// property slices). Origin() bridges to it from a merged view, where a property
 	// whose annotations were unioned across ancestors is a synthesized copy that is

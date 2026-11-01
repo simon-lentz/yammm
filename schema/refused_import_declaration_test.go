@@ -103,7 +103,7 @@ func TestBuilder_AnImportWithAnEmptyAliasIsRefused(t *testing.T) {
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
-	if dep == nil || depResult.HasErrors() {
+	if dep.IsZero() || depResult.HasErrors() {
 		t.Fatalf("the imported schema does not build: %v", depResult)
 	}
 	registry := schema.NewRegistry()
@@ -119,7 +119,7 @@ func TestBuilder_AnImportWithAnEmptyAliasIsRefused(t *testing.T) {
 		WithPrimaryKey("id", schema.NewUUIDConstraint()).
 		Done().
 		Build()
-	if built != nil || !result.HasCode(diag.E_INVALID_ALIAS) {
+	if !built.IsZero() || !result.HasCode(diag.E_INVALID_ALIAS) {
 		t.Errorf("Build = %v, %v; want no schema and E_INVALID_ALIAS", built, result)
 	}
 }

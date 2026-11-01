@@ -169,7 +169,7 @@ func setPlacedBy(id string) mutation {
 	return func(o map[string]any) { o["placed_by"] = map[string]any{"_target_id": id} }
 }
 
-func validateOrder(t *testing.T, s *schema.Schema, order map[string]any) diag.Result {
+func validateOrder(t *testing.T, s schema.Schema, order map[string]any) diag.Result {
 	t.Helper()
 	_, res := NewValidator(s).ValidateOne(t.Context(), "Order", RawInstance{Properties: order})
 	return res

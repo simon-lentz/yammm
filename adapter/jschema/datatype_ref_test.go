@@ -87,8 +87,7 @@ type Doc {
 	}
 }
 
-// A Builder-built property carries no DataTypeRef; its datatype is named by
-// the constraint alone.
+// A Builder-built property names its datatype as a parsed one does.
 func TestMarshal_BuilderDataTypePropertyIsARef(t *testing.T) {
 	s, res := schema.NewBuilder().WithName("b").
 		AddDataType("Code", schema.StringLenBetween(1, 3)).

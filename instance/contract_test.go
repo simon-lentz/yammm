@@ -16,7 +16,7 @@ import (
 
 // contractFixture loads a testdata/contract schema+data pair. The data file
 // holds {"TypeName": [instances...]}; every instance validates as that type.
-func contractFixture(t *testing.T, schemaFile, dataFile string) (*schema.Schema, map[string][]map[string]any) {
+func contractFixture(t *testing.T, schemaFile, dataFile string) (schema.Schema, map[string][]map[string]any) {
 	t.Helper()
 	src, err := os.ReadFile(filepath.Join("testdata", "contract", schemaFile))
 	if err != nil {
@@ -55,7 +55,7 @@ func TestContract_PassCorpus(t *testing.T) {
 	if !ok {
 		t.Fatal("contract_pass.yammm declares no type T")
 	}
-	if n := len(typ.InvariantsSlice()); n < 100 {
+	if n := len(slices.Collect(typ.Invariants())); n < 100 {
 		t.Fatalf("contract_pass.yammm declares %d invariants, floor is 100 — fixture emptied?", n)
 	}
 
@@ -67,7 +67,7 @@ func TestContract_PassCorpus(t *testing.T) {
 			if !result.OK() {
 				t.Errorf("pass corpus drew diagnostics: %s", result)
 			}
-			if valid == nil {
+			if valid.IsZero() {
 				t.Error("pass corpus returned nil instance")
 			}
 			validated++
@@ -79,7 +79,8 @@ func TestContract_PassCorpus(t *testing.T) {
 	if validated == 0 {
 		t.Fatal("data_pass.json drove no instance — every assertion above was skipped")
 	}
-	for typeName, typ := range s.Types() {
+	for typ := range s.Types() {
+		typeName := typ.Name()
 		// Abstract and part types have no ValidateOne entry point, so requiring
 		// an instance for them would fail on a fixture that is entirely correct.
 		if typ.IsAbstract() || typ.IsPart() {
@@ -117,7 +118,7 @@ func TestContract_ErrCorpus(t *testing.T) {
 	for typeName, instances := range data {
 		for _, props := range instances {
 			valid, result := v.ValidateOne(t.Context(), typeName, instance.RawInstance{Properties: props})
-			if valid != nil {
+			if !valid.IsZero() {
 				t.Error("err corpus returned a valid instance")
 			}
 			for issue := range result.Issues() {

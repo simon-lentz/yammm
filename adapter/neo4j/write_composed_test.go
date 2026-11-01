@@ -10,7 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 )
 
-func nestedGraphResult(t *testing.T) (*Adapter, *GraphShape, *graph.Snapshot) {
+func nestedGraphResult(t *testing.T) (*Adapter, *GraphShape, graph.Snapshot) {
 	t.Helper()
 	a, s, v, shape := setupWrite(t, "composed_nested.yammm")
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{
@@ -284,7 +284,7 @@ func TestBatchNodeQueries_ComposedChunkStraddle(t *testing.T) {
 // and a keyless part, each reached by a (one) slot. Until this fixture existed
 // no schema in this package declared a (one) composition at all, so nothing
 // here could exercise the address a (one) slot writes.
-func oneCompositionGraphResult(t *testing.T) (*Adapter, *GraphShape, *graph.Snapshot) {
+func oneCompositionGraphResult(t *testing.T) (*Adapter, *GraphShape, graph.Snapshot) {
 	t.Helper()
 	a, s, v, shape := setupWrite(t, "composed_one.yammm")
 	snap := buildGraphResult(t, s, v, map[string][]map[string]any{

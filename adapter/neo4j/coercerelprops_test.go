@@ -3,6 +3,7 @@ package neo4j_test
 import (
 	"context"
 	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func loadEdgeRelation(t *testing.T) *schema.Relation {
+func loadEdgeRelation(t *testing.T) schema.Relation {
 	t.Helper()
 	s, res := schema.Load(context.Background(), "testdata/edge_typed_props.yammm")
 	if res.HasErrors() {
@@ -21,7 +22,7 @@ func loadEdgeRelation(t *testing.T) *schema.Relation {
 	if !ok {
 		t.Fatal("Source type not found")
 	}
-	rels := st.AssociationsSlice()
+	rels := slices.Collect(st.Associations())
 	if len(rels) != 1 {
 		t.Fatalf("want 1 association on Source, got %d", len(rels))
 	}
@@ -66,7 +67,7 @@ func TestCoerceRelProps_DoesNotMutateItsInput(t *testing.T) {
 func TestCoerceRelProps_NilRelationReturnsAnIndependentCopy(t *testing.T) {
 	t.Parallel()
 	in := map[string]any{"x": "y"}
-	out, err := neo4j.CoerceRelProps(in, nil)
+	out, err := neo4j.CoerceRelProps(in, schema.Relation{})
 	if err != nil {
 		t.Fatalf("CoerceRelProps: %v", err)
 	}
@@ -77,7 +78,7 @@ func TestCoerceRelProps_NilRelationReturnsAnIndependentCopy(t *testing.T) {
 	if in["x"] != "y" {
 		t.Error("the result shares storage with the input")
 	}
-	if got, err := neo4j.CoerceRelProps(nil, nil); err != nil || got != nil {
+	if got, err := neo4j.CoerceRelProps(nil, schema.Relation{}); err != nil || got != nil {
 		t.Errorf("a nil map should return nil, got %v, %v", got, err)
 	}
 }

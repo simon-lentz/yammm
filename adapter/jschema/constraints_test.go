@@ -122,7 +122,7 @@ type County {
 `
 
 // loadNamedType loads the alias fixture and returns the County type.
-func loadNamedType(t *testing.T) *schema.Type {
+func loadNamedType(t *testing.T) schema.Type {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), namedFixture, "test://named.yammm")
 	if res.HasErrors() {
@@ -135,7 +135,7 @@ func loadNamedType(t *testing.T) *schema.Type {
 	return typ
 }
 
-func prop(t *testing.T, typ *schema.Type, name string) *schema.Property {
+func prop(t *testing.T, typ schema.Type, name string) schema.Property {
 	t.Helper()
 	p, ok := typ.Property(name)
 	if !ok {
@@ -148,7 +148,7 @@ func TestSchemaForProperty(t *testing.T) {
 	typ := loadNamedType(t)
 	// Fake defs-table lookup: both DataType-referencing properties (direct
 	// alias and list-of-alias) resolve to the FipsCode def.
-	dtRef := func(p *schema.Property) (string, bool) {
+	dtRef := func(p schema.Property) (string, bool) {
 		switch p.Name() {
 		case "fips", "codes":
 			return "FipsCode", true
@@ -181,7 +181,7 @@ func TestSchemaForProperty(t *testing.T) {
 
 func TestSchemaForProperty_UnregisteredAliasIsError(t *testing.T) {
 	typ := loadNamedType(t)
-	missing := func(*schema.Property) (string, bool) { return "", false }
+	missing := func(schema.Property) (string, bool) { return "", false }
 
 	if _, err := schemaForProperty(prop(t, typ, "fips"), missing); err == nil {
 		t.Error("alias property without a registered $defs key must be an error")

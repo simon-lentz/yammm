@@ -49,8 +49,9 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //     re-serialized. The input bytes' body byte-range is reused
 //     unchanged.
 //   - The returned document's integrity hash is computed over the new
-//     canonical form (new header + existing body) and matches what
-//     [Marshal] would produce for the same logical content, byte-for-byte.
+//     canonical form (new header + existing body) and, for a body in
+//     [Marshal]'s bytes, matches what [Marshal] would produce for the same
+//     logical content, byte-for-byte.
 //   - CreatedAt is preserved from the existing header unless explicitly
 //     overridden via [WithUpdateCreatedAt].
 //   - Metadata replaces the existing map entirely; the caller is
@@ -84,6 +85,7 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 //	header, res := snapshot.HeaderOnly(ctx, data)
 //	if res.HasErrors() { return res.Err() }
 //	newMeta := maps.Clone(header.Metadata)
+//	if newMeta == nil { newMeta = map[string]string{} }
 //	newMeta["pipeline_completed"] = "true"
 //	out, res := snapshot.UpdateMetadata(ctx, data, newMeta)
 //
@@ -96,8 +98,8 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 // UpdateMetadata copies the body bytes verbatim and decodes no instance: it
 // re-verifies no integrity hash, resolves no schema, and of the body it
 // decodes the types table alone. It does refuse every input the failure modes
-// below name, because the output carries a freshly computed integrity hash, so accepting a document no read path accepts would
-// hand back a malformed document that passes verification. Callers needing
+// below name, because the output carries a freshly computed integrity hash, and a
+// malformed document must not come back with a hash that matches. Callers needing
 // more than that pair UpdateMetadata with a prior [Verify] on the same bytes;
 // [HeaderOnly] is not that check, because it reads no instance either.
 //
@@ -136,8 +138,9 @@ func applyUpdateOptions(opts []UpdateOption) updateConfig {
 // Thread safety: UpdateMetadata is a pure function over its inputs.
 // It is safe for concurrent use; it does not mutate data or newMeta.
 //
-// Metadata-key convention (non-enforced): yammm treats a key as an opaque
-// string and requires only that it be valid UTF-8. Consumers using structured metadata should namespace their
+// Metadata-key convention (non-enforced): the library treats a key as an opaque
+// string and requires only that it be valid UTF-8, and the CLI's --metadata and
+// --set also refuse an empty key and cannot spell one holding '='. Consumers using structured metadata should namespace their
 // keys (e.g., myapp.pipeline_completed) to avoid collisions with
 // other metadata consumers who share a .ys file.
 func UpdateMetadata(
@@ -175,7 +178,7 @@ func UpdateMetadata(
 	// body bytes"; a fresh hash is computed at write time.
 	loadCfg := defaultLoadConfig()
 	loadCfg.skipIntegrityCheck = true
-	sd := newStreamDecoder(data, nil, loadCfg)
+	sd := newStreamDecoder(data, schema.Schema{}, loadCfg)
 	if err := sd.decodeHeader(); err != nil {
 		c := diag.NewCollector(0)
 		c.Collect(diag.NewIssue(diag.Error, diag.E_SNAPSHOT_MALFORMED,
@@ -293,10 +296,8 @@ func UpdateMetadata(
 // it — so the result differs from a direct Marshal only where the input document
 // did.
 //
-// Panics if s is nil (programming error), on every call rather than only the
-// ones that reach the fallback: the function cannot complete without it, and
-// deferring the panic to the first input the fast path refuses hides the bug
-// until a document is malformed.
+// Panics if s is zero (programming error), on every call. Only the fallback reads
+// s, and a panic on that path alone hides the bug until a document is malformed.
 //
 // When the fallback path succeeds, the returned [diag.Result] carries a
 // Warning-severity [diag.W_UPDATE_METADATA_FALLBACK], the warnings the Load
@@ -320,7 +321,8 @@ func UpdateMetadata(
 // the caller would rather surface the failure than silently recover.
 //
 // Cost on the happy path matches [UpdateMetadata]. On the fallback path it
-// matches Load + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
+// adds the refused UpdateMetadata and, unless [WithUpdateCreatedAt] gives a
+// non-zero time, a HeaderOnly to Load + Marshal, which [TestUpdateMetadataRatioFloor] holds at least
 // three times slower on a 14.7 MB .ys; the W_UPDATE_METADATA_FALLBACK warning
 // makes the transition visible in consumer logs and dashboards.
 //
@@ -336,15 +338,15 @@ func UpdateMetadataOrReMarshal(
 	ctx context.Context,
 	data []byte,
 	newMeta map[string]string,
-	s *schema.Schema,
+	s schema.Schema,
 	opts ...UpdateOption,
 ) ([]byte, diag.Result) {
 	// Checked before the fast path, not inside the fallback that dereferences
-	// it: a nil schema is a caller's bug on every input, and only some inputs
+	// it: a zero schema is a caller's bug on every input, and only some inputs
 	// reach Load. Deferring the panic let a caller run for months and crash on
 	// the first document the fast path refused.
-	if s == nil {
-		panic("snapshot.UpdateMetadataOrReMarshal: nil Schema")
+	if s.IsZero() {
+		panic("snapshot.UpdateMetadataOrReMarshal: zero Schema")
 	}
 	out, res := UpdateMetadata(ctx, data, newMeta, opts...)
 	if !res.HasErrors() {

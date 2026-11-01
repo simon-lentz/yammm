@@ -140,7 +140,7 @@ func faultRows() []faultRow {
 
 func buildAnswer(build func(*schema.Builder) *schema.Builder) string {
 	s, res := build(schema.NewBuilder().WithName("fleet")).Build()
-	if s != nil && res.OK() {
+	if !s.IsZero() && res.OK() {
 		return "ok"
 	}
 	var out []string

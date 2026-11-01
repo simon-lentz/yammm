@@ -8,7 +8,7 @@ import (
 func TestAnnotation_Inheritance_PropertyLevelViaSharedPointer(t *testing.T) {
 	t.Parallel()
 	// A child inherits the parent's annotated property unchanged; the
-	// annotation travels with the shared *Property, no merge code needed.
+	// annotation travels with the shared Property, no merge code needed.
 	s := loadOK(t, `schema "main"
 type Base {
 	id String primary
@@ -73,7 +73,7 @@ abstract type Base {
 type Derived extends Base {
 	@@index(region)
 }`)
-	anns := schemaType(t, s, "Derived").AllAnnotationsSlice()
+	anns := slices.Collect(schemaType(t, s, "Derived").AllAnnotations())
 	if len(anns) != 2 {
 		t.Fatalf("want 2 @@index, got %d", len(anns))
 	}

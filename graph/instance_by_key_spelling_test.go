@@ -1,11 +1,13 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -41,10 +43,10 @@ func TestInstanceByKey_AnySpellingOnEveryPath(t *testing.T) {
 
 	paths := []struct {
 		name string
-		snap *graph.Snapshot
+		snap graph.Snapshot
 	}{{"Add", built}, {"RebuildSnapshot", rebuilt}}
 	for _, path := range paths {
-		own := path.snap.InstancesOf(runID)[0].PrimaryKey().String()
+		own := slices.Collect(path.snap.InstancesOf(runID))[0].PrimaryKey().String()
 		spellings := []struct {
 			name, key string
 		}{
@@ -82,7 +84,7 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 		t.Fatalf("add: %s", r)
 	}
 	tag := instance.NewValidInstance("Tag", tagID, immutable.WrapKey([]any{"t1"}),
-		immutable.WrapProperties(map[string]any{"name": "t1"}), nil, nil, nil)
+		immutable.WrapProperties(map[string]any{"name": "t1"}), nil, nil, location.Provenance{})
 	if r := g.Add(t.Context(), tag); !r.OK() {
 		t.Fatalf("add tag: %s", r)
 	}
@@ -92,7 +94,7 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 		if _, ok := snap.InstanceByKey(id, snapshotSomeKeyOf(t, snap, id)); !ok {
 			t.Fatalf("type %s has no indexed instance; the unparseable arm would return at the typeIndex guard", id)
 		}
-		if inst, ok := snap.InstanceByKey(id, "not an address"); ok || inst != nil {
+		if inst, ok := snap.InstanceByKey(id, "not an address"); ok || !inst.IsZero() {
 			t.Errorf("InstanceByKey(%s, unparseable) = %v, %v; want nil, false", id, inst, ok)
 		}
 	}
@@ -100,9 +102,9 @@ func TestInstanceByKey_RefusedAddressMisses(t *testing.T) {
 
 // snapshotSomeKeyOf returns the rendered key of one indexed instance of id,
 // which a lookup must find. It fails the test when the type has none.
-func snapshotSomeKeyOf(t *testing.T, snap *graph.Snapshot, id schema.TypeID) string {
+func snapshotSomeKeyOf(t *testing.T, snap graph.Snapshot, id schema.TypeID) string {
 	t.Helper()
-	insts := snap.InstancesOf(id)
+	insts := slices.Collect(snap.InstancesOf(id))
 	if len(insts) == 0 {
 		t.Fatalf("type %s holds no instance", id)
 	}

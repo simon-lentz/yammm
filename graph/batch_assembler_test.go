@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -23,7 +24,7 @@ import (
 // batchAssemblerTestSchema returns a schema with Person + Company plus an
 // optional employer association so we can exercise both happy-path adds and
 // (with the required-association variant below) Check-failure paths.
-func batchAssemblerTestSchema(t *testing.T) *schema.Schema {
+func batchAssemblerTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("batchassembler").
@@ -48,7 +49,7 @@ func batchAssemblerTestSchema(t *testing.T) *schema.Schema {
 // with `employer` declared as a REQUIRED association — used by the
 // FinalizeError test to deterministically trigger an unresolved-required
 // failure on Check.
-func batchAssemblerRequiredEmployerSchema(t *testing.T) *schema.Schema {
+func batchAssemblerRequiredEmployerSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("batchassembler_required").
@@ -101,9 +102,9 @@ func personRawWithEmployer(id, name, employerID string) instance.RawInstance {
 	}
 }
 
-// mustValidPerson constructs a pre-validated Person *ValidInstance using
+// mustValidPerson constructs a pre-validated Person ValidInstance using
 // the public instance constructor — useful for AddValid tests.
-func mustValidPerson(t *testing.T, s *schema.Schema, id, name string) *instance.ValidInstance {
+func mustValidPerson(t *testing.T, s schema.Schema, id, name string) instance.ValidInstance {
 	t.Helper()
 	typ, ok := s.Type("Person")
 	if !ok {
@@ -114,7 +115,7 @@ func mustValidPerson(t *testing.T, s *schema.Schema, id, name string) *instance.
 		typ.ID(),
 		immutable.WrapKey([]any{id}),
 		immutable.WrapProperties(map[string]any{"id": id, "name": name}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 }
 
@@ -168,7 +169,7 @@ func TestBatchAssembler_HappyPath_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("assembler: Finalize: %v", err)
 	}
-	if res.Snapshot == nil {
+	if res.Snapshot.IsZero() {
 		t.Fatal("assembler: res.Snapshot is nil")
 	}
 	if res.Snapshot.Diagnostics().HasErrors() {
@@ -292,7 +293,7 @@ func TestBatchAssembler_AddValidOfANilNamesARefusedValue(t *testing.T) {
 	s := batchAssemblerTestSchema(t)
 	valid, vRes := instance.NewValidator(s).ValidateOne(t.Context(), "Person",
 		instance.RawInstance{Properties: map[string]any{"id": "p1", "name": instance.Refused{Value: 7}}})
-	if valid != nil || !vRes.OK() {
+	if !valid.IsZero() || !vRes.OK() {
 		t.Fatalf("ValidateOne = %v, %s; want nil and no issue", valid, vRes)
 	}
 	ba := graph.NewBatchAssembler(t.Context(), s)
@@ -323,7 +324,7 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 	// LOAD-BEARING: res.Snapshot must be non-nil even on the error path —
 	// the FinalizeResult struct exists to encode this contract at the type
 	// level so callers do not have to gate on `err == nil`.
-	if res.Snapshot == nil {
+	if res.Snapshot.IsZero() {
 		t.Fatal("res.Snapshot is nil on Finalize error path; contract violated")
 	}
 
@@ -353,7 +354,7 @@ func TestBatchAssembler_FinalizeError_FinalizeResultContract(t *testing.T) {
 		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ce.Result.String())
 	}
 	// The Person is still inspectable in the partial snapshot.
-	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != 1 {
+	if persons := slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != 1 {
 		t.Errorf("expected 1 Person in partial snapshot, got %d", len(persons))
 	}
 }
@@ -378,7 +379,7 @@ func TestBatchAssembler_FinalizeSuccess_CarriesCleanDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if res.Snapshot == nil {
+	if res.Snapshot.IsZero() {
 		t.Fatal("res.Snapshot is nil")
 	}
 	// Diagnostics surface is reachable and clean for the happy path.
@@ -439,7 +440,7 @@ func TestBatchAssembler_AddValid_BypassesValidator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != 1 {
+	if persons := slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != 1 {
 		t.Errorf("expected 1 Person, got %d", len(persons))
 	}
 }
@@ -519,7 +520,7 @@ func TestBatchAssembler_Concurrent_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != expected {
+	if persons := slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
@@ -600,7 +601,7 @@ func TestBatchAssembler_Concurrent_AddVsFinalize_Ordering(t *testing.T) {
 
 			// Every key reported as a successful Add must be
 			// in the final snapshot.
-			persons := finalRes.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))
+			persons := slices.Collect(finalRes.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))
 			snapKeys := make(map[string]struct{}, len(persons))
 			for _, p := range persons {
 				snapKeys[p.PrimaryKey().String()] = struct{}{}
@@ -662,7 +663,7 @@ func TestBatchAssembler_Concurrent_AddValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if persons := res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")); len(persons) != expected {
+	if persons := slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); len(persons) != expected {
 		t.Errorf("snapshot Person count: got %d, want %d", len(persons), expected)
 	}
 }
@@ -682,7 +683,7 @@ type seedRecord struct {
 // returns its snapshot WITHOUT running Check — the shape of a mid-batch
 // checkpoint, which may legitimately carry unresolved required references
 // that a later resumed batch completes.
-func buildSeedSnapshot(t *testing.T, s *schema.Schema, records ...seedRecord) *graph.Snapshot {
+func buildSeedSnapshot(t *testing.T, s schema.Schema, records ...seedRecord) graph.Snapshot {
 	t.Helper()
 	ctx := t.Context()
 	g := graph.New(s)
@@ -711,8 +712,8 @@ func TestNewBatchAssemblerFromSnapshot_NilPanics(t *testing.T) {
 		name string
 		call func()
 	}{
-		{"nil_schema", func() { graph.NewBatchAssemblerFromSnapshot(t.Context(), nil, seed) }},
-		{"nil_snapshot", func() { graph.NewBatchAssemblerFromSnapshot(t.Context(), s, nil) }},
+		{"nil_schema", func() { graph.NewBatchAssemblerFromSnapshot(t.Context(), schema.Schema{}, seed) }},
+		{"nil_snapshot", func() { graph.NewBatchAssemblerFromSnapshot(t.Context(), s, graph.Snapshot{}) }},
 		{"nil_context", func() { graph.NewBatchAssemblerFromSnapshot(nil, s, seed) }}, //nolint:staticcheck // testing nil context panic
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -754,13 +755,13 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 2 {
+	if got := len(slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))); got != 2 {
 		t.Errorf("Person count: got %d, want 2 (seeded alice + new bob)", got)
 	}
-	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Company"))); got != 1 {
+	if got := len(slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Company")))); got != 1 {
 		t.Errorf("Company count: got %d, want 1", got)
 	}
-	edges := res.Snapshot.Edges()
+	edges := slices.Collect(res.Snapshot.Edges())
 	if len(edges) != 1 {
 		t.Fatalf("edge count: got %d, want 1", len(edges))
 	}
@@ -772,10 +773,10 @@ func TestNewBatchAssemblerFromSnapshot_ResumeAddsOnTopOfSeed(t *testing.T) {
 	}
 
 	// The source snapshot is independent of the resumed batch.
-	if got := len(seed.InstancesOf(mustTypeID(t, s, "Person"))); got != 1 {
+	if got := len(slices.Collect(seed.InstancesOf(mustTypeID(t, s, "Person")))); got != 1 {
 		t.Errorf("seed Person count mutated: got %d, want 1", got)
 	}
-	if got := len(seed.Edges()); got != 0 {
+	if got := len(slices.Collect(seed.Edges())); got != 0 {
 		t.Errorf("seed edge count mutated: got %d, want 0", got)
 	}
 }
@@ -795,7 +796,7 @@ func TestNewBatchAssemblerFromSnapshot_ResolvesSeededUnresolved(t *testing.T) {
 		t, s,
 		seedRecord{"Person", personRawWithEmployer("alice", "Alice", "acme")},
 	)
-	if got := len(seed.Unresolved()); got != 1 {
+	if got := len(slices.Collect(seed.Unresolved())); got != 1 {
 		t.Fatalf("seed unresolved: got %d, want 1", got)
 	}
 
@@ -808,10 +809,10 @@ func TestNewBatchAssemblerFromSnapshot_ResolvesSeededUnresolved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v (the resumed batch supplied the missing target)", err)
 	}
-	if got := len(res.Snapshot.Edges()); got != 1 {
+	if got := len(slices.Collect(res.Snapshot.Edges())); got != 1 {
 		t.Errorf("edge count: got %d, want 1 (seeded pending edge resolved by new Add)", got)
 	}
-	if got := len(res.Snapshot.Unresolved()); got != 0 {
+	if got := len(slices.Collect(res.Snapshot.Unresolved())); got != 0 {
 		t.Errorf("unresolved count: got %d, want 0", got)
 	}
 }
@@ -853,10 +854,10 @@ func TestNewBatchAssemblerFromSnapshot_SeededUnresolvedFailsFinalize(t *testing.
 	if !foundUnresolved {
 		t.Errorf("expected E_UNRESOLVED_REQUIRED in error result; got: %s", ce.Result.String())
 	}
-	if res.Snapshot == nil {
+	if res.Snapshot.IsZero() {
 		t.Fatal("res.Snapshot is nil on Finalize error path; contract violated")
 	}
-	if got := len(res.Snapshot.Unresolved()); got != 1 {
+	if got := len(slices.Collect(res.Snapshot.Unresolved())); got != 1 {
 		t.Errorf("unresolved count on partial snapshot: got %d, want 1", got)
 	}
 }
@@ -908,10 +909,10 @@ func TestNewBatchAssemblerFromSnapshot_DuplicateAgainstSeeded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
-	if got := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 1 {
+	if got := len(slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))); got != 1 {
 		t.Errorf("Person count: got %d, want 1 (seeded alice only)", got)
 	}
-	if got := len(res.Snapshot.Duplicates()); got != 1 {
+	if got := len(slices.Collect(res.Snapshot.Duplicates())); got != 1 {
 		t.Errorf("Duplicates count: got %d, want 1", got)
 	}
 	// The seed contributed no construction diagnostics; the duplicate from
@@ -1039,13 +1040,13 @@ func TestNewBatchAssemblerFromSnapshot_YSRoundTripResume(t *testing.T) {
 		t.Fatalf("run 2: Finalize: %v", err)
 	}
 
-	if got := len(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); got != 2 {
+	if got := len(slices.Collect(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))); got != 2 {
 		t.Errorf("Person count: got %d, want 2", got)
 	}
-	if got := len(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Company"))); got != 1 {
+	if got := len(slices.Collect(res2.Snapshot.InstancesOf(mustTypeID(t, s, "Company")))); got != 1 {
 		t.Errorf("Company count: got %d, want 1", got)
 	}
-	if got := len(res2.Snapshot.Edges()); got != 2 {
+	if got := len(slices.Collect(res2.Snapshot.Edges())); got != 2 {
 		t.Errorf("edge count: got %d, want 2 (alice edge survives the round trip; bob edge resolves against the loaded instance)", got)
 	}
 
@@ -1135,10 +1136,10 @@ func TestBatchAssembler_Finalize_CancellationIsNotMemoized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the retry could not salvage the batch: %v", err)
 	}
-	if res.Snapshot == nil {
+	if res.Snapshot.IsZero() {
 		t.Fatal("res.Snapshot is nil")
 	}
-	if n := len(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person"))); n != 1 {
+	if n := len(slices.Collect(res.Snapshot.InstancesOf(mustTypeID(t, s, "Person")))); n != 1 {
 		t.Errorf("salvaged snapshot holds %d Person instances, want 1", n)
 	}
 

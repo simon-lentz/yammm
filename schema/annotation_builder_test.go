@@ -21,8 +21,8 @@ func TestAnnotation_Builder_ValidAnnotationsExposed(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("build should succeed, got: %v", res)
 	}
-	if s == nil {
-		t.Fatal("nil schema")
+	if s.IsZero() {
+		t.Fatal("zero schema")
 	}
 	ty := schemaType(t, s, "Trade")
 	if _, ok := typeProperty(t, ty, "state").Annotation("index"); !ok {
@@ -50,8 +50,8 @@ func TestAnnotation_Builder_BuildIsRepeatable(t *testing.T) {
 		if res.HasErrors() {
 			t.Fatalf("%s build should succeed, got: %v", label, res)
 		}
-		if s == nil {
-			t.Fatalf("%s build returned a nil schema", label)
+		if s.IsZero() {
+			t.Fatalf("%s build returned a zero schema", label)
 		}
 		if got := propAnnNames(typeProperty(t, schemaType(t, s, "Trade"), "origin")); len(got) != 1 || got[0] != "writeOnce" {
 			t.Errorf("%s build: origin annotations = %v, want [writeOnce]", label, got)

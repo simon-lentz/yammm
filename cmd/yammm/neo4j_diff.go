@@ -185,7 +185,7 @@ func fetchRemoteState(ctx context.Context, run cli.QueryRunner, database string,
 	// Fetch actual indexes BEFORE diffing constraints, and do it whatever
 	// --indexes says: index and constraint names share one namespace, so the
 	// CONSTRAINT diff needs the index names to know whether a CREATE CONSTRAINT
-	// would silently no-op. --indexes=false opts out of comparing indexes, not
+	// would be refused. --indexes=false opts out of comparing indexes, not
 	// out of classifying constraints accurately — reading it as the latter makes
 	// the same declaration print as an unfixable Create under one flag and
 	// actionable drift under the other. On a server that cannot report indexes

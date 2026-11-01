@@ -11,38 +11,38 @@ import (
 )
 
 // importInto and seedInto are the two import constructors.
-func importInto(s *schema.Schema, snap *graph.Snapshot) (*graph.Graph, diag.Result) {
+func importInto(s schema.Schema, snap graph.Snapshot) (*graph.Graph, diag.Result) {
 	return graph.NewFromSnapshot(s, snap)
 }
 
-func seedInto(ctx context.Context, s *schema.Schema, snap *graph.Snapshot) (*graph.BatchAssembler, diag.Result) {
+func seedInto(ctx context.Context, s schema.Schema, snap graph.Snapshot) (*graph.BatchAssembler, diag.Result) {
 	return graph.NewBatchAssemblerFromSnapshot(ctx, s, snap)
 }
 
 // partsOf restates snap as the parts RebuildSnapshot takes.
-func partsOf(t *testing.T, snap *graph.Snapshot) graph.SnapshotParts {
+func partsOf(t *testing.T, snap graph.Snapshot) graph.SnapshotParts {
 	t.Helper()
 	parts := graph.SnapshotParts{Types: snap.Types()}
 	for inst := range snap.AllInstances() {
 		parts.Instances = append(parts.Instances, instanceParts(inst))
 	}
-	for _, e := range snap.Edges() {
+	for e := range snap.Edges() {
 		parts.Edges = append(parts.Edges, graph.EdgeParts{
 			Relation: e.Relation(), SourceType: e.Source().TypeID(), SourceKey: e.Source().PrimaryKey(),
 			TargetKey: e.Target().PrimaryKey(), Properties: e.Properties(),
 		})
 	}
-	for _, d := range snap.Duplicates() {
+	for d := range snap.Duplicates() {
 		dp := graph.DuplicateParts{
 			Instance: instanceParts(d.Instance()),
 			Relation: d.Relation(),
 		}
-		if d.Parent() != nil {
+		if !d.Parent().IsZero() {
 			dp.ParentType, dp.ParentKey = d.Parent().TypeID(), d.Parent().PrimaryKey()
 		}
 		parts.Duplicates = append(parts.Duplicates, dp)
 	}
-	for _, u := range snap.Unresolved() {
+	for u := range snap.Unresolved() {
 		var key immutable.Key
 		if u.TargetKey() != "" {
 			vals, err := graph.ParseKey(u.TargetKey())
@@ -59,13 +59,13 @@ func partsOf(t *testing.T, snap *graph.Snapshot) graph.SnapshotParts {
 	return parts
 }
 
-func instanceParts(inst *graph.Instance) graph.InstanceParts {
+func instanceParts(inst graph.Instance) graph.InstanceParts {
 	ip := graph.InstanceParts{TypeID: inst.TypeID(), PrimaryKey: inst.PrimaryKey(), Properties: inst.Properties()}
 	for _, rel := range inst.ComposedRelations() {
 		if ip.Composed == nil {
 			ip.Composed = map[string][]graph.InstanceParts{}
 		}
-		for _, child := range inst.Composed(rel) {
+		for child := range inst.Composed(rel) {
 			ip.Composed[rel] = append(ip.Composed[rel], instanceParts(child))
 		}
 	}

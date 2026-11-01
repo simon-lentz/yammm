@@ -51,13 +51,15 @@ import (
 //     normalised to midnight UTC: a date carries no time of day, and the driver
 //     derives its day number by a division that truncates toward zero, so a
 //     pre-1970 instant carrying a clock would land a day late.
-//   - Every other (non-transforming) kind is already driver-native and passes
-//     through unchanged, save a map and a value at a List whose element is a
-//     collection, each refused below.
+//   - Every other (non-transforming) kind passes through unchanged, save a map
+//     and a value at a List whose element is a collection, each refused below.
+//     Coerce does not ask whether the driver takes such a value: the driver
+//     refuses a uuid.UUID, which only the write path renders, and a uint64 past
+//     int64, among others.
 //
 // A map is refused under every constraint, whatever its key and element types:
-// Neo4j stores no map as a property value. The map is judged by its Go type
-// alone, as every value Coerce reads is.
+// Neo4j stores no map as a property value. A nil map holds no value and returns
+// nil.
 //
 // The four transforming kinds above are strict: they error on a value they can
 // neither pass through as already-native nor repair, rather than handing a
@@ -65,9 +67,9 @@ import (
 // which must build a homogeneous typed slice and errors on a wrong-typed element.
 // The non-transforming kinds stay lenient, save a map, refused above, and a
 // List whose element is a collection, a type Neo4j cannot store, where a value
-// that holds one is refused: a correct value of any other is already
-// driver-native, so there is nothing to repair or reject, and instance
-// validation is its type authority. On the validated node path a transforming
+// that holds one is refused: a correct value of any other needs no repair here,
+// since the write path's heldForm renders what the driver does not take (a
+// uuid.UUID at a UUID), and instance validation is its type authority. On the validated node path a transforming
 // kind only ever receives the types its strict set accepts (Float: float64;
 // Integer: int64; Timestamp and Date: the string the validator stores), so
 // strictness fires only on a value no validator refused at Error: a hand-built
@@ -511,9 +513,9 @@ func paramKey(prefix, name string) string {
 // properties live nested under row.props. A caller whose own shape carries
 // both is responsible for describing the merge keys itself and merging the two
 // maps.
-func ParamTypesForType(t *schema.Type, prefix string) ParamTypes {
-	if t == nil {
-		// Nil-guarded like [ImmutableKeysFor], its sibling: both take a schema
+func ParamTypesForType(t schema.Type, prefix string) ParamTypes {
+	if t.IsZero() {
+		// Zero-guarded like [ImmutableKeysFor], its sibling: both take a schema
 		// type a caller may not hold, and one panicking where the other returns
 		// an empty answer is a difference no caller can predict.
 		return ParamTypes{}

@@ -25,9 +25,9 @@ func orderingTypeID(name string) schema.TypeID {
 	return schema.NewTypeID(location.MustNewSourceID("test://ordering.yammm"), name)
 }
 
-func orderingInstance(t *testing.T, name, key string) *Instance {
+func orderingInstance(t *testing.T, name, key string) Instance {
 	t.Helper()
-	return rebuildInstance(tagForms(nil), InstanceParts{
+	return rebuildInstance(tagForms(schema.Schema{}), InstanceParts{
 		TypeID:     orderingTypeID(name),
 		PrimaryKey: immutable.WrapKey([]any{key}),
 		Properties: immutable.WrapProperties(map[string]any{"id": key}),
@@ -182,7 +182,7 @@ func TestCompareDuplicates_RootAndComposedDoNotCollide(t *testing.T) {
 	conflict := orderingInstance(t, "Child", "c1")
 	parent := orderingInstance(t, "Parent", "p1")
 
-	root := newDuplicate(inst, conflict, nil, "", diag.Issue{})
+	root := newDuplicate(inst, conflict, Instance{}, "", diag.Issue{})
 	composed := newDuplicate(inst, conflict, parent, "CHILDREN", diag.Issue{})
 
 	if compareDuplicates(root, composed) == 0 {
@@ -198,8 +198,8 @@ func TestCompareDuplicates_RootAndComposedDoNotCollide(t *testing.T) {
 func TestCompareDuplicates_PropertiesDiscriminate(t *testing.T) {
 	t.Parallel()
 
-	withName := func(name string) *Instance {
-		return rebuildInstance(tagForms(nil), InstanceParts{
+	withName := func(name string) Instance {
+		return rebuildInstance(tagForms(schema.Schema{}), InstanceParts{
 			TypeID:     orderingTypeID("Person"),
 			PrimaryKey: immutable.WrapKey([]any{"p1"}),
 			Properties: immutable.WrapProperties(map[string]any{"id": "p1", "name": name}),
@@ -207,8 +207,8 @@ func TestCompareDuplicates_PropertiesDiscriminate(t *testing.T) {
 	}
 	conflict := withName("first")
 
-	a := newDuplicate(withName("alice"), conflict, nil, "", diag.Issue{})
-	b := newDuplicate(withName("bob"), conflict, nil, "", diag.Issue{})
+	a := newDuplicate(withName("alice"), conflict, Instance{}, "", diag.Issue{})
+	b := newDuplicate(withName("bob"), conflict, Instance{}, "", diag.Issue{})
 
 	if compareDuplicates(a, b) == 0 {
 		t.Error("two rejections differing only in the instance payload compare equal, so their order on the wire is the input order")
@@ -247,7 +247,7 @@ func TestCompareProps_LengthArm(t *testing.T) {
 func TestCompareDuplicates_ProvenanceDiscriminates(t *testing.T) {
 	t.Parallel()
 
-	at := func(line int) *Instance {
+	at := func(line int) Instance {
 		return newInstance("Person", orderingTypeID("Person"),
 			immutable.WrapKey([]any{"p1"}),
 			immutable.WrapProperties(map[string]any{"id": "p1"}),
@@ -257,8 +257,8 @@ func TestCompareDuplicates_ProvenanceDiscriminates(t *testing.T) {
 	}
 	conflict := at(1)
 
-	a := newDuplicate(at(7), conflict, nil, "", diag.Issue{})
-	b := newDuplicate(at(9), conflict, nil, "", diag.Issue{})
+	a := newDuplicate(at(7), conflict, Instance{}, "", diag.Issue{})
+	b := newDuplicate(at(9), conflict, Instance{}, "", diag.Issue{})
 
 	if compareDuplicates(a, b) == 0 {
 		t.Error("two rejections differing only in source position compare equal, so their order on the wire is the input order")

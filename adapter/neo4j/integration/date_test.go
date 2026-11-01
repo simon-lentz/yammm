@@ -25,7 +25,7 @@ func TestCoerceDate_ServerStoresTheWallClockDate(t *testing.T) {
 
 	s, res := schema.LoadString(ctx,
 		"schema \"dt\"\n\ntype Ev {\n\tid String primary\n\ton_date Date\n}\n", "dt.yammm")
-	if s == nil {
+	if s.IsZero() {
 		t.Fatalf("load schema: %s", res)
 	}
 	typ, ok := s.Type("Ev")

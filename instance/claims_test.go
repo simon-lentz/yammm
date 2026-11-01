@@ -9,6 +9,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/schema"
 )
 
 const claimsSchema = `schema "c"
@@ -47,21 +48,26 @@ func TestClaimKeys_DecidesEachKeyAsTheValidatorDoes(t *testing.T) {
 
 	c := instance.ClaimKeys(person, []string{"id", "name", "NAME", "AA", "Aa", "BB", "Works_At", "PETS", "zzz"}, false)
 	for key, want := range map[string]string{"id": "id", "name": "name", "BB": "bb"} {
-		if p := c.Property(key); p == nil || p.Name() != want {
+		if p, ok := c.Property(key); !ok || p.Name() != want {
 			t.Errorf("Property(%q) = %v, want %s", key, p, want)
 		}
 	}
 	for _, key := range []string{"NAME", "AA", "Aa", "zzz"} {
-		if p := c.Property(key); p != nil {
-			t.Errorf("Property(%q) = %s, want nil: shadowed, colliding or unknown", key, p.Name())
+		if p, ok := c.Property(key); ok || !p.IsZero() {
+			t.Errorf("Property(%q) = %s, %v, want no claim: shadowed, colliding or unknown", key, p.Name(), ok)
 		}
 	}
-	if c.Relation("Works_At") != works || c.Relation("PETS") != pets {
+	gotWorks, okWorks := c.Relation("Works_At")
+	gotPets, okPets := c.Relation("PETS")
+	if !okWorks || !okPets || gotWorks != works || gotPets != pets {
 		t.Errorf("folded relation keys do not claim their relations")
 	}
 
 	strict := instance.ClaimKeys(person, []string{"id", "BB", "Works_At"}, true)
-	if strict.Property("BB") != nil || strict.Relation("Works_At") != nil || strict.Property("id") == nil {
+	_, foldedProperty := strict.Property("BB")
+	_, foldedRelation := strict.Relation("Works_At")
+	_, exact := strict.Property("id")
+	if foldedProperty || foldedRelation || !exact {
 		t.Errorf("under strict names only the exact key claims")
 	}
 }
@@ -77,23 +83,27 @@ func TestClaimEdgeKeys_DecidesEachKeyAsTheValidatorDoes(t *testing.T) {
 	keys := []string{"_target_id", "_TARGET_ID", "TITLE", "note", "zzz"}
 
 	c := instance.ClaimEdgeKeys(works, company, keys, false)
-	if k := c.Key("_target_id"); k == nil || k.Name() != "id" {
+	if k, ok := c.Key("_target_id"); !ok || k.Name() != "id" {
 		t.Errorf("Key(_target_id) = %v, want id", k)
 	}
-	if c.Key("_TARGET_ID") != nil || c.Property("_TARGET_ID") != nil {
+	_, shadowedKey := c.Key("_TARGET_ID")
+	_, shadowedProperty := c.Property("_TARGET_ID")
+	if shadowedKey || shadowedProperty {
 		t.Errorf("a key shadowed by an exact one claims something")
 	}
-	if p := c.Property("TITLE"); p == nil || p.Name() != "title" {
+	if p, ok := c.Property("TITLE"); !ok || p.Name() != "title" {
 		t.Errorf("Property(TITLE) = %v, want title", p)
 	}
-	if c.Property("zzz") != nil || c.Key("zzz") != nil {
+	_, unknownProperty := c.Property("zzz")
+	_, unknownKey := c.Key("zzz")
+	if unknownProperty || unknownKey {
 		t.Errorf("an unknown key claims something")
 	}
 
-	if instance.ClaimEdgeKeys(works, nil, keys, false).Key("_target_id") != nil {
+	if _, ok := instance.ClaimEdgeKeys(works, schema.Type{}, keys, false).Key("_target_id"); ok {
 		t.Errorf("with no target a key claims a foreign-key field")
 	}
-	if instance.ClaimEdgeKeys(works, company, keys, true).Property("TITLE") != nil {
+	if _, ok := instance.ClaimEdgeKeys(works, company, keys, true).Property("TITLE"); ok {
 		t.Errorf("under strict names a folded edge property claims")
 	}
 }

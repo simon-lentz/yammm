@@ -46,7 +46,7 @@ func WithClassMembers(include bool) Option {
 // reports a generator bug, never broken Markdown. The schema does not need
 // source backing: on a Builder-built schema, an invariant is its message line
 // and its doc comment.
-func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
+func Marshal(s schema.Schema, opts ...Option) ([]byte, error) {
 	cfg := config{classDiagram: true, classMembers: true}
 	for _, o := range opts {
 		o(&cfg)
@@ -147,12 +147,12 @@ const (
 type outlineEntry struct {
 	kind   outlineKind
 	level  int
-	text   string         // the heading's text as rendered, which the anchor is derived from
-	md     string         // the heading's Markdown source, with inline syntax escaped
-	anchor string         // allocated by anchorAllocator in document order
-	offset int            // where emitDocument wrote the heading line, for the self-check
-	schema *schema.Schema // kindDataTypes, kindImportedSchema
-	typ    *schema.Type   // kindTypeSection
+	text   string        // the heading's text as rendered, which the anchor is derived from
+	md     string        // the heading's Markdown source, with inline syntax escaped
+	anchor string        // allocated by anchorAllocator in document order
+	offset int           // where emitDocument wrote the heading line, for the self-check
+	schema schema.Schema // kindDataTypes, kindImportedSchema
+	typ    schema.Type   // kindTypeSection
 }
 
 // emitDocument writes the document by walking the outline: title, schema
@@ -184,7 +184,7 @@ func (g *generator) emitDocument() {
 				hashes = "###"
 			}
 			g.buf.WriteString(hashes + " " + h.md + "\n\n")
-			g.writeDataTypeTable(h.schema.DataTypesSlice())
+			g.writeDataTypeTable(slices.Collect(h.schema.DataTypes()))
 		case kindImportedSchema:
 			g.buf.WriteString("## " + h.md + "\n")
 			if doc := h.schema.Documentation(); doc != "" {
@@ -198,7 +198,7 @@ func (g *generator) emitDocument() {
 
 // writeDataTypeTable writes the Name | Definition | Description table over a
 // schema's named DataTypes.
-func (g *generator) writeDataTypeTable(dts []*schema.DataType) {
+func (g *generator) writeDataTypeTable(dts []schema.DataType) {
 	tw := g.newTable(0, "Name", "Definition", "Description")
 	for _, dt := range dts {
 		tw.row(codeCellOf(dt.Name()), codeCellOf(dt.Constraint().String()), g.descriptionCellOf(dt.Documentation()))
@@ -401,7 +401,7 @@ func (tw *tableWriter) write(cells []tableCell) {
 // document: its display text, the anchor its heading takes, and its Mermaid
 // class id.
 type typeEntry struct {
-	typ       *schema.Type
+	typ       schema.Type
 	display   string // what a reader sees: see displayName
 	displayMD string // display with inline Markdown syntax escaped
 	anchor    string
@@ -412,12 +412,12 @@ type typeEntry struct {
 // state the emitters and the self-check share.
 type generator struct {
 	buf        bytes.Buffer
-	entry      *schema.Schema
-	closure    []*schema.Schema
-	declaredIn map[schema.TypeID]*schema.Schema // each type's declaring schema
+	entry      schema.Schema
+	closure    []schema.Schema
+	declaredIn map[schema.TypeID]schema.Schema // each type's declaring schema
 	types      map[schema.TypeID]*typeEntry
 	outline    []outlineEntry
-	sources    *schema.Sources
+	sources    schema.Sources
 	contents   map[location.SourceID][]byte // each source's content, read once
 	cfg        config
 
@@ -441,11 +441,11 @@ type generator struct {
 // anchor. An anchor is allocated as GitHub allocates it — the heading's slug,
 // suffixed -1, -2, … when an earlier heading took it — so two headings that
 // slug alike each keep a working link and no schema is refused for its names.
-func newGenerator(s *schema.Schema, cfg config) *generator {
+func newGenerator(s schema.Schema, cfg config) *generator {
 	g := &generator{
 		entry:      s,
-		closure:    s.Closure(),
-		declaredIn: map[schema.TypeID]*schema.Schema{},
+		closure:    slices.Collect(s.Closure()),
+		declaredIn: map[schema.TypeID]schema.Schema{},
 		types:      make(map[schema.TypeID]*typeEntry),
 		sources:    s.Sources(),
 		contents:   map[location.SourceID][]byte{},
@@ -456,7 +456,7 @@ func newGenerator(s *schema.Schema, cfg config) *generator {
 	}
 	mermaidIDs := map[string]bool{}
 	for _, sch := range g.closure {
-		for _, t := range sch.TypesSlice() {
+		for t := range sch.Types() {
 			g.declaredIn[t.ID()] = sch
 			display, displayMD := g.displayName(sch, t)
 			g.types[t.ID()] = &typeEntry{
@@ -476,7 +476,7 @@ func newGenerator(s *schema.Schema, cfg config) *generator {
 // ("alias.Name") for one it imports directly — the name a data file uses —
 // and "Name (schema)" for one it reaches only through another import, which
 // has no name a data file can use and so is never written as a tag.
-func (g *generator) displayName(sch *schema.Schema, t *schema.Type) (string, string) {
+func (g *generator) displayName(sch schema.Schema, t schema.Type) (string, string) {
 	if tag, ok := schema.AddressableTag(g.entry, t.ID()); ok {
 		return tag, escapeInline(tag)
 	}
@@ -519,8 +519,8 @@ func (g *generator) buildOutline() {
 // addSchemaTypes adds one schema's type sections and its data-type table. The
 // entry schema's types sit under a "## Types" heading and its table under
 // "## Data Types"; an imported schema's sit directly under its own heading.
-func (g *generator) addSchemaTypes(add func(outlineEntry), sch *schema.Schema, entry bool) {
-	types := sch.TypesSlice()
+func (g *generator) addSchemaTypes(add func(outlineEntry), sch schema.Schema, entry bool) {
+	types := slices.Collect(sch.Types())
 	if entry && len(types) > 0 {
 		add(outlineEntry{kind: kindTypes, level: 2, text: "Types", md: "Types"})
 	}
@@ -528,7 +528,7 @@ func (g *generator) addSchemaTypes(add func(outlineEntry), sch *schema.Schema, e
 		e := g.types[t.ID()]
 		add(outlineEntry{kind: kindTypeSection, level: 3, text: e.display, md: e.displayMD, typ: t})
 	}
-	if len(sch.DataTypesSlice()) > 0 {
+	if len(slices.Collect(sch.DataTypes())) > 0 {
 		level := 3
 		if entry {
 			level = 2
@@ -584,7 +584,7 @@ func (g *generator) link(e *typeEntry) string {
 // resolving it in the schema that declares t, which is the scope the
 // reference was written in. Returns false when the reference names no type
 // in this document's type map.
-func (g *generator) resolveSuper(t *schema.Type, ref schema.TypeRef) (*typeEntry, bool) {
+func (g *generator) resolveSuper(t schema.Type, ref schema.TypeRef) (*typeEntry, bool) {
 	sch, ok := g.declaredIn[t.ID()]
 	if !ok {
 		return nil, false

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -29,7 +30,7 @@ func (w *failingWriter) Write(p []byte) (int, error) {
 
 // writeToFailingWriter runs WriteSnapshot against a writer that refuses every
 // byte and returns that writer and the error.
-func writeToFailingWriter(t *testing.T, s *schema.Schema, instances map[string][]map[string]any) (*failingWriter, error) {
+func writeToFailingWriter(t *testing.T, s schema.Schema, instances map[string][]map[string]any) (*failingWriter, error) {
 	t.Helper()
 	snap := buildSnapshot(t, s, instances)
 	w := &failingWriter{}
@@ -113,14 +114,14 @@ func TestWriteSnapshot_HeaderFailureIsReported(t *testing.T) {
 
 // A nil snapshot is refused by both write entry points, not only by
 // MarshalSnapshot.
-func TestWriteSnapshot_NilSnapshot(t *testing.T) {
+func TestWriteSnapshot_ZeroSnapshot(t *testing.T) {
 	t.Parallel()
 	err := New().WriteSnapshot(context.Background(), func(string) (io.Writer, error) {
-		t.Fatal("a writer was requested for a nil snapshot")
+		t.Fatal("a writer was requested for a zero snapshot")
 		return io.Discard, nil
-	}, nil)
-	if !errors.Is(err, ErrNilSnapshot) {
-		t.Errorf("error is %v, want ErrNilSnapshot", err)
+	}, graph.Snapshot{})
+	if !errors.Is(err, ErrZeroSnapshot) {
+		t.Errorf("error is %v, want ErrZeroSnapshot", err)
 	}
 }
 

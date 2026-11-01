@@ -140,10 +140,13 @@ func (p Properties) SortedRange() iter.Seq2[string, Value] {
 	}
 }
 
-// Clone returns a deep copy of the properties as a mutable map[string]any.
+// Clone returns a copy of the properties as a mutable map[string]any, deep over
+// wrappers and maps.
 //
 // This is the escape hatch for callers who need to modify values.
-// The returned map is independent of the immutable Properties.
+// A stored pointer, struct or array is shared with the Properties, as the package
+// doc states. The zero Properties
+// clones to nil, and any other Properties clones to a non-nil map.
 func (p Properties) Clone() map[string]any {
 	if p.entries == nil {
 		return nil

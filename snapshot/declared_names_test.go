@@ -36,7 +36,7 @@ part type Piece {
 
 // declaredNamesDocument is a clean .ys holding a value at every position that
 // stores a name, each value a marker an undeclared name can be spliced beside.
-func declaredNamesDocument(t *testing.T) (*schema.Schema, string) {
+func declaredNamesDocument(t *testing.T) (schema.Schema, string) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), declaredNamesSchema, "names.yammm")
 	if res.HasErrors() {
@@ -123,8 +123,8 @@ func TestLoad_RefusesAnUndeclaredNameAtEveryPosition(t *testing.T) {
 				t.Fatalf("mask %b: %s: want %d refusals, got %d:\n%s", mask, label, want, got, r)
 			}
 		}
-		if (want == 0) != (loaded != nil) {
-			t.Fatalf("mask %b: want a snapshot only when no undeclared name, got %v", mask, loaded != nil)
+		if (want == 0) != (!loaded.IsZero()) {
+			t.Fatalf("mask %b: want a snapshot only when no undeclared name, got %v", mask, !loaded.IsZero())
 		}
 	}
 }

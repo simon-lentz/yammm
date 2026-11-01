@@ -30,7 +30,7 @@ func TestRenderKeyValue_APlainScalarAllocatesAsAKeyDoes(t *testing.T) {
 // canonicalizerSchema declares one type whose key canonicalizes and one whose
 // key does not, in a schema that declares a canonicalizing kind, so the
 // canonicalizer is active for both.
-func canonicalizerSchema(t *testing.T) *schema.Schema {
+func canonicalizerSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.NewBuilder().
 		WithName("canon").
@@ -124,10 +124,10 @@ func TestRebuildSnapshot_IndexKeyIsTheCanonicalKey(t *testing.T) {
 	}
 	g := New(s)
 	if r := g.Add(t.Context(), instance.NewValidInstance("Stamped", stamped.ID(), immutable.WrapKey([]any{raw}),
-		immutable.WrapProperties(map[string]any{"observed_at": raw}), nil, nil, nil)); !r.OK() {
+		immutable.WrapProperties(map[string]any{"observed_at": raw}), nil, nil, location.Provenance{})); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	for name, snap := range map[string]*Snapshot{"RebuildSnapshot": rebuilt, "Add": g.Snapshot()} {
+	for name, snap := range map[string]Snapshot{"RebuildSnapshot": rebuilt, "Add": g.Snapshot()} {
 		idx := snap.instanceIndex[stamped.ID()]
 		if len(idx) != 1 {
 			t.Errorf("%s path: index holds %d entries, want 1", name, len(idx))
@@ -145,14 +145,14 @@ func TestRebuildSnapshot_IndexKeyIsTheCanonicalKey(t *testing.T) {
 func TestCompareDuplicates_LoadedRecordsOrderBySourceName(t *testing.T) {
 	id := schema.NewTypeID(location.MustNewSourceID("test://dup.yammm"), "T")
 	key := immutable.WrapKey([]any{"k"})
-	conflict := newInstance("T", id, key, immutable.WrapProperties(nil), nil, false)
+	conflict := newInstance("T", id, key, immutable.WrapProperties(nil), location.Provenance{}, false)
 	// The shape the decoder produces, built here because graph cannot import
 	// snapshot. That a LOADED instance actually has this shape is pinned on the
 	// snapshot side, by TestLoad_ProvenanceSurvivesOnlyWhenTheDocumentHadOne.
-	loaded := func(source string) *Duplicate {
+	loaded := func(source string) Duplicate {
 		prov := location.NewProvenance(source, path.Root(), location.Span{})
 		inst := newInstance("T", id, key, immutable.WrapProperties(nil), prov, false)
-		return newDuplicate(inst, conflict, nil, "", diag.Issue{})
+		return newDuplicate(inst, conflict, Instance{}, "", diag.Issue{})
 	}
 	if c := compareDuplicates(loaded("a.json"), loaded("b.json")); c >= 0 {
 		t.Errorf("a.json against b.json = %d; want negative, ordered by source name", c)

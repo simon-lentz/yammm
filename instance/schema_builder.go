@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/schema"
@@ -24,15 +25,15 @@ import (
 // # Scope of validation
 //
 // Build catches shape errors (schema-structural): property and relation
-// names, association cardinality, and the shape of each edge: a relation that
+// names, an excess target on a (one) relation, and the shape of each edge: a relation that
 // is a composition or declares edge properties, which the builder does not
 // support, an empty target key, a target type that does not exist or has no
 // primary key, and a key whose arity is not the target's.
-// It does NOT catch value-level errors (wrong type, out-of-range, invalid PK);
-// those remain in [Validator.ValidateOne]'s domain. A SchemaBuilder that
+// It does NOT catch value-level errors (wrong type, out-of-range, invalid PK, an
+// absent required property, an invariant); those remain in [Validator.ValidateOne]'s domain. A SchemaBuilder that
 // returns a clean (RawInstance, nil) from Build is guaranteed to pass the
-// shape portion of ValidateOne — property and relation names, and
-// association cardinality. Compositions are not covered: the builder cannot
+// shape portion of ValidateOne — property and relation names, and no
+// excess target on a (one) relation. Compositions are not covered: the builder cannot
 // produce one, so a type with a required composition builds clean here and
 // fails ValidateOne with E_UNRESOLVED_REQUIRED_COMPOSITION.
 //
@@ -40,7 +41,7 @@ import (
 //
 // SchemaBuilder is NOT concurrent-safe; its internal state mutates as
 // methods are called. Construct one builder per goroutine. A single
-// [*schema.Schema] is immutable and may be shared freely across multiple
+// [schema.Schema] is immutable and may be shared freely across multiple
 // builders on multiple goroutines.
 //
 // # One-shot on error
@@ -60,29 +61,29 @@ import (
 // per-call cost and TestSchemaBuilder_SuccessPath_IsAllocationFree the
 // zero-allocation success path.
 type SchemaBuilder struct {
-	schema     *schema.Schema
+	schema     schema.Schema
 	typeName   string // user-provided (may be qualified)
-	typ        *schema.Type
+	typ        schema.Type
 	properties map[string]any
 	edges      map[string]*edgeState
 	errors     []*buildError
 }
 
 type edgeState struct {
-	rel     *schema.Relation
+	rel     schema.Relation
 	targets []map[string]any
 }
 
 // BuilderFor constructs a schema-aware builder for instances of the given
-// type. Returns an error if s is nil, typeName is not in the schema, or the
+// type. Returns an error if s is zero, typeName is not in the schema, or the
 // named type is abstract (abstract types cannot be directly instantiated).
 // Part types are permitted so callers can construct composition children.
 //
 // typeName may be unqualified ("Person") or qualified with an import alias
 // ("cross.Person"), matching the name-resolution rules [Validator] applies.
-func BuilderFor(s *schema.Schema, typeName string) (*SchemaBuilder, error) {
-	if s == nil {
-		return nil, errors.New("instance.BuilderFor: nil schema")
+func BuilderFor(s schema.Schema, typeName string) (*SchemaBuilder, error) {
+	if s.IsZero() {
+		return nil, errors.New("instance.BuilderFor: zero schema")
 	}
 	typ, found := s.ResolveTypeName(typeName)
 	if !found {
@@ -223,7 +224,7 @@ func (b *SchemaBuilder) addEdge(name string, targetKey []any, callerPC uintptr) 
 // properties. Returns a shaped buildError on a missing target type, a keyless
 // target, or a target-key arity mismatch; otherwise nil.
 func (b *SchemaBuilder) buildEdgeTarget(
-	rel *schema.Relation,
+	rel schema.Relation,
 	targetKey []any,
 	callerPC uintptr,
 ) (map[string]any, *buildError) {
@@ -237,7 +238,7 @@ func (b *SchemaBuilder) buildEdgeTarget(
 			callerPC: callerPC,
 		}
 	}
-	pks := targetType.PrimaryKeysSlice()
+	pks := slices.Collect(targetType.PrimaryKeys())
 	if len(pks) == 0 {
 		return nil, &buildError{
 			kind:     kindEdgeShape,
@@ -266,7 +267,7 @@ func (b *SchemaBuilder) buildEdgeTarget(
 }
 
 // edgeStateFor returns the state for rel, creating it on first call.
-func (b *SchemaBuilder) edgeStateFor(rel *schema.Relation) *edgeState {
+func (b *SchemaBuilder) edgeStateFor(rel schema.Relation) *edgeState {
 	st, ok := b.edges[rel.Name()]
 	if !ok {
 		st = &edgeState{rel: rel}
@@ -284,13 +285,15 @@ func (b *SchemaBuilder) edgeStateFor(rel *schema.Relation) *edgeState {
 //
 // On success the returned RawInstance is guaranteed to pass the shape
 // portion of [Validator.ValidateOne]: property names and relation names are
-// schema-valid and association cardinality holds. Compositions are not
+// schema-valid and no (one) relation holds an excess target. Compositions are not
 // covered — the builder cannot produce one — so a type with a required
 // composition builds clean and fails ValidateOne with
 // E_UNRESOLVED_REQUIRED_COMPOSITION. Value-level validation (constraint
-// checks, PK type coercion, foreign-key shape and key-component checks) still
-// happens at ValidateOne time; whether an association's target exists is
-// [graph.Graph.Check]'s question, never the validator's.
+// checks, PK type coercion, foreign-key shape and key-component checks, an
+// absent required property, invariants) still happens at ValidateOne time. No
+// validator asks whether an association's target exists: [graph.Graph.Check]
+// answers for a required association, and [graph.Snapshot.Unresolved] holds an
+// optional one.
 //
 // Error messages include:
 //   - the offending call's target (property or relation name)
@@ -347,6 +350,6 @@ func (b *SchemaBuilder) firstErrorWithCount() error {
 // resolveRelation looks up a relation by name, accepting either the DSL form
 // (e.g. "IN_DISTRICT") or the FieldName form (e.g. "in_district"), the two
 // spellings every name-taking surface of this package accepts.
-func (b *SchemaBuilder) resolveRelation(name string) (*schema.Relation, bool) {
+func (b *SchemaBuilder) resolveRelation(name string) (schema.Relation, bool) {
 	return relationByEitherName(b.typ, name)
 }

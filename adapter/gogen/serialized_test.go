@@ -11,7 +11,7 @@ import (
 )
 
 // loadFixture loads a testdata schema from disk the way Marshal's callers do.
-func loadFixture(t *testing.T, name string) *schema.Schema {
+func loadFixture(t *testing.T, name string) schema.Schema {
 	t.Helper()
 	yammmtest.RequireNoModuleRoot(t, schema.FindModuleRoot)
 	path, err := filepath.Abs(filepath.Join("testdata", name+".yammm"))

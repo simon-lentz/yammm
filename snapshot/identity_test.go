@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ type Basin {
 `),
 }
 
-func loadCrossSchema(t *testing.T) *schema.Schema {
+func loadCrossSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.LoadSourcesWithEntry(t.Context(), crossSchemaSources, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if result.HasErrors() {
@@ -64,7 +65,7 @@ func TestRoundTrip_ComposedChildKeepsTypeIdentity(t *testing.T) {
 	if !ok {
 		t.Fatal("sensor s1 missing after round trip")
 	}
-	children := sensor.Composed("PARTS")
+	children := slices.Collect(sensor.Composed("PARTS"))
 	if len(children) != 1 {
 		t.Fatalf("PARTS children = %d, want 1", len(children))
 	}

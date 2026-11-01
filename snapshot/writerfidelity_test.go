@@ -10,6 +10,7 @@ import (
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
 	"github.com/simon-lentz/yammm/internal/instancetest"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -178,9 +179,9 @@ func TestWriter_RefusesATargetKeyItCannotParse(t *testing.T) {
 	g := graph.New(s)
 	add := g.Add(t.Context(), instance.NewValidInstance("Ref", id, immutable.WrapKey([]any{"r1"}),
 		immutable.WrapProperties(map[string]any{"id": "r1"}),
-		map[string]*instance.ValidEdgeData{"POINTS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		map[string]instance.ValidEdgeData{"POINTS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(nested, immutable.Properties{}),
-		})}, nil, nil))
+		})}, nil, location.Provenance{}))
 	if !add.HasCode(diag.E_GRAPH_INVALID_PK) {
 		t.Errorf("Graph.Add = %s, want the target key refused", add)
 	}

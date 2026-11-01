@@ -134,7 +134,7 @@ type Beacon {
 }
 `
 
-func loadIdentitySchema(t *testing.T) *schema.Schema {
+func loadIdentitySchema(t *testing.T) schema.Schema {
 	t.Helper()
 	sources := map[string][]byte{
 		"entry.yammm": []byte(identityEntrySource),
@@ -151,7 +151,7 @@ func loadIdentitySchema(t *testing.T) *schema.Schema {
 // tagForm re-derives the naming rule from the entry schema's import table.
 // The oracle needs a right-hand side that neither the emitter nor the decoder
 // produced, so this reads the schema directly rather than calling either.
-func tagForm(s *schema.Schema, id schema.TypeID) string {
+func tagForm(s schema.Schema, id schema.TypeID) string {
 	if id.IsZero() || id.SchemaPath() == s.SourceID() {
 		return id.Name()
 	}
@@ -163,7 +163,7 @@ func tagForm(s *schema.Schema, id schema.TypeID) string {
 
 // mustTypeIDIn resolves a type in the entry schema or in one of its imports.
 // alias is empty for a locally declared type.
-func mustTypeIDIn(t *testing.T, s *schema.Schema, alias, name string) schema.TypeID {
+func mustTypeIDIn(t *testing.T, s schema.Schema, alias, name string) schema.TypeID {
 	t.Helper()
 	if alias == "" {
 		typ, ok := s.Type(name)
@@ -177,7 +177,7 @@ func mustTypeIDIn(t *testing.T, s *schema.Schema, alias, name string) schema.Typ
 		t.Fatalf("import alias %q not found", alias)
 	}
 	imported := imp.Schema()
-	if imported == nil {
+	if imported.IsZero() {
 		t.Fatalf("import alias %q resolved to no schema", alias)
 	}
 	typ, ok := imported.Type(name)
@@ -190,14 +190,14 @@ func mustTypeIDIn(t *testing.T, s *schema.Schema, alias, name string) schema.Typ
 // mustTransitiveTypeID resolves a type the entry schema reaches only through
 // an intermediate import, which is the position tagForm renders as a bare
 // name because the entry schema holds no alias for it.
-func mustTransitiveTypeID(t *testing.T, s *schema.Schema, viaAlias, thenAlias, name string) schema.TypeID {
+func mustTransitiveTypeID(t *testing.T, s schema.Schema, viaAlias, thenAlias, name string) schema.TypeID {
 	t.Helper()
 	via, ok := s.ImportByAlias(viaAlias)
 	if !ok {
 		t.Fatalf("import alias %q not found in the entry schema", viaAlias)
 	}
 	mid := via.Schema()
-	if mid == nil {
+	if mid.IsZero() {
 		t.Fatalf("import alias %q resolved to no schema", viaAlias)
 	}
 	then, ok := mid.ImportByAlias(thenAlias)
@@ -205,7 +205,7 @@ func mustTransitiveTypeID(t *testing.T, s *schema.Schema, viaAlias, thenAlias, n
 		t.Fatalf("import alias %q not found in the schema imported as %q", thenAlias, viaAlias)
 	}
 	deep := then.Schema()
-	if deep == nil {
+	if deep.IsZero() {
 		t.Fatalf("import alias %q resolved to no schema", thenAlias)
 	}
 	typ, ok := deep.Type(name)
@@ -217,7 +217,7 @@ func mustTransitiveTypeID(t *testing.T, s *schema.Schema, viaAlias, thenAlias, n
 
 // tidOf resolves a tag form to the identity it renders, so a test written in
 // names reads the same now that the accessors take identities.
-func tidOf(t *testing.T, s *schema.Schema, tag string) schema.TypeID {
+func tidOf(t *testing.T, s schema.Schema, tag string) schema.TypeID {
 	t.Helper()
 	if alias, name, ok := strings.Cut(tag, "."); ok {
 		return mustTypeIDIn(t, s, alias, name)
@@ -229,7 +229,7 @@ func tidOf(t *testing.T, s *schema.Schema, tag string) schema.TypeID {
 // whole snapshot's identities compare as sorted text.
 type identityRecord string
 
-func recordOf(position string, inst *graph.Instance) identityRecord {
+func recordOf(position string, inst graph.Instance) identityRecord {
 	return identityRecord(fmt.Sprintf("%s | name=%s | id=%s | pk=%s | props={%s}",
 		position, inst.TypeName(), inst.TypeID().String(), inst.PrimaryKey().String(),
 		renderProps(inst.Properties().Clone())))
@@ -264,31 +264,31 @@ func renderValue(v any) string {
 // their identities in sorted order. Sorting rather than indexing is deliberate:
 // a defect that moves an instance to a different type key must show up as a
 // changed record, not as a lookup miss the walk skips.
-func collectIdentities(snap *graph.Snapshot) []identityRecord {
+func collectIdentities(snap graph.Snapshot) []identityRecord {
 	var out []identityRecord
-	var walk func(position string, inst *graph.Instance)
-	walk = func(position string, inst *graph.Instance) {
+	var walk func(position string, inst graph.Instance)
+	walk = func(position string, inst graph.Instance) {
 		out = append(out, recordOf(position, inst))
 		for _, rel := range inst.ComposedRelations() {
-			for _, child := range inst.Composed(rel) {
+			for child := range inst.Composed(rel) {
 				walk(position+"/composed["+rel+"]", child)
 			}
 		}
 	}
 	for _, typeName := range snap.Types() {
-		for _, inst := range snap.InstancesOf(typeName) {
+		for inst := range snap.InstancesOf(typeName) {
 			walk("root", inst)
 		}
 	}
-	for _, d := range snap.Duplicates() {
+	for d := range snap.Duplicates() {
 		walk("duplicate", d.Instance())
 		// A conflict re-resolving to a different instance is a loss the
 		// rejected instance's own record cannot show.
 		conflict, parent := "-", "-"
-		if d.Conflict() != nil {
+		if !d.Conflict().IsZero() {
 			conflict = fmt.Sprintf("%s[%s]", d.Conflict().TypeID(), d.Conflict().PrimaryKey())
 		}
-		if d.Parent() != nil {
+		if !d.Parent().IsZero() {
 			parent = fmt.Sprintf("%s[%s]", d.Parent().TypeID(), d.Parent().PrimaryKey())
 		}
 		out = append(out, identityRecord(fmt.Sprintf(
@@ -296,7 +296,7 @@ func collectIdentities(snap *graph.Snapshot) []identityRecord {
 			d.Instance().TypeID(), d.Instance().PrimaryKey(), conflict, parent, d.Relation(),
 		)))
 	}
-	for _, u := range snap.Unresolved() {
+	for u := range snap.Unresolved() {
 		out = append(out, identityRecord(fmt.Sprintf(
 			"unresolved | source=%s | sourceId=%s | sourcePk=%s | rel=%s | target=%s | targetKey=%s | required=%t | reason=%s | props={%s}",
 			u.Source().TypeName(), u.Source().TypeID(), u.Source().PrimaryKey().String(), u.Relation(),
@@ -311,26 +311,26 @@ func collectIdentities(snap *graph.Snapshot) []identityRecord {
 // assertTagFormConsistent checks the naming rule itself, independently of the
 // round trip: a name that disagrees with its identity is wrong even if it
 // survives unchanged.
-func assertTagFormConsistent(t *testing.T, s *schema.Schema, snap *graph.Snapshot, when string) {
+func assertTagFormConsistent(t *testing.T, s schema.Schema, snap graph.Snapshot, when string) {
 	t.Helper()
-	var check func(position string, inst *graph.Instance)
-	check = func(position string, inst *graph.Instance) {
+	var check func(position string, inst graph.Instance)
+	check = func(position string, inst graph.Instance) {
 		if want := tagForm(s, inst.TypeID()); inst.TypeName() != want {
 			t.Errorf("%s: %s pk=%s carries TypeName %q but its TypeID renders as %q",
 				when, position, inst.PrimaryKey().String(), inst.TypeName(), want)
 		}
 		for _, rel := range inst.ComposedRelations() {
-			for _, child := range inst.Composed(rel) {
+			for child := range inst.Composed(rel) {
 				check(position+"/composed["+rel+"]", child)
 			}
 		}
 	}
 	for _, typeName := range snap.Types() {
-		for _, inst := range snap.InstancesOf(typeName) {
+		for inst := range snap.InstancesOf(typeName) {
 			check("root", inst)
 		}
 	}
-	for _, d := range snap.Duplicates() {
+	for d := range snap.Duplicates() {
 		check("duplicate", d.Instance())
 	}
 }
@@ -344,7 +344,7 @@ type identityCase struct {
 	origin string
 	// position describes where the instance sits in the document.
 	position string
-	build    func(t *testing.T, s *schema.Schema) graph.SnapshotParts
+	build    func(t *testing.T, s schema.Schema) graph.SnapshotParts
 }
 
 // partProps names the float property the given schema's Part actually
@@ -363,7 +363,7 @@ func identityCases() []identityCase {
 			name:     "root_local",
 			origin:   "local",
 			position: "root",
-			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+			build: func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				id := mustTypeIDIn(t, s, "", "Anchor")
 				return graph.SnapshotParts{
@@ -382,7 +382,7 @@ func identityCases() []identityCase {
 			name:     "root_imported",
 			origin:   "imported",
 			position: "root",
-			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+			build: func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				id := mustTypeIDIn(t, s, "base", "Basin")
 				return graph.SnapshotParts{
@@ -416,7 +416,7 @@ func identityCases() []identityCase {
 			name:     "composed_collided_name_across_schemas",
 			origin:   "collided",
 			position: "composed",
-			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+			build: func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				parts := composedCase("PARTS", "", "Part", "p3")(t, s)
 				imported := composedCase("IMPORTED", "base", "Part", "p4")(t, s)
@@ -430,7 +430,7 @@ func identityCases() []identityCase {
 			name:     "nested_child_depth_two",
 			origin:   "local",
 			position: "nested",
-			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+			build: func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				siteID := mustTypeIDIn(t, s, "", "Site")
 				partID := mustTypeIDIn(t, s, "", "Part")
@@ -467,7 +467,7 @@ func identityCases() []identityCase {
 			name:     "unresolved_edge_imported_source",
 			origin:   "imported",
 			position: "unresolved",
-			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+			build: func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				id := mustTypeIDIn(t, s, "base", "Basin")
 				return graph.SnapshotParts{
@@ -498,7 +498,7 @@ func identityCases() []identityCase {
 			name:     "composed_transitively_imported",
 			origin:   "transitive",
 			position: "composed",
-			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+			build: func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				siteID := mustTypeIDIn(t, s, "", "Site")
 				basePartID := mustTypeIDIn(t, s, "base", "Part")
@@ -540,7 +540,7 @@ func identityCases() []identityCase {
 			name:     "root_one_name_two_schemas",
 			origin:   "collided",
 			position: "root",
-			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+			build: func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				localID := mustTypeIDIn(t, s, "", "Beacon")
 				importedID := mustTypeIDIn(t, s, "base", "Beacon")
@@ -574,7 +574,7 @@ func identityCases() []identityCase {
 			name:     "duplicate_composed_slot",
 			origin:   "local",
 			position: "duplicate",
-			build: func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+			build: func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 				t.Helper()
 				siteID := mustTypeIDIn(t, s, "", "Site")
 				partID := mustTypeIDIn(t, s, "", "Part")
@@ -618,8 +618,8 @@ func identityCases() []identityCase {
 // composedCase places a child of the named type under the named relation of a
 // Site. When the relation's declared target is not the child's type, the wire
 // must carry an explicit type_id and the decoder must honour it.
-func composedCase(relation, childAlias, childType, childKey string) func(*testing.T, *schema.Schema) graph.SnapshotParts { //nolint:unparam // ingredient kept explicit; the collision is about this name
-	return func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+func composedCase(relation, childAlias, childType, childKey string) func(*testing.T, schema.Schema) graph.SnapshotParts { //nolint:unparam // ingredient kept explicit; the collision is about this name
+	return func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 		t.Helper()
 		siteID := mustTypeIDIn(t, s, "", "Site")
 		childID := mustTypeIDIn(t, s, childAlias, childType)
@@ -643,8 +643,8 @@ func composedCase(relation, childAlias, childType, childKey string) func(*testin
 	}
 }
 
-func duplicateCase(alias, typeName, key string, props map[string]any) func(*testing.T, *schema.Schema) graph.SnapshotParts {
-	return func(t *testing.T, s *schema.Schema) graph.SnapshotParts {
+func duplicateCase(alias, typeName, key string, props map[string]any) func(*testing.T, schema.Schema) graph.SnapshotParts {
+	return func(t *testing.T, s schema.Schema) graph.SnapshotParts {
 		t.Helper()
 		id := mustTypeIDIn(t, s, alias, typeName)
 		inst := graph.InstanceParts{
@@ -698,7 +698,7 @@ func TestIdentityOracle_RoundTripPreservesIdentity(t *testing.T) {
 	}
 	// Illegal rather than untested: a composed child is an instance of its
 	// slot's declared target, and a slot is a composition its parent declares.
-	for name, build := range map[string]func(*testing.T, *schema.Schema) graph.SnapshotParts{
+	for name, build := range map[string]func(*testing.T, schema.Schema) graph.SnapshotParts{
 		"base.Part under PARTS":           composedCase("PARTS", "base", "Part", "p3"),
 		"geo.Part under IMPORTED":         composedCase("IMPORTED", "", "Part", "p4"),
 		"geo.Part under undeclared GHOST": composedCase("GHOST", "", "Part", "p5"),

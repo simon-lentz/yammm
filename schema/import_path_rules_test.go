@@ -44,7 +44,7 @@ func TestImportPath_BackslashIsRefused(t *testing.T) {
 				"schema \"main\"\n\nimport \""+strings.ReplaceAll(row.importPath, `\`, `\\`)+"\" as d\n\ntype T {\n\tid String primary\n}\n")
 
 			s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
-			if s != nil {
+			if !s.IsZero() {
 				t.Fatalf("import %q loaded", row.importPath)
 			}
 			var got []string
@@ -83,7 +83,7 @@ func TestImportPath_BackslashRefusalIsLoadBearing(t *testing.T) {
 		"schema \"main\"\n\nimport \"./a\\\\b\" as d\n\ntype T {\n\tid String primary\n\t--> USES (one) d.Dep\n}\n")
 
 	s, res := schema.Load(t.Context(), entry, schema.WithModuleRoot(root))
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("the import reached the file a\\b.yammm names on this host")
 	}
 	named := false
@@ -110,7 +110,7 @@ func TestBuilderImportPath_BackslashIsRefusedOnThePathRoute(t *testing.T) {
 	}
 	dep, depRes := schema.NewBuilder().WithName("dep").WithSourceID(depID).
 		AddType("Dep").WithPrimaryKey("id", schema.NewUUIDConstraint()).Done().Build()
-	if dep == nil {
+	if dep.IsZero() {
 		t.Fatalf("the dependency did not build: %v", depRes.Err())
 	}
 	registry := schema.NewRegistry()
@@ -125,7 +125,7 @@ func TestBuilderImportPath_BackslashIsRefusedOnThePathRoute(t *testing.T) {
 	s, res := schema.NewBuilder().WithName("main").WithSourceID(mainID).
 		WithRegistry(registry).AddImport(`./a\b`, "d").
 		AddType("T").WithPrimaryKey("id", schema.NewUUIDConstraint()).Done().Build()
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatalf("the Builder resolved a backslash path; res %v", res.Err())
 	}
 	var got []string
@@ -151,7 +151,7 @@ func TestBuilderImportPath_ASchemaNameMayHoldABackslash(t *testing.T) {
 	dep, depRes := schema.NewBuilder().WithName(name).
 		WithSourceID(location.MustNewSourceID("builder://dep")).
 		AddType("Dep").WithPrimaryKey("id", schema.NewUUIDConstraint()).Done().Build()
-	if dep == nil {
+	if dep.IsZero() {
 		t.Fatalf("a schema named %q did not build: %v", name, depRes.Err())
 	}
 	registry := schema.NewRegistry()
@@ -163,7 +163,7 @@ func TestBuilderImportPath_ASchemaNameMayHoldABackslash(t *testing.T) {
 		WithSourceID(location.MustNewSourceID("builder://main")).
 		WithRegistry(registry).AddImport(name, "d").
 		AddType("T").WithPrimaryKey("id", schema.NewUUIDConstraint()).Done().Build()
-	if s == nil {
+	if s.IsZero() {
 		var got []string
 		for issue := range res.Issues() {
 			got = append(got, issue.Code().String()+": "+issue.Message())
@@ -182,7 +182,7 @@ func TestImportPath_ModuleStyleRequiresAModuleRoot(t *testing.T) {
 		"/main.yammm": []byte("schema \"main\"\n\nimport \"lib/common\" as c\n\ntype T {\n\tid String primary\n}\n"),
 	}
 	s, res := schema.LoadSourcesWithEntry(t.Context(), sources, "/main.yammm", "")
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("a module-style import resolved with no module root")
 	}
 	var got []string

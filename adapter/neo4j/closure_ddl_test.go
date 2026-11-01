@@ -27,7 +27,7 @@ type Station {
 `
 )
 
-func loadClosureDDLSchema(t *testing.T) *schema.Schema {
+func loadClosureDDLSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(closureDDLEntry),

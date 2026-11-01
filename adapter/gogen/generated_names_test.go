@@ -23,7 +23,7 @@ import (
 )
 
 // generateSources loads sources with entry "main.yammm" and generates them.
-func generateSources(t *testing.T, sources map[string]string) (*schema.Schema, []byte) {
+func generateSources(t *testing.T, sources map[string]string) (schema.Schema, []byte) {
 	t.Helper()
 	files := make(map[string][]byte, len(sources))
 	for k, v := range sources {

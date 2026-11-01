@@ -19,7 +19,7 @@ import (
 )
 
 // testSchema creates a simple schema for testing.
-func testSchema(t *testing.T) *schema.Schema {
+func testSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -42,7 +42,7 @@ func testSchema(t *testing.T) *schema.Schema {
 }
 
 // testSchemaWithPKLessType creates a schema with a type that has no PK.
-func testSchemaWithPKLessType(t *testing.T) *schema.Schema {
+func testSchemaWithPKLessType(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -68,14 +68,14 @@ func TestNew(t *testing.T) {
 	}
 }
 
-func TestNew_PanicOnNilSchema(t *testing.T) {
+func TestNew_PanicOnZeroSchema(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Error("graph.New(nil) should panic")
 		}
 	}()
 
-	graph.New(nil)
+	graph.New(schema.Schema{})
 }
 
 func TestGraph_Add_NilReceiver(t *testing.T) {
@@ -89,7 +89,7 @@ func TestGraph_Add_NilReceiver(t *testing.T) {
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	yammmtest.AssertPanics(t, func() { g.Add(ctx, inst) })
@@ -105,7 +105,7 @@ func TestGraph_Add_NilInstance(t *testing.T) {
 			t.Error("Add(nil) should panic")
 		}
 	}()
-	g.Add(ctx, nil)
+	g.Add(ctx, instance.ValidInstance{})
 }
 
 func TestGraph_Add_SchemaMismatch(t *testing.T) {
@@ -136,7 +136,7 @@ func TestGraph_Add_SchemaMismatch(t *testing.T) {
 		typeB.ID(), // TypeID points to schemaB
 		immutable.WrapKey([]any{"x1"}),
 		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	defer func() {
@@ -160,7 +160,7 @@ func TestGraph_Add_ImportedSchemaAllowed(t *testing.T) {
 		entityType.ID(), // TypeID points to imported schema
 		immutable.WrapKey([]any{"e1"}),
 		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Test Entity"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, inst)
@@ -181,7 +181,7 @@ func TestGraph_Add_ContextCancellation(t *testing.T) {
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, inst)
@@ -212,7 +212,7 @@ func TestGraph_Add_Success(t *testing.T) {
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, inst)
@@ -227,7 +227,7 @@ func TestGraph_Add_Success(t *testing.T) {
 		t.Errorf("Types() = %v, want [Person]", types)
 	}
 
-	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 	if len(instances) != 1 {
 		t.Fatalf("InstancesOf(\"Person\") returned %d instances, want 1", len(instances))
 	}
@@ -252,7 +252,7 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	if r := g.Add(ctx, inst1); !r.OK() {
 		t.Fatalf("First Add() failed: %s", r.String())
@@ -264,7 +264,7 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice 2"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	result := g.Add(ctx, inst2)
 	if result.OK() {
@@ -276,7 +276,7 @@ func TestGraph_Add_DuplicatePK(t *testing.T) {
 
 	// Verify snapshot has duplicates
 	snap := g.Snapshot()
-	dups := snap.Duplicates()
+	dups := slices.Collect(snap.Duplicates())
 	if len(dups) != 1 {
 		t.Errorf("Snapshot.Duplicates() returned %d, want 1", len(dups))
 	}
@@ -296,7 +296,7 @@ func TestGraph_Add_MissingPK(t *testing.T) {
 		abstractType.ID(),
 		immutable.Key{}, // No PK
 		immutable.WrapProperties(map[string]any{"name": "Test"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, inst)
@@ -323,7 +323,7 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 			personType.ID(),
 			immutable.WrapKey([]any{name}),
 			immutable.WrapProperties(map[string]any{"id": name, "name": name}),
-			nil, nil, nil,
+			nil, nil, location.Provenance{},
 		)
 		if r := g.Add(ctx, inst); !r.OK() {
 			t.Fatalf("Add(%s) failed: %s", name, r.String())
@@ -332,7 +332,7 @@ func TestGraph_Snapshot_DeterministicOrder(t *testing.T) {
 
 	// Verify sorted order in snapshot
 	snap := g.Snapshot()
-	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 	if len(instances) != 3 {
 		t.Fatalf("Expected 3 instances, got %d", len(instances))
 	}
@@ -357,7 +357,7 @@ func TestGraph_InstanceByKey(t *testing.T) {
 		personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	if r := g.Add(ctx, inst); !r.OK() {
@@ -394,28 +394,28 @@ func TestGraph_Check_NilReceiver(t *testing.T) {
 }
 
 func TestSnapshot_NilReceiver(t *testing.T) {
-	var r *graph.Snapshot
+	var r graph.Snapshot
 
 	// All methods should handle nil gracefully
 	if r.Types() != nil {
 		t.Error("nil.Types() should return nil")
 	}
-	if r.InstancesOf(schema.TypeID{}) != nil {
+	if slices.Collect(r.InstancesOf(schema.TypeID{})) != nil {
 		t.Error("nil.InstancesOf() should return nil")
 	}
 	if _, ok := r.InstanceByKey(schema.TypeID{}, "any"); ok {
 		t.Error("nil.InstanceByKey() should return false")
 	}
-	if r.Edges() != nil {
+	if slices.Collect(r.Edges()) != nil {
 		t.Error("nil.Edges() should return nil")
 	}
 	if !r.Diagnostics().OK() {
 		t.Error("nil.Diagnostics() should be OK")
 	}
-	if r.Duplicates() != nil {
+	if slices.Collect(r.Duplicates()) != nil {
 		t.Error("nil.Duplicates() should return nil")
 	}
-	if r.Unresolved() != nil {
+	if slices.Collect(r.Unresolved()) != nil {
 		t.Error("nil.Unresolved() should return nil")
 	}
 	if !r.Diagnostics().OK() {
@@ -427,7 +427,7 @@ func TestSnapshot_NilReceiver(t *testing.T) {
 }
 
 func TestInstance_NilReceiver(t *testing.T) {
-	var i *graph.Instance
+	var i graph.Instance
 
 	// All methods should handle nil gracefully
 	if i.TypeName() != "" {
@@ -445,7 +445,7 @@ func TestInstance_NilReceiver(t *testing.T) {
 	if i.Properties().Len() != 0 {
 		t.Error("nil.Properties() should be empty")
 	}
-	if i.Composed("any") != nil {
+	if slices.Collect(i.Composed("any")) != nil {
 		t.Error("nil.Composed() should return nil")
 	}
 	if i.ComposedCount("any") != 0 {
@@ -457,16 +457,16 @@ func TestInstance_NilReceiver(t *testing.T) {
 }
 
 func TestEdge_NilReceiver(t *testing.T) {
-	var e *graph.Edge
+	var e graph.Edge
 
 	// All methods should handle nil gracefully
 	if e.Relation() != "" {
 		t.Error("nil.Relation() should return empty string")
 	}
-	if e.Source() != nil {
+	if !e.Source().IsZero() {
 		t.Error("nil.Source() should return nil")
 	}
-	if e.Target() != nil {
+	if !e.Target().IsZero() {
 		t.Error("nil.Target() should return nil")
 	}
 	if _, ok := e.Property("any"); ok {
@@ -527,7 +527,7 @@ func TestGraph_PartType_NoPK_Positional(t *testing.T) {
 
 	// Verify all 3 items are present
 	snap := g.Snapshot()
-	containers := snap.InstancesOf(mustTypeID(t, s, "Container"))
+	containers := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Container")))
 	if len(containers) != 1 {
 		t.Fatalf("Expected 1 container, got %d", len(containers))
 	}
@@ -592,12 +592,12 @@ func TestGraph_NestedComposition(t *testing.T) {
 
 	// Verify structure
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	children := parents[0].Composed("CHILDREN")
+	children := slices.Collect(parents[0].Composed("CHILDREN"))
 	if len(children) != 1 {
 		t.Fatalf("Expected 1 child, got %d", len(children))
 	}
@@ -623,13 +623,13 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	acme := instance.NewValidInstance(
 		"Company", companyType.ID(),
 		immutable.WrapKey([]any{"acme"}),
 		immutable.WrapProperties(map[string]any{"id": "acme", "name": "Acme"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	if r := g.Add(ctx, alice); !r.OK() {
@@ -644,20 +644,20 @@ func TestGraph_Duplicates_Ordering(t *testing.T) {
 		"Company", companyType.ID(),
 		immutable.WrapKey([]any{"acme"}),
 		immutable.WrapProperties(map[string]any{"id": "acme", "name": "Acme Dup"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	aliceDup := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice Dup"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	g.Add(ctx, acmeDup)
 	g.Add(ctx, aliceDup)
 
 	snap := g.Snapshot()
-	dups := snap.Duplicates()
+	dups := slices.Collect(snap.Duplicates())
 
 	if len(dups) != 2 {
 		t.Fatalf("Expected 2 duplicates, got %d", len(dups))
@@ -699,7 +699,7 @@ func TestGraph_Unresolved_Ordering(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 
 	if len(unresolved) < 2 {
 		t.Fatalf("Expected at least 2 unresolved, got %d", len(unresolved))
@@ -707,7 +707,7 @@ func TestGraph_Unresolved_Ordering(t *testing.T) {
 
 	// Every adjacent pair is ordered, so an inverted comparator anywhere in
 	// the list fails rather than only one that moves the smallest key.
-	if !slices.IsSortedFunc(unresolved, func(a, b *graph.UnresolvedEdge) int {
+	if !slices.IsSortedFunc(unresolved, func(a, b graph.UnresolvedEdge) int {
 		return cmp.Or(
 			cmp.Compare(a.Source().TypeID().String(), b.Source().TypeID().String()),
 			cmp.Compare(a.Source().PrimaryKey().String(), b.Source().PrimaryKey().String()),
@@ -745,7 +745,7 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{pk}),
 			immutable.WrapProperties(map[string]any{"id": pk, "name": pk}),
-			nil, nil, nil,
+			nil, nil, location.Provenance{},
 		)
 
 		if r := g.Add(ctx, inst); !r.OK() {
@@ -754,7 +754,7 @@ func TestGraph_LargeGraph_Performance(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 
 	if len(instances) != 1000 {
 		t.Fatalf("Expected 1000 instances, got %d", len(instances))
@@ -799,7 +799,7 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{key}),
 			immutable.WrapProperties(map[string]any{"id": key, "name": key}),
-			nil, nil, nil,
+			nil, nil, location.Provenance{},
 		)
 
 		result := g.Add(ctx, inst)
@@ -809,8 +809,8 @@ func TestGraph_SpecialChars_InKeys(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.InstancesOf(mustTypeID(t, s, "Person"))) != len(specialKeys) {
-		t.Errorf("Expected %d instances, got %d", len(specialKeys), len(snap.InstancesOf(mustTypeID(t, s, "Person"))))
+	if len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))) != len(specialKeys) {
+		t.Errorf("Expected %d instances, got %d", len(specialKeys), len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))))
 	}
 
 	// Verify lookup works for each key
@@ -848,7 +848,7 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{key}),
 			immutable.WrapProperties(map[string]any{"id": key, "name": key}),
-			nil, nil, nil,
+			nil, nil, location.Provenance{},
 		)
 
 		result := g.Add(ctx, inst)
@@ -858,8 +858,8 @@ func TestGraph_Unicode_InKeys(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.InstancesOf(mustTypeID(t, s, "Person"))) != len(unicodeKeys) {
-		t.Errorf("Expected %d instances, got %d", len(unicodeKeys), len(snap.InstancesOf(mustTypeID(t, s, "Person"))))
+	if len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))) != len(unicodeKeys) {
+		t.Errorf("Expected %d instances, got %d", len(unicodeKeys), len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))))
 	}
 }
 
@@ -880,7 +880,7 @@ func TestGraph_CompositeKey_TwoComponents(t *testing.T) {
 				"Record", recordType.ID(),
 				immutable.WrapKey([]any{region, fmt.Sprintf("id-%d", i)}),
 				immutable.WrapProperties(map[string]any{"region": region, "id": fmt.Sprintf("id-%d", i), "value": fmt.Sprintf("%s-%d", region, i)}),
-				nil, nil, nil,
+				nil, nil, location.Provenance{},
 			)
 
 			result := g.Add(ctx, inst)
@@ -891,7 +891,7 @@ func TestGraph_CompositeKey_TwoComponents(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	instances := snap.InstancesOf(mustTypeID(t, s, "Record"))
+	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Record")))
 
 	if len(instances) != 9 {
 		t.Fatalf("Expected 9 records, got %d", len(instances))
@@ -903,7 +903,7 @@ func TestGraph_CompositeKey_TwoComponents(t *testing.T) {
 	if !ok {
 		t.Errorf("InstanceByKey failed for composite key %s", key)
 	}
-	if found != nil {
+	if !found.IsZero() {
 		val, _ := found.Property("value")
 		if str, _ := val.String(); str != "us-east-0" {
 			t.Errorf("Wrong value for composite key: %s", str)
@@ -924,7 +924,7 @@ func TestGraph_EmptyProperties(t *testing.T) {
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"minimal"}),
 		immutable.WrapProperties(map[string]any{"id": "minimal"}), // The key property alone
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, inst)
@@ -933,7 +933,7 @@ func TestGraph_EmptyProperties(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	instances := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	instances := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 	if len(instances) != 1 {
 		t.Fatalf("Expected 1 instance, got %d", len(instances))
 	}
@@ -973,7 +973,7 @@ func TestGraph_ComposedRelations_Sorted(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	docs := snap.InstancesOf(mustTypeID(t, s, "Document"))
+	docs := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Document")))
 	if len(docs) != 1 {
 		t.Fatalf("Expected 1 document, got %d", len(docs))
 	}
@@ -1025,7 +1025,7 @@ func TestGraph_MultipleCompositions(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	docs := snap.InstancesOf(mustTypeID(t, s, "Document"))
+	docs := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Document")))
 
 	assertComposedCount(t, docs[0], "NOTES", 3)
 	assertComposedCount(t, docs[0], "TAGS", 2)
@@ -1050,7 +1050,7 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 		userType.ID(),
 		immutable.WrapKey([]any{"u1"}),
 		immutable.WrapProperties(map[string]any{"id": "u1", "username": "alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	if r := g.Add(ctx, user); !r.OK() {
@@ -1064,7 +1064,7 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 		entityType.ID(),
 		immutable.WrapKey([]any{"e1"}),
 		immutable.WrapProperties(map[string]any{"id": "e1", "name": "Entity 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	if r := g.Add(ctx, entity); !r.OK() {
@@ -1090,19 +1090,19 @@ func TestContract6_InstanceTagForm(t *testing.T) {
 	}
 
 	// Verify InstancesOf() works with instance tag form
-	if snap.InstancesOf(tagID(t, mainSchema, "User")) == nil {
+	if slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "User"))) == nil {
 		t.Error("InstancesOf(\"User\") should find local type")
 	}
-	if snap.InstancesOf(tagID(t, mainSchema, "c.Entity")) == nil {
+	if slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "c.Entity"))) == nil {
 		t.Error("InstancesOf(\"c.Entity\") should find imported type")
 	}
 
 	// Verify graph.Instance.TypeName() returns instance tag form
-	users := snap.InstancesOf(tagID(t, mainSchema, "User"))
+	users := slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "User")))
 	if users[0].TypeName() != "User" {
 		t.Errorf("Instance.TypeName() should be \"User\", got %q", users[0].TypeName())
 	}
-	entities := snap.InstancesOf(tagID(t, mainSchema, "c.Entity"))
+	entities := slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "c.Entity")))
 	if entities[0].TypeName() != "c.Entity" {
 		t.Errorf("Instance.TypeName() should be \"c.Entity\", got %q", entities[0].TypeName())
 	}
@@ -1157,7 +1157,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 		productB.ID(),
 		immutable.WrapKey([]any{"p1"}), // Same PK
 		immutable.WrapProperties(map[string]any{"id": "p1", "sourceB": "from B"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	if r := g.Add(ctx, instB); !r.OK() {
@@ -1171,7 +1171,7 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 		productC.ID(),
 		immutable.WrapKey([]any{"p1"}), // Same PK but different TypeID
 		immutable.WrapProperties(map[string]any{"id": "p1", "sourceC": "from C"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, instC)
@@ -1181,10 +1181,10 @@ func TestContract7_TypeIDIndexing(t *testing.T) {
 
 	// Verify both exist
 	snap := g.Snapshot()
-	if len(snap.InstancesOf(tagID(t, mainSchema, "b.Product"))) != 1 {
+	if len(slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "b.Product")))) != 1 {
 		t.Error("b.Product should exist")
 	}
-	if len(snap.InstancesOf(tagID(t, mainSchema, "c.Product"))) != 1 {
+	if len(slices.Collect(snap.InstancesOf(tagID(t, mainSchema, "c.Product")))) != 1 {
 		t.Error("c.Product should exist")
 	}
 }
@@ -1259,13 +1259,13 @@ func TestContract19_FailureSemantics(t *testing.T) {
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}),
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	inst2 := instance.NewValidInstance(
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"alice"}), // Duplicate
 		immutable.WrapProperties(map[string]any{"id": "alice", "name": "Alice 2"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result1 := g.Add(ctx, inst1)
@@ -1286,7 +1286,7 @@ func TestContract19_FailureSemantics(t *testing.T) {
 				panicked = true
 			}
 		}()
-		g.Add(ctx, nil)
+		g.Add(ctx, instance.ValidInstance{})
 	}()
 	if !panicked {
 		t.Error("Nil instance should panic")
@@ -1326,7 +1326,7 @@ func TestResult_Instances(t *testing.T) {
 			"Person", personType.ID(),
 			immutable.WrapKey([]any{fmt.Sprintf("person-%d", i)}),
 			immutable.WrapProperties(map[string]any{"id": fmt.Sprintf("person-%d", i), "name": fmt.Sprintf("Name %d", i)}),
-			nil, nil, nil,
+			nil, nil, location.Provenance{},
 		)
 		if r := g.Add(ctx, inst); !r.OK() {
 			t.Fatalf("Add failed: %s", r.String())
@@ -1356,7 +1356,7 @@ func TestResult_DiagnosticsAndFlags(t *testing.T) {
 		"Person", personType.ID(),
 		immutable.WrapKey([]any{"test-person"}),
 		immutable.WrapProperties(map[string]any{"id": "test-person", "name": "Test"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	result := g.Add(ctx, inst)
 
@@ -1403,14 +1403,14 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
 		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	child2 := instance.NewValidInstance(
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c2"}),
 		immutable.WrapProperties(map[string]any{"id": "c2", "name": "Child 2"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	// Create parent with inline children using composed map
@@ -1425,7 +1425,7 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
 		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, composed, nil,
+		nil, composed, location.Provenance{},
 	)
 
 	result := g.Add(ctx, parent)
@@ -1435,7 +1435,7 @@ func TestGraph_Add_InlineCompositions(t *testing.T) {
 
 	// Verify inline children were extracted
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -1456,7 +1456,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 		grandchildType.ID(),
 		immutable.WrapKey([]any{"gc1"}),
 		immutable.WrapProperties(map[string]any{"id": "gc1", "name": "GrandChild 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	// Create child with inline grandchild
@@ -1470,7 +1470,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
 		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, childComposed, nil,
+		nil, childComposed, location.Provenance{},
 	)
 
 	// Create parent with inline child (which has inline grandchild)
@@ -1484,7 +1484,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
 		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, parentComposed, nil,
+		nil, parentComposed, location.Provenance{},
 	)
 
 	result := g.Add(ctx, parent)
@@ -1494,7 +1494,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 
 	// Verify nested structure
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -1502,7 +1502,7 @@ func TestGraph_Add_NestedInlineCompositions(t *testing.T) {
 	assertComposedCount(t, parents[0], "CHILDREN", 1)
 
 	// Verify grandchildren
-	children := parents[0].Composed("CHILDREN")
+	children := slices.Collect(parents[0].Composed("CHILDREN"))
 	if len(children) != 1 {
 		t.Fatalf("Expected 1 child, got %d", len(children))
 	}
@@ -1528,7 +1528,7 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
 		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, composed, nil,
+		nil, composed, location.Provenance{},
 	)
 
 	result := g.Add(ctx, parent)
@@ -1538,7 +1538,7 @@ func TestGraph_Add_InlineComposition_EmptySlice(t *testing.T) {
 
 	// Verify no children
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	assertComposedCount(t, parents[0], "CHILDREN", 0)
 }
 
@@ -1558,7 +1558,7 @@ func TestGraph_Add_QualifiedTypeNotFound(t *testing.T) {
 		fakeTypeID,
 		immutable.WrapKey([]any{"x1"}),
 		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, inst)
@@ -1601,7 +1601,7 @@ func TestGraph_Add_UnknownSchemaPanics(t *testing.T) {
 		fakeTypeID,
 		immutable.WrapKey([]any{"x1"}),
 		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	defer func() {
@@ -1625,7 +1625,7 @@ func TestGraph_Add_UnqualifiedTypeNotFound(t *testing.T) {
 		fakeTypeID,
 		immutable.WrapKey([]any{"x1"}),
 		immutable.WrapProperties(map[string]any{"id": "x1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	result := g.Add(ctx, inst)
@@ -1658,7 +1658,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 		grandchildType.ID(),
 		immutable.WrapKey([]any{"gc1"}),
 		immutable.WrapProperties(map[string]any{"id": "gc1", "name": "GrandChild 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	// Create child with inline grandchild - this is the key: child has nested composition
@@ -1672,7 +1672,7 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
 		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, childComposed, nil,
+		nil, childComposed, location.Provenance{},
 	)
 
 	// AddComposed the child (with inline grandchild) to the parent
@@ -1683,19 +1683,19 @@ func TestAddComposed_NestedComposition_Extracted(t *testing.T) {
 
 	// Verify nested structure
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
 	// Parent should have child
-	children := parents[0].Composed("CHILDREN")
+	children := slices.Collect(parents[0].Composed("CHILDREN"))
 	if len(children) != 1 {
 		t.Fatalf("Expected 1 child, got %d", len(children))
 	}
 
 	// Child should have grandchild (extracted from inline composition)
-	grandchildren := children[0].Composed("GRAND_CHILDREN")
+	grandchildren := slices.Collect(children[0].Composed("GRAND_CHILDREN"))
 	if len(grandchildren) != 1 {
 		t.Fatalf("Expected 1 grandchild (nested composition should be extracted), got %d", len(grandchildren))
 	}
@@ -1724,14 +1724,14 @@ func TestAdd_OneCardinality_MultipleChildren_RefusesWholeRecord(t *testing.T) {
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
 		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 	child2 := instance.NewValidInstance(
 		"Child",
 		childType.ID(),
 		immutable.WrapKey([]any{"c2"}),
 		immutable.WrapProperties(map[string]any{"id": "c2", "name": "Child 2"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	// Create parent with TWO children (violates (one) cardinality)
@@ -1745,7 +1745,7 @@ func TestAdd_OneCardinality_MultipleChildren_RefusesWholeRecord(t *testing.T) {
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
 		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, parentComposed, nil,
+		nil, parentComposed, location.Provenance{},
 	)
 
 	result := g.Add(ctx, parent)
@@ -1756,16 +1756,16 @@ func TestAdd_OneCardinality_MultipleChildren_RefusesWholeRecord(t *testing.T) {
 	assertHasCode(t, result, diag.E_DUPLICATE_COMPOSED_PK)
 
 	snap := g.Snapshot()
-	if parents := snap.InstancesOf(mustTypeID(t, s, "Parent")); len(parents) != 0 {
+	if parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent"))); len(parents) != 0 {
 		t.Fatalf("a refused record installed %d parents", len(parents))
 	}
-	if dups := snap.Duplicates(); len(dups) != 0 {
+	if dups := slices.Collect(snap.Duplicates()); len(dups) != 0 {
 		t.Fatalf("a refused record left %d Duplicate records", len(dups))
 	}
 }
 
 // TestExtractCompositions_BareValidInstance tests that extractCompositions
-// handles bare *ValidInstance (not wrapped in slice) defensively.
+// handles bare ValidInstance (not wrapped in slice) defensively.
 func TestExtractCompositions_BareValidInstance(t *testing.T) {
 	s := testSchemaWithComposition(t)
 	g := graph.New(s)
@@ -1778,10 +1778,10 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 		childType.ID(),
 		immutable.WrapKey([]any{"c1"}),
 		immutable.WrapProperties(map[string]any{"id": "c1", "name": "Child 1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
-	// Create parent with bare *ValidInstance (not wrapped in slice)
+	// Create parent with bare ValidInstance (not wrapped in slice)
 	// This is defensive handling - the validator normally wraps in slice
 	parentType, _ := s.Type("Parent")
 	parentComposed := map[string]immutable.Value{
@@ -1792,7 +1792,7 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 		parentType.ID(),
 		immutable.WrapKey([]any{"p1"}),
 		immutable.WrapProperties(map[string]any{"id": "p1", "name": "Parent 1"}),
-		nil, parentComposed, nil,
+		nil, parentComposed, location.Provenance{},
 	)
 
 	result := g.Add(ctx, parent)
@@ -1802,14 +1802,14 @@ func TestExtractCompositions_BareValidInstance(t *testing.T) {
 
 	// Verify child was extracted from bare instance
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
 
-	children := parents[0].Composed("CHILDREN")
+	children := slices.Collect(parents[0].Composed("CHILDREN"))
 	if len(children) != 1 {
-		t.Fatalf("Expected 1 child (from bare *ValidInstance), got %d", len(children))
+		t.Fatalf("Expected 1 child (from bare ValidInstance), got %d", len(children))
 	}
 
 	// Verify child data
@@ -2070,7 +2070,7 @@ func TestDuplicateComposedPK_PKDetail(t *testing.T) {
 // mustValidInstanceWithInvalidType creates a ValidInstance with a type
 // that won't match any type in the graph's schema - for testing error handling.
 // Uses the same schema but with a non-existent type to avoid a schema mismatch panic.
-func mustValidInstanceWithInvalidType(t *testing.T, s *schema.Schema, typeName string, pkValues []any, _ map[string]any) *instance.ValidInstance {
+func mustValidInstanceWithInvalidType(t *testing.T, s schema.Schema, typeName string, pkValues []any, _ map[string]any) instance.ValidInstance {
 	t.Helper()
 
 	// Create a TypeID that uses the same schema but a non-existent type name
@@ -2082,7 +2082,7 @@ func mustValidInstanceWithInvalidType(t *testing.T, s *schema.Schema, typeName s
 		fakeTypeID,
 		immutable.WrapKey(pkValues),
 		immutable.WrapProperties(map[string]any{}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 }
 

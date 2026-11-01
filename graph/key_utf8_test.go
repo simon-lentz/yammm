@@ -1,6 +1,7 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 	"unicode/utf8"
 
@@ -36,7 +37,7 @@ part type Part {
 // keyText is a named type over string, which a key holds as it arrived.
 type keyText string
 
-func loadKeyUTF8Schema(t *testing.T) (*schema.Schema, schema.TypeID, schema.TypeID) {
+func loadKeyUTF8Schema(t *testing.T) (schema.Schema, schema.TypeID, schema.TypeID) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), keyUTF8Schema, "keyutf8.yammm")
 	if res.HasErrors() {
@@ -64,7 +65,7 @@ func requireInvalidKey(t *testing.T, res diag.Result) {
 	}
 }
 
-func holderVI(holder schema.TypeID, key string, opts ...instancetest.VIOption) *instance.ValidInstance {
+func holderVI(holder schema.TypeID, key string, opts ...instancetest.VIOption) instance.ValidInstance {
 	return instancetest.VI("Holder", append([]instancetest.VIOption{
 		instancetest.TypeID(holder), instancetest.PK(key),
 		instancetest.Props(map[string]any{"id": key}),
@@ -81,13 +82,13 @@ func TestAdd_RefusesAKeyComponentThatIsNotValidUTF8(t *testing.T) {
 
 	for _, c := range []struct {
 		name string
-		inst *instance.ValidInstance
+		inst instance.ValidInstance
 	}{
 		{"a root's key", holderVI(holder, "a\xffb")},
 		{"a root's key truncated mid-sequence", holderVI(holder, "caf\xc3")},
 		{"a root's key held in a named type", instancetest.VI("Holder", instancetest.TypeID(holder),
 			instancetest.PK(keyText("a\xffb")), instancetest.Props(map[string]any{"id": keyText("a\xffb")}))},
-		{"a target key", holderVI(holder, "h1", instancetest.Edges(map[string]*instance.ValidEdgeData{
+		{"a target key", holderVI(holder, "h1", instancetest.Edges(map[string]instance.ValidEdgeData{
 			"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"a\xffb"}), immutable.Properties{}),
 			}),
@@ -107,7 +108,7 @@ func TestAdd_RefusesAKeyComponentThatIsNotValidUTF8(t *testing.T) {
 				t.Errorf("Add accepted the key")
 			}
 			requireInvalidKey(t, res)
-			if n := len(g.Snapshot().InstancesOf(holder)); n != 0 {
+			if n := len(slices.Collect(g.Snapshot().InstancesOf(holder))); n != 0 {
 				t.Errorf("the refused instance installed: %d Holder instances", n)
 			}
 		})
@@ -120,7 +121,7 @@ func TestAdd_RefusesAKeyComponentThatIsNotValidUTF8(t *testing.T) {
 			requireInvalidKey(t, g.Add(t.Context(), holderVI(holder, key)))
 		}
 		snap := g.Snapshot()
-		if n, d := len(snap.InstancesOf(holder)), len(snap.Duplicates()); n != 0 || d != 0 {
+		if n, d := len(slices.Collect(snap.InstancesOf(holder))), len(slices.Collect(snap.Duplicates())); n != 0 || d != 0 {
 			t.Errorf("the graph holds %d instances and %d duplicates, want none: the two keys are different values", n, d)
 		}
 	})
@@ -178,7 +179,7 @@ func TestRebuildSnapshot_RefusesAKeyComponentThatIsNotValidUTF8(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			snap, res := graph.RebuildSnapshot(s, c.parts)
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Errorf("RebuildSnapshot built a snapshot holding the key")
 			}
 			requireInvalidKey(t, res)
@@ -203,10 +204,10 @@ func TestBypass_APropertyThatIsNotValidUTF8IsHeldAsItArrived(t *testing.T) {
 		PrimaryKey: immutable.WrapKey([]any{"h1"}),
 		Properties: immutable.WrapProperties(map[string]any{"id": "h1", "text": bad}),
 	}}})
-	if rebuilt == nil {
+	if rebuilt.IsZero() {
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
-	for name, snap := range map[string]*graph.Snapshot{"Add": g.Snapshot(), "RebuildSnapshot": rebuilt} {
+	for name, snap := range map[string]graph.Snapshot{"Add": g.Snapshot(), "RebuildSnapshot": rebuilt} {
 		inst, ok := snap.InstanceByKey(holder, `["h1"]`)
 		if !ok {
 			t.Fatalf("%s: no instance at h1", name)

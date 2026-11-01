@@ -85,10 +85,10 @@ func mergedInitialisms(extra []string) map[string]bool {
 // type-checked Go source. The schema must be completed (aliases resolved,
 // inheritance linearized) AND source-backed — i.e. loaded via schema.Load,
 // schema.LoadString, or schema.LoadSourcesWithEntry. A schema built
-// programmatically via schema.Builder without retained source content has a nil
+// programmatically via schema.Builder without retained source content has a zero
 // Sources(); Marshal returns an error for it, because the embedded source
 // and its round-trip self-check require the source.
-func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
+func Marshal(s schema.Schema, opts ...Option) ([]byte, error) {
 	g, err := newGenerator(s, opts...)
 	if err != nil {
 		return nil, err
@@ -102,7 +102,7 @@ func Marshal(s *schema.Schema, opts ...Option) ([]byte, error) {
 
 // newGenerator resolves the package name, the name table and the embedded-key
 // root, which the rest of generation reads.
-func newGenerator(s *schema.Schema, opts ...Option) (*generator, error) {
+func newGenerator(s schema.Schema, opts ...Option) (*generator, error) {
 	cfg := config{}
 	for _, o := range opts {
 		o(&cfg)
@@ -123,7 +123,7 @@ func newGenerator(s *schema.Schema, opts ...Option) (*generator, error) {
 		inits:    mergedInitialisms(cfg.initialisms),
 		keys:     keys,
 		buf:      &bytes.Buffer{},
-		dtFields: map[*schema.Property]*schema.DataType{},
+		dtFields: map[schema.Property]schema.DataType{},
 	}, nil
 }
 
@@ -149,7 +149,7 @@ func (g *generator) finish(data []byte) ([]byte, error) {
 // generator accumulates emitted declarations into buf, then assembles and
 // formats the final file.
 type generator struct {
-	schema     *schema.Schema
+	schema     schema.Schema
 	pkg        string
 	inits      map[string]bool   // the initialism set every name is derived with
 	names      *nameTable        // nil until the collect pass has run
@@ -158,20 +158,20 @@ type generator struct {
 	entryKey   string            // the entry schema's key in embedded
 	schemaHash string            // SchemaHash as emitted
 	buf        *bytes.Buffer
-	temporal   temporalTypes                         // the Date and per-layout Timestamp types
-	collect    *temporalDemand                       // non-nil while collectTemporalDemand dry-runs type resolution
-	needsTime  bool                                  // set when any emitted declaration names time.Time
-	needsJSON  bool                                  // set when any emitted declaration calls encoding/json
-	edges      []edgeRec                             // one per declared association
-	dtFields   map[*schema.Property]*schema.DataType // DataType-typed property -> the DataType it names
+	temporal   temporalTypes                       // the Date and per-layout Timestamp types
+	collect    *temporalDemand                     // non-nil while collectTemporalDemand dry-runs type resolution
+	needsTime  bool                                // set when any emitted declaration names time.Time
+	needsJSON  bool                                // set when any emitted declaration calls encoding/json
+	edges      []edgeRec                           // one per declared association
+	dtFields   map[schema.Property]schema.DataType // DataType-typed property -> the DataType it names
 }
 
 // edgeRec is one declared association, the type that declares it and its
 // resolved target type.
 type edgeRec struct {
-	rel    *schema.Relation
-	owner  *schema.Type
-	target *schema.Type
+	rel    schema.Relation
+	owner  schema.Type
+	target schema.Type
 }
 
 // generate names every declaration, then emits the file.

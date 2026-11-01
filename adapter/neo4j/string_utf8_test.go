@@ -14,6 +14,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -67,7 +68,7 @@ type utf8Holder struct {
 // utf8Neo4jSnapshot builds Holder h1 through instance.NewValidInstance, which
 // runs no validation: h.props beside its key, one LINK to Target t1 carrying
 // h.label, and one composed Note holding h.note.
-func utf8Neo4jSnapshot(t *testing.T, h utf8Holder) (*Adapter, *GraphShape, *graph.Snapshot) {
+func utf8Neo4jSnapshot(t *testing.T, h utf8Holder) (*Adapter, *GraphShape, graph.Snapshot) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), utf8Neo4jSchema, "utf8neo.yammm")
 	if res.HasErrors() {
@@ -93,17 +94,17 @@ func utf8Neo4jSnapshot(t *testing.T, h utf8Holder) (*Adapter, *GraphShape, *grap
 		note = map[string]any{"body": "ok"}
 	}
 	g := graph.New(s)
-	for _, inst := range []*instance.ValidInstance{
+	for _, inst := range []instance.ValidInstance{
 		instance.NewValidInstance("Target", targetT.ID(), immutable.WrapKey([]any{"t1"}),
-			immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, nil),
+			immutable.WrapProperties(map[string]any{"key": "t1"}), nil, nil, location.Provenance{}),
 		instance.NewValidInstance("Holder", holderT.ID(), immutable.WrapKey([]any{"h1"}),
 			immutable.WrapProperties(all),
-			map[string]*instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+			map[string]instance.ValidEdgeData{"LINK": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"t1"}), immutable.WrapProperties(map[string]any{"label": label, "mark": h.mark, "when": h.when})),
 			})},
 			map[string]immutable.Value{"NOTES": immutable.Wrap([]any{
-				instance.NewValidInstance("Note", noteT.ID(), immutable.Key{}, immutable.WrapProperties(note), nil, nil, nil),
-			})}, nil),
+				instance.NewValidInstance("Note", noteT.ID(), immutable.Key{}, immutable.WrapProperties(note), nil, nil, location.Provenance{}),
+			})}, location.Provenance{}),
 	} {
 		if r := g.Add(context.Background(), inst); r.HasErrors() {
 			t.Fatalf("graph.Add: %s", r)

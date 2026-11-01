@@ -68,12 +68,12 @@ func runLoad(cmd *cobra.Command, args []string, sink *cli.DiagnosticSink) error 
 // explicitRoot is the command's module-root flag where it has one, and "" where
 // it does not; it selects the root together with the schema path (see
 // [diagRootFor]).
-func bindSchemaSource(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, absSchemaPath string) {
+func bindSchemaSource(sink *cli.DiagnosticSink, s schema.Schema, explicitRoot, absSchemaPath string) {
 	var provider diag.SourceProvider
 	switch {
-	case s != nil && s.HasSourceProvider():
+	case !s.IsZero() && s.HasSourceProvider():
 		provider = s.Sources()
-	case sink.CapturedSources() != nil:
+	case !sink.CapturedSources().IsZero():
 		provider = sink.CapturedSources()
 	}
 	sink.SetSource(provider, diagRootFor(s, explicitRoot, absSchemaPath))
@@ -90,7 +90,7 @@ func bindSchemaSource(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, 
 // the only signal that a subtype silently dropped an inherited annotation — and
 // it now reaches the operator on every path, including the ones that return
 // before the command's own phase runs.
-func reportSchemaLoad(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, absSchemaPath string, result diag.Result) error {
+func reportSchemaLoad(sink *cli.DiagnosticSink, s schema.Schema, explicitRoot, absSchemaPath string, result diag.Result) error {
 	bindSchemaSource(sink, s, explicitRoot, absSchemaPath)
 	sink.Add(result)
 	if result.HasErrors() {
@@ -104,8 +104,8 @@ func reportSchemaLoad(sink *cli.DiagnosticSink, s *schema.Schema, explicitRoot, 
 // ModuleRoot unless it is a synthetic scheme string, and for a failed load the
 // root the loader would have used — the explicit root, then the nearest
 // yammm.mod, then the directory of the schema file with its symlinks resolved.
-func diagRootFor(s *schema.Schema, explicitRoot, absSchemaPath string) string {
-	if s != nil {
+func diagRootFor(s schema.Schema, explicitRoot, absSchemaPath string) string {
+	if !s.IsZero() {
 		if root := s.ModuleRoot(); root != "" && filepath.IsAbs(root) {
 			return root
 		}

@@ -37,7 +37,7 @@ type Employee extends Staff {
 
 // kinSnapshot rebuilds one Employee and two Companies, with the edges given.
 // graph.RebuildSnapshot reconstructs a document and does not validate one.
-func kinSnapshot(t *testing.T, edges func(employee schema.TypeID) []graph.EdgeParts) (*graph.Snapshot, *schema.Schema) {
+func kinSnapshot(t *testing.T, edges func(employee schema.TypeID) []graph.EdgeParts) (graph.Snapshot, schema.Schema) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), kinSchema, "kin.yammm")
 	if res.HasErrors() {

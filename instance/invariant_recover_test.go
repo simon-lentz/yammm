@@ -8,6 +8,7 @@ import (
 
 	"github.com/simon-lentz/yammm/diag"
 	"github.com/simon-lentz/yammm/immutable"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/location/path"
 	"github.com/simon-lentz/yammm/schema"
 )
@@ -38,8 +39,8 @@ type Doc {
 	v := NewValidator(s, WithLogger(slog.New(panicHandler{})))
 	collector := diag.NewCollectorUnlimited()
 
-	inst := newValidatedInstance("Doc", typ.ID(), immutable.Key{}, immutable.WrapProperties(map[string]any{"id": "d"}), nil, nil, nil)
-	err := v.evaluateInvariants(t.Context(), typ, "Doc", inst, collector, nil, path.Root())
+	inst := newValidatedInstance("Doc", typ.ID(), immutable.Key{}, immutable.WrapProperties(map[string]any{"id": "d"}), nil, nil, location.Provenance{})
+	err := v.evaluateInvariants(t.Context(), typ, "Doc", inst, collector, location.Provenance{}, path.Root())
 	var internalErr *InternalError
 	if !errors.As(err, &internalErr) {
 		t.Fatalf("err = %v, want *InternalError", err)

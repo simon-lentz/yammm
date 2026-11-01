@@ -239,6 +239,14 @@ func TestProperties_CloneNil(t *testing.T) {
 	}
 }
 
+func TestProperties_CloneOfAnEmptyMapIsMutable(t *testing.T) {
+	cloned := WrapProperties(map[string]any{}).Clone()
+	if cloned == nil {
+		t.Fatal("Clone of an empty map = nil, want a map")
+	}
+	cloned["x"] = 1
+}
+
 func TestProperties_WrapProperties_WithClone_Isolation(t *testing.T) {
 	nested := map[string]any{"key": "original"}
 	input := map[string]any{"nested": nested}

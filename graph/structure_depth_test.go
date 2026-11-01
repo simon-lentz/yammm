@@ -8,6 +8,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -136,7 +137,7 @@ func TestRootIneligibility_TakesAddsOrder(t *testing.T) {
 		t.Fatalf("load: %s", res)
 	}
 	a := mustTypeID(t, s, "A")
-	add := graph.New(s).Add(t.Context(), instance.NewValidInstance("A", a, immutable.WrapKey([]any{"x"}), immutable.WrapProperties(nil), nil, nil, nil))
+	add := graph.New(s).Add(t.Context(), instance.NewValidInstance("A", a, immutable.WrapKey([]any{"x"}), immutable.WrapProperties(nil), nil, nil, location.Provenance{}))
 	if !add.HasCode(diag.E_GRAPH_MISSING_PK) {
 		t.Fatalf("control: Add = %s, want E_GRAPH_MISSING_PK", add)
 	}

@@ -23,7 +23,7 @@ func sourceID(t *testing.T, name string) location.SourceID {
 // buildAndComplete runs TestCompleteModel with a fresh collector and a
 // test-name-derived SourceID — the canonical completion harness for every
 // case that needs no registry or resolved imports.
-func buildAndComplete(t *testing.T, model *schema.TestModel) (*schema.Schema, diag.Result) {
+func buildAndComplete(t *testing.T, model *schema.TestModel) (schema.Schema, diag.Result) {
 	t.Helper()
 	collector := diag.NewCollector(0)
 	srcID := location.MustNewSourceID("test://" + strings.ReplaceAll(t.Name(), "/", "_") + ".yammm")
@@ -35,8 +35,8 @@ func buildAndComplete(t *testing.T, model *schema.TestModel) (*schema.Schema, di
 // shape for golden comparison: type flags, supertype names, the full merged
 // property/relation surface (constraints via their canonical String form),
 // invariant names, datatypes, and imports.
-func projectSchema(s *schema.Schema) map[string]any {
-	project := func(props []*schema.Property) []map[string]any {
+func projectSchema(s schema.Schema) map[string]any {
+	project := func(props []schema.Property) []map[string]any {
 		out := make([]map[string]any, 0, len(props))
 		for _, p := range props {
 			constraint := "(none)"
@@ -52,7 +52,7 @@ func projectSchema(s *schema.Schema) map[string]any {
 		}
 		return out
 	}
-	relations := func(rels []*schema.Relation) []map[string]any {
+	relations := func(rels []schema.Relation) []map[string]any {
 		out := make([]map[string]any, 0, len(rels))
 		for _, r := range rels {
 			out = append(out, map[string]any{
@@ -61,23 +61,23 @@ func projectSchema(s *schema.Schema) map[string]any {
 				"Target":    r.Target().Name(),
 				"Optional":  r.IsOptional(),
 				"Many":      r.IsMany(),
-				"EdgeProps": project(r.PropertiesSlice()),
+				"EdgeProps": project(slices.Collect(r.Properties())),
 			})
 		}
 		return out
 	}
 
 	types := make([]map[string]any, 0)
-	for _, typ := range s.TypesSlice() {
+	for typ := range s.Types() {
 		var supers []string
 		for ref := range typ.SuperTypes() {
 			supers = append(supers, ref.Ref().Name())
 		}
-		// AllInvariantsSlice, not InvariantsSlice: every sibling field here
+		// AllInvariants, not Invariants: every sibling field here
 		// projects the MERGED view, and projecting own-only invariants beside
 		// them left inheritance invisible to the whole golden suite.
 		var invariants []string
-		for _, inv := range typ.AllInvariantsSlice() {
+		for inv := range typ.AllInvariants() {
 			invariants = append(invariants, inv.Name())
 		}
 		types = append(types, map[string]any{
@@ -85,15 +85,15 @@ func projectSchema(s *schema.Schema) map[string]any {
 			"Abstract":      typ.IsAbstract(),
 			"Part":          typ.IsPart(),
 			"SuperTypes":    supers,
-			"AllProperties": project(typ.AllPropertiesSlice()),
-			"Associations":  relations(typ.AllAssociationsSlice()),
-			"Compositions":  relations(typ.AllCompositionsSlice()),
+			"AllProperties": project(slices.Collect(typ.AllProperties())),
+			"Associations":  relations(slices.Collect(typ.AllAssociations())),
+			"Compositions":  relations(slices.Collect(typ.AllCompositions())),
 			"Invariants":    invariants,
 		})
 	}
 
 	dataTypes := make([]map[string]any, 0)
-	for _, dt := range s.DataTypesSlice() {
+	for dt := range s.DataTypes() {
 		constraint := "(none)"
 		if c := dt.Constraint(); c != nil {
 			constraint = c.String()
@@ -102,7 +102,7 @@ func projectSchema(s *schema.Schema) map[string]any {
 	}
 
 	imports := make([]map[string]any, 0)
-	for _, imp := range s.ImportsSlice() {
+	for imp := range s.Imports() {
 		imports = append(imports, map[string]any{"Path": imp.Path(), "Alias": imp.Alias()})
 	}
 
@@ -120,7 +120,7 @@ func projectSchema(s *schema.Schema) map[string]any {
 func completeGolden(t *testing.T, model *schema.TestModel) {
 	t.Helper()
 	s, result := buildAndComplete(t, model)
-	require.NotNil(t, s)
+	require.False(t, s.IsZero())
 	require.False(t, result.HasErrors(), "unexpected errors: %v", result)
 	name := strings.ToLower(strings.TrimPrefix(t.Name(), "Test"))
 	yammmtest.GoldenJSON(t, name, projectSchema(s))
@@ -187,7 +187,7 @@ func TestComplete_SimpleInheritance(t *testing.T) {
 }
 
 // TestComplete_Errors drives every uniform completion-failure scenario
-// through one table: each model must fail to complete (nil schema), carry
+// through one table: each model must fail to complete (zero schema), carry
 // the expected diagnostic code when one is pinned, and mention the
 // expected message fragments on the first issue.
 func TestComplete_Errors(t *testing.T) {
@@ -684,7 +684,7 @@ func TestComplete_Errors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, result := buildAndComplete(t, tt.model)
-			assert.Nil(t, s, "completion must fail")
+			assert.True(t, s.IsZero(), "completion must fail")
 			require.True(t, result.HasErrors(), "completion must produce error diagnostics")
 			if tt.wantCode != (diag.Code{}) {
 				assert.True(t, result.HasCode(tt.wantCode), "expected %v in: %s", tt.wantCode, result.String())
@@ -706,7 +706,7 @@ func TestComplete_NilModel(t *testing.T) {
 
 	s := schema.TestCompleteModel(nil, srcID, collector, nil, nil)
 
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 	assert.True(t, collector.HasErrors())
 }
 
@@ -874,16 +874,16 @@ func TestComplete_CompositionTarget_Valid(t *testing.T) {
 }
 
 type mockRegistry struct {
-	schemas map[location.SourceID]*schema.Schema
+	schemas map[location.SourceID]schema.Schema
 }
 
-func (m *mockRegistry) LookupBySourceID(id location.SourceID) (*schema.Schema, bool) {
+func (m *mockRegistry) LookupBySourceID(id location.SourceID) (schema.Schema, bool) {
 	s, ok := m.schemas[id]
 	return s, ok
 }
 
-func (m *mockRegistry) LookupByName(_ string) (*schema.Schema, bool) {
-	return nil, false // Not needed for these tests
+func (m *mockRegistry) LookupByName(_ string) (schema.Schema, bool) {
+	return schema.Schema{}, false // Not needed for these tests
 }
 
 func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
@@ -906,12 +906,12 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 	}
 	baseCollector := diag.NewCollector(0)
 	baseSchema := schema.TestCompleteModel(baseModel, baseSourceID, baseCollector, nil, nil)
-	require.NotNil(t, baseSchema)
+	require.False(t, baseSchema.IsZero())
 	require.False(t, baseCollector.HasErrors())
 
 	// Create registry with base schema
 	registry := &mockRegistry{
-		schemas: map[location.SourceID]*schema.Schema{
+		schemas: map[location.SourceID]schema.Schema{
 			baseSourceID: baseSchema,
 		},
 	}
@@ -950,7 +950,7 @@ func TestComplete_CrossSchemaInheritance_WithRegistry(t *testing.T) {
 	derivedCollector := diag.NewCollector(0)
 	derivedSchema := schema.TestCompleteModel(derivedModel, derivedSourceID, derivedCollector, registry, resolvedImports)
 
-	require.NotNil(t, derivedSchema, "cross-schema inheritance should succeed with registry")
+	require.False(t, derivedSchema.IsZero(), "cross-schema inheritance should succeed with registry")
 	assert.False(t, derivedCollector.HasErrors())
 
 	derived, ok := derivedSchema.Type("DerivedType")
@@ -1005,7 +1005,7 @@ func TestComplete_CrossSchemaInheritance_DeferredWithoutRegistry(t *testing.T) {
 	// immediately, the schema will be nil.
 	// Based on code review of collision.go:validateCompositionTarget,
 	// qualified refs without registry are deferred (returns true).
-	if s != nil {
+	if !s.IsZero() {
 		assert.False(t, collector.HasErrors(), "qualified refs without registry should be deferred, not error")
 	}
 }
@@ -1070,7 +1070,7 @@ func TestComplete_Invariant_Single(t *testing.T) {
 }
 
 // TestComplete_InvariantInheritanceChain pins the merged invariant set down a
-// three-level chain. Until the projection read AllInvariantsSlice, no golden in
+// three-level chain. Until the projection read AllInvariants, no golden in
 // this suite showed an inherited invariant at all — and no fixture declared one
 // to show, so the blind spot was in the corpus as much as in the projection.
 //
@@ -1288,7 +1288,7 @@ func TestComplete_AssociationTarget_CrossSchema_DeferredWithoutRegistry(t *testi
 	s := schema.TestCompleteModel(model, srcID, collector, nil, nil)
 
 	// Should not error - deferred to linking phase
-	if s != nil {
+	if !s.IsZero() {
 		assert.False(t, collector.HasErrors())
 	}
 }
@@ -1406,7 +1406,7 @@ func TestComplete_Import_MissingResolution(t *testing.T) {
 
 	s := schema.TestCompleteModel(model, srcID, collector, nil, resolvedImports)
 
-	assert.Nil(t, s)
+	assert.True(t, s.IsZero())
 	assert.True(t, collector.HasErrors())
 }
 

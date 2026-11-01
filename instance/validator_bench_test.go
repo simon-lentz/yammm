@@ -26,7 +26,7 @@ import (
 // benchValidatorSchema loads a one-type schema carrying decls and invs. It
 // takes source rather than the schema builder because an invariant has no
 // builder form.
-func benchValidatorSchema(b *testing.B, decls, invs string) *schema.Schema {
+func benchValidatorSchema(b *testing.B, decls, invs string) schema.Schema {
 	b.Helper()
 	src := "schema \"vbench\"\n\ntype T {\n\tid String primary\n" + decls + invs + "}\n"
 	s, result := schema.LoadString(b.Context(), src, "vbench.yammm")
@@ -39,7 +39,7 @@ func benchValidatorSchema(b *testing.B, decls, invs string) *schema.Schema {
 // benchValidate runs ValidateOne in a tight loop and fails on the first
 // instance that does not validate — a benchmark measuring the error path
 // would report a number for work the caller never does.
-func benchValidate(b *testing.B, s *schema.Schema, props map[string]any) {
+func benchValidate(b *testing.B, s schema.Schema, props map[string]any) {
 	b.Helper()
 	v := instance.NewValidator(s)
 	ctx := b.Context()
@@ -102,7 +102,7 @@ func benchValidatorProps() map[string]any {
 // The three benchmarks above use a relation-free schema, where invariantScope
 // returns the property map unchanged, so they cannot see this at all.
 
-func relationBenchSchema(b *testing.B, invariants string) *schema.Schema {
+func relationBenchSchema(b *testing.B, invariants string) schema.Schema {
 	b.Helper()
 	src := `schema "vbench"
 
@@ -137,7 +137,7 @@ func relationBenchProps() map[string]any {
 	}
 }
 
-func benchOrder(b *testing.B, s *schema.Schema) {
+func benchOrder(b *testing.B, s schema.Schema) {
 	b.Helper()
 	v := instance.NewValidator(s)
 	ctx := b.Context()

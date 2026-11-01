@@ -17,12 +17,12 @@ func TestStructuralHash_TypeFieldCoverage(t *testing.T) {
 		"name":            "hashed via ID().Name()",
 		"isAbstract":      "hashed: decides E_ABSTRACT_TYPE",
 		"isPart":          "hashed: decides part-at-root rejection",
-		"allProperties":   "hashed via AllPropertiesSlice (linearized)",
-		"primaryKeys":     "hashed via PrimaryKeysSlice",
-		"allAssociations": "hashed via AllAssociationsSlice, edge properties included",
-		"allCompositions": "hashed via AllCompositionsSlice",
-		"allInvariants":   "hashed via AllInvariantsSlice, order-independent, name excluded",
-		"superTypes":      "hashed via SuperTypesSlice (extends rows)",
+		"allProperties":   "hashed via AllProperties (linearized)",
+		"primaryKeys":     "hashed via PrimaryKeys",
+		"allAssociations": "hashed via AllAssociations, edge properties included",
+		"allCompositions": "hashed via AllCompositions",
+		"allInvariants":   "hashed via AllInvariants, order-independent, name excluded",
+		"superTypes":      "hashed via SuperTypes (extends rows)",
 
 		// Subsumed: the linearized all* slices cover the own members.
 		"properties":   "subsumed by allProperties",
@@ -52,7 +52,7 @@ func TestStructuralHash_TypeFieldCoverage(t *testing.T) {
 		"sealed":       "excluded: lifecycle marker",
 	}
 
-	rt := reflect.TypeFor[Type]()
+	rt := reflect.TypeFor[typeState]()
 	for f := range rt.Fields() {
 		if _, ok := classified[f.Name]; !ok {
 			t.Errorf("Type field %q is not classified for StructuralHash — decide hashed or excluded, and record it here", f.Name)
@@ -97,7 +97,7 @@ func TestStructuralHash_SchemaFieldCoverage(t *testing.T) {
 		"sealed":        "excluded: lifecycle marker",
 	}
 
-	rt := reflect.TypeFor[Schema]()
+	rt := reflect.TypeFor[schemaState]()
 	for f := range rt.Fields() {
 		if _, ok := classified[f.Name]; !ok {
 			t.Errorf("Schema field %q is not classified for StructuralHash — decide hashed or excluded, and record it here", f.Name)

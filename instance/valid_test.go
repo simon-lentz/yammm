@@ -1,6 +1,7 @@
 package instance_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -118,7 +119,7 @@ func TestValidInstance_Edge(t *testing.T) {
 				immutable.WrapProperties(nil),
 			),
 		}
-		edges := map[string]*instance.ValidEdgeData{
+		edges := map[string]instance.ValidEdgeData{
 			"MANAGER": instance.NewValidEdgeData(targets),
 		}
 		vi := instancetest.VI(
@@ -129,8 +130,8 @@ func TestValidInstance_Edge(t *testing.T) {
 
 		edge, ok := vi.Edge("MANAGER")
 		require.True(t, ok)
-		require.NotNil(t, edge)
-		assert.Len(t, edge.Targets(), 1)
+		require.False(t, edge.IsZero())
+		assert.Len(t, slices.Collect(edge.Targets()), 1)
 	})
 
 	t.Run("missing_edge", func(t *testing.T) {
@@ -141,11 +142,11 @@ func TestValidInstance_Edge(t *testing.T) {
 
 		edge, ok := vi.Edge("MANAGER")
 		assert.False(t, ok)
-		assert.Nil(t, edge)
+		assert.True(t, edge.IsZero())
 	})
 
 	t.Run("nonexistent_relation", func(t *testing.T) {
-		edges := map[string]*instance.ValidEdgeData{
+		edges := map[string]instance.ValidEdgeData{
 			"MANAGER": instance.NewValidEdgeData(nil),
 		}
 		vi := instancetest.VI(
@@ -156,7 +157,7 @@ func TestValidInstance_Edge(t *testing.T) {
 
 		edge, ok := vi.Edge("nonexistent")
 		assert.False(t, ok)
-		assert.Nil(t, edge)
+		assert.True(t, edge.IsZero())
 	})
 }
 
@@ -174,7 +175,7 @@ func TestValidInstance_Provenance(t *testing.T) {
 		)
 
 		result := vi.Provenance()
-		require.NotNil(t, result)
+		require.False(t, result.IsZero())
 		assert.Equal(t, "test.json", result.SourceName())
 		assert.Equal(t, "$.users[0]", result.Path().String())
 	})
@@ -185,7 +186,7 @@ func TestValidInstance_Provenance(t *testing.T) {
 			instancetest.PK(int64(1)),
 		)
 
-		assert.Nil(t, vi.Provenance())
+		assert.True(t, vi.Provenance().IsZero())
 	})
 }
 
@@ -203,18 +204,18 @@ func TestValidEdgeData_Targets(t *testing.T) {
 		}
 		edge := instance.NewValidEdgeData(targets)
 
-		result := edge.Targets()
+		result := slices.Collect(edge.Targets())
 		assert.Len(t, result, 2)
 	})
 
-	t.Run("nil_edge", func(t *testing.T) {
-		var edge *instance.ValidEdgeData
-		assert.Nil(t, edge.Targets())
+	t.Run("zero_edge", func(t *testing.T) {
+		var edge instance.ValidEdgeData
+		assert.Nil(t, slices.Collect(edge.Targets()))
 	})
 
 	t.Run("empty_targets", func(t *testing.T) {
 		edge := instance.NewValidEdgeData(nil)
-		assert.Nil(t, edge.Targets())
+		assert.Nil(t, slices.Collect(edge.Targets()))
 	})
 }
 
@@ -228,8 +229,8 @@ func TestValidEdgeData_IsEmpty(t *testing.T) {
 		assert.False(t, edge.IsEmpty())
 	})
 
-	t.Run("nil_edge", func(t *testing.T) {
-		var edge *instance.ValidEdgeData
+	t.Run("zero_edge", func(t *testing.T) {
+		var edge instance.ValidEdgeData
 		assert.True(t, edge.IsEmpty())
 	})
 
@@ -286,7 +287,7 @@ func TestValidInstance_Edges_Iterator(t *testing.T) {
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(200)}), immutable.WrapProperties(nil)),
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(201)}), immutable.WrapProperties(nil)),
 		}
-		edges := map[string]*instance.ValidEdgeData{
+		edges := map[string]instance.ValidEdgeData{
 			"MANAGER":  instance.NewValidEdgeData(targets1),
 			"COWORKER": instance.NewValidEdgeData(targets2),
 		}
@@ -300,7 +301,7 @@ func TestValidInstance_Edges_Iterator(t *testing.T) {
 		for name, edge := range vi.Edges() {
 			count++
 			assert.NotEmpty(t, name)
-			assert.NotNil(t, edge)
+			assert.False(t, edge.IsZero())
 		}
 		assert.Equal(t, 2, count)
 	})
@@ -426,62 +427,5 @@ func TestValidEdgeTarget_HasProperties(t *testing.T) {
 		)
 
 		assert.False(t, target.HasProperties())
-	})
-}
-
-func TestValidEdgeData_TargetsIter(t *testing.T) {
-	t.Run("with_targets", func(t *testing.T) {
-		targets := []instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(1)}), immutable.WrapProperties(nil)),
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(2)}), immutable.WrapProperties(nil)),
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(3)}), immutable.WrapProperties(nil)),
-		}
-		edge := instance.NewValidEdgeData(targets)
-
-		count := 0
-		for target := range edge.TargetsIter() {
-			count++
-			assert.NotNil(t, target.TargetKey())
-		}
-		assert.Equal(t, 3, count)
-	})
-
-	t.Run("nil_edge", func(t *testing.T) {
-		var edge *instance.ValidEdgeData
-
-		count := 0
-		for range edge.TargetsIter() {
-			count++
-		}
-		assert.Equal(t, 0, count)
-	})
-
-	t.Run("empty_targets", func(t *testing.T) {
-		edge := instance.NewValidEdgeData(nil)
-
-		count := 0
-		for range edge.TargetsIter() {
-			count++
-		}
-		assert.Equal(t, 0, count)
-	})
-
-	t.Run("early_break", func(t *testing.T) {
-		targets := []instance.ValidEdgeTarget{
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(1)}), immutable.WrapProperties(nil)),
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(2)}), immutable.WrapProperties(nil)),
-			instance.NewValidEdgeTarget(immutable.WrapKey([]any{int64(3)}), immutable.WrapProperties(nil)),
-		}
-		edge := instance.NewValidEdgeData(targets)
-
-		// Test early break from iteration
-		count := 0
-		for range edge.TargetsIter() {
-			count++
-			if count == 2 {
-				break
-			}
-		}
-		assert.Equal(t, 2, count)
 	})
 }

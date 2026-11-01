@@ -40,8 +40,9 @@ func (id TypeID) Name() string {
 // Format: "schemaPath:typeName" or just "typeName" for empty schema path.
 //
 // For a disk-loaded schema the rendering embeds an absolute filesystem path,
-// so it is machine-local: two hosts loading one schema text render different
-// strings. Use it for diagnostics, never as a persisted or compared identity —
+// so it is machine-local: two hosts that hold one schema text at different
+// paths render different strings. Use it for diagnostics and for a sort order on one host, never as a
+// persisted identity or an identity compared across hosts —
 // [StructuralHash] and the .ys wire key on (schema name, type name) for that
 // reason.
 func (id TypeID) String() string {

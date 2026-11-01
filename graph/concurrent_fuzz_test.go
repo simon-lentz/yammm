@@ -3,6 +3,7 @@ package graph_test
 import (
 	"context"
 	"math/rand"
+	"slices"
 	"sync"
 	"testing"
 
@@ -60,7 +61,7 @@ func FuzzGraph_ConcurrentOperations(f *testing.F) {
 }
 
 // buildFuzzSchema creates a simple schema for fuzz testing.
-func buildFuzzSchema(t *testing.T) *schema.Schema {
+func buildFuzzSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
 	s, result := schema.NewBuilder().
@@ -80,7 +81,7 @@ func buildFuzzSchema(t *testing.T) *schema.Schema {
 }
 
 // runFuzzOperations performs random graph operations.
-func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
+func runFuzzOperations(t *testing.T, g *graph.Graph, s schema.Schema, ctx context.Context, r *rand.Rand, workerID, numOps int) {
 	t.Helper()
 
 	personType, ok := s.Type("Person")
@@ -97,7 +98,7 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 			pk := []any{formatID(workerID, id)}
 			// Half the instances carry a friend reference, so edges and
 			// unresolved records both form and the oracle's edge block runs.
-			var edges map[string]*instance.ValidEdgeData
+			var edges map[string]instance.ValidEdgeData
 			if r.Intn(2) == 0 {
 				edges = edgeData("FRIEND", nil, []any{formatID(workerID, r.Intn(100))})
 			}
@@ -106,7 +107,7 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 				personType.ID(),
 				immutable.WrapKey(pk),
 				immutable.WrapProperties(map[string]any{"id": pk[0], "name": formatName(workerID, id)}),
-				edges, nil, nil,
+				edges, nil, location.Provenance{},
 			)
 			// Ignore results - we just want to test for races/panics
 			g.Add(ctx, inst)
@@ -115,8 +116,8 @@ func runFuzzOperations(t *testing.T, g *graph.Graph, s *schema.Schema, ctx conte
 			snap := g.Snapshot()
 			// Read from snapshot to ensure no concurrent modification issues
 			_ = snap.Types()
-			_ = snap.Edges()
-			_ = snap.Unresolved()
+			_ = slices.Collect(snap.Edges())
+			_ = slices.Collect(snap.Unresolved())
 
 		case 2: // Check
 			g.Check(ctx)
@@ -146,7 +147,7 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 	// Basic consistency checks
 	types := snap.Types()
 	for _, typeName := range types {
-		instances := snap.InstancesOf(typeName)
+		instances := slices.Collect(snap.InstancesOf(typeName))
 		// Each instance should be retrievable by key
 		for _, inst := range instances {
 			_, ok := snap.InstanceByKey(typeName, inst.PrimaryKey().String())
@@ -160,14 +161,14 @@ func verifyGraphConsistency(t *testing.T, g *graph.Graph) {
 	// of every unresolved record is too. The corpus must produce edges for
 	// this to mean anything; runFuzzOperations gives half its instances a
 	// friend reference for that reason.
-	for _, edge := range snap.Edges() {
-		for _, endpoint := range []*graph.Instance{edge.Source(), edge.Target()} {
+	for edge := range snap.Edges() {
+		for _, endpoint := range []graph.Instance{edge.Source(), edge.Target()} {
 			if _, ok := snap.InstanceByKey(endpoint.TypeID(), endpoint.PrimaryKey().String()); !ok {
 				t.Errorf("Edge endpoint %s/%s not in graph", endpoint.TypeID(), endpoint.PrimaryKey())
 			}
 		}
 	}
-	for _, unres := range snap.Unresolved() {
+	for unres := range snap.Unresolved() {
 		if _, ok := snap.InstanceByKey(unres.Source().TypeID(), unres.Source().PrimaryKey().String()); !ok {
 			t.Errorf("Unresolved source %s/%s not in graph", unres.Source().TypeID(), unres.Source().PrimaryKey())
 		}
@@ -203,7 +204,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 				personType.ID(),
 				immutable.WrapKey(pk),
 				immutable.WrapProperties(map[string]any{"id": pk[0], "name": "Person-" + string(rune('0'+id))}),
-				nil, nil, nil,
+				nil, nil, location.Provenance{},
 			)
 			g.Add(ctx, inst)
 		}
@@ -216,7 +217,7 @@ func FuzzGraph_AddSequence(f *testing.F) {
 
 		// Graph should have exactly the unique instances (duplicates ignored)
 		snap := g.Snapshot()
-		instanceCount := len(snap.InstancesOf(mustTypeID(t, s, "Person")))
+		instanceCount := len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person"))))
 		if instanceCount != len(uniqueIDs) {
 			t.Errorf("Expected %d instances, got %d", len(uniqueIDs), instanceCount)
 		}

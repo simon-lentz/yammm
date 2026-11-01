@@ -93,7 +93,7 @@ func TestLoad_HoldsThePatternsItsSourceStates(t *testing.T) {
 		}
 	}
 	record("NEAR.note", note.Constraint())
-	for _, dt := range s.DataTypesSlice() {
+	for dt := range s.DataTypes() {
 		record("type "+dt.Name(), dt.Constraint())
 	}
 	fmt.Fprintf(&b, "structural hash: %s\n", schema.StructuralHash(s))

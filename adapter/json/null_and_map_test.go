@@ -36,13 +36,13 @@ func TestParseObject_AnExplicitNullKeepsItsKey(t *testing.T) {
 // validation. The DSL has no map kind and the validator stores no nil, so a
 // stored nil or a map-valued property reaches the writer only this way or
 // through graph.RebuildSnapshot, which a .ys document reaches.
-func bypassPerson(t *testing.T, props map[string]any) *graph.Snapshot {
+func bypassPerson(t *testing.T, props map[string]any) graph.Snapshot {
 	t.Helper()
 	s := testSchemaSimple(t)
 	personT, _ := s.Type("Person")
 	g := graph.New(s)
 	inst := instance.NewValidInstance("Person", personT.ID(), immutable.WrapKey([]any{"p1"}),
-		immutable.WrapProperties(props), nil, nil, nil)
+		immutable.WrapProperties(props), nil, nil, location.Provenance{})
 	if r := g.Add(context.Background(), inst); r.HasErrors() {
 		t.Fatalf("graph.Add: %s", r)
 	}

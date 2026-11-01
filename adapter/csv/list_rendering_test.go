@@ -56,7 +56,7 @@ type Grid {
 }
 `
 
-func loadListRenderingSchema(t *testing.T) *schema.Schema {
+func loadListRenderingSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), listRenderingSchema, "list_rendering.yammm")
 	if res.HasErrors() {
@@ -67,7 +67,7 @@ func loadListRenderingSchema(t *testing.T) *schema.Schema {
 
 // csvRoundTrip writes snap through a, parses every type back through a in
 // order, validates and rebuilds the graph, failing on any error.
-func csvRoundTrip(t *testing.T, a *Adapter, s *schema.Schema, snap *graph.Snapshot, order []string) (map[string][]byte, *graph.Snapshot) {
+func csvRoundTrip(t *testing.T, a *Adapter, s schema.Schema, snap graph.Snapshot, order []string) (map[string][]byte, graph.Snapshot) {
 	t.Helper()
 	ctx := context.Background()
 	files, err := a.MarshalSnapshot(ctx, snap)
@@ -104,7 +104,7 @@ func csvRoundTrip(t *testing.T, a *Adapter, s *schema.Schema, snap *graph.Snapsh
 // assertSameGraph compares two snapshots through the JSON writer, the other
 // implementation of the data contract, which carries nested lists on its own
 // wire.
-func assertSameGraph(t *testing.T, want, got *graph.Snapshot, files map[string][]byte) {
+func assertSameGraph(t *testing.T, want, got graph.Snapshot, files map[string][]byte) {
 	t.Helper()
 	ctx := context.Background()
 	w, err := jsonadapter.New().MarshalObject(ctx, want)
@@ -253,7 +253,7 @@ func TestListRendering_ABypassBuiltFloat32RendersAsAFloatDoes(t *testing.T) {
 			"av":      []any{float32(1e7), float32(0.1)},
 			"points":  []any{[]any{float32(1e7), float32(1e-7)}},
 		}),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
+		instancetest.Edges(map[string]instance.ValidEdgeData{
 			"STOPS": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"sA"}), immutable.WrapProperties(map[string]any{"w": float32(0.1)})),
 			}),
@@ -292,7 +292,7 @@ func TestListRendering_AValueItsConstraintCannotRenderIsWrittenAsItArrived(t *te
 	if !ok {
 		t.Fatal("Grid missing from the fixture schema")
 	}
-	build := func(props map[string]any) *graph.Snapshot {
+	build := func(props map[string]any) graph.Snapshot {
 		t.Helper()
 		g := graph.New(s)
 		vi := instancetest.VI("Grid", instancetest.TypeID(grid.ID()), instancetest.PK("g1"), instancetest.Props(props))
@@ -412,7 +412,7 @@ func TestListRendering_ASeparatorTheParserCannotFindIsRefused(t *testing.T) {
 			t.Errorf("%q: ParseTyped: got %d instances, %d reads and %s, want none, no read and an Error E_CSV_CONFIG naming the list separator", sep, len(raws), input.reads, res.String())
 		}
 		byType, res := New(WithSchema(s), WithListSeparator(sep), WithTypeColumn("type")).ParseWithTypeColumn(context.Background(), location.NewSourceID("g.csv"),
-			strings.NewReader("type,id,tags\nGrid,g1,a|b\n"), func(string) *schema.Type { return typ })
+			strings.NewReader("type,id,tags\nGrid,g1,a|b\n"), func(string) schema.Type { return typ })
 		if len(byType) != 0 || !hasSeverity(res, diag.Error, E_CSV_CONFIG, "list separator") {
 			t.Errorf("%q: ParseWithTypeColumn: got %v and %s, want none and an Error E_CSV_CONFIG naming the list separator", sep, byType, res.String())
 		}

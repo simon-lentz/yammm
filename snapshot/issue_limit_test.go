@@ -16,7 +16,7 @@ import (
 
 // revalDocumentWithFailures marshals n bypass-built Things, each violating
 // the count bound, so re-validation reports at least one finding per Thing.
-func revalDocumentWithFailures(t *testing.T, s *schema.Schema, n int) []byte {
+func revalDocumentWithFailures(t *testing.T, s schema.Schema, n int) []byte {
 	t.Helper()
 	thing, _ := s.Type("Thing")
 	g := graph.New(s)
@@ -28,7 +28,7 @@ func revalDocumentWithFailures(t *testing.T, s *schema.Schema, n int) []byte {
 			instancetest.PK(id),
 			instancetest.Props(map[string]any{"id": id, "count": int64(99)}),
 			instancetest.Composed(map[string]immutable.Value{
-				"ITEMS": immutable.Wrap([]*instance.ValidInstance{revalItem(t, s, "sku-"+id)}),
+				"ITEMS": immutable.Wrap([]instance.ValidInstance{revalItem(t, s, "sku-"+id)}),
 			}),
 		)
 		if r := g.Add(t.Context(), vi); !r.OK() {
@@ -44,7 +44,7 @@ func revalDocumentWithFailures(t *testing.T, s *schema.Schema, n int) []byte {
 
 // unlimitedFindings is the oracle for the capped runs: the whole walk's count,
 // taken with no limit, is what a capped run's stored + dropped must add up to.
-func unlimitedFindings(t *testing.T, s *schema.Schema, data []byte) int {
+func unlimitedFindings(t *testing.T, s schema.Schema, data []byte) int {
 	t.Helper()
 	_, res := snapshot.Load(t.Context(), data, s,
 		snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(0))
@@ -69,7 +69,7 @@ func TestLoad_WithIssueLimit_BoundsTheStoredIssuesNotTheWalk(t *testing.T) {
 
 	snap, res := snapshot.Load(t.Context(), data, s,
 		snapshot.WithRevalidation(diag.Warning), snapshot.WithIssueLimit(3))
-	if snap == nil {
+	if snap.IsZero() {
 		t.Fatalf("Load refused a warnings-only document: %s", res)
 	}
 	if got := res.Len(); got != 3 {
@@ -155,9 +155,9 @@ func TestLoad_WithIssueLimit_KeepsTheFindingsRaisedFirst(t *testing.T) {
 	data := revalDocument(t, s,
 		instancetest.Props(map[string]any{"id": "t1", "count": int64(99), "state": "neither", "code": "bad"}),
 		instancetest.Composed(map[string]immutable.Value{
-			"ITEMS": immutable.Wrap([]*instance.ValidInstance{revalItem(t, s, "sku-1")}),
+			"ITEMS": immutable.Wrap([]instance.ValidInstance{revalItem(t, s, "sku-1")}),
 		}),
-		instancetest.Edges(map[string]*instance.ValidEdgeData{
+		instancetest.Edges(map[string]instance.ValidEdgeData{
 			"OWNER": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 				instance.NewValidEdgeTarget(immutable.WrapKey([]any{"x1"}), immutable.Properties{}),
 			}),
@@ -227,7 +227,7 @@ func TestLoad_RevalidationSharesTheLoadsIssueLimit(t *testing.T) {
 	thing, _ := s.Type("Thing")
 	item, _ := s.Type("Item")
 	g := graph.New(s)
-	items := make([]*instance.ValidInstance, 0, 101)
+	items := make([]instance.ValidInstance, 0, 101)
 	for i := range 101 {
 		items = append(items, instancetest.VI("Item", instancetest.TypeID(item.ID()),
 			instancetest.Props(map[string]any{"sku": fmt.Sprintf("bad-%d", i)})))

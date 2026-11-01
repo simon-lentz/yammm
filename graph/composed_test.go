@@ -2,6 +2,7 @@ package graph_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
@@ -40,7 +41,7 @@ func TestAddComposed_OneCardinality_Success(t *testing.T) {
 
 	// Verify child is attached
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	if len(parents) != 1 {
 		t.Fatalf("Expected 1 parent, got %d", len(parents))
 	}
@@ -104,7 +105,7 @@ func TestAddComposed_ManyWithPK_Success(t *testing.T) {
 
 	// Verify all children attached
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	assertComposedCount(t, parents[0], "CHILDREN", 3)
 }
 
@@ -164,7 +165,7 @@ func TestAddComposed_ManyWithoutPK_Appends(t *testing.T) {
 
 	// Verify all items attached
 	snap := g.Snapshot()
-	containers := snap.InstancesOf(mustTypeID(t, s, "Container"))
+	containers := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Container")))
 	assertComposedCount(t, containers[0], "ITEMS", 3)
 }
 
@@ -327,11 +328,11 @@ func TestAddComposed_AfterAdd_Mixed(t *testing.T) {
 
 	// Verify both children are present
 	snap := g.Snapshot()
-	parents := snap.InstancesOf(mustTypeID(t, s, "Parent"))
+	parents := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Parent")))
 	assertComposedCount(t, parents[0], "CHILDREN", 2)
 
 	// Verify child details
-	children := parents[0].Composed("CHILDREN")
+	children := slices.Collect(parents[0].Composed("CHILDREN"))
 	if len(children) != 2 {
 		t.Fatalf("Expected 2 children, got %d", len(children))
 	}
@@ -355,7 +356,7 @@ func TestAddComposed_NilChild(t *testing.T) {
 			t.Error("AddComposed(nil child) should panic")
 		}
 	}()
-	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", nil)
+	g.AddComposed(ctx, mustTypeID(t, s, "Parent"), graph.FormatKey("p1"), "CHILDREN", instance.ValidInstance{})
 }
 
 func TestAddComposed_SchemaMismatch(t *testing.T) {
@@ -386,7 +387,7 @@ func TestAddComposed_SchemaMismatch(t *testing.T) {
 		otherChildType.ID(), // TypeID points to different schema
 		immutable.WrapKey([]any{"oc1"}),
 		immutable.WrapProperties(map[string]any{"id": "oc1"}),
-		nil, nil, nil,
+		nil, nil, location.Provenance{},
 	)
 
 	// Try to add child from different schema
@@ -520,7 +521,7 @@ func TestResult_Duplicates_IncludesComposedDuplicates_OneCardinality(t *testing.
 
 	// Verify Result.Duplicates() includes the composed duplicate
 	snap := g.Snapshot()
-	dups := snap.Duplicates()
+	dups := slices.Collect(snap.Duplicates())
 
 	if len(dups) != 1 {
 		t.Fatalf("Expected 1 duplicate, got %d", len(dups))
@@ -530,10 +531,10 @@ func TestResult_Duplicates_IncludesComposedDuplicates_OneCardinality(t *testing.
 	if dup.Diagnostic().Code() != diag.E_DUPLICATE_COMPOSED_PK {
 		t.Errorf("Expected E_DUPLICATE_COMPOSED_PK, got %s", dup.Diagnostic().Code())
 	}
-	if dup.Instance() == nil {
+	if dup.Instance().IsZero() {
 		t.Error("Duplicate.Instance should not be nil")
 	}
-	if dup.Conflict() == nil {
+	if dup.Conflict().IsZero() {
 		t.Error("Duplicate.Conflict should not be nil")
 	}
 }
@@ -565,7 +566,7 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 
 	// Verify Result.Duplicates() includes the composed duplicate
 	snap := g.Snapshot()
-	dups := snap.Duplicates()
+	dups := slices.Collect(snap.Duplicates())
 
 	if len(dups) != 1 {
 		t.Fatalf("Expected 1 duplicate, got %d", len(dups))
@@ -575,10 +576,10 @@ func TestResult_Duplicates_IncludesComposedDuplicates_ManyWithPK(t *testing.T) {
 	if dup.Diagnostic().Code() != diag.E_DUPLICATE_COMPOSED_PK {
 		t.Errorf("Expected E_DUPLICATE_COMPOSED_PK, got %s", dup.Diagnostic().Code())
 	}
-	if dup.Instance() == nil {
+	if dup.Instance().IsZero() {
 		t.Error("Duplicate.Instance should not be nil")
 	}
-	if dup.Conflict() == nil {
+	if dup.Conflict().IsZero() {
 		t.Error("Duplicate.Conflict should not be nil")
 	}
 	// The collision is on the key, so both carry it; what separates them is
@@ -643,7 +644,7 @@ type Car {
 	if r := g.Add(ctx, inst); !r.OK() {
 		t.Fatalf("a validated child of an extending part type was refused: %s", r.String())
 	}
-	car := g.Snapshot().InstancesOf(inst.TypeID())[0]
+	car := slices.Collect(g.Snapshot().InstancesOf(inst.TypeID()))[0]
 	if n := car.ComposedCount("WHEELS"); n != 2 {
 		t.Fatalf("children attached = %d, want 2", n)
 	}

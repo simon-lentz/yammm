@@ -2,6 +2,7 @@ package schema_test
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -30,10 +31,10 @@ func TestRegistry_Register(t *testing.T) {
 	assert.Equal(t, 1, r.Len())
 }
 
-func TestRegistry_Register_Nil(t *testing.T) {
+func TestRegistry_Register_Zero(t *testing.T) {
 	r := schema.NewRegistry()
 
-	err := r.Register(nil)
+	err := r.Register(schema.Schema{})
 	require.NoError(t, err)
 	assert.Equal(t, 0, r.Len())
 }
@@ -82,7 +83,9 @@ func TestRegistry_LookupBySourceID(t *testing.T) {
 
 	found, ok := r.LookupBySourceID(srcID)
 	assert.True(t, ok)
-	assert.Same(t, s, found)
+	if s != found {
+		t.Error("s and found do not name one record")
+	}
 
 	_, ok = r.LookupBySourceID(location.MustNewSourceID("test://other.yammm"))
 	assert.False(t, ok)
@@ -97,7 +100,9 @@ func TestRegistry_LookupByName(t *testing.T) {
 
 	found, ok := r.LookupByName("myschema")
 	assert.True(t, ok)
-	assert.Same(t, s, found)
+	if s != found {
+		t.Error("s and found do not name one record")
+	}
 
 	_, ok = r.LookupByName("other")
 	assert.False(t, ok)
@@ -111,7 +116,7 @@ func TestRegistry_LookupType(t *testing.T) {
 
 	// Create a type and add it to the schema
 	typ := schema.TestNewType("Person", srcID, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s, []*schema.Type{typ})
+	schema.TestSetSchemaTypes(s, []schema.Type{typ})
 
 	_ = r.Register(s)
 
@@ -119,7 +124,9 @@ func TestRegistry_LookupType(t *testing.T) {
 	typeID := typ.ID()
 	found, ok := r.LookupType(typeID)
 	assert.True(t, ok)
-	assert.Same(t, typ, found)
+	if typ != found {
+		t.Error("typ and found do not name one record")
+	}
 
 	// Lookup non-existent type
 	fakeID := schema.NewTypeID(location.MustNewSourceID("test://other.yammm"), "Fake")
@@ -152,7 +159,9 @@ func TestRegistry_Clone(t *testing.T) {
 	// Clone should have the same schema
 	found, ok := clone.LookupBySourceID(srcID)
 	assert.True(t, ok)
-	assert.Same(t, s, found)
+	if s != found {
+		t.Error("s and found do not name one record")
+	}
 
 	// Modifying clone should not affect original
 	srcID2 := location.MustNewSourceID("test://other.yammm")
@@ -171,7 +180,7 @@ func TestRegistry_All(t *testing.T) {
 	_ = r.Register(s1)
 	_ = r.Register(s2)
 
-	all := r.All()
+	all := slices.Collect(r.All())
 	assert.Len(t, all, 2)
 }
 
@@ -188,11 +197,11 @@ func TestRegistry_All_OrderDeterminism(t *testing.T) {
 	_ = r.Register(s3)
 
 	// Get first snapshot
-	first := r.All()
+	first := slices.Collect(r.All())
 	require.Len(t, first, 3)
 
 	// Get second snapshot
-	second := r.All()
+	second := slices.Collect(r.All())
 	require.Len(t, second, 3)
 
 	// Order should be deterministic across calls
@@ -278,18 +287,18 @@ func TestRegistry_Register_EmptyName(t *testing.T) {
 	assert.Equal(t, schema.InvalidName, regErr.Kind)
 }
 
-// newIdenticalSchemaPair constructs two distinct *Schema pointers carrying
+// newIdenticalSchemaPair constructs two distinct Schema pointers carrying
 // identical SourceID, name, and types — so StructuralHash(s1) == StructuralHash(s2).
 // Used by the idempotence tests.
-func newIdenticalSchemaPair(tb testing.TB, srcID location.SourceID, schemaName, typeName string) (s1, s2 *schema.Schema) {
+func newIdenticalSchemaPair(tb testing.TB, srcID location.SourceID, schemaName, typeName string) (s1, s2 schema.Schema) {
 	tb.Helper()
 	s1 = schema.TestNewSchema(schemaName, srcID, location.Span{}, "")
 	t1 := schema.TestNewType(typeName, srcID, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s1, []*schema.Type{t1})
+	schema.TestSetSchemaTypes(s1, []schema.Type{t1})
 
 	s2 = schema.TestNewSchema(schemaName, srcID, location.Span{}, "")
 	t2 := schema.TestNewType(typeName, srcID, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s2, []*schema.Type{t2})
+	schema.TestSetSchemaTypes(s2, []schema.Type{t2})
 	return s1, s2
 }
 
@@ -311,7 +320,9 @@ func TestRegistry_Register_IdempotentExactMatch(t *testing.T) {
 	// The registry must retain the first pointer (not the fresh one).
 	found, ok := r.LookupBySourceID(srcID)
 	require.True(t, ok)
-	assert.Same(t, s1, found, "registry must retain the first-registered pointer on idempotent re-register")
+	if s1 != found {
+		t.Error("registry must retain the first-registered pointer on idempotent re-register")
+	}
 }
 
 func TestRegistry_Register_IdempotentNoTypeReindex(t *testing.T) {
@@ -320,13 +331,15 @@ func TestRegistry_Register_IdempotentNoTypeReindex(t *testing.T) {
 
 	s1 := schema.TestNewSchema("shared", srcID, location.Span{}, "")
 	t1 := schema.TestNewType("Person", srcID, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s1, []*schema.Type{t1})
+	schema.TestSetSchemaTypes(s1, []schema.Type{t1})
 
 	s2 := schema.TestNewSchema("shared", srcID, location.Span{}, "")
 	t2 := schema.TestNewType("Person", srcID, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s2, []*schema.Type{t2})
+	schema.TestSetSchemaTypes(s2, []schema.Type{t2})
 
-	require.NotSame(t, t1, t2, "fresh Type pointer required to observe re-index")
+	if t1 == t2 {
+		t.Fatal("a fresh Type record is required to observe the re-index")
+	}
 
 	require.NoError(t, r.Register(s1))
 	require.NoError(t, r.Register(s2), "idempotent re-register must succeed")
@@ -335,7 +348,9 @@ func TestRegistry_Register_IdempotentNoTypeReindex(t *testing.T) {
 	// one. This pins that the idempotence path skips the re-index loop.
 	found, ok := r.LookupType(t1.ID())
 	require.True(t, ok)
-	assert.Same(t, t1, found, "type pointer identity must survive idempotent re-register")
+	if t1 != found {
+		t.Error("type pointer identity must survive idempotent re-register")
+	}
 }
 
 func TestRegistry_Register_ContentDivergence(t *testing.T) {
@@ -346,11 +361,11 @@ func TestRegistry_Register_ContentDivergence(t *testing.T) {
 	// different StructuralHashes (hash.go writes the type name).
 	s1 := schema.TestNewSchema("shared", srcID, location.Span{}, "")
 	t1 := schema.TestNewType("Person", srcID, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s1, []*schema.Type{t1})
+	schema.TestSetSchemaTypes(s1, []schema.Type{t1})
 
 	s2 := schema.TestNewSchema("shared", srcID, location.Span{}, "")
 	t2 := schema.TestNewType("Vehicle", srcID, location.Span{}, "", false, false)
-	schema.TestSetSchemaTypes(s2, []*schema.Type{t2})
+	schema.TestSetSchemaTypes(s2, []schema.Type{t2})
 
 	hash1 := schema.StructuralHash(s1)
 	hash2 := schema.StructuralHash(s2)
@@ -385,7 +400,9 @@ func TestRegistry_Register_ContentDivergence(t *testing.T) {
 	assert.Equal(t, 1, r.Len(), "divergent registration must not insert or overwrite")
 	found, ok := r.LookupBySourceID(srcID)
 	require.True(t, ok)
-	assert.Same(t, s1, found, "registry must still hold the first-registered schema")
+	if s1 != found {
+		t.Error("registry must still hold the first-registered schema")
+	}
 }
 
 // Sanity regression: the pre-existing TestRegistry_Register_DuplicateSourceID

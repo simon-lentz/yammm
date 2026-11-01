@@ -51,7 +51,7 @@ type Person {
 }
 `
 
-func loadReaderSchema(t *testing.T) *schema.Schema {
+func loadReaderSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), readerSchema, "rd.yammm")
 	if res.HasErrors() {
@@ -60,7 +60,7 @@ func loadReaderSchema(t *testing.T) *schema.Schema {
 	return s
 }
 
-func readerDoc(t *testing.T, s *schema.Schema, rows ...map[string]any) string {
+func readerDoc(t *testing.T, s schema.Schema, rows ...map[string]any) string {
 	t.Helper()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -107,7 +107,7 @@ func tableRow(t *testing.T, doc, name string) int {
 }
 
 // readBoth returns Verify's and Load's results for doc.
-func readBoth(t *testing.T, s *schema.Schema, doc string) map[string]diag.Result {
+func readBoth(t *testing.T, s schema.Schema, doc string) map[string]diag.Result {
 	t.Helper()
 	_, l := snapshot.Load(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false))
 	return map[string]diag.Result{"Verify": snapshot.Verify(context.Background(), []byte(doc), s, snapshot.WithIntegrityCheck(false)), "Load": l}
@@ -130,7 +130,7 @@ func requireReaderRule(t *testing.T, name string, got map[string]diag.Result, co
 
 // personDoc holds p1 with an unresolved WORKS_AT and KNOWS record, and an edge
 // to p0 under BOSS, so each record can be edited alone.
-func personDoc(t *testing.T, s *schema.Schema) string {
+func personDoc(t *testing.T, s schema.Schema) string {
 	t.Helper()
 	return readerDoc(t, s,
 		map[string]any{"$type": "Company", "id": "c1"},

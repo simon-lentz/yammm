@@ -49,15 +49,15 @@ func TestBuilder_RefusesNonFiniteFloatBound(t *testing.T) {
 			AddDataType("Weight", schema.FloatBetween(-math.MaxFloat64, math.MaxFloat64)).
 			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 			WithProperty("weight", schema.NewListConstraint(schema.FloatMin(0))).Done().Build()
-		if res.HasErrors() || s == nil {
+		if res.HasErrors() || s.IsZero() {
 			t.Fatalf("finite bounds: Build = %v, %v", s, res.Err())
 		}
 	})
 }
 
-func assertRefusedNonFinite(t *testing.T, s *schema.Schema, res diag.Result) {
+func assertRefusedNonFinite(t *testing.T, s schema.Schema, res diag.Result) {
 	t.Helper()
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("Build returned a schema holding a non-finite Float bound")
 	}
 	issues := slices.Collect(res.Issues())
@@ -105,7 +105,7 @@ func TestBuilder_RefusesEveryConstraintTheDSLRefuses(t *testing.T) {
 			s, res := schema.NewBuilder().WithName("fleet").
 				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 				WithProperty("v", tc.c).Done().Build()
-			if s != nil {
+			if !s.IsZero() {
 				t.Fatalf("the Builder built %s", tc.dsl)
 			}
 			if !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), tc.want) {
@@ -126,7 +126,7 @@ func TestBuilder_RefusesANegativeLength(t *testing.T) {
 			s, res := schema.NewBuilder().WithName("fleet").
 				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 				WithProperty("v", c).Done().Build()
-			if s != nil || !strings.Contains(res.String(), "cannot be negative") {
+			if !s.IsZero() || !strings.Contains(res.String(), "cannot be negative") {
 				t.Errorf("Build = %v, %s; want a refusal naming the negative length", s, res.String())
 			}
 		})
@@ -145,7 +145,7 @@ func TestBuilder_RefusesAFaultBehindAnAlias(t *testing.T) {
 				AddDataType("Code", schema.IntegerBetween(5, 1)).
 				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 				WithProperty("v", c).Done().Build()
-			if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) {
+			if !s.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) {
 				t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT", s, res.String())
 			}
 		})
@@ -158,7 +158,7 @@ func TestBuilder_RefusesAPatternWithNone(t *testing.T) {
 	s, res := schema.NewBuilder().WithName("fleet").
 		AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 		WithProperty("v", schema.NewPatternConstraint(nil)).Done().Build()
-	if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), "needs at least one pattern") {
+	if !s.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), "needs at least one pattern") {
 		t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT naming the missing pattern", s, res.String())
 	}
 }
@@ -190,9 +190,9 @@ func TestBuilder_RefusesAListWithNoElement(t *testing.T) {
 	}
 }
 
-func assertRefusedNoElement(t *testing.T, s *schema.Schema, res diag.Result) {
+func assertRefusedNoElement(t *testing.T, s schema.Schema, res diag.Result) {
 	t.Helper()
-	if s != nil {
+	if !s.IsZero() {
 		t.Fatal("Build returned a schema holding a List with no element")
 	}
 	if !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), "list has no element constraint") {
@@ -215,7 +215,7 @@ func TestBuilder_RefusesAConstraintThePackageDoesNotConstruct(t *testing.T) {
 			s, res := schema.NewBuilder().WithName("fleet").
 				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 				WithProperty("v", c).Done().Build()
-			if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), "none this package constructs") {
+			if !s.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), "none this package constructs") {
 				t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT naming the Go type", s, res.String())
 			}
 		})
@@ -234,7 +234,7 @@ func TestBuilder_RefusesADataTypeDeclaredAsAnotherAlone(t *testing.T) {
 		AddDataType("A", schema.NewIntegerConstraint()).
 		AddDataType("B", schema.NewAliasConstraint("A", nil)).
 		AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).Done().Build()
-	if s != nil || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), `datatype "B" is declared as datatype "A" alone`) {
+	if !s.IsZero() || !hasCode(res, diag.E_INVALID_CONSTRAINT) || !strings.Contains(res.String(), `datatype "B" is declared as datatype "A" alone`) {
 		t.Errorf("Build = %v, %s; want E_INVALID_CONSTRAINT naming B and A", s, res.String())
 	}
 }
@@ -279,7 +279,7 @@ func TestBuilder_RefusesANameTheDSLRefuses(t *testing.T) {
 				t.Fatalf("the DSL accepts %s", tc.name)
 			}
 			s, res := tc.build(base()).Build()
-			if s != nil || !hasCode(res, diag.E_INVALID_NAME) {
+			if !s.IsZero() || !hasCode(res, diag.E_INVALID_NAME) {
 				t.Errorf("Build = %v, %s; want E_INVALID_NAME", s, res.String())
 			}
 		})
@@ -293,7 +293,7 @@ func TestBuilder_RefusesANameTheDSLRefuses(t *testing.T) {
 			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 			WithProperty("schema", schema.NewStringConstraint()).
 			WithRelation("LIST", car, false, false).Done().Build()
-		if s == nil || res.HasErrors() {
+		if s.IsZero() || res.HasErrors() {
 			t.Errorf("Build refused: %s", res.String())
 		}
 	})
@@ -304,7 +304,7 @@ func TestBuilder_RefusesANameTheDSLRefuses(t *testing.T) {
 // an undeclared name is refused whatever resolution rides with it, and a
 // declared DataType governs over a resolution that contradicts it.
 func TestBuilder_ResolvesAnAliasByItsNameAlone(t *testing.T) {
-	build := func(t *testing.T, declared, supplied schema.Constraint) (*schema.Schema, diag.Result) {
+	build := func(t *testing.T, declared, supplied schema.Constraint) (schema.Schema, diag.Result) {
 		t.Helper()
 		b := schema.NewBuilder().WithName("fleet")
 		if declared != nil {
@@ -317,7 +317,7 @@ func TestBuilder_ResolvesAnAliasByItsNameAlone(t *testing.T) {
 	}
 	t.Run("an undeclared name is refused with a resolution supplied", func(t *testing.T) {
 		s, res := build(t, nil, schema.IntegerBetween(1, 5))
-		if s != nil || !hasCode(res, diag.E_UNKNOWN_TYPE) {
+		if !s.IsZero() || !hasCode(res, diag.E_UNKNOWN_TYPE) {
 			t.Fatalf("Build = %v, %s; want E_UNKNOWN_TYPE", s, res.String())
 		}
 	})
@@ -328,7 +328,7 @@ func TestBuilder_ResolvesAnAliasByItsNameAlone(t *testing.T) {
 	} {
 		t.Run("the declaration governs over "+name, func(t *testing.T) {
 			s, res := build(t, schema.IntegerBetween(1, 5), supplied)
-			if s == nil {
+			if s.IsZero() {
 				t.Fatalf("Build refused: %s", res.String())
 			}
 			car, _ := s.Type("Car")
@@ -361,7 +361,7 @@ func TestBuilder_BuildsBoundsThatMeet(t *testing.T) {
 			s, res := schema.NewBuilder().WithName("fleet").
 				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 				WithProperty("v", c).Done().Build()
-			if s == nil || res.HasErrors() {
+			if s.IsZero() || res.HasErrors() {
 				t.Errorf("Build refused a legal constraint: %s", res.String())
 			}
 		})
@@ -386,7 +386,7 @@ func TestBuilder_ResolvesADataTypeAliasByItsNameAlone(t *testing.T) {
 			AddDataType("Wides", schema.NewListConstraint(schema.NewAliasConstraint("Nope", schema.IntegerBetween(1, 5)))).
 			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 			WithProperty("vs", schema.NewAliasConstraint("Wides", nil)).Done().Build()
-		if s != nil || !hasCode(res, diag.E_UNKNOWN_TYPE) {
+		if !s.IsZero() || !hasCode(res, diag.E_UNKNOWN_TYPE) {
 			t.Fatalf("Build = %v, %s; want E_UNKNOWN_TYPE", s, res.String())
 		}
 	})
@@ -397,7 +397,7 @@ func TestBuilder_ResolvesADataTypeAliasByItsNameAlone(t *testing.T) {
 			AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 			WithProperty("v", schema.NewAliasConstraint("Code", schema.NewStringConstraint())).
 			WithProperty("vs", schema.NewAliasConstraint("Wides", nil)).Done().Build()
-		if s == nil {
+		if s.IsZero() {
 			t.Fatalf("Build refused: %s", res.String())
 		}
 		want := schema.IntegerBetween(1, 5)
@@ -435,7 +435,7 @@ func TestBuilder_KeepsAListsLengthBoundsAroundAnAlias(t *testing.T) {
 				AddDataType("Code", schema.IntegerBetween(1, 5)).
 				AddType("Car").WithPrimaryKey("vin", schema.NewStringConstraint()).
 				WithProperty("vs", c.in).Done().Build()
-			if s == nil {
+			if s.IsZero() {
 				t.Fatalf("Build refused: %s", res.String())
 			}
 			car, _ := s.Type("Car")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -154,7 +155,7 @@ func TestEmbeddedKeys_AgreeWithTheLoadersKeyRule(t *testing.T) {
 			if want := strings.TrimPrefix(text.SourceID().String(), consumerRoot+"/"); entry != want {
 				t.Errorf("gogen keys the entry %q, the loader registers %q under %q", entry, l.entry, want)
 			}
-			wantDep := strings.TrimPrefix(text.ImportsSlice()[0].ResolvedSourceID().String(), consumerRoot+"/")
+			wantDep := strings.TrimPrefix(slices.Collect(text.Imports())[0].ResolvedSourceID().String(), consumerRoot+"/")
 			if store[wantDep] == nil {
 				t.Errorf("gogen's store %v holds no %q, the key the loader registers the import under", keysOf(store), wantDep)
 			}

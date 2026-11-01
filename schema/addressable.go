@@ -8,8 +8,8 @@ package schema
 // entry-relative name denotes a refused one — held together over a closure by
 // [TestAddressableTag_IsResolveTypeNameInverse]. [TagForm] renders every
 // identity for display and is lossy on purpose; this refuses instead.
-func AddressableTag(s *Schema, id TypeID) (string, bool) {
-	if s == nil || id.IsZero() {
+func AddressableTag(s Schema, id TypeID) (string, bool) {
+	if s.IsZero() || id.IsZero() {
 		return "", false
 	}
 	if id.SchemaPath() == s.SourceID() {
@@ -23,7 +23,7 @@ func AddressableTag(s *Schema, id TypeID) (string, bool) {
 		return "", false
 	}
 	imp, ok := s.ImportByAlias(alias)
-	if !ok || imp.Schema() == nil {
+	if !ok {
 		return "", false
 	}
 	// A caller may build any TypeID, so the name is checked against the schema
@@ -36,7 +36,7 @@ func AddressableTag(s *Schema, id TypeID) (string, bool) {
 
 // Addressable reports whether s can name id. It is [AddressableTag] without
 // the tag, for a caller deciding eligibility rather than rendering a name.
-func Addressable(s *Schema, id TypeID) bool {
+func Addressable(s Schema, id TypeID) bool {
 	_, ok := AddressableTag(s, id)
 	return ok
 }

@@ -55,7 +55,7 @@ type Solo {
 }
 `
 
-func loadEmptyCellSchema(t *testing.T) *schema.Schema {
+func loadEmptyCellSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), emptyCellSchema, "empty_cells.yammm")
 	if res.HasErrors() {
@@ -66,11 +66,11 @@ func loadEmptyCellSchema(t *testing.T) *schema.Schema {
 
 // emptyCellSnapshot validates and adds every instance in order, so a target
 // precedes the instance that points at it.
-func emptyCellSnapshot(t *testing.T, s *schema.Schema, rows []struct {
+func emptyCellSnapshot(t *testing.T, s schema.Schema, rows []struct {
 	typeName string
 	props    map[string]any
 },
-) *graph.Snapshot {
+) graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
 	v := instance.NewValidator(s)
@@ -97,7 +97,7 @@ type typedRow = struct {
 
 // reparse marshals snap, parses every type the writer emitted back through its
 // own output, in order, and rebuilds the graph, failing on any error.
-func reparse(t *testing.T, s *schema.Schema, snap *graph.Snapshot, order []string) (map[string][]byte, map[string][]instance.RawInstance, *graph.Snapshot) {
+func reparse(t *testing.T, s schema.Schema, snap graph.Snapshot, order []string) (map[string][]byte, map[string][]instance.RawInstance, graph.Snapshot) {
 	t.Helper()
 	ctx := context.Background()
 	a := New(WithSchema(s))
@@ -218,7 +218,7 @@ type Tally {
 func TestEmptyCell_NoSchemaTypeKeepsEveryCellAsItsString(t *testing.T) {
 	t.Parallel()
 	raws, pres := New().ParseTyped(context.Background(), location.NewSourceID("raw.csv"), "Row",
-		strings.NewReader("a,b,c.d\nx,,\n"), nil)
+		strings.NewReader("a,b,c.d\nx,,\n"), schema.Type{})
 	if pres.HasErrors() {
 		t.Fatalf("ParseTyped: %s", pres.String())
 	}
@@ -255,7 +255,7 @@ func TestEmptyCell_UnionHeaderParsesEveryRow(t *testing.T) {
 		"A,a1,one,,\n" +
 		"B,b1,,two,a1\n"
 	byType, pres := New(WithTypeColumn("kind"), WithSchema(s)).ParseWithTypeColumn(context.Background(),
-		location.NewSourceID("union.csv"), strings.NewReader(in), func(name string) *schema.Type {
+		location.NewSourceID("union.csv"), strings.NewReader(in), func(name string) schema.Type {
 			typ, _ := s.Type(name)
 			return typ
 		})
@@ -287,7 +287,7 @@ func TestEmptyCell_ValueInAnUndeclaredColumnIsStillReported(t *testing.T) {
 	in := "kind,id,alpha,beta,ref._target_id\n" +
 		"A,a1,one,stray,a9\n"
 	byType, pres := New(WithTypeColumn("kind"), WithSchema(s)).ParseWithTypeColumn(context.Background(),
-		location.NewSourceID("union.csv"), strings.NewReader(in), func(name string) *schema.Type {
+		location.NewSourceID("union.csv"), strings.NewReader(in), func(name string) schema.Type {
 			typ, _ := s.Type(name)
 			return typ
 		})
@@ -557,7 +557,7 @@ func TestEmptyCell_UnionHeaderWithASharedAssociationFieldParsesEveryRow(t *testi
 		"B,,b1,,y1\n"
 	for _, opts := range [][]Option{{WithTypeColumn("kind"), WithSchema(s)}, {WithTypeColumn("kind")}} {
 		byType, pres := New(opts...).ParseWithTypeColumn(context.Background(),
-			location.NewSourceID("shared.csv"), strings.NewReader(in), func(name string) *schema.Type {
+			location.NewSourceID("shared.csv"), strings.NewReader(in), func(name string) schema.Type {
 				typ, _ := s.Type(name)
 				return typ
 			})

@@ -38,7 +38,7 @@ type Beacon {
 `
 
 // sameNameSnapshot holds one instance of each Beacon.
-func sameNameSnapshot(t *testing.T) (*graph.Snapshot, *schema.Schema) {
+func sameNameSnapshot(t *testing.T) (graph.Snapshot, schema.Schema) {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(t.Context(), map[string][]byte{
 		"entry.yammm": []byte(multiEntrySource),
@@ -52,7 +52,7 @@ func sameNameSnapshot(t *testing.T) (*graph.Snapshot, *schema.Schema) {
 		t.Fatal("local Beacon not found")
 	}
 	base, ok := s.ImportByAlias("base")
-	if !ok || base.Schema() == nil {
+	if !ok || base.Schema().IsZero() {
 		t.Fatal("import alias base did not resolve")
 	}
 	imported, ok := base.Schema().Type("Beacon")

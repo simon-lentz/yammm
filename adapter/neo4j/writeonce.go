@@ -16,12 +16,12 @@ import (
 // with a MERGE match key. A subtype whose own body re-declares an annotated
 // parent property (identically or by narrowing) without re-stating @writeOnce
 // drops it from that subtype's derived set — the load warns via
-// W_ANNOTATION_SHADOWED. Returns nil for a nil type or one with no @writeOnce
+// W_ANNOTATION_SHADOWED. Returns nil for a zero type or one with no @writeOnce
 // properties.
 //
 // The write path selects a type's immutable-key query shape from this set.
-func ImmutableKeysFor(t *schema.Type) []string {
-	if t == nil {
+func ImmutableKeysFor(t schema.Type) []string {
+	if t.IsZero() {
 		return nil
 	}
 	var keys []string
@@ -38,12 +38,11 @@ func ImmutableKeysFor(t *schema.Type) []string {
 // derivedImmutableKeys returns a type's @writeOnce keys for the write path.
 //
 // [Adapter.ShapeForSchema] records them on the shape, which every write entry
-// point receives, so the guarantee holds even for a caller passing a nil schema
-// type — the documented streaming call shape. A nil ImmutableKeys means the
+// point receives. A nil ImmutableKeys means the
 // shape never computed them (hand-built, or built before the field existed)
 // rather than "this type has none"; only then is the schema type consulted, so
 // the common unannotated type costs no per-node walk.
-func derivedImmutableKeys(shape *NodeShape, schemaType *schema.Type) []string {
+func derivedImmutableKeys(shape *NodeShape, schemaType schema.Type) []string {
 	if shape != nil && shape.ImmutableKeys != nil {
 		return shape.ImmutableKeys
 	}

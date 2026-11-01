@@ -12,7 +12,7 @@ import (
 	"github.com/simon-lentz/yammm/schema"
 )
 
-func rebuildTestSchema(t *testing.T) *schema.Schema {
+func rebuildTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	s, result := schema.NewBuilder().
 		WithName("rebuild_test").
@@ -44,7 +44,7 @@ func TestRebuildSnapshot_EmptyParts(t *testing.T) {
 	if result.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
-	if snap == nil {
+	if snap.IsZero() {
 		t.Fatal("expected non-nil snapshot")
 	}
 	if len(snap.Types()) != 0 {
@@ -83,11 +83,11 @@ func TestRebuildSnapshot_WithInstances(t *testing.T) {
 	if len(snap.Types()) != 2 {
 		t.Errorf("expected 2 types, got %d", len(snap.Types()))
 	}
-	if len(snap.InstancesOf(mustTypeID(t, s, "Company"))) != 1 {
-		t.Errorf("expected 1 Company, got %d", len(snap.InstancesOf(mustTypeID(t, s, "Company"))))
+	if len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Company")))) != 1 {
+		t.Errorf("expected 1 Company, got %d", len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Company")))))
 	}
-	if len(snap.InstancesOf(mustTypeID(t, s, "Person"))) != 1 {
-		t.Errorf("expected 1 Person, got %d", len(snap.InstancesOf(mustTypeID(t, s, "Person"))))
+	if len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))) != 1 {
+		t.Errorf("expected 1 Person, got %d", len(slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))))
 	}
 }
 
@@ -123,7 +123,7 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
 
-	edges := snap.Edges()
+	edges := slices.Collect(snap.Edges())
 	if len(edges) != 1 {
 		t.Fatalf("expected 1 edge, got %d", len(edges))
 	}
@@ -134,11 +134,11 @@ func TestRebuildSnapshot_WithEdges(t *testing.T) {
 	}
 
 	// EdgesFrom should also work.
-	persons := snap.InstancesOf(mustTypeID(t, s, "Person"))
+	persons := slices.Collect(snap.InstancesOf(mustTypeID(t, s, "Person")))
 	if len(persons) != 1 {
 		t.Fatalf("expected 1 Person")
 	}
-	edgesFrom := snap.EdgesFrom(persons[0])
+	edgesFrom := slices.Collect(snap.EdgesFrom(persons[0]))
 	if len(edgesFrom) != 1 {
 		t.Errorf("EdgesFrom: expected 1, got %d", len(edgesFrom))
 	}
@@ -166,7 +166,7 @@ func TestRebuildSnapshot_EdgeMissingSource(t *testing.T) {
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
-	if snap != nil {
+	if !snap.IsZero() {
 		t.Error("expected nil snapshot on error")
 	}
 	if !result.HasErrors() {
@@ -211,7 +211,7 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
 
-	dups := snap.Duplicates()
+	dups := slices.Collect(snap.Duplicates())
 	if len(dups) != 1 {
 		t.Fatalf("expected 1 duplicate, got %d", len(dups))
 	}
@@ -223,7 +223,7 @@ func TestRebuildSnapshot_WithDuplicates(t *testing.T) {
 	if !dup.Diagnostic().IsZero() {
 		t.Error("loaded duplicate should not have diagnostic")
 	}
-	if dup.Conflict() == nil {
+	if dup.Conflict().IsZero() {
 		t.Error("conflict should be resolved")
 	}
 }
@@ -245,7 +245,7 @@ func TestRebuildSnapshot_DuplicateConflictMissing(t *testing.T) {
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
-	if snap != nil {
+	if !snap.IsZero() {
 		t.Error("expected nil snapshot on error")
 	}
 	if !result.HasErrors() {
@@ -280,7 +280,7 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
 
-	unresolved := snap.Unresolved()
+	unresolved := slices.Collect(snap.Unresolved())
 	if len(unresolved) != 1 {
 		t.Fatalf("expected 1 unresolved, got %d", len(unresolved))
 	}
@@ -289,7 +289,7 @@ func TestRebuildSnapshot_WithUnresolved(t *testing.T) {
 	if u.Relation() != "EMPLOYER" {
 		t.Errorf("unresolved relation: got %q", u.Relation())
 	}
-	if u.Source() == nil {
+	if u.Source().IsZero() {
 		t.Error("source should be resolved")
 	}
 }
@@ -337,12 +337,12 @@ func TestRebuildSnapshot_OneSlotConflictResolvesThroughSlot(t *testing.T) {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
 
-	dups := snap.Duplicates()
+	dups := slices.Collect(snap.Duplicates())
 	if len(dups) != 1 {
 		t.Fatalf("expected 1 duplicate, got %d", len(dups))
 	}
 	conflict := dups[0].Conflict()
-	if conflict == nil {
+	if conflict.IsZero() {
 		t.Fatal("conflict not resolved")
 	}
 	if got, want := conflict.PrimaryKey().String(), graph.FormatKey("c1"); got != want {
@@ -388,8 +388,8 @@ func TestRebuildSnapshot_ManyConflictIsTheSiblingAtItsKey(t *testing.T) {
 		t.Fatalf("RebuildSnapshot: %s", result)
 	}
 
-	conflict := snap.Duplicates()[0].Conflict()
-	if conflict == nil {
+	conflict := slices.Collect(snap.Duplicates())[0].Conflict()
+	if conflict.IsZero() {
 		t.Fatal("conflict not resolved")
 	}
 	if got, want := conflict.PrimaryKey().String(), graph.FormatKey("c1"); got != want {
@@ -438,7 +438,7 @@ func TestRebuildSnapshot_RefusesAComposedDuplicateOutsideItsSlotsTarget(t *testi
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
-	if snap != nil {
+	if !snap.IsZero() {
 		t.Error("expected nil snapshot on error")
 	}
 	requireFatalNaming(t, result, "the composition \"CHILD\" declares "+childID.String())
@@ -469,7 +469,7 @@ func TestRebuildSnapshot_RefusesARootDuplicateWithNoRootAtItsKey(t *testing.T) {
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
-	if snap != nil {
+	if !snap.IsZero() {
 		t.Error("expected nil snapshot on error")
 	}
 	requireFatalNaming(t, result, "no root is at its own type and key")
@@ -520,7 +520,7 @@ func TestRebuildSnapshot_RefusesAManyDuplicateWithNoSiblingAtItsKey(t *testing.T
 	}
 
 	snap, result := graph.RebuildSnapshot(s, parts)
-	if snap != nil {
+	if !snap.IsZero() {
 		t.Error("expected nil snapshot on error")
 	}
 	requireFatalNaming(t, result, `holds no child of the composition "CHILDREN" at its key`)
@@ -618,7 +618,7 @@ func TestRebuildSnapshot_ZeroIdentityPartsRejected(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			snap, result := graph.RebuildSnapshot(s, tc.parts)
-			if snap != nil {
+			if !snap.IsZero() {
 				t.Error("expected nil snapshot")
 			}
 			found := false
@@ -669,7 +669,7 @@ func TestRebuildSnapshot_EstablishesTheDocumentedOrdering(t *testing.T) {
 		t.Errorf("Types() = %d entries, want 1 — a repeated identity was not deduplicated", len(got))
 	}
 	var keys []string
-	for _, inst := range snap.InstancesOf(parentID) {
+	for inst := range snap.InstancesOf(parentID) {
 		keys = append(keys, inst.PrimaryKey().String())
 	}
 	if !slices.IsSorted(keys) {
@@ -725,7 +725,7 @@ func TestSnapshot_DuplicatesComeBackSorted(t *testing.T) {
 	}
 
 	var keys []string
-	for _, d := range snap.Duplicates() {
+	for d := range snap.Duplicates() {
 		keys = append(keys, d.Instance().PrimaryKey().String())
 	}
 	if !slices.IsSorted(keys) {

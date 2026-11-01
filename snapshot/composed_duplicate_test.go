@@ -3,6 +3,7 @@ package snapshot_test
 import (
 	"bytes"
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -14,7 +15,7 @@ import (
 // composedPKCollision builds a snapshot holding a composed-child primary-key
 // collision: two Child instances with the same key under one Parent's CHILDREN
 // relation. The second is rejected and recorded as a duplicate.
-func composedPKCollision(t *testing.T) *graph.Snapshot {
+func composedPKCollision(t *testing.T) graph.Snapshot {
 	t.Helper()
 	ctx := context.Background()
 	s := testSchemaWithComposition(t)
@@ -33,8 +34,8 @@ func composedPKCollision(t *testing.T) *graph.Snapshot {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.Duplicates()) != 1 {
-		t.Fatalf("snapshot holds %d duplicates, want 1", len(snap.Duplicates()))
+	if len(slices.Collect(snap.Duplicates())) != 1 {
+		t.Fatalf("snapshot holds %d duplicates, want 1", len(slices.Collect(snap.Duplicates())))
 	}
 	return snap
 }
@@ -58,12 +59,12 @@ func TestRoundTrip_ComposedChildDuplicate(t *testing.T) {
 	if loadRes.HasErrors() {
 		t.Fatalf("Load rejected a document Marshal produced: %v", loadRes)
 	}
-	if got := len(loaded.Duplicates()); got != 1 {
+	if got := len(slices.Collect(loaded.Duplicates())); got != 1 {
 		t.Fatalf("loaded snapshot holds %d duplicates, want 1", got)
 	}
 
-	dup := loaded.Duplicates()[0]
-	if dup.Conflict() == nil {
+	dup := slices.Collect(loaded.Duplicates())[0]
+	if dup.Conflict().IsZero() {
 		t.Fatal("duplicate conflict pointer did not resolve")
 	}
 	if got := dup.Conflict().PrimaryKey().String(); got != graph.FormatKey("c1") {
@@ -109,12 +110,12 @@ func TestRoundTrip_ComposedChildDuplicateAmongSiblings(t *testing.T) {
 		t.Fatalf("Load rejected a document Marshal produced: %v", loadRes)
 	}
 
-	dups := loaded.Duplicates()
+	dups := slices.Collect(loaded.Duplicates())
 	if len(dups) != 1 {
 		t.Fatalf("loaded snapshot holds %d duplicates, want 1", len(dups))
 	}
 	conflict := dups[0].Conflict()
-	if conflict == nil {
+	if conflict.IsZero() {
 		t.Fatal("duplicate conflict pointer did not resolve")
 	}
 	if got, want := conflict.PrimaryKey().String(), graph.FormatKey("c2"); got != want {
@@ -149,9 +150,9 @@ func TestVerify_ComposedChildDuplicate(t *testing.T) {
 // through a relation rather than the instance index.
 func TestSnapshot_ComposedDuplicateCarriesParent(t *testing.T) {
 	snap := composedPKCollision(t)
-	dup := snap.Duplicates()[0]
+	dup := slices.Collect(snap.Duplicates())[0]
 
-	if dup.Parent() == nil {
+	if dup.Parent().IsZero() {
 		t.Fatal("composed-child duplicate carries no parent")
 	}
 	if got := dup.Parent().PrimaryKey().String(); got != graph.FormatKey("p1") {
@@ -208,12 +209,12 @@ func TestRoundTrip_OneSlotKeylessConflict(t *testing.T) {
 	if loadRes.HasErrors() {
 		t.Fatalf("Load rejected a document Marshal produced: %v", loadRes)
 	}
-	dups := loaded.Duplicates()
+	dups := slices.Collect(loaded.Duplicates())
 	if len(dups) != 1 {
 		t.Fatalf("loaded snapshot holds %d duplicates, want 1", len(dups))
 	}
 	conflict := dups[0].Conflict()
-	if conflict == nil {
+	if conflict.IsZero() {
 		t.Fatal("duplicate conflict pointer did not resolve")
 	}
 	v, ok := conflict.Property("text")

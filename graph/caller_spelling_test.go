@@ -1,9 +1,11 @@
 package graph_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/diag"
+	"github.com/simon-lentz/yammm/location"
 
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
@@ -20,7 +22,7 @@ const (
 // associates to a Timestamp-keyed peer, so every address the graph receives
 // — a composed parent, an edge endpoint, an unresolved target — has a
 // canonical spelling distinct from the one a caller may hold.
-func callerSpellingSchema(t *testing.T) *schema.Schema {
+func callerSpellingSchema(t *testing.T) schema.Schema {
 	t.Helper()
 	const src = `schema "caller_spelling"
 
@@ -45,17 +47,17 @@ type Tag {
 	return s
 }
 
-func runInstance(t *testing.T, s *schema.Schema, at string, next string) *instance.ValidInstance {
+func runInstance(t *testing.T, s schema.Schema, at string, next string) instance.ValidInstance {
 	t.Helper()
 	runID := mustTypeID(t, s, "Run")
-	var edges map[string]*instance.ValidEdgeData
+	var edges map[string]instance.ValidEdgeData
 	if next != "" {
-		edges = map[string]*instance.ValidEdgeData{"NEXT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
+		edges = map[string]instance.ValidEdgeData{"NEXT": instance.NewValidEdgeData([]instance.ValidEdgeTarget{
 			instance.NewValidEdgeTarget(immutable.WrapKey([]any{next}), immutable.WrapProperties(nil)),
 		})}
 	}
 	return instance.NewValidInstance("Run", runID, immutable.WrapKey([]any{at}),
-		immutable.WrapProperties(map[string]any{"at": at}), edges, nil, nil)
+		immutable.WrapProperties(map[string]any{"at": at}), edges, nil, location.Provenance{})
 }
 
 // TestAddComposed_ParentAddressedByTheCallersSpelling pins that the natural
@@ -70,7 +72,7 @@ func TestAddComposed_ParentAddressedByTheCallersSpelling(t *testing.T) {
 	stepID := mustTypeID(t, s, "Step")
 	run := runInstance(t, s, rawInstant, "")
 	step := instance.NewValidInstance("Step", stepID, immutable.WrapKey([]any{"s1"}),
-		immutable.WrapProperties(map[string]any{"n": "s1"}), nil, nil, nil)
+		immutable.WrapProperties(map[string]any{"n": "s1"}), nil, nil, location.Provenance{})
 
 	for _, spelling := range []string{run.PrimaryKey().String(), graph.FormatKey(canonInstant)} {
 		g := graph.New(s)
@@ -80,8 +82,8 @@ func TestAddComposed_ParentAddressedByTheCallersSpelling(t *testing.T) {
 		if r := g.AddComposed(t.Context(), runID, spelling, "STEPS", step); !r.OK() {
 			t.Fatalf("AddComposed by %s: %s", spelling, r)
 		}
-		inst := g.Snapshot().InstancesOf(runID)[0]
-		if got := len(inst.Composed("STEPS")); got != 1 {
+		inst := slices.Collect(g.Snapshot().InstancesOf(runID))[0]
+		if got := len(slices.Collect(inst.Composed("STEPS"))); got != 1 {
 			t.Errorf("AddComposed by %s attached %d children, want 1", spelling, got)
 		}
 	}
@@ -96,7 +98,7 @@ func TestAddComposed_RefusedParentKeepsTheCallersSpelling(t *testing.T) {
 	runID := mustTypeID(t, s, "Run")
 	stepID := mustTypeID(t, s, "Step")
 	step := instance.NewValidInstance("Step", stepID, immutable.WrapKey([]any{"s1"}),
-		immutable.WrapProperties(map[string]any{"n": "s1"}), nil, nil, nil)
+		immutable.WrapProperties(map[string]any{"n": "s1"}), nil, nil, location.Provenance{})
 	g := graph.New(s)
 	r := g.AddComposed(t.Context(), runID, graph.FormatKey(rawInstant), "STEPS", step)
 	if r.OK() {
@@ -130,7 +132,7 @@ func TestUnresolvedTarget_OneAddressOnEveryPath(t *testing.T) {
 	if r := g.Add(t.Context(), runInstance(t, s, "2021-01-01T00:00:00Z", rawInstant)); !r.OK() {
 		t.Fatalf("add: %s", r)
 	}
-	added := g.Snapshot().Unresolved()
+	added := slices.Collect(g.Snapshot().Unresolved())
 	if len(added) != 1 || added[0].TargetKey() != want {
 		t.Errorf("Add path: unresolved target = %v, want one record at %s", added, want)
 	}
@@ -152,7 +154,7 @@ func TestUnresolvedTarget_OneAddressOnEveryPath(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
-	if got := rebuilt.Unresolved(); len(got) != 1 || got[0].TargetKey() != want {
+	if got := slices.Collect(rebuilt.Unresolved()); len(got) != 1 || got[0].TargetKey() != want {
 		t.Errorf("rebuild path: unresolved target = %v, want one record at %s", got, want)
 	}
 }
@@ -192,10 +194,10 @@ func TestRebuildSnapshot_SourceAddressesMoveWithTheInstances(t *testing.T) {
 	if res.HasErrors() {
 		t.Fatalf("RebuildSnapshot: %s", res)
 	}
-	if e := snap.Edges(); len(e) != 1 || e[0].Source().PrimaryKey().String() != graph.FormatKey(canonInstant) {
+	if e := slices.Collect(snap.Edges()); len(e) != 1 || e[0].Source().PrimaryKey().String() != graph.FormatKey(canonInstant) {
 		t.Errorf("edge source = %v, want the canonical instant", e)
 	}
-	if u := snap.Unresolved(); len(u) != 1 || u[0].Source().PrimaryKey().String() != graph.FormatKey(canonInstant) {
+	if u := slices.Collect(snap.Unresolved()); len(u) != 1 || u[0].Source().PrimaryKey().String() != graph.FormatKey(canonInstant) {
 		t.Errorf("unresolved source = %v, want the canonical instant", u)
 	}
 }

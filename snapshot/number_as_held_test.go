@@ -9,6 +9,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 	"github.com/simon-lentz/yammm/snapshot"
 )
@@ -38,7 +39,7 @@ func TestMarshal_AFloatHeldUnderAnIntegerIsWrittenAsHeld(t *testing.T) {
 	g := graph.New(s)
 	inst := instance.NewValidInstance("T", ty.ID(), immutable.WrapKey([]any{"a"}),
 		immutable.WrapProperties(map[string]any{"id": "a", "n": float64(6), "ns": []any{int64(1), float64(2)}}),
-		nil, nil, nil)
+		nil, nil, location.Provenance{})
 	if r := g.Add(ctx, inst); r.HasErrors() {
 		t.Fatalf("add: %s", r)
 	}

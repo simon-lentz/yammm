@@ -22,7 +22,7 @@ import (
 func TestRenderSymbol_Golden(t *testing.T) {
 	t.Parallel()
 
-	mustType := func(t *testing.T, s *schema.Schema, name string) *schema.Type {
+	mustType := func(t *testing.T, s schema.Schema, name string) schema.Type {
 		t.Helper()
 		typ, ok := s.Type(name)
 		require.True(t, ok)
@@ -51,12 +51,12 @@ func TestRenderSymbol_Golden(t *testing.T) {
 				}
 				s, result := schema.LoadSourcesWithEntry(t.Context(), sources, yammmtest.HostAbs("/test/main.yammm"), yammmtest.HostAbs("/test"))
 				require.False(t, result.HasErrors(), "load: %s", result)
-				var imp *schema.Import
+				var imp schema.Import
 				for i := range s.Imports() {
 					imp = i
 					break
 				}
-				require.NotNil(t, imp)
+				require.False(t, imp.IsZero())
 				return &symbols.Symbol{Name: "parts", Kind: symbols.SymbolImport, Data: imp}
 			},
 		},

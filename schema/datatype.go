@@ -7,7 +7,13 @@ import (
 // DataType represents a named data type alias in a schema.
 // Data types provide reusable constraint definitions that can be
 // referenced by name in property declarations.
-type DataType struct {
+type DataType struct{ *dataTypeState }
+
+// IsZero reports whether the handle names no record.
+func (d DataType) IsZero() bool { return d.dataTypeState == nil }
+
+// dataTypeState is the record a [DataType] names.
+type dataTypeState struct {
 	name       string
 	constraint Constraint
 	span       location.Span
@@ -22,29 +28,29 @@ type DataType struct {
 //   - Advanced use cases like building schemas programmatically via Builder
 //
 // Most users should load schemas from .yammm files using the load package.
-func newDataType(name string, constraint Constraint, span location.Span, doc string) *DataType {
-	return &DataType{
+func newDataType(name string, constraint Constraint, span location.Span, doc string) DataType {
+	return DataType{&dataTypeState{
 		name:       name,
 		constraint: constraint,
 		span:       span,
 		doc:        doc,
-	}
+	}}
 }
 
 // Name returns the data type name.
-func (d *DataType) Name() string {
+func (d DataType) Name() string {
 	return d.name
 }
 
 // Constraint returns the constraint this data type defines.
-func (d *DataType) Constraint() Constraint {
+func (d DataType) Constraint() Constraint {
 	return d.constraint
 }
 
 // setConstraint sets the constraint (called during alias resolution).
 // Internal use only; called during schema completion.
 // Panics if called after seal().
-func (d *DataType) setConstraint(c Constraint) {
+func (d DataType) setConstraint(c Constraint) {
 	if d.sealed {
 		panic("datatype: cannot mutate sealed datatype")
 	}
@@ -52,18 +58,18 @@ func (d *DataType) setConstraint(c Constraint) {
 }
 
 // Span returns the source location of this data type declaration.
-func (d *DataType) Span() location.Span {
+func (d DataType) Span() location.Span {
 	return d.span
 }
 
 // Documentation returns the documentation comment, if any.
-func (d *DataType) Documentation() string {
+func (d DataType) Documentation() string {
 	return d.doc
 }
 
 // seal marks the data type as immutable.
 // Called by the loader after schema completion.
-func (d *DataType) seal() {
+func (d DataType) seal() {
 	if d.sealed {
 		panic("datatype: sealed twice")
 	}
@@ -71,6 +77,6 @@ func (d *DataType) seal() {
 }
 
 // isSealed reports whether the data type has been sealed.
-func (d *DataType) isSealed() bool {
+func (d DataType) isSealed() bool {
 	return d.sealed
 }

@@ -2,6 +2,7 @@ package snapshot_test
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -20,7 +21,7 @@ type Thing {
 
 // attWireFixture marshals one validator-built Thing and returns the schema
 // and document bytes; the document attests {true, true}.
-func attWireFixture(t *testing.T) (*schema.Schema, []byte) {
+func attWireFixture(t *testing.T) (schema.Schema, []byte) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), attWireSchema, "attwire.yammm")
 	if res.HasErrors() {
@@ -62,7 +63,7 @@ func TestAttestation_ValidatorBuiltRoundTripsTrue(t *testing.T) {
 
 	// The claim rides the header; the rebuilt instances stay unproven.
 	thing, _ := s.Type("Thing")
-	insts := snap.InstancesOf(thing.ID())
+	insts := slices.Collect(snap.InstancesOf(thing.ID()))
 	if len(insts) != 1 || insts[0].Validated() {
 		t.Fatal("a loaded instance reports Validated; the wire carries a claim, not a proof")
 	}

@@ -154,13 +154,13 @@ func TestBuilder_RefusesAnImportThatClosesACycle(t *testing.T) {
 		t.Fatalf("load geo: %v", res.Err())
 	}
 	reg := schema.NewRegistry()
-	for _, s := range []*schema.Schema{x, geo} {
+	for _, s := range []schema.Schema{x, geo} {
 		if err := reg.Register(s); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var geoAID location.SourceID
-	for _, member := range x.Closure() {
+	for member := range x.Closure() {
 		if member.Name() == "geo" {
 			geoAID = member.SourceID()
 		}
@@ -168,7 +168,7 @@ func TestBuilder_RefusesAnImportThatClosesACycle(t *testing.T) {
 	if geoAID.IsZero() {
 		t.Fatal("x's closure holds no geo")
 	}
-	build := func(id location.SourceID, imp string) (*schema.Schema, diag.Result) {
+	build := func(id location.SourceID, imp string) (schema.Schema, diag.Result) {
 		b := schema.NewBuilder().WithName("main").WithSourceID(id).WithRegistry(reg).AddImport(imp, "i")
 		b.AddType("Local").WithPrimaryKey("id", schema.NewStringConstraint())
 		return b.Build()
@@ -184,7 +184,7 @@ func TestBuilder_RefusesAnImportThatClosesACycle(t *testing.T) {
 		t.Run(label, func(t *testing.T) {
 			t.Parallel()
 			s, res := build(tc.id, tc.imp)
-			if s != nil {
+			if !s.IsZero() {
 				t.Fatal("an import that closes a cycle built")
 			}
 			issues := slices.Collect(res.Issues())
@@ -233,14 +233,14 @@ func TestBuilder_RefusesAnImportThatClosesACycle(t *testing.T) {
 		}
 		b := schema.NewBuilder().WithName("main").WithSourceID(geoAID).WithRegistry(deep).AddImport("y", "i")
 		b.AddType("Local").WithPrimaryKey("id", schema.NewStringConstraint())
-		if s, res := b.Build(); s != nil || !res.HasErrors() {
+		if s, res := b.Build(); !s.IsZero() || !res.HasErrors() {
 			t.Fatalf("an import whose closure holds the built source two imports deep built: %v", res.Err())
 		} else if issue := slices.Collect(res.Issues()); len(issue) != 1 || issue[0].Code() != diag.E_IMPORT_CYCLE {
 			t.Errorf("result = %v, want one E_IMPORT_CYCLE", res.Err())
 		}
 	})
 
-	if s, res := build(location.MustNewSourceID("test://built.yammm"), "x"); s == nil || res.HasErrors() {
+	if s, res := build(location.MustNewSourceID("test://built.yammm"), "x"); s.IsZero() || res.HasErrors() {
 		t.Errorf("an import of another source is refused: %v", res.Err())
 	}
 }

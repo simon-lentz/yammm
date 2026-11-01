@@ -11,7 +11,7 @@ import (
 
 // loadSchema parses src as a single-source schema and fails the test on any
 // load error.
-func loadSchema(t *testing.T, src string) *schema.Schema {
+func loadSchema(t *testing.T, src string) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadString(context.Background(), src, "test.yammm")
 	if err := res.Err(); err != nil {
@@ -22,7 +22,7 @@ func loadSchema(t *testing.T, src string) *schema.Schema {
 
 // loadSources loads a multi-source schema with entry.yammm as the entry
 // point and fails the test on any load error.
-func loadSources(t *testing.T, sources map[string][]byte) *schema.Schema {
+func loadSources(t *testing.T, sources map[string][]byte) schema.Schema {
 	t.Helper()
 	s, res := schema.LoadSourcesWithEntry(context.Background(), sources, "entry.yammm", ".", schema.WithSourcesOnly(true))
 	if err := res.Err(); err != nil {
@@ -32,13 +32,13 @@ func loadSources(t *testing.T, sources map[string][]byte) *schema.Schema {
 }
 
 // newTestGenerator builds a generator with Marshal's default options.
-func newTestGenerator(t *testing.T, s *schema.Schema) *generator {
+func newTestGenerator(t *testing.T, s schema.Schema) *generator {
 	t.Helper()
 	return newGenerator(s, config{classDiagram: true, classMembers: true})
 }
 
 // sectionFor renders the named type's section and returns it.
-func sectionFor(t *testing.T, s *schema.Schema, typeName string) string {
+func sectionFor(t *testing.T, s schema.Schema, typeName string) string {
 	t.Helper()
 	g := newTestGenerator(t, s)
 	target := findType(t, g, typeName)
@@ -47,7 +47,7 @@ func sectionFor(t *testing.T, s *schema.Schema, typeName string) string {
 }
 
 // findType locates a type anywhere in the generator's closure by bare name.
-func findType(t *testing.T, g *generator, name string) *schema.Type {
+func findType(t *testing.T, g *generator, name string) schema.Type {
 	t.Helper()
 	for _, sch := range g.closure {
 		if typ, ok := sch.Type(name); ok {
@@ -55,7 +55,7 @@ func findType(t *testing.T, g *generator, name string) *schema.Type {
 		}
 	}
 	t.Fatalf("type %q not found in closure", name)
-	return nil
+	return schema.Type{}
 }
 
 func TestEmitTypeSection_PropertyTable(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/simon-lentz/yammm/graph"
 	"github.com/simon-lentz/yammm/immutable"
 	"github.com/simon-lentz/yammm/instance"
+	"github.com/simon-lentz/yammm/location"
 	"github.com/simon-lentz/yammm/schema"
 )
 
@@ -203,7 +205,7 @@ func TestBatchEdgeQueries_Chunking(t *testing.T) {
 	})
 
 	// Precondition guard against fixture drift: one BY_PUBLISHER edge per Book.
-	if totalEdges := len(graphResult.Edges()); totalEdges != 5 {
+	if totalEdges := len(slices.Collect(graphResult.Edges())); totalEdges != 5 {
 		t.Fatalf("fixture should produce 5 edges, got %d", totalEdges)
 	}
 
@@ -647,7 +649,7 @@ func TestPropsToParamMap_TemporalErrorPropagates(t *testing.T) {
 	}
 
 	// A nil schema type short-circuits with no coercion and no error.
-	clean, err := propsToParamMap(immutable.WrapProperties(map[string]any{"x": "y"}), nil)
+	clean, err := propsToParamMap(immutable.WrapProperties(map[string]any{"x": "y"}), schema.Type{})
 	if err != nil || clean["x"] != "y" {
 		t.Fatalf("nil schemaType should pass through unchanged: clean=%v err=%v", clean, err)
 	}
@@ -657,7 +659,7 @@ func TestPropsToParamMap_TemporalErrorPropagates(t *testing.T) {
 // s, exactly as Adapter.ShapeForSchema marks one — carrying only the types
 // given. It exists so a test can reach the per-type "no shape for type" branch
 // without hand-building a shape, which the write path refuses.
-func builtShape(s *schema.Schema, types map[schema.TypeID]NodeShape) *GraphShape {
+func builtShape(s schema.Schema, types map[schema.TypeID]NodeShape) *GraphShape {
 	if types == nil {
 		types = map[schema.TypeID]NodeShape{}
 	}
@@ -696,7 +698,7 @@ func TestBatchNodeQueries_AShapeNamingAKeyTheInstanceLacks(t *testing.T) {
 	// Built without validation, which never stores a null property value.
 	g := graph.New(s)
 	if r := g.Add(context.Background(), instance.NewValidInstance("Entity", entity.ID(), immutable.WrapKey([]any{"e1"}),
-		immutable.WrapProperties(map[string]any{"id": "e1", "score": nil}), nil, nil, nil)); r.HasErrors() {
+		immutable.WrapProperties(map[string]any{"id": "e1", "score": nil}), nil, nil, location.Provenance{})); r.HasErrors() {
 		t.Fatalf("add: %s", r)
 	}
 	graphResult := g.Snapshot()
@@ -804,7 +806,7 @@ func TestCoerceRelProps(t *testing.T) {
 	if !ok {
 		t.Fatal("Source type not found")
 	}
-	rels := st.AssociationsSlice()
+	rels := slices.Collect(st.Associations())
 	if len(rels) != 1 {
 		t.Fatalf("want 1 association on Source, got %d", len(rels))
 	}
@@ -834,7 +836,7 @@ func TestCoerceRelProps(t *testing.T) {
 	}
 
 	// A nil relation passes through unchanged.
-	clean, err := coerceRelProps(map[string]any{"x": "y"}, nil)
+	clean, err := coerceRelProps(map[string]any{"x": "y"}, schema.Relation{})
 	if err != nil || clean["x"] != "y" {
 		t.Fatalf("nil relation should pass through: clean=%v err=%v", clean, err)
 	}
@@ -1067,7 +1069,7 @@ func TestEdgeQueries_CoerceEndpointKeysFromAGraph(t *testing.T) {
 		"Citation": {{"citation_id": "c1", "cites": map[string]any{"_target_created_on": "2024-01-02"}}},
 	})
 
-	if edges := graphResult.Edges(); len(edges) != 1 {
+	if edges := slices.Collect(graphResult.Edges()); len(edges) != 1 {
 		t.Fatalf("got %d edges; want 1", len(edges))
 	}
 
@@ -1097,7 +1099,7 @@ func isDateValue(v any) bool {
 // Mutation: removing the nil guard turns this red with a nil dereference.
 func TestParamTypesForType_NilTypeIsEmptyNotPanic(t *testing.T) {
 	t.Parallel()
-	if got := ParamTypesForType(nil, "rows"); len(got) != 0 {
+	if got := ParamTypesForType(schema.Type{}, "rows"); len(got) != 0 {
 		t.Errorf("ParamTypesForType(nil) = %v; want an empty map", got)
 	}
 }

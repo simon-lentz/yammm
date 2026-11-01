@@ -15,7 +15,7 @@ func TestParseWithTypeColumn_ANameNoHeaderCanHoldIsRefused(t *testing.T) {
 	t.Parallel()
 	r := &countingReader{r: strings.NewReader("\"kind\r\nx\",id\nEntity,e1\n")}
 	byType, res := New(WithTypeColumn("kind\r\nx")).ParseWithTypeColumn(t.Context(),
-		location.MustNewSourceID("test://t.csv"), r, func(string) *schema.Type { return nil })
+		location.MustNewSourceID("test://t.csv"), r, func(string) schema.Type { return schema.Type{} })
 	if !res.HasCode(E_CSV_CONFIG) || res.Len() != 1 {
 		t.Errorf("got %s, want one E_CSV_CONFIG", res)
 	}
@@ -34,7 +34,7 @@ func TestParseWithTypeColumn_ALoneCROrLFNameIsFound(t *testing.T) {
 	for _, name := range []string{"kind\rx", "kind\nx"} {
 		in := `"` + name + "\",id\nEntity,e1\n"
 		byType, res := New(WithTypeColumn(name)).ParseWithTypeColumn(t.Context(),
-			location.MustNewSourceID("test://t.csv"), strings.NewReader(in), func(string) *schema.Type { return nil })
+			location.MustNewSourceID("test://t.csv"), strings.NewReader(in), func(string) schema.Type { return schema.Type{} })
 		if !res.OK() || len(byType["Entity"]) != 1 {
 			t.Errorf("type column %q: %d rows, %s", name, len(byType["Entity"]), res)
 		}

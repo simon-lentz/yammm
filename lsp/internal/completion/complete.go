@@ -180,12 +180,13 @@ func TypeBodyCompletions() []protocol.CompletionItem {
 func TypeCompletions(snapshot *analysis.Snapshot, sourceID location.SourceID) []protocol.CompletionItem {
 	items := make([]protocol.CompletionItem, 0)
 
-	if snapshot == nil || snapshot.Schema == nil {
+	if snapshot == nil || snapshot.Schema.IsZero() {
 		return items
 	}
 
 	// Add local types
-	for name := range snapshot.Schema.Types() {
+	for typ := range snapshot.Schema.Types() {
+		name := typ.Name()
 		sortText := "0_" + name // Local types first
 		kind := protocol.CompletionItemKindClass
 		items = append(items, protocol.CompletionItem{
@@ -202,15 +203,16 @@ func TypeCompletions(snapshot *analysis.Snapshot, sourceID location.SourceID) []
 		for i := range idx.Symbols {
 			sym := &idx.Symbols[i]
 			if sym.Kind == symbols.SymbolImport {
-				imp, ok := sym.Data.(*schema.Import)
-				if !ok || imp.Schema() == nil {
+				imp, ok := sym.Data.(schema.Import)
+				if !ok {
 					continue
 				}
 
 				alias := imp.Alias()
 				// Allocate detail string once per import alias, shared across all types from this import.
 				detail := "Imported type (" + alias + ")"
-				for typeName := range imp.Schema().Types() {
+				for typ := range imp.Schema().Types() {
+					typeName := typ.Name()
 					qualifiedName := alias + "." + typeName
 					sortText := "1_" + qualifiedName // Imported types second
 					kind := protocol.CompletionItemKindClass
@@ -245,12 +247,13 @@ func PropertyTypeCompletions(snapshot *analysis.Snapshot, sourceID location.Sour
 		})
 	}
 
-	if snapshot == nil || snapshot.Schema == nil {
+	if snapshot == nil || snapshot.Schema.IsZero() {
 		return items
 	}
 
 	// Add local datatypes
-	for name := range snapshot.Schema.DataTypes() {
+	for dt := range snapshot.Schema.DataTypes() {
+		name := dt.Name()
 		sortText := "1_" + name
 		kind := protocol.CompletionItemKindTypeParameter
 		items = append(items, protocol.CompletionItem{
@@ -267,15 +270,16 @@ func PropertyTypeCompletions(snapshot *analysis.Snapshot, sourceID location.Sour
 		for i := range idx.Symbols {
 			sym := &idx.Symbols[i]
 			if sym.Kind == symbols.SymbolImport {
-				imp, ok := sym.Data.(*schema.Import)
-				if !ok || imp.Schema() == nil {
+				imp, ok := sym.Data.(schema.Import)
+				if !ok {
 					continue
 				}
 
 				alias := imp.Alias()
 				// Allocate detail string once per import alias, shared across all datatypes from this import.
 				detail := "Imported datatype (" + alias + ")"
-				for dtName := range imp.Schema().DataTypes() {
+				for dt := range imp.Schema().DataTypes() {
+					dtName := dt.Name()
 					qualifiedName := alias + "." + dtName
 					sortText := "2_" + qualifiedName
 					kind := protocol.CompletionItemKindTypeParameter

@@ -250,7 +250,7 @@ type A {
 `
 
 // gatedDoc is gatedHashedDoc with its integrity hash blanked.
-func gatedDoc(t *testing.T) (*schema.Schema, string) {
+func gatedDoc(t *testing.T) (schema.Schema, string) {
 	t.Helper()
 	s, doc := gatedHashedDoc(t)
 	return s, sbIntegrity.ReplaceAllString(doc, `"integrity_hash":""`)
@@ -259,7 +259,7 @@ func gatedDoc(t *testing.T) (*schema.Schema, string) {
 // gatedHashedDoc is a document Graph.Add built under gatedSchema: B b1, and A
 // a1 whose one KNOWS edge and one BEST edge name b9, which no root holds, so
 // each is a target_missing record.
-func gatedHashedDoc(t *testing.T) (*schema.Schema, string) {
+func gatedHashedDoc(t *testing.T) (schema.Schema, string) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), gatedSchema, "gr.yammm")
 	if res.HasErrors() {

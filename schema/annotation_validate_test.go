@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -369,7 +370,7 @@ type T {
 	@@fulltext(id, title)
 }`)
 	ty := schemaType(t, s, "T")
-	all := ty.AllAnnotationsSlice()
+	all := slices.Collect(ty.AllAnnotations())
 	if len(all) == 0 {
 		t.Fatal("T should carry the @@fulltext annotation")
 	}
@@ -475,7 +476,7 @@ type T {
 		t.Errorf("@vector arg kind: got %v, want ArgKeyword", args[0].Kind())
 	}
 	// @@index property-ref args
-	all := ty.AllAnnotationsSlice()
+	all := slices.Collect(ty.AllAnnotations())
 	if len(all) == 0 {
 		t.Fatal("T should carry the @@index annotation")
 	}

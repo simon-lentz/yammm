@@ -114,7 +114,7 @@ var sbIntegrity = regexp.MustCompile(`"integrity_hash":"sha256:[0-9a-f]+"`)
 // associations; Person p2 with an unresolved record under each; Order o1 with
 // two Tags, two keyless Lines, a Seal and a Box in a Box; a root duplicate of
 // c1, and a composed duplicate under BOX, under SEAL and under TAGS.
-func singleBreakDoc(t *testing.T) (*schema.Schema, string) {
+func singleBreakDoc(t *testing.T) (schema.Schema, string) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), singleBreakSchema, "sb.yammm")
 	if res.HasErrors() {

@@ -199,7 +199,7 @@ func buildCrossSchemaSnapshot(t *testing.T) (*analysis.Snapshot, *docstate.Snaps
 	snapshot, err := analyzer.Analyze(t.Context(), entryPath, overlays, tmpDir, lsputil.PositionEncodingUTF16)
 	require.NoError(t, err)
 	require.NotNil(t, snapshot)
-	require.NotNil(t, snapshot.Schema, "schema should parse successfully")
+	require.False(t, snapshot.Schema.IsZero(), "schema should parse successfully")
 	require.True(t, snapshot.Result.OK(), "schema should have no errors")
 
 	entrySourceID, err := location.SourceIDFromPath(entryPath)

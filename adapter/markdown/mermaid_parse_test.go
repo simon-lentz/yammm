@@ -238,7 +238,7 @@ func fixtureCases(t *testing.T) []*diagramCase {
 // newDiagramCase generates the document for s. When Marshal refuses, the case
 // keeps the error and the document the generator emitted before its
 // self-check, so Mermaid's reading of the refused diagram is still measured.
-func newDiagramCase(name string, s *schema.Schema, opts []Option) *diagramCase {
+func newDiagramCase(name string, s schema.Schema, opts []Option) *diagramCase {
 	cfg := config{classDiagram: true, classMembers: true}
 	for _, o := range opts {
 		o(&cfg)
@@ -266,12 +266,12 @@ func newDiagramCase(name string, s *schema.Schema, opts []Option) *diagramCase {
 // display name with every character outside ASCII letters, digits and
 // underscores made an underscore, every "direction" written "direc_tion", and
 // a later clash suffixed _2, _3, ….
-func meaningOf(s *schema.Schema) diagramMeaning {
+func meaningOf(s schema.Schema) diagramMeaning {
 	m := diagramMeaning{direction: "TB"}
 	ids := map[schema.TypeID]string{}
 	taken := map[string]bool{}
-	for _, sch := range s.Closure() {
-		for _, t := range sch.TypesSlice() {
+	for sch := range s.Closure() {
+		for t := range sch.Types() {
 			label := displayOf(s, sch, t)
 			base := strings.ReplaceAll(strings.Map(func(r rune) rune {
 				if r == '_' || 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' {
@@ -288,19 +288,19 @@ func meaningOf(s *schema.Schema) diagramMeaning {
 			m.classes = append(m.classes, mermaidClass{ID: id, Label: label})
 		}
 	}
-	for _, sch := range s.Closure() {
-		for _, t := range sch.TypesSlice() {
+	for sch := range s.Closure() {
+		for t := range sch.Types() {
 			child := ids[t.ID()]
-			for _, ref := range t.InheritsSlice() {
+			for ref := range t.Inherits() {
 				if parent, ok := sch.ResolveType(ref); ok {
 					if pid, ok := ids[parent.ID()]; ok {
 						m.relations = append(m.relations, mermaidRelation{From: pid, To: child, Kind: "inheritance"})
 					}
 				}
 			}
-			for kind, rels := range map[string][]*schema.Relation{
-				"association": t.AssociationsSlice(),
-				"composition": t.CompositionsSlice(),
+			for kind, rels := range map[string][]schema.Relation{
+				"association": slices.Collect(t.Associations()),
+				"composition": slices.Collect(t.Compositions()),
 			} {
 				for _, rel := range rels {
 					if target, ok := ids[rel.TargetID()]; ok {
@@ -319,7 +319,7 @@ func meaningOf(s *schema.Schema) diagramMeaning {
 // displayOf is the name the document gives t: the entry schema's tag for a
 // type it can address, else "Name (schema)", with each control character of
 // the schema name written as its Go escape.
-func displayOf(entry, sch *schema.Schema, t *schema.Type) string {
+func displayOf(entry, sch schema.Schema, t schema.Type) string {
 	if tag, ok := schema.AddressableTag(entry, t.ID()); ok {
 		return tag
 	}
@@ -337,7 +337,7 @@ func displayOf(entry, sch *schema.Schema, t *schema.Type) string {
 
 // dslMultiplicity is the DSL's canonical short multiplicity of a relation's
 // forward direction.
-func dslMultiplicity(rel *schema.Relation) string {
+func dslMultiplicity(rel schema.Relation) string {
 	switch {
 	case rel.IsOptional() && rel.IsMany():
 		return "many"

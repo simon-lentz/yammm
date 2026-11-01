@@ -145,7 +145,7 @@ func TestParse_CodeSaysWhichFaultItIs(t *testing.T) {
 			var result diag.Result
 			if c.typeColumn {
 				_, result = New(opts...).ParseWithTypeColumn(t.Context(), id, r,
-					func(string) *schema.Type { return st })
+					func(string) schema.Type { return st })
 			} else {
 				_, result = New(opts...).ParseTyped(t.Context(), id, c.typeName, r, st)
 			}
@@ -256,7 +256,7 @@ func TestParse_ARefusedSettingIsReportedBeforeAnyRead(t *testing.T) {
 			raws, res := New(c.opt).ParseTyped(t.Context(), id, "Entity", typed, st)
 			byCol := &countingReader{r: strings.NewReader("kind,id,name\nEntity,e1,Ann\n")}
 			byType, colRes := New(c.opt, WithTypeColumn("kind")).ParseWithTypeColumn(t.Context(), id, byCol,
-				func(string) *schema.Type { return st })
+				func(string) schema.Type { return st })
 			for _, result := range []diag.Result{res, colRes} {
 				if _, ok := issueContaining(result, c.message); !ok {
 					t.Errorf("want the message %q: %s", c.message, result)
@@ -299,7 +299,7 @@ func TestParseWithTypeColumn_NoTypeColumnIsRefusedBeforeAnyRead(t *testing.T) {
 	input := &countingReader{r: strings.NewReader("kind,id,name\nEntity,e1,Ann\n")}
 
 	byType, res := New().ParseWithTypeColumn(t.Context(), location.MustNewSourceID("test://data/nocol.csv"), input,
-		func(string) *schema.Type { return st })
+		func(string) schema.Type { return st })
 
 	if len(byType) != 0 || input.reads != 0 {
 		t.Errorf("got %d types and %d reads, want none", len(byType), input.reads)

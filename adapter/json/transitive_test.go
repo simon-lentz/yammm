@@ -47,7 +47,7 @@ part type Shard {
 // transitively imported type resolved to nothing and the writer fell back to
 // the raw relation name where a resolved type supplies the declared field name.
 //
-// Mutation: replacing lookupType's TypeByID with a walk of local types and
+// Mutation: replacing the writer's TypeByID with a walk of local types and
 // direct imports turns this red.
 func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 	t.Parallel()
@@ -63,7 +63,7 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 	}
 
 	mid, ok := s.ImportByAlias("mid")
-	if !ok || mid.Schema() == nil {
+	if !ok || mid.Schema().IsZero() {
 		t.Fatal("import alias mid did not resolve")
 	}
 	holderType, ok := mid.Schema().Type("Holder")
@@ -71,7 +71,7 @@ func TestMarshalObject_ResolvesATransitivelyImportedType(t *testing.T) {
 		t.Fatal("mid.Holder not found")
 	}
 	deepImp, ok := mid.Schema().ImportByAlias("deep")
-	if !ok || deepImp.Schema() == nil {
+	if !ok || deepImp.Schema().IsZero() {
 		t.Fatal("import alias deep did not resolve")
 	}
 	shardType, ok := deepImp.Schema().Type("Shard")

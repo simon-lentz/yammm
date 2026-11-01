@@ -22,25 +22,25 @@ import (
 // a second target is refused with an E_GRAPH_CARDINALITY for each such
 // association. The package doc's Merge
 // on a Duplicate Key section states the rules. Panics as [Graph.Add] does.
-func (g *Graph) AddOrMerge(ctx context.Context, inst *instance.ValidInstance) (merged bool, res diag.Result) {
+func (g *Graph) AddOrMerge(ctx context.Context, inst instance.ValidInstance) (merged bool, res diag.Result) {
 	return g.add(ctx, inst, "graph.AddOrMerge", "yammm.graph.add_or_merge", true)
 }
 
 // recordSlot addresses one source instance's association.
 type recordSlot struct {
-	source   *Instance
+	source   Instance
 	relation string
 }
 
 // heldRecords is what one source holds under one association: its edges and
 // its unresolved records.
 type heldRecords struct {
-	edges   []*Edge
+	edges   []Edge
 	pending []*pendingEdge
 }
 
 // installEdge appends e to the graph's edges and to the source index.
-func (g *Graph) installEdge(e *Edge) {
+func (g *Graph) installEdge(e Edge) {
 	g.edges = append(g.edges, e)
 	if g.bySource != nil {
 		h := g.held(recordSlot{e.source, e.relation})
@@ -60,7 +60,7 @@ func (g *Graph) installPendingEdge(p *pendingEdge) {
 
 // resolvePending turns every unresolved record naming target, at typeID and
 // key, into an edge, and returns how many it resolved.
-func (g *Graph) resolvePending(typeID schema.TypeID, key string, target *Instance) int {
+func (g *Graph) resolvePending(typeID schema.TypeID, key string, target Instance) int {
 	pk := pendingKey{targetTypeID: typeID, targetKey: key}
 	list := g.pending[pk]
 	for _, pend := range list {
@@ -159,7 +159,7 @@ func (h *heldRecords) targets() int {
 // that names a target held does not already hold, once. It refuses with one
 // issue for each (one) association the merge would give a second target, in
 // relation-name order. Called under g.mu.
-func (g *Graph) planMerge(typ *schema.Type, held *Instance, staged []stagedEdge) ([]stagedEdge, []diag.Issue) {
+func (g *Graph) planMerge(typ schema.Type, held Instance, staged []stagedEdge) ([]stagedEdge, []diag.Issue) {
 	g.sourceIndex()
 	var plan []stagedEdge
 	added := make(map[recordSlot]int)
@@ -213,7 +213,7 @@ func (g *Graph) planMerge(typ *schema.Type, held *Instance, staged []stagedEdge)
 // held, an unresolved record where it is not. A record under a required
 // association retires held's "absent" or "empty" record there, which stands
 // alone by the package doc's Records fact. Called under g.mu.
-func (g *Graph) commitMerge(ctx context.Context, held *Instance, plan []stagedEdge) {
+func (g *Graph) commitMerge(ctx context.Context, held Instance, plan []stagedEdge) {
 	for _, se := range plan {
 		if h := g.bySource[recordSlot{held, se.relation}]; h != nil {
 			for _, p := range slices.Clone(h.pending) {
@@ -222,7 +222,7 @@ func (g *Graph) commitMerge(ctx context.Context, held *Instance, plan []stagedEd
 				}
 			}
 		}
-		if target := g.findInstance(se.targetType, se.targetKey); target != nil {
+		if target := g.findInstance(se.targetType, se.targetKey); !target.IsZero() {
 			g.installEdge(newEdge(se.relation, held, target, se.properties))
 			continue
 		}

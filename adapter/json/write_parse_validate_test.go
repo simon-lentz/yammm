@@ -3,6 +3,7 @@ package json
 import (
 	"bytes"
 	"maps"
+	"slices"
 	"testing"
 
 	"github.com/simon-lentz/yammm/graph"
@@ -45,7 +46,7 @@ type Item {
 }
 `
 
-func p2Source(t *testing.T) (*schema.Schema, location.SourceID) {
+func p2Source(t *testing.T) (schema.Schema, location.SourceID) {
 	t.Helper()
 	s, res := schema.LoadString(t.Context(), roundTripSchema, "roundtrip.yammm")
 	if res.HasErrors() {
@@ -91,7 +92,7 @@ func p2Raws() map[string][]map[string]any {
 	}
 }
 
-func buildP2Snapshot(t *testing.T, s *schema.Schema, raws map[string][]map[string]any) *graph.Snapshot {
+func buildP2Snapshot(t *testing.T, s schema.Schema, raws map[string][]map[string]any) graph.Snapshot {
 	t.Helper()
 	v := instance.NewValidator(s)
 	g := graph.New(s)
@@ -186,8 +187,8 @@ func TestMarshalObject_DropsUnresolvedEdgesDeliberately(t *testing.T) {
 	}
 
 	snap := g.Snapshot()
-	if len(snap.Unresolved()) != 1 {
-		t.Fatalf("fixture holds %d unresolved edges, want 1", len(snap.Unresolved()))
+	if len(slices.Collect(snap.Unresolved())) != 1 {
+		t.Fatalf("fixture holds %d unresolved edges, want 1", len(slices.Collect(snap.Unresolved())))
 	}
 	doc, err := New().MarshalObject(t.Context(), snap)
 	if err != nil {

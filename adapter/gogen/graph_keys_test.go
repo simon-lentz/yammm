@@ -49,8 +49,8 @@ func TestMarshal_GraphKeysMatchTheJSONSchemaEnvelope(t *testing.T) {
 		if res.HasErrors() {
 			t.Fatalf("load %s: %v", f, res.Err())
 		}
-		for _, sc := range s.Closure() {
-			for _, typ := range sc.TypesSlice() {
+		for sc := range s.Closure() {
+			for typ := range sc.Types() {
 				if !typ.IsAbstract() && !typ.IsPart() && !schema.Addressable(s, typ.ID()) {
 					unnameable++
 				}

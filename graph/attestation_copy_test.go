@@ -31,7 +31,7 @@ func TestSnapshot_AttestationIsACopy(t *testing.T) {
 	g.Add(t.Context(), instance.NewValidInstance("Thing", ty.ID(),
 		immutable.WrapKey([]any{"t1"}),
 		immutable.WrapProperties(map[string]any{"id": "t1"}),
-		nil, nil, nil))
+		nil, nil, location.Provenance{}))
 	snap := g.Snapshot()
 
 	first := snap.Attestation()
