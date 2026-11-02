@@ -1566,7 +1566,7 @@ func TestServer_RunStdioDeliversDiagnostics(t *testing.T) {
 
 	writeMessage(t, input, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}`)
 	writeMessage(t, input, `{"jsonrpc":"2.0","method":"initialized","params":{}}`)
-	uri := "file://" + filepath.Join(t.TempDir(), "a.yammm")
+	uri := testutil.PathToURI(filepath.Join(t.TempDir(), "a.yammm"))
 	writeMessage(t, input, fmt.Sprintf(`{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":%q,"languageId":"yammm","version":1,"text":"schema \"a\"\ntype A extends Missing { }\n"}}}`, uri))
 
 	// A Windows pipe takes no deadline, and a closed write end bounds the read on every host.
